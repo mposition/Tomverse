@@ -153,6 +153,36 @@ export async function resolveEffectiveExtractionPair(input: {
 }
 
 /**
+ * Refuses a selection that holds a locked snapshot.
+ *
+ * Extraction sends a snapshot's title and every message to a provider, which
+ * is exactly the exposure a lock exists to prevent
+ * (docs/policy/external-conversation-import-and-memory.md §7.1).
+ *
+ * One decision, two readers. The estimate reads plainly, because it reserves
+ * nothing. The create path reads under `FOR UPDATE` inside the transaction
+ * that writes the run and its reservation -- the estimate it re-runs first is
+ * outside that transaction, so a snapshot locked in between would otherwise
+ * produce a run and a charge. Both call this, so the rule cannot drift apart.
+ *
+ * The answer is the 423 every other surface gives a locked snapshot (§21),
+ * all-or-nothing for the request, and it deliberately does not say *which*
+ * snapshot: the caller already knows what it selected, and a list of locked
+ * ids is information the refusal has no reason to hand out.
+ */
+function refuseLockedSelection(
+    rows: readonly { password: string | null }[]
+): void {
+    if (rows.some((row) => row.password !== null)) {
+        throw new ApiSecurityError(
+            423,
+            "CONVERSATION_LOCKED",
+            "A selected conversation is locked."
+        );
+    }
+}
+
+/**
  * The §11 pre-run figure: chunk plan and credit/cost estimate over the
  * user's finalized conversations. Pure math over stored byte counts — no
  * provider contact, no reservation.
@@ -179,7 +209,12 @@ export async function estimateMemoryExtraction(input: {
             userId: input.userId,
             finalized: true,
         },
-        select: { id: true, messageCount: true, contentBytes: true },
+        select: {
+            id: true,
+            messageCount: true,
+            contentBytes: true,
+            password: true,
+        },
     });
     if (
         selected.length === 0 ||
@@ -187,6 +222,9 @@ export async function estimateMemoryExtraction(input: {
     ) {
         throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
     }
+    // After the 404, never before it: "not yours" and "locked" must not be
+    // told apart for an id the caller does not own.
+    refuseLockedSelection(selected);
 
     // Sorted by id before planning. Chunk boundaries depend on the order the
     // conversations arrive in, and `findMany` makes no ordering promise, so
@@ -376,6 +414,33 @@ export async function createMemoryExtractionRun(input: {
         // transaction ends in reserveExtractionRunCredits().
         await acquireCreditAccountLock(tx, input.userId);
         await acquireUserRunLock(tx, input.userId);
+        /*
+          The lock check again, and this time holding the rows.
+
+          The estimate above already refused a locked selection, but it ran
+          outside this transaction: a snapshot locked between that read and
+          this one would otherwise get a run and a reservation. Taking the
+          rows here serialises against the lock write, which updates the same
+          row -- whichever commits first, the other sees it.
+
+          `ORDER BY id ASC ... FOR UPDATE` in SQL, not a sorted list: Prisma's
+          `orderBy` orders the result set and promises nothing about the order
+          row locks are acquired in, and a consistent acquisition order is the
+          only thing that keeps two of these from deadlocking each other.
+
+          After the credit and run locks and before anything touches memory,
+          so the canonical order in
+          docs/policy/external-conversation-import-and-memory.md §13.1 holds:
+          a snapshot row is always taken before the memory lock, never after.
+        */
+        const current = await tx.$queryRaw<Array<{ password: string | null }>>`
+            SELECT password FROM "ExternalConversation"
+            WHERE id = ANY(${sourceSelection}::text[])
+              AND "userId" = ${input.userId}
+            ORDER BY id ASC
+            FOR UPDATE
+        `;
+        refuseLockedSelection(current);
         const active = await tx.memoryExtractionRun.findFirst({
             where: {
                 userId: input.userId,
@@ -716,7 +781,10 @@ export async function claimNextExtractionChunk(
 export async function completeExtractionChunk(
     lease: Pick<MemoryExtractionLease, "runId" | "userId" | "leaseGeneration">,
     chunkIndex: number,
-    result: { outcome: "completed" } | { outcome: "failed"; code: string },
+    result:
+        | { outcome: "completed" }
+        | { outcome: "skipped" }
+        | { outcome: "failed"; code: string },
     now: Date = new Date()
 ): Promise<{ applied: boolean; runStatus: string; chunkStatus?: string }> {
     return prisma.$transaction(async (tx) => {
@@ -725,16 +793,57 @@ export async function completeExtractionChunk(
         // that branch would mean a transaction that sometimes reserves
         // credits without it.
         await acquireCreditAccountLock(tx, lease.userId);
+        /*
+          The run row next, and fenced -- before any chunk row.
+
+          `claimMemoryExtractionRun` takes the run and then resets the chunks
+          a dead generation left running, so a report that locked its chunk
+          first and the run second could wait on a reclaim that is waiting on
+          it. Run before chunk is also the order an extraction commit takes
+          (lib/memoryExtractionCommit.ts).
+
+          The fence is in the lock itself. A generation that was superseded,
+          cancelled or wiped by delete-all matches no row here -- under READ
+          COMMITTED the WHERE is re-checked after the wait -- and leaves
+          without touching its chunk or settling anything. The run that
+          replaced it, or the cancel that ended it, owns the settlement.
+        */
+        const fenced = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "MemoryExtractionRun"
+            WHERE id = ${lease.runId}
+              AND "userId" = ${lease.userId}
+              AND status = 'running'
+              AND "leaseGeneration" = ${lease.leaseGeneration}
+            FOR UPDATE
+        `;
+        if (fenced.length === 0) {
+            const run = await tx.memoryExtractionRun.findUnique({
+                where: { id: lease.runId },
+                select: { status: true },
+            });
+            return { applied: false, runStatus: run?.status ?? "unknown" };
+        }
         const chunk = await tx.memoryExtractionChunk.findUnique({
             where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
             select: { attemptCount: true },
         });
         if (!chunk) return { applied: false, runStatus: "unknown" };
 
+        /*
+          `skipped` is terminal and never goes through `chunkFailureDisposition`.
+          It is not a failure that ran out of attempts: there is nothing to
+          retry, because the thing the chunk was going to read is gone. The
+          `attemptCount` the claim already incremented stays as it is — it
+          records that a worker took this chunk, which is true.
+        */
         const disposition =
             result.outcome === "completed"
                 ? ({ status: "completed" } as const)
-                : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+                : result.outcome === "skipped"
+                  ? ({ status: "skipped" } as const)
+                  : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+        const settledNow =
+            disposition.status === "completed" || disposition.status === "skipped";
 
         const updated = await tx.memoryExtractionChunk.updateMany({
             where: {
@@ -746,8 +855,7 @@ export async function completeExtractionChunk(
             data: {
                 status: disposition.status,
                 failureCode: result.outcome === "failed" ? result.code : null,
-                completedAt:
-                    disposition.status === "completed" ? now : null,
+                completedAt: settledNow ? now : null,
                 // A chunk going back to pending releases its fence so the next
                 // slice — possibly a different worker — can claim it.
                 leaseGeneration:
@@ -765,14 +873,30 @@ export async function completeExtractionChunk(
             return { applied: false, runStatus: run?.status ?? "unknown" };
         }
 
-        const [completed, failed] = await Promise.all([
+        /*
+          Two counts, because they answer two different questions and folding
+          them into one was the defect.
+
+          `processed` is how far the run has got: a chunk whose sources were
+          all gone is as finished as one that called the provider, and a run
+          waiting for it would never end.
+
+          `completed` is what the account pays for. The settlement contract
+          says so in as many words -- "the two really did call the provider"
+          (lib/memoryExtractionCredits.ts) -- and a skipped chunk did not.
+        */
+        const [completed, skipped, failed] = await Promise.all([
             tx.memoryExtractionChunk.count({
                 where: { runId: lease.runId, status: "completed" },
+            }),
+            tx.memoryExtractionChunk.count({
+                where: { runId: lease.runId, status: "skipped" },
             }),
             tx.memoryExtractionChunk.count({
                 where: { runId: lease.runId, status: "failed" },
             }),
         ]);
+        const processed = completed + skipped;
         const run = await tx.memoryExtractionRun.findUniqueOrThrow({
             where: { id: lease.runId },
             select: { chunkTotal: true },
@@ -781,17 +905,17 @@ export async function completeExtractionChunk(
         const terminal =
             failed > 0
                 ? ("failed" as const)
-                : completed >= run.chunkTotal
+                : processed >= run.chunkTotal
                   ? ("completed" as const)
                   : null;
-        await tx.memoryExtractionRun.updateMany({
+        const advanced = await tx.memoryExtractionRun.updateMany({
             where: {
                 id: lease.runId,
                 status: "running",
                 leaseGeneration: lease.leaseGeneration,
             },
             data: {
-                chunkCompleted: completed,
+                chunkCompleted: processed,
                 ...(terminal
                     ? {
                           status: terminal,
@@ -802,12 +926,19 @@ export async function completeExtractionChunk(
                     : { leaseExpiresAt: leaseDeadline(now) }),
             },
         });
+        if (advanced.count !== 1) {
+            // Unreachable while this transaction holds the fenced run row. If
+            // it ever happens, the whole report rolls back rather than
+            // settling a run it did not advance.
+            throw new Error("Memory extraction run changed under its own lock.");
+        }
         if (terminal) {
             // Settled in the same transaction that made the run terminal, so
             // a run can never come to rest with credits still reserved
             // against it. `completed` is what the account is charged for: a
             // run that failed after two of five chunks keeps two, because
-            // those two really did call the provider.
+            // those two really did call the provider. A skipped chunk did
+            // not, so it is in `processed` above and not here.
             await settleExtractionRunCredits(tx, {
                 runId: lease.runId,
                 outcome: terminal,
@@ -874,7 +1005,11 @@ export type ExtractionChunkHandler = (input: {
      * not started yet; what records the rest is the provider-call ledger.
      */
     signal: AbortSignal;
-}) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
+}) => Promise<
+    | { outcome: "completed" }
+    | { outcome: "skipped" }
+    | { outcome: "failed"; code: string }
+>;
 
 export type ExtractionSliceResult = {
     chunksProcessed: number;
@@ -1132,9 +1267,32 @@ export async function driveMemoryExtractionRunSlice(input: {
  * through `driveMemoryExtractionRunSlice` lands with the driver wiring.
  */
 export async function reconcileExpiredMemoryExtractionRuns(now = new Date()) {
-    const reclaimed = await prisma.memoryExtractionRun.updateMany({
-        where: { status: "running", leaseExpiresAt: { lte: now } },
-        data: { status: "pending", leaseExpiresAt: null },
+    /*
+      Rows locked in id order, and never waited for.
+
+      A bare `updateMany` takes its row locks in whatever order the plan
+      visits them, while delete-all locks one account's active runs by id --
+      two expired runs could be taken in opposite orders by the two. Skipping a
+      row another transaction holds (a claim, a report, a delete-all) removes
+      the wait altogether; a run skipped here is still expired next cycle, and
+      the holder is usually about to change it anyway.
+    */
+    const reclaimed = await prisma.$transaction(async (tx) => {
+        const expired = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "MemoryExtractionRun"
+            WHERE status = 'running' AND "leaseExpiresAt" <= ${now}
+            ORDER BY id
+            FOR UPDATE SKIP LOCKED
+        `;
+        if (expired.length === 0) return { count: 0 };
+        return tx.memoryExtractionRun.updateMany({
+            where: {
+                id: { in: expired.map((row) => row.id) },
+                status: "running",
+                leaseExpiresAt: { lte: now },
+            },
+            data: { status: "pending", leaseExpiresAt: null },
+        });
     });
     if (reclaimed.count > 0) {
         console.info(

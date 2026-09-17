@@ -432,6 +432,30 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **잠긴 snapshot은 메모리 추출에 쓸 수 없습니다**(2026-09-16). 새 결정이 아니라
+  바로 위 문장의 적용입니다 — 추출은 snapshot의 제목과 모든 메시지를 외부
+  provider에 보내므로, 그것이 우회 노출이 아니라면 무엇도 아닙니다. 아래 삭제의
+  반대 사례와 같은 논리입니다: 삭제는 내용을 드러내지 않아 막지 않고, 추출은
+  드러내므로 막습니다.
+  - **선택·견적·생성**: 잠긴 snapshot은 고를 수 없고(목록에 잠김으로 보이고
+    해제 화면으로 가는 길을 줍니다), 견적과 생성은 `423 CONVERSATION_LOCKED`로
+    거절합니다. 생성은 run과 예약을 쓰는 트랜잭션 **안에서** snapshot 행을
+    `ORDER BY id FOR UPDATE`로 다시 읽습니다 — 그 앞의 견적은 트랜잭션 밖이라,
+    그것만으로는 사이에 걸린 잠금을 못 막습니다. 거절이 예약보다 먼저이므로
+    아무것도 청구되지 않습니다.
+  - **실행 중 잠금**은 §11.1이 다룹니다.
+  - **provider 호출이 나간 뒤 이긴 잠금**: 그 노출은 이미 일어났고 되돌릴 수
+    없습니다. 결과는 평소대로 `candidate`로 저장하며, 특별한 상태를 주지
+    않습니다. `suspended_by_source_lock`은 `active` 위에만 쓰이고 해제 시
+    `active`로 복원되므로, 후보에 쓰면 해제가 승인된 적 없는 것을 승격시킵니다.
+    그 후보가 채팅에 닿지 않는 것은 상태가 아니라 검색 쿼리의 읽기 시점
+    필터(`lib/memoryRetrievalService.ts`)가 보장합니다.
+- **잠긴 snapshot의 원문 제목도 잠금이 가리는 내용입니다**(IMPORT-LOCK-TITLE-01, 2026-09-15 제품 결정).
+  가져오기 목록(`listExternalConversations`)과 가져오기 상태(`getExternalImportStatus`)는 잠긴 행의
+  `title`을 **보내지 않고**(`null`, `titleWithheld: true`) 브라우저가 해제 grant를 가지고 있어도 같습니다.
+  화면은 공급자·가져온 날짜·잠금 상태로 행을 부릅니다. 제목은 잠금을 통과한 viewer에서만 보이며,
+  이어진 대화 목록·TXT 파일명(`readableContinuationSourceTitle()`)과 같은 규칙입니다. 이미 전달된
+  제목을 회수한다고 약속하지 않으며, 사용자가 직접 저장한 이어진 대화 이름은 이 규칙의 대상이 아닙니다.
 - **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
   내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
   영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의
@@ -757,9 +781,43 @@ Node crypto)입니다.
   소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
   lease 만료 후 maintenance가 회수합니다.
 - **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
-  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+  사용자 plan, provider 예산, **source 잠금**. run 생성 시점의 판정을 캐시하지
+  않습니다. source 잠금은 2026-09-16에 추가됐습니다 — 이 목록은 닫힌 열거라,
+  없는 항목은 재검사되지 않는다는 뜻이었습니다.
+- **실행 중 잠긴 source**는 run을 멈추지 않고 그 source만 뺍니다.
+  - chunk를 읽을 때 잠긴 snapshot을 거릅니다. 일부만 잠겼으면 **남은 source로
+    한 번 호출**하고 그 chunk는 `completed`입니다. 하나를 잠갔다고 사용자가 승인한
+    나머지를 버리지 않습니다.
+  - 전부 잠겼으면 읽을 것이 없으므로 `skipped`이며 과금되지 않습니다.
+  - 읽은 뒤 요청이 나가기 전에 잠기면, **요청 직전의 재검사**가 막습니다. 요청은
+    나가지 않고 provider 입장권은 해제되며, chunk는 `source_locked`로 재시도해
+    재로드가 잠긴 source를 뺍니다.
+  - 그 재검사가 선형화점입니다. 그 뒤 요청 바이트가 나가기 전에 커밋된 잠금까지
+    닫으려면 네트워크 호출 동안 행 잠금을 쥐어야 하므로 닫지 않으며, 그 경우는
+    §7.1의 "provider 호출이 나간 뒤 이긴 잠금"입니다.
+  - run 전체를 취소하지 않는 이유: `memory delete-all`이 진행 중 run을 통째로
+    취소하는 것(§13.1)은 추출이 방금 비운 memory store를 다시 채우기 때문이고,
+    source 잠금은 그 source만 무효화합니다.
 - **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
   반납하고 진행분을 보존합니다.
+- **chunk의 종료 상태는 셋이고, 과금되는 것은 하나입니다**(2026-09-16).
+  `completed`는 provider를 실제로 호출한 chunk, `skipped`는 호출 없이 끝난
+  chunk(계획이 지목한 대화가 전부 사라진 경우), `failed`는 재시도 한도까지
+  실패한 chunk입니다.
+  - run 진행도와 종료 판정은 **`completed + skipped`**입니다. `skipped`를
+    기다리면 run이 끝나지 않습니다.
+  - 정산의 `chunksCharged`는 **`completed`만**입니다. 정산 계약이 "과금된
+    chunk는 실제로 provider를 호출했다"이므로
+    (`lib/memoryExtractionCredits.ts`), `skipped`를 세면 그 문장이 거짓이 됩니다.
+  - `skipped`는 terminal이며 재시도하지 않습니다. 재시도할 대상이 없어서 끝난
+    것이지 실패해서 끝난 것이 아닙니다.
+
+  이전에는 `skipped`가 없어 이 경우가 `completed`로 기록됐고, **원문을 지운
+  사용자가 그 삭제 때문에 불가능해진 호출에 과금되는 구조였습니다.** §13.1은
+  삭제가 run을 좌초시키지 않는다고만 정했을 뿐 그 과금을 승인한 적이 없습니다.
+  실제 청구는 일어나지 않았습니다 — `feature.memoryExtractionEnabled`는
+  production에서 켜진 적이 없습니다(운영자 확인, 2026-09-16). 즉 이 수정은 flag를
+  켜기 전에 도착한 것이지 사후 정정이 아닙니다.
 - extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
   작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
   수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.
@@ -994,11 +1052,18 @@ adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 
     (id 순), 추출 commit과 전체 삭제는 `MemoryExtractionRun` → memory 잠금, source
     잠금은 snapshot 행 → memory 잠금. memory 잠금 보유자는 그 행들을 기다리지
     않습니다(evidence 검증은 잠금 없는 읽기, evidence FK는 `ExternalMessage`만 참조).
+  - 행끼리의 순서도 고정합니다(task_9d445985). 추출 run은 `MemoryExtractionRun` → `MemoryExtractionChunk`:
+    lease 재획득, chunk 완료 보고, 추출 commit이 모두 run 행을 먼저 잡고, 완료 보고는 그 잠금 자체를
+    `status = running`과 lease generation 조건으로 걸어 밀려난 worker가 chunk를 건드리거나 정산하지 못하게 합니다.
+    staging 만료는 `ExternalImport` → 미확정 `ExternalConversation`(id 순)으로 전체 import 삭제와 같은 순서이고,
+    만료 sweep은 import 행을 잠근 **뒤** 상태와 두 TTL을 다시 판정해 그 사이 확정·삭제·활동이 있던 import를
+    건너뜁니다(건너뛴 후보는 만료 수에 세지 않음).
   - source 잠금으로 정지된(`suspended_by_source_lock`) memory의 source가 삭제되면
     `suspended_by_source_delete`(또는 삭제 선택 시 삭제)로 전환합니다. 그대로 두면
     evidence가 없어 잠금 reconciliation이 차단되지 않은 것으로 보고 `active`로
     복원합니다.
-- memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
+- memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단(취소한 run의 크레딧 예약은
+  사용자 취소와 같이 그 transaction에서 정산; 크레딧 계정 잠금 → run 행 → memory 잠금),
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
 - account deletion은 Import·memory·profile·knowledge를 모두 cascade합니다.
@@ -1097,6 +1162,33 @@ composer·comparison rail contract를 침범하지 않습니다.
 - 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
   `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
   `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
+### 13.5 imported data export의 잠긴 snapshot
+
+`GET /api/imports/external/export`(릴리스 A imported data export)는 **잠긴 snapshot을
+존재 metadata로만 내보냅니다** — `{ "locked": true, "importedAt": ... }`이고 제목·
+provider·`externalStableId`·digest·원본 시각·model label·메시지는 싣지 않습니다(2026-09-16).
+메시지는 쿼리 단계에서 읽지도 않습니다.
+
+- **새 정책이 아니라 기존 규칙의 누락 적용입니다.** 같은 행이 계정 데이터 export
+  (`lib/accountDataExport.ts`)에서는 이미 이 방식으로 나가고, 잠긴 source의 memory
+  evidence도 §13.2에서 그렇습니다. 이 경로 하나만 모든 finalized snapshot의 제목과
+  메시지 전문을 내보내고 있었습니다(CONT-SEARCH-01 검토 중 발견).
+- **이유는 §13.2와 같습니다.** export는 계정 밖으로 나가는 문서라 거기 담긴 제목·
+  메시지는 잠금이 풀리든 말든 남습니다. 세션을 가진 사람은 누구나 export를 요청할 수
+  있고, 잠금은 세션만으로는 부족하게 하려고 존재합니다.
+- **grant가 있어도 stub입니다.** grant는 비밀번호를 증명한 뒤에 받는 추가 권한이므로
+  세션과 같지 않습니다. 그래서 잠긴 snapshot 하나의 전문을 의도적으로 내려받는
+  원문 포함 이어가기 export(`docs/policy/external-conversation-continuation.md` §9.1)는
+  grant를 확인한 뒤 허용합니다. 이 경로가 grant를 보지 않는 이유는 그것과 다른
+  종류의 문서이기 때문입니다 — 계정 전체의 일괄 export이고, 같은 행을 내보내는 계정
+  데이터 export가 이미 grant 유무와 무관하게 stub만 내보냅니다. 두 일괄 export가 서로
+  다른 규칙을 가지면, 어느 쪽을 누르느냐에 따라 잠금의 의미가 달라집니다.
+- **항목은 계속 목록에 남깁니다.** 사용자는 계정에 무엇이 있는지 알 권리가 있고, 그것이
+  존재 metadata의 뜻입니다. 잠긴 snapshot의 전문이 필요하면 잠금을 해제한 뒤 export합니다.
+- **형식은 `tomverse.external-conversations.v2`입니다.** v1의 모든 항목에는
+  `messages`가 있었으므로, 모양이 다른 항목이 생긴 것을 v1 reader가 알아채지 못하고
+  실패하지 않도록 버전을 올렸습니다. 모든 항목에 `locked`가 있습니다.
 
 ## 14. Assistant Profile (릴리스 C)
 
@@ -1483,7 +1575,7 @@ entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 | cross-user IDOR (import·memory·profile·knowledge·lock grant) | owner scope 전면 적용, resource type 결속 grant(§7), IDOR 테스트 |
 | context bundle replay·변조 | 서명·nonce·expiry·subject/conversation 결속, admission과 역할 분리(§10) |
 | staging 자원 노출 | 일반 목록·검색·export 비노출, TTL·cleanup |
-| lock 우회 (evidence·retrieval·share 경유) | suspension 원자성(§7.1), 잠긴 evidence 열람 차단, share/export 제외(§13.3) |
+| lock 우회 (evidence·retrieval·share·extraction 경유) | suspension 원자성(§7.1), 잠긴 evidence 열람 차단, share/export 제외(§13.3), 잠긴 snapshot의 추출 거절과 실행 중 제외·요청 직전 재검사(§7.1, §11.1) |
 | provider 예산 잠식 (대량 추출) | batch sub-budget 10%(§3), interactive 우선 |
 | eval 조작 (표본 부풀림·분모 조작·smoke 위장) | 표본 계약(§12.2), manifest 사전 고정, 코드/운영 분리(§12.4), register 감사 |
 | 데이터 유출 (로그·telemetry·오류) | content·title·filename·외부 ID·digest·statement의 로그 금지, content-free 지표만 |
@@ -1695,9 +1787,25 @@ lock은 별도 route입니다. snapshot은 immutable(§4.2)이라 일반 PATCH r
 - **증명 실패는 verify와 같은 attempt 예산을 씁니다.** 두 경로가 다른 속도로
   추측을 허용하면 느슨한 쪽이 실효 한도가 됩니다. 단 `currentPassword`가
   아예 없는 요청은 추측이 아니므로 예산을 쓰지 않고 거절합니다.
-- **설정·변경 성공 시 grant를 함께 발급하고 해제 시 삭제합니다.** 방금 고른
-  비밀번호를 바로 다시 입력시키지 않기 위해서이고, 삭제는 TTL 안에 다른
-  비밀번호로 다시 잠근 snapshot이 옛 grant로 열리는 것을 막습니다.
+- **쓰기는 설정·변경·해제 어느 방향이든 grant를 삭제합니다.** native 대화
+  잠금이 처음부터 그렇게 해 왔고(`PATCH /api/conversations/[id]`가 `password`가
+  실린 모든 요청에서 cookie를 지웁니다), 이 경로만 달랐습니다 — 설정·변경 시
+  30분 grant를 함께 발급했고, 근거는 "방금 비밀번호를 고른 사람은 verify만큼
+  직접 증명했다"였습니다.
+
+  그 근거는 **인증에 대해서는 맞고 잠금의 의미에 대해서는 틀렸습니다.** 잠그는
+  사람은 읽기를 요청한 것이 아니라 읽히지 않기를 요청한 것입니다. 2026-09-16
+  staging 검증이 그 간격의 실제 모습을 찾았습니다 — 방금 잠근 snapshot이
+  사이드바 검색에 그대로 걸렸고(B1), 이어진 대화 내보내기 파일에 원문이
+  실렸습니다(B5). 두 표면 모두 정상 동작이었습니다 — 이 브라우저가 grant를
+  가졌는지 물었고, 잠금이 방금 발급했으므로 가지고 있었습니다. 빠진 것은
+  **잠금이 생긴 뒤의 비밀번호 증명**입니다. 내보낸 파일은 회수할 수 없으므로,
+  30분짜리 임시 권한이 영구 산출물로 바뀌었습니다.
+
+  그래서 잠금은 잠근 본인에게도 닫히고 다음 열람은 비밀번호를 다시 묻습니다.
+  그 비용은 native 잠금이 이미 치르고 있는 비용이며, 잠기지 않는 잠금보다
+  작습니다. grant를 발급해도 되는 곳은 비밀번호 증명이 존재 이유인 route,
+  즉 `verify`뿐이고 `tests/lockResourceType.test.mjs`가 이를 강제합니다.
 - 잠긴 snapshot 조회는 새 코드가 아니라 기존 423 `CONVERSATION_LOCKED`로
   답합니다(§7의 호환 요구, §18 표는 확정본).
 

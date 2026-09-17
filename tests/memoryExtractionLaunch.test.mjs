@@ -8,6 +8,7 @@ import {
     selectionSignature,
     startGate,
     summarizeSelection,
+    withoutLockedSelection,
 } from "../lib/memoryExtractionLaunch.ts";
 
 /**
@@ -277,4 +278,72 @@ test("an unknown status is treated as failed, not as still running", () => {
     });
     assert.equal(progress.status, "failed");
     assert.equal(progress.polling, false);
+});
+
+/* --------------------------------------------------------- locked sources -- */
+
+test("a selection holding a locked snapshot cannot be priced or started", () => {
+    // A locked snapshot may not be sent to a provider
+    // (docs/policy/external-conversation-import-and-memory.md §7.1), so
+    // asking what it would cost is already asking the wrong question.
+    const input = ready({ lockedConversationIds: ["c-1"] });
+    assert.deepEqual(estimateGate(input), {
+        allow: false,
+        reason: "locked_selection",
+    });
+    assert.deepEqual(startGate({ ...input, estimate: estimateFor(input) }), {
+        allow: false,
+        reason: "locked_selection",
+    });
+});
+
+test("a locked snapshot that is not selected blocks nothing", () => {
+    const input = ready({ lockedConversationIds: ["c-9"] });
+    assert.deepEqual(estimateGate(input), { allow: true });
+});
+
+test("too many selected is the answer before which of them are locked", () => {
+    // The size limit applies whatever is chosen; naming the lock first would
+    // send the user to unlock things and then refuse them anyway.
+    const ids = Array.from(
+        { length: MEMORY_EXTRACTION_MAX_SELECTION + 1 },
+        (_, index) => `c-${index}`
+    );
+    const input = ready({
+        selectedConversationIds: ids,
+        lockedConversationIds: ["c-0"],
+    });
+    assert.deepEqual(estimateGate(input), {
+        allow: false,
+        reason: "selection_too_large",
+    });
+});
+
+test("a row locked after it was selected leaves the selection, not the screen", () => {
+    // Left checked behind a disabled checkbox, it would be the one choice the
+    // user could not undo, and it would block the whole launch.
+    const rows = [
+        { id: "c-1", locked: false },
+        { id: "c-2", locked: true },
+        { id: "c-3" },
+    ];
+    assert.deepEqual(
+        [...withoutLockedSelection(["c-1", "c-2", "c-3", "c-off-page"], rows)],
+        ["c-1", "c-3", "c-off-page"],
+        "an id on a page not loaded is kept: the server judges it, not this"
+    );
+});
+
+test("purging a selection with nothing locked returns the same array", () => {
+    // Identity, so a caller setting state from it does not re-render.
+    const selected = ["c-1", "c-2"];
+    assert.equal(
+        withoutLockedSelection(selected, [{ id: "c-1", locked: false }]),
+        selected
+    );
+    assert.equal(
+        withoutLockedSelection(selected, [{ id: "c-9", locked: true }]),
+        selected,
+        "a locked row nobody selected changes nothing either"
+    );
 });

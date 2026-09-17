@@ -2,7 +2,10 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
-import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
+import {
+    LEGACY_CONTINUATION_TITLE,
+    readableContinuationSourceTitle,
+} from "@/lib/continuationDisplayTitle";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { SOURCE_LOCK_SUSPENDED_STATUS } from "@/lib/memorySourceLock";
 import {
@@ -48,6 +51,7 @@ import {
 } from "@/lib/memorySourceDeletion";
 import { markContinuationSourcesDeleted } from "@/lib/externalContinuationService";
 import { prisma } from "@/lib/prisma";
+import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
 
 /**
  * Server side of the external import lifecycle (Release A, slice A1b).
@@ -161,10 +165,22 @@ async function loadOwnedImport(
     return row;
 }
 
+/**
+ * Expires one open import.
+ *
+ * Caller contract: the `ExternalImport` row is already held `FOR UPDATE` in
+ * `tx`. Every caller does -- append, seal and finalize through
+ * `loadOwnedImport(..., { forUpdate: true })`, the sweep explicitly -- so the
+ * order is Import, then its snapshots by id, the order `deleteExternalImport`
+ * takes. Deleting the snapshots first, as this used to, held the children while
+ * waiting for the parent a concurrent delete already held while waiting for
+ * the children (task_9d445985).
+ */
 async function expireStagingImport(
     tx: Prisma.TransactionClient,
     importId: string
 ) {
+    await tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} AND finalized = false ORDER BY id FOR UPDATE`;
     await tx.externalConversation.deleteMany({
         where: { importId, finalized: false },
     });
@@ -344,7 +360,14 @@ export async function listExternalConversations(
             id: row.id,
             importId: row.importId,
             provider: row.provider,
-            title: row.title,
+            // A locked snapshot's title is part of what the lock withholds
+            // (IMPORT-LOCK-TITLE-01), so a list never carries it -- not even to
+            // a browser holding the unlock grant, which keeps this list and
+            // every other place that names the snapshot in agreement
+            // (lib/continuationDisplayTitle.ts). The viewer, past the lock,
+            // shows it.
+            title: readableContinuationSourceTitle(row),
+            titleWithheld: row.password != null,
             externalStableId: row.externalStableId,
             messageCount: row.messageCount,
             contentBytes: asSafeNumber(row.contentBytes),
@@ -877,11 +900,13 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             select: {
                 id: true,
                 title: true,
+                password: true,
                 conversationDigest: true,
                 externalStableId: true,
                 messageCount: true,
                 contentBytes: true,
                 finalized: true,
+                importedAt: true,
                 sourceCreatedAt: true,
                 sourceUpdatedAt: true,
             },
@@ -931,7 +956,12 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             completedAt: row.completedAt?.toISOString() ?? null,
             conversations: staged.map((conversation) => ({
                 id: conversation.id,
-                title: conversation.title,
+                // Withheld for a locked snapshot, as in the list above.
+                title: readableContinuationSourceTitle(conversation),
+                titleWithheld: conversation.password != null,
+                // The date a withheld title is named by, so the screen does not
+                // have to say "locked conversation ( , )".
+                importedAt: conversation.importedAt.toISOString(),
                 conversationDigest: conversation.conversationDigest,
                 externalStableId: conversation.externalStableId,
                 messageCount: conversation.messageCount,
@@ -1651,57 +1681,125 @@ export async function deleteExternalImport(
  * order, for the account export download (§21). Paged so the route can
  * stream a response that may approach the 50MB account quota without ever
  * materializing it whole.
+ *
+ * A locked snapshot yields existence metadata and nothing else: that it is
+ * there, that it is locked, and when it arrived
+ * (docs/policy/external-conversation-import-and-memory.md §13.5).
+ *
+ * This reader was the one place that rule had not reached. The same rows
+ * already leave the account as stubs through the account data export
+ * (`externalConversation` / `externalMessage` in lib/accountDataExport.ts),
+ * whatever grant the browser holds, and memory evidence from a locked source
+ * does in the memory export (§13.2). This is the same kind of document -- a
+ * bulk export of the whole account that leaves it -- so it follows the same
+ * rule. Downloading one snapshot's text on purpose, after proving its password,
+ * is a different act with its own route (the source-included continuation
+ * export) and is not what this is.
  */
 export async function* iterateExternalExportConversations(userId: string) {
     const pageSize = 20;
     let cursor: { importedAt: Date; id: string } | null = null;
     for (;;) {
-        const rows: Array<{
-            id: string;
-            provider: string;
-            title: string;
-            externalStableId: string;
-            sourceModelLabels: unknown;
-            conversationDigest: string;
-            digestVersion: number;
-            sourceCreatedAt: Date | null;
-            sourceUpdatedAt: Date | null;
-            importedAt: Date;
-        }> = await prisma.externalConversation.findMany({
-            where: {
-                userId,
-                finalized: true,
-                ...(cursor
-                    ? {
-                          OR: [
-                              { importedAt: { lt: cursor.importedAt } },
-                              {
-                                  importedAt: cursor.importedAt,
-                                  id: { lt: cursor.id },
-                              },
-                          ],
-                      }
-                    : {}),
-            },
-            orderBy: [{ importedAt: "desc" }, { id: "desc" }],
-            take: pageSize,
-            select: {
-                id: true,
-                provider: true,
-                title: true,
-                externalStableId: true,
-                sourceModelLabels: true,
-                conversationDigest: true,
-                digestVersion: true,
-                sourceCreatedAt: true,
-                sourceUpdatedAt: true,
-                importedAt: true,
-            },
-        });
-        if (rows.length === 0) return;
-        for (const row of rows) {
-            const messages = await prisma.externalMessage.findMany({
-                where: { externalConversationId: row.id },
+        /*
+          The page supplies order and nothing else.
+
+          It used to supply everything, and a lock decided from it was a
+          decision about the past: the page is read once, and then the
+          generator hands entries to a stream that may take a while to drain.
+          A snapshot open when the page was read and locked while an earlier
+          entry was being sent would still have gone out whole -- its title and
+          digest from the stale page, its messages from a query that no longer
+          asked. So each entry is read fresh, below, and the page only says
+          which one comes next.
+        */
+        const page: Array<{ id: string; importedAt: Date }> =
+            await prisma.externalConversation.findMany({
+                where: {
+                    userId,
+                    finalized: true,
+                    ...(cursor
+                        ? {
+                              OR: [
+                                  { importedAt: { lt: cursor.importedAt } },
+                                  {
+                                      importedAt: cursor.importedAt,
+                                      id: { lt: cursor.id },
+                                  },
+                              ],
+                          }
+                        : {}),
+                },
+                orderBy: [{ importedAt: "desc" }, { id: "desc" }],
+                take: pageSize,
+                select: { id: true, importedAt: true },
+            });
+        if (page.length === 0) return;
+        for (const { id } of page) {
+            const entry = await readExportEntry(userId, id);
+            // Deleted, or no longer this account's, since the page was read:
+            // there is nothing to list.
+            if (entry) yield entry;
+        }
+        const last = page[page.length - 1];
+        cursor = { importedAt: last.importedAt, id: last.id };
+    }
+}
+
+/**
+ * One export entry, decided and read in a single snapshot.
+ *
+ * The lock, the metadata and the messages all come from the same committed
+ * state, so they cannot disagree: a lock that committed before the snapshot is
+ * seen and the entry is a stub; one that commits after it lands after this
+ * entry was, in effect, already exported -- the same outcome as a lock placed
+ * a moment after the download finished.
+ *
+ * The entry is built inside the transaction and handed back, never yielded
+ * from inside it. A stream that drains slowly must not hold a snapshot open,
+ * because an open snapshot holds back vacuum for everything it can still see.
+ */
+async function readExportEntry(userId: string, id: string) {
+    return readOnlySnapshotTransaction(
+        async (tx) => {
+            const row = await tx.externalConversation.findFirst({
+                where: { id, userId, finalized: true },
+                select: {
+                    // Read to decide, never emitted: it is a scrypt hash of
+                    // the owner's lock password, and a copy in a downloadable
+                    // file would be an offline cracking target.
+                    password: true,
+                    provider: true,
+                    title: true,
+                    externalStableId: true,
+                    sourceModelLabels: true,
+                    conversationDigest: true,
+                    digestVersion: true,
+                    sourceCreatedAt: true,
+                    sourceUpdatedAt: true,
+                    importedAt: true,
+                },
+            });
+            if (!row) return null;
+            if (row.password !== null) {
+                /*
+                  Written field by field, and the message query below is never
+                  reached: a locked conversation's text is not read into a
+                  process that is building a file for download.
+
+                  Everything else is left out because each of it describes the
+                  thing the lock hides. The title and provider say what it is;
+                  `externalStableId` names it in the provider's own account;
+                  the digest lets a guess about its content be confirmed; the
+                  source timestamps and model labels narrow it down. The
+                  account data export drops the same fields for the same rows.
+                */
+                return {
+                    locked: true as const,
+                    importedAt: row.importedAt.toISOString(),
+                };
+            }
+            const messages = await tx.externalMessage.findMany({
+                where: { externalConversationId: id },
                 orderBy: { ordinal: "asc" },
                 select: {
                     role: true,
@@ -1716,7 +1814,8 @@ export async function* iterateExternalExportConversations(userId: string) {
                     retainedCharacterCount: true,
                 },
             });
-            yield {
+            return {
+                locked: false as const,
                 provider: row.provider,
                 title: row.title,
                 externalStableId: row.externalStableId,
@@ -1742,10 +1841,11 @@ export async function* iterateExternalExportConversations(userId: string) {
                     retainedCharacterCount: message.retainedCharacterCount,
                 })),
             };
-        }
-        const last = rows[rows.length - 1];
-        cursor = { importedAt: last.importedAt, id: last.id };
-    }
+        },
+        // One conversation, however long: generous, because timing out here
+        // fails the whole download rather than one entry of it.
+        { timeout: 30_000, maxWait: 10_000 }
+    );
 }
 
 /**
@@ -1767,15 +1867,32 @@ export async function reconcileExpiredExternalImportStaging(now = new Date()) {
         },
         select: { id: true },
     });
+    let expired = 0;
     for (const row of stale) {
-        await prisma.$transaction(async (tx) => {
+        /*
+          Decided again under the row lock. The candidates were read outside
+          any transaction, and in between the import may have been finalized
+          (IMPORT-STAGING-FINALIZE-01: expiring it then overwrote `completed`
+          with `failed`), deleted, cancelled, or touched by a new batch that
+          moved its idle clock. Only a row that is still open and still past a
+          deadline is expired, and only those are counted.
+        */
+        const didExpire = await prisma.$transaction(async (tx) => {
+            const [current] = await tx.$queryRaw<
+                Array<{ status: string; createdAt: Date; updatedAt: Date }>
+            >`SELECT status, "createdAt", "updatedAt" FROM "ExternalImport" WHERE id = ${row.id} FOR UPDATE`;
+            if (!current || !isOpenImportStatus(current.status) || !isStagingExpired(current, now)) {
+                return false;
+            }
             await expireStagingImport(tx, row.id);
+            return true;
         });
+        if (didExpire) expired += 1;
     }
-    if (stale.length > 0) {
+    if (expired > 0) {
         // §22 staging-cleanup metric. A counter rather than a row aggregate:
         // the expired rows stay owner-deletable, so only the counter survives.
-        await recordExternalImportCounter("staging_expired", stale.length, now);
+        await recordExternalImportCounter("staging_expired", expired, now);
     }
-    return { expiredImports: stale.length };
+    return { expiredImports: expired };
 }

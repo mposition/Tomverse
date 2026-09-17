@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resourceUnlockAccess } from "../lib/conversationLock.ts";
 import {
     LOCK_RESOURCE_TYPES,
     createConversationUnlockCookie,
@@ -62,6 +63,35 @@ test("a conversation grant minted through either entry point is the same grant",
         hasConversationUnlockGrant(request, USER, "conv-1", PASSWORD_HASH),
         true
     );
+});
+
+test("one read answers both whether a grant opens a resource and until when", () => {
+    // The two questions come from the same cookie and the same clock reading,
+    // so a caller that shows something derived from a grant cannot be told
+    // "yes" and "no expiry" across a second boundary (CONT-SEARCH-01).
+    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_HASH);
+    const request = requestWith(cookieValue(setCookie));
+    const granted = resourceUnlockAccess("conversation", request, USER, "conv-1", PASSWORD_HASH);
+    assert.equal(granted.granted, true);
+    assert.equal(
+        granted.expiresAt,
+        Number(cookieValue(setCookie).split("=")[1].split(".")[0]),
+        "the expiry is the grant's own, in epoch seconds"
+    );
+    assert.ok(granted.expiresAt > Math.floor(Date.now() / 1000));
+
+    // No lock: allowed, and nothing expires.
+    assert.deepEqual(resourceUnlockAccess("conversation", request, USER, "conv-1", null), {
+        granted: true,
+        expiresAt: null,
+    });
+    // No grant, and a grant for another resource: refused with no expiry.
+    for (const request of [requestWith(""), requestWith(cookieValue(setCookie))]) {
+        assert.deepEqual(
+            resourceUnlockAccess("conversation", request, USER, "conv-2", PASSWORD_HASH),
+            { granted: false, expiresAt: null }
+        );
+    }
 });
 
 test("an unlocked resource needs no grant at all", () => {
@@ -391,5 +421,72 @@ test("a changed password still invalidates an outstanding grant", () => {
         ),
         false,
         "and stops the moment the stored password differs"
+    );
+});
+
+/**
+ * Who is allowed to mint a grant.
+ *
+ * Staging (2026-09-16) found a snapshot that stayed searchable and stayed
+ * exportable straight after being locked. The lock check was working at both
+ * surfaces; the write route had handed the browser a thirty-minute grant as it
+ * set the lock, and every surface that consults a grant duly found one.
+ *
+ * The fix is one line in that route, but the defect is a class: a grant
+ * reaches every reader at once, so the cost of minting one in the wrong place
+ * is never local to that place. Proving *where* a grant may be minted is
+ * therefore worth a test of its own, and it has to be a source test -- there
+ * is no runtime moment at which "this response came from a write route" can be
+ * observed.
+ *
+ * The rule: only a route whose whole job is proving a password may mint one.
+ * That is `verify`. A route that sets, changes or removes a lock clears
+ * instead, in all three directions.
+ */
+test("only the verify routes mint an unlock grant", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join, resolve, sep } = await import("node:path");
+
+    // `app` and `lib` both, not just the routes. A route is where a grant
+    // reaches the browser, but it is not the only place one can be minted:
+    // a helper in `lib` called by a route would have satisfied a check that
+    // only read `app/api`, and the defect this test exists for would have
+    // come back wearing a different file name.
+    const root = resolve(import.meta.dirname, "..");
+    const walk = (directory) =>
+        readdirSync(directory).flatMap((entry) => {
+            const path = join(directory, entry);
+            return statSync(path).isDirectory() ? walk(path) : [path];
+        });
+
+    const minting = [join(root, "app"), join(root, "lib")]
+        .flatMap(walk)
+        .filter(
+            (path) =>
+                /\.tsx?$/.test(path) &&
+                /create(Conversation|Resource)UnlockCookie\s*\(/.test(
+                    readFileSync(path, "utf8")
+                )
+        )
+        .map((path) => path.slice(root.length + 1).split(sep).join("/"))
+        .sort();
+
+    // `lib/conversationLock.ts` defines them and `createConversationUnlockCookie`
+    // delegates to `createResourceUnlockCookie`, so the definition file names
+    // both and is allowed by path rather than by pattern.
+    const allowed = (path) =>
+        path === "lib/conversationLock.ts" || path.endsWith("verify/route.ts");
+    const offenders = minting.filter((path) => !allowed(path));
+
+    assert.deepEqual(
+        offenders,
+        [],
+        `these routes mint an unlock grant without proving a password: ${offenders.join(", ")}`
+    );
+    // And the rule is not vacuously true because nothing mints one any more.
+    assert.deepEqual(
+        minting.filter((path) => path.endsWith("verify/route.ts")).length,
+        2,
+        "both verify routes still mint a grant"
     );
 });

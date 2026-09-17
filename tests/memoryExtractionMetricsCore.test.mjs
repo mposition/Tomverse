@@ -108,13 +108,16 @@ test("pairs are reported separately", () => {
 });
 
 test("chunk failures are broken down by code", () => {
-    // A provider outage and a deleted source look identical in a success rate
-    // and call for different responses.
+    // A provider outage and an answer the parser could not read look identical
+    // in a success rate and call for different responses. Both codes are ones
+    // lib/memoryExtractionWorker.ts actually emits. (A deleted source used to
+    // be modelled here as a failure code; it is `skipped` now, which is not a
+    // failure at all -- see the test below.)
     const summary = summarize({
         chunks: [
             chunk({ status: "failed", failureCode: "provider_error" }),
             chunk({ status: "failed", failureCode: "provider_error" }),
-            chunk({ status: "failed", failureCode: "no_conversations" }),
+            chunk({ status: "failed", failureCode: "unparseable_answer" }),
             chunk({ status: "failed", failureCode: null }),
             chunk(),
         ],
@@ -123,7 +126,7 @@ test("chunk failures are broken down by code", () => {
     assert.equal(summary.chunks.completed, 1);
     assert.deepEqual(summary.chunks.failureCodes, {
         provider_error: 2,
-        no_conversations: 1,
+        unparseable_answer: 1,
         unknown: 1,
     });
 });
@@ -320,4 +323,25 @@ test("no review items reports zeroes and null rates", () => {
     assert.deepEqual(summary.byPair, []);
     assert.equal(summary.proposed, 0);
     assert.equal(summary.approvalRate, null);
+});
+
+test("a chunk that called no provider is counted apart from one that did", () => {
+    // `skipped` and `completed` both mean "finished", and only one of them
+    // spent anything. Folding them together would make the spend and the
+    // yield both read wrong, which is the same reason settlement counts them
+    // apart.
+    const summary = summarize({
+        chunks: [
+            chunk(),
+            chunk({ status: "skipped" }),
+            chunk({ status: "skipped" }),
+            chunk({ status: "failed", failureCode: "provider_error" }),
+        ],
+    });
+    assert.equal(summary.chunks.completed, 1);
+    assert.equal(summary.chunks.skipped, 2);
+    assert.equal(summary.chunks.failed, 1);
+    assert.equal(summary.chunks.total, 4);
+    // And a skip is not a failure, so it contributes no failure code.
+    assert.deepEqual(summary.chunks.failureCodes, { provider_error: 1 });
 });

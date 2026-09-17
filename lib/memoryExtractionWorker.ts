@@ -147,6 +147,19 @@ export const extractionModelAdapter: ExtractionAdapterFactory = (input) =>
     });
 
 /**
+ * Thrown from `onCallIssued` when a source this chunk loaded has been locked
+ * since. A class of its own so the handler can tell "stopped before it left"
+ * from every provider failure: the first releases its admission and costs
+ * nothing, the others may already have been billed.
+ */
+class SourceLockedBeforeCallError extends Error {
+    constructor() {
+        super("A source was locked before the provider call left.");
+        this.name = "SourceLockedBeforeCallError";
+    }
+}
+
+/**
  * Loads exactly the conversations this chunk was planned around.
  *
  * Scoped to the run's owner as well as to the ids: the chunk plan is stored
@@ -154,6 +167,17 @@ export const extractionModelAdapter: ExtractionAdapterFactory = (input) =>
  * owns that conversation. Ordering is by id so the same chunk always produces
  * the same prompt — `promptVersion` means nothing reproducible otherwise, and
  * the label map the parser uses is assigned by position.
+ *
+ * And unlocked only, for the same reason: a stored id is not a statement that
+ * the snapshot is still readable. A run is created against an unlocked
+ * selection, but it can run for a long time, and the owner can lock a source
+ * in the meantime. This read is where that has to be noticed, because it is
+ * the last point before a title and every message go to a provider
+ * (docs/policy/external-conversation-import-and-memory.md §7.1, §11.1).
+ *
+ * A chunk with some sources locked sends the rest -- one lock does not throw
+ * away the others the owner approved. A chunk with all of them locked comes
+ * back empty and is skipped, which is not charged.
  */
 async function loadChunkConversations(
     userId: string,
@@ -165,7 +189,7 @@ async function loadChunkConversations(
     if (conversationIds.length === 0)
         return { conversations: [], contentBytes: 0 };
     const rows = await prisma.externalConversation.findMany({
-        where: { id: { in: [...conversationIds] }, userId },
+        where: { id: { in: [...conversationIds] }, userId, password: null },
         orderBy: { id: "asc" },
         select: {
             id: true,
@@ -254,7 +278,11 @@ export async function handleMemoryExtractionChunk({
     adapterFactory?: ExtractionAdapterFactory;
     register?: readonly MemoryExtractionEvalEntry[];
     environment?: Record<string, string | undefined>;
-}): Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }> {
+}): Promise<
+    | { outcome: "completed" }
+    | { outcome: "skipped" }
+    | { outcome: "failed"; code: string }
+> {
     const failed = (code: string) => ({ outcome: "failed" as const, code });
 
     // Cheapest possible exit: the slice may already have given up before this
@@ -266,11 +294,25 @@ export async function handleMemoryExtractionChunk({
         chunk.conversationIds
     );
     if (conversations.length === 0) {
-        // The plan named conversations that are gone — deleted, or their
-        // import removed — so there is nothing to extract and nothing to
-        // retry. Completing rather than failing lets the run finish; §13.1
-        // already decided that deleting a source does not strand the run.
-        return { outcome: "completed" };
+        /*
+          The plan named conversations that are gone — deleted, their import
+          removed, or locked since the run was created — so there is nothing
+          to extract and nothing to retry. Not failing, because
+          docs/policy/external-conversation-import-and-memory.md §13.1 already
+          decided that deleting a source does not strand the run, and a lock is
+          a smaller act than a deletion: it would be strange for it to end the
+          work on every other source the owner approved.
+
+          `skipped` rather than `completed`, which is what this returned
+          before. The two look interchangeable from here and are not:
+          `completed` is the count settlement charges, and its contract says in
+          as many words that those chunks "really did call the provider"
+          (lib/memoryExtractionCredits.ts). This one did not, and charging for
+          it was a defect rather than a decision — nothing in that section says
+          a user who deletes a source should pay for the calls that deletion
+          made impossible.
+        */
+        return { outcome: "skipped" };
     }
 
     const owner = await prisma.user.findUnique({
@@ -386,6 +428,45 @@ export async function handleMemoryExtractionChunk({
                 model,
                 signal,
                 onCallIssued: async () => {
+                    /*
+                      The lock, asked once more at the last moment a request
+                      can still be stopped.
+
+                      The load at the top of this handler filtered locked
+                      sources out, but a good deal happens between that read
+                      and this line -- the owner lookup, the pair, the budget
+                      admission -- and the owner can lock a source in that
+                      time. A request built from a source locked since would
+                      send its title and messages anyway. So a lock that has
+                      committed by now stops the request here, before
+                      `callIssued` is set: nothing left, nothing to settle.
+
+                      The chunk is then failed as retryable rather than sent
+                      smaller, because the prompt is already built and cannot
+                      be edited from inside the adapter. The retry reloads,
+                      and the reload's filter builds the prompt again without
+                      the locked source -- or skips the chunk if that was the
+                      last one.
+
+                      What this cannot close is a lock committing after this
+                      read and before the request bytes leave. Closing that
+                      would mean holding a row lock across a network call. The
+                      read is the linearisation point; a lock that loses the
+                      race to it is handled when the answer is committed.
+                    */
+                    const lockedSince = await prisma.externalConversation.count({
+                        where: {
+                            id: {
+                                in: conversations.map(
+                                    (conversation) =>
+                                        conversation.externalConversationId
+                                ),
+                            },
+                            password: { not: null },
+                        },
+                    });
+                    if (lockedSince > 0) throw new SourceLockedBeforeCallError();
+
                     // Durable before the request leaves, so a crash here is
                     // recoverable as "may have cost something".
                     callIssued = true;
@@ -399,6 +480,13 @@ export async function handleMemoryExtractionChunk({
             }),
         });
     } catch (error) {
+        if (error instanceof SourceLockedBeforeCallError) {
+            // Nothing went out, so the admission is released rather than
+            // settled, and the chunk retries against a reload that leaves the
+            // locked source behind.
+            await closeCost("source_locked");
+            return failed("source_locked");
+        }
         const aborted = signal.aborted;
         await closeCost(aborted ? "chunk_timeout" : "provider_error");
         console.error(

@@ -31,6 +31,7 @@ import {
     secondaryButtonClass,
     sectionClass,
 } from "@/components/imports/importFormatting";
+import { importedConversationTitle } from "@/components/imports/importedConversationTitle";
 import {
     groupConversationsByLineage,
     type LineageGroup,
@@ -124,7 +125,9 @@ type HistoryState =
 export type ViewerConversationRow = {
     id: string;
     provider: string;
-    title: string;
+    /** `null` for a locked snapshot: the server does not send its title. */
+    title: string | null;
+    titleWithheld?: boolean;
     externalStableId: string;
     messageCount: number;
     contentBytes: number;
@@ -588,6 +591,28 @@ export function ExternalImportManagement() {
                                 </button>
                             )}
                     </div>
+                    {conversationsState.kind === "ready" &&
+                        conversationsState.rows.length > 0 && (
+                            /*
+                              Said before the download, not left for the file
+                              to explain: a locked snapshot leaves as a stub
+                              (docs/policy/external-conversation-import-and-memory.md
+                              §13.5), and someone who took "download all" at its
+                              word could delete the originals believing they had
+                              a full copy.
+
+                              Shown whenever the button is, not only when a
+                              locked row is on screen -- the list is paged, and
+                              a locked snapshot on a page nobody opened is in
+                              the file all the same.
+                            */
+                            <p
+                                className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                                data-testid="external-import-export-locked-note"
+                            >
+                                {t("externalImport.exportLockedNote")}
+                            </p>
+                        )}
                     {exportFailed && (
                         <p
                             className="mt-3 text-sm leading-6 text-red-600 dark:text-red-400"
@@ -903,7 +928,7 @@ function ConversationRowLink({ row }: { row: ViewerConversationRow }) {
         >
             <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    {row.title}
+                    {importedConversationTitle(row, t)}
                 </span>
                 {/* Said in the list, not only on the page it guards: opening a
                     snapshot to find a password prompt is a worse answer than

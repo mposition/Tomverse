@@ -7,6 +7,7 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { useModalDialog } from "@/components/useModalDialog";
@@ -15,7 +16,7 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { saveResponseAsFile } from "@/lib/browserDownload";
+import { saveResponseAsFile, saveVerifiedResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
@@ -81,6 +82,13 @@ import {
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import {
+  clearContinuationFocus,
+  continuationFocusSnapshot,
+  noteContinuationFocusConversation,
+  serverContinuationFocusSnapshot,
+  subscribeContinuationFocus,
+} from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
@@ -3550,7 +3558,13 @@ export function ChatPageClient({
         // A deleted conversation can never be PATCHed again -- drop any
         // queued or confirmed sync state it still holds.
         modelSettingsSyncQueueRef.current.reset(id);
-        if (currentChatId === id) {
+        // Gone from the list now, not when the refetch lands: anything keyed
+        // on the list -- a search answer that quotes this conversation among
+        // them -- must not outlive the delete by a network round trip.
+        setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+        // The ref, not the closure: the confirmation closes before the request,
+        // so the reader may have opened another conversation while it ran.
+        if (currentChatIdRef.current === id) {
           handleNewChat();
         }
         fetchConversations();
@@ -5399,22 +5413,57 @@ export function ChatPageClient({
   
     const blendedConversations = conversations; 
   
-    const handleDownloadConversation = async (convId: string) => {
+    const handleDownloadConversation = async (
+        convId: string,
+        // The sidebar passes the row title it already has; the file is named by
+        // the server from the same row, so it is accepted and ignored here.
+        _title?: string,
+        options: { includeSource?: boolean } = {}
+    ) => {
         if (isGuestMode) return;
         // Fetched and saved from here rather than navigated to. Assigning
         // `location.href` handed the whole outcome to the browser, including
         // the failures: a refusal became a JSON error page the user was
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
-            const response = await fetch(`/api/conversations/${convId}/export`, {
-                cache: "no-store",
-                // The file is named with the date and words the list shows
-                // (lib/continuationTitleContext.ts).
-                headers: exportNamingHeaders(lang),
-            });
+            const response = await fetch(
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : ""}`,
+                {
+                    cache: "no-store",
+                    // The file is named with the date and words the list shows
+                    // (lib/continuationTitleContext.ts).
+                    headers: exportNamingHeaders(lang),
+                }
+            );
             if (!response.ok) {
-                await discardResponseBody(response);
-                showToast(t("sidebar.downloadFailed"), "error");
+                // Each refusal is its own next step: unlock the original, or
+                // download without it. A generic failure would leave the
+                // reader pressing the same item again.
+                const code = await response
+                    .json()
+                    .then((body: { code?: unknown }) => body?.code)
+                    .catch(() => undefined);
+                showToast(
+                    t(
+                        code === "EXPORT_SOURCE_LOCKED"
+                            ? "sidebar.downloadSourceLocked"
+                            : code === "EXPORT_SOURCE_DELETED"
+                              ? "sidebar.downloadSourceDeleted"
+                              : code === "EXPORT_TOO_LARGE"
+                                ? "sidebar.downloadTooLarge"
+                                : "sidebar.downloadFailed"
+                    ),
+                    "error"
+                );
+                return;
+            }
+            if (options.includeSource) {
+                // Verified before it is saved: a partly received transcript
+                // reads as a complete one.
+                const saved = await saveVerifiedResponseAsFile(response, "conversation.txt");
+                if (!saved.saved) {
+                    showToast(t("sidebar.downloadVerifyFailed"), "error");
+                }
                 return;
             }
             await saveResponseAsFile(response, "conversation.txt");
@@ -6211,8 +6260,54 @@ export function ChatPageClient({
     model. `null` for anything that is not a continuation, which is what stops
     the hook from firing at all.
   */
+  /*
+    A search hit's target message (lib/continuationFocusHandoff.ts), applied
+    only while the conversation it names is the one on screen. Cleared as soon
+    as a different conversation is shown, so returning to this one later opens
+    it at its end rather than at an old hit.
+  */
+  const pendingContinuationFocus = useSyncExternalStore(
+    subscribeContinuationFocus,
+    continuationFocusSnapshot,
+    serverContinuationFocusSnapshot
+  );
+  useEffect(() => {
+    noteContinuationFocusConversation(shellConversationId ?? null);
+  }, [shellConversationId]);
+  const continuationFocusRequest = useMemo(
+    () =>
+      pendingContinuationFocus &&
+      hasConversationPrelude &&
+      pendingContinuationFocus.conversationId === shellConversationId
+        ? {
+            externalMessageId: pendingContinuationFocus.externalMessageId,
+            nonce: pendingContinuationFocus.nonce,
+          }
+        : null,
+    [hasConversationPrelude, pendingContinuationFocus, shellConversationId]
+  );
+  const settleSearchHitFocus = useCallback(
+    (outcome: { reason: string }) => {
+      if (outcome.reason === "found") return;
+      // Nothing to scroll to, so the request is spent now. A found one is
+      // spent when the list has actually moved to it (below).
+      clearContinuationFocus();
+      // Said, never silently swallowed: the reader clicked a result and is
+      // owed a reason when the conversation opens somewhere else.
+      showToast(t("continuation.searchHitUnavailable"), "info");
+    },
+    [showToast, t]
+  );
+  // Consumed once applied, so the next time this conversation opens -- from
+  // the list, after a new chat, in a remounted panel -- it opens at its end
+  // rather than jumping back to an old hit.
+  const consumeAppliedSearchHitFocus = useCallback((nonce: number) => {
+    if (continuationFocusSnapshot()?.nonce === nonce) clearContinuationFocus();
+  }, []);
   const continuationSource = useContinuationSource(
-    hasConversationPrelude ? shellConversationId : null
+    hasConversationPrelude ? shellConversationId : null,
+    continuationFocusRequest,
+    settleSearchHitFocus
   );
   const importedMessages = useMemo(
     () =>
@@ -6234,6 +6329,21 @@ export function ChatPageClient({
             olderCount: continuationSource.olderCount,
             onLoadOlder: continuationSource.loadMore,
             loadingOlder: continuationSource.loadingMore,
+            newerCount: continuationSource.newerCount,
+            onLoadNewer: continuationSource.loadNewer,
+            loadingNewer: continuationSource.loadingNewer,
+            // Only while the request that produced the outcome is still live:
+            // a settled outcome from an earlier visit must not move a panel
+            // that mounts later.
+            focusRequest:
+              continuationSource.focusOutcome?.messageId &&
+              continuationFocusRequest?.nonce === continuationSource.focusOutcome.nonce
+                ? {
+                    messageId: continuationSource.focusOutcome.messageId,
+                    nonce: continuationSource.focusOutcome.nonce,
+                  }
+                : null,
+            onFocusApplied: consumeAppliedSearchHitFocus,
           }
         : undefined,
     [
@@ -6241,6 +6351,12 @@ export function ChatPageClient({
       continuationSource.olderCount,
       continuationSource.loadMore,
       continuationSource.loadingMore,
+      continuationSource.newerCount,
+      continuationSource.loadNewer,
+      continuationSource.loadingNewer,
+      continuationSource.focusOutcome,
+      continuationFocusRequest,
+      consumeAppliedSearchHitFocus,
     ]
   );
 

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, X } from "lucide-react";
@@ -173,6 +174,14 @@ type DesktopChatShellProps = {
     olderCount: number;
     onLoadOlder?: () => void;
     loadingOlder?: boolean;
+    /** Imported turns below the loaded window (after opening at a search hit). */
+    newerCount?: number;
+    onLoadNewer?: () => void;
+    loadingNewer?: boolean;
+    /** Scroll to and focus this `imported:` message once it is rendered. */
+    focusRequest?: { messageId: string; nonce: number } | null;
+    /** Called once the requested message has been scrolled to and focused. */
+    onFocusApplied?: (nonce: number) => void;
   };
   /**
    * Whether this conversation has content the panels cannot see.
@@ -184,14 +193,15 @@ type DesktopChatShellProps = {
    * `/continuations/<an ordinary id>` still gets the ordinary welcome screen.
    */
   hasConversationPrelude?: boolean;
-  onSelectConversation: (id: string) => void;
+  /** The hint is a search result's server-decided surface, for a row the list has not loaded. */
+  onSelectConversation: (id: string, skipLockCheck?: boolean, surfaceHint?: ConversationSurface) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onLock: (id: string, password: string) => void;
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
