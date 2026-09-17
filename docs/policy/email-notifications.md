@@ -4,15 +4,40 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v17 (2026-09-17).** 삭제 요청과 spam complaint가 suppression을 씁니다 —
-  삭제 접수는 marketing 분류 전체, 완료는 전역, complaint는 그 purpose의 opt-out까지.
-  0절 참조.
+- 개정: **v18 (2026-09-17).** provider 사건을 도착 순서가 아니라 사건 순서로 적용하고,
+  delivered가 그보다 이른 soft bounce를 풀며, 만료된 원인을 15분 runner가 해제로
+  기록합니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v18 (2026-09-17) — provider 사건 순서와 만료 기록(S1b-1d)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"사건 순서", "delivered 사건", "만료의 기록"을 구현합니다.
+
+1. **사건 시각** — payload의 `created_at`(ISO 8601, 수신보다 5분 넘게 미래가 아닐 때),
+   아니면 수신 시각입니다. 원인의 `occurredAt`도 이 값입니다.
+2. **순서 키** `(사건 시각, 종류 순위, provider 사건 id)` — 순위는 sent 0, delivered 1,
+   지연·soft bounce 2, hard bounce 3, complaint 4. delivery마다 마지막으로 상태를 바꾼
+   사건의 키(`providerEventAt`·`providerEventRank`·`providerEventId`)를 두고, **더 뒤인
+   사건만** 상태를 바꿉니다. 모든 사건 적용은 주소 잠금 안에서 합니다.
+3. **hard bounce·complaint 원인은 순서와 무관하게 기록**합니다. 상태만 순서를 따릅니다.
+4. **soft bounce** — delivery에 가장 늦은 soft bounce 시각(`softBounceAt`)을, delivered에
+   가장 늦은 delivered 시각(`deliveredAt`, 이제 사건 시각)을 둡니다. 연속 횟수는 **주소의
+   가장 늦은 delivered 이후**(같은 시각 포함) soft bounce가 있는 delivery 수이고, 그
+   delivered보다 이른 soft bounce는 원인을 만들지 않습니다. 이전과 달리 발송 수락(`sent`)은
+   연속을 끊지 않습니다 — 메일함에 대해 말해 주는 것이 없기 때문입니다. 만료는 사건 시각
+   기준 24시간입니다.
+5. **delivered의 해제** — 같은 주소의 활성 soft bounce 원인 중 **사건 시각이 엄격히 이른
+   것만** 해제합니다(`releaseKind` `delivered`). 전역에 활성 원인이 남지 않으면
+   `soft_bounce` entry도 지웁니다 — entry를 읽는 이전 build와 전환 대조가 어긋나지 않도록.
+6. **만료 sweep** — 15분 runner가 만료된 활성 원인에 `releaseKind` `expired`·
+   `releaseEvidence {kind: "expiry"}`를 쓰고, 뒤에 활성 원인이 없는 만료 entry를 지웁니다.
+   주소마다 fence와 주소 잠금 안에서, 한 번에 200행·20초 예산입니다.
 
 ### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
 
