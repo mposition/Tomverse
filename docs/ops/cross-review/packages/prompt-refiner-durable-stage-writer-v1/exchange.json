@@ -1,0 +1,545 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-v1",
+  "requirement": "Prompt Refiner의 과거 provider-free evidence와 admission proposal을 현재 staging 배포의 exact source 및 실행 계약에 다시 결속하고, 명시적 관리자 비용 승인을 immutable stage 행과 tamper-evident audit 행으로 원자적으로 기록하는 durable stage writer를 독립 검토한다. 검토 대상 구현 source는 58d3e1617940c0c8c6ecffd5be993a0396460bdb이고 exact base는 c49d5a3606f259356612ddc5872f29f5fe465158이다. 최종 runtime closure는 정확히 186개 파일(도달 가능한 TypeScript/JavaScript 177개 + 고정 metadata/config/migration 9개)이며, stage는 default-off이고 이 변경에는 제품 caller, 제품 provider/model 호출, external API 또는 Railway 관리 API 호출, 실제 지출 경로가 없다. 독립 검토에 사용하는 Claude Max CLI의 인증·검토 네트워크는 이 제품 실행 경계에 포함하지 않는다. author는 codex, reviewer는 claude이며 사용자가 승인한 --skip-preflight 예외 아래 Claude Code Max 구독 CLI를 Read·Grep·Glob only 및 strict MCP로 사용한다.",
+  "completionCriteria": [
+    "최종 runtime source closure가 정확히 186개 파일(도달 가능한 TypeScript/JavaScript 177개와 고정 metadata/config/migration 9개)로 결속되고, exact raw bytes·full commit SHA·staging deployment id·bounded size·canonical digest 및 보수적 loader/capability 검사가 drift를 fail-closed한다.",
+    "owner 전용 GET preview는 no-store·content-free·read-only이고, POST create-only writer는 strict body, recent authentication, CSRF, DB rate limit, fixed confirmation과 서버가 재계산한 proposal/runtime/execution/preview binding을 요구한다. stale preview, deployment/source/contract drift와 immutable fact mismatch는 쓰기 전에 거부된다.",
+    "stage insert와 tamper-evident audit insert는 하나의 transaction에서 함께 commit 또는 rollback하며, exact replay만 idempotent하다. linked audit HMAC·signed metadata·previousHash predecessor를 공용 helper로 재검증하고 forged audit/stage, provenance 수정·삭제와 만료 후 reserve/consume을 fail-closed한다.",
+    "stage는 seed 없이 default-off 상태를 유지하고 executionAdmitted=false 및 productAdapterReady=false다. provider adapter, provider/model call, external API 또는 Railway 관리 API, credential lookup, 제품 caller, flag/rollout, receipt/reservation 실행과 실제 지출은 0이며 이 변경이 이를 승인하거나 연결하지 않는다.",
+    "fresh PostgreSQL 17 검증에서 124개 migration이 적용되고 drift가 없으며, 관련 DB integration 35개, admin audit chain 19개, shadow-stage route contract 6개가 모두 통과한다.",
+    "runtime source closure test는 최종 186개 파일이 도달 가능한 TypeScript/JavaScript 177개와 고정 metadata/config/migration 9개로 정확히 구성됨을 검증한다. focused Prompt Refiner verifier와 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraints, data-domain registry, unswept-table registry, 문서·정책 참조, strict encoding 및 diff whitespace guard가 각각 통과한다.",
+    "Claude reviewer는 요구사항과 base-to-implementation 전체 diff를 먼저 읽고 작성자 요약과 검사 기록을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공하며, 최초 검토와 최대 2회 수정 검토 뒤 actionable finding이 남으면 on_hold다.",
+    "Claude 독립 검토는 Claude Code Max의 저장된 claude.ai 로그인만 사용하고 --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config로 실행한다. 사용자가 승인한 --skip-preflight만 기록된 skip으로 허용하며 --review-despite-check-failures, API-key fallback, 모델 override, 추가 MCP/shell/write 도구, provider 호출, push·merge·deploy 또는 유료 실행은 금지한다.",
+    "이 task와 authorization은 새 exchange이며 supersedes가 없고 generatedPaths는 비어 있다. 현재 base-to-HEAD 검토 diff는 구현 변경 30개와 이 task/authorization 2개, 총 32개 exact path다. multi-round replay가 round 0의 migration rename source를 동일 provenance로 검증할 수 있도록 이전 migration path 1개를 historical-only로 유지하여 writableScope union은 총 33개 exact path이며, 검토 diff에서 source나 기록을 제외하지 않는다."
+  ],
+  "baseCommit": "c49d5a3606f259356612ddc5872f29f5fe465158",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc",
+      "commit": "ce10fb4ba70d69e72d80745cc4960fa0bf83bbd4",
+      "filesChanged": [
+        ".github/workflows/credit-finance-db-integration.yml",
+        "app/api/admin/prompt-refiner/shadow-stage/route.ts",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/policy/tomverse-chat-data-domain-registry.yaml",
+        "lib/accountDataExportDomains.ts",
+        "lib/adminAudit.ts",
+        "lib/adminAuditSystemActors.ts",
+        "lib/promptRefinerReservationAuthority.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "lib/promptRefinerStageAdmission.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-data-domain-registry.mjs",
+        "scripts/report-unswept-tables-core.mjs",
+        "scripts/run-db-integration-tests.mjs",
+        "tests/fixtures/prompt-refiner-non-utc-writer-child.ts",
+        "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+        "tests/integration/prompt-refiner-reservation.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs",
+        "tests/promptRefinerStageAdmissionCore.test.mjs",
+        "tests/promptRefinerStageAdmissionReader.test.mjs",
+        "tests/server-contract/admin-audit-chain-writer.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+      ],
+      "changeSummary": "Round 0 package for the immutable Prompt Refiner durable stage writer implemented at 738e029efb9f7610dfafb9237453d7a821fa479a plus the committed task and authorization records. The diff remains default-off with executionAdmitted=false and productAdapterReady=false and adds no product caller, provider/model invocation, external or Railway API call, credential lookup, receipt/reservation execution, rollout, deployment, or spending path. The control program runs only provider-free focused tests and repository guards. Credentialed DB integration is intentionally not rerun here; PostgreSQL 17 / 124 migrations / drift 0 / DB integration 35 / admin audit 19 / route contract 6 are cited only as author evidence from the task and are not represented as fresh package checks. A guard verifies prior cross-review records stayed unchanged after implementation source 738e029e while excluding this task's two new authorization records.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 9541.6646",
+          "durationMs": 9642
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 35493.8416",
+          "durationMs": 36238
+        },
+        {
+          "rule": "node --conditions=react-server --experimental-test-module-mocks --import tsx --test --test-concurrency=1 --test-reporter=spec tests/server-contract/admin-audit-chain-writer.test.ts tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 4636.4749",
+          "durationMs": 4747
+        },
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 55749
+        },
+        {
+          "rule": "npx eslint $(git diff --name-only c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx') --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 46537
+        },
+        {
+          "rule": "npx prisma validate",
+          "passed": true,
+          "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+          "durationMs": 2621
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+          "durationMs": 1425
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 1207
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 115 closed list(s) in the schema — 59 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 2220
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 132 suite(s) in tests/integration/, all 132 named by the runner.",
+          "durationMs": 613
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1783
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4547 citation(s) against 38 policy document(s). 2980 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1597
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1719
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 66 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 6 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 3 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 1822
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 948
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 212 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 878
+        },
+        {
+          "rule": "node --test tests/unsweptTables.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 93.5715",
+          "durationMs": 189
+        },
+        {
+          "rule": "git diff --check c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 73
+        },
+        {
+          "rule": "git diff --quiet 738e029efb9f7610dfafb9237453d7a821fa479a HEAD -- docs/ops/cross-review/packages ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json' ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 64
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "docs/ops/tomverse-chat-progress.md:1198",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The only committed record of this round's fresh-database verification states \"전체 121 migration\" and \"관련 DB 31/31\", but the submitted source contains 124 migrations and 35 prompt-refiner DB integration tests, so the recorded run either misreports its numbers or was executed against an earlier source than 738e029e (which added the monotonic-audit-liveness tests), leaving the submitted source without a matching recorded PostgreSQL 17 verification.",
+          "reproduction": "Grep '121 migration' in docs/ops/tomverse-chat-progress.md -> line 1198 reads 'PostgreSQL **17.10** fresh DB에서 전체 **121 migration**, Prisma diff **0**, 관련 DB **31/31**'. Then Glob 'prisma/migrations/*/migration.sql' -> 124 files, and Grep '^test\\(' in tests/integration/prompt-refiner-reservation.db.test.ts (20) and tests/integration/prompt-refiner-reservation-admission.db.test.ts (15) -> 35. Expected: the line records 124 migrations and 35/35 DB integration tests, from a run whose source is the submitted commit.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/tomverse-chat-progress.md:1200 and docs/ops/prompt-refiner-durable-stage-writer-contract.md §9",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Three committed documents state the independent review package has not been created yet, while the same delivery commits that package.",
+          "reproduction": "Grep 'review package는 아직 만들지 않았다' in docs/ops/tomverse-chat-progress.md and '독립 Claude 검토 package는 내부 검증 완료 뒤 별도 cycle에서 생성한다' in docs/ops/prompt-refiner-durable-stage-writer-contract.md (and item 10 of docs/ops/prompt-refiner-durable-stage-writer-task.md); then Glob 'docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.*' -> task.json and authorization.md both present in this change. Expected: the sentences reflect that the package now exists.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The new migration's timestamp sorts before three migrations already present on the base commit, so the fresh-database order that was verified is not the order an already-deployed database will apply it in.",
+          "reproduction": "Glob 'prisma/migrations/*/migration.sql' and sort by directory name: 20260917190000_prompt_refiner_stage_admission sorts before 20260918090000_admin_audit_log_append_only, 20260918090000_email_delivery_not_submitted_defer and 20260918120000_marketing_automation_tables, all of which exist at base c49d5a3606f259356612ddc5872f29f5fe465158. A fresh DB applies it fourth-from-last; `prisma migrate deploy` on an existing DB applies it last. I read 20260918090000_admin_audit_log_append_only and it only adds triggers to AdminAuditLog while this migration only alters PromptRefinerReservationStage and adds an FK to AdminAuditLog(id), so the final schema is identical in either order and the impact is naming hygiene; renaming the directory to sort after 20260918120000 removes the divergence.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Correct the recorded verification numbers (or re-run and record the fresh PostgreSQL 17 pass against the submitted source) and refresh the three stale package-not-yet-created sentences; the code, route, closure (186 = 177 reachable TS/JS + 9 fixed metadata), CSRF coverage, audit-chain (19) and route-contract (6) test counts, absence of any product caller, provider/network/credential/Railway call, and the executionAdmitted=false / productAdapterReady=false default-off posture all held up under Read/Grep/Glob inspection, while the DB-level criteria could only be confirmed structurally because this package did not execute the database suites."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:61d4dfbbdf9450b08e268d123a6968ee6a6170acebb009a9a84f22f39621a0ce",
+      "commit": "36361085a65e60e451ac392a98afef17db4b4905",
+      "filesChanged": [
+        ".github/workflows/credit-finance-db-integration.yml",
+        "app/api/admin/prompt-refiner/shadow-stage/route.ts",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/policy/tomverse-chat-data-domain-registry.yaml",
+        "lib/accountDataExportDomains.ts",
+        "lib/adminAudit.ts",
+        "lib/adminAuditSystemActors.ts",
+        "lib/promptRefinerReservationAuthority.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "lib/promptRefinerStageAdmission.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-data-domain-registry.mjs",
+        "scripts/report-unswept-tables-core.mjs",
+        "scripts/run-db-integration-tests.mjs",
+        "tests/fixtures/prompt-refiner-non-utc-writer-child.ts",
+        "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+        "tests/integration/prompt-refiner-reservation.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs",
+        "tests/promptRefinerStageAdmissionCore.test.mjs",
+        "tests/promptRefinerStageAdmissionReader.test.mjs",
+        "tests/server-contract/admin-audit-chain-writer.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+      ],
+      "changeSummary": "Round 1 addresses all three reproduced round-0 findings while preserving the default-off product boundary. The PostgreSQL 17 author-evidence record now names the submitted source counts (124 migrations, drift 0, 35/35 related DB integration, admin audit 19/19, route contract 6/6); the three stale package-not-yet-created statements now bind to round-0 digest sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc and request_changes; and the stage migration is renamed after the base migrations to 20260918130000 with its exact runtime-closure references updated. The implementation source is 58d3e1617940c0c8c6ecffd5be993a0396460bdb; HEAD 36361085a65e60e451ac392a98afef17db4b4905 rebinds the current task and authorization and retains the round-0 migration source path as historical-only scope so controller replay covers the rename. The current reviewed diff remains exactly 32 files, writableScope union is 33 exact paths with one absent historical-only path, generatedPaths is empty, and no diff is excluded. Package checks are provider-free and credential-free; fresh database results remain cited author evidence rather than a package guard. No product caller, provider/model call, external or Railway API call, credential lookup, rollout, deployment, reservation/receipt execution, actual spending, Claude invocation, push, merge, or deploy occurs.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 7231.7192",
+          "durationMs": 7323
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 27821.2531",
+          "durationMs": 28375
+        },
+        {
+          "rule": "node --conditions=react-server --experimental-test-module-mocks --import tsx --test --test-concurrency=1 --test-reporter=spec tests/server-contract/admin-audit-chain-writer.test.ts tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3427.3735",
+          "durationMs": 3518
+        },
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 42481
+        },
+        {
+          "rule": "npx eslint $(git diff --name-only c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx') --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3821
+        },
+        {
+          "rule": "npx prisma validate",
+          "passed": true,
+          "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+          "durationMs": 2051
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+          "durationMs": 636
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 778
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 115 closed list(s) in the schema — 59 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1076
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 132 suite(s) in tests/integration/, all 132 named by the runner.",
+          "durationMs": 547
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1481
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4547 citation(s) against 38 policy document(s). 2980 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1192
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1398
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 66 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 6 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 3 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 775
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 778
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 212 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 721
+        },
+        {
+          "rule": "node --test tests/unsweptTables.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 82.5912",
+          "durationMs": 174
+        },
+        {
+          "rule": "git diff --check c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 101
+        },
+        {
+          "rule": "git diff --quiet ce10fb4ba70d69e72d80745cc4960fa0bf83bbd4 HEAD -- lib/crossReviewCore.ts lib/crossReviewExecutors.ts scripts/cross-review.mjs docs/ops/cross-review/README.md docs/ops/cross-review/packages ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json' ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 57
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "All three round-0 findings are resolved and independently reproducible: prisma/migrations now contains exactly 124 migration.sql files with the stage migration renamed to 20260918130000_prompt_refiner_stage_admission (sorting after the latest base migration 20260918120000_marketing_automation_tables, with every TS/SQL/test reference updated and the old 20260917190000 path present only in the two cross-review records as historical-only scope); docs/ops/tomverse-chat-progress.md:1198 now states 124 migration / 35 related DB, matching the 20+15 declared tests in tests/integration/prompt-refiner-reservation.db.test.ts and prompt-refiner-reservation-admission.db.test.ts, 19 in tests/server-contract/admin-audit-chain-writer.test.ts, 6 in the shadow-stage route contract, and 96 across the ten focused Prompt Refiner suites the control program ran; and docs/ops/prompt-refiner-durable-stage-writer-contract.md §9, docs/ops/prompt-refiner-durable-stage-writer-task.md item 10 and progress.md:1199 now bind to round-0 digest sha256:989e4221… with verdict request_changes instead of claiming the package does not exist. The 186-path closure is consistent across lib/promptRefinerStageAdmissionCore.ts (194 quoted entries minus the 8 import roots), the migration's expected_paths (186), and the closure test's 9 fixed metadata paths plus the 177-file computed import closure; the stage stays default-off with executionAdmitted/productAdapterReady false, the only non-test callers are the owner-only admin route and the (itself uncalled) reservation authority, and no provider, external, or Railway API path is introduced — note that the fresh PostgreSQL 17 / 124-migration / 35-DB-test results remain cited author evidence, since the control program ran only the non-DB suites and guards, all of which passed."
+    }
+  ],
+  "changeDigest": "sha256:61d4dfbbdf9450b08e268d123a6968ee6a6170acebb009a9a84f22f39621a0ce",
+  "commit": "36361085a65e60e451ac392a98afef17db4b4905",
+  "changeSummary": "Round 1 addresses all three reproduced round-0 findings while preserving the default-off product boundary. The PostgreSQL 17 author-evidence record now names the submitted source counts (124 migrations, drift 0, 35/35 related DB integration, admin audit 19/19, route contract 6/6); the three stale package-not-yet-created statements now bind to round-0 digest sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc and request_changes; and the stage migration is renamed after the base migrations to 20260918130000 with its exact runtime-closure references updated. The implementation source is 58d3e1617940c0c8c6ecffd5be993a0396460bdb; HEAD 36361085a65e60e451ac392a98afef17db4b4905 rebinds the current task and authorization and retains the round-0 migration source path as historical-only scope so controller replay covers the rename. The current reviewed diff remains exactly 32 files, writableScope union is 33 exact paths with one absent historical-only path, generatedPaths is empty, and no diff is excluded. Package checks are provider-free and credential-free; fresh database results remain cited author evidence rather than a package guard. No product caller, provider/model call, external or Railway API call, credential lookup, rollout, deployment, reservation/receipt execution, actual spending, Claude invocation, push, merge, or deploy occurs.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 7231.7192",
+      "durationMs": 7323
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run test:prompt-refiner-shadow",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 27821.2531",
+      "durationMs": 28375
+    },
+    {
+      "rule": "node --conditions=react-server --experimental-test-module-mocks --import tsx --test --test-concurrency=1 --test-reporter=spec tests/server-contract/admin-audit-chain-writer.test.ts tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3427.3735",
+      "durationMs": 3518
+    },
+    {
+      "rule": "npm run typecheck -- --pretty false",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 42481
+    },
+    {
+      "rule": "npx eslint $(git diff --name-only c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx') --max-warnings=0",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3821
+    },
+    {
+      "rule": "npx prisma validate",
+      "passed": true,
+      "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+      "durationMs": 2051
+    },
+    {
+      "rule": "npm run security:regression",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+      "durationMs": 636
+    },
+    {
+      "rule": "npm run check:model-pricing",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+      "durationMs": 778
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 115 closed list(s) in the schema — 59 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+      "durationMs": 1076
+    },
+    {
+      "rule": "npm run check:db-integration-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 132 suite(s) in tests/integration/, all 132 named by the runner.",
+      "durationMs": 547
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+      "durationMs": 1481
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4547 citation(s) against 38 policy document(s). 2980 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1192
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1398
+    },
+    {
+      "rule": "npm run check:data-domain-registry",
+      "passed": true,
+      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 66 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 6 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 3 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+      "durationMs": 775
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 778
+    },
+    {
+      "rule": "npm run check:api-cache-control",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 212 route(s), 5 choosing their own caching, every one of them listed.",
+      "durationMs": 721
+    },
+    {
+      "rule": "node --test tests/unsweptTables.test.mjs",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 82.5912",
+      "durationMs": 174
+    },
+    {
+      "rule": "git diff --check c49d5a3606f259356612ddc5872f29f5fe465158 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 101
+    },
+    {
+      "rule": "git diff --quiet ce10fb4ba70d69e72d80745cc4960fa0bf83bbd4 HEAD -- lib/crossReviewCore.ts lib/crossReviewExecutors.ts scripts/cross-review.mjs docs/ops/cross-review/README.md docs/ops/cross-review/packages ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json' ':(exclude)docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md'",
+      "passed": true,
+      "detail": "",
+      "durationMs": 57
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "All three round-0 findings are resolved and independently reproducible: prisma/migrations now contains exactly 124 migration.sql files with the stage migration renamed to 20260918130000_prompt_refiner_stage_admission (sorting after the latest base migration 20260918120000_marketing_automation_tables, with every TS/SQL/test reference updated and the old 20260917190000 path present only in the two cross-review records as historical-only scope); docs/ops/tomverse-chat-progress.md:1198 now states 124 migration / 35 related DB, matching the 20+15 declared tests in tests/integration/prompt-refiner-reservation.db.test.ts and prompt-refiner-reservation-admission.db.test.ts, 19 in tests/server-contract/admin-audit-chain-writer.test.ts, 6 in the shadow-stage route contract, and 96 across the ten focused Prompt Refiner suites the control program ran; and docs/ops/prompt-refiner-durable-stage-writer-contract.md §9, docs/ops/prompt-refiner-durable-stage-writer-task.md item 10 and progress.md:1199 now bind to round-0 digest sha256:989e4221… with verdict request_changes instead of claiming the package does not exist. The 186-path closure is consistent across lib/promptRefinerStageAdmissionCore.ts (194 quoted entries minus the 8 import roots), the migration's expected_paths (186), and the closure test's 9 fixed metadata paths plus the 177-file computed import closure; the stage stays default-off with executionAdmitted/productAdapterReady false, the only non-test callers are the owner-only admin route and the (itself uncalled) reservation authority, and no provider, external, or Railway API path is introduced — note that the fresh PostgreSQL 17 / 124-migration / 35-DB-test results remain cited author evidence, since the control program ran only the non-DB suites and guards, all of which passed.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-18T06:41:06.274Z",
+  "packagedRounds": 2,
+  "concludedAtRound": 1,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "36361085a65e60e451ac392a98afef17db4b4905",
+  "worktreeDirty": false,
+  "filesChanged": [
+    ".github/workflows/credit-finance-db-integration.yml",
+    "app/api/admin/prompt-refiner/shadow-stage/route.ts",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.task.json",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/policy/tomverse-chat-data-domain-registry.yaml",
+    "lib/accountDataExportDomains.ts",
+    "lib/adminAudit.ts",
+    "lib/adminAuditSystemActors.ts",
+    "lib/promptRefinerReservationAuthority.ts",
+    "lib/promptRefinerReservationCore.ts",
+    "lib/promptRefinerStageAdmission.ts",
+    "lib/promptRefinerStageAdmissionCore.ts",
+    "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+    "prisma/schema.prisma",
+    "scripts/check-data-domain-registry.mjs",
+    "scripts/report-unswept-tables-core.mjs",
+    "scripts/run-db-integration-tests.mjs",
+    "tests/fixtures/prompt-refiner-non-utc-writer-child.ts",
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    "tests/integration/prompt-refiner-reservation.db.test.ts",
+    "tests/promptRefinerReservationCore.test.mjs",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "tests/promptRefinerShadowAdmissionCore.test.mjs",
+    "tests/promptRefinerStageAdmissionCore.test.mjs",
+    "tests/promptRefinerStageAdmissionReader.test.mjs",
+    "tests/server-contract/admin-audit-chain-writer.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ]
+}
