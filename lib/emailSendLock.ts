@@ -121,7 +121,7 @@ const monotonicNow = () => performance.now();
  * to read and submit as though it had not. The locks are released by the
  * rollback, and the caller waits for its next pass.
  */
-const budgetSpent = (deadline: number) => monotonicNow() > deadline;
+const budgetSpent = (deadline: number) => monotonicNow() >= deadline;
 
 /** One line, and no recipient: the row itself records only that it is waiting. */
 const lockUnavailable = <T,>(
@@ -181,6 +181,13 @@ export async function sendWithAddressLock<T>(input: {
       async (tx): Promise<SendLockResult<T>> => {
         started = true;
         const deadline = monotonicNow() + lockTimeoutMs;
+        // What this connection had before the budget was imposed, so the reads
+        // that follow the locks are restored to it rather than left on a
+        // sender's budget -- a relation lock that timed out at two seconds
+        // would be reported as address contention, which it is not.
+        const [{ lock_timeout: restoreTo }] = await tx.$queryRaw<
+          Array<{ lock_timeout: string }>
+        >`SELECT current_setting('lock_timeout') AS lock_timeout`;
 
         // Shared, like every other reader of the suppression record: the
         // cutover holds it exclusively, so this decision cannot be taken under
@@ -201,7 +208,7 @@ export async function sendWithAddressLock<T>(input: {
         // The budget was for the locks. What follows takes only ordinary read
         // locks, and a timeout sized to whatever the budget had left would fail
         // them for no reason.
-        await tx.$queryRaw`SELECT set_config('lock_timeout', ${String(lockTimeoutMs)}, true)`;
+        await tx.$queryRaw`SELECT set_config('lock_timeout', ${restoreTo}, true)`;
 
         const verdict = await suppressionCheck({
           emailAddress: normalized,

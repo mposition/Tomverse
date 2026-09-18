@@ -5,6 +5,7 @@ import { after, beforeEach, mock, test } from "node:test";
 import { deliverNotificationNow, NOTIFICATION_KIND } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import { recordSuppression } from "@/lib/emailSuppression";
+import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
@@ -40,6 +41,13 @@ beforeEach(async () => {
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
   process.env.RESEND_API_KEY = "test-key";
+  // Production reads the causes, and has since the cutover on 2026-09-17.
+  // `suppressionReadAuthorityFromValue` treats an absent row as `entry`, so a
+  // suite that truncates `AppSetting` and says nothing would exercise the
+  // legacy branch and report it as proof about the live one.
+  await prisma.appSetting.create({
+    data: { key: SUPPRESSION_READ_AUTHORITY_KEY, value: "causes" },
+  });
 });
 
 after(async () => {
@@ -84,7 +92,11 @@ let writer: Promise<unknown> = Promise.resolve();
  * one), and `hashtext` returns a signed 32-bit value, which is why the high
  * word is all ones for a negative key.
  */
-const waitForBlockedAddressLock = async (address: string, timeoutMs = 10_000) => {
+const waitForBlockedAddressLock = async (
+  address: string,
+  options: { timeoutMs?: number; until?: () => boolean } = {}
+) => {
+  const timeoutMs = options.timeoutMs ?? 10_000;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const rows = await prisma.$queryRaw<Array<{ waiting: number }>>`
@@ -93,10 +105,22 @@ const waitForBlockedAddressLock = async (address: string, timeoutMs = 10_000) =>
       FROM pg_locks, k
       WHERE locktype = 'advisory'
         AND NOT granted
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
         AND classid::bigint = ((k.key >> 32) & 4294967295)
         AND objid::bigint = (k.key & 4294967295)
+        -- 1 is the single-bigint form. A (int, int) advisory lock in the same
+        -- database can carry the same classid and objid and would otherwise
+        -- satisfy this barrier.
+        AND objsubid = 1
+        AND mode = 'ExclusiveLock'
     `;
     if ((rows[0]?.waiting ?? 0) > 0) return;
+    // The waiter gave up -- a sender waits 2s, this barrier would wait ten.
+    // Stopping here fails the test where it went wrong rather than after
+    // another eight seconds of polling for something that has gone.
+    if (options.until?.()) {
+      throw new Error("The send finished before it was seen waiting for the lock.");
+    }
     if (Date.now() > deadline) {
       throw new Error("No session ever queued for this address's lock.");
     }
@@ -122,13 +146,19 @@ const suppressWhileHoldingAddress = async (address: string) => {
   const transaction = prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${addressKey(address)}))`;
-      await tx.suppressionEntry.create({
+      // A cause, because that is what production decides from. The row is
+      // written here rather than through `recordSuppression()` because that
+      // opens its own transaction and takes this same lock; what is being
+      // reproduced is a writer that holds the lock and has not committed.
+      await tx.suppressionCause.create({
         data: {
           emailAddress: address.trim().toLowerCase(),
           scope: "global",
           purposeKey: "*",
           reason: "hard_bounce",
           source: "provider_webhook",
+          sourceEventKey: `webhook:${randomUUID()}`,
+          occurredAt: new Date(),
         },
       });
       acquired();
@@ -344,10 +374,32 @@ test("a suppression committed while a message is being prepared stops it at the 
   const release = await suppressWhileHoldingAddress(address);
   // The drain is started, not awaited: it has to get past its pre-check and
   // reach the lock while the writer still holds it.
-  const draining = drainStandardEmailDeliveries();
-  await waitForBlockedAddressLock(address);
-  await release();
-  const drain = await draining;
+  let draining: ReturnType<typeof drainStandardEmailDeliveries> | null = null;
+  let drainSettled = false;
+  let barrierFailure: unknown = null;
+  try {
+    draining = drainStandardEmailDeliveries();
+    // Both branches, so a rejection here is not an unhandled one; the promise
+    // itself is awaited below, which is where a failure is reported.
+    void draining.then(
+      () => {
+        drainSettled = true;
+      },
+      () => {
+        drainSettled = true;
+      }
+    );
+    await waitForBlockedAddressLock(address, { until: () => drainSettled });
+  } catch (error) {
+    barrierFailure = error;
+  } finally {
+    // Always: a holder left open would hold this address for thirty seconds and
+    // block the next test's TRUNCATE.
+    await release();
+  }
+  const drain = draining ? await draining : null;
+  if (barrierFailure) throw barrierFailure;
+  if (!drain) throw new Error("The drain never started.");
 
   assert.equal(drain.suppressed, 1, "the message was refused, not sent or deferred");
   assert.equal(drain.sent, 0);
