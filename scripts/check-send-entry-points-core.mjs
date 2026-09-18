@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join, relative, sep } from "node:path";
+import { extname, join, posix, relative, sep } from "node:path";
 
 import ts from "typescript";
 
@@ -61,7 +61,7 @@ export const SEND_ENTRY_POINTS = [
  * same rule. Both read this now.
  */
 export const SEND_SCAN = {
-  roots: ["app", "lib", "packages", "scripts"],
+  roots: ["app", "components", "lib", "packages", "scripts"],
   /** Files at the repository root are scanned too; directories are not. */
   extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx"],
   skipDirectories: ["node_modules", ".next", ".git", "__tests__", "coverage"],
@@ -124,10 +124,17 @@ export const sendEntryPointUses = (source, path = "file.ts") => {
   /** Variables that hold the provider port, so `p.send()` is found too. */
   const providerHolders = new Set();
 
-  const moduleIsEmail = (specifier) =>
-    specifier &&
-    ts.isStringLiteral(specifier) &&
-    EMAIL_MODULE.test(specifier.text.replace(/^@\//, ""));
+  const moduleIsEmail = (specifier) => {
+    if (!specifier || !ts.isStringLiteral(specifier)) return false;
+    const importer = path.replaceAll("\\", "/");
+    const named = specifier.text.replaceAll("\\", "/");
+    const withoutAlias = named.replace(/^@\//, "");
+    const resolved = withoutAlias.startsWith(".")
+      ? posix.normalize(posix.join(posix.dirname(importer), withoutAlias))
+      : posix.normalize(withoutAlias);
+    const withoutExtension = resolved.replace(/\.[cm]?[jt]sx?$/, "");
+    return EMAIL_MODULE.test(withoutExtension);
+  };
 
   const noteNames = (names) => {
     for (const name of names) {

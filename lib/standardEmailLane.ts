@@ -117,7 +117,7 @@ export type StandardEnqueueInput = {
   referenceId?: string;
 };
 
-const resolveLanguage = (value: string | null | undefined) =>
+export const resolveEmailLanguage = (value: string | null | undefined) =>
   isLanguage(value) ? value : "en";
 
 /**
@@ -250,7 +250,7 @@ export async function enqueueStandardEmail(
     }
   }
 
-  const language = resolveLanguage(input.language);
+  const language = resolveEmailLanguage(input.language);
   const template = await ensureTemplateVersion({
     templateKey: input.templateKey,
     language,

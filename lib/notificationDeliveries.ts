@@ -534,6 +534,23 @@ export async function attemptNotificationDelivery({
         // the console shows what it is given rather than inventing a split.
         return { kind: "unsendable", reason: `suppressed:${submitted.skipReason}` };
       }
+      if (submitted.value.ok) {
+        // The former direct sender used to leave this identity evidence for
+        // every accepted queue send. The address-lock helper reports instead
+        // of logging, so preserve the same operator-visible answer here. No
+        // recipient is logged.
+        console.info(
+          JSON.stringify({
+            event: "notification_email_sent",
+            deliveryId,
+            kind,
+            stream: "transactional",
+            senderRole: submitted.value.senderRole,
+            from: submitted.value.from,
+            id: submitted.value.providerMessageId,
+          })
+        );
+      }
       if (submitted.raiseIncident === "transactional_complaint") {
         // The verdict taken under the lock. The notice goes out anyway -- it
         // answers something this person asked for -- but the complaint needs a

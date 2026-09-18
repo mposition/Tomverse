@@ -9,7 +9,10 @@ import {
 import type { LoginMethodProvider } from "@/lib/loginMethodsCore";
 import { prisma } from "@/lib/prisma";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
-import { enqueueStandardEmail } from "@/lib/standardEmailLane";
+import {
+  enqueueStandardEmail,
+  resolveEmailLanguage,
+} from "@/lib/standardEmailLane";
 
 /**
  * The notice that a login method was added or removed.
@@ -50,7 +53,7 @@ export async function prepareLoginMethodNotice(input: {
       input.action === "linked"
         ? LOGIN_METHOD_LINKED_TEMPLATE
         : LOGIN_METHOD_UNLINKED_TEMPLATE,
-    language: input.language ?? "en",
+    language: resolveEmailLanguage(input.language),
   });
 }
 
@@ -77,7 +80,7 @@ export async function enqueueLoginMethodNotice(
      * transaction, which is what preparing it beforehand exists to avoid
      * (independent review, 2026-09-18).
      */
-    language: string | null;
+    language: string;
   }
 ) {
   const user = await tx.user.findUnique({
@@ -115,5 +118,5 @@ export async function loginMethodNoticeLanguage(userId: string) {
     where: { userId },
     select: { language: true },
   });
-  return settings?.language ?? null;
+  return resolveEmailLanguage(settings?.language);
 }

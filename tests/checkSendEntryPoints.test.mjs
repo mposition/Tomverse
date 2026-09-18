@@ -36,6 +36,20 @@ test("an import of a send entry point is a use of it", () => {
   assert.deepEqual(uses(`import { deliverEmailOnce } from "../lib/email";`), [
     "deliverEmailOnce",
   ]);
+  assert.deepEqual(
+    sendEntryPointUses(
+      `import { deliverEmailOnce } from "./email";`,
+      "lib/relativeSender.ts"
+    ),
+    ["deliverEmailOnce"]
+  );
+  assert.deepEqual(
+    sendEntryPointUses(
+      `import { deliverEmailOnce } from "../email";`,
+      "lib/nested/relativeSender.ts"
+    ),
+    ["deliverEmailOnce"]
+  );
 });
 
 test("an alias does not hide the import", () => {
@@ -160,7 +174,7 @@ test("the three ways to reach the provider are the ones named", () => {
 test("the scan reaches past the two directories it started with", () => {
   // The first version read `app` and `lib` for `.ts`/`.tsx` only, so a `.mjs`
   // script or a file at the repository root could send unseen.
-  for (const root of ["app", "lib", "scripts"]) {
+  for (const root of ["app", "components", "lib", "scripts"]) {
     assert.ok(SEND_SCAN.roots.includes(root), root);
   }
   for (const extension of [".ts", ".tsx", ".mjs", ".js"]) {

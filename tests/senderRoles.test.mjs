@@ -398,20 +398,22 @@ test("every notification kind names a sender, and the right one", () => {
   }
 });
 
-test("both lanes log the sender they used, with no credential and no recipient", () => {
+test("every customer-facing lane logs the sender it used, with no credential or recipient", () => {
   // The lanes record an outcome on a row; the wire call logs nothing. Before
   // this a message that left as the wrong sender left no trace of having done
   // so, which is the question this whole axis exists to make answerable.
   for (const [file, event] of [
     ["lib/standardEmailLane.ts", "standard_email_sent"],
     ["lib/credentialEmailLane.ts", "credential_email_sent"],
+    ["lib/notificationDeliveries.ts", "notification_email_sent"],
   ]) {
     const source = readFileSync(file, "utf8");
-    const block = source.slice(
-      source.indexOf(`event: "${event}"`),
-      source.indexOf(`event: "${event}"`) + 700
-    );
-    assert.ok(block.length > 0, `${file} logs no ${event}`);
+    const eventStart = source.indexOf(`event: "${event}"`);
+    assert.notEqual(eventStart, -1, `${file} logs no ${event}`);
+    const block = source
+      .slice(eventStart)
+      .match(/^[\s\S]*?\n[ \t]*}\)[ \t]*\r?\n[ \t]*\);/)?.[0];
+    assert.ok(block, `${file} has no bounded ${event} log object`);
     assert.match(block, /stream:/, `${event} names no stream`);
     assert.match(block, /senderRole:/, `${event} names no sender role`);
     // Neither the address it went to nor anything rendered. On the credential

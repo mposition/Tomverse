@@ -94,8 +94,9 @@ test("the version that was prepared is the version the row asks for", () => {
   // (independent review, 2026-09-18).
   const notice = read("lib/loginMethodNotice.ts");
   // The enqueue takes the language rather than reading it.
-  assert.match(notice, /language: string \| null;/);
+  assert.match(notice, /language: string;/);
   assert.match(notice, /language: input\.language,/);
+  assert.match(notice, /return resolveEmailLanguage\(settings\?\.language\);/);
   assert.doesNotMatch(notice, /settings: \{ select: \{ language/);
   for (const caller of ["lib/loginMethodsCore.ts", "lib/oauthLink.ts"]) {
     const source = read(caller);
