@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  credentialSendWindow,
   CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
   CREDENTIAL_SEND_RESERVE_MS,
   isLockTimeoutError,
@@ -55,18 +56,6 @@ test("the credential lane's waits and reserves fit inside its request budget", (
     CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
       CREDENTIAL_ATTEMPT_TIMEOUT_MS +
       CREDENTIAL_SEND_RESERVE_MS <
-      CREDENTIAL_SEND_BUDGET_MS
-  );
-  // The commit reserve is the one part that sits *outside* it: the lane's
-  // transaction ceiling is what the request has left plus this, because the
-  // transaction has to survive the last thing the request does. Summing the
-  // caps instead would have made that ceiling 3,150ms -- longer than the
-  // budget it is meant to bound.
-  assert.ok(
-    CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
-      CREDENTIAL_ATTEMPT_TIMEOUT_MS +
-      CREDENTIAL_SEND_RESERVE_MS +
-      SEND_COMMIT_RESERVE_MS >
       CREDENTIAL_SEND_BUDGET_MS
   );
 });
@@ -139,4 +128,84 @@ test("a transaction that expired while running is not a start timeout", () => {
     false
   );
   assert.equal(isTransactionStartTimeoutError(null), false);
+});
+
+// ---------------------------------------------------------------------------
+// The credential attempt's window
+// ---------------------------------------------------------------------------
+
+test("a credential attempt's waits all come out of the request budget", () => {
+  const window = credentialSendWindow({
+    budgetLeftMs: CREDENTIAL_SEND_BUDGET_MS,
+    attemptTimeoutMs: CREDENTIAL_ATTEMPT_TIMEOUT_MS,
+  });
+  assert.equal(window.send, true);
+  if (!window.send) return;
+  // The connection and the locks share one budget, and it is the request's.
+  assert.ok(window.lockTimeoutMs <= CREDENTIAL_SEND_BUDGET_MS);
+  assert.equal(window.lockTimeoutMs, CREDENTIAL_SEND_LOCK_TIMEOUT_MS);
+  assert.equal(window.providerCapMs, CREDENTIAL_ATTEMPT_TIMEOUT_MS);
+  // The ceiling is what the request has left plus the room to commit. It is a
+  // function of the budget, not of the caps: half a budget buys half a
+  // ceiling, and a spent one buys nothing at all.
+  assert.equal(
+    window.transactionTimeoutMs,
+    CREDENTIAL_SEND_BUDGET_MS + SEND_COMMIT_RESERVE_MS
+  );
+  const half = credentialSendWindow({
+    budgetLeftMs: CREDENTIAL_SEND_BUDGET_MS / 2,
+    attemptTimeoutMs: CREDENTIAL_ATTEMPT_TIMEOUT_MS,
+  });
+  assert.equal(half.send, true);
+  if (!half.send) return;
+  assert.ok(
+    half.transactionTimeoutMs < window.transactionTimeoutMs,
+    "the ceiling tracks the budget rather than the caps"
+  );
+  assert.ok(half.providerCapMs < window.providerCapMs);
+});
+
+test("a budget already spent starts no wait at all", () => {
+  // Not even a connection: the old shape would still have waited 300ms for one
+  // and 300ms more for a lock before finding there was nothing to send.
+  for (const budgetLeftMs of [-1_000, -1, 0, 1, CREDENTIAL_SEND_RESERVE_MS]) {
+    assert.equal(
+      credentialSendWindow({
+        budgetLeftMs,
+        attemptTimeoutMs: CREDENTIAL_ATTEMPT_TIMEOUT_MS,
+      }).send,
+      false,
+      `budgetLeftMs=${budgetLeftMs}`
+    );
+  }
+});
+
+test("a small budget shrinks every wait rather than refusing outright", () => {
+  const window = credentialSendWindow({
+    budgetLeftMs: 400,
+    attemptTimeoutMs: CREDENTIAL_ATTEMPT_TIMEOUT_MS,
+  });
+  assert.equal(window.send, true);
+  if (!window.send) return;
+  assert.equal(window.lockTimeoutMs, 300);
+  assert.equal(window.providerCapMs, 400 - CREDENTIAL_SEND_RESERVE_MS);
+  assert.equal(window.transactionTimeoutMs, 400 + SEND_COMMIT_RESERVE_MS);
+});
+
+test("every wait a credential attempt may start is a whole number", () => {
+  // `AbortSignal.timeout()` and `SET LOCAL lock_timeout` both want integers,
+  // and the budget arrives as a difference of clocks.
+  const window = credentialSendWindow({
+    budgetLeftMs: 1_234.567,
+    attemptTimeoutMs: 999.99,
+  });
+  assert.equal(window.send, true);
+  if (!window.send) return;
+  for (const value of [
+    window.lockTimeoutMs,
+    window.transactionTimeoutMs,
+    window.providerCapMs,
+  ]) {
+    assert.equal(Number.isInteger(value), true, `not whole: ${value}`);
+  }
 });

@@ -16,4 +16,4 @@
 ALTER TABLE "EmailDelivery" DROP CONSTRAINT IF EXISTS "EmailDelivery_defer_reason_check";
 
 ALTER TABLE "EmailDelivery" ADD CONSTRAINT "EmailDelivery_defer_reason_check"
-    CHECK ("deferReason" IS NULL OR "deferReason" IN ('quiet_hours', 'send_lock'));
+    CHECK ("deferReason" IS NULL OR "deferReason" IN ('quiet_hours', 'send_not_submitted'));

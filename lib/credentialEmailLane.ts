@@ -8,9 +8,8 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
 import {
-  CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
+  credentialSendWindow,
   CREDENTIAL_SEND_RESERVE_MS,
-  SEND_COMMIT_RESERVE_MS,
 } from "@/lib/emailSendLockCore";
 import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import {
@@ -257,30 +256,35 @@ export async function sendCredentialEmailNow(input: {
     attemptsMade += 1;
     retryAfterMs = undefined;
 
+    // Every wait this attempt may start comes out of the same three seconds --
+    // the connection, the locks and the provider call -- so they are all cut
+    // from what the request has left rather than from their own caps
+    // (lib/emailSendLockCore.ts).
+    const window = credentialSendWindow({
+      budgetLeftMs: CREDENTIAL_SEND_BUDGET_MS - (now() - startedAt),
+      attemptTimeoutMs: decision.timeoutMs,
+    });
+    if (!window.send) {
+      // Not even the waits are worth starting. The loop would refuse the next
+      // attempt anyway; saying so here keeps the reason truthful rather than
+      // reporting a provider timeout we never made.
+      lastErrorKind = "budget_exhausted";
+      break;
+    }
+
     // The address lock, the last suppression word and this attempt, in one
-    // scope (docs/policy/email-product-news-redesign-draft.md section 7.4).
-    // The waits are this lane's own: 300ms for the lock and whatever is left
-    // of the three-second request budget for the provider, so a busy address
-    // costs a retry rather than the person's sign-in.
+    // scope (docs/policy/email-product-news-redesign-draft.md section 7.4), so
+    // a busy address costs a retry rather than the person's sign-in.
     const submitted = await sendWithAddressLock({
       emailAddress: input.to,
       classification: "transactional",
       now: new Date(now()),
-      lockTimeoutMs: CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
-      // What this request has left, plus the room to commit. Everything the
-      // transaction does -- the lock wait and the one attempt it admits -- is
-      // already cut from that same remaining budget, so summing the caps would
-      // have produced a ceiling longer than the three seconds the lane is
-      // allowed (300 + 2,500 + 100 + 250 = 3,150).
-      transactionTimeoutMs:
-        Math.max(
-          CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
-          CREDENTIAL_SEND_BUDGET_MS - (now() - startedAt)
-        ) + SEND_COMMIT_RESERVE_MS,
-      // The lane cap for this attempt; the helper cuts it to what the
-      // transaction can protect, and the callback cuts it again to what the
-      // request budget has left.
-      providerTimeoutMs: decision.timeoutMs,
+      lockTimeoutMs: window.lockTimeoutMs,
+      transactionTimeoutMs: window.transactionTimeoutMs,
+      // The lane cap for this attempt; the helper cuts it again to what the
+      // transaction can protect, and the callback cuts it once more to what
+      // the request budget has left by the time the lock is held.
+      providerTimeoutMs: window.providerCapMs,
       submit: async ({ providerTimeoutMs }) => {
         // Recomputed now the lock is held: waiting for it spent part of the
         // budget this timeout was cut from. The reserve leaves the transaction

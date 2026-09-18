@@ -206,7 +206,17 @@ export async function sendWithAddressLock<T>(input: {
     return await prisma.$transaction(
       async (tx): Promise<SendLockResult<T>> => {
         started = true;
-        const deadline = monotonicNow() + lockTimeoutMs;
+        // The lock budget, but never past what the transaction can protect:
+        // the wait for a connection has already come out of the same deadline,
+        // and a fresh full wait here would let a caller spend its budget twice
+        // (independent review, round 6).
+        const deadline = Math.min(
+          monotonicNow() + lockTimeoutMs,
+          transactionDeadline - SEND_COMMIT_RESERVE_MS
+        );
+        if (budgetSpent(deadline)) {
+          return lockUnavailable(input, transactionTimeoutMs, "budget");
+        }
         // What this connection had before the budget was imposed, so the reads
         // that follow the locks are restored to it rather than left on a
         // sender's budget -- a relation lock that timed out at two seconds

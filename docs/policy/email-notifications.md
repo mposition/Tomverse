@@ -1897,6 +1897,15 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
   **판정은 오류 문구가 아니라 callback이 시작됐는지로 합니다.** Prisma는 "시작하지
   못했다"와 "실행 중에 만료됐다"를 같은 `P2028`로 보고하는데 둘은 정반대입니다 —
   앞은 아무것도 제출하지 않았고 뒤는 다 제출했을 수 있습니다.
+- **credential lane은 모든 대기를 요청 잔여 예산에서 자릅니다.** connection 획득·잠금·
+  provider 호출이 전부 같은 3초에서 나오므로, 상한을 합해 만들면(300 + 2,500 + 100 +
+  250 = 3,150) 묶으려던 예산보다 긴 천장이 됩니다. `credentialSendWindow()`가 남은
+  예산 하나에서 세 값을 유도하고, 예산이 이미 없으면 **connection조차 기다리지
+  않습니다** — 예전 모양은 보낼 것이 없다는 사실을 알기까지 300ms를 기다려 connection을
+  얻고 300ms를 더 기다려 잠금을 시도할 수 있었습니다.
+- **잠금 예산도 transaction deadline을 넘지 못합니다.** connection 대기가 이미 같은
+  deadline에서 나갔으므로, 잠금 단계에서 다시 온전한 대기를 허용하면 한 호출이 자기
+  예산을 두 번 쓰게 됩니다.
 - **provider 예산은 transaction의 남은 수명에서 잘라 냅니다.** 두 시계는 서로를
   모릅니다 — Prisma의 `timeout`은 transaction을 끝내고 advisory 잠금을 함께 풀지만,
   이미 떠 있는 `AbortSignal.timeout`은 계속 돕니다. transaction이 6초 남은 시점에

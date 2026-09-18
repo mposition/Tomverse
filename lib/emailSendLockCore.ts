@@ -68,6 +68,56 @@ export const CREDENTIAL_SEND_RESERVE_MS = 100;
  */
 export const SEND_COMMIT_RESERVE_MS = 250;
 
+export type CredentialSendWindow =
+  | { send: false }
+  | {
+      send: true;
+      /** The whole wait for the connection and the locks. */
+      lockTimeoutMs: number;
+      /** What the transaction may live for, including the room to commit. */
+      transactionTimeoutMs: number;
+      /** The most this attempt would ever give the provider. */
+      providerCapMs: number;
+    };
+
+/**
+ * What one credential attempt may spend, given what its request has left.
+ *
+ * Every wait here comes out of the same three seconds: the connection, the
+ * locks and the provider call. Deriving them from the caps instead -- 300 +
+ * 2,500 + 100 + 250 -- produced a ceiling of 3,150ms, longer than the budget it
+ * was supposed to bound, and left a spent request still able to wait 300ms for
+ * a connection and 300ms more for a lock before discovering it had nothing to
+ * send.
+ *
+ * Pure, so the arithmetic is exercised at its edges -- a budget already gone, a
+ * budget too small to be worth a call -- rather than inferred from the
+ * constants (independent review, round 6).
+ */
+export const credentialSendWindow = (input: {
+  budgetLeftMs: number;
+  /** The attempt cap the retry curve allows. */
+  attemptTimeoutMs: number;
+}): CredentialSendWindow => {
+  const left = Math.floor(input.budgetLeftMs);
+  // Nothing left, or too little to leave the provider a millisecond after the
+  // reserve. Either way the attempt is not worth the waits it would start.
+  if (left <= CREDENTIAL_SEND_RESERVE_MS) return { send: false };
+  const providerCapMs = Math.min(
+    Math.floor(input.attemptTimeoutMs),
+    left - CREDENTIAL_SEND_RESERVE_MS
+  );
+  if (providerCapMs < 1) return { send: false };
+  return {
+    send: true,
+    lockTimeoutMs: Math.min(CREDENTIAL_SEND_LOCK_TIMEOUT_MS, left),
+    // The room to commit is the one part outside the request budget: the
+    // transaction has to survive the last thing the request does.
+    transactionTimeoutMs: left + SEND_COMMIT_RESERVE_MS,
+    providerCapMs,
+  };
+};
+
 /**
  * Whether a thrown error is Postgres refusing to keep waiting for a lock
  * (SQLSTATE 55P03, `lock_not_available`).
