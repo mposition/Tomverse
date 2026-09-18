@@ -22,8 +22,10 @@ supersedes는 없다. exact base는
 승인 범위의 목표는 final runtime closure 186개가 TypeScript/JavaScript 177개와
 고정 metadata/config/migration 9개로 정확히 구성되는지, fresh PostgreSQL 17에서
 124 migrations·drift 0·DB integration 35개·audit contract 19개·route contract
-6개가 통과하는지, stage가 default-off이며 provider·API·제품 caller·실제 지출
-경로가 0인지 독립적으로 검토하는 것이다. 이 수치는 검토 요구사항이지 이 문서가
+6개가 통과하는지, stage가 default-off이며 제품 caller, provider/model 호출,
+external API 또는 Railway 관리 API 호출과 실제 지출 경로가 없는지 독립적으로
+검토하는 것이다. 독립 검토에 사용하는 Claude Max CLI의 인증·검토 네트워크는
+이 제품 실행 경계에 포함하지 않는다. 이 수치는 검토 요구사항이지 이 문서가
 그 결과를 인증한다는 뜻이 아니다.
 
 ## 유지되는 경계
