@@ -994,6 +994,30 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- A failed post's only way out is a re-queue, and both the store and the
+    -- transition above read the last failed attempt from this history to check
+    -- that the operator's approval came after it. A summary does not carry an
+    -- outcome, so compacting that attempt away would leave the post failed with
+    -- no exit at all -- which retention is not for.
+    IF OLD."status" = 'failed' THEN
+        SELECT pg_catalog.max((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC')
+        INTO last_failure_at
+        FROM pg_catalog.jsonb_array_elements(OLD."history") AS "h"("entry")
+        WHERE "entry" ->> 'type' = 'attempt'
+          AND "entry" ->> 'outcome' = 'failed';
+
+        IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
+            WHERE "entry" ->> 'type' = 'attempt'
+              AND "entry" ->> 'outcome' = 'failed'
+              AND ((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC') = last_failure_at
+        ) THEN
+            RAISE EXCEPTION 'MarketingPost % is failed and its last failed attempt is what a re-queue is measured against', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
     -- Everything kept is still there, in order, at the front.
     SELECT pg_catalog.jsonb_agg("entry" ORDER BY "ordinality")
     INTO tail
@@ -1033,19 +1057,51 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Nothing in the tail but summaries and that closing entry.
+    -- Nothing in the tail but well-formed summaries and that closing entry.
+    --
+    -- Every comparison here is NULL-safe on purpose. `x ->> 'type'` is NULL when
+    -- the key is absent, `NULL NOT IN (...)` is NULL, and `IF NULL` does not
+    -- raise -- so an entry with no `type` at all used to pass this loop, and a
+    -- `count(DISTINCT ...)` below skipped it again. The result was a history
+    -- carrying `{}` that the store's schema then refused to parse, which would
+    -- have stopped every later append to that post.
     FOR element IN SELECT "entry" FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
     LOOP
-        IF element ->> 'type' NOT IN ('retention_summary', 'retention_compaction') THEN
+        IF pg_catalog.jsonb_typeof(element) IS DISTINCT FROM 'object'
+            OR pg_catalog.coalesce(element ->> 'type', '') NOT IN ('retention_summary', 'retention_compaction') THEN
             RAISE EXCEPTION 'MarketingPost % compaction may only add summaries', OLD."id"
                 USING ERRCODE = 'check_violation';
+        END IF;
+
+        -- The exact key set, so a summary cannot carry anything else along with
+        -- it. "C" collation because the comparison is against a literal array
+        -- and must not depend on the database's locale.
+        IF element ->> 'type' = 'retention_summary' THEN
+            IF (
+                SELECT pg_catalog.array_agg("key" ORDER BY "key" COLLATE "C")
+                FROM pg_catalog.jsonb_object_keys(element) AS "k"("key")
+            ) IS DISTINCT FROM ARRAY['at', 'count', 'firstAt', 'lastAt', 'summarises', 'type'] THEN
+                RAISE EXCEPTION 'MarketingPost % retention summary is not the shape a summary has', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+        ELSE
+            IF (
+                SELECT pg_catalog.array_agg("key" ORDER BY "key" COLLATE "C")
+                FROM pg_catalog.jsonb_object_keys(element) AS "k"("key")
+            ) IS DISTINCT FROM ARRAY['at', 'removedEntryCount', 'type'] THEN
+                RAISE EXCEPTION 'MarketingPost % retention compaction entry is not the shape it has', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
         END IF;
     END LOOP;
 
     -- A summary for something that did not leave is a record of a removal that
-    -- never happened, so the two sets have to match in both directions.
+    -- never happened, so the counts have to match in both directions. Counting
+    -- rows rather than distinct values: two summaries of the same kind are two
+    -- rows here and one distinct value, and the per-kind check below would then
+    -- be the only thing that noticed.
     IF (
-        SELECT pg_catalog.count(DISTINCT "entry" ->> 'summarises')
+        SELECT pg_catalog.count(*)
         FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
         WHERE "entry" ->> 'type' = 'retention_summary'
     ) <> (

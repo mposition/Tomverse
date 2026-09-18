@@ -394,10 +394,15 @@ test("every allowlist and exclusion entry carries a reason and a positive count"
     ...DELEGATE_NAME_ALLOWLIST,
     ...RAW_SQL_ALLOWLIST,
     ...RUNTIME_SQL_ALLOWLIST,
+    ...RETENTION_SETTING_ALLOWLIST,
   ]) {
     assert.ok(typeof entry.reason === "string" && entry.reason.trim().length >= 20, JSON.stringify(entry));
   }
-  for (const entry of [...DELEGATE_NAME_ALLOWLIST, ...RUNTIME_SQL_ALLOWLIST]) {
+  for (const entry of [
+    ...DELEGATE_NAME_ALLOWLIST,
+    ...RUNTIME_SQL_ALLOWLIST,
+    ...RETENTION_SETTING_ALLOWLIST,
+  ]) {
     assert.ok(Number.isInteger(entry.count) && entry.count > 0, JSON.stringify(entry));
   }
   for (const entry of RAW_SQL_ALLOWLIST) {

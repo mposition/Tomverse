@@ -233,6 +233,45 @@ async function publishedPost(channelId: string) {
   });
 }
 
+/**
+ * A write the database refuses, in a transaction of its own with the retention
+ * setting on.
+ *
+ * The rejection has to escape the transaction. A trigger's RAISE aborts it, so
+ * catching the error inside the callback and returning normally leaves Prisma
+ * committing an aborted transaction: that fails with `25P02`, and the assertion
+ * the test was written for never runs. For the same reason each refusal gets
+ * its own transaction rather than sharing one.
+ */
+const refusedUnderRetention = async (
+  operation: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  expected: RegExp,
+) => {
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(RETENTION_ON);
+      await operation(tx);
+    }),
+    (error: Error) => {
+      assert.match(error.message, expected);
+      return true;
+    },
+  );
+};
+
+const refusedCompaction = (id: string, history: unknown[], expected: RegExp) =>
+  refusedUnderRetention(
+    (tx) =>
+      tx.marketingPost.update({
+        where: { id },
+        data: {
+          history: history as Prisma.InputJsonValue[],
+          historyVersion: 1,
+        },
+      }),
+    expected,
+  );
+
 const refused = async (operation: Promise<unknown>, expected: RegExp) => {
   await assert.rejects(operation, (error: Error) => {
     assert.match(error.message, expected);
@@ -295,16 +334,19 @@ test("a temporary table of the same name cannot answer for the channel", async (
   // with the foreign key still pointing at the real account.
   const instagram = await approvedChannel({ channel: "instagram" });
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(
-      `CREATE TEMPORARY TABLE "MarketingChannel" ("id" TEXT, "channel" TEXT, "allowedLocales" TEXT[]) ON COMMIT DROP`,
-    );
-    await tx.$executeRawUnsafe(
-      `INSERT INTO pg_temp."MarketingChannel" VALUES ($1, 'linkedin', ARRAY['en'])`,
-      instagram.id,
-    );
-    await refused(
-      tx.marketingPost.create({
+  // The rejection escapes the transaction: a trigger's RAISE aborts it, so
+  // catching the error inside and returning normally would leave Prisma
+  // committing an aborted transaction and failing with 25P02 instead.
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `CREATE TEMPORARY TABLE "MarketingChannel" ("id" TEXT, "channel" TEXT, "allowedLocales" TEXT[]) ON COMMIT DROP`,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO pg_temp."MarketingChannel" VALUES ($1, 'linkedin', ARRAY['en'])`,
+        instagram.id,
+      );
+      await tx.marketingPost.create({
         data: {
           channelId: instagram.id,
           locale: "en",
@@ -328,10 +370,13 @@ test("a temporary table of the same name cannot answer for the channel", async (
           history: [historyEntry("draft", { envelopeDigest: DIGEST })],
           historyVersion: 0,
         },
-      }),
-      /cannot be autonomous on instagram/,
-    );
-  });
+      });
+    }),
+    (error: Error) => {
+      assert.match(error.message, /cannot be autonomous on instagram/);
+      return true;
+    },
+  );
 });
 
 test("autonomous mode is allowed on a channel that can retract", async () => {
@@ -768,28 +813,24 @@ test("content is purged only by retention, only when it is old, never under hold
     /content is only purged by retention/,
   );
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(RETENTION_ON);
-    await refused(
+  await refusedUnderRetention(
+    (tx) =>
       tx.marketingPost.update({
         where: { id: fresh.id },
         data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
       }),
-      /not yet twenty-four months old/,
-    );
-  });
+    /not yet twenty-four months old/,
+  );
 
   const held = await agedPost(row.id, 800, { legalHold: true });
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(RETENTION_ON);
-    await refused(
+  await refusedUnderRetention(
+    (tx) =>
       tx.marketingPost.update({
         where: { id: held.id },
         data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
       }),
-      /under legal hold/,
-    );
-  });
+    /under legal hold/,
+  );
 
   const old = await agedPost(row.id, 800);
   await prisma.$transaction(async (tx) => {
@@ -837,42 +878,55 @@ test("compaction drops only old attempts and webhook ids, and says what it dropp
   };
   const compaction = historyEntry("retention_compaction", { removedEntryCount: 1 });
 
+  // One transaction per refusal. A RAISE leaves the transaction aborted, so a
+  // second statement in the same one fails with 25P02 rather than the error the
+  // assertion is about -- the first version of this test proved nothing after
+  // its first line.
+  await refusedCompaction(
+    created.id,
+    [summary, compaction],
+    /cannot compact a draft entry at any age/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, summary, compaction],
+    /cannot compact an entry younger than ninety days/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, compaction],
+    /needs exactly one summary of its removed attempt entries/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, summary, { ...summary, count: 1 }, compaction],
+    /summarises something it did not remove/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, { ...summary, lastAt: youngAttempt.at }, compaction],
+    /does not span them/,
+  );
+  // `x ->> 'type'` on an entry with no type is NULL, and a NULL comparison does
+  // not raise; an entry like this used to pass every tail check.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, summary, {}, compaction],
+    /may only add summaries/,
+  );
+  await refusedCompaction(
+    created.id,
+    [
+      draftEntry,
+      youngAttempt,
+      { ...summary, note: "tidied up" },
+      compaction,
+    ],
+    /is not the shape a summary has/,
+  );
+
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(RETENTION_ON);
-
-    await refused(
-      tx.marketingPost.update({
-        where: { id: created.id },
-        data: {
-          history: [summary, compaction],
-          historyVersion: 1,
-        },
-      }),
-      /cannot compact a draft entry at any age/,
-    );
-
-    await refused(
-      tx.marketingPost.update({
-        where: { id: created.id },
-        data: {
-          history: [draftEntry, summary, compaction],
-          historyVersion: 1,
-        },
-      }),
-      /cannot compact an entry younger than ninety days/,
-    );
-
-    await refused(
-      tx.marketingPost.update({
-        where: { id: created.id },
-        data: {
-          history: [draftEntry, youngAttempt, compaction],
-          historyVersion: 1,
-        },
-      }),
-      /without summarising them/,
-    );
-
     await tx.marketingPost.update({
       where: { id: created.id },
       data: {
@@ -902,26 +956,20 @@ test("a post is deleted only as an old refused draft that never reached a platfo
     /only deleted by retention/,
   );
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(RETENTION_ON);
-    await refused(
-      tx.marketingPost.delete({ where: { id: fresh.id } }),
-      /not yet ninety days old/,
-    );
-  });
+  await refusedUnderRetention(
+    (tx) => tx.marketingPost.delete({ where: { id: fresh.id } }),
+    /not yet ninety days old/,
+  );
 
   const dispatched = await agedPost(row.id, 200, {
     status: "guard_rejected",
     guardDecision: "reject",
     publishAttempt: 1,
   });
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(RETENTION_ON);
-    await refused(
-      tx.marketingPost.delete({ where: { id: dispatched.id } }),
-      /reached a platform and is not deletable/,
-    );
-  });
+  await refusedUnderRetention(
+    (tx) => tx.marketingPost.delete({ where: { id: dispatched.id } }),
+    /reached a platform and is not deletable/,
+  );
 
   const deletable = await agedPost(row.id, 200, { status: "approval_expired" });
   await prisma.$transaction(async (tx) => {
@@ -1005,13 +1053,10 @@ test("a report's anchors cannot move, and it is deleted only after them", async 
     /retention anchors are immutable/,
   );
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(RETENTION_ON);
-    await refused(
-      tx.marketingReport.delete({ where: { id: report.id } }),
-      /retained until/,
-    );
-  });
+  await refusedUnderRetention(
+    (tx) => tx.marketingReport.delete({ where: { id: report.id } }),
+    /retained until/,
+  );
 });
 
 test("a visibility run keeps cited urls https and an answer digest only", async () => {
