@@ -391,24 +391,11 @@ test("a refund receipt and its queue row are written together", () => {
  */
 test("every transactional email sender has a reviewed failure policy", () => {
   const CLASSIFIED = {
-    "lib/notificationDeliveries.ts": "is the retry queue itself",
-    "lib/supportNotificationEmail.ts": "renders for the queue, does not send",
-    // Claims its row before sending and resets the claim on failure, so the
-    // next maintenance pass retries it.
-    "lib/maintenance.ts": "retries via its own claim/reset",
-    "lib/billingEmails.ts": "renders and sends; callers own the policy",
-    "lib/accountEmails.ts": "renders and sends; callers own the policy",
-    // Time-sensitive by design: a login code delivered late is worse than
-    // one not delivered, and the user can simply request another.
-    "lib/emailLoginEmails.ts": "deliberately fire-and-forget (time-sensitive)",
-    // Records every send, skip and failure in its own report table, which the
-    // admin console surfaces.
-    "lib/providerModelCatalogReport.ts": "records outcomes in its report table",
+    // The queue's operator half, split out so the queue file itself need not
+    // be on the send allowlist. It answers in the queue's own outcome type, so
+    // the retry policy is the queue's (docs/policy/email-notifications.md v23).
+    "lib/operatorNotificationSend.ts": "answers in the retry queue's outcome type",
     "app/api/admin/test-email/route.ts": "an admin's own manual probe",
-    // Raises an operational incident on failure.
-    "app/api/user/account/route.ts": "alerts via reportOperationalIncident",
-    "app/api/billing/refund-request/route.ts": "queued",
-    "app/api/admin/refund-requests/[requestId]/route.ts": "queued",
   };
 
   const senders = execFileSync(
@@ -432,6 +419,8 @@ test("every transactional email sender has a reviewed failure policy", () => {
       `CLASSIFIED here with the reason they may be fire-and-forget:\n` +
       unclassified.join("\n")
   );
+  const stale = Object.keys(CLASSIFIED).filter((path) => !senders.includes(path));
+  assert.deepEqual(stale, [], `These reviewed sender policies are stale:\n${stale.join("\n")}`);
 });
 
 // ---------------------------------------------------------------------------

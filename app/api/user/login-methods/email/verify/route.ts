@@ -1,15 +1,13 @@
 export const dynamic = "force-dynamic";
 
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { verifyEmailLoginCodeForOwnAccount } from "@/lib/emailLogin";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
-import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { enableEmailLoginMethod } from "@/lib/loginMethodsCore";
 
 const verifySchema = z
   .object({
@@ -37,32 +35,14 @@ export async function POST(req: Request) {
       );
     }
 
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: { emailLoginEnabled: true },
-    });
+    // The decision, the change and the notice are one call, in
+    // lib/loginMethodsCore.ts: a route cannot be driven against a database,
+    // and "did this actually enable anything" is the part worth proving.
+    await enableEmailLoginMethod(session.user.id);
     logSecurityAuditEvent("auth.login_method.link", {
       userId: session.user.id,
       provider: "email",
       outcome: "success",
-    });
-
-    after(async () => {
-      try {
-        await sendLoginMethodChangedEmail({
-          to: session.user.email,
-          action: "linked",
-          method: "email",
-        });
-      } catch (error) {
-        await reportOperationalIncident({
-          code: "LOGIN_METHOD_NOTIFICATION_FAILED",
-          title: "Login-method-linked notification failed",
-          error,
-          severity: "warning",
-          context: { component: "login-methods" },
-        });
-      }
     });
 
     return NextResponse.json({ ok: true });

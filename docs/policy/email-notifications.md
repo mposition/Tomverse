@@ -4,14 +4,63 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v21 (2026-09-17).** soft bounce로 잘못 처리된 영구 bounce를 보관 중인 사건에서
-  hard bounce 원인으로 기록하는 일회성 복구 절차를 둡니다. 0절 참조.
+- 개정: **v23 (2026-09-18).** 발송 진입점 allowlist와 로그인 방법 변경 안내를
+  standard lane으로 옮겼습니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v23 (2026-09-18) — 발송 진입점 allowlist와 로그인 방법 안내의 lane 이동(S1b-3b)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C41·C35·C36·C49입니다.
+전체 계약은 9.8에 있고, 여기에는 바뀐 판정만 적습니다.
+
+1. **provider에 닿을 수 있는 파일은 목록 하나입니다.** `deliverEmailOnce`·
+   `sendTransactionalEmail`·`emailProvider().send`를 쓰는 파일은 `lib/email.ts`,
+   helper, `lib/operationalMonitoring.ts`, `lib/providerMonitoring.ts`, 분리된 운영자
+   발송 module, 관리자 테스트 메일뿐입니다. `npm run check:send-entry-points`가 PR
+   Fast Gate에서 강제하며, 항목마다 **왜 허용되는지**를 함께 적습니다.
+2. **검사가 파일 단위라는 것이 코드 모양을 정했습니다.** 파일 단위 목록은 잠금 안의
+   제출과 그 옆의 제출을 구분하지 못합니다. 그래서 (a) lane은 helper에 callback이
+   아니라 **렌더된 메시지**를 넘기고 제출은 helper가 하며, (b) 알림 큐의 운영자
+   경보는 자기 module로 갈라졌습니다 — 두 종류를 담은 파일을 허용하면 같은 파일의
+   고객 발송이 잠금을 건너뛰어도 통과하기 때문입니다.
+3. **알림 큐는 allowlist에 없습니다.** 고객 kind는 helper, 운영자 kind는 분리된
+   module을 부릅니다.
+4. **로그인 방법 변경 안내가 standard lane으로 옮겨졌습니다.** template은 둘
+   (`login_method_linked`·`login_method_unlinked`, 둘 다 transactional·security·
+   purpose 없음)이고, **변경과 enqueue는 같은 transaction**이며 version은 그 앞에서
+   확정합니다. 지금까지는 응답 뒤 `after()`에서 보내고 실패하면 incident만 남겼으므로,
+   **모든 기기에서 로그아웃된 사람이 아무 통보도 받지 못할 수 있었습니다.**
+5. 부수적으로 닫힌 결함 둘 — OAuth callback을 다시 태우면 **이미 연결된 계정에도**
+   "추가됨"을 보냈습니다(이제 실제로 바뀔 때만 큐에 들어갑니다). 그리고 호출자가 없는
+   `sendEmailLoginCodeEmail`이 남아 raw 발송 경로를 하나 더 열어 두고 있었습니다.
+6. **관리자 테스트 메일은 suppression을 보지 않습니다**(7.4 C35). 수신자는 로그인한
+   관리자 자신이고, 막힌 주소에서 "설정은 정상"을 "발송 실패"로 보고하면 시험이 자기가
+   재려는 것을 재지 못합니다.
+7. **운영자 발송 module은 수신자를 스스로 정합니다.** allowlist에 있으면서 호출자가
+   준 주소로 보내 주는 wrapper는 우회를 닫은 것이 아니라 **옮긴 것**입니다 — 어떤
+   고객 경로든 그것을 부르면 잠금을 건너뛰면서 검사는 통과합니다. 설정된 운영자
+   주소가 아니면 거부하고 구조화 로그를 남깁니다.
+8. **검사는 파싱합니다.** 첫 판은 정규식이었고 재export alias·namespace import·
+   동적 `import()`·변수 경유 `provider.send()`·`.mjs`와 저장소 root 파일이 전부
+   통과했습니다. 전부 발송이고 전부 초록이었을 것입니다. 구문의 문제이므로 구문
+   트리로 답합니다. production source의 범위도 한 곳에 정의해 gate와 테스트가
+   다시 어긋나지 않게 합니다.
+9. **큐의 identity refusal은 terminal이 아닙니다.** "기다린다고 환경변수가 생기지
+   않는다"는 기다림에 대해 참이고 **창에 대해서는 거짓**입니다 — 운영자가 설정을
+   고치고 재배포하는 것이 이 큐가 재시도하는 이유입니다. 재시도는 그대로 두고,
+   기록되는 이름만 `unknown`에서 `identity_*`로 바꿉니다.
+10. **로그인 방법 안내는 실제로 바뀐 때만 큐에 들어갑니다.** `update`는 이미 켜져
+    있는 행에도 성공하므로, email 검증을 다시 태우거나 두 요청이 경합하면 아무것도
+    바뀌지 않은 채 "추가됨"이 나갔습니다 — OAuth에서 고친 것과 같은 거짓 보안
+    안내입니다. 조건부 쓰기의 변경 건수가 판정합니다.
+11. **language는 한 번만 읽습니다.** 준비할 때와 큐에 넣을 때 각각 읽으면, 그 사이에
+    언어를 바꾼 사용자 때문에 **준비하지 않은 version**이 필요해지고, 그 등록이
+    로그인 변경 transaction 안으로 들어옵니다 — 미리 준비하는 이유가 사라집니다.
 
 ### v22 (2026-09-18) — 발송 직전 주소 잠금(S1b-3a)
 
@@ -1961,6 +2010,23 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
   standard lane뿐 아니라 credential lane과 알림 큐도 같은 `raiseIncident`를 읽습니다.
   초기 확인 뒤에 생긴 complaint를 한 경로만 보고하면 "발송 직전 판정"이라는 말이
   거짓이 됩니다.
+
+
+**provider에 닿는 파일은 목록 하나입니다(C41).** 모든 고객 대상 발송이 이 helper를
+지난다는 것은 습관이 아니라 검사로 강제됩니다 — 다른 곳에서 한 발송은 잠금도,
+재조회도, 같은 범위도 건너뛰고 **그 실패는 조용합니다**: 메일은 나가고, 수신자는 철회한
+사람이며, 기록에는 확인했다고 남습니다.
+
+- **allowlist** — `lib/email.ts`(두 진입점을 정의), helper, `lib/operationalMonitoring.ts`,
+  `lib/providerMonitoring.ts`, `lib/operatorNotificationSend.ts`, 관리자 테스트 메일.
+  항목마다 허용 이유를 적습니다(`scripts/check-send-entry-points-core.mjs`).
+- **검사가 파일 단위라는 사실이 코드를 정했습니다.** lane은 callback이 아니라 렌더된
+  메시지를 넘기고 제출은 helper가 합니다. callback이었다면 모든 lane이 진입점을
+  import했을 것이고, 파일 단위 검사는 그것을 raw 발송과 구분하지 못합니다.
+- **알림 큐의 운영자 경보는 자기 module입니다.** 큐 파일은 두 종류를 담으므로 allowlist에
+  넣을 수 없습니다 — 넣으면 같은 파일의 고객 발송이 잠금을 건너뛰어도 통과합니다.
+- allowlist에 있지만 더 이상 발송하지 않는 파일은 **실패가 아니라 경고**로 보고합니다.
+  아무도 정리하지 않는 목록은 곧 아무것도 설명하지 못하게 됩니다.
 
 ---
 

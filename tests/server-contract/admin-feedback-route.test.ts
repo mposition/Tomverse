@@ -161,6 +161,23 @@ async function loadRoute(): Promise<{
           world.emails.push(input);
           return { sent: true, skipped: false, id: "qa-email" };
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: {
+          to: string;
+          subject: string;
+          text: string;
+          html: string;
+          idempotencyKey?: string;
+        }) => {
+          // The same failure, in the shape the helper reads: a 502 is what
+          // "mailbox unavailable" was standing for.
+          if (world.emailShouldFail) return { ok: false, status: 502 };
+          world.emails.push(input);
+          return { ok: true, providerMessageId: "qa-email", from: "support@tomverse.app", senderRole: "support" };
+        },
       },
     });
 

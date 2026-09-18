@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
@@ -15,9 +15,7 @@ import {
   isAdminReauthenticationError,
 } from "@/lib/adminReauthentication";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
-import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-import { removeLoginMethod, type LoginMethodProvider } from "@/lib/loginMethodsCore";
+import { removeLoginMethod } from "@/lib/loginMethodsCore";
 
 export async function GET(req: Request) {
   try {
@@ -103,23 +101,10 @@ export async function DELETE(req: Request) {
       outcome: "success",
     });
 
-    after(async () => {
-      try {
-        await sendLoginMethodChangedEmail({
-          to: session.user.email,
-          action: "unlinked",
-          method: body.method as LoginMethodProvider,
-        });
-      } catch (error) {
-        await reportOperationalIncident({
-          code: "LOGIN_METHOD_NOTIFICATION_FAILED",
-          title: "Login-method-removed notification failed",
-          error,
-          severity: "warning",
-          context: { component: "login-methods" },
-        });
-      }
-    });
+    // The notice is queued inside the same transaction as the removal
+    // (lib/loginMethodsCore.ts). It used to be sent here, after the response,
+    // and a failure left an incident and a person who was signed out of every
+    // device without being told (section 7.4, C36).
 
     return NextResponse.json({ success: true, changed: true });
   } catch (error) {

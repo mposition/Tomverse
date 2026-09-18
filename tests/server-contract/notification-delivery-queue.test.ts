@@ -260,6 +260,31 @@ async function loadModules() {
           if (outcome === "skip") return { sent: false, skipped: true };
           throw new Error(outcome.throws);
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: SendAttempt) => {
+          const outcome = nextSendOutcome();
+          world.sends.push({
+            to: input.to,
+            subject: input.subject,
+            text: input.text,
+            senderRole: input.senderRole,
+            idempotencyKey: input.idempotencyKey,
+          });
+          if (outcome === "ok") {
+            return { ok: true, providerMessageId: "1", from: "support@tomverse.app", senderRole: input.senderRole };
+          }
+          if (outcome === "skip") return { ok: false, notConfigured: true, status: null };
+          // The scripted throw carries its status in the message, which is what
+          // the operator path parses. The helper's path reads the status field,
+          // so the same script has to answer in both shapes.
+          const status = /Email send failed:\s*(\d{3})/.exec(outcome.throws)?.[1];
+          return status
+            ? { ok: false, status: Number(status) }
+            : { ok: false, status: null, transportError: new Error(outcome.throws) };
+        },
       },
     });
 
