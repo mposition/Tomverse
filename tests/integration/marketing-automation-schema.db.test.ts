@@ -1328,6 +1328,10 @@ test("compacting a failure away does not open a path into failed", async () => {
     errorCode: null,
   };
   const created = await agedPost(row.id, 400, {
+    // The counter matches the failure already in the history: a dispatch moves it
+    // by exactly one, so a fixture that started at zero could not reach attempt
+    // two and would fail before the compaction this test is about.
+    publishAttempt: 1,
     history: [draftEntry, oldFailure],
     historyVersion: 0,
   });
@@ -1618,6 +1622,16 @@ test("a second dispatch cannot reuse the first attempt's number", async () => {
     prisma.marketingPost.update({
       where: { id: dispatched.id },
       data: { status: "publishing" },
+    }),
+    /dispatch moves the attempt counter by one/,
+  );
+
+  // Nor may it skip: the number is the ordinal of a real dispatch, so a gap
+  // would be an attempt nothing happened on.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "publishing", publishAttempt: 3 },
     }),
     /dispatch moves the attempt counter by one/,
   );
