@@ -221,7 +221,7 @@ const resolveLocalRuntimeImport = (fromPath, specifier) => {
     // Linux, while a Windows junction may resolve outside the checkout. Treat
     // both layouts alike. Workspace links realpath back to packages/* and are
     // still included by the local-runtime branch below.
-    if (isInstalledDependencyResolution(path)) return null;
+    if (workspace === null && isInstalledDependencyResolution(path)) return null;
     const inside = path !== ".." && !path.startsWith(`..\\`) && !path.startsWith("../") && !isAbsolute(path);
     if (inside) {
       assert.equal(
@@ -1151,6 +1151,7 @@ test("installed dependency declarations are external but workspace sources remai
   assert.equal(isInstalledDependencyResolution("node_modules/next-auth/next.d.ts"), true);
   assert.equal(isInstalledDependencyResolution("packages/example/node_modules/dependency/index.d.ts"), true);
   assert.equal(isInstalledDependencyResolution("packages/chat-core/src/index.ts"), false);
+  assert.equal(resolveLocalRuntimeImport("lib/promptRefinerStageAdmission.ts", "next-auth/next"), null);
 });
 
 test("TypeScript options and workspace metadata control local resolution", () => {

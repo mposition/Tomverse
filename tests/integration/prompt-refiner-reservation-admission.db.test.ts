@@ -54,7 +54,7 @@ const request = () =>
 const reset = async () => {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE "PromptRefinerReservation", "PromptRefinerReservationStage", "AdminAuditLog"
-    RESTART IDENTITY CASCADE
+    RESTART IDENTITY
   `);
 };
 
