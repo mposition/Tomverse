@@ -439,13 +439,21 @@ export async function suppressionCheck(input: {
   classification: SendClassification;
   purpose?: string | null;
   now?: Date;
+  /**
+   * The transaction to read in, when the caller holds the address lock and the
+   * answer has to be the one true inside it. A read on the global client would
+   * be a read outside those locks, which is the race sendWithAddressLock()
+   * exists to close (docs/policy/email-notifications.md 9.8).
+   */
+  client?: Prisma.TransactionClient;
 }): Promise<SuppressionVerdict> {
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
+  const db = input.client ?? prisma;
   // Which record decides is read on every call; see lib/emailSuppressionAuthority.ts.
-  const authority = await readSuppressionAuthority();
+  const authority = await readSuppressionAuthority(db);
   const records =
     authority === "causes"
-      ? await prisma.suppressionCause.findMany({
+      ? await db.suppressionCause.findMany({
           where: {
             emailAddress,
             releasedAt: null,
@@ -460,7 +468,7 @@ export async function suppressionCheck(input: {
           // Expired soft bounces are filtered by the verdict itself.
           select: { reason: true, sourceStream: true, expiresAt: true },
         })
-      : await prisma.suppressionEntry.findMany({
+      : await db.suppressionEntry.findMany({
           where: {
             emailAddress,
             OR: [
