@@ -52,6 +52,12 @@
 --    set by BEFORE INSERT triggers from the server clock and refused any later
 --    change, so a caller cannot date a row into the past and delete it.
 --
+-- A note on spelling, because it looks inconsistent and is not. Every function
+-- these triggers call is written `pg_catalog.name`, so no search path can point
+-- it elsewhere. `COALESCE` is not written that way because it cannot be: it is
+-- SQL syntax rather than a function, and `pg_catalog.coalesce(...)` is an error
+-- (42883, no such function). The same is true of the other SQL constructs here.
+--
 -- An honest note about the setting in 6. The application uses one database role,
 -- so `SET LOCAL tomverse.marketing_retention_compaction` is not a privilege
 -- boundary -- any code in the application could set it. What it is is a second,
@@ -285,7 +291,7 @@ ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_locales_check" C
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_connectionGeneration_check" CHECK ("connectionGeneration" >= 1);
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_policyVersion_check" CHECK ("policyVersion" >= 1);
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_graduationEpoch_check" CHECK ("graduationEpoch" >= 0);
-ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_cap_overrides_non_negative_check" CHECK (pg_catalog.coalesce("dailyCapOverride", 0) >= 0 AND pg_catalog.coalesce("weeklyCapOverride", 0) >= 0);
+ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_cap_overrides_non_negative_check" CHECK (COALESCE("dailyCapOverride", 0) >= 0 AND COALESCE("weeklyCapOverride", 0) >= 0);
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_autonomous_needs_graduation_check" CHECK ("status" <> 'autonomous_mode' OR ("graduatedAt" IS NOT NULL AND "graduationSnapshot" IS NOT NULL));
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_paused_records_when_check" CHECK ("status" <> 'paused' OR "pausedAt" IS NOT NULL);
 ALTER TABLE "MarketingChannel" ADD CONSTRAINT "MarketingChannel_live_has_approval_start_check" CHECK ("status" NOT IN ('approval_mode', 'autonomous_mode') OR "approvalStartedAt" IS NOT NULL);
@@ -956,7 +962,7 @@ BEGIN
             RAISE EXCEPTION 'MarketingPost % purge must record when it happened', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;
-        IF pg_catalog.coalesce(OLD."publishedAt", OLD."createdAt") > now_utc - INTERVAL '24 months' THEN
+        IF COALESCE(OLD."publishedAt", OLD."createdAt") > now_utc - INTERVAL '24 months' THEN
             RAISE EXCEPTION 'MarketingPost % content is not yet twenty-four months old', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;
@@ -1035,7 +1041,7 @@ BEGIN
         WITH ORDINALITY AS "element"("entry", "ordinality")
     WHERE NEW."history" @> pg_catalog.jsonb_build_array("entry");
 
-    kept := pg_catalog.coalesce(kept, '[]'::JSONB);
+    kept := COALESCE(kept, '[]'::JSONB);
     kept_length := pg_catalog.jsonb_array_length(kept);
 
     SELECT pg_catalog.jsonb_agg("entry" ORDER BY "ordinality")
@@ -1044,7 +1050,7 @@ BEGIN
         WITH ORDINALITY AS "element"("entry", "ordinality")
     WHERE NOT (NEW."history" @> pg_catalog.jsonb_build_array("entry"));
 
-    removed := pg_catalog.coalesce(removed, '[]'::JSONB);
+    removed := COALESCE(removed, '[]'::JSONB);
     removed_length := pg_catalog.jsonb_array_length(removed);
 
     IF removed_length = 0 THEN
@@ -1092,7 +1098,7 @@ BEGIN
         WITH ORDINALITY AS "element"("entry", "ordinality")
     WHERE "ordinality" <= kept_length;
 
-    IF pg_catalog.coalesce(tail, '[]'::JSONB) IS DISTINCT FROM kept THEN
+    IF COALESCE(tail, '[]'::JSONB) IS DISTINCT FROM kept THEN
         RAISE EXCEPTION 'MarketingPost % compaction changed the entries it kept', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
@@ -1103,7 +1109,7 @@ BEGIN
         WITH ORDINALITY AS "element"("entry", "ordinality")
     WHERE "ordinality" > kept_length;
 
-    tail := pg_catalog.coalesce(tail, '[]'::JSONB);
+    tail := COALESCE(tail, '[]'::JSONB);
 
     -- Exactly one closing entry, at the end, counting exactly what left. Not
     -- "the last one is a compaction": a second compaction entry earlier in the
@@ -1135,7 +1141,7 @@ BEGIN
     FOR element IN SELECT "entry" FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
     LOOP
         IF pg_catalog.jsonb_typeof(element) IS DISTINCT FROM 'object'
-            OR pg_catalog.coalesce(element ->> 'type', '') NOT IN ('retention_summary', 'retention_compaction') THEN
+            OR COALESCE(element ->> 'type', '') NOT IN ('retention_summary', 'retention_compaction') THEN
             RAISE EXCEPTION 'MarketingPost % compaction may only add summaries', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;
