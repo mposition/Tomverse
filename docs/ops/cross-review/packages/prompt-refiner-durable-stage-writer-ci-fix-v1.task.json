@@ -21,5 +21,7 @@
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
     "tests/promptRefinerRuntimeSourceClosure.test.mjs"
   ],
-  "generatedPaths": []
+  "generatedPaths": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1"
+  ]
 }

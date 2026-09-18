@@ -15,8 +15,9 @@ Codex가 현재 대화의 사용자 승인을 기록한다. 사용자 메시지�
 exchange의 Claude 읽기 전용 독립 검토에만 적용한다. author는 Codex,
 reviewer는 Claude이며 exact base는
 `29d7f98a4986ae8d1226854a43ed785b5086fd9f`이다. writable scope는 CI 후속
-수정 6개 경로와 이 task 및 authorization 2개 경로인 exact 8개이고 generated
-paths는 비어 있다.
+수정 6개 경로와 이 task 및 authorization 2개 경로인 exact 8개이다. 검토
+controller가 만드는 동일 task 이름의 package 디렉터리만 generated path로 선언하며,
+각 round의 snapshot digest 검증 대상이다.
 
 ## 유지되는 경계
 
