@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for the operator-notification retry queue.
@@ -94,6 +95,8 @@ const fakePrisma = {
   suppressionEntry: { findMany: async () => [] },
   // The suppression read authority: absent, so entries decide.
   appSetting: { findUnique: async () => null },
+  // The fence and the address lock the send takes before it submits.
+  ...sendLockPrismaStubs(),
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakePrisma),
   feedback: {
     create: async ({ data }: { data: Record<string, unknown> }) => {

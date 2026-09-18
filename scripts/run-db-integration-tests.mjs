@@ -248,6 +248,10 @@ run(
     "tests/integration/email-webhook-processing-lease.db.test.ts",
     // Recording the permanent bounces that were handled as soft ones.
     "tests/integration/email-permanent-bounce-recovery.db.test.ts",
+    // The lock every customer-facing send takes: the suppression word read
+    // inside it, the provider call made while it is held, and the row that
+    // waits without counting an attempt when somebody else has the address.
+    "tests/integration/email-send-address-lock.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     // A deletion request and a spam complaint: the suppression and the preference
     // withdrawal commit in one transaction, keyed so a retry records nothing new.

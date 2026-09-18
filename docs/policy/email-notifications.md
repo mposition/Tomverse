@@ -13,6 +13,33 @@
 
 ## 0. 개정 이력
 
+### v22 (2026-09-18) — 발송 직전 주소 잠금(S1b-3a)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C29입니다. 전체
+계약은 9.8에 있고, 여기에는 바뀐 판정만 적습니다.
+
+1. **고객 대상 발송은 `sendWithAddressLock()` 하나를 지납니다.** 주소 전역(→ purpose)
+   잠금 안에서 suppression을 다시 읽고, 같은 범위에서 provider에 제출합니다. 철회·
+   suppression이 렌더링 도중에 커밋돼도 그 메일은 나가지 않습니다.
+2. **잠금 순서는 주소 → purpose 행**이고 앞에 suppression fence(공유)가 옵니다.
+   sender는 writer가 먼저 잡는 `User` 행 잠금을 잡지 않습니다 — 계정을 바꾸지 않고,
+   그 순서만이 교착을 만듭니다.
+3. **시간 예산**(9.8 표) — 잠금 **전체** 대기 2초(credential 300ms), provider
+   10초(credential은 남은 예산 − 100ms), transaction 15초. `lock_timeout`은 잠금마다
+   다시 적용되므로 절대 deadline 하나로 관리하고, **provider 예산은 transaction의 남은
+   수명에서 commit 여유를 뺀 값**을 넘지 않습니다 — transaction timeout은 HTTP 요청을
+   중단시키지 못하므로, 그보다 긴 호출은 잠금이 풀린 뒤의 제출이 됩니다.
+4. **제출하지 못한 것은 시도가 아닙니다.** `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로
+   pending에 남고 기존 backoff로 돌아오며, 알림 큐 행도 시도 횟수를 올리지 않습니다.
+   남의 철회가 이 메일의 포기 예산을 쓰지 않습니다.
+5. **환불 안내도 suppression 판정을 받습니다**(transactional). 지금까지는 아무것도
+   묻지 않아 막힌 주소가 provider 실패로 보였습니다. 운영자 알림은 이 경로를 지나지
+   않습니다.
+6. transactional complaint 경보는 **세 경로 모두** 잠금 안의 재조회 결과로 올립니다 —
+   발송 직전의 판정이 그 메일에 대한 사실이기 때문입니다.
+7. 제출이 성공한 뒤 transaction이 실패해도 그 답을 씁니다. 이 transaction은 아무것도
+   쓰지 않으므로 rollback이 잃는 것이 없고, 버리면 이미 나간 메일을 다시 보냅니다.
+
 ### v21 (2026-09-17) — 잘못 분류된 영구 bounce 복구
 
 v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처리되어, 없는 메일함에도
@@ -1808,6 +1835,132 @@ POST /api/webhooks/email/resend
     **응답이 끝난 뒤** 실행됩니다. credential lane은 응답 **전에** 보내야
     성공/실패를 응답에 담을 수 있으므로(9.4a-3) 발송 자체에는 쓰지 않습니다.
     관측용 쓰기처럼 응답을 막을 이유가 없는 작업에만 씁니다.
+
+### 9.8 발송 직전 주소 잠금 (S1b-3a)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C29를 구현합니다.
+
+lane은 suppression을 확인한 뒤 template 조회·렌더링·footer 구성·야간 대기를 거쳐
+provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습니다** — 메일이 만들어지는
+동안 수신을 거부했거나, 스팸 신고를 했거나, 삭제를 요청한 사람에게도 발송됐고,
+기록에는 "확인했다"가 남았습니다.
+
+**고객 대상 발송은 모두 `sendWithAddressLock()`(`lib/emailSendLock.ts`) 하나를
+지납니다.** 그 안에서 잠금 → suppression 재조회 → provider 제출이 한 범위에 있습니다.
+
+- **잠금 순서는 주소 → purpose 행**이며, writer가 잡는 순서의 뒷부분과 같습니다
+  (`lib/emailPreferences.ts`). writer가 먼저 잡는 **`User` 행 잠금은 sender가 잡지
+  않습니다** — 발송은 계정을 바꾸지 않고, 주소 뒤에 그것을 잡는 것이 유일하게 교착이
+  되는 순서입니다. 잠금 앞에는 suppression fence를 공유 모드로 잡으므로, 판정이 한
+  권위에서 시작해 다른 권위에서 실행되는 일이 없습니다(v16).
+- **provider 호출은 transaction이 열린 채로 일어납니다.** 제출 전에 푼 잠금은 아무것도
+  지키지 못하기 때문이고, 그래서 예산을 명시합니다. 제출이 성공한 뒤 커밋이 실패하면
+  발송은 유효하고 행은 재시도되며, provider idempotency key가 두 번째 메일을 막습니다.
+- **먼저 커밋한 쪽이 이깁니다.** 철회가 먼저면 재조회가 보고 중단하며, 제출이 먼저면
+  철회 응답은 제출이 끝난 뒤에 돌아갑니다.
+
+**시간 예산**
+
+| 항목 | standard lane·알림 큐 | credential lane |
+|---|---|---|
+| 잠금 대기 — **세 잠금 전체** | 2초 | 300ms |
+| provider 호출 timeout | 10초, **transaction 잔여 − 250ms**를 넘지 않음 | 남은 요청 예산 − 100ms, 상한 2.5초, 같은 제한 적용 |
+| transaction timeout | 15초 | 잠금 대기 + 그 시도의 timeout + 여유 (둘 다 요청 예산 안) |
+| 잠금을 못 얻으면 | claim 해제, 기존 backoff로 복귀, **시도 횟수는 올리지 않음** | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
+
+- 제출하지 못한 `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로 pending에
+  남습니다. `lastErrorKind`에 쓰지 않는 이유는 야간 대기와 같습니다 — 기다린 것을
+  오류로 기록하면 이후 발송된 행에 오래된 오류가 남습니다.
+- **저장되는 값은 원인이 아니라 결과를 말합니다.** 세 원인(주소 점유·connection
+  없음·transaction 잔여 부족) 모두 제출하지 않았다는 같은 결과이고, 어느 것이었는지는
+  구조화 로그의 `cause`가 말합니다. 행에 `send_lock`이라고 적으면 예산 때문에 미뤄진
+  발송에 대해 누가 주소를 잡고 있었다는 거짓을 남기게 됩니다.
+- 알림 큐의 `lock_unavailable`도 시도로 세지 않으므로, 남의 철회 때문에 6회 한도가
+  소진되어 포기되는 일이 없습니다.
+- 대기를 실패로 세지 않는다는 것은 **잠금 경합만으로는 포기하지 않는다**는 뜻입니다.
+  경합은 철회 transaction 하나의 길이(밀리초 단위)이므로 이 선택이 맞지만, 한 주소가
+  매 회차 막히는 것은 증상이므로 `email_send_lock_unavailable` 구조화 로그를 남깁니다
+  (수신자는 싣지 않습니다).
+- **잠금 대기는 잠금마다가 아니라 전체에 걸립니다.** Postgres의 `lock_timeout`은
+  **획득 시도마다** 적용되므로 한 번 설정하고 세 잠금을 잡으면 계약이 약속한 대기의
+  세 배가 됩니다. 그래서 절대 deadline 하나를 두고 **잠금 직전마다 남은 시간으로
+  다시 설정**하며, 남은 시간이 없으면 잡지 않고 `lock_unavailable`입니다. **마지막
+  잠금 뒤에도 한 번 더 검사합니다** — `lock_timeout`은 한 번의 대기만 묶고 그 앞뒤
+  statement는 묶지 않으므로, deadline 직후에 승인된 잠금으로 계속 진행하면 안 됩니다.
+  시계는 `performance.now()`입니다(벽시계 보정이 예산을 늘리거나 줄이면 안 됩니다).
+  잠금을 다 잡은 뒤에는 **그 연결이 원래 갖고 있던 값**(`current_setting`으로 읽어
+  둔 값)으로 되돌립니다 — 이후의 일반 read가 발송 예산 때문에 실패하면 주소 경합이
+  아닌 것을 주소 경합으로 보고하게 됩니다.
+- **connection pool을 못 얻어 transaction이 시작조차 못 한 것도 같은 결과입니다.**
+  아무것도 제출되지 않았으므로 판정은 같고, 로그의 `cause`가 `lock`인지 `pool`인지
+  구분합니다 — 운영자가 봐야 하는 것은 주소가 바쁜지 이 프로세스가 바쁜지입니다.
+  **판정은 오류 문구가 아니라 callback이 시작됐는지로 합니다.** Prisma는 "시작하지
+  못했다"와 "실행 중에 만료됐다"를 같은 `P2028`로 보고하는데 둘은 정반대입니다 —
+  앞은 아무것도 제출하지 않았고 뒤는 다 제출했을 수 있습니다.
+- **credential lane은 모든 대기를 요청 잔여 예산에서 자릅니다.** connection 획득·잠금·
+  provider 호출이 전부 같은 3초에서 나오므로, 상한을 합해 만들면(300 + 2,500 + 100 +
+  250 = 3,150) 묶으려던 예산보다 긴 천장이 됩니다. `credentialSendWindow()`가 남은
+  예산 하나에서 세 값을 유도하고, 예산이 이미 없으면 **connection조차 기다리지
+  않습니다** — 예전 모양은 보낼 것이 없다는 사실을 알기까지 300ms를 기다려 connection을
+  얻고 300ms를 더 기다려 잠금을 시도할 수 있었습니다.
+- **잠금 예산도 transaction deadline을 넘지 못합니다.** connection 대기가 이미 같은
+  deadline에서 나갔으므로, 잠금 단계에서 다시 온전한 대기를 허용하면 한 호출이 자기
+  예산을 두 번 쓰게 됩니다.
+- **provider 예산은 transaction의 남은 수명에서 잘라 냅니다.** 두 시계는 서로를
+  모릅니다 — Prisma의 `timeout`은 transaction을 끝내고 advisory 잠금을 함께 풀지만,
+  이미 떠 있는 `AbortSignal.timeout`은 계속 돕니다. transaction이 6초 남은 시점에
+  10초짜리 호출을 시작하면, **잠금이 풀린 뒤에도 제출이 진행됩니다** — 그 사이 철회가
+  그 잠금을 잡고 커밋해 사용자에게 응답까지 마칠 수 있습니다. 그래서 잠금과 재조회가
+  끝난 시점에 남은 시간에서 **commit 여유 250ms**를 빼고, lane 상한과 비교해 작은 쪽을
+  제출에 줍니다. **남은 것이 없으면 제출하지 않고** `lock_unavailable`(cause
+  `budget`)로 돌아갑니다 — 짧은 발송이 아니라 발송 없음입니다.
+- **잠금 단계가 끝난 뒤의 `55P03`은 주소 경합이 아닙니다.** 복원된
+  `lock_timeout` 아래에서 일반 relation 잠금이 끊긴 것이므로 실패로 다룹니다. 판정은
+  잠금 단계인지 여부로 하고, 오류 문구로 하지 않습니다.
+- **제출이 성공한 뒤 transaction이 실패하면 그 답을 버리지 않습니다.** 이 transaction은
+  아무것도 쓰지 않으므로(설정과 원인을 읽고 잠금을 잡을 뿐) rollback이 잃는 것이
+  없고, 답을 버리면 이미 나간 메일을 다시 보내게 됩니다. 이 경우
+  `email_send_lock_lost_after_submit`을 남깁니다 — 일어났다면 예산이 틀린 것입니다.
+- **잠금 때문에 미뤄진 행은 backlog에 셉니다.** 야간 대기와 다릅니다 — 야간 대기는
+  예정대로이고, 이것은 늦은 것입니다. 되돌아오는 대기는 그 행이 실패했다면 기다렸을
+  곡선의 값이고, 곡선이 끝났으면 1분입니다.
+- **cutover는 in-flight 발송만큼 fence를 기다립니다.** 발송이 fence를 공유 모드로
+  provider 호출 동안(최대 10초) 잡으므로, `email:suppression-cutover`의 배타 획득이
+  그만큼 늦어질 수 있습니다. 배타 대기가 줄을 서면 그 뒤의 발송은 2초 안에 잠금을 얻지
+  못하고 `send_not_submitted`으로 미뤄졌다가 cutover가 끝난 뒤 돌아옵니다 — 발송이 사라지는
+  것이 아니라 미뤄지는 것입니다.
+- **purpose 철회는 그 purpose scope suppression으로 관측합니다.** 철회는 preference
+  행과 purpose scope suppression을 한 transaction에서 쓰므로(7.4의 총잠금 순서),
+  잠금 안의 suppression 재조회가 그것을 봅니다. 그래서 preference 행을 다시 읽지
+  않습니다 — purpose 행 잠금은 순서를 맞추기 위한 것이고, 판정 자료는 suppression
+  한 곳입니다.
+
+**helper를 지나는 경로**
+
+| 경로 | 잠금 |
+|---|---|
+| standard lane (`lib/standardEmailLane.ts`) | 주소 → purpose(템플릿에 purpose가 있고 계정이 있을 때) |
+| credential lane (`lib/credentialEmailLane.ts`) | 주소. **시도마다** 잡습니다 — 이 lane은 3초 안에서 재시도하므로, 그 사이 커밋된 privacy request가 다음 시도를 막아야 합니다 |
+
+| 알림 큐의 고객 대상 kind (`lib/notificationDeliveries.ts`) | 주소 |
+
+- **알림 큐의 고객 대상 kind는 목록입니다**(`CUSTOMER_NOTIFICATION_KINDS`) — 이름
+  접두사로 유도하지 않습니다. 수신자가 누구인지 정하지 않은 채 추가된 kind가 이름만
+  맞아 한쪽 분기를 물려받아서는 안 됩니다.
+- **환불 안내가 이 목록에 들어옵니다.** 지금까지 suppression을 보지 않았으므로 hard
+  bounce·운영자 중단·privacy request가 provider까지 가서 provider 탓처럼 보였습니다.
+  판정은 transactional이므로 complaint로는 막히지 않습니다(13.3).
+- **운영자 알림은 지나지 않습니다.** 팀에게 남의 신고를 알리는 메일이므로, 고객 주소의
+  suppression이 그것을 침묵시켜서는 안 됩니다.
+- 각 lane이 렌더링 전에 하던 suppression 확인은 그대로 둡니다. 막힌 주소에 template
+  조회 이상을 쓰지 않기 위한 것이며, **발송 판정은 잠금 안의 재조회**입니다.
+- **credential lane은 예산이 끝난 뒤에는 제출하지 않습니다.** 잠금을 기다리는 동안
+  예산이 사라졌으면 그 시도는 제출 없이 `budget_exhausted`로 끝냅니다 — 사용자가
+  이미 실패를 통보받은 뒤에 로그인 코드를 발송하지 않기 위해서입니다.
+- **transactional complaint 경보는 세 경로 모두 잠금 안의 판정으로 올립니다.**
+  standard lane뿐 아니라 credential lane과 알림 큐도 같은 `raiseIncident`를 읽습니다.
+  초기 확인 뒤에 생긴 complaint를 한 경로만 보고하면 "발송 직전 판정"이라는 말이
+  거짓이 됩니다.
 
 ---
 

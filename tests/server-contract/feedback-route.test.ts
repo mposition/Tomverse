@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for /api/feedback.
@@ -196,6 +197,8 @@ async function loadRoute(): Promise<{
       },
       // The suppression read authority: absent, so entries decide.
       appSetting: { findUnique: async () => null },
+      // The fence and the address lock the send takes before it submits.
+      ...sendLockPrismaStubs(),
       userSettings: {
         findUnique: async () =>
           world.settingsLanguage ? { language: world.settingsLanguage } : null,
