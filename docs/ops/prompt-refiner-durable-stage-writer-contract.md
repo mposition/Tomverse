@@ -17,7 +17,7 @@
 `GET /api/admin/prompt-refiner/shadow-stage`
 
 인증된 owner와 최근 인증을 요구한다. DB mutation, rate-limit 소비, stage/audit 생성은 없다.
-서버가 과거 evidence를 replay하고 현재 deployment의 180개 고정 source 파일 raw bytes를 읽어
+서버가 과거 evidence를 replay하고 현재 deployment의 186개 고정 source 파일 raw bytes를 읽어
 proposal/runtime-source/execution digest, commit, deployment, 고정 비용·slot·TTL과
 `executionAdmitted:false`, `productAdapterReady:false`를 반환한다. 또한 environment,
 deployment id, commit SHA, 세 digest, 비용·capacity·TTL 전체의 canonical JSON을 결속한
@@ -75,9 +75,9 @@ error/body는 담지 않는다.
 - migration은 기존 stage가 있으면 중단하고 seed/backfill하지 않는다.
 - writer가 UTC로 정규화한 한 DB clock snapshot으로 승인·만료 시각을 audit metadata와 stage 양쪽에
   기록하고, INSERT trigger는 두 값이 정확히 일치하지 않으면 거부한다.
-- DB CHECK는 180개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
+- DB CHECK는 186개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
   digest를 다시 계산하고 execution manifest의 canonical digest도 다시 계산한다.
-- 180개 중 171개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
+- 186개 중 177개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
   static import/re-export, literal dynamic import, literal `require`, require alias,
   `module.require`와 `createRequire` 호출로 도달하는 local runtime 폐쇄와 같아야 한다.
   `node:module`과 `module`은 같은 builtin으로 취급하고 named·default·namespace import의

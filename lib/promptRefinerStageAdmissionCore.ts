@@ -38,7 +38,7 @@ export const PROMPT_REFINER_STAGE_CONFIRMATION =
   "APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES" as const;
 export const PROMPT_REFINER_STAGE_REASON =
   "bounded_staging_shadow_cost_approval" as const;
-export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 180 as const;
+export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 186 as const;
 export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -72,6 +72,7 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
   "lib/activeAiModel.ts",
   "lib/adminAudit.ts",
   "lib/adminAuditIntegrityCore.ts",
+  "lib/adminAuditSystemActors.ts",
   "lib/adminAuth.ts",
   "lib/adminAuthCore.ts",
   "lib/adminReauthentication.ts",
@@ -121,10 +122,15 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
   "lib/emailAuditHash.ts",
   "lib/emailConsentToken.ts",
   "lib/emailFeatureFlags.ts",
+  "lib/emailJurisdictionCore.ts",
   "lib/emailLogin.ts",
   "lib/emailLoginEmails.ts",
+  "lib/emailPreferenceCore.ts",
+  "lib/emailPreferences.ts",
   "lib/emailProviderPort.ts",
   "lib/emailProviderPortCore.ts",
+  "lib/emailSendLock.ts",
+  "lib/emailSendLockCore.ts",
   "lib/emailSendRetryCore.ts",
   "lib/emailSendingIdentity.ts",
   "lib/emailSendingIdentityCore.ts",

@@ -60,9 +60,9 @@ const compilerOptions = parsedConfig.options;
 // its already-reviewed data-indexing expressions are frozen as an exact
 // path/position/text snapshot.  Any new or moved non-static element access must
 // be reviewed and must update this digest before the closure gate can pass.
-const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 220;
+const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 221;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 =
-  "b253be22cfbdb92637dda566af0c0d088a41011d52a63da0e7832b1b93974506";
+  "e0c6cf0868ee77ebc821fed2f96dc9317509f0236d463e22f2a0893db89f71d3";
 
 const unwrapStaticExpression = (node) => {
   let current = node;

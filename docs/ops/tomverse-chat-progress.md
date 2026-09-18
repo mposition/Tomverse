@@ -1172,7 +1172,7 @@ events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검
 ## 2026-09-17 Prompt Refiner durable stage writer 회차 (내부 검증 완료, 독립 검토 대기)
 
 앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source
-identity와 승인 시점 staging deployment의 full commit, exact 180-file runtime import-closure source manifest,
+identity와 승인 시점 staging deployment의 full commit, exact 186-file runtime import-closure source manifest,
 고정 execution manifest를 하나의 immutable stage에 결속한다. 승인 시각과 60분 expiry는
 DB clock이 소유하며, owner 전용 POST는 advisory lock 아래 tamper-evident success audit과
 stage insert를 한 transaction으로 처리한다. 동일 actor·동일 runtime의 exact replay만

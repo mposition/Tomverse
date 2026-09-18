@@ -81,7 +81,7 @@ STRICT
 PARALLEL SAFE
 AS $$
 DECLARE
-    expected_file_count CONSTANT INTEGER := 180;
+    expected_file_count CONSTANT INTEGER := 186;
     maximum_total_size_bytes CONSTANT NUMERIC := 16777216;
     expected_paths CONSTANT TEXT[] := ARRAY[
         '.gitattributes',
@@ -98,6 +98,7 @@ DECLARE
         'lib/activeAiModel.ts',
         'lib/adminAudit.ts',
         'lib/adminAuditIntegrityCore.ts',
+        'lib/adminAuditSystemActors.ts',
         'lib/adminAuth.ts',
         'lib/adminAuthCore.ts',
         'lib/adminReauthentication.ts',
@@ -147,10 +148,15 @@ DECLARE
         'lib/emailAuditHash.ts',
         'lib/emailConsentToken.ts',
         'lib/emailFeatureFlags.ts',
+        'lib/emailJurisdictionCore.ts',
         'lib/emailLogin.ts',
         'lib/emailLoginEmails.ts',
+        'lib/emailPreferenceCore.ts',
+        'lib/emailPreferences.ts',
         'lib/emailProviderPort.ts',
         'lib/emailProviderPortCore.ts',
+        'lib/emailSendLock.ts',
+        'lib/emailSendLockCore.ts',
         'lib/emailSendRetryCore.ts',
         'lib/emailSendingIdentity.ts',
         'lib/emailSendingIdentityCore.ts',
@@ -355,7 +361,7 @@ ALTER TABLE "PromptRefinerReservationStage"
           "schemaVersion":"prompt-refiner-shadow-execution-manifest-v1",
           "stageId":"prompt-refiner-shadow-v1",
           "reservationContractDigest":"sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f",
-          "runtimeSource":{"fileCount":180,"maxFileBytes":8388608,"maxTotalBytes":16777216},
+          "runtimeSource":{"fileCount":186,"maxFileBytes":8388608,"maxTotalBytes":16777216},
           "executionContractVersion":"prompt-refiner-execution-contract-v1",
           "executionContract":{
             "contractVersion":"prompt-refiner-execution-contract-v1",

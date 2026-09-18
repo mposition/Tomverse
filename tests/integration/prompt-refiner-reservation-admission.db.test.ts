@@ -53,12 +53,9 @@ const request = () =>
 
 const reset = async () => {
   await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE "PromptRefinerReservation", "PromptRefinerReservationStage"
+    TRUNCATE TABLE "PromptRefinerReservation", "PromptRefinerReservationStage", "AdminAuditLog"
     RESTART IDENTITY CASCADE
   `);
-  await prisma.adminAuditLog.deleteMany({
-    where: { action: "prompt_refiner.shadow_stage.activated" },
-  });
 };
 
 const ensureRuntimeModel = async () => {
@@ -455,6 +452,38 @@ test("deployment mismatch is a 409 conflict and cannot add an audit", async () =
   );
 });
 
+test("an exact replay by another actor is a 409 conflict and cannot add an audit", async () => {
+  await create();
+  const otherActor = {
+    user: {
+      id: "different-owner",
+      email: "different-owner@example.com",
+      authenticatedAt: new Date().toISOString(),
+    },
+  } as Session;
+  await assert.rejects(
+    createPromptRefinerReservationStage({
+      session: otherActor,
+      request: request(),
+      expected: await expected(),
+    }),
+    (error: unknown) =>
+      Boolean(
+        error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "PROMPT_REFINER_STAGE_ALREADY_EXISTS_MISMATCH"
+      )
+  );
+  assert.equal(await prisma.promptRefinerReservationStage.count(), 1);
+  assert.equal(
+    await prisma.adminAuditLog.count({
+      where: { action: "prompt_refiner.shadow_stage.activated" },
+    }),
+    1
+  );
+});
+
 test("a preview from the same commit and source but another deployment is stale before transaction writes", async () => {
   const staleExpected = await expected();
   process.env.RAILWAY_DEPLOYMENT_ID = "prompt-refiner-admission-db-test-next";
@@ -524,6 +553,35 @@ test("audit failure rolls back the stage and direct SQL cannot alter or delete p
     /cannot be deleted/i
   );
   assert.equal(created.stage.id, PROMPT_REFINER_RESERVATION_STAGE_ID);
+});
+
+test("stage insert failure rolls the already-written activation audit back", async () => {
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "prompt_refiner_test_reject_stage_insert"()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      RAISE EXCEPTION 'forced stage insert failure';
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "prompt_refiner_test_reject_stage_insert_trigger"
+    BEFORE INSERT ON "PromptRefinerReservationStage"
+    FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_test_reject_stage_insert"();
+  `);
+  try {
+    await assert.rejects(create(), /forced stage insert failure/i);
+  } finally {
+    await prisma.$executeRawUnsafe(`
+      DROP TRIGGER IF EXISTS "prompt_refiner_test_reject_stage_insert_trigger" ON "PromptRefinerReservationStage";
+      DROP FUNCTION IF EXISTS "prompt_refiner_test_reject_stage_insert"();
+    `);
+  }
+  assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
+  assert.equal(
+    await prisma.adminAuditLog.count({
+      where: { action: "prompt_refiner.shadow_stage.activated" },
+    }),
+    0
+  );
 });
 
 test("expired stage refuses reserve and consume at both service and DB boundaries", async () => {
