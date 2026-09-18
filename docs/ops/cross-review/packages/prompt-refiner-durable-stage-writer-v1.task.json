@@ -1,6 +1,7 @@
 {
   "taskId": "prompt-refiner-durable-stage-writer-v1",
-  "requirement": "Prompt Refiner의 과거 provider-free evidence와 admission proposal을 현재 staging 배포의 exact source 및 실행 계약에 다시 결속하고, 명시적 관리자 비용 승인을 immutable stage 행과 tamper-evident audit 행으로 원자적으로 기록하는 durable stage writer를 독립 검토한다. 검토 대상 구현 source는 738e029efb9f7610dfafb9237453d7a821fa479a이고 exact base는 c49d5a3606f259356612ddc5872f29f5fe465158이다. 최종 runtime closure는 정확히 186개 파일(도달 가능한 TypeScript/JavaScript 177개 + 고정 metadata/config/migration 9개)이며, stage는 default-off이고 이 변경에는 제품 caller, 제품 provider/model 호출, external API 또는 Railway 관리 API 호출, 실제 지출 경로가 없다. 독립 검토에 사용하는 Claude Max CLI의 인증·검토 네트워크는 이 제품 실행 경계에 포함하지 않는다. author는 codex, reviewer는 claude이며 사용자가 승인한 --skip-preflight 예외 아래 Claude Code Max 구독 CLI를 Read·Grep·Glob only 및 strict MCP로 사용한다.",
+  "requirement": "Prompt Refiner의 과거 provider-free evidence와 admission proposal을 현재 staging 배포의 exact source 및 실행 계약에 다시 결속하고, 명시적 관리자 비용 승인을 immutable stage 행과 tamper-evident audit 행으로 원자적으로 기록하는 durable stage writer를 독립 검토한다. 검토 대상 구현 source는 58d3e1617940c0c8c6ecffd5be993a0396460bdb이고 exact base는 c49d5a3606f259356612ddc5872f29f5fe465158이다. 최종 runtime closure는 정확히 186개 파일(도달 가능한 TypeScript/JavaScript 177개 + 고정 metadata/config/migration 9개)이며, stage는 default-off이고 이 변경에는 제품 caller, 제품 provider/model 호출, external API 또는 Railway 관리 API 호출, 실제 지출 경로가 없다. 독립 검토에 사용하는 Claude Max CLI의 인증·검토 네트워크는 이 제품 실행 경계에 포함하지 않는다. author는 codex, reviewer는 claude이며 사용자가 승인한 --skip-preflight 예외 아래 Claude Code Max 구독 CLI를 Read·Grep·Glob only 및 strict MCP로 사용한다.",
+  "revisionNote": "Round 0 reviewed digest sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc concluded request_changes. The original user authorization, including the --skip-preflight exception, is unchanged; this revision rebinds the implementation source and renamed migration path for the pending round 1 review.",
   "completionCriteria": [
     "최종 runtime source closure가 정확히 186개 파일(도달 가능한 TypeScript/JavaScript 177개와 고정 metadata/config/migration 9개)로 결속되고, exact raw bytes·full commit SHA·staging deployment id·bounded size·canonical digest 및 보수적 loader/capability 검사가 drift를 fail-closed한다.",
     "owner 전용 GET preview는 no-store·content-free·read-only이고, POST create-only writer는 strict body, recent authentication, CSRF, DB rate limit, fixed confirmation과 서버가 재계산한 proposal/runtime/execution/preview binding을 요구한다. stale preview, deployment/source/contract drift와 immutable fact mismatch는 쓰기 전에 거부된다.",
@@ -31,7 +32,7 @@
     "lib/promptRefinerReservationCore.ts",
     "lib/promptRefinerStageAdmission.ts",
     "lib/promptRefinerStageAdmissionCore.ts",
-    "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+    "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
     "prisma/schema.prisma",
     "scripts/check-data-domain-registry.mjs",
     "scripts/report-unswept-tables-core.mjs",

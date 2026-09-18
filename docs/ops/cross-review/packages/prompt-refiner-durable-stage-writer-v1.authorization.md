@@ -15,9 +15,16 @@ Codex가 현재 대화의 사용자 승인을 기록한다. 사용자 메시지�
 Claude 읽기 전용 독립 검토에만 적용한다. author는 Codex, reviewer는 Claude이고
 supersedes는 없다. exact base는
 `c49d5a3606f259356612ddc5872f29f5fe465158`, 독립 검토에 제출할 구현 source는
-`738e029efb9f7610dfafb9237453d7a821fa479a`다. writable scope는 base 대비 구현
+`58d3e1617940c0c8c6ecffd5be993a0396460bdb`다. writable scope는 base 대비 구현
 변경 30개와 이 task/authorization 2개를 합친 exact 32개 경로이고
 `generatedPaths`는 비어 있다.
+
+Round 0 reviewed digest
+`sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`의
+판정은 `request_changes`였다. 이 수정은 원래 사용자 승인 문구와
+`--skip-preflight` 예외를 바꾸지 않고 구현 source와 rename된 migration exact
+scope만 round 1 대기 source에 다시 결속한다. round 1 검토 통과나 완료를 주장하지
+않는다.
 
 승인 범위의 목표는 final runtime closure 186개가 TypeScript/JavaScript 177개와
 고정 metadata/config/migration 9개로 정확히 구성되는지, fresh PostgreSQL 17에서
