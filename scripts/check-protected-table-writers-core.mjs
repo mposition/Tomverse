@@ -116,6 +116,30 @@ export const PROTECTED_TABLES = [
     writers: ["lib/adminAudit.ts"],
     contract: "docs/policy/marketing-automation.md §6",
   },
+  {
+    table: "MarketingChannel",
+    delegate: "marketingChannel",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "MarketingPost",
+    delegate: "marketingPost",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "MarketingReport",
+    delegate: "marketingReport",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "AiVisibilityRun",
+    delegate: "aiVisibilityRun",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -256,6 +280,43 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 4,
     reason:
       "The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.",
+  },
+  {
+    path: "scripts/report-unswept-tables-core.mjs",
+    table: "MarketingReport",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The retention registry's prose: one entry says an AI visibility run has the same shape as MarketingReport's, and other entries in the file use the words delete and update. A report; it opens no database connection.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingChannel",
+    tableMentions: 20,
+    writeVerbs: 14,
+    reason:
+      "The migration that creates the marketing tables and the triggers that bound them. It names UPDATE, DELETE and INSERT to constrain or refuse them; the only statements that write a row are the CREATE TABLE and CREATE INDEX statements themselves. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 29,
+    writeVerbs: 14,
+    reason: "The same migration; see the MarketingChannel entry above.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingReport",
+    tableMentions: 4,
+    writeVerbs: 14,
+    reason: "The same migration; see the MarketingChannel entry above.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "AiVisibilityRun",
+    tableMentions: 5,
+    writeVerbs: 14,
+    reason: "The same migration; see the MarketingChannel entry above.",
   },
 ];
 

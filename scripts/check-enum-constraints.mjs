@@ -631,6 +631,111 @@ const REGISTRY = {
       "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
   },
 
+  MarketingChannel_channel_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_CHANNELS",
+    reason:
+      "The eight platforms the programme posts to (docs/policy/marketing-automation.md O6). Immutable per row, so this list also decides which posts can ever exist against an account: instagram and tiktok are the two the O15 constraint names, and a ninth platform arriving without that review would inherit no answer about whether its posts can be retracted.",
+  },
+  MarketingChannel_provider_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_PROVIDERS",
+    reason:
+      "Who carries the post: the publishing tool, or an operator by hand. The distinction is load-bearing rather than descriptive -- a manual account has no connected account to reference, which is the other half of MarketingChannel_external_ref_matches_provider_check, and it has no posting cap to lower.",
+  },
+  MarketingChannel_status_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_CHANNEL_STATUSES",
+    reason:
+      "The account lifecycle of docs/policy/marketing-automation.md §8.2. The allowed movements between these five are a trigger, not this list; what the list settles is that `disconnected` is a status rather than a deleted row, so the posts that name the account keep naming something.",
+  },
+  MarketingChannel_defaultLocale_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_LOCALES",
+    reason:
+      "The four languages of docs/policy/marketing-automation.md O7. Simplified Chinese is only ever RedNote's, aimed at Chinese speakers outside the mainland, and mainland China is out of scope -- so a fifth locale is a market decision, not a translation.",
+  },
+  MarketingChannel_pausedFromMode_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_PAUSABLE_MODES",
+    reason:
+      "Where a paused account came from, and deliberately a two-value subset of the status list rather than the status list itself: an account paused while still connecting has no earlier mode to restore, and a resume reads this column to decide whether returning to autonomous mode is a return or a promotion. Nullable, because only a paused row has one.",
+  },
+  MarketingPost_locale_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_LOCALES",
+    reason:
+      "The same four languages as the channel's, on the post. The same list rather than a second one: a post's locale is checked against the account's allowedLocales, and two lists that could drift would let a post claim a language no account can hold.",
+  },
+  MarketingPost_kind_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_POST_KINDS",
+    reason:
+      "What the row is: a social post, a RedNote package an operator posts by hand, a landing variant, or a reference to an SEO pull request. They share a table because they share the Guard, the approval and the claim evidence; they differ in what publishing means, which is the publisher's branch and not a column.",
+  },
+  MarketingPost_guardDecision_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_GUARD_DECISIONS",
+    reason:
+      "What the Guard concluded (docs/policy/marketing-automation.md §7). `autonomous_eligible` is the only value that can reach autonomous mode, and MarketingPost_autonomous_needs_template_check reads it, so a fourth decision that nothing mapped would silently be a decision autonomy could not act on.",
+  },
+  MarketingPost_status_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_POST_STATUSES",
+    reason:
+      "Every state a draft reaches. `outcome_unknown` is separate from `failed` because a failure is a post that did not happen and an unknown outcome is a post that may have -- the second halts the account and the first does not. `deleted` and `removed_by_platform` are likewise different facts about the same absence.",
+  },
+  MarketingPost_mode_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_POST_MODES",
+    reason:
+      "Whether a human approved this post or an approved template did. Two values and no third: a post is covered by one authority or the other, and a mode meaning \"partly\" would have no answer to which digest the approval bound to.",
+  },
+  MarketingPost_verificationMethod_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_VERIFICATION_METHODS",
+    reason:
+      "How the app established that a post is publicly visible, which is not the same claim as having published it. Nullable, because an unverified post has no method rather than a method that failed.",
+  },
+  MarketingPost_deletionMethod_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_DELETION_METHODS",
+    reason:
+      "How a published post stopped being public. `platform_removed` is a moderation event and the other two are ours, so collapsing them would lose the distinction the automatic-halt rules are built on. Nullable, because a live post has no deletion.",
+  },
+  MarketingReport_kind_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_REPORT_KINDS",
+    reason:
+      "Which aggregate a report row is. It is also the key into MARKETING_REPORT_PAYLOAD_SCHEMAS and into the retention periods of docs/policy/marketing-automation.md §12.2, so a kind the list does not know would be a row with no schema to parse it and no date to delete it by -- which is why MarketingReport_retentionUntil_check's CASE has no ELSE.",
+  },
+  AiVisibilityRun_locale_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_LOCALES",
+    reason:
+      "The language the prompt was asked in. The same four as the posting locales, because the measurement asks what an assistant says about us in the markets we address.",
+  },
+  AiVisibilityRun_searchMode_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "AI_VISIBILITY_SEARCH_MODES",
+    reason:
+      "Whether the assistant could search the web for that answer. Two runs of the same prompt in the two modes answer different questions -- what a model has learned about us, and what it can find -- so the column exists to keep them from being averaged together.",
+  },
 };
 
 const migrations = readdirSync(migrationsDirectory)

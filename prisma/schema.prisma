@@ -5535,3 +5535,138 @@ model PromptRefinerReservation {
 
   @@index([stageId, status, expiresAt])
 }
+
+// The marketing automation tables (docs/policy/marketing-automation.md).
+// Invariants live in 20260918120000_marketing_automation_tables: closed-list
+// CHECKs that repeat lib/marketingAutomationSchema.ts, the O15 block on
+// autonomous posting where the API cannot retract a post, lower-only posting
+// caps, the account transitions of §8.2, append-only history, and deletes
+// bounded by retention. lib/marketingStore.ts is the only module that writes
+// them; npm run check:protected-table-writers enforces that.
+
+model MarketingChannel {
+  id                   String    @id @default(cuid())
+  channel              String
+  provider             String
+  externalAccountRef   String?
+  accountSlug          String    @unique
+  defaultLocale        String
+  allowedLocales       String[]
+  connectionGeneration Int       @default(1)
+  scopesDigest         String
+  policyVersion        Int       @default(1)
+  status               String
+  approvalStartedAt    DateTime?
+  graduatedAt          DateTime?
+  graduationEpoch      Int       @default(0)
+  graduationSnapshot   Json?
+  pausedAt             DateTime?
+  pausedFromMode       String?
+  pauseReasonCode      String?
+  dailyCapOverride     Int?
+  weeklyCapOverride    Int?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  posts MarketingPost[]
+
+  @@index([status])
+}
+
+model MarketingPost {
+  id                   String   @id @default(cuid())
+  channelId            String
+  locale               String
+  kind                 String
+  logicalKey           String   @unique
+  envelope             Json?
+  envelopeDigest       String
+  rendererVersion      String
+  templateId           String?
+  templateDigest       String?
+  claimIds             String[]
+  assetIds             String[]
+  claimRegistryVersion Int
+  assetRegistryVersion Int
+  factSnapshot         Json
+  guardDecision        String
+  guardCodes           String[]
+  guardRuleIds         String[]
+  status               String
+  mode                 String
+
+  /// The approval's audit entry, by id and with no relation: the audit log is
+  /// append-only and hash-chained, so a foreign-key action that rewrote this
+  /// column would make an approval indistinguishable from a forged one -- the
+  /// same reason AdminAuditLog.actorUserId is not a foreign key.
+  approvalAuditLogId String?
+
+  approvedAt         DateTime?
+  approvedDigest     String?
+  approvalExpiresAt  DateTime?
+  reusableAsTemplate Boolean   @default(false)
+  scheduledAt        DateTime?
+  slotDate           DateTime? @db.Date
+  claimToken         String?
+  leaseUntil         DateTime?
+  publishAttempt     Int       @default(0)
+  providerRequestKey String?
+  externalPostId     String?
+  externalUrl        String?
+  publishedAt        DateTime?
+  verifiedPublicAt   DateTime?
+  verificationMethod String?
+  errorCode          String?
+  outcomeUnknownAt   DateTime?
+  deletedAt          DateTime?
+  deletionMethod     String?
+  history            Json      @default("[]")
+  historyVersion     Int       @default(0)
+  contentPurgedAt    DateTime?
+  legalHold          Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  channel MarketingChannel @relation(fields: [channelId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([channelId, status])
+  @@index([status, scheduledAt])
+  @@index([channelId, slotDate])
+  @@index([createdAt])
+}
+
+model MarketingReport {
+  id             String   @id @default(cuid())
+  kind           String
+  periodStart    DateTime
+  periodEnd      DateTime
+  payload        Json
+  sourceVersion  String
+  retentionUntil DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([kind, periodStart])
+  @@index([retentionUntil])
+}
+
+model AiVisibilityRun {
+  id               String   @id @default(cuid())
+  promptSetVersion String
+  promptId         String
+  locale           String
+  model            String
+  modelVersion     String
+  searchMode       String
+  region           String
+  runAt            DateTime
+  mentioned        Boolean
+  citedUrls        String[]
+  answerDigest     String
+  accuracyFlags    Json?
+  retentionUntil   DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([runAt])
+  @@index([promptSetVersion, promptId])
+  @@index([retentionUntil])
+}
