@@ -1487,7 +1487,17 @@ test("winding the attempt counter back does not reuse an old failure", async () 
       where: { id: dispatched.id },
       data: { status: "failed", publishAttempt: 1 },
     }),
-    /attempt counter does not go backwards/,
+    /attempt counter changes only when the post is dispatched/,
+  );
+
+  // Forward is refused for the same reason backward is: moving it on would leave
+  // the real last failure unprotected from retention.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { publishAttempt: 3 },
+    }),
+    /attempt counter changes only when the post is dispatched/,
   );
 
   // And even at the right number, the failure has to be recorded by this write
@@ -1541,5 +1551,33 @@ test("a failure stamped finer than a millisecond is still protected", async () =
       historyEntry("retention_compaction", { removedEntryCount: 1 }),
     ],
     /the failure of attempt 1 is what a re-queue is measured against/,
+  );
+});
+
+test("a failure already in the history is not this statement's record of it", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  // The publisher appends the failure and moves the status in one write. Split
+  // across two, the second write records nothing, and the rule is about what a
+  // write records rather than about what the row happens to contain.
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("attempt", { attempt: 1, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /in the same write/,
   );
 });

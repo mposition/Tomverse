@@ -339,7 +339,7 @@ const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
  * Narrower than `z.iso.datetime({ offset: true })` in two places, and both are
  * about the database rather than about taste. Zod accepts year `0000`, which
  * Postgres has no such year for, and offsets out to `+23:00`, which Postgres
- * refuses past `+15:59`. A value the schema accepted and the database could not
+ * refuses past `+15:59` and which no real zone uses past `+14:00`. A value the schema accepted and the database could not
  * cast would be stored and then fail every later read of the row -- so the two
  * are held to one range, and it is the smaller one.
  *
@@ -347,14 +347,14 @@ const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
  * marketing triggers have to apply it too and a trigger cannot import this.
  */
 export const MARKETING_INSTANT_PATTERN =
-  /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-4]):[0-5][0-9])$/;
+  /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)$/;
 
 const isoInstant = z
   .iso
   .datetime({ offset: true })
   .refine((value) => MARKETING_INSTANT_PATTERN.test(value), {
     message:
-      "must be an ISO instant with a year from 0001 and an offset within 14 hours",
+      "must be an ISO instant with a year from 0001 and an offset no further out than 14:00",
   });
 
 /** A calendar date with no time of day. */

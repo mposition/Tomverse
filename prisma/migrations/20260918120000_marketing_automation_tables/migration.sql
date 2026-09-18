@@ -773,7 +773,7 @@ DECLARE
     -- both, and a value the schema accepted and this database could not cast
     -- would be written once and then break every later read of the row.
     iso_instant CONSTANT TEXT :=
-        '^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-4]):[0-5][0-9])$';
+        '^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)$';
     instants TEXT[];
     instant TEXT;
     last_failure_at TIMESTAMPTZ;
@@ -804,12 +804,19 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- The attempt counter only ever goes up. It is what a failure entry is tied
-    -- to, so a write that could wind it back could make an older failure answer
-    -- for a newer attempt.
-    IF NEW."publishAttempt" < OLD."publishAttempt" THEN
-        RAISE EXCEPTION 'MarketingPost % attempt counter does not go backwards, from % to %', OLD."id", OLD."publishAttempt", NEW."publishAttempt"
-            USING ERRCODE = 'check_violation';
+    -- The attempt counter moves in exactly one place: the write that sends the
+    -- post to a platform. It is what a failure entry is tied to, so any other
+    -- write that could move it -- back to reuse an older failure, or forward to
+    -- leave the real last failure unprotected -- would make that tie meaningless.
+    IF NEW."publishAttempt" <> OLD."publishAttempt" THEN
+        IF NOT (OLD."status" = 'scheduled' AND NEW."status" = 'publishing') THEN
+            RAISE EXCEPTION 'MarketingPost % attempt counter changes only when the post is dispatched', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF NEW."publishAttempt" <> OLD."publishAttempt" + 1 THEN
+            RAISE EXCEPTION 'MarketingPost % attempt counter moves by one, not from % to %', OLD."id", OLD."publishAttempt", NEW."publishAttempt"
+                USING ERRCODE = 'check_violation';
+        END IF;
     END IF;
 
     -- docs/policy/marketing-automation.md §12.2 dates the content purge from the
