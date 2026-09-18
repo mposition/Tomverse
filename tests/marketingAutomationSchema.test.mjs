@@ -27,6 +27,7 @@ import {
   MARKETING_DELETION_METHODS,
   MARKETING_DISPATCHED_STATUSES,
   MARKETING_GUARD_DECISIONS,
+  MARKETING_INSTANT_PATTERN,
   MARKETING_LOCALES,
   MARKETING_NO_AUTONOMY_CHANNELS,
   MARKETING_PAUSABLE_MODES,
@@ -489,31 +490,38 @@ test("a citation may be anywhere, as long as it is https", () => {
 // ---------------------------------------------------------------------------
 // The instant contract, on both sides
 // ---------------------------------------------------------------------------
-
-test("the migration's instant rule accepts exactly what the module does", async () => {
-  // The trigger writes retention entries the store has to be able to read back,
-  // so its idea of a timestamp and zod's have to be the same one. Neither half
-  // of the SQL rule is enough alone: the pattern gives shape and ranges, the
-  // `::DATE` cast gives the calendar. This mirrors both.
-  const pattern = MIGRATION.split("iso_instant CONSTANT TEXT :=")[1]
+test("the migration's instant rule is the module's, and both are one contract", async () => {
+  // The trigger writes retention entries the store has to read back, so its idea
+  // of a timestamp and the module's have to be the same one. The pattern is
+  // literally the same text; what each side adds to it differs -- zod's calendar
+  // on one side, a cast on the other -- so the pair is compared candidate by
+  // candidate.
+  const fromMigration = MIGRATION.split("iso_instant CONSTANT TEXT :=")[1]
     .split("';")[0]
     .replace(/^\s*'/, "");
-  const shaped = new RegExp(pattern);
+  assert.equal(
+    fromMigration,
+    MARKETING_INSTANT_PATTERN.source,
+    "the trigger's pattern and the module's have drifted",
+  );
 
+  const shaped = new RegExp(fromMigration);
+
+  // What Postgres's cast answers, computed rather than borrowed: JavaScript's
+  // Date maps years 0 to 99 onto 1900 to 1999, so `Date.UTC` is not a mirror of
+  // `::TIMESTAMPTZ` at the bottom of the range. The narrowed pattern keeps the
+  // rest of the domain inside what Postgres accepts, so this is the whole of it.
   const inTheCalendar = (value) => {
     const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    return (
-      date.getUTCFullYear() === year &&
-      date.getUTCMonth() === month - 1 &&
-      date.getUTCDate() === day
-    );
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    const lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= lengths[month - 1];
   };
-  const sqlAccepts = (value) => shaped.test(value) && inTheCalendar(value);
+  const databaseAccepts = (value) => shaped.test(value) && inTheCalendar(value);
 
   const { z } = await import("zod");
-  const zodAccepts = (value) =>
-    z.iso.datetime({ offset: true }).safeParse(value).success;
+  const moduleAccepts = (value) =>
+    z.iso.datetime({ offset: true }).safeParse(value).success && shaped.test(value);
 
   const candidates = [
     "2026-09-18T00:00:00Z",
@@ -522,9 +530,14 @@ test("the migration's instant rule accepts exactly what the module does", async 
     "2026-09-18T00:00:00.123456789Z",
     "2026-09-18T00:00:00+09:00",
     "2026-09-18T00:00:00-05:30",
-    "2026-09-18T00:00:00+23:00",
+    "2026-09-18T00:00:00+14:00",
     "2024-02-29T00:00:00Z",
+    "0001-01-01T00:00:00Z",
+    "0099-12-31T23:59:59Z",
+    "0100-02-28T00:00:00Z",
+    "0100-02-29T00:00:00Z",
     // Refused by both, each for its own reason.
+    "0000-01-01T00:00:00Z",
     "2025-02-29T00:00:00Z",
     "2026-02-30T00:00:00Z",
     "2026-04-31T00:00:00Z",
@@ -534,6 +547,8 @@ test("the migration's instant rule accepts exactly what the module does", async 
     "2026-09-18T24:00:00Z",
     "2026-09-18T23:59:60Z",
     "2026-09-18T00:00:00+00:60",
+    "2026-09-18T00:00:00+15:00",
+    "2026-09-18T00:00:00+23:00",
     "2026-09-18T00:00:00",
     "2026-09-18 00:00:00Z",
     "2026-9-18T00:00:00Z",
@@ -541,9 +556,22 @@ test("the migration's instant rule accepts exactly what the module does", async 
 
   for (const candidate of candidates) {
     assert.equal(
-      sqlAccepts(candidate),
-      zodAccepts(candidate),
+      databaseAccepts(candidate),
+      moduleAccepts(candidate),
       `${candidate}: the migration and the module disagree`,
     );
+  }
+
+  // And the narrowing is real: these are instants zod alone would accept.
+  for (const beyond of [
+    "0000-01-01T00:00:00Z",
+    "2026-09-18T00:00:00+15:00",
+    "2026-09-18T00:00:00+23:00",
+  ]) {
+    assert.ok(
+      z.iso.datetime({ offset: true }).safeParse(beyond).success,
+      `${beyond} should be what zod alone accepts`,
+    );
+    assert.equal(moduleAccepts(beyond), false, `${beyond} is outside the contract`);
   }
 });

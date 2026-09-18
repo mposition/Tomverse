@@ -761,19 +761,22 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     retention_running BOOLEAN;
-    -- The same instants lib/marketingAutomationSchema.ts accepts, which is what
-    -- a row has to be for the store to be able to read it back. Two halves,
-    -- because neither is enough on its own: this pattern gives the shape and the
-    -- ranges (month 01-12, hour 00-23, second 00-59, offset up to 23:59, all of
-    -- which zod checks), and the ::DATE cast below gives the calendar -- 31 April
-    -- and 29 February in a common year are both well-formed here and refused
-    -- there. tests/marketingAutomationSchema.test.mjs runs the two against zod
-    -- itself, candidate by candidate.
+    -- The same instants lib/marketingAutomationSchema.ts accepts, character for
+    -- character: MARKETING_INSTANT_PATTERN there is this pattern, and the schema
+    -- applies it on top of zod. Two halves here, because neither is enough on its
+    -- own -- the pattern gives the shape and the ranges, and the cast below gives
+    -- the calendar, which a pattern cannot express: 31 April and 29 February in a
+    -- common year are both well-formed and are not dates.
+    --
+    -- The year starts at 0001 and the offset stops at 14 hours because Postgres
+    -- has no year zero and refuses an offset past 15:59. Zod on its own accepts
+    -- both, and a value the schema accepted and this database could not cast
+    -- would be written once and then break every later read of the row.
     iso_instant CONSTANT TEXT :=
-        '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$';
+        '^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-4]):[0-5][0-9])$';
     instants TEXT[];
     instant TEXT;
-    last_failure_at TIMESTAMP(3);
+    last_failure_at TIMESTAMPTZ;
     old_length INTEGER;
     new_length INTEGER;
     kept JSONB;
@@ -798,6 +801,14 @@ BEGIN
 
     IF NEW."logicalKey" <> OLD."logicalKey" THEN
         RAISE EXCEPTION 'MarketingPost % logical key is immutable', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- The attempt counter only ever goes up. It is what a failure entry is tied
+    -- to, so a write that could wind it back could make an older failure answer
+    -- for a newer attempt.
+    IF NEW."publishAttempt" < OLD."publishAttempt" THEN
+        RAISE EXCEPTION 'MarketingPost % attempt counter does not go backwards, from % to %', OLD."id", OLD."publishAttempt", NEW."publishAttempt"
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -865,14 +876,23 @@ BEGIN
         -- compacting the old attempt away first and moving to `failed`
         -- afterwards -- or in the same statement, where OLD.status is still the
         -- earlier one -- would otherwise produce a failed post with no exit.
+        -- The failure has to be recorded *by this statement*, not found
+        -- somewhere in the history. Matching anywhere left the counter as the
+        -- only thing tying the entry to the attempt, and the counter is a column
+        -- the same statement can write: setting publishAttempt back to 1 made
+        -- attempt one's old failure answer for attempt two. Requiring the entry
+        -- to be newly appended also fits what the publisher does anyway, which is
+        -- to record the failure and move the status in one write.
         IF NEW."status" = 'failed' AND NOT EXISTS (
             SELECT 1
-            FROM pg_catalog.jsonb_array_elements(NEW."history") AS "h"("entry")
-            WHERE "entry" ->> 'type' = 'attempt'
+            FROM pg_catalog.jsonb_array_elements(NEW."history")
+                WITH ORDINALITY AS "h"("entry", "ordinality")
+            WHERE "ordinality" > old_length
+              AND "entry" ->> 'type' = 'attempt'
               AND "entry" ->> 'outcome' = 'failed'
               AND "entry" -> 'attempt' = pg_catalog.to_jsonb(NEW."publishAttempt")
         ) THEN
-            RAISE EXCEPTION 'MarketingPost % cannot be failed without recording the failure of attempt %', OLD."id", NEW."publishAttempt"
+            RAISE EXCEPTION 'MarketingPost % cannot be failed without recording the failure of attempt % in the same write', OLD."id", NEW."publishAttempt"
                 USING ERRCODE = 'check_violation';
         END IF;
 
@@ -884,7 +904,7 @@ BEGIN
         -- approval -- an approval older than the failure is not a decision about
         -- it.
         IF OLD."status" = 'failed' AND NEW."status" = 'scheduled' THEN
-            SELECT pg_catalog.max((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC')
+            SELECT pg_catalog.max(("entry" ->> 'at')::TIMESTAMPTZ)
             INTO last_failure_at
             FROM pg_catalog.jsonb_array_elements(OLD."history") AS "h"("entry")
             WHERE "entry" ->> 'type' = 'attempt'
@@ -904,7 +924,7 @@ BEGIN
                     USING ERRCODE = 'check_violation';
             END IF;
 
-            IF NEW."approvedAt" <= last_failure_at THEN
+            IF (NEW."approvedAt" AT TIME ZONE 'UTC') <= last_failure_at THEN
                 RAISE EXCEPTION 'MarketingPost % re-queue approval predates the failure it answers', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
@@ -1041,23 +1061,20 @@ BEGIN
     -- that the operator's approval came after it. A summary does not carry an
     -- outcome, so compacting that attempt away would leave the post failed with
     -- no exit at all -- which retention is not for.
-    IF OLD."status" = 'failed' THEN
-        SELECT pg_catalog.max((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC')
-        INTO last_failure_at
-        FROM pg_catalog.jsonb_array_elements(OLD."history") AS "h"("entry")
+    -- The attempt this post failed on is identified by its number, not by its
+    -- time. Comparing times meant putting a value the schema allows to any
+    -- precision into a TIMESTAMP(3) and comparing it back: a failure stamped
+    -- .123456789 did not equal its own truncation, so the entry this protects
+    -- was removable after all.
+    IF OLD."status" = 'failed' AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
         WHERE "entry" ->> 'type' = 'attempt'
-          AND "entry" ->> 'outcome' = 'failed';
-
-        IF EXISTS (
-            SELECT 1
-            FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
-            WHERE "entry" ->> 'type' = 'attempt'
-              AND "entry" ->> 'outcome' = 'failed'
-              AND ((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC') = last_failure_at
-        ) THEN
-            RAISE EXCEPTION 'MarketingPost % is failed and its last failed attempt is what a re-queue is measured against', OLD."id"
-                USING ERRCODE = 'check_violation';
-        END IF;
+          AND "entry" ->> 'outcome' = 'failed'
+          AND "entry" -> 'attempt' = pg_catalog.to_jsonb(OLD."publishAttempt")
+    ) THEN
+        RAISE EXCEPTION 'MarketingPost % is failed and the failure of attempt % is what a re-queue is measured against', OLD."id", OLD."publishAttempt"
+            USING ERRCODE = 'check_violation';
     END IF;
 
     -- Everything kept is still there, in order, at the front.
@@ -1156,17 +1173,21 @@ BEGIN
             instants := ARRAY[element ->> 'at'];
         END IF;
 
-        -- Shape and ranges from the pattern, the calendar from the cast.
+        -- Shape and ranges from the pattern, the calendar from the cast. The
+        -- whole string is cast, not just the date: every other read of these
+        -- instants below casts the whole string too, so anything that survives
+        -- here survives those.
         FOREACH instant IN ARRAY instants LOOP
             IF instant !~ iso_instant THEN
                 RAISE EXCEPTION 'MarketingPost % retention entry carries %, which is not an instant this store can read back', OLD."id", instant
                     USING ERRCODE = 'check_violation';
             END IF;
             BEGIN
-                PERFORM pg_catalog.substring(instant, 1, 10)::DATE;
-            EXCEPTION WHEN others THEN
-                RAISE EXCEPTION 'MarketingPost % retention entry carries %, which is not a date in the calendar', OLD."id", instant
-                    USING ERRCODE = 'check_violation';
+                PERFORM instant::TIMESTAMPTZ;
+            EXCEPTION
+                WHEN invalid_datetime_format OR datetime_field_overflow THEN
+                    RAISE EXCEPTION 'MarketingPost % retention entry carries %, which is not a date in the calendar', OLD."id", instant
+                        USING ERRCODE = 'check_violation';
             END;
         END LOOP;
     END LOOP;

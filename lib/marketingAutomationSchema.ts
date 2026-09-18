@@ -333,8 +333,29 @@ const registryId = z
 /** Lower-case hexadecimal sha256. */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 
-/** An instant with an offset, as the database round-trips it. */
-const isoInstant = z.iso.datetime({ offset: true });
+/**
+ * An instant with an offset, as the database round-trips it.
+ *
+ * Narrower than `z.iso.datetime({ offset: true })` in two places, and both are
+ * about the database rather than about taste. Zod accepts year `0000`, which
+ * Postgres has no such year for, and offsets out to `+23:00`, which Postgres
+ * refuses past `+15:59`. A value the schema accepted and the database could not
+ * cast would be stored and then fail every later read of the row -- so the two
+ * are held to one range, and it is the smaller one.
+ *
+ * `MARKETING_INSTANT_PATTERN` is the same rule as a pattern, because the
+ * marketing triggers have to apply it too and a trigger cannot import this.
+ */
+export const MARKETING_INSTANT_PATTERN =
+  /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-](0[0-9]|1[0-4]):[0-5][0-9])$/;
+
+const isoInstant = z
+  .iso
+  .datetime({ offset: true })
+  .refine((value) => MARKETING_INSTANT_PATTERN.test(value), {
+    message:
+      "must be an ISO instant with a year from 0001 and an offset within 14 hours",
+  });
 
 /** A calendar date with no time of day. */
 const isoDate = z.iso.date();

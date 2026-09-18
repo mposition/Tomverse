@@ -1388,11 +1388,15 @@ test("an earlier failure does not stand in for the current attempt's", async () 
   const dispatched = await dispatchedPost(row.id);
   const history = dispatched.history as Prisma.InputJsonValue[];
 
-  const firstFailure = historyEntry("attempt", {
+  // A second in the past, so the operator approval below is deterministically
+  // later than the failure it answers rather than possibly the same millisecond.
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
     attempt: 1,
     outcome: "failed",
     errorCode: null,
-  });
+  };
   await prisma.marketingPost.update({
     where: { id: dispatched.id },
     data: {
@@ -1439,4 +1443,103 @@ test("an earlier failure does not stand in for the current attempt's", async () 
     },
   });
   assert.equal(failedAgain.status, "failed");
+});
+
+test("winding the attempt counter back does not reuse an old failure", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-2",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+
+  // The counter is the only thing tying a failure entry to an attempt, so a
+  // write that could wind it back could make attempt one's failure answer for
+  // attempt two.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed", publishAttempt: 1 },
+    }),
+    /attempt counter does not go backwards/,
+  );
+
+  // And even at the right number, the failure has to be recorded by this write
+  // rather than found somewhere in the history.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /in the same write/,
+  );
+});
+
+test("a failure stamped finer than a millisecond is still protected", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  // The store's schema accepts any sub-second precision. The protection used to
+  // compare this against a TIMESTAMP(3) copy of itself, which is a different
+  // value, so the entry it exists to keep was removable.
+  const preciseFailure = {
+    at: new Date(Date.now() - 200 * DAY).toISOString().replace("Z", "456789Z"),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  // The dispatched-status CHECK requires the provider key to be the logical
+  // key, so the fixture names both.
+  const logicalKey = `post-precise-${Math.random().toString(36).slice(2)}`;
+  const created = await agedPost(row.id, 400, {
+    status: "failed",
+    publishAttempt: 1,
+    logicalKey,
+    providerRequestKey: logicalKey,
+    history: [draftEntry, preciseFailure],
+    historyVersion: 0,
+  });
+
+  await refusedCompaction(
+    created.id,
+    [
+      draftEntry,
+      {
+        at: new Date().toISOString(),
+        type: "retention_summary",
+        summarises: "attempt",
+        count: 1,
+        firstAt: preciseFailure.at,
+        lastAt: preciseFailure.at,
+      },
+      historyEntry("retention_compaction", { removedEntryCount: 1 }),
+    ],
+    /the failure of attempt 1 is what a re-queue is measured against/,
+  );
 });
