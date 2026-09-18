@@ -198,7 +198,13 @@ CREATE UNIQUE INDEX "MarketingChannel_accountSlug_key" ON "MarketingChannel"("ac
 CREATE INDEX "MarketingChannel_status_idx" ON "MarketingChannel"("status");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "MarketingChannel_provider_externalAccountRef_key" ON "MarketingChannel"("provider", "externalAccountRef");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "MarketingPost_logicalKey_key" ON "MarketingPost"("logicalKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MarketingPost_providerRequestKey_key" ON "MarketingPost"("providerRequestKey");
 
 -- CreateIndex
 CREATE INDEX "MarketingPost_channelId_status_idx" ON "MarketingPost"("channelId", "status");
@@ -360,12 +366,12 @@ ALTER TABLE "AiVisibilityRun" ADD CONSTRAINT "AiVisibilityRun_answerDigest_check
 ALTER TABLE "AiVisibilityRun" ADD CONSTRAINT "AiVisibilityRun_citedUrls_check" CHECK ("marketing_all_https"("citedUrls"));
 ALTER TABLE "AiVisibilityRun" ADD CONSTRAINT "AiVisibilityRun_retentionUntil_check" CHECK ("retentionUntil" = "runAt" + INTERVAL '24 months');
 
--- Partial unique indexes, which schema.prisma cannot express. The first stops
--- two rows claiming the same connected account; the second stops two posts
--- claiming the same provider idempotency key, which is what makes a repeated
--- publish one post rather than two.
-CREATE UNIQUE INDEX "MarketingChannel_provider_externalAccountRef_key" ON "MarketingChannel"("provider", "externalAccountRef") WHERE "externalAccountRef" IS NOT NULL;
-CREATE UNIQUE INDEX "MarketingPost_providerRequestKey_key" ON "MarketingPost"("providerRequestKey") WHERE "providerRequestKey" IS NOT NULL;
+-- The two uniques that stop a second row claiming a connected account or a
+-- provider idempotency key. Plain rather than partial: Postgres treats NULLs as
+-- distinct in a unique index, so `WHERE ... IS NOT NULL` would add nothing and
+-- would put an index in the database that prisma/schema.prisma cannot declare --
+-- which is drift. 20260801190000 replaced an earlier partial index for the same
+-- reason. These two are in the generated block above, with the rest.
 
 -- ---------------------------------------------------------------------------
 -- MarketingChannel: caps, identity, transitions, deletion

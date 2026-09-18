@@ -5585,6 +5585,7 @@ model MarketingChannel {
 
   posts MarketingPost[]
 
+  @@unique([provider, externalAccountRef])
   @@index([status])
 }
 
@@ -5623,7 +5624,7 @@ model MarketingPost {
   claimToken         String?
   leaseUntil         DateTime?
   publishAttempt     Int       @default(0)
-  providerRequestKey String?
+  providerRequestKey String?   @unique
   externalPostId     String?
   externalUrl        String?
   publishedAt        DateTime?
