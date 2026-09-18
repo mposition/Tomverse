@@ -19,7 +19,8 @@
     "tests/integration/admin-audit-chain-writer.db.test.ts",
     "tests/integration/marketing-automation-schema.db.test.ts",
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
-    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1"
   ],
   "generatedPaths": [
     "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1"
