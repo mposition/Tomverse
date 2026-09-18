@@ -13,6 +13,7 @@ import {
   createMarketingPost,
   insertAiVisibilityRun,
   insertMarketingReport,
+  MarketingStoreRefusedError,
   updateMarketingChannel,
   MARKETING_RESUME_AUTONOMOUS_ACTION,
 } from "@/lib/marketingStore";
@@ -275,6 +276,14 @@ const refusedCompaction = (id: string, history: unknown[], expected: RegExp) =>
 const refused = async (operation: Promise<unknown>, expected: RegExp) => {
   await assert.rejects(operation, (error: Error) => {
     assert.match(error.message, expected);
+    return true;
+  });
+};
+
+const refusedByStore = async (operation: Promise<unknown>, expectedCode: string) => {
+  await assert.rejects(operation, (error: Error) => {
+    assert.ok(error instanceof MarketingStoreRefusedError);
+    assert.equal(error.code, expectedCode);
     return true;
   });
 };
@@ -669,7 +678,7 @@ test("a dispatched post cannot go back to a state that says it never left", asyn
   await refused(
     prisma.marketingPost.update({
       where: { id: draft.id },
-      data: { status: "published", publishedAt: new Date() },
+      data: { status: "published" },
     }),
     /cannot move from drafted to published/,
   );
@@ -727,6 +736,19 @@ test("a post cannot become published without recording when", async () => {
       data: { status: "published" },
     }),
     /cannot become published without recording when|published_records_when/,
+  );
+});
+
+test("a post records a publication time only when it becomes published", async () => {
+  const row = await approvedChannel();
+  const draft = await post(row.id);
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { publishedAt: new Date() },
+    }),
+    /records a publication time only when it becomes published/,
   );
 });
 
@@ -1199,9 +1221,9 @@ test("an audit entry resumes an account once, and only after the pause", async (
   });
   assert.equal(paused.pausedFromMode, "autonomous_mode");
 
-  await refused(
+  await refusedByStore(
     resumeAutonomous(row.id, staleAuditId, "incident_resolved"),
-    /entry_predates_decision/,
+    "resume_evidence_entry_predates_decision",
   );
 
   const freshAuditId = await resumeAuditEntry(row.id, "incident_resolved");
@@ -1222,9 +1244,9 @@ test("an audit entry resumes an account once, and only after the pause", async (
     where: { id: row.id },
     data: { status: "paused" },
   });
-  await refused(
+  await refusedByStore(
     resumeAutonomous(row.id, freshAuditId, "incident_resolved"),
-    /resume_evidence_reused/,
+    "resume_evidence_reused",
   );
 });
 
@@ -1275,7 +1297,7 @@ test("a retention entry's values are typed, not just keyed", async () => {
   await refusedCompaction(
     created.id,
     [draftEntry, { ...summary, firstAt: "2026-09-18 00:00:00" }, compaction],
-    /is not the shape a summary has/,
+    /not an instant this store can read back/,
   );
 
   await prisma.$transaction(async (tx) => {
