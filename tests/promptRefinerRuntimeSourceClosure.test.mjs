@@ -208,6 +208,11 @@ const isInstalledDependencyResolution = (path) =>
 
 const resolveLocalRuntimeImport = (fromPath, specifier) => {
   const workspace = workspaceForSpecifier(specifier);
+  assert.equal(
+    specifier.startsWith("@tomverse/") && workspace === null,
+    false,
+    `unrecognized local workspace import: ${specifier} from ${fromPath}`
+  );
   const resolution = ts.resolveModuleName(
     specifier,
     join(repositoryRoot, fromPath),
@@ -1152,6 +1157,10 @@ test("installed dependency declarations are external but workspace sources remai
   assert.equal(isInstalledDependencyResolution("packages/example/node_modules/dependency/index.d.ts"), true);
   assert.equal(isInstalledDependencyResolution("packages/chat-core/src/index.ts"), false);
   assert.equal(resolveLocalRuntimeImport("lib/promptRefinerStageAdmission.ts", "next-auth/next"), null);
+  assert.throws(
+    () => resolveLocalRuntimeImport("lib/promptRefinerStageAdmission.ts", "@tomverse/not-a-workspace"),
+    /unrecognized local workspace import/
+  );
 });
 
 test("TypeScript options and workspace metadata control local resolution", () => {

@@ -305,7 +305,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 1,
     writeVerbs: 4,
     reason:
-      "The retention registry's prose: one entry says an AI visibility run has the same shape as MarketingReport's, and other entries in the file use the words delete and update. A report; it opens no database connection.",
+      "The retention registry's prose: the Prompt Refiner stage entry contributes update/delete, and two other entries describe deletes. MarketingReport is named by an AI-visibility shape comparison. This is a report; it opens no database connection.",
   },
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
