@@ -207,6 +207,32 @@ test("the retention setting is spelled the same in both places", () => {
   assert.ok(MIGRATION.includes(`'${MARKETING_RETENTION_SETTING}'`));
 });
 
+test("every retention setting read is NULL-safe", () => {
+  // current_setting(..., true) returns NULL when this custom setting has never
+  // been set. Pin all three reads: the update trigger converts NULL to false,
+  // while both delete triggers treat NULL as different from the enabling value.
+  const escapedSetting = MARKETING_RETENTION_SETTING.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  const reads = [
+    ...MIGRATION.matchAll(
+      new RegExp(
+        `pg_catalog\\.current_setting\\(\\s*'${escapedSetting}',\\s*true\\s*\\)\\s+(IS(?: NOT)? DISTINCT FROM 'on')`,
+        "g",
+      ),
+    ),
+  ].map((match) => match[1]);
+  assert.deepEqual(
+    reads,
+    [
+      "IS NOT DISTINCT FROM 'on'",
+      "IS DISTINCT FROM 'on'",
+      "IS DISTINCT FROM 'on'",
+    ],
+  );
+});
+
 test("every report kind has a payload schema and a retention period", () => {
   for (const kind of MARKETING_REPORT_KINDS) {
     assert.ok(MARKETING_REPORT_PAYLOAD_SCHEMAS[kind], `${kind} has no payload schema`);

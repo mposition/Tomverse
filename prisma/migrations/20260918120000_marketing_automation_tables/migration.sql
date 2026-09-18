@@ -795,7 +795,14 @@ DECLARE
     summary JSONB;
     now_utc TIMESTAMP(3);
 BEGIN
-    retention_running := pg_catalog.current_setting('tomverse.marketing_retention_compaction', true) = 'on';
+    -- `missing_ok = true` returns NULL when no session has ever named this
+    -- custom setting. Make the comparison NULL-safe: otherwise both
+    -- `IF retention_running` and `IF NOT retention_running` are skipped and an
+    -- ordinary append falls through into the compaction-only branch.
+    retention_running := pg_catalog.current_setting(
+        'tomverse.marketing_retention_compaction',
+        true
+    ) IS NOT DISTINCT FROM 'on';
     now_utc := pg_catalog.clock_timestamp() AT TIME ZONE 'UTC';
     old_length := pg_catalog.jsonb_array_length(OLD."history");
     new_length := pg_catalog.jsonb_array_length(NEW."history");
@@ -1207,15 +1214,15 @@ BEGIN
     END LOOP;
 
     -- A summary for something that did not leave is a record of a removal that
-    -- never happened, so the counts have to match in both directions. Counting
-    -- rows rather than distinct values: two summaries of the same kind are two
-    -- rows here and one distinct value, and the per-kind check below would then
-    -- be the only thing that noticed.
+    -- never happened. Refuse an excess here; a missing summary reaches the
+    -- per-kind check below, whose error names the kind that is absent. Counting
+    -- rows here catches an outright excess; the per-kind check also catches a
+    -- duplicate that took the place of another removed kind's summary.
     IF (
         SELECT pg_catalog.count(*)
         FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
         WHERE "entry" ->> 'type' = 'retention_summary'
-    ) <> (
+    ) > (
         SELECT pg_catalog.count(DISTINCT "entry" ->> 'type')
         FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
     ) THEN
