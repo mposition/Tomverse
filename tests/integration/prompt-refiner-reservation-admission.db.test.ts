@@ -123,7 +123,7 @@ beforeEach(async () => {
 test("migration has no seed and the writer atomically binds provenance to one audit", async () => {
   assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
   const migration = readFileSync(
-    "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+    "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
     "utf8"
   );
   assert.doesNotMatch(migration, /INSERT\s+INTO\s+"PromptRefinerReservationStage"/i);

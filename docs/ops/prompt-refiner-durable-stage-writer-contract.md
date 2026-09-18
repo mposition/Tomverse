@@ -163,4 +163,7 @@ source/deployment/execution, model/pricing이 모두 현재일 때만 기존 res
   expiry 및 consume 거부
 - 기존 proposal/reservation/execution/Refiner/injection/PLANNER-03 회귀
 
-독립 Claude 검토 package는 내부 검증 완료 뒤 별도 cycle에서 생성한다.
+독립 Claude round 0 package digest는
+`sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`이고
+판정은 `request_changes`다. 지적 수정과 검증 뒤 round 1 제출 대기이며, 이 기록은
+독립 검토 통과나 구현 완료를 뜻하지 않는다.

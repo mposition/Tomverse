@@ -48,7 +48,10 @@ flag·credential·receipt writer를 연결하지 않는다.
    lock은 하지 않는다.
 8. SQL 우회로 provenance 수정·삭제, 만료 후 reserve·consume을 할 수 없다.
 9. 모든 기존 Prompt Refiner, injection, PLANNER-03 회귀가 유지된다.
-10. 독립 검토 package는 이 구현/내부 검증 회차 뒤 별도 단계에서 생성한다.
+10. 독립 Claude round 0 package digest는
+    `sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`이고
+    판정은 `request_changes`다. 지적 수정과 검증 뒤 round 1 제출 대기이며, 이
+    기록은 독립 검토 통과나 구현 완료를 뜻하지 않는다.
 11. closure 검사는 현재 정상 source의 명시적 safe form만 허용한다. 열거된 Reflect/process/
     module/globalThis/eval/Function loader 형태와 constructor/prototype chain은 fail-closed하며,
     임의 JavaScript reflection 전체를 증명한다고 주장하지 않는다. 새 capability는 계약과

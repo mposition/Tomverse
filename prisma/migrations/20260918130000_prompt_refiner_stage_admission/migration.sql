@@ -89,7 +89,7 @@ DECLARE
         'package-lock.json',
         'tsconfig.json',
         'prisma/schema.prisma',
-        'prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql',
+        'prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql',
         'apps/mobile/package.json',
         'packages/chat-core/package.json',
         'packages/ui-tokens/package.json',

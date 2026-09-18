@@ -1169,7 +1169,7 @@ events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검
 4. 사용자 선택 증거가 쌓인 뒤 Refiner→Router 결합과 full-catalog 선택 품질 최적화를
    별도 실험으로 진행한다.
 
-## 2026-09-17 Prompt Refiner durable stage writer 회차 (내부 검증 완료, 독립 검토 대기)
+## 2026-09-17 Prompt Refiner durable stage writer 회차 (round 0 request_changes, 수정 검증·round 1 대기)
 
 앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source
 identity와 승인 시점 staging deployment의 full commit, exact 186-file runtime import-closure source manifest,
@@ -1195,8 +1195,8 @@ provider admission은 열리지 않는다.
 | 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +3%p** — 유료 실행은 열지 않고 승인 provenance와 expiry 경계를 구현했다. |
 | C19–C20 Refiner·Planner·품질 평가 | **약 51%** (직전 약 47%, durable 승인/감사/runtime 재검증 반영) |
 | 구현 | additive no-seed migration, content-free exact-byte manifest, owner-only preview/create, 원자 audit+stage, same-runtime idempotency, create/replay/reserve/consume 공용 stage-linked audit HMAC 검증과 runtime source·execution 재검증 |
-| 내부 검증 | 독립 verifier 기준 focused Prompt Refiner **96/96**, admin route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL **17.10** fresh DB에서 전체 **121 migration**, Prisma diff **0**, 관련 DB **31/31**. typecheck·대상 lint·문서·정책·encoding·data-domain·prompt-injection·DB coverage·API cache·enum 검사 **PASS** |
-| 독립 검토·통합 CI | 내부 검증 완료 뒤 Claude Code Max 읽기 전용 검토가 필요하다. review package는 아직 만들지 않았다. |
+| 내부 검증 | 독립 verifier 기준 focused Prompt Refiner **96/96**, admin audit chain **19/19**, shadow-stage route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL **17.10** fresh DB에서 전체 **124 migration**, Prisma diff **0**, 관련 DB **35/35**. typecheck·대상 lint·문서·정책·encoding·data-domain·prompt-injection·DB coverage·API cache·enum 검사 **PASS** |
+| 독립 검토·통합 CI | round 0 package digest는 `sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`, 판정은 `request_changes`다. 지적 수정과 검증 뒤 round 1 제출 대기이며 통과·완료로 간주하지 않는다. |
 | 공개 상태 | provider/API/Railway/유료 호출 0, stage seed 0, 제품 caller·flag·성공 admission 없음 |
 
 범위 밖 관찰: 별도 전체 검사에서 확인된 Brisbane chat-concurrency 기존 실패는 이 기능의

@@ -166,7 +166,7 @@ const fixedNonImportPaths = Object.freeze([
   "package-lock.json",
   "tsconfig.json",
   "prisma/schema.prisma",
-  "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+  "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
   ...workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))).sort(),
 ]);
 
@@ -1157,7 +1157,7 @@ test("TypeScript options and workspace metadata control local resolution", () =>
 
 test("TypeScript and PostgreSQL enforce the identical ordered runtime source paths", () => {
   const migration = readFileSync(
-    join(repositoryRoot, "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql"),
+    join(repositoryRoot, "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql"),
     "utf8"
   );
   const block = migration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
