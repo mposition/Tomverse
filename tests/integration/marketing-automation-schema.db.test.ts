@@ -1227,3 +1227,158 @@ test("an audit entry resumes an account once, and only after the pause", async (
     /resume_evidence_reused/,
   );
 });
+
+test("a retention entry's values are typed, not just keyed", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  const oldAttempt = {
+    at: new Date(Date.now() - 200 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "outcome_unknown",
+    errorCode: null,
+  };
+  const created = await agedPost(row.id, 400, {
+    history: [draftEntry, oldAttempt],
+    historyVersion: 0,
+  });
+
+  const summary = {
+    at: new Date().toISOString(),
+    type: "retention_summary",
+    summarises: "attempt",
+    count: 1,
+    firstAt: oldAttempt.at,
+    lastAt: oldAttempt.at,
+  };
+  const compaction = historyEntry("retention_compaction", { removedEntryCount: 1 });
+
+  // A string that reads as a number passes `::INTEGER` and would be written.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, count: "1" }, compaction],
+    /is not the shape a summary has/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, summary, { ...compaction, removedEntryCount: "1" }],
+    /is not the shape it has/,
+  );
+  // Not a time at all.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, at: 0 }, compaction],
+    /is not the shape a summary has/,
+  );
+  // A time Postgres reads happily and the module's schema refuses, which is the
+  // pair that would write a row nothing can read back.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, firstAt: "2026-09-18 00:00:00" }, compaction],
+    /is not the shape a summary has/,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: created.id },
+      data: { history: [draftEntry, summary, compaction], historyVersion: 1 },
+    });
+  });
+  const compacted = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: created.id },
+  });
+  assert.equal((compacted.history as { type: string }[]).length, 3);
+});
+
+test("a post cannot become failed with no failure in its history", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed with no failed attempt in its history/,
+  );
+
+  const failed = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [
+        ...(dispatched.history as Prisma.InputJsonValue[]),
+        historyEntry("attempt", { attempt: 1, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  assert.equal(failed.status, "failed");
+});
+
+test("compacting a failure away does not open a path into failed", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  const oldFailure = {
+    at: new Date(Date.now() - 200 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  const created = await agedPost(row.id, 400, {
+    history: [draftEntry, oldFailure],
+    historyVersion: 0,
+  });
+
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: created.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-2",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled" });
+  await step({
+    status: "publishing",
+    publishAttempt: 2,
+    providerRequestKey: created.logicalKey,
+  });
+
+  // Compaction is allowed here: the post is not failed, so nothing is measuring
+  // against that attempt yet.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: created.id },
+      data: {
+        history: [
+          draftEntry,
+          {
+            at: new Date().toISOString(),
+            type: "retention_summary",
+            summarises: "attempt",
+            count: 1,
+            firstAt: oldFailure.at,
+            lastAt: oldFailure.at,
+          },
+          historyEntry("retention_compaction", { removedEntryCount: 1 }),
+        ],
+        historyVersion: 1,
+      },
+    });
+  });
+
+  // And now the post cannot become failed without recording the failure, so the
+  // two-step route to a failed post with no way out is closed.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed with no failed attempt in its history/,
+  );
+});

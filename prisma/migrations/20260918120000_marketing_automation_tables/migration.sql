@@ -753,6 +753,11 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     retention_running BOOLEAN;
+    -- The same instants lib/marketingAutomationSchema.ts accepts: a date, a time,
+    -- and an offset. Postgres reads far more than this as a timestamp, and a
+    -- value it accepts but the module refuses is a row nothing can read back.
+    iso_instant CONSTANT TEXT :=
+        '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$';
     last_failure_at TIMESTAMP(3);
     old_length INTEGER;
     new_length INTEGER;
@@ -831,6 +836,22 @@ BEGIN
         -- and an old draft published today would be purgeable immediately.
         IF NEW."status" = 'published' AND NEW."publishedAt" IS NULL THEN
             RAISE EXCEPTION 'MarketingPost % cannot become published without recording when', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        -- A post that is failed carries the failure in its history, because that
+        -- is what the re-queue below is measured against. Checked on the way in
+        -- rather than only while the post sits there: compacting the old attempt
+        -- away first and moving to `failed` afterwards -- or in the same
+        -- statement, where OLD.status is still the earlier one -- would otherwise
+        -- produce a failed post with no exit at all.
+        IF NEW."status" = 'failed' AND NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.jsonb_array_elements(NEW."history") AS "h"("entry")
+            WHERE "entry" ->> 'type' = 'attempt'
+              AND "entry" ->> 'outcome' = 'failed'
+        ) THEN
+            RAISE EXCEPTION 'MarketingPost % cannot be failed with no failed attempt in its history', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;
 
@@ -1073,14 +1094,31 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
 
-        -- The exact key set, so a summary cannot carry anything else along with
-        -- it. "C" collation because the comparison is against a literal array
-        -- and must not depend on the database's locale.
+        -- The exact key set *and* the type of every value. "C" collation because
+        -- the comparison is against a literal array and must not depend on the
+        -- database's locale.
+        --
+        -- The types matter as much as the keys. `count: "1"` is a string that
+        -- `::INTEGER` would happily read below, and `at: 0` is not a time at
+        -- all; both would be written, and then lib/marketingStore.ts would fail
+        -- to parse the history it was about to append to -- which stops every
+        -- later write to that post. The timestamp pattern is the same contract
+        -- as the module's ISO-with-offset instants, rather than everything
+        -- Postgres is willing to read as a time.
         IF element ->> 'type' = 'retention_summary' THEN
             IF (
                 SELECT pg_catalog.array_agg("key" ORDER BY "key" COLLATE "C")
                 FROM pg_catalog.jsonb_object_keys(element) AS "k"("key")
-            ) IS DISTINCT FROM ARRAY['at', 'count', 'firstAt', 'lastAt', 'summarises', 'type'] THEN
+            ) IS DISTINCT FROM ARRAY['at', 'count', 'firstAt', 'lastAt', 'summarises', 'type']
+                OR pg_catalog.jsonb_typeof(element -> 'count') IS DISTINCT FROM 'number'
+                OR (element -> 'count')::TEXT !~ '^[1-9][0-9]*$'
+                OR pg_catalog.jsonb_typeof(element -> 'summarises') IS DISTINCT FROM 'string'
+                OR pg_catalog.jsonb_typeof(element -> 'at') IS DISTINCT FROM 'string'
+                OR pg_catalog.jsonb_typeof(element -> 'firstAt') IS DISTINCT FROM 'string'
+                OR pg_catalog.jsonb_typeof(element -> 'lastAt') IS DISTINCT FROM 'string'
+                OR (element ->> 'at') !~ iso_instant
+                OR (element ->> 'firstAt') !~ iso_instant
+                OR (element ->> 'lastAt') !~ iso_instant THEN
                 RAISE EXCEPTION 'MarketingPost % retention summary is not the shape a summary has', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
@@ -1088,7 +1126,11 @@ BEGIN
             IF (
                 SELECT pg_catalog.array_agg("key" ORDER BY "key" COLLATE "C")
                 FROM pg_catalog.jsonb_object_keys(element) AS "k"("key")
-            ) IS DISTINCT FROM ARRAY['at', 'removedEntryCount', 'type'] THEN
+            ) IS DISTINCT FROM ARRAY['at', 'removedEntryCount', 'type']
+                OR pg_catalog.jsonb_typeof(element -> 'removedEntryCount') IS DISTINCT FROM 'number'
+                OR (element -> 'removedEntryCount')::TEXT !~ '^[1-9][0-9]*$'
+                OR pg_catalog.jsonb_typeof(element -> 'at') IS DISTINCT FROM 'string'
+                OR (element ->> 'at') !~ iso_instant THEN
                 RAISE EXCEPTION 'MarketingPost % retention compaction entry is not the shape it has', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
