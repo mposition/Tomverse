@@ -1581,3 +1581,50 @@ test("a failure already in the history is not this statement's record of it", as
     /in the same write/,
   );
 });
+
+test("a second dispatch cannot reuse the first attempt's number", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-3",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+
+  // Leaving the counter alone was the remaining way to give two real attempts
+  // the same number, which would make the failure entries of both indistinguishable.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "publishing" },
+    }),
+    /dispatch moves the attempt counter by one/,
+  );
+
+  const second = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+  assert.equal(second.publishAttempt, 2);
+});
