@@ -16,7 +16,11 @@ Claude 읽기 전용 독립 검토에만 적용한다. author는 Codex, reviewer
 supersedes는 없다. exact base는
 `c49d5a3606f259356612ddc5872f29f5fe465158`, 독립 검토에 제출할 구현 source는
 `58d3e1617940c0c8c6ecffd5be993a0396460bdb`다. writable scope는 base 대비 구현
-변경 30개와 이 task/authorization 2개를 합친 exact 32개 경로이고
+변경 30개와 이 task/authorization 2개를 합친 현재 검토 diff exact 32개 경로에,
+round 0 migration rename source
+`prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql` 1개를
+multi-round replay provenance 보존용 historical-only 경로로 유지한 exact 33개
+union이다. 이 추가는 현재 writable source나 검토 diff를 넓히지 않으며
 `generatedPaths`는 비어 있다.
 
 Round 0 reviewed digest
