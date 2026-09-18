@@ -350,20 +350,26 @@ test("the templates that had to move are the ones that moved", () => {
   assert.equal(roleOf("account_welcome"), "general");
 });
 
-test("the login-code sender is named identically wherever it is written", () => {
-  // lib/emailLoginEmails.ts names the role rather than importing it, because
-  // lib/emailTemplateDefinitions.ts imports *it* for the renderer and a cycle
-  // for one string is the worse trade. This is what stops the two drifting.
-  const definition = allTemplateDefinitions().find(
-    (entry) => entry.key === "auth_login_code"
-  );
+test("the login emails name no sender role of their own", () => {
+  // They used to: the file sent as well as rendered, so it named the role and
+  // lib/emailTemplateDefinitions.ts named it again, and this test existed to
+  // stop the two drifting. The file only renders now -- the credential lane
+  // carries the login code and the standard lane carries the login-method
+  // notices -- so the role is the registry's, in one place, and there is
+  // nothing left to drift against (docs/policy/email-notifications.md v23).
   const source = readFileSync("lib/emailLoginEmails.ts", "utf8");
-  const declared = [...source.matchAll(/senderRole:\s*"([a-z]+)"/g)].map(
-    (match) => match[1]
-  );
-  assert.ok(declared.length > 0, "the login emails name no sender role");
-  for (const role of declared) {
-    assert.equal(role, definition.senderRole);
+  assert.deepEqual([...source.matchAll(/senderRole:\s*"([a-z]+)"/g)], []);
+
+  // And the roles those templates go out as are the ones the contract names: a
+  // login code and a login-method change are both security.
+  for (const key of [
+    "auth_login_code",
+    "login_method_linked",
+    "login_method_unlinked",
+  ]) {
+    const definition = allTemplateDefinitions().find((entry) => entry.key === key);
+    assert.ok(definition, key);
+    assert.equal(definition.senderRole, "security", key);
   }
 });
 

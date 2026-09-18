@@ -12,7 +12,10 @@ import { removeLoginMethod } from "@/lib/loginMethodsCore";
 
 const resetLoginMethodsData = () =>
   prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE "Session", "Account", "User" RESTART IDENTITY CASCADE
+    TRUNCATE TABLE
+      "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
+      "EmailPolicyVersion", "Session", "Account", "User"
+    RESTART IDENTITY CASCADE
   `);
 
 beforeEach(resetLoginMethodsData);
@@ -131,4 +134,41 @@ test("concurrent removal of a user's last two methods cannot remove both", async
   });
   const enabledCount = googleLinked + (reloaded.emailLoginEnabled ? 1 : 0);
   assert.equal(enabledCount, 1, "exactly one login method must remain enabled");
+});
+
+test("the removal queues its notice in the same transaction", async () => {
+  // It used to be sent after the response, and a failure left an incident and
+  // a person who had been signed out of every device and told nothing
+  // (docs/policy/email-notifications.md v23).
+  const user = await createUser({ google: true, emailLoginEnabled: true });
+
+  assert.equal(await removeLoginMethod(user.id, "google"), "removed");
+
+  const queued = await prisma.emailDelivery.findMany({
+    where: { userId: user.id },
+    select: { emailAddress: true, lane: true, status: true, renderDataSnapshot: true },
+  });
+  assert.equal(queued.length, 1, "the notice is in the queue, not in an after()");
+  assert.equal(queued[0].emailAddress, user.email);
+  assert.equal(queued[0].lane, "standard");
+  assert.equal(queued[0].status, "pending");
+  // Queued, not sent: what the lane does next -- the address lock, the
+  // suppression re-check, the retries -- is the lane's, and this row is what
+  // makes it happen at all.
+  assert.notEqual(queued[0].renderDataSnapshot, null);
+});
+
+test("a removal that changed nothing queues nothing", async () => {
+  // A redundant call returns `already-removed` without revoking sessions; it
+  // must not announce a removal that did not happen either.
+  const user = await createUser({ google: true, emailLoginEnabled: true });
+  assert.equal(await removeLoginMethod(user.id, "azure-ad"), "already-removed");
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
+});
+
+test("a removal that is refused queues nothing", async () => {
+  // The last method cannot be removed, so there is nothing to announce.
+  const user = await createUser({ google: true });
+  assert.equal(await removeLoginMethod(user.id, "google"), "blocked");
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
 });

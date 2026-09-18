@@ -85,6 +85,14 @@ async function loadRoute() {
           world.emails.push(input);
           return { sent: true, skipped: false, id: "qa-email" };
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: { to: string; subject: string; text: string }) => {
+          world.emails.push(input);
+          return { ok: true, providerMessageId: "qa-email", from: "support@tomverse.app", senderRole: "support" };
+        },
       },
     });
     const fakePrisma: Record<string, unknown> = {

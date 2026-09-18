@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+
+import {
+  SEND_ALLOWLIST,
+  sendEntryPointViolations,
+} from "../scripts/check-send-entry-points-core.mjs";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -150,14 +155,29 @@ test("the four templates are transactional and carry no unsubscribe link", () =>
 // The acceptance criterion, as a check rather than a state somebody observed
 // once: no user-facing path may call the provider directly again.
 //
-// The three exemptions are the ones ADR §2.4 and §9.4a name. The credential
-// lane is not an oversight -- a login code lives ten minutes and a fifteen
-// minute drain would deliver it after it expired.
-const DIRECT_SEND_ALLOWLIST = new Map([
-  ["app/api/admin/test-email/route.ts", "operator's own test send"],
-  ["lib/emailLoginEmails.ts", "credential synchronous lane (§9.4a)"],
-  ["lib/notificationDeliveries.ts", "the notification retry queue's own sender"],
-]);
+// The list of who may lives in one place now --
+// `scripts/check-send-entry-points-core.mjs`, enforced by
+// `npm run check:send-entry-points` in PR Fast Gate. This test used to carry a
+// second copy, and two lists of the same rule drift: the copy here still
+// exempted the credential lane's old sender months after the lane stopped
+// using it (docs/policy/email-notifications.md v23).
+//
+// What is asserted here is the part that check cannot see: that the exemptions
+// are the ones the contract names, and that each says why.
+test("the files allowed to send directly are the ones the contract names", () => {
+  assert.deepEqual(Object.keys(SEND_ALLOWLIST).sort(), [
+    "app/api/admin/test-email/route.ts",
+    "lib/email.ts",
+    "lib/emailSendLock.ts",
+    "lib/operationalMonitoring.ts",
+    "lib/operatorNotificationSend.ts",
+    "lib/providerMonitoring.ts",
+  ]);
+  // The queue is the one that must not be here: it carries customer notices
+  // and operator alerts in one file, so allowing it would allow a customer
+  // send in it to skip the address lock (section 7.4, C41).
+  assert.equal(Object.hasOwn(SEND_ALLOWLIST, "lib/notificationDeliveries.ts"), false);
+});
 
 test("no user-facing path sends transactional email directly", () => {
   const tracked = execFileSyncLines("git", [
@@ -167,27 +187,16 @@ test("no user-facing path sends transactional email directly", () => {
     "scripts",
   ]).filter((file) => file.endsWith(".ts") || file.endsWith(".tsx"));
 
-  const callers = tracked.filter((file) => {
-    if (file === "lib/email.ts") return false;
-    return /\bsendTransactionalEmail\s*\(/.test(readFileSync(file, "utf8"));
-  });
-
-  const unexpected = callers.filter((file) => !DIRECT_SEND_ALLOWLIST.has(file));
-  assert.deepEqual(
-    unexpected,
-    [],
-    "these call the provider directly and would lose the message on failure; " +
-      "enqueue through lib/standardEmailLane.ts instead"
+  const violations = sendEntryPointViolations(
+    tracked.map((file) => ({ path: file, source: readFileSync(file, "utf8") }))
   );
 
-  // And the other direction, so a removed exemption does not sit here
-  // pretending to still guard something.
-  for (const file of DIRECT_SEND_ALLOWLIST.keys()) {
-    assert.ok(
-      callers.includes(file),
-      `${file} no longer sends directly; drop it from the allowlist`
-    );
-  }
+  assert.deepEqual(
+    violations.map((violation) => violation.path),
+    [],
+    "these reach the provider without the address lock; a customer send belongs " +
+      "in sendWithAddressLock(), an operator alert in an allowlisted module"
+  );
 });
 
 function execFileSyncLines(command, args) {

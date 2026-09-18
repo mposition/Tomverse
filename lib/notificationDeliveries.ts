@@ -2,7 +2,6 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendTransactionalEmail } from "@/lib/email";
 import {
   buildSupportNotificationEmail,
   supportNotificationRecipient,
@@ -17,6 +16,7 @@ import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import { qualifiesForTraceAutoReview } from "@/lib/feedbackTraceAutoReview";
 import { feedbackStageRecipient } from "@/lib/feedbackLifecycleCore";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
+import { sendOperatorNotification } from "@/lib/operatorNotificationSend";
 import { STANDARD_SEND_PROVIDER_TIMEOUT_MS } from "@/lib/emailSendLockCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -28,6 +28,7 @@ import {
   NOTIFICATION_DELIVERY_STATUS,
   classifyNotificationError,
   nextNotificationDeliveryState,
+  notificationOutcomeForProviderResult,
   type NotificationAttemptOutcome,
 } from "@/lib/notificationRetryCore";
 
@@ -517,13 +518,13 @@ export async function attemptNotificationDelivery({
         // request could outlive the lock and put a message on the wire after a
         // withdrawal completed.
         providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
-        submit: ({ providerTimeoutMs }) =>
-          sendTransactionalEmail({
-            ...message,
-            senderRole,
-            idempotencyKey: `notification-delivery:${deliveryId}`,
-            timeoutMs: providerTimeoutMs,
-          }),
+        message: {
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+        },
+        senderRole,
+        idempotencyKey: `notification-delivery:${deliveryId}`,
       });
       if (submitted.ok === false && submitted.reason === "lock_unavailable") {
         return { kind: "lock_unavailable" };
@@ -548,17 +549,18 @@ export async function attemptNotificationDelivery({
           context: { component: "notification-deliveries", classification: "transactional" },
         });
       }
-      if (submitted.value.skipped) return { kind: "not_configured" };
-      return { kind: "delivered" };
+      // Read from the provider's answer rather than from a thrown string. A
+      // refused sending identity used to arrive as an unparseable message and
+      // be classified `unknown` and retried, when no amount of waiting sets an
+      // environment variable (lib/notificationRetryCore.ts).
+      return notificationOutcomeForProviderResult(submitted.value);
     }
 
-    const result = await sendTransactionalEmail({
-      ...message,
-      senderRole,
-      idempotencyKey: `notification-delivery:${deliveryId}`,
-    });
-    if (result.skipped) return { kind: "not_configured" };
-    return { kind: "delivered" };
+    // An operator alert, through the one module allowed to submit one. This
+    // file is deliberately not on the send allowlist: it carries both kinds,
+    // and a file-level allowance here would also cover a customer send that
+    // skipped the address lock (section 7.4, C41).
+    return sendOperatorNotification({ message, senderRole, deliveryId });
   } catch (error) {
     const { errorKind, permanent } = classifyNotificationError(error);
     return { kind: "failed", errorKind, permanent };

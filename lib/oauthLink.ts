@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
+import {
+    enqueueLoginMethodNotice,
+    loginMethodNoticeLanguage,
+    prepareLoginMethodNotice,
+} from "@/lib/loginMethodNotice";
 
 // Self-service "add Google/Microsoft to my already-logged-in account". NextAuth
 // v4's OAuth callbacks.signIn has no access to the incoming request/cookies, so
@@ -284,6 +289,23 @@ export async function completeOAuthLink(
             : undefined,
     });
 
-    await prisma.account.create({ data: encrypted });
+    // Before the transaction: registering a template version is not part of
+    // whether an account may be linked (lib/loginMethodNotice.ts).
+    await prepareLoginMethodNotice({
+        action: "linked",
+        language: await loginMethodNoticeLanguage(currentUserId),
+    });
+    await prisma.$transaction(async (tx) => {
+        await tx.account.create({ data: encrypted });
+        // In the same transaction as the link. The early return above is why
+        // this is here rather than in the route: a callback replayed for an
+        // account already linked reaches that return, and used to send "a login
+        // method was added" about nothing (section 7.4, C36).
+        await enqueueLoginMethodNotice(tx, {
+            userId: currentUserId,
+            action: "linked",
+            method: provider,
+        });
+    });
     logSecurityAuditEvent("auth.link_account", { userId: currentUserId, provider });
 }

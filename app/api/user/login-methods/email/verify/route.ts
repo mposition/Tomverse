@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
@@ -8,8 +8,11 @@ import { prisma } from "@/lib/prisma";
 import { verifyEmailLoginCodeForOwnAccount } from "@/lib/emailLogin";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
-import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  enqueueLoginMethodNotice,
+  loginMethodNoticeLanguage,
+  prepareLoginMethodNotice,
+} from "@/lib/loginMethodNotice";
 
 const verifySchema = z
   .object({
@@ -37,32 +40,29 @@ export async function POST(req: Request) {
       );
     }
 
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: { emailLoginEnabled: true },
+    // Before the transaction: registering a template version is not part of
+    // whether a login method may be enabled (lib/loginMethodNotice.ts).
+    await prepareLoginMethodNotice({
+      action: "linked",
+      language: await loginMethodNoticeLanguage(session.user.id),
+    });
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: session.user.id },
+        data: { emailLoginEnabled: true },
+      });
+      // In the same transaction as the change, so the notice cannot be lost
+      // while the new login method stands (section 7.4, C36).
+      await enqueueLoginMethodNotice(tx, {
+        userId: session.user.id,
+        action: "linked",
+        method: "email",
+      });
     });
     logSecurityAuditEvent("auth.login_method.link", {
       userId: session.user.id,
       provider: "email",
       outcome: "success",
-    });
-
-    after(async () => {
-      try {
-        await sendLoginMethodChangedEmail({
-          to: session.user.email,
-          action: "linked",
-          method: "email",
-        });
-      } catch (error) {
-        await reportOperationalIncident({
-          code: "LOGIN_METHOD_NOTIFICATION_FAILED",
-          title: "Login-method-linked notification failed",
-          error,
-          severity: "warning",
-          context: { component: "login-methods" },
-        });
-      }
     });
 
     return NextResponse.json({ ok: true });

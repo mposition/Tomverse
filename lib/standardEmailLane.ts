@@ -3,7 +3,6 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { deliverEmailOnce } from "@/lib/email";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
 import {
   SEND_LOCK_RETRY_MS,
@@ -1008,28 +1007,23 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     // so a call that outlived it would be submitting with no lock held
     // (docs/policy/email-notifications.md section 9.8).
     providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
-    submit: ({ providerTimeoutMs }) =>
-      deliverEmailOnce({
-        to: delivery.emailAddress,
-        ...rendered,
-        idempotencyKey: delivery.idempotencyKey,
-        // Marketing sends from its own domain or does not send. Derived from the
-        // template's classification rather than passed by the enqueuing caller,
-        // for the same reason the classification itself is: a caller that could
-        // choose would eventually choose wrong, and a promotion sent from the
-        // transactional domain has no symptom until login codes stop arriving
-        // (docs/policy/email-notifications.md §5.3, §14.1).
-        stream: streamForClassification(definition.classification),
-        // From the definition too, and for the same reason: the drain looks the
-        // template up by key on every attempt, so a retry hours later resolves the
-        // sender the first attempt used rather than one recomputed from what the
-        // retry happens to know (docs/policy/email-notifications.md §14.1a).
-        senderRole: definition.senderRole,
-        // Handed down rather than restated: the helper has already cut it to
-        // what the transaction can protect (lib/emailSendLockCore.ts).
-        timeoutMs: providerTimeoutMs,
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
-      }),
+    message: {
+      ...rendered,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    },
+    idempotencyKey: delivery.idempotencyKey,
+    // Marketing sends from its own domain or does not send. Derived from the
+    // template's classification rather than passed by the enqueuing caller, for
+    // the same reason the classification itself is: a caller that could choose
+    // would eventually choose wrong, and a promotion sent from the transactional
+    // domain has no symptom until login codes stop arriving
+    // (docs/policy/email-notifications.md §5.3, §14.1).
+    stream: streamForClassification(definition.classification),
+    // From the definition too, and for the same reason: the drain looks the
+    // template up by key on every attempt, so a retry hours later resolves the
+    // sender the first attempt used rather than one recomputed from what the
+    // retry happens to know (docs/policy/email-notifications.md §14.1a).
+    senderRole: definition.senderRole,
   });
 
   if (submitted.ok === false && submitted.reason === "lock_unavailable") {

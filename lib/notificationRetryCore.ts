@@ -188,3 +188,44 @@ export const nextNotificationDeliveryState = ({
     lastErrorKind: errorKind,
   };
 };
+
+/**
+ * What the provider's answer means for a queued notification.
+ *
+ * The customer-facing kinds submit through `sendWithAddressLock()`, which
+ * reports the provider's result rather than throwing a string for
+ * `classifyNotificationError()` to parse. Reading the result directly is both
+ * shorter and more truthful: a refused sending identity used to arrive here as
+ * an unparseable message and be classified `unknown` and retried, when no
+ * amount of waiting sets an environment variable.
+ *
+ * Pure, and beside the classifier it replaces for that path, so the two answers
+ * can be compared in one file.
+ */
+export const notificationOutcomeForProviderResult = (result: {
+  ok: boolean;
+  notConfigured?: boolean;
+  identityRefusal?: string | null;
+  status?: number | null;
+  transportError?: unknown;
+}): NotificationAttemptOutcome => {
+  if (result.ok) return { kind: "delivered" };
+  if (result.notConfigured) return { kind: "not_configured" };
+  if (result.identityRefusal) {
+    return {
+      kind: "failed",
+      errorKind: `identity_${result.identityRefusal.toLowerCase()}`.slice(0, 40),
+      permanent: true,
+    };
+  }
+  if (result.status === null || result.status === undefined) {
+    const name =
+      result.transportError instanceof Error ? result.transportError.name : "unknown";
+    return { kind: "failed", errorKind: name.slice(0, 40), permanent: false };
+  }
+  return {
+    kind: "failed",
+    errorKind: `http_${result.status}`,
+    permanent: isPermanentDeliveryStatus(result.status),
+  };
+};

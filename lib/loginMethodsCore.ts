@@ -1,6 +1,11 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import {
+  enqueueLoginMethodNotice,
+  loginMethodNoticeLanguage,
+  prepareLoginMethodNotice,
+} from "@/lib/loginMethodNotice";
 import { invalidateSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 export type LoginMethodProvider = "google" | "azure-ad" | "email";
@@ -20,6 +25,13 @@ export async function removeLoginMethod(
   userId: string,
   method: LoginMethodProvider
 ): Promise<RemoveLoginMethodOutcome> {
+  // Before the transaction, so registering a template version is never part of
+  // whether a login method may be removed (lib/loginMethodNotice.ts).
+  await prepareLoginMethodNotice({
+    action: "unlinked",
+    language: await loginMethodNoticeLanguage(userId),
+  });
+
   const outcome = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"login-methods:" + userId}))`;
 
@@ -65,6 +77,12 @@ export async function removeLoginMethod(
       where: { id: userId },
       data: { sessionsInvalidatedAt: new Date(), sessionsRevokedAt: new Date() },
     });
+
+    // In the same transaction as the removal, so the notice cannot be lost
+    // while the change stands. It used to be sent after the request and a
+    // failure left an incident: the account holder was signed out of every
+    // device and told nothing (section 7.4, C36).
+    await enqueueLoginMethodNotice(tx, { userId, action: "unlinked", method });
 
     return "removed" as const;
   });
