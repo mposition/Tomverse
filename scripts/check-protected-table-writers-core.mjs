@@ -292,30 +292,30 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
     table: "MarketingChannel",
-    tableMentions: 20,
-    writeVerbs: 14,
+    tableMentions: 48,
+    writeVerbs: 66,
     reason:
       "The migration that creates the marketing tables and the triggers that bound them. It names UPDATE, DELETE and INSERT to constrain or refuse them; the only statements that write a row are the CREATE TABLE and CREATE INDEX statements themselves. Applied history, so an edit changes a count.",
   },
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
     table: "MarketingPost",
-    tableMentions: 29,
-    writeVerbs: 14,
+    tableMentions: 67,
+    writeVerbs: 66,
     reason: "The same migration; see the MarketingChannel entry above.",
   },
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
     table: "MarketingReport",
-    tableMentions: 4,
-    writeVerbs: 14,
+    tableMentions: 11,
+    writeVerbs: 66,
     reason: "The same migration; see the MarketingChannel entry above.",
   },
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
     table: "AiVisibilityRun",
-    tableMentions: 5,
-    writeVerbs: 14,
+    tableMentions: 14,
+    writeVerbs: 66,
     reason: "The same migration; see the MarketingChannel entry above.",
   },
 ];
@@ -327,6 +327,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "The chain-head trigger reads the head with EXECUTE over TG_RELID::regclass -- the table the trigger is attached to -- so no search path or same-named temporary table can redirect the read. It builds no table name from input.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    count: 1,
+    reason:
+      "The post trigger reads its channel with EXECUTE over a name built from TG_TABLE_SCHEMA -- the schema its own table is in -- because an unqualified name resolves against the session search path, where a temporary table of the same name would answer for the real one. The schema is the trigger own schema, not input, not input, and it is quoted with %I.",
   },
   {
     path: "lib/prisma.ts",

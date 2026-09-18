@@ -5537,10 +5537,11 @@ model PromptRefinerReservation {
 }
 
 // The marketing automation tables (docs/policy/marketing-automation.md).
-// Invariants live in 20260918120000_marketing_automation_tables: closed-list
-// CHECKs that repeat lib/marketingAutomationSchema.ts, the O15 block on
-// autonomous posting where the API cannot retract a post, lower-only posting
-// caps, the account transitions of §8.2, append-only history, and deletes
+// Every invariant lives in 20260918120000_marketing_automation_tables: the
+// closed-list CHECKs that repeat lib/marketingAutomationSchema.ts, the O15
+// block on autonomous posting where the API cannot retract a post, lower-only
+// posting caps, the account transitions of section 8.2, the post status
+// whitelist, append-only history with a default-deny compaction, and deletes
 // bounded by retention. lib/marketingStore.ts is the only module that writes
 // them; npm run check:protected-table-writers enforces that.
 
@@ -5563,10 +5564,20 @@ model MarketingChannel {
   pausedAt             DateTime?
   pausedFromMode       String?
   pauseReasonCode      String?
-  dailyCapOverride     Int?
-  weeklyCapOverride    Int?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+
+  /// The audit entry and the reason an operator gave for returning this account
+  /// to autonomous mode (policy section 8.2). Recorded by id and with no
+  /// relation, for the reason AdminAuditLog.actorUserId is not a foreign key:
+  /// the entry is part of a hash chain, and a foreign-key action that rewrote
+  /// this column would make a real resume indistinguishable from an invented
+  /// one.
+  lastResumeAuditLogId String?
+  lastResumeReasonCode String?
+
+  dailyCapOverride  Int?
+  weeklyCapOverride Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   posts MarketingPost[]
 
@@ -5595,10 +5606,8 @@ model MarketingPost {
   status               String
   mode                 String
 
-  /// The approval's audit entry, by id and with no relation: the audit log is
-  /// append-only and hash-chained, so a foreign-key action that rewrote this
-  /// column would make an approval indistinguishable from a forged one -- the
-  /// same reason AdminAuditLog.actorUserId is not a foreign key.
+  /// The approval's audit entry, by id and with no relation, for the same
+  /// reason as lastResumeAuditLogId above.
   approvalAuditLogId String?
 
   approvedAt         DateTime?
@@ -5620,7 +5629,7 @@ model MarketingPost {
   outcomeUnknownAt   DateTime?
   deletedAt          DateTime?
   deletionMethod     String?
-  history            Json      @default("[]")
+  history            Json
   historyVersion     Int       @default(0)
   contentPurgedAt    DateTime?
   legalHold          Boolean   @default(false)
@@ -5636,13 +5645,18 @@ model MarketingPost {
 }
 
 model MarketingReport {
-  id             String   @id @default(cuid())
-  kind           String
-  periodStart    DateTime
-  periodEnd      DateTime
-  payload        Json
-  sourceVersion  String
-  retentionUntil DateTime
+  id            String   @id @default(cuid())
+  kind          String
+  periodStart   DateTime
+  periodEnd     DateTime
+  payload       Json
+  sourceVersion String
+
+  /// Both defaults exist so a writer may omit the columns. A BEFORE INSERT
+  /// trigger overwrites them from the server clock and the period the kind
+  /// carries, so neither default is ever the value that is stored, and a caller
+  /// cannot date a row into the past and delete it.
+  retentionUntil DateTime @default(now())
   createdAt      DateTime @default(now())
 
   @@index([kind, periodStart])
@@ -5663,8 +5677,10 @@ model AiVisibilityRun {
   citedUrls        String[]
   answerDigest     String
   accuracyFlags    Json?
-  retentionUntil   DateTime
-  createdAt        DateTime @default(now())
+
+  /// Set by the same kind of trigger as MarketingReport's, from runAt.
+  retentionUntil DateTime @default(now())
+  createdAt      DateTime @default(now())
 
   @@index([runAt])
   @@index([promptSetVersion, promptId])

@@ -659,6 +659,13 @@ const REGISTRY = {
     reason:
       "The four languages of docs/policy/marketing-automation.md O7. Simplified Chinese is only ever RedNote's, aimed at Chinese speakers outside the mainland, and mainland China is out of scope -- so a fifth locale is a market decision, not a translation.",
   },
+  MarketingChannel_lastResumeReasonCode_check: {
+    owner: "list",
+    module: "lib/marketingAutomationSchema.ts",
+    list: "MARKETING_RESUME_REASON_CODES",
+    reason:
+      "Why an operator returned a paused account to autonomous mode (docs/policy/marketing-automation.md 8.2). A closed list because it is read as a count later -- how often a pause turned out to be a false positive is a question about the halt rules, and free text cannot be counted. The operator sentence goes in the audit row the column names, not here. Nullable, because an account that has never been resumed has no reason.",
+  },
   MarketingChannel_pausedFromMode_check: {
     owner: "list",
     module: "lib/marketingAutomationSchema.ts",

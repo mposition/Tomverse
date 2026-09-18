@@ -15,11 +15,15 @@
  * rested on, what the Guard decided, what the platform answered. Free text in
  * those columns would put model output, reader comments and platform prose
  * into a store the retention rules (docs/policy/marketing-automation.md §12.2)
- * describe as structured facts. So every schema is `.strict()`, every string
- * has a maximum length, and exactly one field in the whole module carries
- * rendered prose: `MarketingEnvelope.renderedText`, which the server rendered
- * from an approved template. Everything else is an identifier, a digest, an
- * enumerated token, a number or a timestamp.
+ * describe as structured facts.
+ *
+ * So there is exactly one free-text field in this module -- the server-rendered
+ * `MarketingEnvelope.renderedText` -- and every other string carries a type: an
+ * https URL with a host rule, a sha256 digest, a registry id, a locale, an ISO
+ * timestamp, or a member of a closed list. `tests/marketingAutomationSchema.test.mjs`
+ * fails the build if a bare `z.string()` appears outside the typed helpers
+ * below, because "a string with a maximum length" is not a type -- it is prose
+ * with a ceiling.
  *
  * Pure: no server-only import, no Prisma. Static checks, unit tests and the
  * store module all read it.
@@ -60,13 +64,31 @@ export const MARKETING_CHANNEL_STATUSES = [
 export type MarketingChannelStatus = (typeof MARKETING_CHANNEL_STATUSES)[number];
 
 /**
- * The two live modes an account can be paused out of. `pausedFromMode` records
- * where it was so a resume can put it back, and only these two are places to
- * come back to: an account paused while still connecting or already
- * disconnected has no earlier mode to restore.
+ * The two live modes an account can be paused out of, and the only values
+ * `pausedFromMode` takes.
+ *
+ * A pause is only ever entered from one of these, and the trigger sets the
+ * column itself from the previous status rather than accepting a caller's
+ * value: an account that could declare where it came from could declare it had
+ * been autonomous and resume there.
  */
 export const MARKETING_PAUSABLE_MODES = ["approval_mode", "autonomous_mode"] as const;
 export type MarketingPausableMode = (typeof MARKETING_PAUSABLE_MODES)[number];
+
+/**
+ * Why an operator resumed an account into autonomous mode
+ * (docs/policy/marketing-automation.md §8.2). A closed list because it is read
+ * as a count later -- how often a pause turned out to be a false positive is a
+ * question about the halt rules, and free text cannot be counted. The operator's
+ * sentence goes in the audit row, not here.
+ */
+export const MARKETING_RESUME_REASON_CODES = [
+  "incident_resolved",
+  "false_positive_pause",
+  "operator_review_complete",
+] as const;
+export type MarketingResumeReasonCode =
+  (typeof MARKETING_RESUME_REASON_CODES)[number];
 
 /** What a draft row is for. */
 export const MARKETING_POST_KINDS = [
@@ -78,8 +100,9 @@ export const MARKETING_POST_KINDS = [
 export type MarketingPostKind = (typeof MARKETING_POST_KINDS)[number];
 
 /**
- * Every state a draft can reach, in no particular order -- the allowed
- * movements between them are the publisher's contract (S2), not this list.
+ * Every state a draft can reach. Which movements between them are allowed is
+ * the transition trigger's whitelist, not this list.
+ *
  * `outcome_unknown` is separate from `failed` on purpose: a failure is a post
  * that did not happen, and an unknown outcome is a post that may have.
  */
@@ -101,7 +124,53 @@ export const MARKETING_POST_STATUSES = [
 ] as const;
 export type MarketingPostStatus = (typeof MARKETING_POST_STATUSES)[number];
 
-/** Whether a human approved this particular post or a template did. */
+/**
+ * The only movements between post statuses
+ * (marketing S1 plan r5: the ledger is a whitelist).
+ *
+ * Read as "from → the states it may become". Anything not listed is refused by
+ * the trigger, which matters most for the states a dispatch has already
+ * reached: nothing that was sent to a platform may go back to `rejected`,
+ * `guard_rejected` or `approval_expired`, because those say the post never
+ * left.
+ *
+ * `failed → scheduled` is the one re-entry, and it is not a retry: it needs a
+ * fresh human approval, because a confirmed failure is re-queued by a person
+ * (docs/policy/marketing-automation.md §2). `outcome_unknown` resolves to what
+ * the platform turns out to have done, and never to a re-send.
+ */
+export const MARKETING_POST_STATUS_TRANSITIONS: Readonly<
+  Partial<Record<MarketingPostStatus, readonly MarketingPostStatus[]>>
+> = {
+  drafted: ["guard_rejected", "pending_approval"],
+  pending_approval: ["approved", "rejected", "approval_expired"],
+  approved: ["scheduled", "approval_expired"],
+  scheduled: ["publishing", "approval_expired"],
+  publishing: ["published", "failed", "outcome_unknown"],
+  published: ["verified", "removed_by_platform", "deleted"],
+  verified: ["removed_by_platform", "deleted"],
+  outcome_unknown: ["published", "failed"],
+  failed: ["scheduled"],
+};
+
+/**
+ * The statuses a post can only be in because a request was sent to a platform.
+ *
+ * They carry two consequences: the provider's idempotency key must be set (so a
+ * retry cannot become a second post), and the row can never be deleted, because
+ * something may exist on a platform that this row is the only record of.
+ */
+export const MARKETING_DISPATCHED_STATUSES = [
+  "publishing",
+  "published",
+  "verified",
+  "outcome_unknown",
+  "failed",
+  "removed_by_platform",
+  "deleted",
+] as const;
+
+/** Whether a human approved this particular post or an approved template did. */
 export const MARKETING_POST_MODES = ["approval", "autonomous"] as const;
 export type MarketingPostMode = (typeof MARKETING_POST_MODES)[number];
 
@@ -197,9 +266,12 @@ export const MARKETING_NO_AUTONOMY_CHANNELS = ["instagram", "tiktok"] as const;
 
 /**
  * How long each report kind is kept (docs/policy/marketing-automation.md
- * §12.2). `retentionUntil` must *equal* `createdAt` plus this interval -- not
- * be at most it -- so a writer cannot quietly shorten or extend one row's life
- * while the column still looks policy-shaped.
+ * §12.2).
+ *
+ * The values are duplicated in the migration's BEFORE INSERT trigger, which is
+ * what actually sets `retentionUntil` from the database clock; this copy is
+ * what the unit test compares the trigger against, and what a reader of the
+ * application sees. Neither the store nor any caller computes the column.
  */
 export const MARKETING_REPORT_RETENTION: Readonly<
   Record<
@@ -221,91 +293,117 @@ export const MARKETING_REPORT_RETENTION: Readonly<
 /** AI visibility runs are kept for two years (docs/policy/marketing-automation.md §12.2). */
 export const AI_VISIBILITY_RETENTION_MONTHS = 24;
 
-/**
- * Add whole months the way Postgres does, because the constraint compares
- * against exactly that.
- *
- * `timestamp + interval '1 month'` keeps the day of the month and clamps to the
- * last day when the target month is shorter: 31 January plus one month is 28
- * February. JavaScript's `setMonth` overflows into the next month instead (3
- * March), so a row created on the 31st would be computed one way here and
- * checked another way in the database, and the insert would be refused for
- * three days out of every month. Nothing would have been wrong with the data.
- */
-export function addMonthsLikePostgres(from: Date, months: number): Date {
-  const year = from.getUTCFullYear();
-  const month = from.getUTCMonth() + months;
-  const day = from.getUTCDate();
-  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const result = new Date(from.getTime());
-  result.setUTCFullYear(year, month, Math.min(day, lastDayOfTargetMonth));
-  return result;
-}
+/** Published content is purged after two years (docs/policy/marketing-automation.md §12.2). */
+export const MARKETING_CONTENT_RETENTION_MONTHS = 24;
 
-/** When a report of this kind stops being kept (docs/policy/marketing-automation.md §12.2). */
-export function marketingReportRetentionUntil(
-  kind: MarketingReportKind,
-  createdAt: Date,
-): Date {
-  const retention = MARKETING_REPORT_RETENTION[kind];
-  if (!retention) {
-    throw new Error(`No marketing report retention for kind ${kind}`);
-  }
-  if (retention.unit === "month") {
-    return addMonthsLikePostgres(createdAt, retention.amount);
-  }
-  return new Date(createdAt.getTime() + retention.amount * 24 * 60 * 60 * 1000);
-}
+/** Attempts and webhook ids are compacted after ninety days (docs/policy/marketing-automation.md §12.2). */
+export const MARKETING_HISTORY_DETAIL_RETENTION_DAYS = 90;
 
-/** When an AI visibility run stops being kept. */
-export function aiVisibilityRetentionUntil(runAt: Date): Date {
-  return addMonthsLikePostgres(runAt, AI_VISIBILITY_RETENTION_MONTHS);
-}
+/** Refused and expired drafts are deleted after ninety days (docs/policy/marketing-automation.md §12.2). */
+export const MARKETING_DRAFT_RETENTION_DAYS = 90;
 
 /**
  * The transaction-local setting that lets the retention job past the
- * append-only history trigger and the envelope purge refusal.
+ * append-only history trigger and the content purge refusal.
  *
- * The application uses one database role, so this is not a privilege boundary
- * and the migration says so. What it does is make a purge impossible to write
- * by accident: an ordinary update never sets it, and the protected-table
- * writer check refuses the name outside the modules on its allowlist.
+ * The application uses one database role, so this is not a privilege boundary:
+ * any code in the application could set it. What it is is a second, deliberate
+ * action that ordinary code never performs, so a purge cannot happen by
+ * accident. It is not on its own an authorisation, and the triggers that read
+ * it still apply the age, legal-hold and shape rules to every row.
  */
 export const MARKETING_RETENTION_SETTING =
   "tomverse.marketing_retention_compaction";
 
 // ---------------------------------------------------------------------------
-// Shared field shapes
+// TYPED FIELDS BEGIN
+//
+// Every string in every schema below is built from one of these. A bare
+// `z.string()` anywhere outside this block fails the meta-test, and the one
+// free-text exception is named explicitly at the end of it.
 // ---------------------------------------------------------------------------
 
-/** Every free-standing identifier column: opaque, short, no whitespace. */
-const identifier = z
+/** A registry identifier: opaque, short, no whitespace, no prose. */
+const registryId = z
   .string()
   .min(1)
   .max(120)
   .regex(/^[A-Za-z0-9._:-]+$/);
-const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const isoInstant = z.iso.datetime({ offset: true });
-const httpsUrl = z.string().url().max(2048).startsWith("https://");
 
-const channelEnum = z.enum(MARKETING_CHANNELS);
-const localeEnum = z.enum(MARKETING_LOCALES);
+/** Lower-case hexadecimal sha256. */
+const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+
+/** An instant with an offset, as the database round-trips it. */
+const isoInstant = z.iso.datetime({ offset: true });
+
+/** A calendar date with no time of day. */
+const isoDate = z.iso.date();
+
+/** An ISO 4217 code, upper case. */
+const currencyCode = z.string().regex(/^[A-Z]{3}$/);
+
+/** A host name, for the one field that keeps a host instead of a URL. */
+const hostName = z
+  .string()
+  .max(253)
+  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/);
+
+/**
+ * An https URL, optionally restricted to one host.
+ *
+ * The host rule is the difference between "a link we published" and "a link
+ * somebody sent us": `finalUrl` is where a post sends a reader and must be our
+ * own site, while a source or a citation is by definition somewhere else.
+ */
+const httpsUrl = (host?: string) => {
+  const base = z
+    .string()
+    .max(2048)
+    .refine(
+      (value) => {
+        let url: URL;
+        try {
+          url = new URL(value);
+        } catch {
+          return false;
+        }
+        if (url.protocol !== "https:") return false;
+        return host === undefined || url.host === host;
+      },
+      host === undefined
+        ? { message: "must be an https URL" }
+        : { message: `must be an https URL on ${host}` },
+    );
+  return base;
+};
+
+/** Where a post sends a reader. Our own site, by the same rule the Guard applies. */
+export const MARKETING_PUBLIC_HOST = "tomverse.app";
 
 /**
  * The internal account name. System-generated from the channel and a small
  * number (`instagram-2`), never an operator's free text, a handle, a display
  * name or an address -- those are personal data on a platform's side and this
- * store holds none of them.
+ * store holds none of them. The database also checks that the prefix is the
+ * row's own channel.
  */
 export const MARKETING_ACCOUNT_SLUG_PATTERN = /^[a-z]+-[0-9]{1,3}$/;
 const accountSlug = z.string().max(40).regex(MARKETING_ACCOUNT_SLUG_PATTERN);
 
 /**
- * The one field in this module that carries prose, and it is prose this server
- * rendered from an approved template. A longer render is a bug in the
- * renderer, not a row to store.
+ * THE ONE FREE-TEXT FIELD. Prose this server rendered from an approved
+ * template, and the only place in these tables where a sentence is stored. A
+ * longer render is a bug in the renderer, not a row to store.
  */
 const RENDERED_TEXT_MAX = 3000;
+const renderedText = z.string().min(1).max(RENDERED_TEXT_MAX);
+
+// ---------------------------------------------------------------------------
+// TYPED FIELDS END
+// ---------------------------------------------------------------------------
+
+const channelEnum = z.enum(MARKETING_CHANNELS);
+const localeEnum = z.enum(MARKETING_LOCALES);
 
 // ---------------------------------------------------------------------------
 // MarketingPost.envelope
@@ -323,19 +421,15 @@ export const marketingEnvelopeSchema = z
     channel: channelEnum,
     accountSlug,
     locale: localeEnum,
-    renderedText: z.string().min(1).max(RENDERED_TEXT_MAX),
-    claimIds: z.array(identifier).max(50),
+    renderedText,
+    claimIds: z.array(registryId).max(50),
+    // The alt text itself lives in the asset registry beside the asset, keyed
+    // per locale; a free sentence here would be a second, unreviewed place for
+    // customer-visible words.
     assets: z
-      .array(
-        z
-          .object({
-            assetId: identifier,
-            alt: z.string().min(1).max(400),
-          })
-          .strict(),
-      )
+      .array(z.object({ assetId: registryId, altKey: registryId }).strict())
       .max(20),
-    finalUrl: httpsUrl.nullable(),
+    finalUrl: httpsUrl(MARKETING_PUBLIC_HOST).nullable(),
     scheduledAt: isoInstant.nullable(),
     disclosureFlags: z.array(z.enum(MARKETING_DISCLOSURE_FLAGS)).max(3),
   })
@@ -347,7 +441,7 @@ export type MarketingEnvelope = z.infer<typeof marketingEnvelopeSchema>;
 // ---------------------------------------------------------------------------
 
 const rowReference = z
-  .object({ rowId: identifier, updatedAt: isoInstant })
+  .object({ rowId: registryId, updatedAt: isoInstant })
   .strict();
 
 /**
@@ -369,7 +463,7 @@ export const marketingFactSnapshotSchema = z
       .strict()
       .nullable(),
     modelRegistryRows: z.array(rowReference).max(200),
-    evidenceDigests: z.array(digest).max(50),
+    evidenceDigests: z.array(sha256).max(50),
   })
   .strict();
 export type MarketingFactSnapshot = z.infer<typeof marketingFactSnapshotSchema>;
@@ -391,7 +485,7 @@ export const marketingGraduationSnapshotSchema = z
     operatorEditRate: z.number().min(0).max(1),
     observedFromAt: isoInstant,
     observedUntilAt: isoInstant,
-    approvalAuditLogId: identifier,
+    approvalAuditLogId: registryId,
     policyVersion: z.number().int().min(1),
   })
   .strict();
@@ -407,22 +501,22 @@ export type MarketingGraduationSnapshot = z.infer<
  * The append-only record of what happened to one draft.
  *
  * Digests, codes and identifiers: a revision records that the text changed and
- * what it changed to by digest, not the text. The only entry that is not an
- * addition to the end is `retention_compaction`, and the database refuses even
- * that without the retention setting (docs/policy/marketing-automation.md
- * §12.2).
+ * what it changed to by digest, not the text. No entry type carries prose, so
+ * the only thing retention can do to this array is remove old attempts and
+ * webhook ids and leave a summary in their place -- which is what the
+ * compaction trigger allows and nothing else.
  */
 export const marketingHistoryEntrySchema = z.discriminatedUnion("type", [
   z
-    .object({ at: isoInstant, type: z.literal("draft"), envelopeDigest: digest })
+    .object({ at: isoInstant, type: z.literal("draft"), envelopeDigest: sha256 })
     .strict(),
   z
     .object({
       at: isoInstant,
       type: z.literal("edit_revision"),
-      envelopeDigest: digest,
-      previousEnvelopeDigest: digest,
-      byAuditLogId: identifier.nullable(),
+      envelopeDigest: sha256,
+      previousEnvelopeDigest: sha256,
+      byAuditLogId: registryId.nullable(),
     })
     .strict(),
   z
@@ -430,8 +524,8 @@ export const marketingHistoryEntrySchema = z.discriminatedUnion("type", [
       at: isoInstant,
       type: z.literal("guard_result"),
       decision: z.enum(MARKETING_GUARD_DECISIONS),
-      codes: z.array(identifier).max(40),
-      ruleIds: z.array(identifier).max(40),
+      codes: z.array(registryId).max(40),
+      ruleIds: z.array(registryId).max(40),
     })
     .strict(),
   z
@@ -440,15 +534,26 @@ export const marketingHistoryEntrySchema = z.discriminatedUnion("type", [
       type: z.literal("attempt"),
       attempt: z.number().int().min(1),
       outcome: z.enum(["published", "failed", "outcome_unknown"]),
-      errorCode: identifier.nullable(),
+      errorCode: registryId.nullable(),
     })
     .strict(),
   z
     .object({
       at: isoInstant,
       type: z.literal("webhook_event"),
-      eventIdDigest: digest,
-      eventType: identifier,
+      eventIdDigest: sha256,
+      eventType: registryId,
+    })
+    .strict(),
+  // Written only by retention, and only in place of the entries it removed.
+  z
+    .object({
+      at: isoInstant,
+      type: z.literal("retention_summary"),
+      summarises: z.enum(["attempt", "webhook_event"]),
+      count: z.number().int().min(1),
+      firstAt: isoInstant,
+      lastAt: isoInstant,
     })
     .strict(),
   z
@@ -461,29 +566,92 @@ export const marketingHistoryEntrySchema = z.discriminatedUnion("type", [
 ]);
 export type MarketingHistoryEntry = z.infer<typeof marketingHistoryEntrySchema>;
 
-export const marketingHistorySchema = z.array(marketingHistoryEntrySchema).max(500);
+/** The entry types a caller may append. Retention writes the other two. */
+export const MARKETING_APPENDABLE_HISTORY_TYPES = [
+  "draft",
+  "edit_revision",
+  "guard_result",
+  "attempt",
+  "webhook_event",
+] as const;
+
+export const MARKETING_HISTORY_MAX_ENTRIES = 500;
+
+export const marketingHistorySchema = z
+  .array(marketingHistoryEntrySchema)
+  .max(MARKETING_HISTORY_MAX_ENTRIES);
+
+// ---------------------------------------------------------------------------
+// Market intelligence facts
+// ---------------------------------------------------------------------------
+
+/**
+ * What a competitor fact may say, by kind.
+ *
+ * There is no free-string case. A sentence about a competitor is an opinion
+ * this table cannot attribute, cannot compare across two readings, and cannot
+ * check against the source it names -- and it would arrive from a model reading
+ * somebody else's marketing page, which is the least trustworthy text in the
+ * system. A fact that does not fit one of these shapes is not stored, and the
+ * report counts it as unrepresentable.
+ */
+export const marketIntelValueSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("number"),
+      value: z.number(),
+      unit: registryId.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("date"), value: isoDate }).strict(),
+  z
+    .object({
+      kind: z.literal("money"),
+      amountMinor: z.number().int(),
+      currency: currencyCode,
+    })
+    .strict(),
+  z.object({ kind: z.literal("token"), value: registryId }).strict(),
+]);
+export type MarketIntelValue = z.infer<typeof marketIntelValueSchema>;
+
+/**
+ * The tokens each fact type may use.
+ *
+ * A token is only meaningful against a vocabulary: `"unlimited"` for a message
+ * quota and `"unlimited"` for a support tier are different claims, and a shared
+ * pool of strings would let one be counted as the other. A fact type with no
+ * entry accepts no tokens at all.
+ */
+export const MARKET_INTEL_FACT_TOKENS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  plan_tier: ["free", "pro", "max", "team", "enterprise"],
+  availability: ["available", "waitlist", "announced", "withdrawn"],
+  billing_interval: ["monthly", "annual", "one_off"],
+  model_access: ["included", "add_on", "unavailable"],
+};
+
+/** Whether a fact's value is usable for its fact type. */
+export function marketIntelFactProblem(
+  factType: string,
+  value: MarketIntelValue,
+): string | null {
+  if (value.kind !== "token") return null;
+  const vocabulary = MARKET_INTEL_FACT_TOKENS[factType];
+  if (!vocabulary) return `fact type ${factType} has no token vocabulary`;
+  if (!vocabulary.includes(value.value)) {
+    return `${value.value} is not a token of ${factType}`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // MarketingReport.payload, one schema per kind
 // ---------------------------------------------------------------------------
 
-/**
- * A competitor fact is a value with a source and a date, and the value is not
- * a paragraph: a number, a date, an enumerated token, or a short string with
- * no newline. Prose about a competitor is an opinion this table has no way to
- * attribute.
- */
-const marketIntelValue = z.union([
-  z.number(),
-  z.iso.date(),
-  z
-    .string()
-    .max(80)
-    .regex(/^[^\n\r]*$/),
-]);
-
 const countByCode = z.array(
-  z.object({ code: identifier, count: z.number().int().min(0) }).strict(),
+  z.object({ code: registryId, count: z.number().int().min(0) }).strict(),
 );
 
 export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
@@ -509,9 +677,9 @@ export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
     .strict(),
   brief: z
     .object({
-      topicIds: z.array(identifier).max(50),
-      claimIds: z.array(identifier).max(50),
-      sourceDigests: z.array(digest).max(50),
+      topicIds: z.array(registryId).max(50),
+      claimIds: z.array(registryId).max(50),
+      sourceDigests: z.array(sha256).max(50),
     })
     .strict(),
   market_intel: z
@@ -520,21 +688,31 @@ export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
         .array(
           z
             .object({
-              competitorId: identifier,
-              factType: identifier,
-              value: marketIntelValue,
-              sourceUrl: httpsUrl,
+              competitorId: registryId,
+              factType: registryId,
+              value: marketIntelValueSchema,
+              sourceUrl: httpsUrl(),
               checkedAt: isoInstant,
             })
-            .strict(),
+            .strict()
+            .superRefine((fact, context) => {
+              const problem = marketIntelFactProblem(fact.factType, fact.value);
+              if (problem) {
+                context.addIssue({ code: "custom", message: problem });
+              }
+            }),
         )
         .max(200),
+      // Facts the reader could not turn into one of the shapes above. A count,
+      // so that "we found nothing" and "we could not store what we found" are
+      // different answers.
+      unrepresentableFactCount: z.number().int().min(0),
     })
     .strict(),
   experiment_result: z
     .object({
-      experimentId: identifier,
-      variantId: identifier,
+      experimentId: registryId,
+      variantId: registryId,
       exposures: z.number().int().min(0),
       conversions: z.number().int().min(0),
       startedAt: isoInstant,
@@ -543,7 +721,7 @@ export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
     .strict(),
   measurement_120d: z
     .object({
-      metricId: identifier,
+      metricId: registryId,
       value: z.number(),
       sampleSize: z.number().int().min(0),
       observedFromAt: isoInstant,
@@ -552,14 +730,11 @@ export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
     .strict(),
   comment_alerts: z
     .object({
-      postId: identifier,
+      postId: registryId,
       alertCount: z.number().int().min(0),
-      riskCodes: z.array(identifier).max(20),
+      riskCodes: z.array(registryId).max(20),
       firstDetectedAt: isoInstant,
-      externalUrlHost: z
-        .string()
-        .max(253)
-        .regex(/^[a-z0-9.-]+$/),
+      externalUrlHost: hostName,
     })
     .strict(),
   mainland_block_check: z
@@ -579,9 +754,9 @@ export const MARKETING_REPORT_PAYLOAD_SCHEMAS: Readonly<
     .strict(),
   webhook_shadow: z
     .object({
-      eventIdDigest: digest,
-      eventType: identifier,
-      channelId: identifier,
+      eventIdDigest: sha256,
+      eventType: registryId,
+      channelId: registryId,
       derivedStatus: z.enum(MARKETING_POST_STATUSES),
       statusQueryMatch: z.boolean(),
     })
@@ -634,3 +809,6 @@ export const aiVisibilityAccuracyFlagsSchema = z
 export type AiVisibilityAccuracyFlags = z.infer<
   typeof aiVisibilityAccuracyFlagsSchema
 >;
+
+/** Every cited URL is https; the host is not restricted, because a citation is elsewhere. */
+export const aiVisibilityCitedUrlsSchema = z.array(httpsUrl()).max(50);
