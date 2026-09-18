@@ -7,6 +7,7 @@ import {
   CREDENTIAL_SEND_RESERVE_MS,
   isLockTimeoutError,
   isTransactionStartTimeoutError,
+  providerSendBudget,
   SEND_COMMIT_RESERVE_MS,
   SEND_LOCK_RETRY_MS,
   STANDARD_SEND_LOCK_TIMEOUT_MS,
@@ -208,4 +209,51 @@ test("every wait a credential attempt may start is a whole number", () => {
   ]) {
     assert.equal(Number.isInteger(value), true, `not whole: ${value}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// What the provider is given
+// ---------------------------------------------------------------------------
+
+test("the provider gets the lane cap, or what the transaction has left", () => {
+  // The cut used to be observable from a test that read it out of the submit
+  // callback. The helper owns the submission now, so the number reaches the
+  // provider through a mocked `fetch` where it cannot be read -- which is why
+  // the arithmetic is here (independent review, 2026-09-18).
+  assert.deepEqual(providerSendBudget({ leftMs: 12_000, capMs: 10_000 }), {
+    send: true,
+    providerTimeoutMs: 10_000,
+  });
+  assert.deepEqual(providerSendBudget({ leftMs: 4_000, capMs: 10_000 }), {
+    send: true,
+    providerTimeoutMs: 4_000,
+  });
+  // No cap: the transaction is the only bound.
+  assert.deepEqual(providerSendBudget({ leftMs: 4_000 }), {
+    send: true,
+    providerTimeoutMs: 4_000,
+  });
+});
+
+test("the provider's budget is always a whole number, rounded down", () => {
+  // `AbortSignal.timeout()` validates a uint32 and throws `ERR_OUT_OF_RANGE`
+  // on the fraction `performance.now()` arithmetic produces. Down, so the cut
+  // is never generous.
+  const budget = providerSendBudget({ leftMs: 1_234.987, capMs: 9_999.5 });
+  assert.equal(budget.send, true);
+  if (!budget.send) return;
+  assert.equal(budget.providerTimeoutMs, 1_234);
+});
+
+test("less than a millisecond left is no call at all", () => {
+  // The request would be in flight after the rollback released the address.
+  for (const leftMs of [0.9, 0, -1, -10_000]) {
+    assert.deepEqual(
+      providerSendBudget({ leftMs, capMs: 10_000 }),
+      { send: false },
+      `leftMs=${leftMs}`
+    );
+  }
+  // And a cap of zero is a caller asking for no call.
+  assert.deepEqual(providerSendBudget({ leftMs: 10_000, capMs: 0 }), { send: false });
 });

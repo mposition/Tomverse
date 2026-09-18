@@ -6,6 +6,7 @@ import {
   classifyNotificationError,
   type NotificationAttemptOutcome,
 } from "@/lib/notificationRetryCore";
+import { supportNotificationRecipient } from "@/lib/supportNotificationEmail";
 
 /**
  * The queue's operator alerts, and the only place they reach the provider.
@@ -26,7 +27,24 @@ import {
  * customer's address has no bearing on whether the team hears about their
  * report, and a queue-level stop that silenced them would hide the reports
  * rather than the mail.
+ *
+ * **Which is why it decides the recipient itself.** A module on the allowlist
+ * that took an address from its caller would be a way to send anywhere without
+ * the lock, and the file-level check would pass it -- the bypass moved rather
+ * than closed (independent review, 2026-09-18). The operator address is the one
+ * this deployment is configured with, and anything else is refused.
  */
+
+export type OperatorNotificationRefusal =
+  /** No operator address is configured, so there is nobody to alert. */
+  | "no_operator_address"
+  /**
+   * The caller asked for an address that is not the operator's. Refused rather
+   * than sent: a customer address here would be a send that skipped the address
+   * lock and the suppression check.
+   */
+  | "not_the_operator_address";
+
 export async function sendOperatorNotification(input: {
   message: { to: string; subject: string; html: string; text: string };
   senderRole: SenderRole;
@@ -36,9 +54,31 @@ export async function sendOperatorNotification(input: {
    */
   deliveryId: string;
 }): Promise<NotificationAttemptOutcome> {
+  const operator = supportNotificationRecipient();
+  if (!operator) {
+    return { kind: "unsendable", reason: "no_operator_address" };
+  }
+  if (input.message.to.trim().toLowerCase() !== operator.trim().toLowerCase()) {
+    // Not "send it anyway": the address this was asked to write to is not the
+    // one this module exists for, and the only way that happens is a caller
+    // using it to reach somewhere else.
+    console.error(
+      JSON.stringify({
+        event: "operator_notification_recipient_refused",
+        deliveryId: input.deliveryId,
+        senderRole: input.senderRole,
+      })
+    );
+    return { kind: "unsendable", reason: "not_the_operator_address" };
+  }
+
   try {
     const result = await sendTransactionalEmail({
       ...input.message,
+      // The configured address, not the one that arrived. They are equal by the
+      // check above; using this one means a later change to that check cannot
+      // leave an unvalidated address on the wire.
+      to: operator,
       senderRole: input.senderRole,
       idempotencyKey: `notification-delivery:${input.deliveryId}`,
     });

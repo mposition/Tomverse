@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
-import { removeLoginMethod } from "@/lib/loginMethodsCore";
+import { enableEmailLoginMethod, removeLoginMethod } from "@/lib/loginMethodsCore";
 
 // Regression coverage for an incident where a user's login-method removal
 // appeared to fail client-side ("could not remove") while the server had
@@ -171,4 +171,41 @@ test("a removal that is refused queues nothing", async () => {
   const user = await createUser({ google: true });
   assert.equal(await removeLoginMethod(user.id, "google"), "blocked");
   assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
+});
+
+test("enabling email login queues the notice, once", async () => {
+  const user = await createUser({ google: true });
+
+  assert.equal(await enableEmailLoginMethod(user.id), "enabled");
+  const queued = await prisma.emailDelivery.findMany({ where: { userId: user.id } });
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].emailAddress, user.email);
+  assert.equal(queued[0].status, "pending");
+  assert.equal(
+    (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailLoginEnabled,
+    true
+  );
+});
+
+test("verifying again announces nothing, because nothing changed", async () => {
+  // `update` succeeds on a row that is already `true`, so this used to queue "a
+  // login method was added" for a replayed verification -- the same false
+  // security notice the OAuth callback was fixed for.
+  const user = await createUser({ google: true, emailLoginEnabled: true });
+
+  assert.equal(await enableEmailLoginMethod(user.id), "already-enabled");
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
+});
+
+test("two verifications racing announce it once", async () => {
+  // The conditional write is what decides, so only one of them can be the one
+  // that changed anything.
+  const user = await createUser({ google: true });
+
+  const outcomes = await Promise.all([
+    enableEmailLoginMethod(user.id),
+    enableEmailLoginMethod(user.id),
+  ]);
+  assert.deepEqual(outcomes.filter((outcome) => outcome === "enabled").length, 1);
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 1);
 });

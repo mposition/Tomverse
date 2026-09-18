@@ -72,10 +72,39 @@ test("the change and the notice commit together", () => {
   // The queue row is written with the caller's transaction client. Without
   // that, a change that rolled back could still have queued the notice -- and
   // worse, a change that committed could have lost it.
+  //
+  // This reads the source because a route cannot be driven against a database.
+  // The behaviour itself is proved in tests/integration/login-methods.db.test.ts,
+  // for both of the two paths that have a testable entry point: the removal and
+  // the email verification. The OAuth link is only covered here, because
+  // `completeOAuthLink` talks to a provider before it writes anything.
   const notice = read("lib/loginMethodNotice.ts");
   assert.match(notice, /enqueueStandardEmail\(\{\s*\n\s*tx,/);
   for (const caller of ["lib/loginMethodsCore.ts", "lib/oauthLink.ts"]) {
     assert.match(read(caller), /enqueueLoginMethodNotice\(tx, \{/, caller);
+  }
+});
+
+test("the version that was prepared is the version the row asks for", () => {
+  // The language used to be read twice -- once to prepare the template version
+  // and again inside the transaction. Somebody changing it in between would
+  // leave the enqueue needing a version nobody prepared, and
+  // `enqueueStandardEmail` would register one inside the login-method
+  // transaction, which is what preparing it beforehand exists to avoid
+  // (independent review, 2026-09-18).
+  const notice = read("lib/loginMethodNotice.ts");
+  // The enqueue takes the language rather than reading it.
+  assert.match(notice, /language: string \| null;/);
+  assert.match(notice, /language: input\.language,/);
+  assert.doesNotMatch(notice, /settings: \{ select: \{ language/);
+  for (const caller of ["lib/loginMethodsCore.ts", "lib/oauthLink.ts"]) {
+    const source = read(caller);
+    assert.match(source, /const language = await loginMethodNoticeLanguage\(/, caller);
+    assert.match(
+      source,
+      /prepareLoginMethodNotice\(\{ action: "[a-z]+", language \}\)/,
+      caller
+    );
   }
 });
 

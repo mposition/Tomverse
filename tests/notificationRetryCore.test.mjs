@@ -392,15 +392,16 @@ test("a refund receipt and its queue row are written together", () => {
 test("every transactional email sender has a reviewed failure policy", () => {
   const CLASSIFIED = {
     "lib/notificationDeliveries.ts": "is the retry queue itself",
+    // The queue's operator half, split out so the queue file itself need not
+    // be on the send allowlist. It answers in the queue's own outcome type, so
+    // the retry policy is the queue's (docs/policy/email-notifications.md v23).
+    "lib/operatorNotificationSend.ts": "answers in the retry queue's outcome type",
     "lib/supportNotificationEmail.ts": "renders for the queue, does not send",
     // Claims its row before sending and resets the claim on failure, so the
     // next maintenance pass retries it.
     "lib/maintenance.ts": "retries via its own claim/reset",
     "lib/billingEmails.ts": "renders and sends; callers own the policy",
     "lib/accountEmails.ts": "renders and sends; callers own the policy",
-    // Time-sensitive by design: a login code delivered late is worse than
-    // one not delivered, and the user can simply request another.
-    "lib/emailLoginEmails.ts": "deliberately fire-and-forget (time-sensitive)",
     // Records every send, skip and failure in its own report table, which the
     // admin console surfaces.
     "lib/providerModelCatalogReport.ts": "records outcomes in its report table",

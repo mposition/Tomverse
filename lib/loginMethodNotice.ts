@@ -67,11 +67,22 @@ export async function enqueueLoginMethodNotice(
     userId: string;
     action: "linked" | "unlinked";
     method: LoginMethodProvider;
+    /**
+     * The same value `prepareLoginMethodNotice()` was given.
+     *
+     * Passed rather than read again: reading it here would let the two
+     * disagree -- somebody changing their language between the two reads would
+     * leave the enqueue needing a version nobody prepared, and
+     * `enqueueStandardEmail` would then register one inside the caller's
+     * transaction, which is what preparing it beforehand exists to avoid
+     * (independent review, 2026-09-18).
+     */
+    language: string | null;
   }
 ) {
   const user = await tx.user.findUnique({
     where: { id: input.userId },
-    select: { email: true, settings: { select: { language: true } } },
+    select: { email: true },
   });
   // No address, nothing to queue. The change still stands: a login method is
   // not conditional on our being able to write about it.
@@ -85,18 +96,19 @@ export async function enqueueLoginMethodNotice(
         : LOGIN_METHOD_UNLINKED_TEMPLATE,
     emailAddress: user.email,
     userId: input.userId,
-    language: user.settings?.language ?? null,
+    language: input.language,
     payload: { method: input.method },
   });
 }
 
 /**
- * The language the notice will be written in, for `prepareLoginMethodNotice`.
+ * The language the notice will be written in.
  *
- * Read before the transaction so the template version is registered for the
- * language the message will actually use. A miss here costs a second version,
- * not a wrong message: the enqueue reads the language again inside the
- * transaction and that is the one the row records.
+ * Read once, before the transaction, and then handed to both
+ * `prepareLoginMethodNotice()` and `enqueueLoginMethodNotice()` -- so the
+ * version that was registered is the version the row asks for. Reading it
+ * twice would let somebody changing their language in between leave the
+ * enqueue needing a version nobody prepared.
  */
 export async function loginMethodNoticeLanguage(userId: string) {
   const settings = await prisma.userSettings.findUnique({

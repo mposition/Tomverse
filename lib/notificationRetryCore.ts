@@ -212,10 +212,19 @@ export const notificationOutcomeForProviderResult = (result: {
   if (result.ok) return { kind: "delivered" };
   if (result.notConfigured) return { kind: "not_configured" };
   if (result.identityRefusal) {
+    // Retryable, as it was before this mapper existed. The reasoning for
+    // calling it permanent -- no amount of waiting sets an environment
+    // variable -- is true of the waiting and false of the window: an operator
+    // who fixes the configuration and redeploys between attempts is exactly
+    // who this queue is retrying for, and a terminal verdict would lose the
+    // notice they were trying to save (independent review, 2026-09-18).
+    //
+    // What did change is the name. It used to arrive as an unparseable thrown
+    // string and be recorded as `unknown`, which told an operator nothing.
     return {
       kind: "failed",
       errorKind: `identity_${result.identityRefusal.toLowerCase()}`.slice(0, 40),
-      permanent: true,
+      permanent: false,
     };
   }
   if (result.status === null || result.status === undefined) {

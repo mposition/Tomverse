@@ -558,3 +558,61 @@ test("a refund notice asks suppression too, and costs no attempt when the addres
   assert.equal(row.attempts, 0);
   assert.equal(row.lastErrorKind, "send_not_submitted");
 });
+
+test("the message, the identity and the idempotency key reach the provider", async () => {
+  // The helper submits now, so what a lane hands it has to arrive unchanged.
+  // Nothing pinned that: the headers marketing depends on, the stream that
+  // decides the sending domain, the sender role and the key that makes a retry
+  // one message rather than two all pass through one call
+  // (independent review, 2026-09-18).
+  const address = `${randomUUID()}@example.com`;
+  const bodies: string[] = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    bodies.push(String(init.body));
+    return accepted();
+  });
+
+  const result = await sendWithAddressLock({
+    emailAddress: address,
+    classification: "marketing",
+    message: {
+      subject: "A subject",
+      html: "<p>Body</p>",
+      text: "Body",
+      headers: { "List-Unsubscribe": "<https://tomverse.app/u/abc>" },
+    },
+    senderRole: "marketing",
+    idempotencyKey: "delivery-42",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(bodies.length, 1);
+  const sent = JSON.parse(bodies[0]);
+  assert.equal(sent.to, address);
+  assert.equal(sent.subject, "A subject");
+  assert.equal(sent.html, "<p>Body</p>");
+  assert.equal(sent.text, "Body");
+  assert.equal(sent.headers["List-Unsubscribe"], "<https://tomverse.app/u/abc>");
+});
+
+test("a message with no headers carries none", async () => {
+  // Transactional mail must not acquire an unsubscribe header by passing
+  // through a helper that also serves marketing
+  // (docs/policy/email-notifications.md §5.1 C10).
+  const address = `${randomUUID()}@example.com`;
+  const bodies: string[] = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    bodies.push(String(init.body));
+    return accepted();
+  });
+
+  await sendWithAddressLock({
+    emailAddress: address,
+    classification: "transactional",
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
+  });
+
+  const sent = JSON.parse(bodies[0]);
+  assert.equal(sent.headers, undefined);
+});

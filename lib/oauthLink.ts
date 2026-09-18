@@ -291,10 +291,10 @@ export async function completeOAuthLink(
 
     // Before the transaction: registering a template version is not part of
     // whether an account may be linked (lib/loginMethodNotice.ts).
-    await prepareLoginMethodNotice({
-        action: "linked",
-        language: await loginMethodNoticeLanguage(currentUserId),
-    });
+    // Read once and used for both, so the version prepared is the version the
+    // queued row asks for.
+    const language = await loginMethodNoticeLanguage(currentUserId);
+    await prepareLoginMethodNotice({ action: "linked", language });
     await prisma.$transaction(async (tx) => {
         await tx.account.create({ data: encrypted });
         // In the same transaction as the link. The early return above is why
@@ -305,6 +305,7 @@ export async function completeOAuthLink(
             userId: currentUserId,
             action: "linked",
             method: provider,
+            language,
         });
     });
     logSecurityAuditEvent("auth.link_account", { userId: currentUserId, provider });

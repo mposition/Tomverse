@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  productionSourceFiles,
   SEND_ALLOWLIST,
   sendEntryPointViolations,
 } from "../scripts/check-send-entry-points-core.mjs";
 import test from "node:test";
-import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 import {
   buildAdminPlanChangedEmail,
@@ -180,15 +180,12 @@ test("the files allowed to send directly are the ones the contract names", () =>
 });
 
 test("no user-facing path sends transactional email directly", () => {
-  const tracked = execFileSyncLines("git", [
-    "ls-files",
-    "app",
-    "lib",
-    "scripts",
-  ]).filter((file) => file.endsWith(".ts") || file.endsWith(".tsx"));
-
+  // The same collection the gate uses, from the same module: this test and the
+  // gate had separate ideas of what "production source" meant, and two scopes
+  // for one rule drift exactly as two lists do (independent review,
+  // 2026-09-18).
   const violations = sendEntryPointViolations(
-    tracked.map((file) => ({ path: file, source: readFileSync(file, "utf8") }))
+    productionSourceFiles(resolve(import.meta.dirname, ".."))
   );
 
   assert.deepEqual(
@@ -199,8 +196,3 @@ test("no user-facing path sends transactional email directly", () => {
   );
 });
 
-function execFileSyncLines(command, args) {
-  return execFileSync(command, args, { encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
-}

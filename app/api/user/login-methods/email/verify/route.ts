@@ -4,15 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { verifyEmailLoginCodeForOwnAccount } from "@/lib/emailLogin";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import {
-  enqueueLoginMethodNotice,
-  loginMethodNoticeLanguage,
-  prepareLoginMethodNotice,
-} from "@/lib/loginMethodNotice";
+import { enableEmailLoginMethod } from "@/lib/loginMethodsCore";
 
 const verifySchema = z
   .object({
@@ -40,25 +35,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Before the transaction: registering a template version is not part of
-    // whether a login method may be enabled (lib/loginMethodNotice.ts).
-    await prepareLoginMethodNotice({
-      action: "linked",
-      language: await loginMethodNoticeLanguage(session.user.id),
-    });
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: session.user.id },
-        data: { emailLoginEnabled: true },
-      });
-      // In the same transaction as the change, so the notice cannot be lost
-      // while the new login method stands (section 7.4, C36).
-      await enqueueLoginMethodNotice(tx, {
-        userId: session.user.id,
-        action: "linked",
-        method: "email",
-      });
-    });
+    // The decision, the change and the notice are one call, in
+    // lib/loginMethodsCore.ts: a route cannot be driven against a database,
+    // and "did this actually enable anything" is the part worth proving.
+    await enableEmailLoginMethod(session.user.id);
     logSecurityAuditEvent("auth.login_method.link", {
       userId: session.user.id,
       provider: "email",
