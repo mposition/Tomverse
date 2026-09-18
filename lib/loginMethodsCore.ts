@@ -1,6 +1,11 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import {
+  enqueueLoginMethodNotice,
+  loginMethodNoticeLanguage,
+  prepareLoginMethodNotice,
+} from "@/lib/loginMethodNotice";
 import { invalidateSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 export type LoginMethodProvider = "google" | "azure-ad" | "email";
@@ -20,6 +25,13 @@ export async function removeLoginMethod(
   userId: string,
   method: LoginMethodProvider
 ): Promise<RemoveLoginMethodOutcome> {
+  // Before the transaction, so registering a template version is never part of
+  // whether a login method may be removed (lib/loginMethodNotice.ts).
+  // Read once and used for both, so the version prepared is the version the
+  // queued row asks for.
+  const language = await loginMethodNoticeLanguage(userId);
+  await prepareLoginMethodNotice({ action: "unlinked", language });
+
   const outcome = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"login-methods:" + userId}))`;
 
@@ -66,6 +78,17 @@ export async function removeLoginMethod(
       data: { sessionsInvalidatedAt: new Date(), sessionsRevokedAt: new Date() },
     });
 
+    // In the same transaction as the removal, so the notice cannot be lost
+    // while the change stands. It used to be sent after the request and a
+    // failure left an incident: the account holder was signed out of every
+    // device and told nothing (section 7.4, C36).
+    await enqueueLoginMethodNotice(tx, {
+      userId,
+      action: "unlinked",
+      method,
+      language,
+    });
+
     return "removed" as const;
   });
 
@@ -73,4 +96,43 @@ export async function removeLoginMethod(
   // this the unlinked user keeps a working session until it lapses.
   if (outcome === "removed") invalidateSessionSecuritySnapshot(userId);
   return outcome;
+}
+
+export type EnableEmailLoginOutcome = "enabled" | "already-enabled";
+
+/**
+ * Turns email login on, and queues the notice only if it was off.
+ *
+ * Here rather than in the route so the decision can be exercised against a
+ * database. `update` succeeds on a row that is already `true`, so the route
+ * queued "a login method was added" for a replayed verification or two racing
+ * requests -- the same false security notice the OAuth callback was fixed for
+ * (independent review, 2026-09-18). The count from a conditional write is what
+ * decides.
+ */
+export async function enableEmailLoginMethod(
+  userId: string
+): Promise<EnableEmailLoginOutcome> {
+  // Read once and used for both, so the version prepared is the version the
+  // queued row asks for.
+  const language = await loginMethodNoticeLanguage(userId);
+  await prepareLoginMethodNotice({ action: "linked", language });
+
+  return prisma.$transaction(async (tx) => {
+    const changed = await tx.user.updateMany({
+      where: { id: userId, emailLoginEnabled: false },
+      data: { emailLoginEnabled: true },
+    });
+    if (changed.count === 0) return "already-enabled" as const;
+
+    // In the same transaction as the change, so the notice cannot be lost
+    // while the new login method stands (section 7.4, C36).
+    await enqueueLoginMethodNotice(tx, {
+      userId,
+      action: "linked",
+      method: "email",
+      language,
+    });
+    return "enabled" as const;
+  });
 }

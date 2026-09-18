@@ -272,6 +272,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:sending-identity
 
+      # Every customer-facing send takes the address lock and asks suppression
+      # again inside it. A send made anywhere else skips all three, and the
+      # failure is silent -- the message goes out, the recipient is somebody who
+      # had withdrawn, and the record says the check was made.
+      - name: Only the allowed files can reach the mail provider
+        timeout-minutes: 5
+        run: npm run check:send-entry-points
+
       - name: Email provider port stays two methods over one provider
         timeout-minutes: 5
         run: npm run check:email-provider-port

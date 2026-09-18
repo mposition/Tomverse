@@ -3,14 +3,10 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
-import {
-  credentialSendWindow,
-  CREDENTIAL_SEND_RESERVE_MS,
-} from "@/lib/emailSendLockCore";
+import { credentialSendWindow } from "@/lib/emailSendLockCore";
 import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import {
   AUTH_LOGIN_CODE_TEMPLATE,
@@ -281,43 +277,37 @@ export async function sendCredentialEmailNow(input: {
       now: new Date(now()),
       lockTimeoutMs: window.lockTimeoutMs,
       transactionTimeoutMs: window.transactionTimeoutMs,
-      // The lane cap for this attempt; the helper cuts it again to what the
-      // transaction can protect, and the callback cuts it once more to what
-      // the request budget has left by the time the lock is held.
+      // The lane cap for this attempt. The helper cuts it again to what the
+      // transaction can protect, and that ceiling is itself this request's
+      // remaining budget plus the commit reserve -- so a budget spent while
+      // waiting for the address shortens the call, and a budget gone refuses
+      // it, without this lane recomputing anything.
       providerTimeoutMs: window.providerCapMs,
-      submit: async ({ providerTimeoutMs }) => {
-        // Recomputed now the lock is held: waiting for it spent part of the
-        // budget this timeout was cut from. The reserve leaves the transaction
-        // room to commit after the provider answers.
-        const remaining =
-          CREDENTIAL_SEND_BUDGET_MS - (now() - startedAt) - CREDENTIAL_SEND_RESERVE_MS;
-        // The budget went while we waited for the address. Starting a request
-        // that cannot finish inside it would put a message on the wire after
-        // the person has already been told the sign-in failed.
-        if (remaining <= 0) return { expired: true } as const;
-        return {
-          expired: false,
-          response: await deliverEmailOnce({
-            to: input.to,
-            subject: input.subject,
-            html: input.html,
-            text: input.text,
-            idempotencyKey: input.idempotencyKey,
-            timeoutMs: Math.min(providerTimeoutMs, remaining),
-            // Read from the one template this lane carries rather than written
-            // here. Every attempt inside this request, and the record of it,
-            // then names the same sender as the standard lane would for the
-            // same template (docs/policy/email-notifications.md §14.1a).
-            senderRole: CREDENTIAL_SENDER_ROLE,
-          }),
-        } as const;
+      message: {
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
       },
+      idempotencyKey: input.idempotencyKey,
+      // Read from the one template this lane carries rather than written here.
+      // Every attempt inside this request, and the record of it, then names the
+      // same sender as the standard lane would for the same template
+      // (docs/policy/email-notifications.md §14.1a).
+      senderRole: CREDENTIAL_SENDER_ROLE,
     });
 
     if (submitted.ok === false && submitted.reason === "lock_unavailable") {
-      // A writer holds the address. Nothing was submitted, so this is an
-      // attempt that can be made again inside the budget -- the loop decides
-      // whether there is room for it (section 7.4, time budgets).
+      if (submitted.cause === "budget") {
+        // The budget went while this attempt was waiting for the address, so
+        // the helper refused rather than starting a call it could not protect.
+        // The loop would refuse the next attempt anyway; naming it here keeps
+        // the record truthful rather than reporting a wait for a lock.
+        lastErrorKind = "budget_exhausted";
+        break;
+      }
+      // A writer holds the address, or no connection came free. Nothing was
+      // submitted, so this is an attempt that can be made again inside the
+      // budget -- the loop decides whether there is room for it (section 7.4).
       lastErrorKind = "send_not_submitted";
       continue;
     }
@@ -337,14 +327,6 @@ export async function sendCredentialEmailNow(input: {
       return { sent: false, reason: "suppressed", skipReason: submitted.skipReason };
     }
 
-    if (submitted.value.expired) {
-      // Nothing was submitted and there is no room for another attempt. The
-      // loop would refuse the next one anyway; saying so here keeps the reason
-      // truthful rather than reporting a provider timeout we never made.
-      lastErrorKind = "budget_exhausted";
-      break;
-    }
-
     if (submitted.raiseIncident === "transactional_complaint") {
       // The verdict taken under the lock, so a complaint recorded while this
       // request was retrying is still reported. The code goes out either way --
@@ -361,7 +343,7 @@ export async function sendCredentialEmailNow(input: {
       });
     }
 
-    const response = submitted.value.response;
+    const response = submitted.value;
 
     const outcome: ProviderSendOutcome = response.ok
       ? { kind: "delivered", providerMessageId: response.providerMessageId }
