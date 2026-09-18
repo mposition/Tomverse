@@ -232,7 +232,7 @@ export async function updateMarketingChannel(
   if (patch.status === "autonomous_mode") {
     const current = await database.marketingChannel.findUnique({
       where: { id },
-      select: { status: true },
+      select: { status: true, pausedAt: true, lastResumeAuditLogId: true },
     });
     if (current?.status === "paused") {
       if (!resume) {
@@ -241,11 +241,22 @@ export async function updateMarketingChannel(
           "Returning an account to autonomous mode needs the operator's reason and audit entry",
         );
       }
+      if (resume.auditLogId === current.lastResumeAuditLogId) {
+        throw new MarketingStoreRefusedError(
+          "resume_evidence_reused",
+          "That audit entry already resumed this account once",
+        );
+      }
       const verdict = await verifyMarketingAuditEvidence(database, {
         auditLogId: resume.auditLogId,
         action: MARKETING_RESUME_AUTONOMOUS_ACTION,
         targetId: id,
         metadata: { reasonCode: resume.reasonCode },
+        // The decision has to be later than the pause it answers. Without this
+        // two entries from earlier resumes could be used alternately to bring
+        // the account back for ever, and the trigger -- which only sees that
+        // the column changed -- would agree every time.
+        notBefore: current.pausedAt ?? undefined,
       });
       if (!verdict.ok) {
         throw new MarketingStoreRefusedError(
@@ -452,7 +463,12 @@ export async function appendMarketingPostHistory(
 
   const current = await database.marketingPost.findUnique({
     where: { id: input.id },
-    select: { history: true, historyVersion: true, status: true },
+    select: {
+      history: true,
+      historyVersion: true,
+      status: true,
+      envelopeDigest: true,
+    },
   });
   if (!current || current.historyVersion !== input.expectedVersion) {
     return { appended: false };
@@ -462,8 +478,9 @@ export async function appendMarketingPostHistory(
   const data = postPatchData(input.patch ?? {});
 
   // docs/policy/marketing-automation.md §2: a confirmed failure is re-queued by
-  // a person. The trigger requires a new approval entry; this is what makes it
-  // an entry that says so.
+  // a person, and the decision is about this content and this failure. The
+  // trigger sees that the approval is new and later than the failure; only here
+  // can the entry be read to check that it approved these bytes.
   if (current.status === "failed" && input.patch?.status === "scheduled") {
     if (!input.requeue) {
       throw new MarketingStoreRefusedError(
@@ -471,10 +488,26 @@ export async function appendMarketingPostHistory(
         "Re-queueing a failed post needs the operator's audit entry",
       );
     }
+
+    const digest = input.patch.envelopeDigest ?? current.envelopeDigest;
+    const lastFailureAt = history
+      .filter((item) => item.type === "attempt" && item.outcome === "failed")
+      .map((item) => new Date(item.at).getTime())
+      .reduce((latest, at) => Math.max(latest, at), Number.NEGATIVE_INFINITY);
+
+    if (!Number.isFinite(lastFailureAt)) {
+      throw new MarketingStoreRefusedError(
+        "requeue_without_failure",
+        "This post is failed and its history records no failed attempt",
+      );
+    }
+
     const verdict = await verifyMarketingAuditEvidence(database, {
       auditLogId: input.requeue.auditLogId,
       action: MARKETING_REQUEUE_ACTION,
       targetId: input.id,
+      metadata: { digest },
+      notBefore: new Date(lastFailureAt),
     });
     if (!verdict.ok) {
       throw new MarketingStoreRefusedError(
@@ -484,6 +517,7 @@ export async function appendMarketingPostHistory(
     }
     data.approvalAuditLogId = input.requeue.auditLogId;
     data.approvedAt = verdict.createdAt;
+    data.approvedDigest = digest;
   }
 
   const updated = await database.marketingPost.updateMany({

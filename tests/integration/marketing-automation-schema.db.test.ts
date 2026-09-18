@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import type { Session } from "next-auth";
+
 import { Prisma } from "@prisma/client";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
 import {
@@ -9,6 +13,8 @@ import {
   createMarketingPost,
   insertAiVisibilityRun,
   insertMarketingReport,
+  updateMarketingChannel,
+  MARKETING_RESUME_AUTONOMOUS_ACTION,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -26,6 +32,52 @@ import { prisma } from "@/lib/prisma";
 // The retention setting is a transaction-local GUC, so each test that needs it
 // opens its own transaction and sets it there; a test that forgets sees the
 // refusal, which is the default.
+
+const AUDIT_SECRET = "marketing-schema-db-secret-0041";
+
+const operator = {
+  user: { id: "marketing-operator", email: "owner@example.test" },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+/**
+ * A real audit entry of the kind an operator route writes in S2.
+ *
+ * Written through the audit writer rather than inserted, so it carries a real
+ * hash and a real place in the chain -- which is what the evidence check reads.
+ * Returns the entry id.
+ */
+async function resumeAuditEntry(channelId: string, reasonCode: string) {
+  return writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing/resume"),
+    action: MARKETING_RESUME_AUTONOMOUS_ACTION,
+    targetType: "MarketingChannel",
+    targetId: channelId,
+    summary: "Resumed after the incident was resolved.",
+    metadata: { actorHadMarketingWrite: true, reasonCode },
+  });
+}
+
+const resumeAutonomous = async (
+  channelId: string,
+  auditLogId: string,
+  reasonCode: string,
+) => {
+  const current = await prisma.marketingChannel.findUniqueOrThrow({
+    where: { id: channelId },
+  });
+  return updateMarketingChannel(
+    prisma,
+    channelId,
+    {
+      status: "autonomous_mode",
+      graduatedAt: current.graduatedAt,
+      graduationSnapshot: current.graduationSnapshot as never,
+    },
+    { auditLogId, reasonCode: reasonCode as never },
+  );
+};
 
 const reset = () =>
   prisma.$executeRawUnsafe(
@@ -143,6 +195,44 @@ async function agedPost(
   }
 }
 
+/**
+ * A post carried to `publishing` the way the whitelist requires.
+ *
+ * Built by walking the real transitions rather than by inserting the end state:
+ * the insert trigger refuses a row created as though it had been published, and
+ * the dispatched-status CHECK refuses one without a provider request key, so a
+ * fixture that jumps straight there fails before the assertion it was written
+ * for and says nothing about the rule under test.
+ */
+async function dispatchedPost(channelId: string) {
+  const draft = await post(channelId);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-1",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled" });
+  return step({
+    status: "publishing",
+    publishAttempt: 1,
+    providerRequestKey: draft.logicalKey,
+  });
+}
+
+/** The same, one step further. */
+async function publishedPost(channelId: string) {
+  const dispatched = await dispatchedPost(channelId);
+  return prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "published", publishedAt: new Date() },
+  });
+}
+
 const refused = async (operation: Promise<unknown>, expected: RegExp) => {
   await assert.rejects(operation, (error: Error) => {
     assert.match(error.message, expected);
@@ -150,9 +240,18 @@ const refused = async (operation: Promise<unknown>, expected: RegExp) => {
   });
 };
 
-beforeEach(reset);
+let previousAuditKey: string | undefined;
+
+beforeEach(async () => {
+  previousAuditKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_SECRET;
+  await reset();
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY`);
+});
 
 after(async () => {
+  if (previousAuditKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousAuditKey;
   await reset();
   await prisma.$disconnect();
 });
@@ -281,13 +380,15 @@ test("a channel's platform, carrier and slug are immutable", async () => {
 });
 
 test("a slug always names its own channel", async () => {
-  const row = await channel();
+  // At insert, where the store is not the one choosing it. An update would only
+  // prove the immutability trigger fires, which is a different rule.
   await refused(
     prisma.$executeRawUnsafe(
-      `UPDATE "MarketingChannel" SET "accountSlug" = 'tiktok-1' WHERE "id" = $1`,
-      row.id,
+      `INSERT INTO "MarketingChannel" ("id","channel","provider","externalAccountRef","accountSlug","defaultLocale","allowedLocales","scopesDigest","status","updatedAt")
+       VALUES ('mismatched-slug','linkedin','zernio','zernio-mismatch','tiktok-1','en',ARRAY['en'],$1,'connect_pending', now())`,
+      DIGEST,
     ),
-    /slug is immutable|accountSlug_shape/,
+    /accountSlug_shape/,
   );
 });
 
@@ -505,21 +606,27 @@ test("the store's create writes the draft entry itself", async () => {
 
 test("a dispatched post cannot go back to a state that says it never left", async () => {
   const row = await approvedChannel();
-  const dispatched = await post(row.id);
-  await prisma.marketingPost.update({
-    where: { id: dispatched.id },
-    data: { status: "pending_approval", historyVersion: 1, history: [
-      ...(dispatched.history as Prisma.InputJsonValue[]),
-      historyEntry("guard_result", { decision: "approval_required", codes: [], ruleIds: [] }),
-    ] },
-  });
+  const published = await publishedPost(row.id);
 
+  for (const status of ["rejected", "guard_rejected", "approval_expired", "scheduled"]) {
+    await refused(
+      prisma.marketingPost.update({
+        where: { id: published.id },
+        data: { status },
+      }),
+      new RegExp(`cannot move from published to ${status}`),
+    );
+  }
+
+  // And a post that has not been dispatched cannot skip to a state that says it
+  // was.
+  const draft = await post(row.id);
   await refused(
     prisma.marketingPost.update({
-      where: { id: dispatched.id },
-      data: { status: "published" },
+      where: { id: draft.id },
+      data: { status: "published", publishedAt: new Date() },
     }),
-    /cannot move from pending_approval to published/,
+    /cannot move from drafted to published/,
   );
 });
 
@@ -564,22 +671,24 @@ test("an approval that names no digest is not an approval", async () => {
   assert.equal(approved.status, "approved");
 });
 
+test("a post cannot become published without recording when", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  // The purge clock reads publishedAt first, so a NULL here would date a post
+  // published today from whenever its draft was written.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "published" },
+    }),
+    /cannot become published without recording when|published_records_when/,
+  );
+});
+
 test("a publication time is written once", async () => {
   const row = await approvedChannel();
-  const published = await agedPost(row.id, 1, {
-    status: "publishing",
-    publishAttempt: 1,
-  });
-  await prisma.marketingPost.update({
-    where: { id: published.id },
-    data: { providerRequestKey: published.logicalKey },
-  });
-
-  const first = new Date();
-  await prisma.marketingPost.update({
-    where: { id: published.id },
-    data: { status: "published", publishedAt: first },
-  });
+  const published = await publishedPost(row.id);
+  const first = published.publishedAt!;
 
   await refused(
     prisma.marketingPost.update({
@@ -951,4 +1060,125 @@ test("a visibility run keeps cited urls https and an answer digest only", async 
     /citedUrls/,
   );
   await refused(directRun([], "not-a-digest"), /answerDigest/);
+});
+
+// ---------------------------------------------------------------------------
+// The two movements that are an operator's decision
+// ---------------------------------------------------------------------------
+
+test("a reconnect cannot ride in on another column's change", async () => {
+  const row = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+  const disconnected = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "disconnected" },
+  });
+  assert.equal(disconnected.status, "disconnected");
+
+  // Changing the scopes digest at the same time used to reach the reconnect
+  // branch's early return, which skipped the generation check below it.
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        status: "approval_mode",
+        scopesDigest: OTHER_DIGEST,
+        graduationEpoch: disconnected.graduationEpoch + 1,
+      },
+    }),
+    /reconnects only with a new connection generation/,
+  );
+
+  const reconnected = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      status: "approval_mode",
+      scopesDigest: OTHER_DIGEST,
+      connectionGeneration: disconnected.connectionGeneration + 1,
+      graduationEpoch: disconnected.graduationEpoch + 1,
+    },
+  });
+  assert.equal(reconnected.connectionGeneration, disconnected.connectionGeneration + 1);
+});
+
+test("the resume columns cannot be written on the way past", async () => {
+  const row = await approvedChannel();
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        scopesDigest: OTHER_DIGEST,
+        status: "approval_mode",
+        graduationEpoch: 1,
+        lastResumeAuditLogId: "audit-invented",
+        lastResumeReasonCode: "incident_resolved",
+      },
+    }),
+    /records a resume reason only when it resumes into autonomous mode/,
+  );
+});
+
+test("an audit entry resumes an account once, and only after the pause", async () => {
+  const row = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+  const graduated = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      status: "autonomous_mode",
+      graduatedAt: new Date(),
+      graduationSnapshot: {
+        graduationEpoch: 0,
+        approvedPostCount: 20,
+        guardRejectionRate: 0,
+        operatorEditRate: 0,
+        observedFromAt: new Date().toISOString(),
+        observedUntilAt: new Date().toISOString(),
+        approvalAuditLogId: "audit-graduation",
+        policyVersion: 1,
+      },
+    },
+  });
+  assert.equal(graduated.status, "autonomous_mode");
+
+  // An entry written before the pause is a record of an earlier decision.
+  const staleAuditId = await resumeAuditEntry(row.id, "incident_resolved");
+  const paused = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "paused" },
+  });
+  assert.equal(paused.pausedFromMode, "autonomous_mode");
+
+  await refused(
+    resumeAutonomous(row.id, staleAuditId, "incident_resolved"),
+    /entry_predates_decision/,
+  );
+
+  const freshAuditId = await resumeAuditEntry(row.id, "incident_resolved");
+  const resumed = await updateMarketingChannel(
+    prisma,
+    row.id,
+    {
+      status: "autonomous_mode",
+      graduatedAt: graduated.graduatedAt,
+      graduationSnapshot: graduated.graduationSnapshot as never,
+    },
+    { auditLogId: freshAuditId, reasonCode: "incident_resolved" },
+  );
+  assert.equal(resumed.lastResumeAuditLogId, freshAuditId);
+
+  // The same entry cannot bring it back a second time.
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "paused" },
+  });
+  await refused(
+    resumeAutonomous(row.id, freshAuditId, "incident_resolved"),
+    /resume_evidence_reused/,
+  );
 });

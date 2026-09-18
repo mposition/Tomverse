@@ -18,13 +18,18 @@
  *   route writes after its own permission check -- permissions can change, and
  *   what matters is what was true when the decision was made;
  * - it targets this row and no other;
- * - its own hash reproduces. A forged row would have to be written with a
- *   listed signing key, which is the same bar the chain verifier applies.
+ * - it was written after the thing it authorises. An entry that already existed
+ *   is a record of an earlier decision, and without this the same two entries
+ *   could be used alternately to resume an account for ever;
+ * - its own hash reproduces, and it is linked to the entries either side of it.
+ *   A forged row would have to be written with a listed signing key; a row
+ *   lifted out of the chain and re-inserted would keep its hash but lose its
+ *   links, which is what the linkage read catches.
  *
- * What it does not check: that the row is correctly linked to its neighbours.
- * That is a property of the chain rather than of one entry, and
- * `verifyAdminAuditIntegrity()` is what answers it; a per-row linkage read here
- * would be a second, weaker implementation of the same walk.
+ * What it does not check: the rest of the chain. `verifyAdminAuditIntegrity()`
+ * walks every row and is what answers "is the log intact"; this answers "is
+ * this row still where it was written", which is the part a single decision
+ * depends on.
  */
 
 import "server-only";
@@ -48,8 +53,10 @@ export type MarketingAuditProblem =
   | "marketing_write_not_recorded"
   | "target_mismatch"
   | "metadata_mismatch"
+  | "entry_predates_decision"
   | "entry_unhashed"
-  | "entry_hash_mismatch";
+  | "entry_hash_mismatch"
+  | "entry_not_linked";
 
 export type MarketingAuditRequirement = {
   auditLogId: string;
@@ -57,6 +64,12 @@ export type MarketingAuditRequirement = {
   targetId: string;
   /** Metadata keys that must be present with exactly these values. */
   metadata?: Readonly<Record<string, string>>;
+  /**
+   * The moment the entry has to be later than: the pause it resumes, the
+   * failure it re-queues. Without it an entry written for an earlier decision
+   * is evidence for this one too.
+   */
+  notBefore?: Date;
 };
 
 export type MarketingAuditVerdict =
@@ -94,6 +107,12 @@ export async function verifyMarketingAuditEvidence(
       return { ok: false, problem: "metadata_mismatch" };
     }
   }
+  if (
+    requirement.notBefore &&
+    entry.createdAt.getTime() <= requirement.notBefore.getTime()
+  ) {
+    return { ok: false, problem: "entry_predates_decision" };
+  }
 
   // An entry with no hash is outside what verification covers
   // (lib/adminAudit.ts writes one whenever a key is configured), so it is not
@@ -124,6 +143,42 @@ export async function verifyMarketingAuditEvidence(
   });
 
   if (!reproduced) return { ok: false, problem: "entry_hash_mismatch" };
+
+  // Where the entry sits. The chain is ordered by (createdAt, id), so the row
+  // before it must be the one its `previousHash` names, and the row after it --
+  // if there is one -- must name this entry's hash. A row detached from the
+  // chain still reproduces its own hash; what it loses is its place.
+  const [before, after] = await Promise.all([
+    database.adminAuditLog.findFirst({
+      where: {
+        entryHash: { not: null },
+        OR: [
+          { createdAt: { lt: entry.createdAt } },
+          { createdAt: entry.createdAt, id: { lt: entry.id } },
+        ],
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { entryHash: true },
+    }),
+    database.adminAuditLog.findFirst({
+      where: {
+        entryHash: { not: null },
+        OR: [
+          { createdAt: { gt: entry.createdAt } },
+          { createdAt: entry.createdAt, id: { gt: entry.id } },
+        ],
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { previousHash: true },
+    }),
+  ]);
+
+  if (entry.previousHash !== (before?.entryHash ?? null)) {
+    return { ok: false, problem: "entry_not_linked" };
+  }
+  if (after && after.previousHash !== entry.entryHash) {
+    return { ok: false, problem: "entry_not_linked" };
+  }
 
   return { ok: true, createdAt: entry.createdAt };
 }

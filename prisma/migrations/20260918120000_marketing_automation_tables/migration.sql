@@ -308,6 +308,12 @@ ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_purge_is_consistent_ch
 ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_dispatched_has_request_key_check" CHECK ("status" NOT IN ('publishing', 'published', 'verified', 'outcome_unknown', 'failed', 'removed_by_platform', 'deleted') OR ("providerRequestKey" IS NOT NULL AND "providerRequestKey" = "logicalKey" AND "publishAttempt" > 0));
 ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_providerRequestKey_check" CHECK ("providerRequestKey" IS NULL OR "providerRequestKey" = "logicalKey");
 
+-- A post that has been published carries the moment it was, and every state it
+-- can reach afterwards is reached from published or verified. The purge clock
+-- reads this column first, so a NULL here would date a published post from its
+-- draft.
+ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_published_records_when_check" CHECK ("status" NOT IN ('published', 'verified', 'removed_by_platform', 'deleted') OR "publishedAt" IS NOT NULL);
+
 ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_externalUrl_check" CHECK ("externalUrl" IS NULL OR "externalUrl" LIKE 'https://%');
 ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_publishAttempt_check" CHECK ("publishAttempt" >= 0);
 ALTER TABLE "MarketingPost" ADD CONSTRAINT "MarketingPost_historyVersion_check" CHECK ("historyVersion" >= 0);
@@ -497,6 +503,25 @@ BEGIN
         OR NEW."scopesDigest" <> OLD."scopesDigest"
         OR NEW."policyVersion" <> OLD."policyVersion";
 
+    -- These two are checked before any branch returns, because they hold
+    -- whatever else the write is doing. They used to sit after the reconnect
+    -- branch, so a write that also changed the scopes digest reached that
+    -- branch's `RETURN` and never passed this way: it could revive a
+    -- disconnected account on its old connection generation, and rewrite the
+    -- resume columns while doing it.
+    IF NOT (OLD."status" = 'paused' AND NEW."status" = 'autonomous_mode')
+        AND (NEW."lastResumeAuditLogId" IS DISTINCT FROM OLD."lastResumeAuditLogId"
+            OR NEW."lastResumeReasonCode" IS DISTINCT FROM OLD."lastResumeReasonCode") THEN
+        RAISE EXCEPTION 'MarketingChannel % records a resume reason only when it resumes into autonomous mode', OLD."accountSlug"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF OLD."status" = 'disconnected' AND NEW."status" <> 'disconnected'
+        AND NEW."connectionGeneration" <> OLD."connectionGeneration" + 1 THEN
+        RAISE EXCEPTION 'MarketingChannel % reconnects only with a new connection generation', OLD."accountSlug"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
     IF identity_changed THEN
         IF NEW."status" <> 'approval_mode'
             OR NEW."graduatedAt" IS NOT NULL
@@ -544,11 +569,6 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    IF OLD."status" = 'disconnected' AND NEW."connectionGeneration" <> OLD."connectionGeneration" + 1 THEN
-        RAISE EXCEPTION 'MarketingChannel % reconnects only with a new connection generation', OLD."accountSlug"
-            USING ERRCODE = 'check_violation';
-    END IF;
-
     IF NEW."status" = 'paused' THEN
         -- The trigger records where the pause came from; a caller's value is
         -- ignored rather than checked, because a value that is only checked can
@@ -592,13 +612,6 @@ BEGIN
             NEW."pausedAt" := NULL;
             NEW."pausedFromMode" := NULL;
         END IF;
-    END IF;
-
-    IF NEW."status" <> 'autonomous_mode'
-        AND (NEW."lastResumeAuditLogId" IS DISTINCT FROM OLD."lastResumeAuditLogId"
-            OR NEW."lastResumeReasonCode" IS DISTINCT FROM OLD."lastResumeReasonCode") THEN
-        RAISE EXCEPTION 'MarketingChannel % records a resume reason only when it resumes into autonomous mode', OLD."accountSlug"
-            USING ERRCODE = 'check_violation';
     END IF;
 
     IF NEW."status" = 'disconnected' THEN
@@ -740,6 +753,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     retention_running BOOLEAN;
+    last_failure_at TIMESTAMP(3);
     old_length INTEGER;
     new_length INTEGER;
     kept JSONB;
@@ -811,17 +825,45 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
 
+        -- A post that has become published carries the moment it did. The purge
+        -- clock is `COALESCE(publishedAt, createdAt)`, so leaving it NULL would
+        -- date a post published today from whenever its draft was written --
+        -- and an old draft published today would be purgeable immediately.
+        IF NEW."status" = 'published' AND NEW."publishedAt" IS NULL THEN
+            RAISE EXCEPTION 'MarketingPost % cannot become published without recording when', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+
         -- A confirmed failure is re-queued by a person, never by a retry
         -- (docs/policy/marketing-automation.md §2). The store checks that the
-        -- audit entry is a human requeue; the trigger checks that it is a new
-        -- one and that it is not dated before the failure.
+        -- audit entry is a human requeue for this content; the trigger checks
+        -- that the approval is new and dated after the failure it is answering,
+        -- which it reads from the history rather than from the previous
+        -- approval -- an approval older than the failure is not a decision about
+        -- it.
         IF OLD."status" = 'failed' AND NEW."status" = 'scheduled' THEN
+            SELECT pg_catalog.max((("entry" ->> 'at')::TIMESTAMPTZ) AT TIME ZONE 'UTC')
+            INTO last_failure_at
+            FROM pg_catalog.jsonb_array_elements(OLD."history") AS "h"("entry")
+            WHERE "entry" ->> 'type' = 'attempt'
+              AND "entry" ->> 'outcome' = 'failed';
+
             IF NEW."approvalAuditLogId" IS NULL
                 OR NEW."approvalAuditLogId" IS NOT DISTINCT FROM OLD."approvalAuditLogId"
                 OR NEW."approvedAt" IS NULL
                 OR (OLD."approvedAt" IS NOT NULL AND NEW."approvedAt" <= OLD."approvedAt")
                 OR NEW."approvedDigest" IS DISTINCT FROM NEW."envelopeDigest" THEN
                 RAISE EXCEPTION 'MarketingPost % is re-queued only by a fresh approval of its current content', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+
+            IF last_failure_at IS NULL THEN
+                RAISE EXCEPTION 'MarketingPost % is failed with no failed attempt in its history', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+
+            IF NEW."approvedAt" <= last_failure_at THEN
+                RAISE EXCEPTION 'MarketingPost % re-queue approval predates the failure it answers', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
         END IF;
@@ -911,6 +953,12 @@ BEGIN
     -- an entry either survives verbatim or is one of the two detail types this
     -- allows to go. If an entry type ever carries text, this trigger has to
     -- learn the redaction case before that type is added.
+    --
+    -- Membership is by containment, which does not count duplicates, so two
+    -- byte-identical entries are treated as one: compaction must remove both or
+    -- neither. Every entry carries its own `at`, so identical pairs do not arise
+    -- in practice; the effect of the simplification is to refuse a compaction,
+    -- never to admit one.
     SELECT pg_catalog.jsonb_agg("entry" ORDER BY "ordinality")
     INTO kept
     FROM pg_catalog.jsonb_array_elements(OLD."history")
@@ -966,6 +1014,18 @@ BEGIN
 
     tail := pg_catalog.coalesce(tail, '[]'::JSONB);
 
+    -- Exactly one closing entry, at the end, counting exactly what left. Not
+    -- "the last one is a compaction": a second compaction entry earlier in the
+    -- tail would be a record of a removal that never happened.
+    IF (
+        SELECT pg_catalog.count(*)
+        FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
+        WHERE "entry" ->> 'type' = 'retention_compaction'
+    ) <> 1 THEN
+        RAISE EXCEPTION 'MarketingPost % compaction writes exactly one closing entry', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
     IF new_length < 1
         OR NEW."history" -> (new_length - 1) ->> 'type' IS DISTINCT FROM 'retention_compaction'
         OR (NEW."history" -> (new_length - 1) ->> 'removedEntryCount')::INTEGER IS DISTINCT FROM removed_length THEN
@@ -973,19 +1033,47 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
+    -- Nothing in the tail but summaries and that closing entry.
+    FOR element IN SELECT "entry" FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
+    LOOP
+        IF element ->> 'type' NOT IN ('retention_summary', 'retention_compaction') THEN
+            RAISE EXCEPTION 'MarketingPost % compaction may only add summaries', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END LOOP;
+
+    -- A summary for something that did not leave is a record of a removal that
+    -- never happened, so the two sets have to match in both directions.
+    IF (
+        SELECT pg_catalog.count(DISTINCT "entry" ->> 'summarises')
+        FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
+        WHERE "entry" ->> 'type' = 'retention_summary'
+    ) <> (
+        SELECT pg_catalog.count(DISTINCT "entry" ->> 'type')
+        FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
+    ) THEN
+        RAISE EXCEPTION 'MarketingPost % compaction summarises something it did not remove', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
     -- One summary per kind of entry that left, saying how many and when.
     FOR summarised_type IN SELECT DISTINCT "entry" ->> 'type' FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
     LOOP
+        IF (
+            SELECT pg_catalog.count(*)
+            FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
+            WHERE "entry" ->> 'type' = 'retention_summary'
+              AND "entry" ->> 'summarises' = summarised_type
+        ) <> 1 THEN
+            RAISE EXCEPTION 'MarketingPost % needs exactly one summary of its removed % entries', OLD."id", summarised_type
+                USING ERRCODE = 'check_violation';
+        END IF;
+
         SELECT "entry"
         INTO summary
         FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
         WHERE "entry" ->> 'type' = 'retention_summary'
           AND "entry" ->> 'summarises' = summarised_type;
-
-        IF summary IS NULL THEN
-            RAISE EXCEPTION 'MarketingPost % compaction removed % entries without summarising them', OLD."id", summarised_type
-                USING ERRCODE = 'check_violation';
-        END IF;
 
         IF (summary ->> 'count')::INTEGER IS DISTINCT FROM (
             SELECT pg_catalog.count(*)::INTEGER
@@ -995,13 +1083,19 @@ BEGIN
             RAISE EXCEPTION 'MarketingPost % summary of % entries does not count them', OLD."id", summarised_type
                 USING ERRCODE = 'check_violation';
         END IF;
-    END LOOP;
 
-    -- Nothing in the tail but summaries and the closing entry.
-    FOR element IN SELECT "entry" FROM pg_catalog.jsonb_array_elements(tail) AS "t"("entry")
-    LOOP
-        IF element ->> 'type' NOT IN ('retention_summary', 'retention_compaction') THEN
-            RAISE EXCEPTION 'MarketingPost % compaction may only add summaries', OLD."id"
+        -- The span is the whole point of the summary: it is what is left to say
+        -- when the entries themselves are gone.
+        IF (summary ->> 'firstAt')::TIMESTAMPTZ IS DISTINCT FROM (
+            SELECT pg_catalog.min(("entry" ->> 'at')::TIMESTAMPTZ)
+            FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
+            WHERE "entry" ->> 'type' = summarised_type
+        ) OR (summary ->> 'lastAt')::TIMESTAMPTZ IS DISTINCT FROM (
+            SELECT pg_catalog.max(("entry" ->> 'at')::TIMESTAMPTZ)
+            FROM pg_catalog.jsonb_array_elements(removed) AS "r"("entry")
+            WHERE "entry" ->> 'type' = summarised_type
+        ) THEN
+            RAISE EXCEPTION 'MarketingPost % summary of % entries does not span them', OLD."id", summarised_type
                 USING ERRCODE = 'check_violation';
         END IF;
     END LOOP;

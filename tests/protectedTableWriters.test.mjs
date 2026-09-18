@@ -9,6 +9,7 @@ import {
   EXCLUDED_PREFIXES,
   PROTECTED_TABLES,
   RAW_SQL_ALLOWLIST,
+  RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
   checkProtectedTableWriters,
   selectScannedPaths,
@@ -30,6 +31,7 @@ const realAllowlistPaths = new Set([
   ...DELEGATE_NAME_ALLOWLIST.map((entry) => entry.path),
   ...RAW_SQL_ALLOWLIST.map((entry) => entry.path),
   ...RUNTIME_SQL_ALLOWLIST.map((entry) => entry.path),
+  ...RETENTION_SETTING_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -416,6 +418,43 @@ test("account deletion's runtime SQL never names a protected table", () => {
       `${table} must not be anonymised or deleted by account deletion`
     );
   }
+});
+
+test("naming the retention setting outside the allowlist is a finding", () => {
+  // Both spellings, because passing the constant to set_config() needs no
+  // literal anywhere and would otherwise be invisible to a text rule.
+  assertOneFinding(
+    "lib/somethingElse.ts",
+    "await tx.$executeRawUnsafe(\"SET LOCAL tomverse.marketing_retention_compaction = 'on'\");",
+    "retention-setting"
+  );
+  assertOneFinding(
+    "lib/somethingElse.ts",
+    "import { MARKETING_RETENTION_SETTING } from '@/lib/marketingAutomationSchema';",
+    "retention-setting"
+  );
+});
+
+test("a file that does not name the setting is not a finding", () => {
+  assert.deepEqual(one("lib/somethingElse.ts", "export const x = 1;"), []);
+});
+
+test("the allowlist is exact in both directions", () => {
+  // One mention where the allowlist expects two is as much a change as three.
+  // Unfiltered on purpose: this fixture *is* an allowlisted path, so the
+  // helper that hides real allowlist entries would hide the finding too.
+  const findings = checkProtectedTableWriters({
+    sources: [
+      {
+        path: "lib/marketingAutomationSchema.ts",
+        text: "const x = 'tomverse.marketing_retention_compaction';",
+      },
+    ],
+  }).filter((finding) => finding.path === "lib/marketingAutomationSchema.ts");
+  assert.ok(
+    findings.some((finding) => finding.rule === "retention-setting"),
+    JSON.stringify(findings)
+  );
 });
 
 test("the repository passes the check as it stands", () => {
