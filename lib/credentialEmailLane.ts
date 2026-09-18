@@ -10,6 +10,7 @@ import { sendWithAddressLock } from "@/lib/emailSendLock";
 import {
   CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
   CREDENTIAL_SEND_RESERVE_MS,
+  SEND_COMMIT_RESERVE_MS,
 } from "@/lib/emailSendLockCore";
 import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import {
@@ -271,8 +272,15 @@ export async function sendCredentialEmailNow(input: {
       // budget. A transaction that expired first would abandon a submission
       // that had already reached the provider.
       transactionTimeoutMs:
-        CREDENTIAL_SEND_LOCK_TIMEOUT_MS + decision.timeoutMs + 500,
-      submit: async () => {
+        CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
+        decision.timeoutMs +
+        CREDENTIAL_SEND_RESERVE_MS +
+        SEND_COMMIT_RESERVE_MS,
+      // The lane cap for this attempt; the helper cuts it to what the
+      // transaction can protect, and the callback cuts it again to what the
+      // request budget has left.
+      providerTimeoutMs: decision.timeoutMs,
+      submit: async ({ providerTimeoutMs }) => {
         // Recomputed now the lock is held: waiting for it spent part of the
         // budget this timeout was cut from. The reserve leaves the transaction
         // room to commit after the provider answers.
@@ -290,7 +298,7 @@ export async function sendCredentialEmailNow(input: {
             html: input.html,
             text: input.text,
             idempotencyKey: input.idempotencyKey,
-            timeoutMs: Math.min(decision.timeoutMs, remaining),
+            timeoutMs: Math.min(providerTimeoutMs, remaining),
             // Read from the one template this lane carries rather than written
             // here. Every attempt inside this request, and the record of it,
             // then names the same sender as the standard lane would for the

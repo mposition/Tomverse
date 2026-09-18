@@ -1003,7 +1003,12 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     purpose: definition.purpose,
     userId: delivery.userId,
     now,
-    submit: () =>
+    // The lane cap. What the call gets is this or the transaction’s remaining
+    // life, whichever is less -- the transaction cannot abort an HTTP request,
+    // so a call that outlived it would be submitting with no lock held
+    // (docs/policy/email-notifications.md section 9.8).
+    providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+    submit: ({ providerTimeoutMs }) =>
       deliverEmailOnce({
         to: delivery.emailAddress,
         ...rendered,
@@ -1020,9 +1025,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         // sender the first attempt used rather than one recomputed from what the
         // retry happens to know (docs/policy/email-notifications.md §14.1a).
         senderRole: definition.senderRole,
-        // Stated here because the lane now waits for this call holding a lock;
-        // the transaction budget is sized to outlast it (lib/emailSendLockCore.ts).
-        timeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+        // Handed down rather than restated: the helper has already cut it to
+        // what the transaction can protect (lib/emailSendLockCore.ts).
+        timeoutMs: providerTimeoutMs,
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
       }),
   });

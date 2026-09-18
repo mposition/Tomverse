@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   isLockTimeoutError,
   isTransactionStartTimeoutError,
+  SEND_COMMIT_RESERVE_MS,
   STANDARD_SEND_LOCK_TIMEOUT_MS,
   STANDARD_SEND_TRANSACTION_TIMEOUT_MS,
 } from "@/lib/emailSendLockCore";
@@ -65,17 +66,18 @@ export type SendLockResult<T> =
   /** A suppression this address has now, whatever the earlier check saw. */
   | { ok: false; reason: "suppressed"; skipReason: string }
   /**
-   * The send never reached the provider: either somebody else holds the
-   * address (`lock`) or no connection came free in time, so the transaction
-   * never started (`pool`). Nothing was submitted and nothing was written; the
+   * The send never reached the provider: somebody else holds the address
+   * (`lock`), no connection came free in time so the transaction never started
+   * (`pool`), or the transaction had too little life left to protect a
+   * submission (`budget`). Nothing was submitted and nothing was written; the
    * caller releases its claim and lets the existing backoff bring the message
    * back, without counting an attempt (section 7.4, time budgets).
    *
-   * The two are one outcome because they are one decision -- wait and try
-   * again -- and two names because an operator reading the log needs to know
-   * whether the address is busy or this process is.
+   * The three are one outcome because they are one decision -- wait and try
+   * again -- and three names because an operator reading the log needs to know
+   * whether the address is busy, this process is, or the budgets are wrong.
    */
-  | { ok: false; reason: "lock_unavailable"; cause: "lock" | "pool" };
+  | { ok: false; reason: "lock_unavailable"; cause: "lock" | "pool" | "budget" };
 
 /** Raised inside the transaction when the lock budget is spent. Never escapes. */
 class SendLockBudgetSpent extends Error {
@@ -127,7 +129,7 @@ const budgetSpent = (deadline: number) => monotonicNow() >= deadline;
 const lockUnavailable = <T,>(
   input: { classification: SendClassification; purpose?: string | null },
   waitedMs: number,
-  cause: "lock" | "pool"
+  cause: "lock" | "pool" | "budget"
 ): SendLockResult<T> => {
   console.warn(
     JSON.stringify({
@@ -152,8 +154,17 @@ export async function sendWithAddressLock<T>(input: {
   /** The whole wait for all of the locks, not the wait for each of them. */
   lockTimeoutMs?: number;
   transactionTimeoutMs?: number;
-  /** The provider submission. Runs holding the locks; must not write rows. */
-  submit: () => Promise<T>;
+  /**
+   * The longest this lane would ever give the provider. What the submission
+   * actually gets is this or what the transaction has left, whichever is less.
+   */
+  providerTimeoutMs?: number;
+  /**
+   * The provider submission. Runs holding the locks; must not write rows, and
+   * must bound itself by the budget it is handed -- the transaction's own
+   * timeout cannot stop an HTTP request.
+   */
+  submit: (budget: { providerTimeoutMs: number }) => Promise<T>;
 }): Promise<SendLockResult<T>> {
   const lockTimeoutMs = Math.max(
     1,
@@ -170,6 +181,11 @@ export async function sendWithAddressLock<T>(input: {
   // opposite things: one submitted nothing, the other may have submitted
   // everything.
   let started = false;
+  // Which statements a lock timeout may have come from. Once the locks are
+  // held, a 55P03 is an ordinary relation lock giving up -- a failure, not this
+  // address being busy -- and reporting it as contention would retry it for
+  // ever under a name that says nothing went wrong.
+  let inLockPhase = true;
   // Kept outside the transaction so a rollback after a successful submission
   // does not take the provider's answer with it.
   let submitted:
@@ -181,6 +197,9 @@ export async function sendWithAddressLock<T>(input: {
       async (tx): Promise<SendLockResult<T>> => {
         started = true;
         const deadline = monotonicNow() + lockTimeoutMs;
+        // Prisma starts its own clock when the callback does, so this is the
+        // same instant the transaction's life is measured from.
+        const transactionDeadline = monotonicNow() + transactionTimeoutMs;
         // What this connection had before the budget was imposed, so the reads
         // that follow the locks are restored to it rather than left on a
         // sender's budget -- a relation lock that timed out at two seconds
@@ -205,6 +224,7 @@ export async function sendWithAddressLock<T>(input: {
         // late goes back on its curve rather than reading and submitting as
         // though it had not.
         if (budgetSpent(deadline)) throw new SendLockBudgetSpent();
+        inLockPhase = false;
         // The budget was for the locks. What follows takes only ordinary read
         // locks, and a timeout sized to whatever the budget had left would fail
         // them for no reason.
@@ -221,8 +241,25 @@ export async function sendWithAddressLock<T>(input: {
           return { ok: false, reason: "suppressed", skipReason: verdict.skipReason };
         }
 
+        // From here the locks are held and the reads are done, so what is left
+        // of the transaction is what is left to protect the submission. The
+        // provider gets that, less the room to finish, and never more than the
+        // lane would give it anyway.
+        const left =
+          transactionDeadline - monotonicNow() - SEND_COMMIT_RESERVE_MS;
+        if (left <= 0) {
+          // The locks and the reads took the transaction's life. Submitting now
+          // would mean a request still in flight after the rollback released
+          // the address -- after a withdrawal could have taken it and answered.
+          return lockUnavailable(input, transactionTimeoutMs, "budget");
+        }
+        const providerTimeoutMs = Math.min(
+          input.providerTimeoutMs ?? left,
+          left
+        );
+
         const answer = {
-          value: await input.submit(),
+          value: await input.submit({ providerTimeoutMs }),
           raiseIncident: verdict.raiseIncident ?? null,
         };
         submitted = answer;
@@ -266,7 +303,7 @@ export async function sendWithAddressLock<T>(input: {
     const budgetSpentError =
       error instanceof SendLockBudgetSpent ||
       (error instanceof Error && error.name === "SendLockBudgetSpent");
-    if (budgetSpentError || isLockTimeoutError(error)) {
+    if (budgetSpentError || (inLockPhase && isLockTimeoutError(error))) {
       return lockUnavailable(input, lockTimeoutMs, "lock");
     }
     throw error;

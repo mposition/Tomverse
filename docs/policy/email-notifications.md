@@ -26,7 +26,9 @@
    그 순서만이 교착을 만듭니다.
 3. **시간 예산**(9.8 표) — 잠금 **전체** 대기 2초(credential 300ms), provider
    10초(credential은 남은 예산 − 100ms), transaction 15초. `lock_timeout`은 잠금마다
-   다시 적용되므로 절대 deadline 하나로 관리합니다.
+   다시 적용되므로 절대 deadline 하나로 관리하고, **provider 예산은 transaction의 남은
+   수명에서 commit 여유를 뺀 값**을 넘지 않습니다 — transaction timeout은 HTTP 요청을
+   중단시키지 못하므로, 그보다 긴 호출은 잠금이 풀린 뒤의 제출이 됩니다.
 4. **잠금 실패는 시도가 아닙니다.** `EmailDelivery`는 `deferReason = 'send_lock'`으로
    pending에 남고 기존 backoff로 돌아오며, 알림 큐 행도 시도 횟수를 올리지 않습니다.
    남의 철회가 이 메일의 포기 예산을 쓰지 않습니다.
@@ -1862,7 +1864,7 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 | 항목 | standard lane·알림 큐 | credential lane |
 |---|---|---|
 | 잠금 대기 — **세 잠금 전체** | 2초 | 300ms |
-| provider 호출 timeout | 10초 | 남은 요청 예산 − 100ms, 상한 2.5초 |
+| provider 호출 timeout | 10초, **transaction 잔여 − 250ms**를 넘지 않음 | 남은 요청 예산 − 100ms, 상한 2.5초, 같은 제한 적용 |
 | transaction timeout | 15초 | 잠금 대기 + 그 시도의 timeout + 여유 (둘 다 요청 예산 안) |
 | 잠금을 못 얻으면 | claim 해제, 기존 backoff로 복귀, **시도 횟수는 올리지 않음** | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
 
@@ -1891,6 +1893,17 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
   **판정은 오류 문구가 아니라 callback이 시작됐는지로 합니다.** Prisma는 "시작하지
   못했다"와 "실행 중에 만료됐다"를 같은 `P2028`로 보고하는데 둘은 정반대입니다 —
   앞은 아무것도 제출하지 않았고 뒤는 다 제출했을 수 있습니다.
+- **provider 예산은 transaction의 남은 수명에서 잘라 냅니다.** 두 시계는 서로를
+  모릅니다 — Prisma의 `timeout`은 transaction을 끝내고 advisory 잠금을 함께 풀지만,
+  이미 떠 있는 `AbortSignal.timeout`은 계속 돕니다. transaction이 6초 남은 시점에
+  10초짜리 호출을 시작하면, **잠금이 풀린 뒤에도 제출이 진행됩니다** — 그 사이 철회가
+  그 잠금을 잡고 커밋해 사용자에게 응답까지 마칠 수 있습니다. 그래서 잠금과 재조회가
+  끝난 시점에 남은 시간에서 **commit 여유 250ms**를 빼고, lane 상한과 비교해 작은 쪽을
+  제출에 줍니다. **남은 것이 없으면 제출하지 않고** `lock_unavailable`(cause
+  `budget`)로 돌아갑니다 — 짧은 발송이 아니라 발송 없음입니다.
+- **잠금 단계가 끝난 뒤의 `55P03`은 주소 경합이 아닙니다.** 복원된
+  `lock_timeout` 아래에서 일반 relation 잠금이 끊긴 것이므로 실패로 다룹니다. 판정은
+  잠금 단계인지 여부로 하고, 오류 문구로 하지 않습니다.
 - **제출이 성공한 뒤 transaction이 실패하면 그 답을 버리지 않습니다.** 이 transaction은
   아무것도 쓰지 않으므로(설정과 원인을 읽고 잠금을 잡을 뿐) rollback이 잃는 것이
   없고, 답을 버리면 이미 나간 메일을 다시 보내게 됩니다. 이 경우

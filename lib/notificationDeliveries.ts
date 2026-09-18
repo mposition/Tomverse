@@ -512,16 +512,17 @@ export async function attemptNotificationDelivery({
       const submitted = await sendWithAddressLock({
         emailAddress: message.to,
         classification: "transactional",
-        submit: () =>
+        // The lane cap; the helper cuts it to what the transaction can
+        // protect. Without a timeout there is no abort signal at all, and the
+        // request could outlive the lock and put a message on the wire after a
+        // withdrawal completed.
+        providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+        submit: ({ providerTimeoutMs }) =>
           sendTransactionalEmail({
             ...message,
             senderRole,
             idempotencyKey: `notification-delivery:${deliveryId}`,
-            // Stated because this call now runs holding the address lock. The
-            // transaction budget cannot stop an HTTP request -- only an abort
-            // signal can -- so without this the provider call could outlive the
-            // lock and put a message on the wire after a withdrawal completed.
-            timeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+            timeoutMs: providerTimeoutMs,
           }),
       });
       if (submitted.ok === false && submitted.reason === "lock_unavailable") {

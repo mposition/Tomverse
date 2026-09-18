@@ -54,6 +54,21 @@ export const SEND_LOCK_RETRY_MS = 60_000;
 export const CREDENTIAL_SEND_RESERVE_MS = 100;
 
 /**
+ * Kept back from the transaction's remaining life, so a submission that spends
+ * all of its timeout still leaves room for the transaction to finish.
+ *
+ * The provider timeout and the transaction timeout are two clocks that do not
+ * know about each other. Prisma's `timeout` ends the transaction and releases
+ * the advisory locks with it; an `AbortSignal.timeout` already in flight keeps
+ * running. A send that began a ten-second call with six seconds of transaction
+ * left would be submitting after its lock had gone -- after a withdrawal could
+ * have taken that lock, committed, and answered the person who asked for it.
+ * So the provider's budget is cut from what the transaction has left, less
+ * this, and a send with nothing left submits nothing.
+ */
+export const SEND_COMMIT_RESERVE_MS = 250;
+
+/**
  * Whether a thrown error is Postgres refusing to keep waiting for a lock
  * (SQLSTATE 55P03, `lock_not_available`).
  *

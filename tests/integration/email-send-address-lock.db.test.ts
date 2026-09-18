@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { recordSuppression } from "@/lib/emailSuppression";
 import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
+import { SEND_COMMIT_RESERVE_MS } from "@/lib/emailSendLockCore";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
   drainStandardEmailDeliveries,
@@ -77,6 +78,30 @@ const addressIsFree = async (address: string) => {
 
 /** A writer started inside a send, awaited after it, so a failure is not unhandled. */
 let writer: Promise<unknown> = Promise.resolve();
+
+/**
+ * Waits for a holder to say it has the lock, or for its transaction to fail.
+ *
+ * Without the second half, a setup transaction that threw before it reached
+ * `acquired()` would leave the test waiting on a promise nothing will ever
+ * resolve -- and a broken fixture would be reported as a hang rather than as
+ * the error it is.
+ */
+const readyOrFailed = async (ready: Promise<void>, transaction: Promise<unknown>) => {
+  let acquired = false;
+  const failedFirst = transaction.then(
+    () => {
+      if (!acquired) throw new Error("The holder ended before it took the lock.");
+    },
+    (error) => {
+      throw error;
+    }
+  );
+  // A rejection after the race is settled is reported by the release instead,
+  // which awaits the same transaction.
+  failedFirst.catch(() => {});
+  await Promise.race([ready.then(() => { acquired = true; }), failedFirst]);
+};
 
 /**
  * Waits until a backend is blocked on **this address's** advisory lock.
@@ -166,7 +191,7 @@ const suppressWhileHoldingAddress = async (address: string) => {
     },
     { timeout: 30_000, maxWait: 10_000 }
   );
-  await ready;
+  await readyOrFailed(ready, transaction);
   return async () => {
     release();
     await transaction;
@@ -191,7 +216,7 @@ const holdAddress = async (address: string) => {
     },
     { timeout: 30_000, maxWait: 10_000 }
   );
-  await ready;
+  await readyOrFailed(ready, transaction);
   return async () => {
     release();
     await transaction;
@@ -270,6 +295,63 @@ test("a suppression writer waits for the send it raced, and is seen by the next 
   });
   assert.equal(second.ok, false);
   assert.equal(second.ok === false ? second.reason : null, "suppressed");
+});
+
+test("a provider call is never given more time than its transaction has left", async () => {
+  // The two clocks do not know about each other: Prisma's timeout ends the
+  // transaction and releases the locks, and an `AbortSignal.timeout` already
+  // running keeps running. A ten-second call begun with six seconds of
+  // transaction left would be submitting with no lock held.
+  const address = `${randomUUID()}@example.com`;
+  let given = -1;
+
+  const result = await sendWithAddressLock({
+    emailAddress: address,
+    classification: "transactional",
+    transactionTimeoutMs: 2_000,
+    providerTimeoutMs: 10_000,
+    submit: async ({ providerTimeoutMs }) => {
+      given = providerTimeoutMs;
+      return "sent";
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(given > 0, "the call was given a budget");
+  assert.ok(
+    given <= 2_000 - SEND_COMMIT_RESERVE_MS,
+    `the lane cap was cut to the transaction's life, got ${given}`
+  );
+});
+
+test("a transaction with nothing left submits nothing at all", async () => {
+  // The locks and the reads can take the transaction's life. What is left then
+  // is not a short send -- it is no send, because the rollback would release
+  // the address while the request was still in flight.
+  const address = `${randomUUID()}@example.com`;
+  let submitted = 0;
+
+  const result = await sendWithAddressLock({
+    emailAddress: address,
+    classification: "transactional",
+    // Whatever the locks cost, the reserve alone accounts for all of it.
+    lockTimeoutMs: SEND_COMMIT_RESERVE_MS,
+    transactionTimeoutMs: SEND_COMMIT_RESERVE_MS,
+    providerTimeoutMs: 10_000,
+    submit: async () => {
+      submitted += 1;
+      return "sent";
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false ? result.reason : null, "lock_unavailable");
+  assert.equal(
+    result.ok === false && result.reason === "lock_unavailable" ? result.cause : null,
+    "budget",
+    "refused for the budget, not for contention"
+  );
+  assert.equal(submitted, 0, "nothing reached the provider");
 });
 
 test("the address is locked while the provider is being called, and free after", async () => {
