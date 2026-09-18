@@ -2,10 +2,12 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { deliverEmailOnce } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import {
   isLockTimeoutError,
   isTransactionStartTimeoutError,
+  providerSendBudget,
   SEND_COMMIT_RESERVE_MS,
   STANDARD_SEND_LOCK_TIMEOUT_MS,
   STANDARD_SEND_TRANSACTION_TIMEOUT_MS,
@@ -20,6 +22,8 @@ import {
   lockSuppressionAddress,
 } from "@/lib/emailSuppressionAuthority";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
+import type { ProviderSendResult } from "@/lib/emailProviderPortCore";
+import type { SenderRole, SendingStream } from "@/lib/emailSendingIdentityCore";
 
 /**
  * The one door every customer-facing send goes through.
@@ -56,10 +60,11 @@ import type { SendClassification } from "@/lib/emailSuppressionCore";
  * budgets are explicit (lib/emailSendLockCore.ts).
  */
 
-export type SendLockResult<T> =
+export type SendLockResult =
   | {
       ok: true;
-      value: T;
+      /** What the provider answered. The helper made the call, not the caller. */
+      value: ProviderSendResult;
       /** The verdict's own signal, raised by the caller in its own words. */
       raiseIncident: "transactional_complaint" | null;
     }
@@ -126,11 +131,11 @@ const monotonicNow = () => performance.now();
 const budgetSpent = (deadline: number) => monotonicNow() >= deadline;
 
 /** One line, and no recipient: the row itself records only that it is waiting. */
-const lockUnavailable = <T,>(
+const lockUnavailable = (
   input: { classification: SendClassification; purpose?: string | null },
   waitedMs: number,
   cause: "lock" | "pool" | "budget"
-): SendLockResult<T> => {
+): SendLockResult => {
   console.warn(
     JSON.stringify({
       event: "email_send_lock_unavailable",
@@ -143,7 +148,7 @@ const lockUnavailable = <T,>(
   return { ok: false, reason: "lock_unavailable", cause };
 };
 
-export async function sendWithAddressLock<T>(input: {
+export async function sendWithAddressLock(input: {
   emailAddress: string;
   classification: SendClassification;
   /** Locked and re-checked when the message belongs to one. */
@@ -160,12 +165,26 @@ export async function sendWithAddressLock<T>(input: {
    */
   providerTimeoutMs?: number;
   /**
-   * The provider submission. Runs holding the locks; must not write rows, and
-   * must bound itself by the budget it is handed -- the transaction's own
-   * timeout cannot stop an HTTP request.
+   * The rendered message. **The helper submits it; the caller does not.**
+   *
+   * A callback would have left every lane importing a send entry point, and a
+   * file-level allowlist cannot tell a submission made inside these locks from
+   * one made beside them -- which is the whole point of the check in
+   * `scripts/check-send-entry-points.mjs`. So the submission lives here, and
+   * the lanes hand over a message.
    */
-  submit: (budget: { providerTimeoutMs: number }) => Promise<T>;
-}): Promise<SendLockResult<T>> {
+  message: {
+    subject: string;
+    html: string;
+    text: string;
+    /** Only marketing carries these; see `RenderedMessage.headers`. */
+    headers?: Record<string, string>;
+  };
+  /** Which sending domain and account. Transactional unless stated. */
+  stream?: SendingStream;
+  senderRole: SenderRole;
+  idempotencyKey?: string;
+}): Promise<SendLockResult> {
   const lockTimeoutMs = Math.max(
     1,
     Math.round(input.lockTimeoutMs ?? STANDARD_SEND_LOCK_TIMEOUT_MS)
@@ -189,7 +208,7 @@ export async function sendWithAddressLock<T>(input: {
   // Kept outside the transaction so a rollback after a successful submission
   // does not take the provider's answer with it.
   let submitted:
-    | { value: T; raiseIncident: "transactional_complaint" | null }
+    | { value: ProviderSendResult; raiseIncident: "transactional_complaint" | null }
     | null = null;
 
   // Taken **before** the call, not inside the callback: Prisma's `timeout`
@@ -204,7 +223,7 @@ export async function sendWithAddressLock<T>(input: {
 
   try {
     return await prisma.$transaction(
-      async (tx): Promise<SendLockResult<T>> => {
+      async (tx): Promise<SendLockResult> => {
         started = true;
         // The lock budget, but never past what the transaction can protect:
         // the wait for a connection has already come out of the same deadline,
@@ -268,14 +287,13 @@ export async function sendWithAddressLock<T>(input: {
         // lane would give it anyway.
         const left =
           transactionDeadline - monotonicNow() - SEND_COMMIT_RESERVE_MS;
-        // Whole milliseconds, because `AbortSignal.timeout()` validates a
-        // uint32 and throws `ERR_OUT_OF_RANGE` on the fraction that
-        // `performance.now()` arithmetic produces. Rounded down, so the cut is
-        // never generous.
-        const providerTimeoutMs = Math.floor(
-          Math.min(input.providerTimeoutMs ?? left, left)
-        );
-        if (providerTimeoutMs < 1) {
+        const budget = providerSendBudget({
+          leftMs: left,
+          ...(input.providerTimeoutMs === undefined
+            ? {}
+            : { capMs: input.providerTimeoutMs }),
+        });
+        if (!budget.send) {
           // The locks and the reads took the transaction's life. Submitting now
           // would mean a request still in flight after the rollback released
           // the address -- after a withdrawal could have taken it and answered.
@@ -283,7 +301,14 @@ export async function sendWithAddressLock<T>(input: {
         }
 
         const answer = {
-          value: await input.submit({ providerTimeoutMs }),
+          value: await deliverEmailOnce({
+            ...input.message,
+            to: input.emailAddress,
+            senderRole: input.senderRole,
+            ...(input.stream ? { stream: input.stream } : {}),
+            ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+            timeoutMs: budget.providerTimeoutMs,
+          }),
           raiseIncident: verdict.raiseIncident ?? null,
         };
         submitted = answer;
@@ -298,7 +323,7 @@ export async function sendWithAddressLock<T>(input: {
     );
   } catch (error) {
     const answer = submitted as {
-      value: T;
+      value: ProviderSendResult;
       raiseIncident: "transactional_complaint" | null;
     } | null;
     if (answer) {

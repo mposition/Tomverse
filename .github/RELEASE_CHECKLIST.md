@@ -226,6 +226,10 @@ Date / timezone:    ____________________
       own literal, so moving the sending domain moved one of them and no health
       check could tell: a check only sees the senders that ask it
       (docs/ops/email-sending-domains.md §1.2)
+- [ ] `npm run check:send-entry-points` — proves every customer-facing send
+      reaches the provider only through the address lock and suppression
+      re-check, while the one operator-only path chooses its configured
+      recipient rather than accepting an arbitrary address from a caller
 - [ ] `npm run check:email-provider-port` — proves the provider seam is still
       two methods over one implementation, and that nothing posts to the send
       endpoint around it. Templates, contacts and segments stay in our own

@@ -188,3 +188,53 @@ export const nextNotificationDeliveryState = ({
     lastErrorKind: errorKind,
   };
 };
+
+/**
+ * What the provider's answer means for a queued notification.
+ *
+ * The customer-facing kinds submit through `sendWithAddressLock()`, which
+ * reports the provider's result rather than throwing a string for
+ * `classifyNotificationError()` to parse. Reading the result directly is both
+ * shorter and more truthful: a refused sending identity used to arrive here as
+ * an unparseable message and be classified `unknown` and retried, when no
+ * amount of waiting sets an environment variable.
+ *
+ * Pure, and beside the classifier it replaces for that path, so the two answers
+ * can be compared in one file.
+ */
+export const notificationOutcomeForProviderResult = (result: {
+  ok: boolean;
+  notConfigured?: boolean;
+  identityRefusal?: string | null;
+  status?: number | null;
+  transportError?: unknown;
+}): NotificationAttemptOutcome => {
+  if (result.ok) return { kind: "delivered" };
+  if (result.notConfigured) return { kind: "not_configured" };
+  if (result.identityRefusal) {
+    // Retryable, as it was before this mapper existed. The reasoning for
+    // calling it permanent -- no amount of waiting sets an environment
+    // variable -- is true of the waiting and false of the window: an operator
+    // who fixes the configuration and redeploys between attempts is exactly
+    // who this queue is retrying for, and a terminal verdict would lose the
+    // notice they were trying to save (independent review, 2026-09-18).
+    //
+    // What did change is the name. It used to arrive as an unparseable thrown
+    // string and be recorded as `unknown`, which told an operator nothing.
+    return {
+      kind: "failed",
+      errorKind: `identity_${result.identityRefusal.toLowerCase()}`.slice(0, 40),
+      permanent: false,
+    };
+  }
+  if (result.status === null || result.status === undefined) {
+    const name =
+      result.transportError instanceof Error ? result.transportError.name : "unknown";
+    return { kind: "failed", errorKind: name.slice(0, 40), permanent: false };
+  }
+  return {
+    kind: "failed",
+    errorKind: `http_${result.status}`,
+    permanent: isPermanentDeliveryStatus(result.status),
+  };
+};

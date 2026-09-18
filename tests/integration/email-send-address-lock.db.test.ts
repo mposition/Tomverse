@@ -42,6 +42,8 @@ beforeEach(async () => {
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
   process.env.RESEND_API_KEY = "test-key";
+  delete process.env.MARKETING_RESEND_API_KEY;
+  delete process.env.MARKETING_EMAIL_FROM;
   // Production reads the causes, and has since the cutover on 2026-09-17.
   // `suppressionReadAuthorityFromValue` treats an absent row as `entry`, so a
   // suite that truncates `AppSetting` and says nothing would exercise the
@@ -232,14 +234,16 @@ test("the last suppression word is taken inside the lock, and submits nothing", 
     sourceEventKey: `webhook:${randomUUID()}`,
   });
 
-  let submitted = 0;
+  const calls: unknown[] = [];
+  mock.method(globalThis, "fetch", async (...args: unknown[]) => {
+    calls.push(args);
+    return accepted();
+  });
   const result = await sendWithAddressLock({
     emailAddress: address,
     classification: "transactional",
-    submit: async () => {
-      submitted += 1;
-      return "sent";
-    },
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
   });
 
   assert.equal(result.ok, false);
@@ -248,7 +252,7 @@ test("the last suppression word is taken inside the lock, and submits nothing", 
     result.ok === false && result.reason === "suppressed" ? result.skipReason : null,
     "hard_bounce"
   );
-  assert.equal(submitted, 0, "a suppressed address reaches no provider");
+  assert.equal(calls.length, 0, "a suppressed address reaches no provider");
 });
 
 test("a suppression writer waits for the send it raced, and is seen by the next one", async () => {
@@ -259,27 +263,31 @@ test("a suppression writer waits for the send it raced, and is seen by the next 
   const address = `${randomUUID()}@example.com`;
   let writerSettled = false;
 
+  // The provider call is where the lock is held, so the race is run from
+  // inside it.
+  mock.method(globalThis, "fetch", async () => {
+    // Started, not awaited: it has to be blocked on the address lock this
+    // transaction holds.
+    writer = recordSuppression({
+      emailAddress: address,
+      reason: "hard_bounce",
+      source: "provider_webhook",
+      sourceEventKey: `webhook:${randomUUID()}`,
+    }).then(() => {
+      writerSettled = true;
+    });
+    // Postgres itself says the writer is queued for an advisory lock. A timer
+    // here would prove only that it had not finished, which is also what a
+    // writer that never reached the lock looks like.
+    await waitForBlockedAddressLock(address);
+    assert.equal(writerSettled, false, "the writer waited for the submission");
+    return accepted();
+  });
   const first = await sendWithAddressLock({
     emailAddress: address,
     classification: "transactional",
-    submit: async () => {
-      // Started, not awaited: it has to be blocked on the address lock this
-      // transaction holds.
-      writer = recordSuppression({
-        emailAddress: address,
-        reason: "hard_bounce",
-        source: "provider_webhook",
-        sourceEventKey: `webhook:${randomUUID()}`,
-      }).then(() => {
-        writerSettled = true;
-      });
-      // Postgres itself says the writer is queued for an advisory lock. A
-      // timer here would prove only that it had not finished, which is also
-      // what a writer that never reached the lock looks like.
-      await waitForBlockedAddressLock(address);
-      assert.equal(writerSettled, false, "the writer waited for the submission");
-      return "sent";
-    },
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
   });
   assert.equal(first.ok, true);
 
@@ -291,41 +299,11 @@ test("a suppression writer waits for the send it raced, and is seen by the next 
   const second = await sendWithAddressLock({
     emailAddress: address,
     classification: "transactional",
-    submit: async () => "sent",
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
   });
   assert.equal(second.ok, false);
   assert.equal(second.ok === false ? second.reason : null, "suppressed");
-});
-
-test("a provider call is never given more time than its transaction has left", async () => {
-  // The two clocks do not know about each other: Prisma's timeout ends the
-  // transaction and releases the locks, and an `AbortSignal.timeout` already
-  // running keeps running. A ten-second call begun with six seconds of
-  // transaction left would be submitting with no lock held.
-  const address = `${randomUUID()}@example.com`;
-  let given = -1;
-
-  const result = await sendWithAddressLock({
-    emailAddress: address,
-    classification: "transactional",
-    transactionTimeoutMs: 2_000,
-    providerTimeoutMs: 10_000,
-    submit: async ({ providerTimeoutMs }) => {
-      given = providerTimeoutMs;
-      return "sent";
-    },
-  });
-
-  assert.equal(result.ok, true);
-  assert.ok(given > 0, "the call was given a budget");
-  assert.ok(
-    given <= 2_000 - SEND_COMMIT_RESERVE_MS,
-    `the lane cap was cut to the transaction's life, got ${given}`
-  );
-  // Whole milliseconds: this number reaches `AbortSignal.timeout()`, which
-  // validates a uint32 and throws `ERR_OUT_OF_RANGE` on the fraction that
-  // `performance.now()` arithmetic produces.
-  assert.equal(Number.isInteger(given), true, `not a whole number: ${given}`);
 });
 
 test("a transaction with nothing left submits nothing at all", async () => {
@@ -333,8 +311,12 @@ test("a transaction with nothing left submits nothing at all", async () => {
   // is not a short send -- it is no send, because the rollback would release
   // the address while the request was still in flight.
   const address = `${randomUUID()}@example.com`;
-  let submitted = 0;
 
+  const calls: unknown[] = [];
+  mock.method(globalThis, "fetch", async (...args: unknown[]) => {
+    calls.push(args);
+    return accepted();
+  });
   const result = await sendWithAddressLock({
     emailAddress: address,
     classification: "transactional",
@@ -342,10 +324,8 @@ test("a transaction with nothing left submits nothing at all", async () => {
     lockTimeoutMs: SEND_COMMIT_RESERVE_MS,
     transactionTimeoutMs: SEND_COMMIT_RESERVE_MS,
     providerTimeoutMs: 10_000,
-    submit: async () => {
-      submitted += 1;
-      return "sent";
-    },
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
   });
 
   assert.equal(result.ok, false);
@@ -355,22 +335,24 @@ test("a transaction with nothing left submits nothing at all", async () => {
     "budget",
     "refused for the budget, not for contention"
   );
-  assert.equal(submitted, 0, "nothing reached the provider");
+  assert.equal(calls.length, 0, "nothing reached the provider");
 });
 
 test("the address is locked while the provider is being called, and free after", async () => {
   const address = `${randomUUID()}@example.com`;
   let lockedDuringSubmit: boolean | null = null;
 
+  mock.method(globalThis, "fetch", async () => {
+    // A second connection cannot take the address: that is what "in one scope"
+    // means. Without it a withdrawal could commit here unseen.
+    lockedDuringSubmit = !(await addressIsFree(address));
+    return accepted();
+  });
   const result = await sendWithAddressLock({
     emailAddress: address,
     classification: "transactional",
-    submit: async () => {
-      // A second connection cannot take the address: that is what "in one
-      // scope" means. Without it a withdrawal could commit here unseen.
-      lockedDuringSubmit = !(await addressIsFree(address));
-      return "sent";
-    },
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
   });
 
   assert.equal(result.ok, true);
@@ -577,4 +559,68 @@ test("a refund notice asks suppression too, and costs no attempt when the addres
   assert.equal(row.status, "pending");
   assert.equal(row.attempts, 0);
   assert.equal(row.lastErrorKind, "send_not_submitted");
+});
+
+test("the message, the identity and the idempotency key reach the provider", async () => {
+  // The helper submits now, so what a lane hands it has to arrive unchanged.
+  // Nothing pinned that: the headers marketing depends on, the stream that
+  // decides the sending domain, the sender role and the key that makes a retry
+  // one message rather than two all pass through one call
+  // (independent review, 2026-09-18).
+  const address = `${randomUUID()}@example.com`;
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  process.env.MARKETING_EMAIL_FROM = "Tomverse News <news@news.tomverse.app>";
+  const requests: RequestInit[] = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    requests.push(init);
+    return accepted();
+  });
+
+  const result = await sendWithAddressLock({
+    emailAddress: address,
+    classification: "marketing",
+    message: {
+      subject: "A subject",
+      html: "<p>Body</p>",
+      text: "Body",
+      headers: { "List-Unsubscribe": "<https://tomverse.app/u/abc>" },
+    },
+    stream: "marketing",
+    senderRole: "marketing",
+    idempotencyKey: "delivery-42",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(requests.length, 1);
+  const request = requests[0];
+  const sent = JSON.parse(String(request.body));
+  assert.equal(sent.to, address);
+  assert.equal(sent.from, "Tomverse News <news@news.tomverse.app>");
+  assert.equal(sent.subject, "A subject");
+  assert.equal(sent.html, "<p>Body</p>");
+  assert.equal(sent.text, "Body");
+  assert.equal(sent.headers["List-Unsubscribe"], "<https://tomverse.app/u/abc>");
+  assert.equal(new Headers(request.headers).get("Idempotency-Key"), "delivery-42");
+});
+
+test("a message with no headers carries none", async () => {
+  // Transactional mail must not acquire an unsubscribe header by passing
+  // through a helper that also serves marketing
+  // (docs/policy/email-notifications.md §5.1 C10).
+  const address = `${randomUUID()}@example.com`;
+  const bodies: string[] = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    bodies.push(String(init.body));
+    return accepted();
+  });
+
+  await sendWithAddressLock({
+    emailAddress: address,
+    classification: "transactional",
+    message: { subject: "s", html: "<p>s</p>", text: "s" },
+    senderRole: "security",
+  });
+
+  const sent = JSON.parse(bodies[0]);
+  assert.equal(sent.headers, undefined);
 });

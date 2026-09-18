@@ -68,6 +68,29 @@ export const CREDENTIAL_SEND_RESERVE_MS = 100;
  */
 export const SEND_COMMIT_RESERVE_MS = 250;
 
+/**
+ * What the provider may be given, out of what the transaction has left.
+ *
+ * Whole milliseconds, because `AbortSignal.timeout()` validates a uint32 and
+ * throws `ERR_OUT_OF_RANGE` on the fraction `performance.now()` arithmetic
+ * produces; rounded down, so the cut is never generous. Below one millisecond
+ * there is no call to make -- the submission would be in flight after the
+ * rollback released the address.
+ *
+ * Pure so the arithmetic is exercised directly: the value reaches the provider
+ * through a mocked `fetch`, where the number itself is no longer observable.
+ */
+export const providerSendBudget = (input: {
+  /** Transaction life left, already less the commit reserve. */
+  leftMs: number;
+  /** The lane cap, when the lane states one. */
+  capMs?: number;
+}): { send: false } | { send: true; providerTimeoutMs: number } => {
+  const providerTimeoutMs = Math.floor(Math.min(input.capMs ?? input.leftMs, input.leftMs));
+  if (providerTimeoutMs < 1) return { send: false };
+  return { send: true, providerTimeoutMs };
+};
+
 export type CredentialSendWindow =
   | { send: false }
   | {

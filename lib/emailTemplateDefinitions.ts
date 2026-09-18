@@ -11,7 +11,12 @@ import {
   buildBillingWelcomeEmail,
   buildFoundingTesterPassEmail,
 } from "@/lib/billingEmails";
-import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import {
+  buildEmailLoginCodeEmail,
+  buildLoginMethodLinkedEmail,
+  buildLoginMethodUnlinkedEmail,
+  type LoginMethodNoticePayload,
+} from "@/lib/emailLoginEmails";
 import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
 import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
 import {
@@ -178,6 +183,14 @@ export const FOUNDING_TESTER_PASS_REMINDER_TEMPLATE =
   "founding_tester_pass_reminder";
 export const FOUNDING_TESTER_PASS_ENDED_TEMPLATE = "founding_tester_pass_ended";
 export const ADMIN_PLAN_CHANGED_TEMPLATE = "admin_plan_changed";
+/**
+ * The two login-method notices. Two keys rather than one with a branch: the
+ * registry hashes one `placeholderPayload` per template, so a template that
+ * rendered two subjects would have an artifact matching neither
+ * (docs/policy/email-product-news-redesign-draft.md section 7.4, C36).
+ */
+export const LOGIN_METHOD_LINKED_TEMPLATE = "login_method_linked";
+export const LOGIN_METHOD_UNLINKED_TEMPLATE = "login_method_unlinked";
 
 const definitions: AnyDefinition[] = [
   {
@@ -238,6 +251,29 @@ const definitions: AnyDefinition[] = [
     render: (payload: AccountDeletionScheduledPayload, language) =>
       buildAccountDeletionScheduledEmail({ ...payload, language }),
     placeholderPayload: { scheduledFor: "{{scheduledFor}}" },
+  },
+  {
+    key: LOGIN_METHOD_LINKED_TEMPLATE,
+    // A login method changed and every other device may have been signed out.
+    // If it was not the account holder, this is what they act on -- so it is
+    // security, and no preference switches it off.
+    senderRole: "security",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: LoginMethodNoticePayload, language) =>
+      buildLoginMethodLinkedEmail(payload, language),
+    placeholderPayload: { method: "google" },
+  },
+  {
+    key: LOGIN_METHOD_UNLINKED_TEMPLATE,
+    senderRole: "security",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: LoginMethodNoticePayload, language) =>
+      buildLoginMethodUnlinkedEmail(payload, language),
+    placeholderPayload: { method: "google" },
   },
   {
     key: ACCOUNT_RESTORED_TEMPLATE,
