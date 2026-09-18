@@ -154,7 +154,7 @@ export const nextNotificationDeliveryState = ({
       status: NOTIFICATION_DELIVERY_STATUS.pending,
       attempts: made,
       nextAttemptAt: nextNotificationAttemptAt(made, now),
-      lastErrorKind: "send_lock_unavailable",
+      lastErrorKind: "send_not_submitted",
     };
   }
 

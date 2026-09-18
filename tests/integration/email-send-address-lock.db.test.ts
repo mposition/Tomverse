@@ -322,6 +322,10 @@ test("a provider call is never given more time than its transaction has left", a
     given <= 2_000 - SEND_COMMIT_RESERVE_MS,
     `the lane cap was cut to the transaction's life, got ${given}`
   );
+  // Whole milliseconds: this number reaches `AbortSignal.timeout()`, which
+  // validates a uint32 and throws `ERR_OUT_OF_RANGE` on the fraction that
+  // `performance.now()` arithmetic produces.
+  assert.equal(Number.isInteger(given), true, `not a whole number: ${given}`);
 });
 
 test("a transaction with nothing left submits nothing at all", async () => {
@@ -414,7 +418,7 @@ test("a queued message that cannot take the lock waits instead of failing", asyn
   // Waiting for somebody else is not a failed attempt, and counting it would
   // spend this message's abandonment budget on their withdrawal.
   assert.equal(row.attempts, 0);
-  assert.equal(row.deferReason, "send_lock");
+  assert.equal(row.deferReason, "send_not_submitted");
   assert.equal(row.claimedAt, null);
   assert.notEqual(row.nextAttemptAt, null);
   assert.equal(row.lastErrorKind, null);
@@ -572,5 +576,5 @@ test("a refund notice asks suppression too, and costs no attempt when the addres
   });
   assert.equal(row.status, "pending");
   assert.equal(row.attempts, 0);
-  assert.equal(row.lastErrorKind, "send_lock_unavailable");
+  assert.equal(row.lastErrorKind, "send_not_submitted");
 });

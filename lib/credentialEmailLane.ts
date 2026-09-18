@@ -267,15 +267,16 @@ export async function sendCredentialEmailNow(input: {
       classification: "transactional",
       now: new Date(now()),
       lockTimeoutMs: CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
-      // Long enough to outlast what it protects -- the lock wait and the one
-      // attempt it admits -- both of which are already inside the request
-      // budget. A transaction that expired first would abandon a submission
-      // that had already reached the provider.
+      // What this request has left, plus the room to commit. Everything the
+      // transaction does -- the lock wait and the one attempt it admits -- is
+      // already cut from that same remaining budget, so summing the caps would
+      // have produced a ceiling longer than the three seconds the lane is
+      // allowed (300 + 2,500 + 100 + 250 = 3,150).
       transactionTimeoutMs:
-        CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
-        decision.timeoutMs +
-        CREDENTIAL_SEND_RESERVE_MS +
-        SEND_COMMIT_RESERVE_MS,
+        Math.max(
+          CREDENTIAL_SEND_LOCK_TIMEOUT_MS,
+          CREDENTIAL_SEND_BUDGET_MS - (now() - startedAt)
+        ) + SEND_COMMIT_RESERVE_MS,
       // The lane cap for this attempt; the helper cuts it to what the
       // transaction can protect, and the callback cuts it again to what the
       // request budget has left.
@@ -313,7 +314,7 @@ export async function sendCredentialEmailNow(input: {
       // A writer holds the address. Nothing was submitted, so this is an
       // attempt that can be made again inside the budget -- the loop decides
       // whether there is room for it (section 7.4, time budgets).
-      lastErrorKind = "send_lock_unavailable";
+      lastErrorKind = "send_not_submitted";
       continue;
     }
 

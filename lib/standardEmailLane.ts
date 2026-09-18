@@ -1054,7 +1054,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           now.getTime() + (backoff.retry ? backoff.delayMs : SEND_LOCK_RETRY_MS)
         ),
         claimedAt: null,
-        deferReason: "send_lock",
+        deferReason: "send_not_submitted",
       },
     });
     return { outcome: "pending" as const, classification: definition.classification };

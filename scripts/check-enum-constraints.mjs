@@ -623,7 +623,7 @@ const REGISTRY = {
   EmailDelivery_defer_reason_check: {
     owner: "database",
     reason:
-      "Why a pending delivery is waiting for nextAttemptAt when the wait is not a retry. quiet_hours, written by the standard lane when a marketing message reaches a night-time window (docs/policy/email-notifications.md §5.2 E5); send_lock, written when a writer held the recipient address at the provider call, so nothing was submitted and no attempt was counted (§9.8). Kept apart from lastErrorKind so waiting is never recorded as an error, and cleared when the row is next attempted.",
+      "Why a pending delivery is waiting for nextAttemptAt when the wait is not a retry. quiet_hours, written by the standard lane when a marketing message reaches a night-time window (docs/policy/email-notifications.md §5.2 E5); send_not_submitted, written when the send-lock step ended without reaching the provider -- a writer held the address, no connection came free, or the transaction had too little left to protect a submission -- so nothing was sent and no attempt was counted (§9.8). The value names the outcome rather than one of its causes; the structured log carries the cause. Kept apart from lastErrorKind so waiting is never recorded as an error, and cleared when the row is next attempted.",
   },
   EmailDelivery_skip_reason_check: {
     owner: "database",

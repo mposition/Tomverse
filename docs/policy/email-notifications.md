@@ -29,7 +29,7 @@
    다시 적용되므로 절대 deadline 하나로 관리하고, **provider 예산은 transaction의 남은
    수명에서 commit 여유를 뺀 값**을 넘지 않습니다 — transaction timeout은 HTTP 요청을
    중단시키지 못하므로, 그보다 긴 호출은 잠금이 풀린 뒤의 제출이 됩니다.
-4. **잠금 실패는 시도가 아닙니다.** `EmailDelivery`는 `deferReason = 'send_lock'`으로
+4. **제출하지 못한 것은 시도가 아닙니다.** `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로
    pending에 남고 기존 backoff로 돌아오며, 알림 큐 행도 시도 횟수를 올리지 않습니다.
    남의 철회가 이 메일의 포기 예산을 쓰지 않습니다.
 5. **환불 안내도 suppression 판정을 받습니다**(transactional). 지금까지는 아무것도
@@ -1868,9 +1868,13 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 | transaction timeout | 15초 | 잠금 대기 + 그 시도의 timeout + 여유 (둘 다 요청 예산 안) |
 | 잠금을 못 얻으면 | claim 해제, 기존 backoff로 복귀, **시도 횟수는 올리지 않음** | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
 
-- 잠금을 못 얻은 `EmailDelivery`는 `deferReason = 'send_lock'`으로 pending에
+- 제출하지 못한 `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로 pending에
   남습니다. `lastErrorKind`에 쓰지 않는 이유는 야간 대기와 같습니다 — 기다린 것을
   오류로 기록하면 이후 발송된 행에 오래된 오류가 남습니다.
+- **저장되는 값은 원인이 아니라 결과를 말합니다.** 세 원인(주소 점유·connection
+  없음·transaction 잔여 부족) 모두 제출하지 않았다는 같은 결과이고, 어느 것이었는지는
+  구조화 로그의 `cause`가 말합니다. 행에 `send_lock`이라고 적으면 예산 때문에 미뤄진
+  발송에 대해 누가 주소를 잡고 있었다는 거짓을 남기게 됩니다.
 - 알림 큐의 `lock_unavailable`도 시도로 세지 않으므로, 남의 철회 때문에 6회 한도가
   소진되어 포기되는 일이 없습니다.
 - 대기를 실패로 세지 않는다는 것은 **잠금 경합만으로는 포기하지 않는다**는 뜻입니다.
@@ -1914,7 +1918,7 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 - **cutover는 in-flight 발송만큼 fence를 기다립니다.** 발송이 fence를 공유 모드로
   provider 호출 동안(최대 10초) 잡으므로, `email:suppression-cutover`의 배타 획득이
   그만큼 늦어질 수 있습니다. 배타 대기가 줄을 서면 그 뒤의 발송은 2초 안에 잠금을 얻지
-  못하고 `send_lock`으로 미뤄졌다가 cutover가 끝난 뒤 돌아옵니다 — 발송이 사라지는
+  못하고 `send_not_submitted`으로 미뤄졌다가 cutover가 끝난 뒤 돌아옵니다 — 발송이 사라지는
   것이 아니라 미뤄지는 것입니다.
 - **purpose 철회는 그 purpose scope suppression으로 관측합니다.** 철회는 preference
   행과 purpose scope suppression을 한 transaction에서 쓰므로(7.4의 총잠금 순서),

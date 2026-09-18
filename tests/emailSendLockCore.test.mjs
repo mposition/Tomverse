@@ -6,6 +6,7 @@ import {
   CREDENTIAL_SEND_RESERVE_MS,
   isLockTimeoutError,
   isTransactionStartTimeoutError,
+  SEND_COMMIT_RESERVE_MS,
   SEND_LOCK_RETRY_MS,
   STANDARD_SEND_LOCK_TIMEOUT_MS,
   STANDARD_SEND_PROVIDER_TIMEOUT_MS,
@@ -26,23 +27,46 @@ test("the budgets are the ones the contract names", () => {
   assert.equal(CREDENTIAL_SEND_LOCK_TIMEOUT_MS, 300);
 });
 
-test("a transaction outlasts the lock wait and the call it protects", () => {
+test("a transaction outlasts the lock wait, the call it protects, and the commit", () => {
   // Otherwise the transaction expires while the submission it exists to
-  // protect is still in flight, and the send is abandoned after the provider
-  // has already accepted it.
+  // protect is still in flight, and the advisory lock is released with it. The
+  // reserve belongs inside the sum: it is the room the transaction needs after
+  // the provider answers, not slack outside the budget.
   assert.ok(
     STANDARD_SEND_TRANSACTION_TIMEOUT_MS >
-      STANDARD_SEND_LOCK_TIMEOUT_MS + STANDARD_SEND_PROVIDER_TIMEOUT_MS
+      STANDARD_SEND_LOCK_TIMEOUT_MS +
+        STANDARD_SEND_PROVIDER_TIMEOUT_MS +
+        SEND_COMMIT_RESERVE_MS
+  );
+  // And by enough that a standard send at full stretch never has its lane cap
+  // cut, so the cut is a bound rather than something the normal path leans on.
+  assert.ok(
+    STANDARD_SEND_TRANSACTION_TIMEOUT_MS -
+      STANDARD_SEND_LOCK_TIMEOUT_MS -
+      SEND_COMMIT_RESERVE_MS >=
+      STANDARD_SEND_PROVIDER_TIMEOUT_MS
   );
 });
 
-test("the credential lane's lock wait and reserve fit inside its request budget", () => {
-  // The lane waits for the lock, then sends, then commits -- all inside the
-  // three seconds a person is watching a sign-in screen for.
+test("the credential lane's waits and reserves fit inside its request budget", () => {
+  // The lane waits for the lock and then sends, all inside the three seconds a
+  // person is watching a sign-in screen for.
   assert.ok(
     CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
       CREDENTIAL_ATTEMPT_TIMEOUT_MS +
       CREDENTIAL_SEND_RESERVE_MS <
+      CREDENTIAL_SEND_BUDGET_MS
+  );
+  // The commit reserve is the one part that sits *outside* it: the lane's
+  // transaction ceiling is what the request has left plus this, because the
+  // transaction has to survive the last thing the request does. Summing the
+  // caps instead would have made that ceiling 3,150ms -- longer than the
+  // budget it is meant to bound.
+  assert.ok(
+    CREDENTIAL_SEND_LOCK_TIMEOUT_MS +
+      CREDENTIAL_ATTEMPT_TIMEOUT_MS +
+      CREDENTIAL_SEND_RESERVE_MS +
+      SEND_COMMIT_RESERVE_MS >
       CREDENTIAL_SEND_BUDGET_MS
   );
 });

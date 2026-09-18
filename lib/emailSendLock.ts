@@ -192,14 +192,21 @@ export async function sendWithAddressLock<T>(input: {
     | { value: T; raiseIncident: "transactional_complaint" | null }
     | null = null;
 
+  // Taken **before** the call, not inside the callback: Prisma's `timeout`
+  // covers the whole transaction, which has already begun by the time the
+  // callback runs, and the wait for a connection comes before that again. A
+  // deadline measured from the callback would sit *after* the one Prisma is
+  // keeping, which is the wrong side -- the budget cut from it has to expire
+  // first, or the rollback releases the address while the submission it was
+  // protecting is still in flight. This one is conservative by exactly the
+  // time those two steps take.
+  const transactionDeadline = monotonicNow() + transactionTimeoutMs;
+
   try {
     return await prisma.$transaction(
       async (tx): Promise<SendLockResult<T>> => {
         started = true;
         const deadline = monotonicNow() + lockTimeoutMs;
-        // Prisma starts its own clock when the callback does, so this is the
-        // same instant the transaction's life is measured from.
-        const transactionDeadline = monotonicNow() + transactionTimeoutMs;
         // What this connection had before the budget was imposed, so the reads
         // that follow the locks are restored to it rather than left on a
         // sender's budget -- a relation lock that timed out at two seconds
@@ -247,16 +254,19 @@ export async function sendWithAddressLock<T>(input: {
         // lane would give it anyway.
         const left =
           transactionDeadline - monotonicNow() - SEND_COMMIT_RESERVE_MS;
-        if (left <= 0) {
+        // Whole milliseconds, because `AbortSignal.timeout()` validates a
+        // uint32 and throws `ERR_OUT_OF_RANGE` on the fraction that
+        // `performance.now()` arithmetic produces. Rounded down, so the cut is
+        // never generous.
+        const providerTimeoutMs = Math.floor(
+          Math.min(input.providerTimeoutMs ?? left, left)
+        );
+        if (providerTimeoutMs < 1) {
           // The locks and the reads took the transaction's life. Submitting now
           // would mean a request still in flight after the rollback released
           // the address -- after a withdrawal could have taken it and answered.
           return lockUnavailable(input, transactionTimeoutMs, "budget");
         }
-        const providerTimeoutMs = Math.min(
-          input.providerTimeoutMs ?? left,
-          left
-        );
 
         const answer = {
           value: await input.submit({ providerTimeoutMs }),

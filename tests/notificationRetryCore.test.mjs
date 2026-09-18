@@ -467,7 +467,7 @@ test("losing the address lock is not an attempt", () => {
   const state = at({ kind: "lock_unavailable" }, 1);
   assert.equal(state.status, "pending");
   assert.equal(state.attempts, 0);
-  assert.equal(state.lastErrorKind, "send_lock_unavailable");
+  assert.equal(state.lastErrorKind, "send_not_submitted");
   assert.equal(
     state.nextAttemptAt.getTime(),
     NOW.getTime() + NOTIFICATION_RETRY_DELAYS_MS[0]
