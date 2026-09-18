@@ -485,3 +485,65 @@ test("a citation may be anywhere, as long as it is https", () => {
     false,
   );
 });
+
+// ---------------------------------------------------------------------------
+// The instant contract, on both sides
+// ---------------------------------------------------------------------------
+
+test("the migration's instant rule accepts exactly what the module does", async () => {
+  // The trigger writes retention entries the store has to be able to read back,
+  // so its idea of a timestamp and zod's have to be the same one. Neither half
+  // of the SQL rule is enough alone: the pattern gives shape and ranges, the
+  // `::DATE` cast gives the calendar. This mirrors both.
+  const pattern = MIGRATION.split("iso_instant CONSTANT TEXT :=")[1]
+    .split("';")[0]
+    .replace(/^\s*'/, "");
+  const shaped = new RegExp(pattern);
+
+  const inTheCalendar = (value) => {
+    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  };
+  const sqlAccepts = (value) => shaped.test(value) && inTheCalendar(value);
+
+  const { z } = await import("zod");
+  const zodAccepts = (value) =>
+    z.iso.datetime({ offset: true }).safeParse(value).success;
+
+  const candidates = [
+    "2026-09-18T00:00:00Z",
+    "2026-09-18T00:00:00.1Z",
+    "2026-09-18T00:00:00.123Z",
+    "2026-09-18T00:00:00.123456789Z",
+    "2026-09-18T00:00:00+09:00",
+    "2026-09-18T00:00:00-05:30",
+    "2026-09-18T00:00:00+23:00",
+    "2024-02-29T00:00:00Z",
+    // Refused by both, each for its own reason.
+    "2025-02-29T00:00:00Z",
+    "2026-02-30T00:00:00Z",
+    "2026-04-31T00:00:00Z",
+    "2026-13-40T25:61:61+24:60",
+    "2026-00-10T00:00:00Z",
+    "2026-09-00T00:00:00Z",
+    "2026-09-18T24:00:00Z",
+    "2026-09-18T23:59:60Z",
+    "2026-09-18T00:00:00+00:60",
+    "2026-09-18T00:00:00",
+    "2026-09-18 00:00:00Z",
+    "2026-9-18T00:00:00Z",
+  ];
+
+  for (const candidate of candidates) {
+    assert.equal(
+      sqlAccepts(candidate),
+      zodAccepts(candidate),
+      `${candidate}: the migration and the module disagree`,
+    );
+  }
+});

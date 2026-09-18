@@ -310,7 +310,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
     table: "MarketingPost",
-    tableMentions: 78,
+    tableMentions: 80,
     writeVerbs: 67,
     reason: "The same migration; see the MarketingChannel entry above.",
   },

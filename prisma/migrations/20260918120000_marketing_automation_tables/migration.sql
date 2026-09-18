@@ -70,8 +70,10 @@
 -- `prisma migrate diff` generates from the four models, so the column types,
 -- nullability, defaults and Prisma-expressible indexes cannot drift from
 -- prisma/schema.prisma. Everything schema.prisma cannot express -- CHECK
--- constraints, partial unique indexes, triggers -- is added after them, which is
--- how the ten existing CHECK constraints in this repository are carried.
+-- constraints and triggers -- is added after them, which is how the ten existing
+-- CHECK constraints in this repository are carried. Anything it *can* express
+-- stays in the schema: an index only the database has is drift, which is why
+-- both uniques here are plain rather than partial.
 -- ---------------------------------------------------------------------------
 
 -- CreateTable
@@ -759,11 +761,18 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     retention_running BOOLEAN;
-    -- The same instants lib/marketingAutomationSchema.ts accepts: a date, a time,
-    -- and an offset. Postgres reads far more than this as a timestamp, and a
-    -- value it accepts but the module refuses is a row nothing can read back.
+    -- The same instants lib/marketingAutomationSchema.ts accepts, which is what
+    -- a row has to be for the store to be able to read it back. Two halves,
+    -- because neither is enough on its own: this pattern gives the shape and the
+    -- ranges (month 01-12, hour 00-23, second 00-59, offset up to 23:59, all of
+    -- which zod checks), and the ::DATE cast below gives the calendar -- 31 April
+    -- and 29 February in a common year are both well-formed here and refused
+    -- there. tests/marketingAutomationSchema.test.mjs runs the two against zod
+    -- itself, candidate by candidate.
     iso_instant CONSTANT TEXT :=
-        '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$';
+        '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$';
+    instants TEXT[];
+    instant TEXT;
     last_failure_at TIMESTAMP(3);
     old_length INTEGER;
     new_length INTEGER;
@@ -845,19 +854,25 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
 
-        -- A post that is failed carries the failure in its history, because that
-        -- is what the re-queue below is measured against. Checked on the way in
-        -- rather than only while the post sits there: compacting the old attempt
-        -- away first and moving to `failed` afterwards -- or in the same
-        -- statement, where OLD.status is still the earlier one -- would otherwise
-        -- produce a failed post with no exit at all.
+        -- A post that is failed carries *this* failure in its history, because
+        -- that is what the re-queue below is measured against. The attempt number
+        -- is part of it: a post whose first attempt failed, was re-queued by a
+        -- person and failed again would otherwise satisfy this with the first
+        -- failure, and the operator's next approval would be checked against a
+        -- failure from two rounds ago.
+        --
+        -- Checked on the way in rather than only while the post sits there:
+        -- compacting the old attempt away first and moving to `failed`
+        -- afterwards -- or in the same statement, where OLD.status is still the
+        -- earlier one -- would otherwise produce a failed post with no exit.
         IF NEW."status" = 'failed' AND NOT EXISTS (
             SELECT 1
             FROM pg_catalog.jsonb_array_elements(NEW."history") AS "h"("entry")
             WHERE "entry" ->> 'type' = 'attempt'
               AND "entry" ->> 'outcome' = 'failed'
+              AND "entry" -> 'attempt' = pg_catalog.to_jsonb(NEW."publishAttempt")
         ) THEN
-            RAISE EXCEPTION 'MarketingPost % cannot be failed with no failed attempt in its history', OLD."id"
+            RAISE EXCEPTION 'MarketingPost % cannot be failed without recording the failure of attempt %', OLD."id", NEW."publishAttempt"
                 USING ERRCODE = 'check_violation';
         END IF;
 
@@ -1122,12 +1137,11 @@ BEGIN
                 OR pg_catalog.jsonb_typeof(element -> 'at') IS DISTINCT FROM 'string'
                 OR pg_catalog.jsonb_typeof(element -> 'firstAt') IS DISTINCT FROM 'string'
                 OR pg_catalog.jsonb_typeof(element -> 'lastAt') IS DISTINCT FROM 'string'
-                OR (element ->> 'at') !~ iso_instant
-                OR (element ->> 'firstAt') !~ iso_instant
-                OR (element ->> 'lastAt') !~ iso_instant THEN
+                THEN
                 RAISE EXCEPTION 'MarketingPost % retention summary is not the shape a summary has', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
+            instants := ARRAY[element ->> 'at', element ->> 'firstAt', element ->> 'lastAt'];
         ELSE
             IF (
                 SELECT pg_catalog.array_agg("key" ORDER BY "key" COLLATE "C")
@@ -1135,12 +1149,26 @@ BEGIN
             ) IS DISTINCT FROM ARRAY['at', 'removedEntryCount', 'type']
                 OR pg_catalog.jsonb_typeof(element -> 'removedEntryCount') IS DISTINCT FROM 'number'
                 OR (element -> 'removedEntryCount')::TEXT !~ '^[1-9][0-9]*$'
-                OR pg_catalog.jsonb_typeof(element -> 'at') IS DISTINCT FROM 'string'
-                OR (element ->> 'at') !~ iso_instant THEN
+                OR pg_catalog.jsonb_typeof(element -> 'at') IS DISTINCT FROM 'string' THEN
                 RAISE EXCEPTION 'MarketingPost % retention compaction entry is not the shape it has', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
+            instants := ARRAY[element ->> 'at'];
         END IF;
+
+        -- Shape and ranges from the pattern, the calendar from the cast.
+        FOREACH instant IN ARRAY instants LOOP
+            IF instant !~ iso_instant THEN
+                RAISE EXCEPTION 'MarketingPost % retention entry carries %, which is not an instant this store can read back', OLD."id", instant
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            BEGIN
+                PERFORM pg_catalog.substring(instant, 1, 10)::DATE;
+            EXCEPTION WHEN others THEN
+                RAISE EXCEPTION 'MarketingPost % retention entry carries %, which is not a date in the calendar', OLD."id", instant
+                    USING ERRCODE = 'check_violation';
+            END;
+        END LOOP;
     END LOOP;
 
     -- A summary for something that did not leave is a record of a removal that

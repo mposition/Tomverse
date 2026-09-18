@@ -1291,7 +1291,7 @@ test("a retention entry's values are typed, not just keyed", async () => {
   assert.equal((compacted.history as { type: string }[]).length, 3);
 });
 
-test("a post cannot become failed with no failure in its history", async () => {
+test("a post cannot become failed without recording this attempt failing", async () => {
   const row = await approvedChannel();
   const dispatched = await dispatchedPost(row.id);
 
@@ -1300,7 +1300,7 @@ test("a post cannot become failed with no failure in its history", async () => {
       where: { id: dispatched.id },
       data: { status: "failed" },
     }),
-    /cannot be failed with no failed attempt in its history/,
+    /cannot be failed without recording the failure of attempt/,
   );
 
   const failed = await prisma.marketingPost.update({
@@ -1379,6 +1379,64 @@ test("compacting a failure away does not open a path into failed", async () => {
       where: { id: created.id },
       data: { status: "failed" },
     }),
-    /cannot be failed with no failed attempt in its history/,
+    /cannot be failed without recording the failure of attempt/,
   );
+});
+
+test("an earlier failure does not stand in for the current attempt's", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  const firstFailure = historyEntry("attempt", {
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+
+  // A person re-queues it, and the publisher sends attempt two.
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-1",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+
+  // Attempt one's failure is still in the history, and it is not this failure.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed without recording the failure of attempt 2/,
+  );
+
+  const failedAgain = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [
+        ...history,
+        firstFailure,
+        historyEntry("attempt", { attempt: 2, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 2,
+    },
+  });
+  assert.equal(failedAgain.status, "failed");
 });
