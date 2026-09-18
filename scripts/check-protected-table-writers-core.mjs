@@ -66,6 +66,16 @@
  *    driver (`pg` and friends), which bypass Prisma entirely. A spelling that
  *    is not on this list is not inventoried.
  *
+ * 6. **retention-setting.** The transaction-local setting that lets retention
+ *    past the marketing tables' append-only history and content-purge rules is
+ *    counted per file, by both spellings -- the string and the constant that
+ *    holds it -- against RETENTION_SETTING_ALLOWLIST. Any module that can name
+ *    it can turn retention mode on for its own transaction, and the triggers
+ *    would then apply the retention rules to whatever that transaction was
+ *    doing. This is not a privilege boundary (the application has one database
+ *    role); it is what makes naming the setting a reviewed act rather than an
+ *    import.
+ *
  * ## What this check is for, and what remains outside it
  *
  * A text check over a general-purpose language cannot follow every alias: a
@@ -115,6 +125,30 @@ export const PROTECTED_TABLES = [
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
     contract: "docs/policy/marketing-automation.md §6",
+  },
+  {
+    table: "MarketingChannel",
+    delegate: "marketingChannel",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "MarketingPost",
+    delegate: "marketingPost",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "MarketingReport",
+    delegate: "marketingReport",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "AiVisibilityRun",
+    delegate: "aiVisibilityRun",
+    writers: ["lib/marketingStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
   },
 ];
 
@@ -257,6 +291,43 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.",
   },
+  {
+    path: "scripts/report-unswept-tables-core.mjs",
+    table: "MarketingReport",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The retention registry's prose: one entry says an AI visibility run has the same shape as MarketingReport's, and other entries in the file use the words delete and update. A report; it opens no database connection.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingChannel",
+    tableMentions: 48,
+    writeVerbs: 67,
+    reason:
+      "The migration that creates the marketing tables and the triggers that bound them. It names UPDATE, DELETE and INSERT to constrain or refuse them; the only statements that write a row are the CREATE TABLE and CREATE INDEX statements themselves. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 82,
+    writeVerbs: 67,
+    reason: "The same migration; see the MarketingChannel entry above.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "MarketingReport",
+    tableMentions: 11,
+    writeVerbs: 67,
+    reason: "The same migration; see the MarketingChannel entry above.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    table: "AiVisibilityRun",
+    tableMentions: 14,
+    writeVerbs: 67,
+    reason: "The same migration; see the MarketingChannel entry above.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
@@ -266,6 +337,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "The chain-head trigger reads the head with EXECUTE over TG_RELID::regclass -- the table the trigger is attached to -- so no search path or same-named temporary table can redirect the read. It builds no table name from input.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    count: 1,
+    reason:
+      "The post trigger reads its channel with EXECUTE over a name built from TG_TABLE_SCHEMA -- the schema its own table is in -- because an unqualified name resolves against the session search path, where a temporary table of the same name would answer for the real one. The schema is the trigger own schema, not input, not input, and it is quoted with %I.",
   },
   {
     path: "lib/prisma.ts",
@@ -755,8 +832,50 @@ const keyOf = (...parts) => parts.join(" :: ");
 export const sourceFingerprint = (text) =>
   createHash("sha256").update(text.split("\r\n").join("\n")).digest("hex");
 
+/**
+ * The transaction-local setting that lets retention past the append-only
+ * history trigger and the content purge refusal.
+ *
+ * The application uses one database role, so setting it is not a privilege
+ * anybody has to be granted -- which is exactly why naming it has to be a
+ * reviewed act. A module that can reach the name can turn retention mode on for
+ * its own transaction, and the triggers would then apply the retention rules to
+ * whatever it was doing. Both spellings are counted: the string itself, and the
+ * constant that holds it, because passing the constant to `set_config()` needs
+ * no literal anywhere.
+ *
+ * The retention module that will legitimately set it is S3; until it exists the
+ * only entries here are the declaration and the migration that reads it.
+ */
+export const RETENTION_SETTING_TOKENS = [
+  "tomverse.marketing_retention_compaction",
+  "MARKETING_RETENTION_SETTING",
+];
+
+export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "lib/marketingAutomationSchema.ts",
+    count: 2,
+    reason:
+      "Where the constant is declared: the exported name and its value. Declaring it is not setting it.",
+  },
+  {
+    path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+    count: 4,
+    reason:
+      "The triggers that read the setting to decide whether retention is running. Reading it is the check; setting it is what this rule is about.",
+  },
+];
+
+const retentionSettingMentions = (text) =>
+  RETENTION_SETTING_TOKENS.reduce(
+    (total, token) => total + text.split(token).length - 1,
+    0
+  );
+
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
+  const retentionSettingByPath = new Map();
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
@@ -764,6 +883,9 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
   for (const { path, text } of sources) {
     if (isExcluded(path)) continue;
+
+    const retentionMentions = retentionSettingMentions(text);
+    if (retentionMentions > 0) retentionSettingByPath.set(path, retentionMentions);
 
     if (path.endsWith(".sql")) {
       const sql = sqlWithoutComments(text);
@@ -898,6 +1020,27 @@ export const checkProtectedTableWriters = ({ sources }) => {
       detail: entry?.sha256
         ? `imports a database driver and changed since review: sha256 ${fingerprint}, allowlist says ${entry.sha256}`
         : `imports a database driver; the allowlist entry needs sha256 ${fingerprint} after review`,
+    });
+  }
+
+  const allowedRetention = new Map(
+    RETENTION_SETTING_ALLOWLIST.map((entry) => [entry.path, entry])
+  );
+  for (const [path, mentions] of retentionSettingByPath) {
+    const expected = allowedRetention.get(path)?.count ?? 0;
+    if (mentions === expected) continue;
+    findings.push({
+      rule: "retention-setting",
+      path,
+      detail: `names the retention setting ${mentions} time(s), allowlist says ${expected}`,
+    });
+  }
+  for (const entry of RETENTION_SETTING_ALLOWLIST) {
+    if (retentionSettingByPath.has(entry.path)) continue;
+    findings.push({
+      rule: "retention-setting",
+      path: entry.path,
+      detail: `allowlist says ${entry.count} mention(s), found 0${missingNote(entry.path)}; remove the entry`,
     });
   }
 
