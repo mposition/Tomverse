@@ -42,6 +42,8 @@ beforeEach(async () => {
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
   process.env.RESEND_API_KEY = "test-key";
+  delete process.env.MARKETING_RESEND_API_KEY;
+  delete process.env.MARKETING_EMAIL_FROM;
   // Production reads the causes, and has since the cutover on 2026-09-17.
   // `suppressionReadAuthorityFromValue` treats an absent row as `entry`, so a
   // suite that truncates `AppSetting` and says nothing would exercise the
@@ -566,9 +568,11 @@ test("the message, the identity and the idempotency key reach the provider", asy
   // one message rather than two all pass through one call
   // (independent review, 2026-09-18).
   const address = `${randomUUID()}@example.com`;
-  const bodies: string[] = [];
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  process.env.MARKETING_EMAIL_FROM = "Tomverse News <news@news.tomverse.app>";
+  const requests: RequestInit[] = [];
   mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
-    bodies.push(String(init.body));
+    requests.push(init);
     return accepted();
   });
 
@@ -581,18 +585,22 @@ test("the message, the identity and the idempotency key reach the provider", asy
       text: "Body",
       headers: { "List-Unsubscribe": "<https://tomverse.app/u/abc>" },
     },
+    stream: "marketing",
     senderRole: "marketing",
     idempotencyKey: "delivery-42",
   });
 
   assert.equal(result.ok, true);
-  assert.equal(bodies.length, 1);
-  const sent = JSON.parse(bodies[0]);
+  assert.equal(requests.length, 1);
+  const request = requests[0];
+  const sent = JSON.parse(String(request.body));
   assert.equal(sent.to, address);
+  assert.equal(sent.from, "Tomverse News <news@news.tomverse.app>");
   assert.equal(sent.subject, "A subject");
   assert.equal(sent.html, "<p>Body</p>");
   assert.equal(sent.text, "Body");
   assert.equal(sent.headers["List-Unsubscribe"], "<https://tomverse.app/u/abc>");
+  assert.equal(new Headers(request.headers).get("Idempotency-Key"), "delivery-42");
 });
 
 test("a message with no headers carries none", async () => {

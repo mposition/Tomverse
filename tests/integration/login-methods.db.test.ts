@@ -18,7 +18,15 @@ const resetLoginMethodsData = () =>
     RESTART IDENTITY CASCADE
   `);
 
-beforeEach(resetLoginMethodsData);
+beforeEach(async () => {
+  // Login-method changes now enqueue a durable standard-lane notice. Its
+  // personalisation snapshot is encrypted even in tests; without a test key
+  // this suite exercises configuration failure rather than the account
+  // transaction it exists to prove.
+  process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
+  process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
+  await resetLoginMethodsData();
+});
 after(async () => {
   await resetLoginMethodsData();
   await prisma.$disconnect();
