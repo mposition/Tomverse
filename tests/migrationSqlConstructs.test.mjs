@@ -22,21 +22,18 @@ import test from "node:test";
 const MIGRATIONS = resolve(import.meta.dirname, "..", "prisma", "migrations");
 
 /**
- * The constructs Postgres parses rather than resolves.
+ * Construct names with no callable pg_catalog function of the same name.
  *
  * Not the whole list -- `CASE`, `IS DISTINCT FROM` and the rest are not written
- * in call form, so nobody can qualify them by accident. These are the ones that
- * are.
+ * in call form, so nobody can qualify them by accident. Some constructs such as
+ * `SUBSTRING` also have callable catalog functions, so a blanket list of
+ * function-like SQL syntax would reject valid hardened SQL.
  */
 const NOT_FUNCTIONS = [
   "coalesce",
   "nullif",
   "greatest",
   "least",
-  "extract",
-  "overlay",
-  "position",
-  "substring",
   "trim",
   "cast",
 ];
@@ -50,6 +47,70 @@ const NOT_FUNCTIONS = [
  */
 const constructPattern = () =>
   new RegExp(`pg_catalog\\.(${NOT_FUNCTIONS.join("|")})\\s*\\(`, "gi");
+
+/**
+ * Hide SQL comments without moving the remaining text.
+ *
+ * Keeping every character position stable lets the failure below report a line
+ * from the original migration. Quoted strings and identifiers are copied as-is
+ * so comment markers in values do not hide executable SQL that follows them.
+ */
+const withoutSqlComments = (sql) => {
+  const output = [...sql];
+  let quote = null;
+  let blockDepth = 0;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const current = sql[index];
+    const next = sql[index + 1];
+
+    if (blockDepth > 0) {
+      if (current === "/" && next === "*") {
+        output[index] = output[index + 1] = " ";
+        blockDepth += 1;
+        index += 1;
+      } else if (current === "*" && next === "/") {
+        output[index] = output[index + 1] = " ";
+        blockDepth -= 1;
+        index += 1;
+      } else if (current !== "\n" && current !== "\r") {
+        output[index] = " ";
+      }
+      continue;
+    }
+
+    if (quote !== null) {
+      if (current === quote && next === quote) {
+        index += 1;
+      } else if (current === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (current === "'" || current === '"') {
+      quote = current;
+      continue;
+    }
+
+    if (current === "-" && next === "-") {
+      while (index < sql.length && sql[index] !== "\n") {
+        output[index] = " ";
+        index += 1;
+      }
+      index -= 1;
+      continue;
+    }
+
+    if (current === "/" && next === "*") {
+      output[index] = output[index + 1] = " ";
+      blockDepth = 1;
+      index += 1;
+    }
+  }
+
+  return output.join("");
+};
 
 const migrationFiles = () =>
   readdirSync(MIGRATIONS)
@@ -69,7 +130,8 @@ const migrationFiles = () =>
 test("no migration qualifies a SQL construct as a catalog function", () => {
   const offenders = [];
   for (const file of migrationFiles()) {
-    for (const match of file.sql.matchAll(constructPattern())) {
+    const executableSql = withoutSqlComments(file.sql);
+    for (const match of executableSql.matchAll(constructPattern())) {
       const line = file.sql.slice(0, match.index).split("\n").length;
       offenders.push(`${file.path}:${line}  ${match[0].trim()}`);
     }
@@ -91,6 +153,12 @@ test("the guard finds what it is for", () => {
     constructPattern()
   );
   assert.match(`pg_catalog.COALESCE (x, 0)`, constructPattern());
+  assert.doesNotMatch(
+    withoutSqlComments(
+      `-- pg_catalog.coalesce(x, 0)\n/* pg_catalog.nullif(y, 0) */ SELECT 1;`
+    ),
+    constructPattern()
+  );
   // And leaves the real catalog functions alone, which the same migrations are
   // full of and which the qualification is correct for.
   for (const legitimate of [
@@ -98,6 +166,12 @@ test("the guard finds what it is for", () => {
     `pg_catalog.jsonb_typeof(value)`,
     `pg_catalog.count(*)`,
     `pg_catalog.hashtext('key')`,
+    // These names also have SQL-special forms, but unlike COALESCE they have
+    // real pg_catalog functions that can be called with ordinary arguments.
+    `pg_catalog.extract('epoch', value)`,
+    `pg_catalog.overlay(value, replacement, 2, 3)`,
+    `pg_catalog.position(needle, haystack)`,
+    `pg_catalog.substring(value, 2, 3)`,
   ]) {
     assert.doesNotMatch(legitimate, constructPattern());
   }
