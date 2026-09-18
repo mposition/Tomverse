@@ -195,4 +195,3 @@ test("no user-facing path sends transactional email directly", () => {
       "in sendWithAddressLock(), an operator alert in an allowlisted module"
   );
 });
-
