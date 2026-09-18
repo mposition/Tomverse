@@ -89,6 +89,26 @@ const create = async () =>
     expected: await expected(),
   });
 
+const seedFutureAuditHead = async (offsetMs: number) => {
+  const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  assert.ok(clock);
+  const createdAt = new Date(clock.now.getTime() + offsetMs);
+  const entryHash = randomUUID().replaceAll("-", "").padEnd(64, "0");
+  await prisma.adminAuditLog.create({
+    data: {
+      action: "test.audit_head.seeded",
+      targetType: "PromptRefinerReservationStageTest",
+      summary: "Seeded a deterministic audit-chain head for stage timestamp coverage.",
+      previousHash: null,
+      entryHash,
+      createdAt,
+    },
+  });
+  return { createdAt, entryHash };
+};
+
 before(async () => {
   await ensureRuntimeModel();
 });
@@ -229,6 +249,50 @@ test("stage audit freshness uses UTC under a non-UTC database session", async ()
   assert.equal(
     stored.approvalExpiresAt.getTime() - stored.approvedAt.getTime(),
     PROMPT_REFINER_STAGE_APPROVAL_TTL_MS
+  );
+});
+
+test("the shared audit writer's monotonic +1ms timestamp remains stage-admissible", async () => {
+  const binding = await expected();
+  const head = await seedFutureAuditHead(30_000);
+
+  const created = await createPromptRefinerReservationStage({
+    session,
+    request: request(),
+    expected: binding,
+  });
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: created.stage.authorizationAuditLogId },
+  });
+  assert.equal(audit.previousHash, head.entryHash);
+  assert.equal(audit.createdAt.getTime(), head.createdAt.getTime() + 1);
+  assert.equal(
+    created.stage.approvalExpiresAt.getTime() - created.stage.approvedAt.getTime(),
+    PROMPT_REFINER_STAGE_APPROVAL_TTL_MS
+  );
+  assert.equal(
+    (await reservePromptRefinerExecution({ requestId: "monotonic_audit_stage_reserve" })).ok,
+    true
+  );
+});
+
+test("the stage trigger rejects a shared-writer audit more than one minute in the future", async () => {
+  const binding = await expected();
+  const head = await seedFutureAuditHead(120_000);
+
+  await assert.rejects(
+    createPromptRefinerReservationStage({
+      session,
+      request: request(),
+      expected: binding,
+    }),
+    /authorization audit binding is invalid/i
+  );
+  assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
+  assert.equal(await prisma.adminAuditLog.count(), 1);
+  assert.equal(
+    await prisma.adminAuditLog.count({ where: { entryHash: head.entryHash } }),
+    1
   );
 });
 

@@ -429,7 +429,7 @@ BEGIN
            OR audit_entry_hash IS NULL
            OR audit_entry_hash !~ '^[a-f0-9]{64}$'
            OR audit_created_at < audit_observed_at - INTERVAL '1 minute'
-           OR audit_created_at > audit_observed_at
+           OR audit_created_at > audit_observed_at + INTERVAL '1 minute'
            OR audit_metadata IS DISTINCT FROM jsonb_build_object(
                 'admissionVersion', NEW."admissionVersion",
                 'proposalDigest', NEW."proposalDigest",

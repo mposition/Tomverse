@@ -91,6 +91,11 @@ let writer: typeof import("../../lib/adminAudit.ts").writeAdminAuditLog;
 
 const SECRET = "admin-audit-chain-writer-test-secret-32";
 const DATABASE_NOW = new Date("2026-09-17T01:02:03.456Z");
+const DATABASE_CLOCK_SQL =
+  "-- AdminAuditLog.createdAt is a naive timestamp. Always materialize the " +
+  "-- UTC wall clock explicitly so a non-UTC database session cannot shift " +
+  "-- the stored instant or the HMAC payload derived from it. " +
+  `SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "createdAt"`;
 
 beforeEach(async () => {
   world = {
@@ -166,7 +171,7 @@ test("inside a caller's transaction: lock, database clock, previous hash, insert
   assert.deepEqual(lock.kind === "executeRaw" && lock.values, []);
   assert.equal(
     clock.kind === "queryRaw" && clock.sql,
-    'SELECT clock_timestamp() AS "createdAt"'
+    DATABASE_CLOCK_SQL
   );
   assert.deepEqual(previous.kind === "findFirst" && previous.args, {
     where: { entryHash: { not: null } },
@@ -464,7 +469,7 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
   );
   assert.equal(
     clock.kind === "queryRaw" && clock.sql,
-    'SELECT clock_timestamp() AS "createdAt"'
+    DATABASE_CLOCK_SQL
   );
 
   const metadata = { purgedCount: 1, systemActor: "marketing-retention" };

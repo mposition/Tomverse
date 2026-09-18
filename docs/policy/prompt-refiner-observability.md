@@ -299,7 +299,7 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
 후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
 다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 186개 source
-파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 171개 source는
+파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 177개 source는
 admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 9개는
 root/workspace resolution metadata를 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
 넘으면 거부한다. 별도 execution manifest는
