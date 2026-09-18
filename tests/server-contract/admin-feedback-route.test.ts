@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for PATCH /api/admin/feedback/[feedbackId].
@@ -243,6 +244,8 @@ async function loadRoute(): Promise<{
       },
       // The suppression read authority: absent, so entries decide.
       appSetting: { findUnique: async () => null },
+      // The fence and the address lock the send takes before it submits.
+      ...sendLockPrismaStubs(),
       feedbackAutoFixCase: {
         updateMany: async ({
           where,

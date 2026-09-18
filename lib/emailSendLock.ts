@@ -221,9 +221,13 @@ export async function sendWithAddressLock<T>(input: {
         // that follow the locks are restored to it rather than left on a
         // sender's budget -- a relation lock that timed out at two seconds
         // would be reported as address contention, which it is not.
-        const [{ lock_timeout: restoreTo }] = await tx.$queryRaw<
+        const settings = await tx.$queryRaw<
           Array<{ lock_timeout: string }>
         >`SELECT current_setting('lock_timeout') AS lock_timeout`;
+        // Postgres always answers this, but a client that does not is not a
+        // reason to fail a send: `0` is the server default and the value every
+        // other query on this connection runs under.
+        const restoreTo = settings[0]?.lock_timeout ?? "0";
 
         // Shared, like every other reader of the suppression record: the
         // cutover holds it exclusively, so this decision cannot be taken under
