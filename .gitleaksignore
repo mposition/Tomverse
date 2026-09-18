@@ -115,7 +115,10 @@ bd8584ca778a3f1774740f39b2af8568afa16d71:tests/server-contract/email-provider-po
 # tracked source text and never authenticated any system. A follow-up commit
 # constructs the current digest from two parts so future edits do not recreate
 # the credential-shaped assignment; the immutable introducing commit remains
-# pinned here.
+# pinned here. `dynamicElementAccessSnapshot()` in
+# tests/promptRefinerRuntimeSourceClosure.test.mjs recomputes it; run
+# `node --conditions=react-server --import tsx --test
+# tests/promptRefinerRuntimeSourceClosure.test.mjs` to assert the digest.
 #
 # Scope: exactly this one finding in that one commit -- nothing wider.
 a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure.test.mjs:generic-api-key:64
