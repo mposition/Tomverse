@@ -203,6 +203,9 @@ const compilerAliasCouldBeLocal = (specifier) =>
       : specifier.startsWith(pattern.slice(0, star)) && specifier.endsWith(pattern.slice(star + 1));
   });
 
+const isInstalledDependencyResolution = (path) =>
+  path.replaceAll("\\", "/").split("/").includes("node_modules");
+
 const resolveLocalRuntimeImport = (fromPath, specifier) => {
   const workspace = workspaceForSpecifier(specifier);
   const resolution = ts.resolveModuleName(
@@ -214,6 +217,11 @@ const resolveLocalRuntimeImport = (fromPath, specifier) => {
   if (resolution) {
     const resolvedReal = realpathSync.native(resolution.resolvedFileName);
     const path = relative(repositoryRootReal, resolvedReal);
+    // npm installs external packages below node_modules inside the checkout on
+    // Linux, while a Windows junction may resolve outside the checkout. Treat
+    // both layouts alike. Workspace links realpath back to packages/* and are
+    // still included by the local-runtime branch below.
+    if (isInstalledDependencyResolution(path)) return null;
     const inside = path !== ".." && !path.startsWith(`..\\`) && !path.startsWith("../") && !isAbsolute(path);
     if (inside) {
       assert.equal(
@@ -1137,6 +1145,12 @@ test("closure parser binds aliases and every supported runtime module loading fo
       unsafe
     );
   }
+});
+
+test("installed dependency declarations are external but workspace sources remain local", () => {
+  assert.equal(isInstalledDependencyResolution("node_modules/next-auth/next.d.ts"), true);
+  assert.equal(isInstalledDependencyResolution("packages/example/node_modules/dependency/index.d.ts"), true);
+  assert.equal(isInstalledDependencyResolution("packages/chat-core/src/index.ts"), false);
 });
 
 test("TypeScript options and workspace metadata control local resolution", () => {

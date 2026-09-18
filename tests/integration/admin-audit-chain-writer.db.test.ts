@@ -23,7 +23,13 @@ import { prisma } from "@/lib/prisma";
 const SECRET = "admin-audit-chain-writer-db-secret-0032";
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY`);
+  prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "PromptRefinerReservation",
+      "PromptRefinerReservationStage",
+      "AdminAuditLog"
+    RESTART IDENTITY
+  `);
 
 const session = {
   user: { id: "admin-chain-writer", email: "owner@example.test" },
