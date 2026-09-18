@@ -15,8 +15,14 @@ Codex가 현재 대화의 사용자 승인을 기록한다. 사용자 메시지�
 새 exchange의 Claude 읽기 전용 독립 검토에만 적용한다. author는 Codex,
 reviewer는 Claude이며 exact base는
 `757c608f02fba306e454b07accdc14c977704557`, 검토할 구현 source는
-`f8d63741`이다. writable scope는 secret-scan 수정 2개 경로와 이 task 및
+`cb68d4da`이다. writable scope는 secret-scan 수정 2개 경로와 이 task 및
 authorization 2개 경로인 exact 4개이고 generated paths는 비어 있다.
+
+Round 0 digest
+`sha256:668f656c0ff38991d310246ae9b2ae0299455d5f9cb4645df271c1cabaa4f679`은
+`approve`였지만 재현 함수와 exact command를 주석에 직접 쓰라는 nit 1건이 열려
+controller가 `awaiting_revision`으로 기록했다. Round 1은 그 문서성 지적만
+보완하며 원래 사용자 승인과 검토 경계를 바꾸지 않는다.
 
 ## 유지되는 경계
 
