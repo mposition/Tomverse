@@ -76,6 +76,44 @@ export type MarketingAuditVerdict =
   | { ok: true; createdAt: Date }
   | { ok: false; problem: MarketingAuditProblem };
 
+export const MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION =
+  "marketing_webhook.verification_signed";
+
+export type MarketingWebhookSignatureAuditBinding = {
+  signatureAuditLogId: string;
+  recordId: string;
+  recordDigest: string;
+};
+
+/**
+ * Opaque proof returned only after the hash-chained human audit row is read.
+ * The private unique-symbol member prevents callers from manufacturing a
+ * structurally identical `verified: true` object in TypeScript.
+ */
+declare const marketingWebhookSignatureAuditEvidenceBrand: unique symbol;
+export type MarketingWebhookSignatureAuditEvidence = {
+  auditLogId: string;
+  action: typeof MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION;
+  targetId: string;
+  recordDigest: string;
+  verified: boolean;
+  readonly [marketingWebhookSignatureAuditEvidenceBrand]: true;
+};
+
+/**
+ * The exact human-audit claim a webhook verification signature must prove.
+ * Kept here beside the hash-chain verifier so S2 cannot accidentally verify a
+ * generic marketing action and then label the resulting boolean a signature.
+ */
+export const marketingWebhookSignatureAuditRequirement = (
+  binding: MarketingWebhookSignatureAuditBinding,
+): MarketingAuditRequirement => ({
+  auditLogId: binding.signatureAuditLogId,
+  action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
+  targetId: binding.recordId,
+  metadata: { recordDigest: binding.recordDigest },
+});
+
 const metadataValue = (metadata: unknown, key: string): unknown =>
   metadata && typeof metadata === "object" && !Array.isArray(metadata)
     ? (metadata as Record<string, unknown>)[key]
@@ -181,4 +219,21 @@ export async function verifyMarketingAuditEvidence(
   }
 
   return { ok: true, createdAt: entry.createdAt };
+}
+
+export async function verifyMarketingWebhookSignatureAuditEvidence(
+  database: MarketingAuditReader,
+  binding: MarketingWebhookSignatureAuditBinding,
+): Promise<MarketingWebhookSignatureAuditEvidence> {
+  const verdict = await verifyMarketingAuditEvidence(
+    database,
+    marketingWebhookSignatureAuditRequirement(binding),
+  );
+  return {
+    auditLogId: binding.signatureAuditLogId,
+    action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
+    targetId: binding.recordId,
+    recordDigest: binding.recordDigest,
+    verified: verdict.ok,
+  } as MarketingWebhookSignatureAuditEvidence;
 }

@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -58,6 +59,16 @@ import {
   EMAIL_MARKETING_FLAG_KEY,
   emailFeatureEnabledFromValue,
 } from "@/lib/emailFeatureFlags";
+import {
+  MARKETING_AUTO_PUBLISH_KEY,
+  MARKETING_DRAFTS_KEY,
+  MARKETING_EXPERIMENTS_KEY,
+  MARKETING_PUBLISH_KEY,
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  marketingAutomationEnabledFromValue,
+  type ReadResult,
+} from "@/lib/marketingAutomationAccess";
 import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
@@ -620,6 +631,102 @@ export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return emailFeatureEnabledFromValue(row?.value);
+}
+
+/**
+ * S1d marketing switches are default-off and deliberately have no writer yet.
+ * S2 adds the permission-checked, step-up-protected and audit-logged routes.
+ * Until then these readers expose failure separately from a stored `false`, so
+ * the access resolver can record `input_unreadable:<name>` while denying both.
+ */
+export type MarketingAutomationSettingsRead = {
+  draftsEnabled: ReadResult<boolean>;
+  publishEnabled: ReadResult<boolean>;
+  autoPublishEnabled: ReadResult<boolean>;
+  experimentsEnabled: ReadResult<boolean>;
+  webhookShadowEnabled: ReadResult<boolean>;
+  webhookShadowStoredValue: ReadResult<string | null>;
+  webhookApplyScopeValue: ReadResult<string | null>;
+};
+
+export async function readMarketingAutomationSettingsFrom(
+  client: Pick<PrismaClient, "appSetting">,
+  databaseEnabled: boolean,
+): Promise<MarketingAutomationSettingsRead> {
+  const fromValues = (values: ReadonlyMap<string, string>) => ({
+    draftsEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(values.get(MARKETING_DRAFTS_KEY)),
+    },
+    publishEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(values.get(MARKETING_PUBLISH_KEY)),
+    },
+    autoPublishEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_AUTO_PUBLISH_KEY),
+      ),
+    },
+    experimentsEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_EXPERIMENTS_KEY),
+      ),
+    },
+    webhookShadowEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_WEBHOOK_SHADOW_KEY),
+      ),
+    },
+    webhookShadowStoredValue: {
+      ok: true as const,
+      value: values.get(MARKETING_WEBHOOK_SHADOW_KEY) ?? null,
+    },
+    webhookApplyScopeValue: {
+      ok: true as const,
+      value: values.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY) ?? null,
+    },
+  });
+
+  if (!databaseEnabled) return fromValues(new Map());
+
+  try {
+    const rows = await client.appSetting.findMany({
+      where: {
+        key: {
+          in: [
+            MARKETING_DRAFTS_KEY,
+            MARKETING_PUBLISH_KEY,
+            MARKETING_AUTO_PUBLISH_KEY,
+            MARKETING_EXPERIMENTS_KEY,
+            MARKETING_WEBHOOK_SHADOW_KEY,
+            MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    return fromValues(new Map(rows.map((row) => [row.key, row.value])));
+  } catch {
+    const unreadable: ReadResult<never> = { ok: false };
+    return {
+      draftsEnabled: unreadable,
+      publishEnabled: unreadable,
+      autoPublishEnabled: unreadable,
+      experimentsEnabled: unreadable,
+      webhookShadowEnabled: unreadable,
+      webhookShadowStoredValue: unreadable,
+      webhookApplyScopeValue: unreadable,
+    };
+  }
+}
+
+export async function readMarketingAutomationSettings(): Promise<
+  MarketingAutomationSettingsRead
+> {
+  return readMarketingAutomationSettingsFrom(prisma, !e2eDatabaseDisabled());
 }
 
 export class MemoryFeatureDisabledError extends Error {
