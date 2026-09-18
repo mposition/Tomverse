@@ -37,6 +37,8 @@ const validStage = (overrides = {}) => ({
     costCeilingMicroUsd: 2_491_600n,
     reservationCount: 0,
     allocatedCostMicroUsd: 0n,
+    approvedAt: new Date("2026-09-17T00:00:00.000Z"),
+    approvalExpiresAt: new Date("2026-09-17T01:00:00.000Z"),
     ...overrides,
 });
 
@@ -82,6 +84,7 @@ test("stage validation rejects every mutable bound and broken accounting", () =>
         ["costCeilingMicroUsd", 2_491_599n, "stage_cost_mismatch"],
         ["reservationCount", 101, "reservation_count_invalid"],
         ["allocatedCostMicroUsd", 1n, "allocated_cost_invalid"],
+        ["approvalExpiresAt", new Date("2026-09-17T00:59:59.999Z"), "approval_window_invalid"],
     ];
     for (const [field, value, expected] of cases) {
         assert.ok(

@@ -2220,7 +2220,9 @@ model AdminAuditLog {
   entryHash    String?  @unique
   createdAt    DateTime @default(now())
 
-  /// No relation on purpose: see
+  promptRefinerReservationStage PromptRefinerReservationStage?
+
+  /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
   /// `actorUserId` is part of this row's HMAC input, so a foreign-key action
   /// rewriting it makes an audit entry indistinguishable from a forged one --
@@ -5504,21 +5506,42 @@ model MobileAuthEvent {
 // are content-free tombstones and are never deleted or reused.
 
 model PromptRefinerReservationStage {
-  id                     String   @id
-  contractVersion        String
-  contractDigest         String   @unique
-  status                 String
-  perRequestCostMicroUsd BigInt
-  maxReservations        Int
-  costCeilingMicroUsd    BigInt
-  reservationCount       Int      @default(0)
-  allocatedCostMicroUsd  BigInt   @default(0)
-  approvedBy             String
-  approvedAt             DateTime
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                             String   @id
+  contractVersion                String
+  contractDigest                 String   @unique
+  status                         String
+  perRequestCostMicroUsd         BigInt
+  maxReservations                Int
+  costCeilingMicroUsd            BigInt
+  reservationCount               Int      @default(0)
+  allocatedCostMicroUsd          BigInt   @default(0)
+  admissionVersion               String
+  proposalVersion                String
+  proposalDigest                 String
+  evidenceBundleDigest           String
+  evidenceManifestSha256         String
+  historicalSourceRef            String
+  historicalSourceIdentityDigest String
+  corpusDigest                   String
+  runtimeCommitSha               String
+  runtimeSourceIdentityDigest    String
+  /// Content-free v2 manifest for the exact 180-file runtime import closure;
+  /// the database validates ordered paths plus 8 MiB/file and 16 MiB total.
+  runtimeSourceManifest          Json
+  runtimeSourceManifestDigest    String
+  runtimeEnvironment             String
+  runtimeDeploymentId            String
+  executionManifest              Json
+  executionManifestDigest        String
+  approvedBy                     String
+  approvedAt                     DateTime
+  approvalExpiresAt              DateTime
+  authorizationAuditLogId        String   @unique
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
 
-  reservations PromptRefinerReservation[]
+  reservations          PromptRefinerReservation[]
+  authorizationAuditLog AdminAuditLog              @relation(fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 model PromptRefinerReservation {

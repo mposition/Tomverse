@@ -81,7 +81,10 @@ async function appendAuditChainEntry(
 ): Promise<string> {
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
   const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
-    SELECT clock_timestamp() AS "createdAt"
+    -- AdminAuditLog.createdAt is a naive timestamp. Always materialize the
+    -- UTC wall clock explicitly so a non-UTC database session cannot shift
+    -- the stored instant or the HMAC payload derived from it.
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "createdAt"
   `;
   const databaseNow = timestampRows[0]?.createdAt || new Date();
   const previous = integritySecret

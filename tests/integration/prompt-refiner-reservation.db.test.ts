@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { before, beforeEach, test } from "node:test";
+import type { Session } from "next-auth";
 
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import {
     consumePromptRefinerReservation,
@@ -17,9 +19,26 @@ import {
     PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
     PROMPT_REFINER_RESERVATION_STAGE_ID,
 } from "@/lib/promptRefinerReservationCore";
+import { loadPromptRefinerStageAdmissionFacts } from "@/lib/promptRefinerStageAdmission";
+import {
+    PROMPT_REFINER_STAGE_APPROVAL_TTL_MS,
+    PROMPT_REFINER_STAGE_REASON,
+    prefixedPromptRefinerDigest,
+} from "@/lib/promptRefinerStageAdmissionCore";
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 
 const INPUT_PRICE_ENV = "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION";
+const FIXTURE_COMMIT_SHA = "a".repeat(40);
+const FIXTURE_DEPLOYMENT_ID = "prompt-refiner-db-test";
+process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+process.env.RAILWAY_GIT_COMMIT_SHA = FIXTURE_COMMIT_SHA;
+process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
+process.env.ADMIN_AUDIT_INTEGRITY_KEY = "prompt-refiner-reservation-strong-fixture-key";
+
+const fixtureSession = { user: { id: "mposition", email: "owner@example.com" } } as Session;
+const fixtureRequest = new Request("http://127.0.0.1:3100/db-fixture", {
+    headers: { "user-agent": "prompt-refiner-db-integration" },
+});
 
 const reset = async () => {
     await prisma.$executeRawUnsafe(`
@@ -42,22 +61,119 @@ const ensureRuntimeModel = async () => {
     });
 };
 
-const createStage = async (input: { status?: "approved" | "closed" } = {}) => {
-    return prisma.promptRefinerReservationStage.create({
-        data: {
-            id: PROMPT_REFINER_RESERVATION_STAGE_ID,
+const stageCreateData = async (input: {
+    id?: string;
+    status?: "approved" | "closed";
+    reservationCount?: number;
+    allocatedCostMicroUsd?: bigint;
+} = {}) => {
+    const facts = await loadPromptRefinerStageAdmissionFacts();
+    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    const approvedAt = clock!.now;
+    const approvalExpiresAt = new Date(approvedAt.getTime() + PROMPT_REFINER_STAGE_APPROVAL_TTL_MS);
+    const auditId = await writeAdminAuditLog({
+        session: fixtureSession,
+        request: fixtureRequest,
+        action: "prompt_refiner.shadow_stage.activated",
+        targetType: "PromptRefinerReservationStage",
+        targetId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+        summary: "Approved the bounded Prompt Refiner staging shadow stage.",
+        metadata: {
+            admissionVersion: facts.admissionVersion,
+            proposalDigest: facts.proposalDigest,
+            evidenceBundleDigest: facts.evidenceBundleDigest,
+            runtimeSourceManifestDigest: facts.runtimeSourceManifestDigest,
+            executionManifestDigest: facts.executionManifestDigest,
+            environment: facts.runtimeEnvironment,
+            deploymentId: facts.runtimeDeploymentId,
+            commitSha: facts.runtimeCommitSha,
+            perRequestCostMicroUsd: 24_916,
+            maxReservations: 100,
+            costCeilingMicroUsd: 2_491_600,
+            approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+            approvedAt: approvedAt.toISOString(),
+            approvalExpiresAt: approvalExpiresAt.toISOString(),
+            reason: PROMPT_REFINER_STAGE_REASON,
+        },
+    });
+    return {
+            id: input.id ?? PROMPT_REFINER_RESERVATION_STAGE_ID,
             contractVersion: PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
             contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
             status: input.status ?? "approved",
             perRequestCostMicroUsd: BigInt(24_916),
             maxReservations: 100,
             costCeilingMicroUsd: BigInt(2_491_600),
-            reservationCount: 0,
-            allocatedCostMicroUsd: BigInt(0),
+            reservationCount: input.reservationCount ?? 0,
+            allocatedCostMicroUsd: input.allocatedCostMicroUsd ?? BigInt(0),
+            admissionVersion: facts.admissionVersion,
+            proposalVersion: facts.proposalVersion,
+            proposalDigest: facts.proposalDigest,
+            evidenceBundleDigest: facts.evidenceBundleDigest,
+            evidenceManifestSha256: facts.evidenceManifestSha256,
+            historicalSourceRef: facts.historicalSourceRef,
+            historicalSourceIdentityDigest: facts.historicalSourceIdentityDigest,
+            corpusDigest: facts.corpusDigest,
+            runtimeCommitSha: facts.runtimeCommitSha,
+            runtimeSourceIdentityDigest: facts.runtimeSourceIdentityDigest,
+            runtimeSourceManifest: facts.runtimeSourceManifest,
+            runtimeSourceManifestDigest: facts.runtimeSourceManifestDigest,
+            runtimeEnvironment: facts.runtimeEnvironment,
+            runtimeDeploymentId: facts.runtimeDeploymentId,
+            executionManifest: facts.executionManifest,
+            executionManifestDigest: facts.executionManifestDigest,
             approvedBy: "mposition",
-            approvedAt: new Date(),
+            approvedAt,
+            approvalExpiresAt,
+            authorizationAuditLogId: auditId,
+    };
+};
+
+const rebindStageAudit = async (data: Awaited<ReturnType<typeof stageCreateData>>) => {
+    data.authorizationAuditLogId = await writeAdminAuditLog({
+        session: fixtureSession,
+        request: fixtureRequest,
+        action: "prompt_refiner.shadow_stage.activated",
+        targetType: "PromptRefinerReservationStage",
+        targetId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+        summary: "Approved the bounded Prompt Refiner staging shadow stage.",
+        metadata: {
+            admissionVersion: data.admissionVersion,
+            proposalDigest: data.proposalDigest,
+            evidenceBundleDigest: data.evidenceBundleDigest,
+            runtimeSourceManifestDigest: data.runtimeSourceManifestDigest,
+            executionManifestDigest: data.executionManifestDigest,
+            environment: data.runtimeEnvironment,
+            deploymentId: data.runtimeDeploymentId,
+            commitSha: data.runtimeCommitSha,
+            perRequestCostMicroUsd: Number(data.perRequestCostMicroUsd),
+            maxReservations: data.maxReservations,
+            costCeilingMicroUsd: Number(data.costCeilingMicroUsd),
+            approvalTtlMinutes: 60,
+            approvedAt: data.approvedAt.toISOString(),
+            approvalExpiresAt: data.approvalExpiresAt.toISOString(),
+            reason: PROMPT_REFINER_STAGE_REASON,
         },
     });
+    return data;
+};
+
+const recomputeRuntimeManifestDigests = (data: Awaited<ReturnType<typeof stageCreateData>>) => {
+    const manifest = data.runtimeSourceManifest as unknown as { files: Array<Record<string, unknown>> };
+    data.runtimeSourceIdentityDigest = prefixedPromptRefinerDigest({ files: manifest.files });
+    data.runtimeSourceManifestDigest = prefixedPromptRefinerDigest(data.runtimeSourceManifest);
+};
+
+const createStage = async (input: { status?: "approved" | "closed" } = {}) => {
+    const stage = await prisma.promptRefinerReservationStage.create({
+        data: await stageCreateData({ ...input, status: "approved" }),
+    });
+    if (input.status === "closed") {
+        return prisma.promptRefinerReservationStage.update({ where: { id: stage.id }, data: { status: "closed" } });
+    }
+    return stage;
 };
 
 const bindingOf = (reservation: {
@@ -111,6 +227,8 @@ before(async () => {
 
 beforeEach(async () => {
     delete process.env[INPUT_PRICE_ENV];
+    process.env.RAILWAY_GIT_COMMIT_SHA = FIXTURE_COMMIT_SHA;
+    process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
     await reset();
 });
 
@@ -138,19 +256,10 @@ test("reserve uses the DB clock and atomically binds one exact permanent slot", 
 test("a stage must start at zero and direct counter updates cannot mint slots", async () => {
     await assert.rejects(
         prisma.promptRefinerReservationStage.create({
-            data: {
-                id: PROMPT_REFINER_RESERVATION_STAGE_ID,
-                contractVersion: PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
-                contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-                status: "approved",
-                perRequestCostMicroUsd: BigInt(24_916),
-                maxReservations: 100,
-                costCeilingMicroUsd: BigInt(2_491_600),
+            data: await stageCreateData({
                 reservationCount: 1,
                 allocatedCostMicroUsd: BigInt(24_916),
-                approvedBy: "mposition",
-                approvedAt: new Date(),
-            },
+            }),
         }),
         /must start with zero accounting/i
     );
@@ -223,13 +332,7 @@ test("a repeated request is idempotent and never consumes a second slot", async 
     const first = await reservePromptRefinerExecution({ requestId: "request_same" });
     assert.equal(first.ok, true);
     if (!first.ok) return;
-    await prisma.promptRefinerReservationStage.update({
-        where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
-        data: { status: "closed" },
-    });
-    process.env[INPUT_PRICE_ENV] = "99";
     const second = await reservePromptRefinerExecution({ requestId: "request_same" });
-    delete process.env[INPUT_PRICE_ENV];
     assert.equal(second.ok, true);
     if (!second.ok) return;
     assert.equal(first.value.created, true);
@@ -248,6 +351,64 @@ test("a repeated request is idempotent and never consumes a second slot", async 
         where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
     });
     assert.equal(stage.reservationCount, 1);
+});
+
+test("an active requestId replay is refused after the stage approval expires", async () => {
+    await createStage();
+    const first = await reservePromptRefinerExecution({ requestId: "request_expired_replay" });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+    );
+    try {
+        await prisma.$executeRaw`
+            UPDATE "PromptRefinerReservationStage"
+            SET "approvedAt" = "approvedAt" - INTERVAL '2 hours',
+                "approvalExpiresAt" = "approvalExpiresAt" - INTERVAL '2 hours'
+            WHERE "id" = ${PROMPT_REFINER_RESERVATION_STAGE_ID}
+        `;
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+        );
+    }
+    const replay = await reservePromptRefinerExecution({ requestId: "request_expired_replay" });
+    assert.equal(replay.ok, false);
+    assert.equal(await prisma.promptRefinerReservation.count(), 1);
+});
+
+test("an active requestId replay is refused after deployment or source identity drift", async () => {
+    await createStage();
+    const first = await reservePromptRefinerExecution({ requestId: "request_source_drift_replay" });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    process.env.RAILWAY_DEPLOYMENT_ID = "different-deployment";
+    const deploymentReplay = await reservePromptRefinerExecution({
+        requestId: "request_source_drift_replay",
+    });
+    assert.deepEqual(deploymentReplay, { ok: false, reason: "stage_contract_mismatch" });
+
+    process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
+    process.env.RAILWAY_GIT_COMMIT_SHA = "c".repeat(40);
+    const sourceReplay = await reservePromptRefinerExecution({
+        requestId: "request_source_drift_replay",
+    });
+    assert.deepEqual(sourceReplay, { ok: false, reason: "stage_contract_mismatch" });
+    assert.equal(await prisma.promptRefinerReservation.count(), 1);
+});
+
+test("an active requestId replay is refused after model pricing drift", async () => {
+    await createStage();
+    const first = await reservePromptRefinerExecution({ requestId: "request_pricing_drift_replay" });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    process.env[INPUT_PRICE_ENV] = "99";
+    const replay = await reservePromptRefinerExecution({ requestId: "request_pricing_drift_replay" });
+    assert.deepEqual(replay, { ok: false, reason: "runtime_contract_mismatch" });
+    assert.equal(await prisma.promptRefinerReservation.count(), 1);
 });
 
 test("every exact direct insert consumes budget and forged or 101st inserts fail closed", async () => {
@@ -895,19 +1056,97 @@ test("stage-row locking admits only the remaining five slots under concurrency",
 });
 
 test("database constraints reject malformed state and triggers prevent deletion or reuse", async () => {
+    const wrongPath = await stageCreateData();
+    wrongPath.runtimeSourceManifest = structuredClone(wrongPath.runtimeSourceManifest) as typeof wrongPath.runtimeSourceManifest;
+    (wrongPath.runtimeSourceManifest as unknown as { files: Array<{ path: string }> }).files[0]!.path = "lib/not-allowed.ts";
+    recomputeRuntimeManifestDigests(wrongPath);
+    await rebindStageAudit(wrongPath);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: wrongPath }),
+        /runtime_identity_check|check constraint/i
+    );
+
+    const extraEntryKey = await stageCreateData();
+    extraEntryKey.runtimeSourceManifest = structuredClone(extraEntryKey.runtimeSourceManifest) as typeof extraEntryKey.runtimeSourceManifest;
+    (extraEntryKey.runtimeSourceManifest as unknown as { files: Array<Record<string, unknown>> }).files[0]!.unexpected = true;
+    recomputeRuntimeManifestDigests(extraEntryKey);
+    await rebindStageAudit(extraEntryKey);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: extraEntryKey }),
+        /runtime_identity_check|check constraint/i
+    );
+
+    const malformedHash = await stageCreateData();
+    malformedHash.runtimeSourceManifest = structuredClone(malformedHash.runtimeSourceManifest) as typeof malformedHash.runtimeSourceManifest;
+    (malformedHash.runtimeSourceManifest as unknown as { files: Array<{ sha256: string }> }).files[0]!.sha256 = "A".repeat(64);
+    recomputeRuntimeManifestDigests(malformedHash);
+    await rebindStageAudit(malformedHash);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: malformedHash }),
+        /runtime_identity_check|check constraint/i
+    );
+
+    const oversizedEntry = await stageCreateData();
+    oversizedEntry.runtimeSourceManifest = structuredClone(oversizedEntry.runtimeSourceManifest) as typeof oversizedEntry.runtimeSourceManifest;
+    (oversizedEntry.runtimeSourceManifest as unknown as { files: Array<{ sizeBytes: number }> }).files[0]!.sizeBytes = 8 * 1024 * 1024 + 1;
+    recomputeRuntimeManifestDigests(oversizedEntry);
+    await rebindStageAudit(oversizedEntry);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: oversizedEntry }),
+        /runtime_identity_check|check constraint/i
+    );
+
+    const oversizedClosure = await stageCreateData();
+    oversizedClosure.runtimeSourceManifest = structuredClone(oversizedClosure.runtimeSourceManifest) as typeof oversizedClosure.runtimeSourceManifest;
+    const oversizedClosureManifest = oversizedClosure.runtimeSourceManifest as unknown as {
+        totalSizeBytes: number;
+        files: Array<{ sizeBytes: number }>;
+    };
+    for (const index of [0, 1, 2]) {
+        oversizedClosureManifest.files[index]!.sizeBytes = 6 * 1024 * 1024;
+    }
+    oversizedClosureManifest.totalSizeBytes = oversizedClosureManifest.files.reduce(
+        (total, entry) => total + entry.sizeBytes,
+        0
+    );
+    recomputeRuntimeManifestDigests(oversizedClosure);
+    await rebindStageAudit(oversizedClosure);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: oversizedClosure }),
+        /runtime_identity_check|check constraint/i
+    );
+
+    const executionSourcePolicyDrift = await stageCreateData();
+    executionSourcePolicyDrift.executionManifest = structuredClone(executionSourcePolicyDrift.executionManifest) as typeof executionSourcePolicyDrift.executionManifest;
+    (executionSourcePolicyDrift.executionManifest as unknown as {
+        runtimeSource: { maxTotalBytes: number };
+    }).runtimeSource.maxTotalBytes += 1;
+    executionSourcePolicyDrift.executionManifestDigest = prefixedPromptRefinerDigest(
+        executionSourcePolicyDrift.executionManifest
+    );
+    await rebindStageAudit(executionSourcePolicyDrift);
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: executionSourcePolicyDrift }),
+        /execution_manifest_check|check constraint/i
+    );
+
+    const auditMismatch = await stageCreateData();
+    auditMismatch.runtimeDeploymentId = "other-valid-deployment";
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: auditMismatch }),
+        /authorization audit binding is invalid/i
+    );
+
+    const actorMismatch = await stageCreateData();
+    actorMismatch.approvedBy = "another-actor";
+    await assert.rejects(
+        prisma.promptRefinerReservationStage.create({ data: actorMismatch }),
+        /authorization audit binding is invalid/i
+    );
+
     await assert.rejects(
         prisma.promptRefinerReservationStage.create({
-            data: {
-                id: "another_stage",
-                contractVersion: PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
-                contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-                status: "approved",
-                perRequestCostMicroUsd: BigInt(24_916),
-                maxReservations: 100,
-                costCeilingMicroUsd: BigInt(2_491_600),
-                approvedBy: "mposition",
-                approvedAt: new Date(),
-            },
+            data: await stageCreateData({ id: "another_stage" }),
         })
     );
     await createStage();

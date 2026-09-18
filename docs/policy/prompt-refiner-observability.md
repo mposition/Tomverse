@@ -293,3 +293,48 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
 새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
 추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
 유지한다.
+
+## 11. durable staging approval provenance
+
+후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
+결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
+다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 180개 source
+파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 171개 source는
+admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 9개는
+root/workspace resolution metadata를 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
+넘으면 거부한다. 별도 execution manifest는
+고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
+`executionAdmitted=false`, `productAdapterReady=false`를 유지한다.
+
+승인 시각과 정확히 60분인 expiry는 PostgreSQL clock이 소유한다. stage insert와
+tamper-evident success audit은 advisory lock 아래 같은 transaction에서 commit하며, exact
+same actor/runtime replay만 audit 추가 없이 idempotent하다. 다른 immutable facts 또는 만료된
+행의 replay는 409다. migration은 기존 stage를 추측 backfill하거나 seed하지 않고 예상하지
+못한 행이 하나라도 있으면 실패한다. DB trigger가 provenance 수정·삭제 및 만료 후 새
+reservation/consume을 거부하되 HMAC secret은 소유하지 않으므로 hash shape만 검사한다.
+application writer create/replay와 reserve/consume이 같은 검증 helper로 stage-linked audit
+행의 signed payload HMAC을 현재·과거 integrity key와 현재·legacy canonical 형식으로
+검증하고, signed metadata를 stage에 다시 결속한 뒤 current source/execution manifest를
+다시 읽어 저장 행과 비교한다. HMAC에 포함된 `previousHash`가 null이 아니면 그 exact hash의
+선행 audit 행도 존재해야 한다. 위조 audit/stage는 `stage_authorization_invalid`다. global
+audit chain scan이나 table SHARE lock은 하지 않으므로 unrelated audit write가 모든
+reserve/consume과 경합하지 않는다.
+
+`requestId`가 이미 active reservation을 가리키더라도 replay 전에 같은 stage expiry,
+runtime source/deployment/execution 및 model/pricing 검증을 다시 수행한다. idempotency는 현재
+권한 안에서 같은 reservation을 재사용한다는 뜻이며, 만료되거나 drift한 권한을 우회하지 않는다.
+
+manifest와 API는 content-free다. prompt/refined prompt/output, 사용자·대화·session id,
+credential, provider error/body는 저장하지 않는다. `approvedBy`는 운영자 식별자라 data-domain
+registry의 actor row로 retain되며 manual PrivacyRequest 경로를 따른다. customer data export에는
+포함되지 않는다. 권한 TTL 60분은 감사 evidence retention 기간을 뜻하지 않는다.
+
+GET preview는 no-write이고 POST body는 세 digest, preview binding digest와 고정
+confirmation만 받는다. reason은 caller 입력이 아니라 서버 고정 상수다.
+owner-only, recent auth, 전역 CSRF, 4 KiB strict JSON, DB rate limit을 적용한다. 이 endpoint와
+stage 행은 provider/network/credential/receipt/reservation/product/flag를 실행하지 않으며,
+실제 paid shadow는 별도 독립 검토와 비용 승인 없이는 열리지 않는다. 세부 계약은
+[`prompt-refiner-durable-stage-writer-contract.md`](../ops/prompt-refiner-durable-stage-writer-contract.md),
+위협 모델은
+[`prompt-refiner-durable-stage-writer-threat-model.md`](prompt-refiner-durable-stage-writer-threat-model.md)에
+있다.
