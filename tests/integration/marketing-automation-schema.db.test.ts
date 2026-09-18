@@ -390,7 +390,7 @@ test("the store's create writes the draft entry itself", async () => {
 test("history is append-only and its version moves by exactly one", async () => {
   const row = await channel();
   const created = await post(row.id);
-  const original = created.history as unknown[];
+  const original = created.history as Prisma.InputJsonValue[];
 
   await refused(
     prisma.marketingPost.update({
