@@ -1224,6 +1224,8 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
     ["docs/ops/tomverse-chat-progress.md", /exact (\d+)-file runtime import-closure source manifest/],
+    ["docs/policy/prompt-refiner-observability.md", /고정 (\d+)개 source/],
+    ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
     const found = source.match(pattern);
@@ -1244,5 +1246,14 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     contract,
     new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),
     "runtime TypeScript/JavaScript source-count contract drifted"
+  );
+  const observabilityPolicy = readFileSync(
+    join(repositoryRoot, "docs/policy/prompt-refiner-observability.md"),
+    "utf8"
+  );
+  assert.match(
+    observabilityPolicy,
+    new RegExp(`${expectedRuntimeSourceCount}개 source는`),
+    "observability policy runtime-source count drifted"
   );
 });
