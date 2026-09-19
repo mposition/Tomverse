@@ -159,8 +159,16 @@ const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
     const reasoningTokens = count(
         asRecord(usage.outputTokenDetails).reasoningTokens
     );
+    // The provider's total input/output counts already include cached input
+    // and billed reasoning output under the frozen pricing contract. Requiring
+    // all four fields is nevertheless intentional: partial provider telemetry
+    // must remain visibly unknown rather than looking like a complete cost
+    // observation.
     const costUpperBoundMicroUsd =
-        inputTokens !== null && outputTokens !== null
+        inputTokens !== null &&
+        outputTokens !== null &&
+        cachedInputTokens !== null &&
+        reasoningTokens !== null
             ? promptRefinerWorstCaseCostMicroUsd({
                   inputTokens,
                   outputTokens,
@@ -176,9 +184,12 @@ const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
 };
 
 /**
- * Byte-level BPE safety bound: every content token covers at least one UTF-8
- * byte. The fixed allowance covers message framing. This is deliberately an
- * upper bound, not a claim that the repository owns the provider tokenizer.
+ * Byte-level BPE safety prefilter: every content token covers at least one
+ * UTF-8 byte. The fixed allowance covers message framing. This deliberately
+ * does not satisfy the frozen preregistration's future actual-tokenizer
+ * requirement. The run remains unadmitted until that requirement is fulfilled
+ * or a separate contract revision is approved; this adapter only fails closed
+ * before dispatch when even the conservative bound exceeds the ceiling.
  */
 export const promptRefinerRenderedInputTokenUpperBound = (
     request: PromptRefinerRequest

@@ -208,37 +208,58 @@ test("warnings, multiple steps, or provider usage beyond the contract stop as un
   }
 });
 
-test("unknown usage is null rather than fabricated zero", async () => {
-  const adapter = adapterWith(async () => validResult({ usage: undefined }));
+test("partial usage keeps cost unknown rather than fabricating complete telemetry", async () => {
+  const adapter = adapterWith(async () =>
+    validResult({ usage: { inputTokens: 100, outputTokens: 20 } }),
+  );
   const outcome = await adapter(validRequest());
   assert.equal(outcome.status, "suggested");
   assert.deepEqual(outcome.usage, {
-    inputTokens: null,
+    inputTokens: 100,
     cachedInputTokens: null,
-    outputTokens: null,
+    outputTokens: 20,
     reasoningTokens: null,
     costUpperBoundMicroUsd: null,
   });
 });
 
+const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".tmp",
+  "artifacts",
+  "docs",
+  "node_modules",
+  "public",
+  "tests",
+]);
+
 const sourceFiles = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name);
-    if (entry.isDirectory()) return sourceFiles(path);
+    if (entry.isDirectory()) {
+      if (
+        SOURCE_SCAN_EXCLUDED_DIRECTORIES.has(entry.name) ||
+        (entry.name.startsWith(".") && entry.name !== ".railway")
+      ) {
+        return [];
+      }
+      return sourceFiles(path);
+    }
     return /\.(?:ts|tsx|mjs)$/.test(entry.name) ? [path] : [];
   });
 
 test("no shipped entry point imports the live adapter", () => {
   const root = resolve(import.meta.dirname, "..");
   const adapterPath = join(root, "lib/promptRefinerShadowLiveAdapter.ts");
-  const offenders = ["app", "lib", "scripts"].flatMap((directory) =>
-    sourceFiles(join(root, directory))
-      .filter((path) => path !== adapterPath)
-      .filter((path) =>
-        readFileSync(path, "utf8").includes("promptRefinerShadowLiveAdapter"),
-      )
-      .map((path) => path.slice(root.length + 1).replaceAll("\\", "/")),
-  );
+  const scanned = sourceFiles(root).filter((path) => path !== adapterPath);
+  assert.ok(scanned.some((path) => path === join(root, "instrumentation.ts")));
+  assert.ok(scanned.some((path) => path.startsWith(join(root, "components"))));
+  const offenders = scanned
+    .filter((path) =>
+      readFileSync(path, "utf8").includes("promptRefinerShadowLiveAdapter"),
+    )
+    .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
   assert.deepEqual(offenders, []);
 
   const adapterSource = readFileSync(

@@ -348,7 +348,7 @@ retry는 0, timeout은 15초이며 결과가 불명확하면 `unknown_after_disp
 같은 요청을 다시 보내지 않는다. 이 값은 실행 가능한 budget이 아니라 별도 비용 승인이
 결속될 때 적용할 ceiling이다.
 
-`promptRefiner-openai-sdk-adapter-v1`은 고정된 OpenAI 모델·가격·reasoning 설정과 기존
+`prompt-refiner-openai-sdk-adapter-v1`은 고정된 OpenAI 모델·가격·reasoning 설정과 기존
 strict JSON parser를 연결한 서버 전용 모듈이다. provider SDK와 credential boundary는
 유일한 live export가 실제 호출될 때만 동적으로 해석한다. 현재 제품·관리자 route,
 script, cron과 다른 runtime library는 이 모듈을 import하지 않는다. 따라서 이 변경만으로
@@ -359,7 +359,9 @@ UTF-8 byte 수는 byte-level BPE token 수의 보수적 상한이고, 여기에 
 더해 100,000-token 계약을 넘으면 dispatch 전에 거부한다. 실제 provider usage는 nullable로
 기록하며 알 수 없는 값을 0으로 만들지 않는다. warning, multi-step, usage cap 초과 또는
 provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 않는다. 계산된 비용은 고정
-단가의 보수적 upper bound이지 provider invoice가 아니다.
+단가의 보수적 upper bound이지 provider invoice가 아니다. 이 prefilter는 기존 동결 계약이
+요구한 actual-tokenizer 식별·계수를 충족하지 않으므로 실행 승인 근거가 아니다. durable
+runner가 열리기 전에 그 요구를 구현하거나 별도 계약 변경으로 다시 승인해야 한다.
 
 이 단계의 readiness 값은 `durableRunWriterReady=false`, `entryPointReady=false`,
 `executionAdmitted=false`, `productAdapterReady=false`다. 다음 변경은 별도 검토에서 exact
