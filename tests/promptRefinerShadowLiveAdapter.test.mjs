@@ -170,6 +170,11 @@ test("strict parser failures remain fixed response-validation reasons", async (t
 test("post-dispatch errors separate timeout, known provider failure, and unknown", async (t) => {
   for (const [name, error, reason] of [
     ["timeout", Object.assign(new Error("secret timeout prose"), { name: "TimeoutError" }), "timeout"],
+    [
+      "sdk timeout",
+      new DOMException("Total timeout of 15000ms exceeded", "TimeoutError"),
+      "timeout",
+    ],
     ["provider", Object.assign(new Error("secret provider prose"), { statusCode: 429 }), "provider_error"],
     ["unknown", new Error("secret unknown prose"), "unknown_after_dispatch"],
   ]) {
@@ -235,9 +240,9 @@ const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
 ]);
 const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const STATIC_AI_IMPORT_PATTERN =
-  /(?:^|\n)\s*import[\s\S]*?from\s+["']ai["'];/;
+  /(?:^|\n)\s*import\b(?!\s*\()[^;]*?["']ai["']\s*;/;
 const STATIC_ACTIVE_MODEL_IMPORT_PATTERN =
-  /(?:^|\n)\s*import[\s\S]*?from\s+["']@\/lib\/activeAiModel["'];/;
+  /(?:^|\n)\s*import\b(?!\s*\()[^;]*?["']@\/lib\/activeAiModel["']\s*;/;
 
 const sourceFiles = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -293,6 +298,16 @@ test("unreachability guard recognizes multiline imports and JS entry extensions"
   );
   assert.match(
     'import {\n  getActiveAiModel,\n} from "@/lib/activeAiModel";',
+    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
+  );
+  assert.match('import "ai";', STATIC_AI_IMPORT_PATTERN);
+  assert.match(
+    'import "@/lib/activeAiModel";',
+    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
+  );
+  assert.doesNotMatch('const sdk = import("ai");', STATIC_AI_IMPORT_PATTERN);
+  assert.doesNotMatch(
+    'const active = import("@/lib/activeAiModel");',
     STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
   );
   for (const name of [

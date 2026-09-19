@@ -134,9 +134,12 @@ const count = (value: unknown): NullableCount =>
 const safeErrorFacts = (error: unknown): { name: string; statusCode: number | null } => {
     try {
         const value = asRecord(error);
+        const isNamedError =
+            error instanceof Error ||
+            (typeof DOMException !== "undefined" && error instanceof DOMException);
         return {
             name:
-                error instanceof Error && /^[A-Za-z][A-Za-z0-9]*$/.test(error.name)
+                isNamedError && /^[A-Za-z][A-Za-z0-9]*$/.test(error.name)
                     ? error.name
                     : "UnknownError",
             statusCode:
