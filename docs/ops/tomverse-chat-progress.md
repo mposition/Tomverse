@@ -1211,3 +1211,48 @@ provider admission은 열리지 않는다.
    측정한다.
 4. 실제 evidence가 gate를 통과할 때만 suggestion adapter/UI를 연결하고, 이후
    Refiner→Router와 full-catalog 선택 품질을 별도 실험한다.
+
+## 2026-09-20 Prompt Refiner durable stage writer 통합 완료 회차
+
+앞 회차의 durable DB provenance/admin writer를 최종 독립 검토와 Linux 통합 CI까지
+마쳤다. stage는 과거 evidence, 사람 승인·비용 상한, 승인 시점 staging deployment의
+full commit, 187개 고정 runtime import-closure 파일, execution manifest와 60분 DB-clock
+expiry를 한 행에 결속한다. owner 전용 preview/create는 advisory lock 아래 stage와
+tamper-evident audit을 같은 transaction으로 기록하며, exact replay만 idempotent하다.
+reserve/consume도 같은 stage-linked audit HMAC, runtime source와 execution manifest,
+expiry를 다시 검증한다.
+
+rebase 뒤 source closure와 정책 문서의 187개 전체·178개 runtime source·9개 metadata
+설명을 실제 계산값에 다시 결속했다. Linux CI에서만 드러난 관리자 route test loader의
+query-suffix named-export 차이는 제품 route를 바꾸지 않고 direct import와 명시적 auth
+mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 caller/flag를 연결하지
+않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
+seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) — 검증·운영 기반은 전진했지만 사용자가 접하는 공개 기능 분모는 아직 변하지 않았다. |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +4%p** — 승인 provenance·감사·expiry·runtime 재검증과 Linux 통합 검증을 완료했다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 55%** (직전 약 51%, durable writer의 독립 검토·통합 CI·병합 완료 반영) |
+| 구현 | additive no-seed migration, content-free 187-file manifest, owner-only preview/create, 원자 audit+stage, exact-runtime idempotency, create/replay/reserve/consume 공용 HMAC·expiry·runtime 재검증 완료 |
+| 로컬 검증 | focused Prompt Refiner **96/96**, admin audit chain **19/19**, shadow-stage route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL 17 fresh DB에서 전체 **124 migration**, Prisma drift **0**, 관련 DB **35/35**. 전체 server **9,831 pass·1 skip·0 fail**, client **58/58** |
+| 독립 검토 | Claude Code Max의 최종 policy-doc continuation은 digest `sha256:044952f70518f8217e13e2ec1a702404b1c63718a3ac64cc3298755b3330c4b5`를 **approve, findings 0**으로 종료했다. Linux route test 후속도 digest `sha256:e01bfa7ae5df3b59fe073fc64e2d7b7eff1d09cd4f3071d6f8373f011368dee7`를 **approve, findings 0**으로 종료했다. |
+| 통합 CI·병합 | PR **#1555**는 **20 success·0 fail·2 intentional skip** 뒤 `develop`에 merge SHA `2df3d7abfb731bdd10d11bcce51683453724d060`으로 병합됐다. 최초 Linux loader 실패는 수정 후 같은 `Server contract tests`에서 통과했다. |
+| 공개 상태 | 배포·staging 실행은 이 기록에서 확인하지 않았다. provider/API/Railway/유료 호출 0, stage seed 0, 제품 caller·flag·성공 admission 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 병합된 commit의 staging 배포·migration 상태와 owner-only **preview** 결과를 읽기 전용으로
+   결속해, 예상 provider/model·최대 요청 수·비용 상한·중단 조건을 한 번의 실행 승인안으로
+   만든다. 이 단계에서는 stage를 만들거나 provider를 호출하지 않는다.
+2. 그 preview와 비용표에 대해 별도의 명시적 사람 승인을 받은 뒤에만 60분 이내 stage를
+   생성하고, 승인된 bounded paid shadow를 정확히 1회 실행한다. unknown outcome은 재시도하지
+   않고 확인 대상으로 넘긴다.
+3. 의미 보존·행동상 주입 저항·비용·지연·제외율 evidence를 승인 gate로 판정하고, 실패하면
+   제품 연결 없이 원인별 후속으로 분리한다.
+4. gate를 통과할 때만 제안형 suggestion adapter/UI를 default-off로 연결하고 사용자 채택·거절
+   증거를 수집한다.
+5. 그 사용자 선택 증거 뒤에만 Refiner→Router 결합과 full-catalog 모델 선택 품질 최적화를
+   별도 실험으로 진행한다.
