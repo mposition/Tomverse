@@ -1037,19 +1037,21 @@ test("runtime source allowlist is exactly the deterministic local runtime import
     "non-static element access snapshot changed; unreviewed computed access is fail-closed"
   );
   const expected = [...fixedNonImportPaths, ...runtimeImportClosure()];
-  const listed = new Set(PROMPT_REFINER_RUNTIME_SOURCE_PATHS);
+  const actual = [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS];
+  const listed = new Set(actual);
   const expectedSet = new Set(expected);
   const missing = expected.filter((path) => !listed.has(path));
-  const extra = PROMPT_REFINER_RUNTIME_SOURCE_PATHS.filter((path) => !expectedSet.has(path));
+  const extra = actual.filter((path) => !expectedSet.has(path));
+  const firstDifferentIndex = actual.findIndex((path, index) => path !== expected[index]);
   assert.equal(
     expected.length,
     PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
     `runtime source closure has ${expected.length} file(s), but the declared count is ${PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT}`
   );
   assert.deepEqual(
-    [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS],
+    actual,
     expected,
-    `runtime source path list changed; missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)}`
+    `runtime source path list changed; missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)} firstDifferentIndex=${firstDifferentIndex} actual=${JSON.stringify(actual[firstDifferentIndex])} expected=${JSON.stringify(expected[firstDifferentIndex])}`
   );
   const actualBytes = expected.reduce((total, path) => total + statSync(join(repositoryRoot, path)).size, 0);
   assert.ok(actualBytes > 0);
@@ -1203,4 +1205,13 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
   const sqlPaths = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
   assert.equal(sqlPaths.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   assert.deepEqual(sqlPaths, [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS]);
+  const executionManifestFileCount = migration.match(
+    /"runtimeSource":\{"fileCount":(\d+),/
+  );
+  assert.ok(executionManifestFileCount, "migration executionManifest runtimeSource.fileCount is missing");
+  assert.equal(
+    Number(executionManifestFileCount[1]),
+    PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
+    "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
+  );
 });
