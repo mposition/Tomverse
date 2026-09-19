@@ -173,3 +173,24 @@ manifest bytes와 대상 environment를 다시 검증한 결과를 요구하고,
 결속하고 durable admin writer가 그것을 원자적으로 생성하도록 별도 설계·검토해야 한다.
 그 전에는 stage seed, Prisma mutation, admin route/script, receipt writer, product caller,
 provider SDK, 자격증명 조회, flag 활성화 또는 `admitted: true` 경로를 추가하지 않는다.
+
+## 9. live adapter 준비 상태
+
+후속 `prompt-refiner-shadow-run-v1` 계약은 첫 실제 shadow를 이 문서의 동결 corpus
+16건으로 제한하고 최대 16 dispatch, 요청당 24,916 microUSD, run 전체 398,656
+microUSD를 고정한다. 이 계약과 서버 전용 OpenAI SDK adapter는 구현돼 있지만
+`durableRunWriterReady=false`, `entryPointReady=false`, `executionAdmitted=false`,
+`productAdapterReady=false`다.
+
+adapter는 기존 message builder와 strict parser를 재사용하고 15초 timeout, retry 0,
+4096 output-token cap을 고정한다. dispatch 직전 future runner가 제공할 callback을 먼저
+완료해야 하며, callback이 실패하면 provider를 부르지 않는다. dispatch 이후 timeout,
+알려진 provider 실패와 unknown outcome을 분리하고, 알 수 없는 usage는 null로 유지한다.
+system/data message의 UTF-8 byte 수에 고정 framing allowance를 더한 값은 exact tokenizer
+측정이 아닌 보수적 token upper bound다.
+
+중요하게도 이 adapter를 import하는 제품 route, 관리자 route, script, cron 또는 다른
+runtime library는 없다. 기존 `npm run shadow:prompt-refiner` 역시 provider-free 상태를
+그대로 유지하며 adapter를 호출하지 않는다. 다음 단계는 adapter 호출 추가가 아니라,
+먼저 exact 비용 승인과 reservation consume, dispatch intent와 terminal receipt를 durable하게
+기록하는 별도 runner/writer 계약을 구현·독립 검토하는 것이다.
