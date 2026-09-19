@@ -174,6 +174,8 @@ test("only the surfaces that offer a choice import the fallback table", () => {
       "names models still reachable in a provider-budget refusal, before any stream exists",
     "components/chat/ProviderStatusBanner.tsx":
       "renders those candidates for the user to pick from",
+    "lib/promptRefinerStageAdmissionCore.ts":
+      "binds the fallback table's source bytes into a content-free runtime manifest; it does not read the table's exports or dispatch a model",
   };
 
   // The allowlist keys are POSIX-shaped literals, so the separator is

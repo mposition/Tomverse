@@ -1,0 +1,172 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-secret-scan-fix-v1",
+  "requirement": "PR #1555의 두 secret-scan failure를 실제 credential 유출과 구분하고 최소 범위로 수정한다. commit a831d33f의 tests/promptRefinerRuntimeSourceClosure.test.mjs:64 값은 tracked source의 path/position/text에서 계산한 SHA-256 snapshot digest이며 인증 material이 아니다. immutable history의 정확한 gitleaks fingerprint 하나만 .gitleaksignore에 고정하고, 현재 test source는 동일 digest를 두 부분에서 조립해 이후 commit에서 credential-shaped assignment를 재생성하지 않는다. allowlist 범위를 넓히거나 secret detector 규칙을 약화하지 않고 runtime closure behavior와 digest 값을 보존한다. exact base는 757c608f02fba306e454b07accdc14c977704557이고 round 1 구현 source는 cb68d4da이다. author는 codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "gitleaks ignore는 a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure.test.mjs:generic-api-key:64 한 fingerprint만 추가하고 regex·path·rule 전역 allowlist를 추가하지 않는다.",
+    "ignore 주석과 git history가 해당 값이 tracked source snapshot의 SHA-256 digest이며 실제 credential 또는 인증 material이 아님을 재현 가능하게 설명한다.",
+    "현재 runtime closure test는 동일 64-character digest를 결정적으로 조립하고 221개 reviewed dynamic element access snapshot 검사를 그대로 통과한다.",
+    "gitleaks allowlist canary 3개와 runtime closure test 4개, diff whitespace 및 strict encoding 검사가 통과한다.",
+    "변경은 secret-scan false positive 처리로 한정되고 Prompt Refiner product/provider/network/credential/activation/spending 경계를 바꾸지 않는다.",
+    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "757c608f02fba306e454b07accdc14c977704557",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:668f656c0ff38991d310246ae9b2ae0299455d5f9cb4645df271c1cabaa4f679",
+      "commit": "861a63b102c114cfbfb668b5df3c7dc9f7c7830f",
+      "filesChanged": [
+        ".gitleaksignore",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.task.json",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/gitleaksAllowlist.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2514.0423",
+          "durationMs": 2619
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1656
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1537
+        },
+        {
+          "rule": "git diff --check 757c608f02fba306e454b07accdc14c977704557 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 63
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": ".gitleaksignore:111-121",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The ignore comment states what the value is but never names the artifact that recomputes it, so a reader must find the recomputation path themselves to satisfy the \"reproducibly explain\" bar.",
+          "reproduction": "Read .gitleaksignore:111-120: it says \"the exact path/position/text digest of the reviewed non-static element-access snapshot\" with no pointer to `dynamicElementAccessSnapshot()` in tests/promptRefinerRuntimeSourceClosure.test.mjs:110-140 or to `node --conditions=react-server --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`, which is the command that regenerates and asserts the digest; adding that one clause makes the claim checkable without searching.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: .gitleaksignore:111-121); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:0313358a16c08b4ba3f01506f0ea7fb7b0ea5e29250bf8ed00e2b251fc7d9462",
+      "commit": "a10fcd6ff62926624888c154c53cbfdca10d9194",
+      "filesChanged": [
+        ".gitleaksignore",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.task.json",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/gitleaksAllowlist.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5958.9016",
+          "durationMs": 6061
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1841
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1617
+        },
+        {
+          "rule": "git diff --check 757c608f02fba306e454b07accdc14c977704557 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 68
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Land the change as is; the round-0 nit is closed and no actionable finding remains."
+    }
+  ],
+  "changeDigest": "sha256:0313358a16c08b4ba3f01506f0ea7fb7b0ea5e29250bf8ed00e2b251fc7d9462",
+  "commit": "a10fcd6ff62926624888c154c53cbfdca10d9194",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/gitleaksAllowlist.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5958.9016",
+      "durationMs": 6061
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+      "durationMs": 1841
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1617
+    },
+    {
+      "rule": "git diff --check 757c608f02fba306e454b07accdc14c977704557 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 68
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Land the change as is; the round-0 nit is closed and no actionable finding remains.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-18T07:02:57.410Z",
+  "packagedRounds": 2,
+  "concludedAtRound": 1,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "a10fcd6ff62926624888c154c53cbfdca10d9194",
+  "worktreeDirty": false,
+  "filesChanged": [
+    ".gitleaksignore",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-secret-scan-fix-v1.task.json",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ]
+}

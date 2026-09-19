@@ -1,0 +1,326 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-closure-doc-sync-v1",
+  "requirement": "on_hold로 종결된 prompt-refiner-durable-stage-writer-rebase-fingerprints-v1의 마지막 비차단 finding을 닫는다. Prompt Refiner runtime import closure가 186개에서 187개로 늘어난 사실을 Prisma schema와 운영 계약·작업·진행 문서에 일치시키고, TypeScript/JavaScript source 수는 177개에서 178개로 바로잡는다. schema.prisma의 주석 byte 변경 때문에 marketing webhook pipeline fingerprint를 결정적으로 다시 계산하고 기존 fail-closed 검사를 유지한다. 문서의 closure 수가 다시 drift하지 않도록 기존 runtime source closure test가 상수와 운영 문구를 직접 결속한다. 제품 runtime 동작, database schema 구조, provider/model, Railway, credential, stage mutation, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "Prisma schema와 Prompt Refiner durable writer 계약·작업·진행 문서가 runtime closure 187개 및 그중 TypeScript/JavaScript source 178개를 동일하게 기술한다.",
+    "runtime source closure test가 PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT를 기준으로 운영 문서와 schema의 count-bearing 문구를 검사해 186 회귀를 fail-closed한다.",
+    "MARKETING_WEBHOOK_PIPELINE_FINGERPRINT는 주석 byte가 바뀐 schema.prisma를 포함해 computeMarketingWebhookPipelineFingerprint가 재현하는 값과 정확히 일치한다.",
+    "focused fingerprint/source-closure test, typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "이 task는 이전 on_hold exchange와 finding을 수정하지 않고 supersedes로 계승하며 product database mutation, provider/model/Railway 호출, credential, stage/flag/rollout 또는 paid execution을 추가하지 않는다.",
+    "Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "3f050c8789a3bdefa16580aadbae2f3e14761f38",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:5eb0c9f8d31b55eafd1ff6e4695b44f665b89ef7844d0bf78dbcb7efa6ef8a6e",
+      "commit": "0eadce637c87dfc8191c2f00620da022aed252dd",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "lib/marketingAutomationAccess.ts",
+        "prisma/schema.prisma",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "이전 on_hold exchange의 마지막 documentation-only finding을 새 continuation에서 닫았다. schema와 운영 계약·작업·진행 문서를 187-file closure 및 178개 TypeScript/JavaScript source로 동기화하고, 기존 runtime closure test가 count-bearing 문구를 상수에 결속한다. schema comment byte 변경에 따라 marketing fingerprint를 ac8d4125...c63e로 재계산했다. runtime/database 구조·provider·stage·flag 동작은 바꾸지 않았다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs tests/marketingAutomationAccess.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2204.3879",
+          "durationMs": 2292
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 40070
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2972
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1357
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3034 source file(s), all present.",
+          "durationMs": 1420
+        },
+        {
+          "rule": "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 62
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Two live policy documents still describe the closure as 186 fixed source files (and 177 TypeScript/JavaScript sources), so the prose drift the superseded finding named is closed only for the schema and the contract/task/progress documents named in the writable scope, not repository-wide.",
+          "reproduction": "rg -n '186개|177개' docs/policy — prints 'import-closure로 검증되는 186개 고정 path allowlist' (threat model line 40) and '고정 186개 source 파일 ... 177개 source는' (observability lines 301-302), while lib/promptRefinerStageAdmissionCore.ts:41 declares PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 187 and PROMPT_REFINER_RUNTIME_SOURCE_PATHS holds 178 TypeScript/JavaScript paths plus 9 fixed metadata paths. Documentation-only: no fail-closed check consumes these two files, and both are outside this task's writableScope.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1244",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The inner TypeScript/JavaScript source count in the contract assertion is the literal `178` rather than the value the same test already derives, so that half of the sentence is not bound to the computed closure.",
+          "reproduction": "In the same file, `runtimeImportClosure()` (line 1012) returns exactly the reachable TypeScript/JavaScript set and `fixedNonImportPaths` (line 165) the 9 metadata paths; adding `assert.equal(runtimeImportClosure().length, 178)` passes today. Because the new assertion at line 1244 hardcodes 178 instead of `runtimeImportClosure().length`, a future change that moves one path from metadata to source (total still 187) leaves the contract sentence '187개 중 178개' stale and the test green.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40; open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:1244); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:c64fd87a617e7822ad144a600baa90dc42f78c889857394ac1e9b18d13e633ab",
+      "commit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "lib/marketingAutomationAccess.ts",
+        "prisma/schema.prisma",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 0의 현재 scope 내 finding을 닫았다. 계약의 TypeScript/JavaScript source count는 literal 178이 아니라 runtimeImportClosure().length에서 계산해 검증한다. scope 밖 docs/policy 두 파일의 stale 186/177 문구는 숨기지 않고 별도 continuation에 포함한다. schema·fingerprint·runtime 동작은 Round 0과 동일하다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs tests/marketingAutomationAccess.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2780.0521",
+          "durationMs": 2866
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 38905
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2945
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1345
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3034 source file(s), all present.",
+          "durationMs": 1430
+        },
+        {
+          "rule": "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 64
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Two live policy documents still describe the closure as 186 fixed source files and 177 TypeScript/JavaScript sources, and the new count-binding test covers only schema.prisma plus the three ops documents, so this prose can keep drifting undetected; both files are outside this task's writableScope and requirement wording (Prisma schema plus 운영 계약·작업·진행 문서), so it is recorded rather than actionable here.",
+          "reproduction": "rg -n \"186개 source|177개 source|186개 고정 path\" docs/policy/ → two hits; `node --conditions=react-server --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs` still passes because the new \"operator-facing contracts\" test reads only prisma/schema.prisma, docs/ops/prompt-refiner-durable-stage-writer-{contract,task}.md and docs/ops/tomverse-chat-progress.md.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:c64fd87a617e7822ad144a600baa90dc42f78c889857394ac1e9b18d13e633ab",
+      "commit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "lib/marketingAutomationAccess.ts",
+        "prisma/schema.prisma",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 1에서 현재 task scope의 모든 finding은 닫혔다. 남은 두 policy 문구는 승인된 writableScope 밖이므로 기존 digest를 변경하지 않고 마지막 round에 그대로 공개한다. controller 종결 후 새 continuation이 해당 두 policy 파일과 이를 검증하는 test를 명시적으로 포함한다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs tests/marketingAutomationAccess.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2756.1634",
+          "durationMs": 2838
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 38767
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2967
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1348
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3034 source file(s), all present.",
+          "durationMs": 1447
+        },
+        {
+          "rule": "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 64
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Two live policy documents still say 186 fixed source files / 177 TypeScript-JavaScript sources and remain uncovered by the new count-binding test, but both files are outside this task's writableScope and outside the requirement's enumerated documents (Prisma schema plus 운영 계약·작업·진행 문서), so this is recorded for the announced follow-up task rather than actionable here.",
+          "reproduction": "rg -n '186개|177개' docs/policy — prints prompt-refiner-observability.md:301-302 and prompt-refiner-durable-stage-writer-threat-model.md:40; the new test at tests/promptRefinerRuntimeSourceClosure.test.mjs:1222-1227 checks only prisma/schema.prisma and the three docs/ops files, so these two lines stay green at 186.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:c64fd87a617e7822ad144a600baa90dc42f78c889857394ac1e9b18d13e633ab",
+  "commit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+  "changeSummary": "Round 1에서 현재 task scope의 모든 finding은 닫혔다. 남은 두 policy 문구는 승인된 writableScope 밖이므로 기존 digest를 변경하지 않고 마지막 round에 그대로 공개한다. controller 종결 후 새 continuation이 해당 두 policy 파일과 이를 검증하는 test를 명시적으로 포함한다.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs tests/marketingAutomationAccess.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2756.1634",
+      "durationMs": 2838
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 38767
+    },
+    {
+      "rule": "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2967
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1348
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3034 source file(s), all present.",
+      "durationMs": 1447
+    },
+    {
+      "rule": "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 64
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Two live policy documents still say 186 fixed source files / 177 TypeScript-JavaScript sources and remain uncovered by the new count-binding test, but both files are outside this task's writableScope and outside the requirement's enumerated documents (Prisma schema plus 운영 계약·작업·진행 문서), so this is recorded for the announced follow-up task rather than actionable here.",
+      "reproduction": "rg -n '186개|177개' docs/policy — prints prompt-refiner-observability.md:301-302 and prompt-refiner-durable-stage-writer-threat-model.md:40; the new test at tests/promptRefinerRuntimeSourceClosure.test.mjs:1222-1227 checks only prisma/schema.prisma and the three docs/ops files, so these two lines stay green at 186.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 1 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-19T14:45:10.718Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [
+    "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "prisma/schema.prisma:5528 (also docs/ops/prompt-refiner-durable-stage-writer-contract.md:20,78,80 and docs/ops/prompt-refiner-durable-stage-writer-task.md:17)",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Prose still describes the closure as 186 files after the enforced contract moved to 187; no test or script binds these strings, so the drift is documentation-only and does not weaken any fail-closed check.",
+      "reproduction": "rg -n '\\b186\\b' prisma/schema.prisma docs/ops/prompt-refiner-durable-stage-writer-contract.md docs/ops/prompt-refiner-durable-stage-writer-task.md -> five stale mentions; rg -n '\\b186\\b' --glob '{lib,tests,scripts,app,packages}/**' returns no contract-bearing hit, and prisma/schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry (lib/marketingAutomationAccess.ts:101-104), so editing it re-rolls MARKETING_WEBHOOK_PIPELINE_FINGERPRINT — carried to a follow-up task as the author disclosed, outside the approved 6-path writableScope."
+    }
+  ],
+  "headCommit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "lib/marketingAutomationAccess.ts",
+    "prisma/schema.prisma",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ]
+}

@@ -342,6 +342,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
   },
   {
+    domain: "promptRefinerReservationStage",
+    publicName: "prompt_refiner_stage_approvals",
+    prismaModel: "PromptRefinerReservationStage",
+    state: "excluded",
+    exclusionReason:
+      "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+  },
+  {
     domain: "adminNote",
     publicName: "admin_notes",
     prismaModel: "AdminNote",

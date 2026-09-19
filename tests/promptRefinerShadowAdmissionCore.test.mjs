@@ -1012,7 +1012,7 @@ const allFiles = (directory) =>
         return statSync(path).isDirectory() ? allFiles(path) : [path];
     });
 
-test("proposal core has no product, provider, credential, writer, or stage-seed caller", () => {
+test("proposal core stays pure and only the dedicated server admission boundary may call it", () => {
     const core = readFileSync(
         join(root, "lib", "promptRefinerShadowAdmissionCore.ts"),
         "utf8"
@@ -1040,11 +1040,15 @@ test("proposal core has no product, provider, credential, writer, or stage-seed 
                 continue;
             }
             const content = readFileSync(path, "utf8");
+            const isDedicatedAdmissionBoundary = [
+                join("lib", "promptRefinerStageAdmission.ts"),
+                join("lib", "promptRefinerStageAdmissionCore.ts"),
+            ].some((suffix) => path.endsWith(suffix));
             assert.equal(
                 /promptRefinerShadowAdmissionCore|proposePromptRefinerShadowStage/.test(
                     content
                 ),
-                false,
+                isDedicatedAdmissionBoundary,
                 path
             );
         }

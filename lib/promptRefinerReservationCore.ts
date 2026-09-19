@@ -73,8 +73,10 @@ if (computedReservationContractDigest !== PROMPT_REFINER_RESERVATION_CONTRACT_DI
 export const PROMPT_REFINER_RESERVATION_REFUSALS = Object.freeze([
     "invalid_binding",
     "stage_not_found",
+    "stage_authorization_invalid",
     "stage_contract_mismatch",
     "runtime_contract_mismatch",
+    "runtime_source_mismatch",
     "request_binding_mismatch",
     "request_already_terminal",
     "reservation_not_found",
@@ -95,6 +97,8 @@ export type PromptRefinerReservationStageFacts = {
     costCeilingMicroUsd: bigint;
     reservationCount: number;
     allocatedCostMicroUsd: bigint;
+    approvedAt: Date;
+    approvalExpiresAt: Date;
 };
 
 export const promptRefinerReservationStageProblems = (
@@ -144,6 +148,12 @@ export const promptRefinerReservationStageProblems = (
     }
     if (stage.allocatedCostMicroUsd > stage.costCeilingMicroUsd) {
         problems.push("stage_cost_exceeded");
+    }
+    if (
+        stage.approvalExpiresAt.getTime() - stage.approvedAt.getTime() !==
+        60 * 60 * 1_000
+    ) {
+        problems.push("approval_window_invalid");
     }
     return problems;
 };

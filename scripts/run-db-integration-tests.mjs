@@ -203,6 +203,9 @@ run(
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // The staging-only create-once writer: exact historical/current provenance,
+    // audit atomicity, immutable approval and DB-clock expiry.
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",

@@ -21,6 +21,12 @@ import {
     type PromptRefinerReservationBinding,
     type PromptRefinerReservationRefusal,
 } from "@/lib/promptRefinerReservationCore";
+import {
+    loadPromptRefinerStageAdmissionFacts,
+    PromptRefinerStageAdmissionError,
+    promptRefinerStageAuthorizationIsValid,
+    promptRefinerStoredStageMatchesRuntime,
+} from "@/lib/promptRefinerStageAdmission";
 
 type ReservationFacts = PromptRefinerReservationBinding & {
     status: "reserved" | "consumed" | "released" | "expired";
@@ -40,6 +46,16 @@ const refuse = <T>(reason: PromptRefinerReservationRefusal): AuthorityResult<T> 
     ok: false,
     reason,
 });
+
+const refuseRuntimeFacts = <T>(error: unknown): AuthorityResult<T> => {
+    if (
+        error instanceof PromptRefinerStageAdmissionError &&
+        error.code === "PROMPT_REFINER_STAGE_EXECUTION_DRIFT"
+    ) {
+        return refuse("runtime_contract_mismatch");
+    }
+    return refuse("runtime_source_mismatch");
+};
 
 const dbClock = async (tx: Prisma.TransactionClient) => {
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -132,12 +148,34 @@ export const reservePromptRefinerExecution = async (input: {
         return refuse("invalid_binding");
     }
 
+    let runtimeFacts: Awaited<ReturnType<typeof loadPromptRefinerStageAdmissionFacts>>;
+    try {
+        runtimeFacts = await loadPromptRefinerStageAdmissionFacts();
+    } catch (error) {
+        return refuseRuntimeFacts(error);
+    }
+
     return prisma.$transaction(async (tx) => {
         // Global lock order: stage -> model registry -> reservation.
         const stage = await lockStage(tx, stageId);
         if (!stage) return refuse("stage_not_found");
+        if (!(await promptRefinerStageAuthorizationIsValid(tx, stage))) {
+            return refuse("stage_authorization_invalid");
+        }
         await lockModelRegistry(tx);
-
+        const now = await dbClock(tx);
+        // Idempotency never revives stale authority. A requestId replay may
+        // reuse its active reservation only while the same stage, deployment,
+        // source, execution contract, model and pricing remain authorized.
+        if (
+            promptRefinerReservationStageProblems(stage).length > 0 ||
+            !promptRefinerStoredStageMatchesRuntime(stage, runtimeFacts, now)
+        ) {
+            return refuse("stage_contract_mismatch");
+        }
+        if (!(await lockedRuntimeContractIsCurrent(tx))) {
+            return refuse("runtime_contract_mismatch");
+        }
         const existingId = await tx.$queryRaw<Array<{ id: string }>>`
             SELECT "id"
             FROM "PromptRefinerReservation"
@@ -161,7 +199,6 @@ export const reservePromptRefinerExecution = async (input: {
                     reservation: facts(existing),
                 };
             }
-            const now = await dbClock(tx);
             if (existing.expiresAt.getTime() <= now.getTime()) {
                 const expired = await tx.promptRefinerReservation.update({
                     where: { id: existing.id },
@@ -180,19 +217,11 @@ export const reservePromptRefinerExecution = async (input: {
             };
         }
 
-        if (promptRefinerReservationStageProblems(stage).length > 0) {
-            return refuse("stage_contract_mismatch");
-        }
-        if (!(await lockedRuntimeContractIsCurrent(tx))) {
-            return refuse("runtime_contract_mismatch");
-        }
-
         if (stage.reservationCount >= stage.maxReservations) {
             return refuse("stage_capacity_exhausted");
         }
         const requestCost = BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD);
 
-        const now = await dbClock(tx);
         const reservation = await tx.promptRefinerReservation.create({
             data: {
                 id: randomUUID(),
@@ -227,14 +256,37 @@ const transitionReservation = async (input: {
         return refuse("invalid_binding");
     }
 
+    let runtimeFacts: Awaited<ReturnType<typeof loadPromptRefinerStageAdmissionFacts>> | undefined;
+    if (input.transition === "consume") {
+        try {
+            runtimeFacts = await loadPromptRefinerStageAdmissionFacts();
+        } catch (error) {
+            return refuseRuntimeFacts(error);
+        }
+    }
+
     return prisma.$transaction(async (tx) => {
         const stage = await lockStage(tx, input.binding.stageId);
         if (!stage) return refuse("stage_not_found");
+        if (
+            input.transition === "consume" &&
+            !(await promptRefinerStageAuthorizationIsValid(tx, stage))
+        ) {
+            return refuse("stage_authorization_invalid");
+        }
         await lockModelRegistry(tx);
+        const now = await dbClock(tx);
         if (
             promptRefinerReservationStageProblems(stage, {
                 requireApproved: input.transition === "consume",
-            }).length > 0
+            }).length > 0 ||
+            (input.transition === "consume" &&
+                (!runtimeFacts ||
+                    !promptRefinerStoredStageMatchesRuntime(
+                        stage,
+                        runtimeFacts,
+                        now
+                    )))
         ) {
             return refuse("stage_contract_mismatch");
         }
@@ -263,7 +315,6 @@ const transitionReservation = async (input: {
         }
         if (current.status !== "reserved") return refuse("reservation_not_active");
 
-        const now = await dbClock(tx);
         if (current.expiresAt.getTime() <= now.getTime()) {
             await tx.promptRefinerReservation.update({
                 where: { id: current.id },

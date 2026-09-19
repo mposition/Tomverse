@@ -1,0 +1,78 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-19T15:14:51.387Z",
+  "durationMs": 44744,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 8,
+    "cachedInputTokens": 51824,
+    "outputTokens": 2724,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.283248,
+    "raw": {
+      "input_tokens": 8,
+      "cache_creation_input_tokens": 18469,
+      "cache_read_input_tokens": 51824,
+      "output_tokens": 2724,
+      "output_tokens_details": {
+        "thinking_tokens": 1496
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 18469,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 761,
+          "cache_read_input_tokens": 21586,
+          "cache_creation_input_tokens": 1625,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1625
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-19T15:15:36.190Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:e01bfa7ae5df3b59fe073fc64e2d7b7eff1d09cd4f3071d6f8373f011368dee7",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "Merge as is: the test now imports app/api/admin/prompt-refiner/shadow-stage/route.ts at a plain file URL (tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts:186) and explicitly mocks lib/auth.ts authOptions (lines 107-109) matching admin-promotion-diagnostics-route.test.ts:154 and admin-billing-promotion-policy.test.ts:117; the mocked authOptions is only consumed by the already-mocked getServerSession (route.ts:48), no product module in the route graph imports lib/auth besides the route itself, the diff stays inside writableScope with no route or runtime change, all 6 tests and the typecheck/lint/encoding/whitespace guards pass, and the prior round's out-of-scope query-suffix observation carried no reproduction of an actual failure so it is recorded only."
+  }
+}

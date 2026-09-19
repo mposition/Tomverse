@@ -294,7 +294,13 @@ beforeEach(async () => {
   previousAuditKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_SECRET;
   await reset();
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY`);
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "PromptRefinerReservation",
+      "PromptRefinerReservationStage",
+      "AdminAuditLog"
+    RESTART IDENTITY
+  `);
 });
 
 after(async () => {

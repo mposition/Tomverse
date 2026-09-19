@@ -1168,3 +1168,46 @@ events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검
 3. 승인된 실제 evidence가 gate를 통과할 때만 suggestion adapter와 UI를 연결한다.
 4. 사용자 선택 증거가 쌓인 뒤 Refiner→Router 결합과 full-catalog 선택 품질 최적화를
    별도 실험으로 진행한다.
+
+## 2026-09-17 Prompt Refiner durable stage writer 회차 (round 0 request_changes, 수정 검증·round 1 대기)
+
+앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source
+identity와 승인 시점 staging deployment의 full commit, exact 187-file runtime import-closure source manifest,
+고정 execution manifest를 하나의 immutable stage에 결속한다. 승인 시각과 60분 expiry는
+DB clock이 소유하며, owner 전용 POST는 advisory lock 아래 tamper-evident success audit과
+stage insert를 한 transaction으로 처리한다. 동일 actor·동일 runtime의 exact replay만
+idempotent하고 다른 facts는 409다. migration은 기존 stage를 backfill/seed하지 않으며
+예상하지 못한 행이 있으면 중단한다.
+
+writer create/replay와 reserve/consume은 같은 helper로 stage-linked audit 행의 HMAC·signed
+metadata 결속, non-null `previousHash`의 실제 선행 행 존재와 현재 runtime source/execution
+manifest, expiry를 DB clock 기준으로 다시 검증한다. global audit chain scan/table SHARE lock은
+하지 않는다. DB trigger는 공개 shape만 검사하고 HMAC 진위를 주장하지 않는다. 직접 SQL 경계에도 만료 검사를 추가했다. 단 이 회차는
+provider/API/Railway 관리 API/credential/receipt/제품 caller/flag를 연결하지 않고,
+execution/product readiness 두 boolean은 계속 false다. 따라서 stage writer가 존재해도 actual
+provider admission은 열리지 않는다.
+
+### 한눈에 보는 전체 Chat 진척 (임시)
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +3%p** — 유료 실행은 열지 않고 승인 provenance와 expiry 경계를 구현했다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 51%** (직전 약 47%, durable 승인/감사/runtime 재검증 반영) |
+| 구현 | additive no-seed migration, content-free exact-byte manifest, owner-only preview/create, 원자 audit+stage, same-runtime idempotency, create/replay/reserve/consume 공용 stage-linked audit HMAC 검증과 runtime source·execution 재검증 |
+| 내부 검증 | 독립 verifier 기준 focused Prompt Refiner **96/96**, admin audit chain **19/19**, shadow-stage route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL **17.10** fresh DB에서 전체 **124 migration**, Prisma diff **0**, 관련 DB **35/35**. typecheck·대상 lint·문서·정책·encoding·data-domain·prompt-injection·DB coverage·API cache·enum 검사 **PASS** |
+| 독립 검토·통합 CI | round 0 package digest는 `sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`, 판정은 `request_changes`다. 지적 수정과 검증 뒤 round 1 제출 대기이며 통과·완료로 간주하지 않는다. |
+| 공개 상태 | provider/API/Railway/유료 호출 0, stage seed 0, 제품 caller·flag·성공 admission 없음 |
+
+범위 밖 관찰: 별도 전체 검사에서 확인된 Brisbane chat-concurrency 기존 실패는 이 기능의
+검증 수치에 포함하지 않았으며, 이 회차의 성공 근거나 feature blocker로도 사용하지 않았다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max로 읽기 전용 독립 검토하고 Linux 통합 CI를 통과시킨다.
+2. writer 계약이 승인된 뒤에도 별도 명시적 비용 승인 전에는 stage를 만들거나 paid shadow를
+   실행하지 않는다.
+3. 별도 승인된 bounded shadow를 정확히 1회 실행해 의미 보존·행동상 주입 저항·비용·지연을
+   측정한다.
+4. 실제 evidence가 gate를 통과할 때만 suggestion adapter/UI를 연결하고, 이후
+   Refiner→Router와 full-catalog 선택 품질을 별도 실험한다.

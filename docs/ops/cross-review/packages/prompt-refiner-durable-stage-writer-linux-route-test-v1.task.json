@@ -1,0 +1,18 @@
+{
+  "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+  "requirement": "PR #1555의 Linux 통합 CI에서 Prompt Refiner 관리자 route server-contract 5개가 route.GET/POST is not a function으로 연쇄 실패한 테스트 로더 결함을 고친다. 이 테스트 파일은 격리된 server-contract process에서 route를 한 번만 import하므로 Windows에서만 우연히 named export를 보존하던 query-string cache suffix를 제거하고, route가 참조하는 authOptions를 다른 관리자 route 테스트와 같이 명시적으로 mock해 platform별 transitive auth import를 없앤다. 실제 route, 제품 runtime, database, provider/model, Railway, credential, stage, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "admin-prompt-refiner-shadow-stage-route server-contract가 route.ts를 query suffix 없이 직접 import하고 lib/auth.ts authOptions를 명시적으로 mock한다.",
+    "해당 6개 테스트가 Windows 로컬 server-contract 명령에서 통과하고 Linux PR Fast Gate에서 GET/POST named exports를 정상 호출한다.",
+    "typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "변경은 테스트와 검토 기록에 한정되며 실제 route 또는 제품 동작을 바꾸지 않는다.",
+    "Claude verdict는 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "aaefe4245457335874b078746ae067a23a0d11dc",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ],
+  "generatedPaths": []
+}

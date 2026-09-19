@@ -162,7 +162,12 @@ const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map
 // that no script can derive, so widening it would have failed the build on a
 // governance question. Both are registered now as `unverified` on both axes,
 // which records the outstanding decision without letting the table escape.
-const USER_COLUMN = /^\s{2}\w*[Uu]serId\s+String\b/m;
+// `approvedBy` is also a durable operator identifier. The Prompt Refiner stage
+// deliberately has no User relation: deleting an operator must not rewrite the
+// immutable approval evidence. Treat that exact column as user data so future
+// approval tables cannot escape the registry merely by choosing a different
+// name for the actor id.
+const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
 const holdsUserData = new Set(
   models
     .filter(({ body }) => USER_LINK.test(body) || USER_COLUMN.test(body))

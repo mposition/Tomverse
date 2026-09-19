@@ -41,7 +41,7 @@ export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
   metadata !== null &&
   typeof metadata === "object" &&
   !Array.isArray(metadata) &&
-  Object.prototype.hasOwnProperty.call(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
+  Object.hasOwn(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
 
 type AuditRowActorFields = {
   actorUserId: string | null;

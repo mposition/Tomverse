@@ -292,12 +292,20 @@ export const RAW_SQL_ALLOWLIST = [
       "The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.",
   },
   {
+    path: "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 14,
+    reason:
+      "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+  },
+  {
     path: "scripts/report-unswept-tables-core.mjs",
     table: "MarketingReport",
     tableMentions: 1,
-    writeVerbs: 2,
+    writeVerbs: 4,
     reason:
-      "The retention registry's prose: one entry says an AI visibility run has the same shape as MarketingReport's, and other entries in the file use the words delete and update. A report; it opens no database connection.",
+      "The retention registry's prose: the Prompt Refiner stage entry contributes update/delete, and two other entries describe deletes. MarketingReport is named by an AI-visibility shape comparison. This is a report; it opens no database connection.",
   },
   {
     path: "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
@@ -367,6 +375,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     path: "lib/promptRefinerReservationAuthority.ts",
     count: 1,
     reason: "LOCK TABLE \"ModelRegistryEntry\" IN SHARE MODE, a constant string.",
+  },
+  {
+    path: "lib/promptRefinerStageAdmission.ts",
+    count: 1,
+    reason:
+      "LOCK TABLE \"ModelRegistryEntry\" IN SHARE MODE before validating the pinned model row; the SQL is a constant and names no protected table.",
   },
   {
     path: "scripts/audit-image-backfill.mjs",

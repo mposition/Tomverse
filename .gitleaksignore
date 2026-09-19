@@ -107,3 +107,18 @@ fc1e3368e4d14f3d3552c677184a9a88b7a05697:tests/assistantPackageReview.test.mjs:g
 # Scope: exactly these findings in those two commits -- nothing wider.
 bd8584ca778a3f1774740f39b2af8568afa16d71:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
 048dd1c9380a53d1210ca6ba2b4936ec1f056d74:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
+
+# SHA-256 snapshot digest in a runtime-closure test, not a credential.
+#
+# Commit a831d33 records the exact path/position/text digest of the reviewed
+# non-static element-access snapshot. The value is derived entirely from
+# tracked source text and never authenticated any system. A follow-up commit
+# constructs the current digest from two parts so future edits do not recreate
+# the credential-shaped assignment; the immutable introducing commit remains
+# pinned here. `dynamicElementAccessSnapshot()` in
+# tests/promptRefinerRuntimeSourceClosure.test.mjs recomputes it; run
+# `node --conditions=react-server --import tsx --test
+# tests/promptRefinerRuntimeSourceClosure.test.mjs` to assert the digest.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure.test.mjs:generic-api-key:64

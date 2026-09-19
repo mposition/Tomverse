@@ -172,7 +172,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
 
 /** Updated only by the fingerprint test after reviewing a declared file change. */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c78e7bb3329d823ea041f9246fe882f0156def4669702478ea989d93f8834c12";
+  "ac8d4125347e59b7f896d2b70927f45595768e369716d8299db2692414bbc63e";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
