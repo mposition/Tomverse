@@ -12,7 +12,6 @@ import {
     PROMPT_REFINER_EXECUTION_MODEL_PIN,
     PROMPT_REFINER_MAX_INPUT_TOKENS,
     PROMPT_REFINER_MAX_OUTPUT_TOKENS,
-    PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE,
     PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
     PROMPT_REFINER_RETRY_COUNT,
     PROMPT_REFINER_TIMEOUT_MS,
@@ -25,6 +24,7 @@ import { getEnabledModel, type AiModel } from "@/lib/models";
 import { promptRefinerModelMessages } from "@/lib/promptRefinerModelPrompt";
 import {
     PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
+    PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
     promptRefinerShadowRunContractProblems,
 } from "@/lib/promptRefinerShadowRunContract";
 import { parsePromptRefinerShadowOutput } from "@/lib/promptRefinerShadowHarness";
@@ -199,7 +199,7 @@ export const promptRefinerRenderedInputTokenUpperBound = (
         messages.reduce(
             (total, message) => total + Buffer.byteLength(message.content, "utf8"),
             0
-        ) + PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE
+        ) + PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE
     );
 };
 

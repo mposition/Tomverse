@@ -27,6 +27,7 @@ export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
     "prompt-refiner-openai-sdk-adapter-v1" as const;
 export const PROMPT_REFINER_SHADOW_CORPUS_DIGEST =
     PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
+export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
 export const PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES =
     PROMPT_REFINER_SHADOW_CORPUS_CASES;
 export const PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD =
@@ -70,6 +71,12 @@ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
         retryCount: PROMPT_REFINER_RETRY_COUNT,
         perRequestCostCeilingMicroUsd:
             PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
+        renderedInputPrefilter: Object.freeze({
+            method: "utf8_bytes_plus_fixed_framing" as const,
+            framingTokenAllowance:
+                PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
+            satisfiesActualTokenizerRequirement: false,
+        }),
     }),
     run: Object.freeze({
         maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
@@ -91,7 +98,7 @@ const computedDigest = `sha256:${createHash("sha256")
 
 // Replaced with the computed literal before review. A mismatch fails import.
 export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
-    "sha256:3deca003463326b0c2b63e5e25a51d790f9a273873b10fc85fb8f70af909e6f4" as const;
+    "sha256:50a77992458e4fbdc3bf0325ec2df93feabe894b02eb242438cc036120e067dd" as const;
 
 if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
     throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);

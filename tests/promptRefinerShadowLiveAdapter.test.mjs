@@ -233,6 +233,11 @@ const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
   "public",
   "tests",
 ]);
+const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const STATIC_AI_IMPORT_PATTERN =
+  /(?:^|\n)\s*import[\s\S]*?from\s+["']ai["'];/;
+const STATIC_ACTIVE_MODEL_IMPORT_PATTERN =
+  /(?:^|\n)\s*import[\s\S]*?from\s+["']@\/lib\/activeAiModel["'];/;
 
 const sourceFiles = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -246,7 +251,7 @@ const sourceFiles = (root) =>
       }
       return sourceFiles(path);
     }
-    return /\.(?:ts|tsx|mjs)$/.test(entry.name) ? [path] : [];
+    return SOURCE_FILE_PATTERN.test(entry.name) ? [path] : [];
   });
 
 test("no shipped entry point imports the live adapter", () => {
@@ -261,6 +266,12 @@ test("no shipped entry point imports the live adapter", () => {
     )
     .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
   assert.deepEqual(offenders, []);
+  assert.equal(
+    readFileSync(join(root, "package.json"), "utf8").includes(
+      "lib/promptRefinerShadowLiveAdapter",
+    ),
+    false,
+  );
 
   const adapterSource = readFileSync(
     adapterPath,
@@ -268,6 +279,32 @@ test("no shipped entry point imports the live adapter", () => {
   );
   assert.match(adapterSource, /import\("ai"\)/);
   assert.match(adapterSource, /import\("@\/lib\/activeAiModel"\)/);
-  assert.doesNotMatch(adapterSource, /^import .* from "ai";/m);
-  assert.doesNotMatch(adapterSource, /^import .*activeAiModel/m);
+  assert.doesNotMatch(adapterSource, STATIC_AI_IMPORT_PATTERN);
+  assert.doesNotMatch(
+    adapterSource,
+    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
+  );
+});
+
+test("unreachability guard recognizes multiline imports and JS entry extensions", () => {
+  assert.match(
+    'import {\n  generateText,\n} from "ai";',
+    STATIC_AI_IMPORT_PATTERN,
+  );
+  assert.match(
+    'import {\n  getActiveAiModel,\n} from "@/lib/activeAiModel";',
+    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
+  );
+  for (const name of [
+    "entry.js",
+    "entry.cjs",
+    "entry.mjs",
+    "entry.jsx",
+    "entry.ts",
+    "entry.cts",
+    "entry.mts",
+    "entry.tsx",
+  ]) {
+    assert.equal(SOURCE_FILE_PATTERN.test(name), true, name);
+  }
 });
