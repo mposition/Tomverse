@@ -1044,9 +1044,13 @@ test("runtime source allowlist is exactly the deterministic local runtime import
   assert.equal(
     expected.length,
     PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
-    `runtime source file count changed; missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)}`
+    `runtime source closure has ${expected.length} file(s), but the declared count is ${PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT}`
   );
-  assert.deepEqual([...PROMPT_REFINER_RUNTIME_SOURCE_PATHS], expected);
+  assert.deepEqual(
+    [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS],
+    expected,
+    `runtime source path list changed; missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)}`
+  );
   const actualBytes = expected.reduce((total, path) => total + statSync(join(repositoryRoot, path)).size, 0);
   assert.ok(actualBytes > 0);
   assert.ok(actualBytes < PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES);
