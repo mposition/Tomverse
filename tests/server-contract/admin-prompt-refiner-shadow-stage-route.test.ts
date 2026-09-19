@@ -104,6 +104,9 @@ async function loadRoute() {
             : null,
       },
     });
+    mock.module(mod("lib/auth.ts"), {
+      namedExports: { authOptions: {} },
+    });
     mock.module(mod("lib/adminAuth.ts"), {
       namedExports: {
         isAdminSession: () => world.authenticated,
@@ -180,7 +183,7 @@ async function loadRoute() {
       },
     });
   }
-  return import(`${mod("app/api/admin/prompt-refiner/shadow-stage/route.ts")}?cached`);
+  return import(mod("app/api/admin/prompt-refiner/shadow-stage/route.ts"));
 }
 
 const post = (body: unknown) =>
