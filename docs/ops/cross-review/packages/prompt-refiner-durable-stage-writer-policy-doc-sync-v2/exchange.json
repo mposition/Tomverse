@@ -1,0 +1,222 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-policy-doc-sync-v2",
+  "requirement": "on_hold로 종결된 prompt-refiner-durable-stage-writer-closure-doc-sync-v1의 마지막 documentation-only finding을 닫는 마지막 continuation이다. Prompt Refiner observability policy와 durable stage writer threat model의 runtime import closure 설명을 187개 고정 파일, 그중 178개 TypeScript/JavaScript runtime source와 9개 고정 metadata 파일로 동기화한다. 기존 runtime source closure test가 두 policy 문서의 전체 count와 runtime-source count를 실제 PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT 및 runtimeImportClosure().length에 결속한다. 제품 runtime, database schema, fingerprint, provider/model, Railway, credential, stage mutation, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "prompt-refiner-observability policy는 187개 source 파일 중 178개 runtime source와 9개 고정 metadata 파일을 기술한다.",
+    "durable stage writer threat model은 import-closure로 검증되는 187개 고정 path allowlist를 기술한다.",
+    "runtime source closure test가 두 policy 문서의 전체 count와 runtime-source count를 실제 계산값에 결속해 186/177 회귀를 fail-closed한다.",
+    "focused runtime source closure test, typecheck, 수정 파일 lint, strict encoding, policy section reference 및 diff whitespace 검사가 통과한다.",
+    "이 task는 이전 두 on_hold exchange와 finding을 수정하지 않고 supersedes lineage로 계승하며 product/runtime/database/fingerprint 동작을 바꾸지 않는다.",
+    "Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:9b9d70ef26f415035e07c7f2e2a667754dd137c89799a32c9d184c2dbbff89ba",
+      "commit": "47f8d86309233b2c419adf088fe2259fecbdc638",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json",
+        "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "두 on_hold exchange의 마지막 documentation-only finding을 닫는 최종 continuation이다. observability policy와 threat model을 187-file closure 및 178 runtime sources에 동기화하고 기존 closure test가 두 policy 문구를 실제 total/runtime-source 계산값에 결속한다. runtime, database schema, fingerprint와 제품 동작은 변경하지 않았다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2597.9513",
+          "durationMs": 2681
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 38894
+        },
+        {
+          "rule": "npx eslint tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2860
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1357
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4543 citation(s) against 38 policy document(s). 2976 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1132
+        },
+        {
+          "rule": "git diff --check 60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 60
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1250-1258",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The observability runtime-source assertion matches `178개 source는` anywhere in the whole document rather than in the section that states the closure split, so a future edit that regresses the section while leaving that digit string elsewhere in the file would still pass (the total-count loop at 1227 and the threat-model pattern at 1228 are section-unique today, and the same unanchored style is already used for the existing contract assertions at 1240-1249).",
+          "reproduction": "Edit docs/policy/prompt-refiner-observability.md line 302 to read `177개 source는` and append a line `178개 source는 (예시)` at the end of the file, then run `node --conditions=react-server --import tsx --test --test-concurrency=1 tests/promptRefinerRuntimeSourceClosure.test.mjs`: the test still passes although the policy section now states the stale 177 count.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:1250-1258); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:044952f70518f8217e13e2ec1a702404b1c63718a3ac64cc3298755b3330c4b5",
+      "commit": "e3572f073fbfd81e56d19c2656d5112bbec7ca60",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json",
+        "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 0 finding을 닫았다. observability total/runtime-source count는 문서 전체의 느슨한 substring이 아니라 closure 설명의 정확한 연속 두 줄에서 함께 캡처하며, 각각 실제 total closure count와 runtimeImportClosure().length에 비교한다. 문서와 runtime 동작은 Round 0과 동일하다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2479.0211",
+          "durationMs": 2565
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39754
+        },
+        {
+          "rule": "npx eslint tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2865
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1393
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4543 citation(s) against 38 policy document(s). 2976 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1136
+        },
+        {
+          "rule": "git diff --check 60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2 HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 57
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Round 0 finding is closed — the observability assertion at tests/promptRefinerRuntimeSourceClosure.test.mjs:1253-1266 now captures 187 and 178 from one contiguous two-line span of the closure paragraph and compares them to PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT (lib/promptRefinerStageAdmissionCore.ts:41) and the dynamically computed runtimeImportClosure().length (test:1012-1025); docs/policy/prompt-refiner-observability.md:301-304 states 187/178/9 consistently with the 9 fixed metadata prefix entries at lib/promptRefinerStageAdmissionCore.ts:61-69, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40 is the unique match for the newly added 187-path allowlist pattern, the diff touches only the two policy docs, the test, and the two cross-review records within writableScope with no product/runtime/schema change, and all reported tests and guards passed, so no further round is needed (optionally, a future edit could also bind the '9개' metadata figure, which is currently only implied by 187−178)."
+    }
+  ],
+  "changeDigest": "sha256:044952f70518f8217e13e2ec1a702404b1c63718a3ac64cc3298755b3330c4b5",
+  "commit": "e3572f073fbfd81e56d19c2656d5112bbec7ca60",
+  "changeSummary": "Round 0 finding을 닫았다. observability total/runtime-source count는 문서 전체의 느슨한 substring이 아니라 closure 설명의 정확한 연속 두 줄에서 함께 캡처하며, 각각 실제 total closure count와 runtimeImportClosure().length에 비교한다. 문서와 runtime 동작은 Round 0과 동일하다.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2479.0211",
+      "durationMs": 2565
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 39754
+    },
+    {
+      "rule": "npx eslint tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2865
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1393
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4543 citation(s) against 38 policy document(s). 2976 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1136
+    },
+    {
+      "rule": "git diff --check 60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 57
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Round 0 finding is closed — the observability assertion at tests/promptRefinerRuntimeSourceClosure.test.mjs:1253-1266 now captures 187 and 178 from one contiguous two-line span of the closure paragraph and compares them to PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT (lib/promptRefinerStageAdmissionCore.ts:41) and the dynamically computed runtimeImportClosure().length (test:1012-1025); docs/policy/prompt-refiner-observability.md:301-304 states 187/178/9 consistently with the 9 fixed metadata prefix entries at lib/promptRefinerStageAdmissionCore.ts:61-69, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40 is the unique match for the newly added 187-path allowlist pattern, the diff touches only the two policy docs, the test, and the two cross-review records within writableScope with no product/runtime/schema change, and all reported tests and guards passed, so no further round is needed (optionally, a future edit could also bind the '9개' metadata figure, which is currently only implied by 187−178).",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-19T14:52:42.315Z",
+  "packagedRounds": 2,
+  "concludedAtRound": 1,
+  "lineage": [
+    "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+    "prompt-refiner-durable-stage-writer-closure-doc-sync-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Two live policy documents still say 186 fixed source files / 177 TypeScript-JavaScript sources and remain uncovered by the new count-binding test, but both files are outside this task's writableScope and outside the requirement's enumerated documents (Prisma schema plus 운영 계약·작업·진행 문서), so this is recorded for the announced follow-up task rather than actionable here.",
+      "reproduction": "rg -n '186개|177개' docs/policy — prints prompt-refiner-observability.md:301-302 and prompt-refiner-durable-stage-writer-threat-model.md:40; the new test at tests/promptRefinerRuntimeSourceClosure.test.mjs:1222-1227 checks only prisma/schema.prisma and the three docs/ops files, so these two lines stay green at 186."
+    }
+  ],
+  "headCommit": "e3572f073fbfd81e56d19c2656d5112bbec7ca60",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json",
+    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ]
+}
