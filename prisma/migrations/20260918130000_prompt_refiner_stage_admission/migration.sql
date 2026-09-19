@@ -81,7 +81,7 @@ STRICT
 PARALLEL SAFE
 AS $$
 DECLARE
-    expected_file_count CONSTANT INTEGER := 186;
+    expected_file_count CONSTANT INTEGER := 187;
     maximum_total_size_bytes CONSTANT NUMERIC := 16777216;
     expected_paths CONSTANT TEXT[] := ARRAY[
         '.gitattributes',
@@ -176,6 +176,7 @@ DECLARE
         'lib/imageGenerationAccess.ts',
         'lib/language.ts',
         'lib/managedSlack.ts',
+        'lib/marketingAutomationAccess.ts',
         'lib/marketingConsentConfirmationEmail.ts',
         'lib/marketingEmailLayout.ts',
         'lib/marketingRoutes.ts',
@@ -361,7 +362,7 @@ ALTER TABLE "PromptRefinerReservationStage"
           "schemaVersion":"prompt-refiner-shadow-execution-manifest-v1",
           "stageId":"prompt-refiner-shadow-v1",
           "reservationContractDigest":"sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f",
-          "runtimeSource":{"fileCount":186,"maxFileBytes":8388608,"maxTotalBytes":16777216},
+          "runtimeSource":{"fileCount":187,"maxFileBytes":8388608,"maxTotalBytes":16777216},
           "executionContractVersion":"prompt-refiner-execution-contract-v1",
           "executionContract":{
             "contractVersion":"prompt-refiner-execution-contract-v1",

@@ -38,7 +38,7 @@ export const PROMPT_REFINER_STAGE_CONFIRMATION =
   "APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES" as const;
 export const PROMPT_REFINER_STAGE_REASON =
   "bounded_staging_shadow_cost_approval" as const;
-export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 186 as const;
+export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 187 as const;
 export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -150,6 +150,7 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
   "lib/imageGenerationAccess.ts",
   "lib/language.ts",
   "lib/managedSlack.ts",
+  "lib/marketingAutomationAccess.ts",
   "lib/marketingConsentConfirmationEmail.ts",
   "lib/marketingEmailLayout.ts",
   "lib/marketingRoutes.ts",

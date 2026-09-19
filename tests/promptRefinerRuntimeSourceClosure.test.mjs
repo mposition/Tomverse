@@ -60,10 +60,10 @@ const compilerOptions = parsedConfig.options;
 // its already-reviewed data-indexing expressions are frozen as an exact
 // path/position/text snapshot.  Any new or moved non-static element access must
 // be reviewed and must update this digest before the closure gate can pass.
-const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 221;
+const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e0c6cf0868ee77ebc821fed2f96dc9317",
-  "509f0236d463e22f2a0893db89f71d3",
+  "778c2fc68dc5e77dc584478c007e1f5d",
+  "b930dc321a1b2b6a60dcf19b52a0d627",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -1037,7 +1037,15 @@ test("runtime source allowlist is exactly the deterministic local runtime import
     "non-static element access snapshot changed; unreviewed computed access is fail-closed"
   );
   const expected = [...fixedNonImportPaths, ...runtimeImportClosure()];
-  assert.equal(expected.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
+  const listed = new Set(PROMPT_REFINER_RUNTIME_SOURCE_PATHS);
+  const expectedSet = new Set(expected);
+  const missing = expected.filter((path) => !listed.has(path));
+  const extra = PROMPT_REFINER_RUNTIME_SOURCE_PATHS.filter((path) => !expectedSet.has(path));
+  assert.equal(
+    expected.length,
+    PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
+    `runtime source file count changed; missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)}`
+  );
   assert.deepEqual([...PROMPT_REFINER_RUNTIME_SOURCE_PATHS], expected);
   const actualBytes = expected.reduce((total, path) => total + statSync(join(repositoryRoot, path)).size, 0);
   assert.ok(actualBytes > 0);
