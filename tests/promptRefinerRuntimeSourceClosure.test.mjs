@@ -1224,7 +1224,6 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
     ["docs/ops/tomverse-chat-progress.md", /exact (\d+)-file runtime import-closure source manifest/],
-    ["docs/policy/prompt-refiner-observability.md", /고정 (\d+)개 source/],
     ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
@@ -1251,9 +1250,18 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     join(repositoryRoot, "docs/policy/prompt-refiner-observability.md"),
     "utf8"
   );
-  assert.match(
-    observabilityPolicy,
-    new RegExp(`${expectedRuntimeSourceCount}개 source는`),
+  const observabilityClosureCounts = observabilityPolicy.match(
+    /고정 (\d+)개 source\r?\n파일의 exact bytes\(개별\/총 size와 SHA-256\)를 canonical manifest로 만든다\. (\d+)개 source는/
+  );
+  assert.ok(observabilityClosureCounts, "observability policy runtime closure paragraph is missing");
+  assert.equal(
+    observabilityClosureCounts[1],
+    expectedCount,
+    "observability policy total source count drifted"
+  );
+  assert.equal(
+    observabilityClosureCounts[2],
+    expectedRuntimeSourceCount,
     "observability policy runtime-source count drifted"
   );
 });
