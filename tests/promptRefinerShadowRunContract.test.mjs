@@ -14,13 +14,15 @@ import {
 import {
   PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
   PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
-  PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
   PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
   PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
   promptRefinerShadowRunContractProblems,
 } from "../lib/promptRefinerShadowRunContract.ts";
+import {
+  PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
+} from "../lib/promptRefinerShadowHarness.ts";
 
 test("shadow run contract narrows the durable stage to the frozen 16-case run", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES, 16);

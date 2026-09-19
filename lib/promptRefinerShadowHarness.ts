@@ -26,6 +26,8 @@ export const PROMPT_REFINER_SHADOW_CORPUS_VERSION =
     "prompt-refiner-shadow-corpus-v1" as const;
 export const PROMPT_REFINER_SHADOW_CORPUS_ID =
     "tomverse-prompt-refiner-shadow-v1" as const;
+export const PROMPT_REFINER_SHADOW_CORPUS_DIGEST =
+    "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958" as const;
 export const PROMPT_REFINER_SHADOW_CORPUS_CASES = 16;
 export const PROMPT_REFINER_SHADOW_MAX_CORPUS_BYTES = 256 * 1024;
 export const PROMPT_REFINER_SHADOW_MAX_OUTPUT_BYTES = 64 * 1024;

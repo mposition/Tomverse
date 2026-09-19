@@ -13,10 +13,8 @@ import {
     PROMPT_REFINER_RESERVATION_STAGE_ID,
 } from "@/lib/promptRefinerReservationCore";
 import {
-    PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
-} from "@/lib/promptRefinerShadowAdmissionCore";
-import {
     PROMPT_REFINER_SHADOW_CORPUS_CASES,
+    PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
     PROMPT_REFINER_SHADOW_CORPUS_ID,
     PROMPT_REFINER_SHADOW_CORPUS_VERSION,
 } from "@/lib/promptRefinerShadowHarness";
@@ -25,8 +23,6 @@ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
     "prompt-refiner-shadow-run-v1" as const;
 export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
     "prompt-refiner-openai-sdk-adapter-v1" as const;
-export const PROMPT_REFINER_SHADOW_CORPUS_DIGEST =
-    PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
 export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
 export const PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES =
     PROMPT_REFINER_SHADOW_CORPUS_CASES;
