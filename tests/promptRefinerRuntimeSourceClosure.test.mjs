@@ -1215,3 +1215,33 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
   );
 });
+
+test("operator-facing contracts name the enforced runtime source closure size", () => {
+  const expectedCount = String(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
+  for (const [path, pattern] of [
+    ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
+    ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
+    ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
+    ["docs/ops/tomverse-chat-progress.md", /exact (\d+)-file runtime import-closure source manifest/],
+  ]) {
+    const source = readFileSync(join(repositoryRoot, path), "utf8");
+    const found = source.match(pattern);
+    assert.ok(found, `${path} has no runtime source closure count`);
+    assert.equal(found[1], expectedCount, `${path} runtime source closure count drifted`);
+  }
+
+  const contract = readFileSync(
+    join(repositoryRoot, "docs/ops/prompt-refiner-durable-stage-writer-contract.md"),
+    "utf8"
+  );
+  assert.match(
+    contract,
+    new RegExp(`${expectedCount}개 경로의 순서`),
+    "database path-count contract drifted"
+  );
+  assert.match(
+    contract,
+    new RegExp(`${expectedCount}개 중 178개 TypeScript/JavaScript source`),
+    "runtime TypeScript/JavaScript source-count contract drifted"
+  );
+});
