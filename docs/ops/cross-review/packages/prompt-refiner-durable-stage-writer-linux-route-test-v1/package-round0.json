@@ -1,0 +1,67 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+  "round": 0,
+  "baseCommit": "aaefe4245457335874b078746ae067a23a0d11dc",
+  "lineage": [],
+  "inheritedFindings": [],
+  "changeDigest": "sha256:e01bfa7ae5df3b59fe073fc64e2d7b7eff1d09cd4f3071d6f8373f011368dee7",
+  "commit": "ae33745fb76b9f5a8e11d3b37646e81d7c2d0192",
+  "headCommit": "ae33745fb76b9f5a8e11d3b37646e81d7c2d0192",
+  "worktreeDirty": false,
+  "changeSummary": "Linux PR Fast Gate에서 route.ts?cached import가 GET/POST named exports를 노출하지 않아 같은 파일의 5개 테스트가 연쇄 실패했다. 격리 process에서 한 번만 import하는 기존 server-contract 패턴대로 query suffix를 제거하고 route의 authOptions 의존성을 명시적으로 mock했다. 실제 route와 제품 코드는 변경하지 않았고 로컬 6/6, typecheck, lint, encoding, diff check가 통과했다.",
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ],
+  "treeFilesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 486.6318",
+      "durationMs": 571
+    }
+  ],
+  "guardCommands": [
+    "npm run typecheck",
+    "npx eslint tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+    "npm run check:encoding:strict",
+    "git diff --check aaefe4245457335874b078746ae067a23a0d11dc HEAD -- ."
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 44975
+    },
+    {
+      "rule": "npx eslint tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2893
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1456
+    },
+    {
+      "rule": "git diff --check aaefe4245457335874b078746ae067a23a0d11dc HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 64
+    }
+  ],
+  "producedAt": "2026-09-19T15:11:41.717Z",
+  "diff": "diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md\nnew file mode 100644\nindex 00000000..1538c0ec\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md\n@@ -0,0 +1,17 @@\n+# Prompt Refiner Linux route 테스트 수정 Claude 독립 검토 제한 승인\n+\n+Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 중단된 자동 개발을 이어서\n+마무리하도록 요청했고, 앞선 지시에서 독립 검토가 필요하면 Claude에 요청하며\n+`--skip-preflight` 예외를 허용했다. 이 문서는 전자서명, 제품 실행 승인 또는 검토\n+통과 기록이 아니다.\n+\n+이 승인은\n+[검토 task](prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json)에 정의된\n+Linux server-contract 테스트 로더 수정의 Claude 읽기 전용 독립 검토에만 적용한다.\n+\n+- Claude는 저장된 Claude Max `claude.ai` 로그인과 `Read,Grep,Glob`만 사용한다.\n+- review child 환경에서 Anthropic API key 환경변수를 제거하고 Max 인증을 확인한다.\n+- `--skip-preflight`만 허용하며 test/CI 우회와 `--review-despite-check-failures`는 금지한다.\n+- 제품 route, database, provider/model, Railway, credential, stage, flag/rollout 및 유료\n+  실행은 승인하지 않는다.\n+- 최초 검토와 최대 두 번의 수정 검토만 허용한다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json\nnew file mode 100644\nindex 00000000..923fa3c8\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json\n@@ -0,0 +1,18 @@\n+{\n+  \"taskId\": \"prompt-refiner-durable-stage-writer-linux-route-test-v1\",\n+  \"requirement\": \"PR #1555의 Linux 통합 CI에서 Prompt Refiner 관리자 route server-contract 5개가 route.GET/POST is not a function으로 연쇄 실패한 테스트 로더 결함을 고친다. 이 테스트 파일은 격리된 server-contract process에서 route를 한 번만 import하므로 Windows에서만 우연히 named export를 보존하던 query-string cache suffix를 제거하고, route가 참조하는 authOptions를 다른 관리자 route 테스트와 같이 명시적으로 mock해 platform별 transitive auth import를 없앤다. 실제 route, 제품 runtime, database, provider/model, Railway, credential, stage, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.\",\n+  \"completionCriteria\": [\n+    \"admin-prompt-refiner-shadow-stage-route server-contract가 route.ts를 query suffix 없이 직접 import하고 lib/auth.ts authOptions를 명시적으로 mock한다.\",\n+    \"해당 6개 테스트가 Windows 로컬 server-contract 명령에서 통과하고 Linux PR Fast Gate에서 GET/POST named exports를 정상 호출한다.\",\n+    \"typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.\",\n+    \"변경은 테스트와 검토 기록에 한정되며 실제 route 또는 제품 동작을 바꾸지 않는다.\",\n+    \"Claude verdict는 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다.\"\n+  ],\n+  \"baseCommit\": \"aaefe4245457335874b078746ae067a23a0d11dc\",\n+  \"writableScope\": [\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.authorization.md\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-linux-route-test-v1.task.json\",\n+    \"tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts\"\n+  ],\n+  \"generatedPaths\": []\n+}\ndiff --git a/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts b/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts\nindex f62a248d..d854063b 100644\n--- a/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts\n+++ b/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts\n@@ -104,6 +104,9 @@ async function loadRoute() {\n             : null,\n       },\n     });\n+    mock.module(mod(\"lib/auth.ts\"), {\n+      namedExports: { authOptions: {} },\n+    });\n     mock.module(mod(\"lib/adminAuth.ts\"), {\n       namedExports: {\n         isAdminSession: () => world.authenticated,\n@@ -180,7 +183,7 @@ async function loadRoute() {\n       },\n     });\n   }\n-  return import(`${mod(\"app/api/admin/prompt-refiner/shadow-stage/route.ts\")}?cached`);\n+  return import(mod(\"app/api/admin/prompt-refiner/shadow-stage/route.ts\"));\n }\n \n const post = (body: unknown) =>\n"
+}
