@@ -1218,6 +1218,7 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
 
 test("operator-facing contracts name the enforced runtime source closure size", () => {
   const expectedCount = String(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
+  const expectedRuntimeSourceCount = String(runtimeImportClosure().length);
   for (const [path, pattern] of [
     ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
@@ -1241,7 +1242,7 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   );
   assert.match(
     contract,
-    new RegExp(`${expectedCount}개 중 178개 TypeScript/JavaScript source`),
+    new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),
     "runtime TypeScript/JavaScript source-count contract drifted"
   );
 });
