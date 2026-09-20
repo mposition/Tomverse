@@ -217,6 +217,20 @@ const REGISTRY = {
     reason:
       "A deliberately coarse public-safe failure vocabulary. It prevents provider messages, exception text, credentials or request fragments from entering durable recovery state and later leaving through GET or account export.",
   },
+  PromptRefinerShadowRun_status_check: {
+    owner: "list",
+    module: "lib/promptRefinerShadowRunContract.ts",
+    list: "PROMPT_REFINER_SHADOW_RUN_STATUSES",
+    reason:
+      "The durable shadow run lifecycle. The owner-only writer, terminal counter transition and outcome-unknown latch branch on this shared list; a database-only status would evade those fail-closed transitions, while a code-only status would turn an admitted run update into a write-time 500.",
+  },
+  PromptRefinerShadowAttempt_status_check: {
+    owner: "list",
+    module: "lib/promptRefinerShadowRunContract.ts",
+    list: "PROMPT_REFINER_SHADOW_ATTEMPT_STATUSES",
+    reason:
+      "The durable attempt lifecycle deliberately has only dispatch intent and terminal receipt. The terminal writer and stale-intent sweep both use this list, so drift would either strand an attempt outside recovery or let an unknown state bypass terminal immutability.",
+  },
 
   // --- the union exists, but only at compile time -------------------------
   AccountDataExportRequest_refusalReason_check: {
