@@ -411,7 +411,10 @@ export function AdminPromptRefinerShadowPanel() {
             <Field label={m.status} value={stage.status} />
             <Field label={m.deployment} value={stage.deploymentId} />
             <Field label={m.commit} value={stage.commitSha} />
-            <Field label={m.expires} value={`${stage.approvalTtlMinutes} min`} />
+            <Field
+              label={m.approvalWindow}
+              value={`${stage.approvalTtlMinutes} min`}
+            />
             <Field
               label={m.perRequestCeiling}
               value={usd(stage.perRequestCostMicroUsd)}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { adminPromptRefinerShadowMessages } from "../lib/adminMessages/promptRefinerShadow.ts";
 
 const root = process.cwd();
 const panel = readFileSync(
@@ -57,6 +58,25 @@ test("the page exposes recent-auth recovery but no prompt or model output", () =
   assert.match(panel, /promptRefinerStageApprovalBody\(stage\)/);
   assert.match(panel, /promptRefinerRunApprovalBody\(run\)/);
   assert.match(panel, /promptRefinerExecutionBody\(execution\)/);
+});
+
+test("the stage TTL and execution expiry keep distinct labels", () => {
+  assert.match(
+    panel,
+    /label=\{m\.approvalWindow\}[\s\S]*?stage\.approvalTtlMinutes/
+  );
+  assert.match(
+    panel,
+    /label=\{m\.expires\}[\s\S]*?execution\.approvalExpiresAt/
+  );
+  assert.notEqual(
+    adminPromptRefinerShadowMessages.en.approvalWindow,
+    adminPromptRefinerShadowMessages.en.expires
+  );
+  assert.notEqual(
+    adminPromptRefinerShadowMessages.ko.approvalWindow,
+    adminPromptRefinerShadowMessages.ko.expires
+  );
 });
 
 test("refresh re-reads the visible step instead of advancing the workflow", () => {
