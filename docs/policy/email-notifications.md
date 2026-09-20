@@ -21,18 +21,49 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
 1. **옛 `(provider, providerEventId)` unique를 제거합니다.** 계정이 다르면 같은
    provider 사건 id라도 **다른 사건**이고, 그것을 말하는 것이 계정 포함 unique입니다.
    옛 것은 marketing 사건을 transactional 사건과 충돌한다며 거절할 수 있었습니다.
+   그것은 20260821090000이 `CREATE UNIQUE INDEX`로 만든 **index**이지 constraint가
+   아니므로 `DROP INDEX`가 지우는 문장입니다. migration은 그래도 `DROP CONSTRAINT`를
+   **먼저** 두는데, 만약 어딘가에서 constraint로 존재한다면 `DROP INDEX`는 건너뛰는
+   것이 아니라 dependency 오류로 **실패**하고 `IF EXISTS`는 그것을 덮지 않습니다.
 2. **`ProviderWebhookEvent.providerAccount`의 default를 제거합니다.** writer는 하나이고
    항상 계정을 말합니다. default는 그것이 조용히 참이 아니게 되는 경로입니다.
-3. **`EmailDelivery(providerAccount, providerMessageId)`에 부분 unique를 겁니다.**
+3. **`EmailDelivery(providerAccount, providerMessageId)`를 unique로 만듭니다.**
    메시지 id는 **계정 안에서** delivery 하나를 가리키고, S1b-2b의 결속이 그렇게 읽습니다.
-   둘 다 NULL이 아닌 행에만 걸립니다 — provider에 닿지 못한 발송은 메시지 id가 없고
-   그런 행이 많습니다. Prisma는 부분 index를 표현하지 못하므로 migration에 있고,
-   schema에는 어디 있는지를 적어 둡니다.
+   **부분(partial)이 아니라 일반 unique입니다.** `WHERE 둘 다 NOT NULL` 술어는 일반
+   unique가 이미 보장하는 것과 정확히 같은 것을 말합니다 — Postgres는 NULL을 비교하지
+   않으므로 provider에 닿지 못한 발송은 어차피 아무와도 충돌하지 않습니다. 그리고 그
+   술어는 이 저장소에서 비싼 것 하나를 요구합니다: Prisma schema가 부분 index를 표현하지
+   못하므로 `db push`는 만들지 않고 `migrate diff`는 매번 drift로 보고합니다.
+   20260801190000_plan_change_pending_slot이 같은 교훈이며, 그때는 테스트가 검증한다고
+   믿은 제약이 실제 DB에 없었습니다.
 4. **이 migration은 눈감고 적용할 수 없습니다.** unique index 빌드는 처음 만나는
    중복에서 **배포 도중** 실패하고, 답은 이 파일이 아니라 데이터에 있습니다.
    `npm run email:check-message-id-duplicates`가 읽기 전용으로 묻고 개수만 출력합니다
-   (주소·메시지 id 없음). `safeToAddUnique`가 false이면 각 중복이 무엇인지 정하기
-   전에는 배포하지 않습니다.
+   (주소·메시지 id 없음; `providerAccount`는 `EmailDelivery_provider_account_check`가
+   가두는 닫힌 lane 이름입니다). **그 판독은 멈출 근거이지 가도 된다는 보증이 아닙니다** —
+   읽은 시점과 migration 실행 시점 사이에 잠금이 없으므로, 필드 이름은
+   `noDuplicatesAtReadTime`입니다. 판정하는 것은 index 빌드 자신입니다.
+5. **그래서 순서가 계약입니다.** 새 unique를 **먼저** 만들고, 성공한 뒤에 같은 컬럼의
+   일반 index를 지웁니다. migration 파일이 transaction 안에서 도는지 아닌지에 판정이
+   걸리지 않게 하려는 것입니다 — 안에서 돌면 실패가 전체를 되돌리고, 밖에서 돌면 실패가
+   DROP에 닿기 전에 멈춥니다. 어느 쪽이든 기존 index가 남으므로 배포 실패가 webhook
+   matcher를 순차 스캔으로 떨어뜨리지 않습니다.
+6. **빌드는 `EmailDelivery`에 ACCESS EXCLUSIVE 잠금을 겁니다.** `CONCURRENTLY`는
+   transaction 안에서 Postgres가 거부하므로 migration에 쓸 수 없습니다. 대신 `CREATE
+   UNIQUE INDEX IF NOT EXISTS`로 두어, 행 수가 그 잠금을 감당할 수 없을 때 운영자가
+   같은 이름·같은 컬럼으로 **먼저 CONCURRENTLY 빌드**할 수 있게 합니다. 이름만 믿지
+   않기 위해 migration이 곧바로 카탈로그에서 그 index가 unique이고 부분이 아니며 컬럼과
+   순서가 맞는지 읽고, 아니면 `RAISE EXCEPTION`으로 멈춥니다. 행 수는 검사 script의
+   `totalRows`가 알려 줍니다.
+7. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+   schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지 않고
+   insert하며 이 migration이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
+   insert가 `NOT NULL`로 실패하고, 충돌 해소는 이 migration이 지운
+   `(provider, providerEventId)` unique를 지목합니다. 비용은 수신 webhook 전량 거절과
+   bounce·complaint 처리 정지입니다. 더 내려가야 하면 migration을 **먼저** 되돌리며
+   (default 복원 + 옛 unique 재생성), 그 재생성 자체가 계정이 다른 같은 사건 id에서
+   실패할 수 있습니다. 복구 절차이지 일상 경로가 아닙니다.
+
 ### v23 (2026-09-18) — 발송 진입점 allowlist와 로그인 방법 안내의 lane 이동(S1b-3b)
 
 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C41·C35·C36·C49입니다.

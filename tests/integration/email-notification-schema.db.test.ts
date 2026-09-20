@@ -39,20 +39,6 @@ const reset = () =>
   `);
 
 /** Asserts the write fails, and that it fails for the stated reason. */
-const rejectsWithEither = async (names: string[], run: () => Promise<unknown>) => {
-  let message: string | null = null;
-  try {
-    await run();
-  } catch (error) {
-    message = error instanceof Error ? error.message : String(error);
-  }
-  assert.notEqual(message, null, `expected one of ${names.join(", ")} to reject the write`);
-  assert.ok(
-    names.some((name) => message!.includes(name)) || /Unique constraint failed/.test(message!),
-    `expected a unique violation; got: ${message!.slice(0, 300)}`
-  );
-};
-
 const rejects = async (name: string, run: () => Promise<unknown>) => {
   let message: string | null = null;
   try {
@@ -411,7 +397,7 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
     /UNIQUE INDEX .*\(\s*"?provider"?,\s*"providerAccount",\s*"providerEventId"\s*\)/
   );
 
-  await rejectsWithEither(["ProviderWebhookEvent_account_event_key"], () =>
+  await rejects("ProviderWebhookEvent_account_event_key", () =>
     prisma.providerWebhookEvent.create({
       data: {
         provider: "resend",
@@ -489,15 +475,63 @@ test("one provider message id belongs to one delivery, within its account", asyn
     data: sent({ providerAccount: "marketing" }),
   });
 
-  // And the index is partial, so the many deliveries that never reached the
-  // provider -- no account, no message id -- stay free of it.
-  for (let i = 0; i < 2; i += 1) {
-    await prisma.emailDelivery.create({
-      data: delivery({ providerAccount: null, providerMessageId: null }),
-    });
+  // A row with a null in either column conflicts with nothing, which is what
+  // lets this index be plain rather than partial. All three shapes, twice each:
+  // both null is the delivery that never reached the provider, and the
+  // one-sided pairs are the states it passes through.
+  for (const shape of [
+    { providerAccount: null, providerMessageId: null },
+    { providerAccount: "transactional", providerMessageId: null },
+    { providerAccount: null, providerMessageId },
+  ]) {
+    for (let i = 0; i < 2; i += 1) {
+      await prisma.emailDelivery.create({ data: delivery(shape) });
+    }
   }
+
+  // Four carry the id: the two accounts, and the two account-less rows the
+  // one-sided shape created.
   assert.equal(
     await prisma.emailDelivery.count({ where: { providerMessageId } }),
-    2
+    4
   );
+});
+
+test("the delivery message id index is unique, and is not partial", async () => {
+  // Rows with nulls pass a plain unique index and a partial one alike, so the
+  // test above cannot tell the two apart -- and the difference is the whole
+  // reason this index is written the way it is: schema.prisma cannot express a
+  // partial index, so a partial one here would be invisible to `db push` and
+  // would be reported as drift on every run. Asked of the catalogue directly.
+  const [index] = await prisma.$queryRaw<
+    Array<{ is_unique: boolean; predicate: string | null; columns: string[] }>
+  >`
+    SELECT i.indisunique AS is_unique,
+           pg_get_expr(i.indpred, i.indrelid) AS predicate,
+           (
+             SELECT array_agg(a.attname ORDER BY k.ord)
+               FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute a
+                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+           ) AS columns
+      FROM pg_index i
+      JOIN pg_class ix ON ix.oid = i.indexrelid
+      JOIN pg_class tb ON tb.oid = i.indrelid
+     WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
+       AND tb.relname = 'EmailDelivery'
+  `;
+
+  assert.ok(index, "the index is missing entirely");
+  assert.equal(index.is_unique, true);
+  assert.equal(index.predicate, null);
+  assert.deepEqual(index.columns, ["providerAccount", "providerMessageId"]);
+
+  // And the plain index it replaced is gone: two structures for one question is
+  // how they drift apart.
+  const [old] = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT count(*) AS count
+      FROM pg_class
+     WHERE relname = 'EmailDelivery_providerAccount_providerMessageId_idx'
+  `;
+  assert.equal(Number(old?.count ?? 0), 0);
 });

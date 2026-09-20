@@ -291,11 +291,12 @@ export async function processResendWebhook(input: {
       ${JSON.stringify(input.payload)}::jsonb,
       ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
     )
-    -- No conflict target while the old (provider, providerEventId) unique still
-    -- exists beside the per-account one: a target names one arbiter, and a
-    -- conflict on the other would raise instead of doing nothing -- as when
-    -- two workers insert the same new event at once. Which row conflicted is
-    -- established by the lookup below.
+    -- No conflict target. The contraction (20260920100000) left one arbiter,
+    -- so naming it would behave identically -- and not naming it stays right if
+    -- a second one is ever added, which is what went wrong while the old
+    -- (provider, providerEventId) unique sat beside the per-account one: a
+    -- target names one arbiter and a conflict on the other raises instead of
+    -- doing nothing. Which row conflicted is established by the lookup below.
     ON CONFLICT DO NOTHING
     RETURNING "id", "receivedAt",
               ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
