@@ -9,14 +9,15 @@
     "완료된 v4 run은 저장된 case evidence와 cost/latency telemetry만으로 동결 aggregate bundle을 재구성하고 pass/fail/insufficient를 반환하며 제품·Router·유료 권한은 모두 false다.",
     "v3 기존 row와 terminal receipt는 변경·재해석하지 않고 v4 migration은 seed, backfill, provider call 또는 flag 변경을 수행하지 않는다.",
     "전체 unit, focused Prompt Refiner, DB integration/contract, TypeScript, ESLint, 문서·정책·schema·protected-writer 검사가 통과한다.",
-    "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다."
+    "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
+    "재귀적인 audit diff 팽창을 막기 위해 이 exchange의 package output 디렉터리만 reviewed diff에서 제외하며 task, authorization, 구현·테스트·migration·운영 문서는 모두 검토 대상에 남고 package, exchange, events, failure, verdict 기록은 저장소에 보존한다."
   ],
   "baseCommit": "388cb319cd657da468ae99711b24c7fe8a44a012",
   "writableScope": [
     "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
     "app/api/admin/prompt-refiner/shadow-run/route.ts",
     "components/admin/AdminPromptRefinerShadowPanel.tsx",
-    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4",
+    "docs/ops/cross-review/packages",
     "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.authorization.md",
     "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.task.json",
     "docs/ops/prompt-refiner-confirmatory-shadow-v4.md",
