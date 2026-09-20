@@ -35,6 +35,11 @@ import {
 import {
   PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
 } from "../lib/promptRefinerShadowHarness.ts";
+import {
+  PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
+  PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_ID,
+  PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_VERSION,
+} from "../lib/promptRefinerShadowEvidenceCore.ts";
 
 test("shadow run contract narrows the durable stage to the frozen 16-case run", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES, 16);
@@ -100,12 +105,22 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
   );
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.runId, PROMPT_REFINER_SHADOW_RUN_ID);
   assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.caseIds, PROMPT_REFINER_SHADOW_CASE_IDS);
+  assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.evidence, {
+    specVersion: PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_VERSION,
+    specId: PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_ID,
+    specDigest: PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
+    evaluation: "transient_proposal_to_content_free_case_evidence",
+    durableProposalBytes: false,
+    durablePerItemContentDigest: false,
+    terminalReceiptAtomicity: "same_transaction",
+    aggregateRebuild: "content_free_attempt_evidence",
+  });
   assert.equal(PROMPT_REFINER_SHADOW_CASE_IDS.length, 16);
   assert.equal(new Set(PROMPT_REFINER_SHADOW_CASE_IDS).size, 16);
   assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
 });
 
-test("v3 admits only the owner-only shadow entry point, never the product path", () => {
+test("v4 admits only the owner-only shadow entry point, never the product path", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady, true);
@@ -119,6 +134,14 @@ test("v3 admits only the owner-only shadow entry point, never the product path",
 });
 
 test("run source manifest is exact, bounded and commit-bound", () => {
+  for (const requiredPath of [
+    "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+    "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+    "prisma/schema.prisma",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+  ]) {
+    assert.ok(PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.includes(requiredPath));
+  }
   const files = new Map(
     PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.map((path, index) => [
       path,
@@ -170,4 +193,5 @@ test("run preview digest binds deployment, stage closure, delta and cost", () =>
   );
   assert.equal(binding.tokenizerEncoding, PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING);
   assert.equal(binding.maxInputTokens, 100_000);
+  assert.equal(binding.evidenceSpecDigest, PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST);
 });

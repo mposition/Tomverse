@@ -13,8 +13,6 @@ import {
     PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
 } from "./promptRefinerExecutionContract";
 import {
-    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-    PROMPT_REFINER_RESERVATION_STAGE_ID,
     PROMPT_REFINER_RESERVATION_TTL_MS,
 } from "./promptRefinerReservationCore";
 import {
@@ -99,6 +97,10 @@ export const PROMPT_REFINER_SHADOW_ADMISSION_MANIFEST_SHA256 =
     "9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d" as const;
 export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST =
     "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2" as const;
+export const PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID =
+    "prompt-refiner-shadow-v1" as const;
+export const PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST =
+    "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f" as const;
 
 const INTERNAL_ADMISSION_EVIDENCE_FILES = INTRINSIC_OBJECT_FREEZE([
     "admission-readiness-v1.report.json",
@@ -198,8 +200,8 @@ export type PromptRefinerShadowStageProposal = {
         journalSchemaVersion: typeof PROMPT_REFINER_SHADOW_JOURNAL_VERSION;
     }>;
     readonly reservationStage: Readonly<{
-        stageId: typeof PROMPT_REFINER_RESERVATION_STAGE_ID;
-        contractDigest: typeof PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST;
+        stageId: typeof PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID;
+        contractDigest: typeof PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST;
         perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
         maxReservations: typeof PROMPT_REFINER_SHADOW_MAX_DISPATCHES;
         costCeilingMicroUsd: typeof PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD;
@@ -673,8 +675,9 @@ function trustedUnsignedProposal(): Omit<
             journalSchemaVersion: PROMPT_REFINER_SHADOW_JOURNAL_VERSION,
         },
         reservationStage: {
-            stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
-            contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+            stageId: PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID,
+            contractDigest:
+                PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST,
             perRequestCostMicroUsd:
                 PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
             maxReservations: PROMPT_REFINER_SHADOW_MAX_DISPATCHES,

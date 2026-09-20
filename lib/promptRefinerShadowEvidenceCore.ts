@@ -114,6 +114,14 @@ export type PromptRefinerShadowEvidenceRunCase = {
     costMicroUsd: number | null;
 };
 
+export type PromptRefinerShadowStoredEvidenceCase = {
+    caseId: string;
+    terminalStatus: EvidenceTerminalStatus;
+    evidence: PromptRefinerShadowCaseEvidence;
+    durationMs: number | null;
+    costMicroUsd: number | null;
+};
+
 export type PromptRefinerShadowEvidenceCaseFailure =
     | "not_suggested"
     | "source_not_changed"
@@ -663,6 +671,261 @@ function evaluateSuggestedCase(
     };
 }
 
+/**
+ * Evaluates one transient provider result. The returned object is content-free:
+ * callers must discard `refinedPrompt` immediately after this function returns.
+ */
+export function evaluatePromptRefinerShadowCaseEvidence(input: {
+    corpus: PromptRefinerShadowCorpus;
+    spec: PromptRefinerShadowEvidenceSpec;
+    caseIndex: number;
+    terminalStatus: EvidenceTerminalStatus;
+    refinedPrompt: string | null;
+}): PromptRefinerShadowCaseEvidence {
+    const corpus = validatePromptRefinerShadowCorpus(input.corpus);
+    if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
+        fail("corpus_contract_digest_mismatch");
+    }
+    const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
+    const caseIndex = safeInteger(input.caseIndex, "case_index", 0, 15);
+    const sourceCase = corpus.cases[caseIndex]!;
+    const caseSpec = spec.cases[caseIndex]!;
+    if (
+        sourceCase.id !== EVIDENCE_CASE_IDS[caseIndex] ||
+        sourceCase.id !== caseSpec.id ||
+        sourceCase.language !== caseSpec.language ||
+        sourceCase.category !== caseSpec.category
+    ) {
+        fail("corpus_case_contract_mismatch");
+    }
+    if (input.terminalStatus === "suggested") {
+        const refinedPrompt = boundedString(
+            input.refinedPrompt,
+            "refined_prompt",
+            PROMPT_REFINER_MAX_PROMPT_BYTES
+        );
+        if (
+            refinedPrompt.length > PROMPT_REFINER_MAX_PROMPT_CHARS ||
+            Buffer.byteLength(refinedPrompt, "utf8") >
+                PROMPT_REFINER_SHADOW_MAX_OUTPUT_BYTES
+        ) {
+            fail("suggested_run_case_invalid");
+        }
+        return evaluateSuggestedCase(sourceCase, caseSpec, refinedPrompt);
+    }
+    if (input.refinedPrompt !== null) {
+        fail("non_suggested_run_case_has_prompt");
+    }
+    return failedOrUnknownEvidence(sourceCase, caseSpec, input.terminalStatus);
+}
+
+const nullableBoolean = (value: unknown, where: string): boolean | null => {
+    if (value !== null && typeof value !== "boolean") fail(`${where}_invalid`);
+    return value as boolean | null;
+};
+
+const evidenceFailureReasons = (
+    value: unknown
+): PromptRefinerShadowEvidenceCaseFailure[] => {
+    if (!Array.isArray(value) || value.length > 7) {
+        fail("stored_failure_reasons_invalid");
+    }
+    const allowed: readonly PromptRefinerShadowEvidenceCaseFailure[] = [
+        "not_suggested",
+        "source_not_changed",
+        "length_out_of_bounds",
+        "language_mismatch",
+        "required_concept_missing",
+        "exact_literal_missing",
+        "unsafe_injection_framing",
+    ];
+    const reasons = value.map((item) =>
+        enumValue(item, allowed, "stored_failure_reason")
+    );
+    if (new Set(reasons).size !== reasons.length) {
+        fail("stored_failure_reasons_duplicate");
+    }
+    return reasons;
+};
+
+/** Strictly validates the closed evidence shape accepted by the DB writer. */
+export function validatePromptRefinerShadowCaseEvidence(input: {
+    value: unknown;
+    spec: PromptRefinerShadowEvidenceSpec;
+    caseIndex: number;
+    terminalStatus: EvidenceTerminalStatus;
+}): PromptRefinerShadowCaseEvidence {
+    const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
+    const caseIndex = safeInteger(input.caseIndex, "case_index", 0, 15);
+    const caseSpec = spec.cases[caseIndex]!;
+    const object = strictBenchmarkObject(
+        input.value,
+        [
+            "caseId",
+            "language",
+            "category",
+            "terminalStatus",
+            "evidenceStatus",
+            "distinctFromSource",
+            "lengthWithinBounds",
+            "languageMatched",
+            "requiredConceptGroups",
+            "matchedConceptGroups",
+            "requiredExactLiterals",
+            "preservedExactLiterals",
+            "injectionSafelyFramed",
+            "lengthBucket",
+            "failureReasons",
+        ],
+        "stored_case_evidence"
+    );
+    if (
+        object.caseId !== caseSpec.id ||
+        object.language !== caseSpec.language ||
+        object.category !== caseSpec.category ||
+        object.terminalStatus !== input.terminalStatus
+    ) {
+        fail("stored_case_evidence_binding_mismatch");
+    }
+    const evidenceStatus = enumValue(
+        object.evidenceStatus,
+        ["pass", "fail", "insufficient_evidence"] as const,
+        "stored_evidence_status"
+    );
+    const distinctFromSource = nullableBoolean(
+        object.distinctFromSource,
+        "stored_distinct_from_source"
+    );
+    const lengthWithinBounds = nullableBoolean(
+        object.lengthWithinBounds,
+        "stored_length_within_bounds"
+    );
+    const languageMatched = nullableBoolean(
+        object.languageMatched,
+        "stored_language_matched"
+    );
+    const requiredConceptGroups = safeInteger(
+        object.requiredConceptGroups,
+        "stored_required_concept_groups",
+        1,
+        8
+    );
+    const matchedConceptGroups =
+        object.matchedConceptGroups === null
+            ? null
+            : safeInteger(
+                  object.matchedConceptGroups,
+                  "stored_matched_concept_groups",
+                  0,
+                  requiredConceptGroups
+              );
+    const requiredExactLiterals = safeInteger(
+        object.requiredExactLiterals,
+        "stored_required_exact_literals",
+        0,
+        8
+    );
+    const preservedExactLiterals =
+        object.preservedExactLiterals === null
+            ? null
+            : safeInteger(
+                  object.preservedExactLiterals,
+                  "stored_preserved_exact_literals",
+                  0,
+                  requiredExactLiterals
+              );
+    const injectionSafelyFramed = nullableBoolean(
+        object.injectionSafelyFramed,
+        "stored_injection_safely_framed"
+    );
+    const lengthValue =
+        object.lengthBucket === null
+            ? null
+            : enumValue(
+                  object.lengthBucket,
+                  ["shorter", "same", "up_to_2x", "up_to_4x", "over_4x"] as const,
+                  "stored_length_bucket"
+              );
+    const failureReasons = evidenceFailureReasons(object.failureReasons);
+    if (
+        requiredConceptGroups !== caseSpec.requiredConceptGroups.length ||
+        requiredExactLiterals !== caseSpec.exactLiterals.length
+    ) {
+        fail("stored_case_evidence_requirement_mismatch");
+    }
+    if (input.terminalStatus !== "suggested") {
+        const expectedStatus =
+            input.terminalStatus === "unknown" ? "insufficient_evidence" : "fail";
+        const expectedReasons =
+            input.terminalStatus === "failed" ? ["not_suggested"] : [];
+        if (
+            evidenceStatus !== expectedStatus ||
+            distinctFromSource !== null ||
+            lengthWithinBounds !== null ||
+            languageMatched !== null ||
+            matchedConceptGroups !== null ||
+            preservedExactLiterals !== null ||
+            injectionSafelyFramed !== null ||
+            lengthValue !== null ||
+            canonicalBenchmarkJson(failureReasons) !==
+                canonicalBenchmarkJson(expectedReasons)
+        ) {
+            fail("stored_non_suggested_evidence_invalid");
+        }
+    } else {
+        if (
+            distinctFromSource === null ||
+            lengthWithinBounds === null ||
+            languageMatched === null ||
+            matchedConceptGroups === null ||
+            preservedExactLiterals === null ||
+            lengthValue === null ||
+            (caseSpec.injection === null
+                ? injectionSafelyFramed !== null
+                : injectionSafelyFramed === null)
+        ) {
+            fail("stored_suggested_evidence_incomplete");
+        }
+        const expectedReasons: PromptRefinerShadowEvidenceCaseFailure[] = [];
+        if (!distinctFromSource) expectedReasons.push("source_not_changed");
+        if (!lengthWithinBounds) expectedReasons.push("length_out_of_bounds");
+        if (!languageMatched) expectedReasons.push("language_mismatch");
+        if (matchedConceptGroups !== requiredConceptGroups) {
+            expectedReasons.push("required_concept_missing");
+        }
+        if (preservedExactLiterals !== requiredExactLiterals) {
+            expectedReasons.push("exact_literal_missing");
+        }
+        if (injectionSafelyFramed === false) {
+            expectedReasons.push("unsafe_injection_framing");
+        }
+        if (
+            canonicalBenchmarkJson(failureReasons) !==
+                canonicalBenchmarkJson(expectedReasons) ||
+            evidenceStatus !== (expectedReasons.length === 0 ? "pass" : "fail")
+        ) {
+            fail("stored_suggested_evidence_inconsistent");
+        }
+    }
+    return {
+        caseId: caseSpec.id,
+        language: caseSpec.language,
+        category: caseSpec.category,
+        terminalStatus: input.terminalStatus,
+        evidenceStatus,
+        distinctFromSource,
+        lengthWithinBounds,
+        languageMatched,
+        requiredConceptGroups,
+        matchedConceptGroups,
+        requiredExactLiterals,
+        preservedExactLiterals,
+        injectionSafelyFramed,
+        lengthBucket: lengthValue,
+        failureReasons,
+    };
+}
+
 function validateRunCase(
     value: unknown,
     expectedId: string
@@ -733,48 +996,16 @@ function nearestRank(values: number[], percentile: number): number | null {
     return sorted[Math.ceil(percentile * sorted.length) - 1]!;
 }
 
-/**
- * Evaluates one complete synthetic shadow run. Inputs may contain proposal
- * text; outputs deliberately cannot.
- */
-export function evaluatePromptRefinerShadowEvidence(input: {
-    corpus: PromptRefinerShadowCorpus;
-    spec: PromptRefinerShadowEvidenceSpec;
-    cases: unknown;
-}): PromptRefinerShadowEvidenceBundle {
-    const corpus = validatePromptRefinerShadowCorpus(input.corpus);
-    if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
-        fail("corpus_contract_digest_mismatch");
-    }
-    const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
-    if (!Array.isArray(input.cases) || input.cases.length !== 16) {
-        fail("run_requires_16_cases");
-    }
-    const runCases = input.cases.map((candidate, index) =>
-        validateRunCase(candidate, EVIDENCE_CASE_IDS[index]!)
-    );
-    const cases = corpus.cases.map((sourceCase, index) => {
-        const caseSpec = spec.cases[index]!;
-        const runCase = runCases[index]!;
-        if (
-            sourceCase.id !== caseSpec.id ||
-            sourceCase.language !== caseSpec.language ||
-            sourceCase.category !== caseSpec.category
-        ) {
-            fail("corpus_case_contract_mismatch");
-        }
-        return runCase.terminalStatus === "suggested"
-            ? evaluateSuggestedCase(
-                  sourceCase,
-                  caseSpec,
-                  runCase.refinedPrompt!
-              )
-            : failedOrUnknownEvidence(
-                  sourceCase,
-                  caseSpec,
-                  runCase.terminalStatus
-              );
-    });
+type ContentFreeRunFact = Pick<
+    PromptRefinerShadowStoredEvidenceCase,
+    "terminalStatus" | "durationMs" | "costMicroUsd"
+>;
+
+function buildEvidenceBundle(
+    spec: PromptRefinerShadowEvidenceSpec,
+    cases: PromptRefinerShadowCaseEvidence[],
+    runCases: ContentFreeRunFact[]
+): PromptRefinerShadowEvidenceBundle {
     const suggestedCases = runCases.filter(
         (item) => item.terminalStatus === "suggested"
     ).length;
@@ -820,17 +1051,11 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         durations.length === runCases.length ? Math.max(...durations) : null;
     const gateReasons: PromptRefinerShadowEvidenceGateReason[] = [];
     if (passedCases !== spec.thresholds.requiredCasePasses) {
-        if (failedEvidenceCases > 0) {
-            gateReasons.push("case_evidence_failed");
-        }
-        if (incompleteEvidenceCases > 0) {
-            gateReasons.push("case_evidence_incomplete");
-        }
+        if (failedEvidenceCases > 0) gateReasons.push("case_evidence_failed");
+        if (incompleteEvidenceCases > 0) gateReasons.push("case_evidence_incomplete");
     }
     if (passedInjectionCases !== spec.thresholds.requiredInjectionPasses) {
-        if (failedInjectionCases > 0) {
-            gateReasons.push("injection_evidence_failed");
-        }
+        if (failedInjectionCases > 0) gateReasons.push("injection_evidence_failed");
         if (incompleteInjectionCases > 0) {
             gateReasons.push("injection_evidence_incomplete");
         }
@@ -913,4 +1138,122 @@ export function evaluatePromptRefinerShadowEvidence(input: {
             "A passing bundle does not authorize a provider run, product UI, Router coupling or rollout.",
         ],
     };
+}
+
+/** Rebuilds an aggregate using only durable content-free case evidence. */
+export function aggregatePromptRefinerShadowStoredEvidence(input: {
+    corpus: PromptRefinerShadowCorpus;
+    spec: PromptRefinerShadowEvidenceSpec;
+    cases: unknown;
+}): PromptRefinerShadowEvidenceBundle {
+    const corpus = validatePromptRefinerShadowCorpus(input.corpus);
+    if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
+        fail("corpus_contract_digest_mismatch");
+    }
+    const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
+    if (!Array.isArray(input.cases) || input.cases.length !== 16) {
+        fail("stored_run_requires_16_cases");
+    }
+    const rows = input.cases.map((candidate, index) => {
+        const object = strictBenchmarkObject(
+            candidate,
+            ["caseId", "terminalStatus", "evidence", "durationMs", "costMicroUsd"],
+            "stored_evidence_run_case"
+        );
+        if (object.caseId !== EVIDENCE_CASE_IDS[index]) {
+            fail("stored_run_case_id_or_order_mismatch");
+        }
+        const terminalStatus = enumValue(
+            object.terminalStatus,
+            TERMINAL_STATUSES,
+            "stored_terminal_status"
+        );
+        const durationMs =
+            object.durationMs === null
+                ? null
+                : safeInteger(object.durationMs, "stored_duration_ms", 0, 60_000);
+        const costMicroUsd =
+            object.costMicroUsd === null
+                ? null
+                : safeInteger(
+                      object.costMicroUsd,
+                      "stored_cost_micro_usd",
+                      0,
+                      100_000_000
+                  );
+        if (terminalStatus === "suggested" && durationMs === null) {
+            fail("stored_suggested_case_missing_duration");
+        }
+        if (terminalStatus === "failed" && durationMs === null) {
+            fail("stored_failed_case_missing_duration");
+        }
+        if (
+            terminalStatus === "unknown" &&
+            (durationMs !== null || costMicroUsd !== null)
+        ) {
+            fail("stored_unknown_case_claims_metrics");
+        }
+        return {
+            caseId: EVIDENCE_CASE_IDS[index]!,
+            terminalStatus,
+            evidence: validatePromptRefinerShadowCaseEvidence({
+                value: object.evidence,
+                spec,
+                caseIndex: index,
+                terminalStatus,
+            }),
+            durationMs,
+            costMicroUsd,
+        };
+    });
+    return buildEvidenceBundle(
+        spec,
+        rows.map((row) => row.evidence),
+        rows
+    );
+}
+
+/**
+ * Evaluates one complete synthetic shadow run. Inputs may contain proposal
+ * text; outputs deliberately cannot.
+ */
+export function evaluatePromptRefinerShadowEvidence(input: {
+    corpus: PromptRefinerShadowCorpus;
+    spec: PromptRefinerShadowEvidenceSpec;
+    cases: unknown;
+}): PromptRefinerShadowEvidenceBundle {
+    const corpus = validatePromptRefinerShadowCorpus(input.corpus);
+    if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
+        fail("corpus_contract_digest_mismatch");
+    }
+    const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
+    if (!Array.isArray(input.cases) || input.cases.length !== 16) {
+        fail("run_requires_16_cases");
+    }
+    const runCases = input.cases.map((candidate, index) =>
+        validateRunCase(candidate, EVIDENCE_CASE_IDS[index]!)
+    );
+    const cases = corpus.cases.map((sourceCase, index) => {
+        const caseSpec = spec.cases[index]!;
+        const runCase = runCases[index]!;
+        if (
+            sourceCase.id !== caseSpec.id ||
+            sourceCase.language !== caseSpec.language ||
+            sourceCase.category !== caseSpec.category
+        ) {
+            fail("corpus_case_contract_mismatch");
+        }
+        return runCase.terminalStatus === "suggested"
+            ? evaluateSuggestedCase(
+                  sourceCase,
+                  caseSpec,
+                  runCase.refinedPrompt!
+              )
+            : failedOrUnknownEvidence(
+                  sourceCase,
+                  caseSpec,
+                  runCase.terminalStatus
+              );
+    });
+    return buildEvidenceBundle(spec, cases, runCases);
 }

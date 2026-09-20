@@ -18,6 +18,7 @@ import {
     PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
     PROMPT_REFINER_RESERVATION_REFUSALS,
     PROMPT_REFINER_RESERVATION_STAGE_ID,
+    PROMPT_REFINER_RESERVATION_STAGE_IDS,
     PROMPT_REFINER_RESERVATION_STAGE_STATUSES,
     PROMPT_REFINER_RESERVATION_STATUSES,
     PROMPT_REFINER_RESERVATION_TTL_MS,
@@ -45,16 +46,20 @@ const validStage = (overrides = {}) => ({
 test("reservation contract freezes one bounded, content-free authority", () => {
     assert.equal(
         PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
-        "prompt-refiner-reservation-authority-v1"
+        "prompt-refiner-reservation-authority-v2"
     );
-    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v1");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v2");
+    assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_IDS], [
+        "prompt-refiner-shadow-v1",
+        "prompt-refiner-shadow-v2",
+    ]);
     assert.equal(PROMPT_REFINER_RESERVATION_TTL_MS, 300_000);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.perRequestCostMicroUsd, 24_916);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.maxReservations, 100);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.costCeilingMicroUsd, 2_491_600);
     assert.equal(
         PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-        "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f"
+        "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1"
     );
     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_STATUSES], [
         "approved",

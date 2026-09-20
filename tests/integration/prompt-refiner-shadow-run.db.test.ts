@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { before, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
 
+import corpusJson from "@/docs/ops/prompt-refiner-shadow/corpus-v1.json";
+import evidenceSpecJson from "@/docs/ops/prompt-refiner-shadow/evidence-spec-v1.json";
+
 import { prisma } from "@/lib/prisma";
 import {
     consumePromptRefinerReservation,
@@ -32,8 +35,14 @@ import {
     PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
 } from "@/lib/promptRefinerShadowRunContract";
 import {
+    evaluatePromptRefinerShadowCaseEvidence,
+    validatePromptRefinerShadowEvidenceSpec,
+} from "@/lib/promptRefinerShadowEvidenceCore";
+import { validatePromptRefinerShadowCorpus } from "@/lib/promptRefinerShadowHarness";
+import {
     createPromptRefinerShadowRun,
     promptRefinerShadowRunPreview,
+    readPromptRefinerShadowEvidenceBundle,
     readPromptRefinerShadowExecutionState,
     recordPromptRefinerShadowDispatchIntent,
     recordPromptRefinerShadowTerminal,
@@ -162,6 +171,23 @@ const usage = (costUpperBoundMicroUsd: number | null = 44) => ({
     reasoningTokens: costUpperBoundMicroUsd === null ? null : 8,
     costUpperBoundMicroUsd,
 });
+
+const corpus = validatePromptRefinerShadowCorpus(corpusJson);
+const evidenceSpec = validatePromptRefinerShadowEvidenceSpec(evidenceSpecJson);
+const evidenceFor = (
+    caseIndex: number,
+    terminalStatus: "suggested" | "failed" | "unknown"
+) =>
+    evaluatePromptRefinerShadowCaseEvidence({
+        corpus,
+        spec: evidenceSpec,
+        caseIndex,
+        terminalStatus,
+        refinedPrompt:
+            terminalStatus === "suggested"
+                ? `${corpus.cases[caseIndex]!.sourceText} refined`
+                : null,
+    });
 
 before(async () => {
     await ensureRuntimeModel();
@@ -323,11 +349,42 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
     await approveStage();
     await approveRun();
     const { attempt } = await dispatch({ requestId: "shadow_db_terminal_1", caseIndex: 0 });
+    await assert.rejects(
+        recordPromptRefinerShadowTerminal({
+            attemptId: attempt.id,
+            terminalReason: "suggested",
+            durationMs: 12,
+            usage: usage(44),
+            evidence: {
+                ...evidenceFor(0, "suggested"),
+                sourceText: corpus.cases[0]!.sourceText,
+            },
+        }),
+        (error: unknown) =>
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "PROMPT_REFINER_SHADOW_EVIDENCE_INVALID"
+    );
+    assert.equal(
+        await prisma.adminAuditLog.count({
+            where: { action: "prompt_refiner.shadow_dispatch.terminal_recorded" },
+        }),
+        0
+    );
+    assert.equal(
+        (
+            await prisma.promptRefinerShadowAttempt.findUniqueOrThrow({
+                where: { id: attempt.id },
+            })
+        ).status,
+        "dispatch_intent"
+    );
     const first = await recordPromptRefinerShadowTerminal({
         attemptId: attempt.id,
         terminalReason: "suggested",
         durationMs: 12,
         usage: usage(44),
+        evidence: evidenceFor(0, "suggested"),
     });
     assert.equal(first.created, true);
     assert.equal(first.attempt.status, "terminal");
@@ -339,6 +396,7 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
         terminalReason: "suggested",
         durationMs: 12,
         usage: usage(44),
+        evidence: evidenceFor(0, "suggested"),
     });
     assert.equal(replay.replayed, true);
     await assert.rejects(
@@ -347,6 +405,7 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
             terminalReason: "provider_error",
             durationMs: 12,
             usage: usage(null),
+            evidence: evidenceFor(0, "failed"),
         }),
         (error: unknown) =>
             error instanceof Error &&
@@ -358,6 +417,71 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
             where: { action: "prompt_refiner.shadow_dispatch.terminal_recorded" },
         }),
         1
+    );
+});
+
+test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {
+    await approveStage();
+    await approveRun();
+    for (let caseIndex = 0; caseIndex < PROMPT_REFINER_SHADOW_CASE_IDS.length; caseIndex += 1) {
+        const { attempt } = await dispatch({
+            requestId: `shadow_db_evidence_${caseIndex}`,
+            caseIndex,
+        });
+        await recordPromptRefinerShadowTerminal({
+            attemptId: attempt.id,
+            terminalReason: "provider_error",
+            durationMs: 10 + caseIndex,
+            usage: usage(null),
+            evidence: evidenceFor(caseIndex, "failed"),
+        });
+    }
+
+    const bundle = await readPromptRefinerShadowEvidenceBundle();
+    assert.ok(bundle);
+    assert.equal(bundle.gateOutcome, "fail");
+    assert.equal(bundle.summary.attemptedCases, 16);
+    assert.equal(bundle.summary.suggestedCases, 0);
+    assert.equal(bundle.summary.failedCases, 16);
+    assert.equal(bundle.summary.unknownCases, 0);
+    assert.equal(bundle.summary.costReportedCases, 0);
+    assert.equal(bundle.summary.totalCostMicroUsd, null);
+    assert.equal(bundle.summary.latencyReportedCases, 16);
+    assert.equal(bundle.summary.latencyMaxMs, 25);
+    assert.ok(bundle.gateReasons.includes("terminal_failure_present"));
+    assert.ok(bundle.gateReasons.includes("cost_incomplete"));
+    assert.equal(bundle.cases.length, 16);
+
+    const [attempts, audits, run] = await Promise.all([
+        prisma.promptRefinerShadowAttempt.findMany({
+            where: { runId: PROMPT_REFINER_SHADOW_RUN_ID },
+            orderBy: { caseIndex: "asc" },
+        }),
+        prisma.adminAuditLog.findMany({
+            where: { action: "prompt_refiner.shadow_dispatch.terminal_recorded" },
+            orderBy: { createdAt: "asc" },
+        }),
+        prisma.promptRefinerShadowRun.findUniqueOrThrow({
+            where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
+        }),
+    ]);
+    assert.equal(run.status, "completed");
+    assert.equal(run.terminalCount, 16);
+    assert.equal(attempts.length, 16);
+    assert.equal(audits.length, 16);
+    for (const attempt of attempts) {
+        assert.notEqual(attempt.evidence, null);
+        const audit = audits.find((candidate) => candidate.targetId === attempt.id);
+        assert.ok(audit);
+        assert.deepEqual(
+            (audit.metadata as { evidence: unknown }).evidence,
+            attempt.evidence
+        );
+    }
+    const serialized = JSON.stringify({ bundle, attempts, audits });
+    assert.doesNotMatch(
+        serialized,
+        /sourceText|refinedPrompt|responseBody|credential/i
     );
 });
 
@@ -374,6 +498,7 @@ test("unknown terminal latches the run and refuses every later case without redi
         terminalReason: "unknown_after_dispatch",
         durationMs: 60_000,
         usage: usage(null),
+        evidence: evidenceFor(0, "unknown"),
     });
     assert.equal(terminal.run.status, "stopped_unknown");
     assert.equal(terminal.run.stopReason, "unknown_after_dispatch");
@@ -384,6 +509,7 @@ test("unknown terminal latches the run and refuses every later case without redi
         terminalReason: "suggested",
         durationMs: 12,
         usage: usage(44),
+        evidence: evidenceFor(1, "suggested"),
     });
     assert.equal(catchUp.run.status, "stopped_unknown");
     assert.equal(catchUp.run.terminalCount, 2);
@@ -527,6 +653,7 @@ test("sweep reports a conflicting known receipt race without discarding prior cl
             terminalReason: "suggested",
             durationMs: 12,
             usage: usage(44),
+            evidence: evidenceFor(1, "suggested"),
         });
         [sweep] = await Promise.all([sweepPromise, knownReceiptPromise]);
     } finally {

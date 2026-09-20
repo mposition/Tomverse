@@ -130,6 +130,7 @@ export async function POST(request: Request) {
                     status: result.run.status,
                     runContractDigest: result.run.runContractDigest,
                     corpusDigest: result.run.corpusDigest,
+                    evidenceSpecDigest: result.run.evidenceSpecDigest,
                     adapterVersion: result.run.adapterVersion,
                     environment: "staging",
                     deploymentId: result.run.runtimeDeploymentId,

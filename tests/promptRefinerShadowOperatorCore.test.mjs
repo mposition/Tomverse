@@ -100,6 +100,7 @@ const runBody = () => ({
     stageApprovalExpiresAt: "2026-09-21T02:00:00.000Z",
     runContractDigest: digest("6"),
     corpusDigest: "b".repeat(64),
+    evidenceSpecDigest: "c".repeat(64),
     adapterVersion: "prompt-refiner-openai-sdk-adapter-v1",
     provider: contract.provider,
     modelId: contract.modelId,
@@ -136,7 +137,26 @@ const executionBody = () => ({
     runContractDigest: digest("6"),
     enabled: true,
     confirmation: contract.executionConfirmation,
+    evidence: null,
     productAdapterReady: false,
+  },
+});
+
+const evidenceBody = () => ({
+  gateOutcome: "pass",
+  gateReasons: [],
+  summary: {
+    attemptedCases: 16,
+    suggestedCases: 16,
+    failedCases: 0,
+    unknownCases: 0,
+    passedCases: 16,
+    passedInjectionCases: 2,
+    costReportedCases: 16,
+    totalCostMicroUsd: 12_345,
+    latencyReportedCases: 16,
+    latencyP90Ms: 900,
+    latencyMaxMs: 1_200,
   },
 });
 
@@ -148,6 +168,31 @@ test("the exact frozen stage, run, and execution previews are accepted", () => {
   const execution = parsePromptRefinerExecutionPreview(executionBody(), run);
   assert.ok(execution);
   assert.equal(run.corpusDigest, "b".repeat(64));
+  assert.equal(run.evidenceSpecDigest, "c".repeat(64));
+});
+
+test("a completed content-free evidence summary is accepted and malformed summaries fail closed", () => {
+  const stage = parsePromptRefinerStagePreview(stageBody());
+  assert.ok(stage);
+  const run = parsePromptRefinerRunPreview(runBody(), stage);
+  assert.ok(run);
+  const valid = executionBody();
+  valid.execution.evidence = evidenceBody();
+  assert.ok(parsePromptRefinerExecutionPreview(valid, run));
+
+  for (const mutate of [
+    (evidence) => (evidence.sourceText = "must not cross the API"),
+    (evidence) => (evidence.summary.attemptedCases = 15),
+    (evidence) => (evidence.summary.unknownCases = 1),
+    (evidence) => (evidence.summary.latencyP90Ms = 1_300),
+    (evidence) => evidence.gateReasons.push("unknown_reason"),
+    (evidence) => evidence.gateReasons.push("unknown_present"),
+  ]) {
+    const candidate = executionBody();
+    candidate.execution.evidence = evidenceBody();
+    mutate(candidate.execution.evidence);
+    assert.equal(parsePromptRefinerExecutionPreview(candidate, run), null);
+  }
 });
 
 test("approval bodies reuse only exact server-bound values", () => {
@@ -189,6 +234,7 @@ test("cost, model, deployment, and run-contract drift fail closed", () => {
     (preview) => (preview.modelId = "another-model"),
     (preview) => (preview.deploymentId = "deployment-2"),
     (preview) => (preview.corpusDigest = digest("b")),
+    (preview) => (preview.evidenceSpecDigest = digest("c")),
   ]) {
     const candidate = structuredClone(runBody());
     mutate(candidate.preview);

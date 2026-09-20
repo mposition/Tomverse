@@ -1,5 +1,9 @@
 # Prompt Refiner receipt와 관측 계약
 
+구현 승인 기록: `mposition`, 2026-09-21 (Australia/Brisbane). 승인 범위는
+confirmatory shadow v4 계약과 content-free evidence writer의 구현·독립 검토까지이며,
+provider 호출·유료 실행·제품 노출·Router 결합은 포함하지 않는다.
+
 상태: **provider-independent 데이터·실행 사전등록·예약 authority 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를

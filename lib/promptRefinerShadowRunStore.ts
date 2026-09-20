@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import { Prisma, type ModelRegistryEntry } from "@prisma/client";
 
+import corpusJson from "@/docs/ops/prompt-refiner-shadow/corpus-v1.json";
+import evidenceSpecJson from "@/docs/ops/prompt-refiner-shadow/evidence-spec-v1.json";
+
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
     ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
@@ -63,11 +66,28 @@ import {
     promptRefinerShadowRunPreviewBindingDigest,
     type PromptRefinerShadowRunSourceManifest,
 } from "@/lib/promptRefinerShadowRunContract";
-import { PROMPT_REFINER_SHADOW_CORPUS_DIGEST } from "@/lib/promptRefinerShadowHarness";
+import {
+    aggregatePromptRefinerShadowStoredEvidence,
+    evaluatePromptRefinerShadowCaseEvidence,
+    PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
+    validatePromptRefinerShadowCaseEvidence,
+    validatePromptRefinerShadowEvidenceSpec,
+    type PromptRefinerShadowCaseEvidence,
+    type PromptRefinerShadowEvidenceBundle,
+} from "@/lib/promptRefinerShadowEvidenceCore";
+import {
+    PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
+    validatePromptRefinerShadowCorpus,
+} from "@/lib/promptRefinerShadowHarness";
 import {
     writePromptRefinerDispatchAudit,
     writePromptRefinerTerminalAudit,
 } from "@/lib/promptRefinerShadowSystemAudit";
+
+const shadowCorpus = validatePromptRefinerShadowCorpus(corpusJson);
+const shadowEvidenceSpec = validatePromptRefinerShadowEvidenceSpec(
+    evidenceSpecJson
+);
 
 type PromptRefinerShadowDispatchFact = {
     requestId: string;
@@ -114,6 +134,7 @@ type StoredRun = {
     runContractVersion: string;
     runContractDigest: string;
     corpusDigest: string;
+    evidenceSpecDigest: string | null;
     adapterVersion: string;
     status: string;
     perRequestCostMicroUsd: bigint;
@@ -253,6 +274,7 @@ const runApprovalMetadata = (run: StoredRun) => ({
     runContractVersion: run.runContractVersion,
     runContractDigest: run.runContractDigest,
     corpusDigest: run.corpusDigest,
+    evidenceSpecDigest: run.evidenceSpecDigest,
     adapterVersion: run.adapterVersion,
     runtimeSourceManifestDigest: run.runtimeSourceManifestDigest,
     previewBindingDigest: run.previewBindingDigest,
@@ -351,6 +373,7 @@ const runMatchesRuntime = (
         run.runContractVersion === PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION &&
         run.runContractDigest === PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST &&
         run.corpusDigest === PROMPT_REFINER_SHADOW_CORPUS_DIGEST &&
+        run.evidenceSpecDigest === PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST &&
         run.adapterVersion === PROMPT_REFINER_SHADOW_ADAPTER_VERSION &&
         ["approved", "running"].includes(run.status) &&
         run.perRequestCostMicroUsd ===
@@ -431,6 +454,7 @@ export const readPromptRefinerShadowExecutionState = async (): Promise<
             run.runContractVersion !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION ||
             run.runContractDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST ||
             run.corpusDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST ||
+            run.evidenceSpecDigest !== PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST ||
             run.adapterVersion !== PROMPT_REFINER_SHADOW_ADAPTER_VERSION ||
             run.perRequestCostMicroUsd !==
                 BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD) ||
@@ -628,6 +652,7 @@ export const createPromptRefinerShadowRun = async (input: {
             runContractVersion: PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
             runContractDigest: PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
             corpusDigest: PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
+            evidenceSpecDigest: PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
             adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
             status: "approved",
             perRequestCostMicroUsd: BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD),
@@ -869,6 +894,15 @@ const terminalInputIsValid = (
         telemetry.usage.costUpperBoundMicroUsd <=
             PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD);
 
+const evidenceTerminalStatus = (
+    reason: PromptRefinerTerminalReason
+): "suggested" | "failed" | "unknown" =>
+    reason === "suggested"
+        ? "suggested"
+        : reason === "unknown_after_dispatch"
+          ? "unknown"
+          : "failed";
+
 const terminalValuesEqual = (
     attempt: {
         terminalReason: string | null;
@@ -879,9 +913,11 @@ const terminalValuesEqual = (
         outputTokens: number | null;
         reasoningTokens: number | null;
         actualCostMicroUsd: bigint | null;
+        evidence: unknown;
     },
     reason: PromptRefinerTerminalReason,
-    telemetry: TerminalTelemetry
+    telemetry: TerminalTelemetry,
+    evidence: PromptRefinerShadowCaseEvidence
 ) =>
     attempt.terminalReason === reason &&
     attempt.durationMs === telemetry.durationMs &&
@@ -893,13 +929,15 @@ const terminalValuesEqual = (
     attempt.actualCostMicroUsd ===
         (telemetry.usage.costUpperBoundMicroUsd === null
             ? null
-            : BigInt(telemetry.usage.costUpperBoundMicroUsd));
+            : BigInt(telemetry.usage.costUpperBoundMicroUsd)) &&
+    canonicalBenchmarkJson(attempt.evidence) === canonicalBenchmarkJson(evidence);
 
 export const recordPromptRefinerShadowTerminal = async (input: {
     attemptId: string;
     terminalReason: PromptRefinerTerminalReason;
     durationMs: number;
     usage: PromptRefinerShadowUsage;
+    evidence: unknown;
 }) => {
     if (
         !/^[A-Za-z0-9_-]{1,128}$/.test(input.attemptId) ||
@@ -931,8 +969,43 @@ export const recordPromptRefinerShadowTerminal = async (input: {
         const attempt = await tx.promptRefinerShadowAttempt.findUniqueOrThrow({
             where: { id: input.attemptId },
         });
+        if (
+            run.runContractDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST ||
+            run.evidenceSpecDigest !== PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST
+        ) {
+            refuse(
+                409,
+                "PROMPT_REFINER_SHADOW_EVIDENCE_RUN_MISMATCH",
+                "The attempt is not bound to the reviewed evidence contract."
+            );
+        }
+        const evidence: PromptRefinerShadowCaseEvidence = (() => {
+            try {
+                return validatePromptRefinerShadowCaseEvidence({
+                    value: input.evidence,
+                    spec: shadowEvidenceSpec,
+                    caseIndex: attempt.caseIndex,
+                    terminalStatus: evidenceTerminalStatus(
+                        input.terminalReason
+                    ),
+                });
+            } catch {
+                return refuse(
+                    400,
+                    "PROMPT_REFINER_SHADOW_EVIDENCE_INVALID",
+                    "The terminal evidence is invalid."
+                );
+            }
+        })();
         if (attempt.status === "terminal") {
-            if (terminalValuesEqual(attempt, input.terminalReason, input)) {
+            if (
+                terminalValuesEqual(
+                    attempt,
+                    input.terminalReason,
+                    input,
+                    evidence
+                )
+            ) {
                 return { created: false, replayed: true, attempt, run };
             }
             refuse(409, "PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT", "A different terminal receipt already exists.");
@@ -962,6 +1035,7 @@ export const recordPromptRefinerShadowTerminal = async (input: {
             outputTokens: input.usage.outputTokens,
             reasoningTokens: input.usage.reasoningTokens,
             actualCostMicroUsd: input.usage.costUpperBoundMicroUsd,
+            evidence: evidence as unknown as Prisma.InputJsonValue,
         });
         const updatedCount = await tx.promptRefinerShadowAttempt.updateMany({
             where: { id: attempt.id, status: "dispatch_intent" },
@@ -980,6 +1054,7 @@ export const recordPromptRefinerShadowTerminal = async (input: {
                     input.usage.costUpperBoundMicroUsd === null
                         ? null
                         : BigInt(input.usage.costUpperBoundMicroUsd),
+                evidence: evidence as unknown as Prisma.InputJsonValue,
                 terminalAuditLogId,
             },
         });
@@ -1025,6 +1100,111 @@ export const recordPromptRefinerShadowTerminal = async (input: {
     });
 };
 
+/**
+ * Rebuilds the reviewed bundle only from durable, content-free attempt facts.
+ * Incomplete runs return null; malformed or differently bound completed rows
+ * fail closed instead of being rendered as evidence.
+ */
+export const readPromptRefinerShadowEvidenceBundle = async (): Promise<
+    PromptRefinerShadowEvidenceBundle | null
+> => {
+    const run = await prisma.promptRefinerShadowRun.findUnique({
+        where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
+        select: {
+            runContractDigest: true,
+            corpusDigest: true,
+            evidenceSpecDigest: true,
+            maxDispatches: true,
+            terminalCount: true,
+        },
+    });
+    if (!run) return null;
+    if (
+        run.runContractDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST ||
+        run.corpusDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST ||
+        run.evidenceSpecDigest !== PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST
+    ) {
+        refuse(
+            409,
+            "PROMPT_REFINER_SHADOW_EVIDENCE_RUN_MISMATCH",
+            "The stored run is not bound to the reviewed evidence contract."
+        );
+    }
+    if (
+        run.terminalCount !== run.maxDispatches ||
+        run.maxDispatches !== PROMPT_REFINER_SHADOW_CASE_IDS.length
+    ) {
+        return null;
+    }
+    const attempts = await prisma.promptRefinerShadowAttempt.findMany({
+        where: { runId: PROMPT_REFINER_SHADOW_RUN_ID },
+        orderBy: { caseIndex: "asc" },
+        select: {
+            caseId: true,
+            caseIndex: true,
+            status: true,
+            terminalReason: true,
+            evidence: true,
+            durationMs: true,
+            actualCostMicroUsd: true,
+        },
+    });
+    if (attempts.length !== PROMPT_REFINER_SHADOW_CASE_IDS.length) {
+        refuse(
+            409,
+            "PROMPT_REFINER_SHADOW_EVIDENCE_INCOMPLETE",
+            "The completed run does not contain every evidence case."
+        );
+    }
+    const cases = attempts.map((attempt, index) => {
+        if (
+            attempt.caseIndex !== index ||
+            attempt.caseId !== PROMPT_REFINER_SHADOW_CASE_IDS[index] ||
+            attempt.status !== "terminal" ||
+            typeof attempt.terminalReason !== "string" ||
+            !DISPATCH_TERMINAL_REASONS.has(
+                attempt.terminalReason as PromptRefinerTerminalReason
+            ) ||
+            attempt.evidence === null
+        ) {
+            refuse(
+                409,
+                "PROMPT_REFINER_SHADOW_EVIDENCE_INVALID",
+                "The completed run contains invalid evidence facts."
+            );
+        }
+        return {
+            caseId: attempt.caseId,
+            terminalStatus: evidenceTerminalStatus(
+                attempt.terminalReason as PromptRefinerTerminalReason
+            ),
+            evidence: attempt.evidence,
+            durationMs:
+                attempt.terminalReason === "unknown_after_dispatch"
+                    ? null
+                    : attempt.durationMs,
+            costMicroUsd:
+                attempt.terminalReason === "unknown_after_dispatch" ||
+                attempt.actualCostMicroUsd === null
+                    ? null
+                    : Number(attempt.actualCostMicroUsd),
+        };
+    });
+    try {
+        return aggregatePromptRefinerShadowStoredEvidence({
+            corpus: shadowCorpus,
+            spec: shadowEvidenceSpec,
+            cases,
+        });
+    } catch {
+        return refuse(
+            409,
+            "PROMPT_REFINER_SHADOW_EVIDENCE_INVALID",
+            "The completed run evidence could not be verified."
+        );
+    }
+};
+
 const unknownTelemetry = (): TerminalTelemetry => ({
     durationMs: PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
     usage: {
@@ -1062,7 +1242,7 @@ export const sweepPromptRefinerShadowUnknowns = async () => {
             },
             orderBy: [{ dispatchIntentAt: "asc" }, { id: "asc" }],
             take: PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH,
-            select: { id: true },
+            select: { id: true, caseIndex: true },
         });
         return { observedAt, stale };
     });
@@ -1073,6 +1253,13 @@ export const sweepPromptRefinerShadowUnknowns = async () => {
             const result = await recordPromptRefinerShadowTerminal({
                 attemptId: attempt.id,
                 terminalReason: "unknown_after_dispatch",
+                evidence: evaluatePromptRefinerShadowCaseEvidence({
+                    corpus: shadowCorpus,
+                    spec: shadowEvidenceSpec,
+                    caseIndex: attempt.caseIndex,
+                    terminalStatus: "unknown",
+                    refinedPrompt: null,
+                }),
                 ...unknownTelemetry(),
             });
             if (result.created || result.replayed) closed.push(attempt.id);

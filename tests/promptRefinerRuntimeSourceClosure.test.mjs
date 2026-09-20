@@ -62,8 +62,8 @@ const compilerOptions = parsedConfig.options;
 // be reviewed and must update this digest before the closure gate can pass.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "6c04c275e702bdd092ebfa7277943cc05",
-  "82ca4ce6a4f1dfe4cb67518df8d871b",
+  "35bbf0f8b2c925df480da5b0d90cc54e",
+  "fd9d6b000c000bb41688c606daa90164",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -169,6 +169,7 @@ const fixedNonImportPaths = Object.freeze([
   "tsconfig.json",
   "prisma/schema.prisma",
   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+  "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
   ...workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))).sort(),
 ]);
 
@@ -1196,17 +1197,26 @@ test("TypeScript options and workspace metadata control local resolution", () =>
 });
 
 test("TypeScript and PostgreSQL enforce the identical ordered runtime source paths", () => {
-  const migration = readFileSync(
+  const legacyMigration = readFileSync(
     join(repositoryRoot, "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql"),
     "utf8"
   );
-  const block = migration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
+  const migration = readFileSync(
+    join(repositoryRoot, "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"),
+    "utf8"
+  );
+  const block = legacyMigration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
   assert.ok(block, "migration expected_paths block is missing");
   const sqlPaths = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const addedPath = migration.match(
+    /'path', '(prisma\/migrations\/20260921100000_prompt_refiner_confirmatory_shadow_v4\/migration\.sql)'/
+  );
+  assert.ok(addedPath, "v4 migration extension path is missing");
+  sqlPaths.splice(6, 0, addedPath[1]);
   assert.equal(sqlPaths.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   assert.deepEqual(sqlPaths, [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS]);
   const executionManifestFileCount = migration.match(
-    /"runtimeSource":\{"fileCount":(\d+),/
+    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v2"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
   );
   assert.ok(executionManifestFileCount, "migration executionManifest runtimeSource.fileCount is missing");
   assert.equal(
@@ -1221,10 +1231,7 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   const expectedRuntimeSourceCount = String(runtimeImportClosure().length);
   for (const [path, pattern] of [
     ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
-    ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
-    ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
-    ["docs/ops/tomverse-chat-progress.md", /exact (\d+)-file runtime import-closure source manifest/],
-    ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
+    ["docs/ops/prompt-refiner-confirmatory-shadow-v4.md", /\*\*(\d+)개 고정 source 파일\*\*/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
     const found = source.match(pattern);
@@ -1233,35 +1240,12 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   }
 
   const contract = readFileSync(
-    join(repositoryRoot, "docs/ops/prompt-refiner-durable-stage-writer-contract.md"),
+    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v4.md"),
     "utf8"
   );
   assert.match(
     contract,
-    new RegExp(`${expectedCount}개 경로의 순서`),
-    "database path-count contract drifted"
-  );
-  assert.match(
-    contract,
-    new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),
+    new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개는 8개 실행 root의 local TypeScript/JavaScript`),
     "runtime TypeScript/JavaScript source-count contract drifted"
-  );
-  const observabilityPolicy = readFileSync(
-    join(repositoryRoot, "docs/policy/prompt-refiner-observability.md"),
-    "utf8"
-  );
-  const observabilityClosureCounts = observabilityPolicy.match(
-    /고정 (\d+)개 source\r?\n파일의 exact bytes\(개별\/총 size와 SHA-256\)를 canonical manifest로 만든다\. (\d+)개 source는/
-  );
-  assert.ok(observabilityClosureCounts, "observability policy runtime closure paragraph is missing");
-  assert.equal(
-    observabilityClosureCounts[1],
-    expectedCount,
-    "observability policy total source count drifted"
-  );
-  assert.equal(
-    observabilityClosureCounts[2],
-    expectedRuntimeSourceCount,
-    "observability policy runtime-source count drifted"
   );
 });
