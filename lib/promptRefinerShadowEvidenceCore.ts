@@ -739,7 +739,10 @@ export function evaluatePromptRefinerShadowEvidence(input: {
     spec: PromptRefinerShadowEvidenceSpec;
     cases: unknown;
 }): PromptRefinerShadowEvidenceBundle {
-    validatePromptRefinerShadowCorpus(input.corpus);
+    const corpus = validatePromptRefinerShadowCorpus(input.corpus);
+    if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
+        fail("corpus_contract_digest_mismatch");
+    }
     const spec = validatePromptRefinerShadowEvidenceSpec(input.spec);
     if (!Array.isArray(input.cases) || input.cases.length !== 16) {
         fail("run_requires_16_cases");
@@ -747,7 +750,7 @@ export function evaluatePromptRefinerShadowEvidence(input: {
     const runCases = input.cases.map((candidate, index) =>
         validateRunCase(candidate, EVIDENCE_CASE_IDS[index]!)
     );
-    const cases = input.corpus.cases.map((sourceCase, index) => {
+    const cases = corpus.cases.map((sourceCase, index) => {
         const caseSpec = spec.cases[index]!;
         const runCase = runCases[index]!;
         if (
@@ -825,9 +828,19 @@ export function evaluatePromptRefinerShadowEvidence(input: {
             gateReasons.push("latency_max_exceeded");
         }
     }
-    const insufficient = gateReasons.some((reason) =>
+    const incomplete = gateReasons.some((reason) =>
         ["unknown_present", "cost_incomplete", "latency_incomplete"].includes(reason)
     );
+    const conclusiveFailure =
+        cases.some((item) => item.evidenceStatus === "fail") ||
+        gateReasons.some((reason) =>
+            [
+                "terminal_failure_present",
+                "cost_threshold_exceeded",
+                "latency_p90_exceeded",
+                "latency_max_exceeded",
+            ].includes(reason)
+        );
     return {
         schemaVersion: PROMPT_REFINER_SHADOW_EVIDENCE_BUNDLE_VERSION,
         purpose: "development-only",
@@ -839,9 +852,11 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         gateOutcome:
             gateReasons.length === 0
                 ? "pass"
-                : insufficient
-                  ? "insufficient_evidence"
-                  : "fail",
+                : conclusiveFailure
+                  ? "fail"
+                  : incomplete
+                    ? "insufficient_evidence"
+                    : "fail",
         gateReasons,
         summary: {
             attemptedCases: 16,

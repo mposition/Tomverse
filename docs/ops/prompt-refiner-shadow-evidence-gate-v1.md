@@ -84,13 +84,17 @@ The following thresholds are frozen in the spec:
 
 Nearest-rank p90 is computed from all 16 case durations. Cost and latency are
 usable only when all 16 rows report them. Missing telemetry makes the aggregate
-`insufficient_evidence`, while a known threshold miss makes it `fail`.
+`insufficient_evidence` only when no conclusive failure is present. A known
+case, terminal, cost or latency failure takes precedence and makes the result
+`fail` even when another row also has incomplete telemetry.
 
 The cost number is an evidence threshold equal to the already reviewed
 16-dispatch stage ceiling; it is not spending authority. The latency thresholds
 were chosen after the 2026-09-21 exploratory v3 run reported p90 4,018 ms and
-maximum 4,110 ms. Consequently, that earlier run did **not** preregister these
-thresholds and cannot be relabelled as their confirmatory pass.
+maximum 4,110 ms. The content-free source record, run id and aggregate receipt
+are preserved in [Tomverse Chat progress](tomverse-chat-progress.md#2026-09-21-prompt-refiner-shadow-v3-one-time-staging-result).
+Consequently, that earlier run did **not** preregister these thresholds and
+cannot be relabelled as their confirmatory pass.
 
 ## 5. Historical v3 evidence cannot be upgraded retroactively
 

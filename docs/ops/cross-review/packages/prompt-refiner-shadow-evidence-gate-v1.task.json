@@ -17,6 +17,7 @@
     "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
     "docs/ops/prompt-refiner-shadow-harness.md",
     "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+    "docs/ops/tomverse-chat-progress.md",
     "docs/policy/prompt-refiner-observability.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",
     "lib/promptRefinerShadowEvidenceCore.ts",

@@ -1409,3 +1409,42 @@ system audit과 DB trigger에 결속된다. maintenance는 durable sweeper만 im
    durable receipt를 먼저 조사한다.
 5. 의미 보존·행동상 주입 저항·비용·지연 gate를 통과할 때만 제안형 UI를 default-off로
    연결하고, 사용자 채택·거절 evidence 뒤 Refiner→Router full-catalog 실험으로 진행한다.
+
+## 2026-09-21 Prompt Refiner shadow v3 one-time staging result
+
+owner가 승인한 고정 합성 corpus 16건의 `prompt-refiner-shadow-run-v3`를 staging에서
+정확히 한 번 실행했다. durable content-free run/attempt receipt가 기록한 결과는
+16/16 dispatch·terminal 완료, `suggested` 16건, failed·unknown·retry 각 0건이다.
+입력 2,927 tokens, 출력 1,909 tokens, reasoning 1,334 tokens였고 총비용은
+2,887 microUSD(US$0.002887)로 동결된 398,656 microUSD ceiling 안이었다.
+지연은 최소 1,964 ms, p50 2,805 ms, p90 4,018 ms, 최대 4,110 ms였다.
+
+이 기록의 source of record는 staging의 owner-only durable run receipt이며 run id가
+위 exact contract를 식별한다. refined prompt bytes는 strict parsing 뒤 폐기됐고 prompt,
+proposal, excerpt, 사용자 identity는 이 progress 기록에도 남기지 않았다. 따라서 이 실행은
+reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-injection 저항을 소급 증명하지
+않는다. 실행 뒤 두 shadow execution flag를 제거했고 cleanup deployment
+`65dc3179-16cb-485d-b4a7-af8fbe65e5e4`가 merge SHA
+`ab80900972673eea516c53a0fb260b70b6db893f`로 SUCCESS임을 확인했다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 72%** (주관적 범위 **62–82%**) — 직전 공개 기록 약 69%에서 bounded staging 실행·운영 폐쇄를 +3%p 반영 |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +15%p / 전체 계획 +3%p** — 제안 UI와 Router 결합은 아직 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 95%** — 고정 shadow 실행과 cleanup까지 완료했지만 의미 gate는 후속 |
+| 실행 결과 | 16/16 완료, failed·unknown·retry 0, US$0.002887, p90 4,018 ms, max 4,110 ms |
+| 안전 경계 | prompt/proposal 미보존, execution flags 제거, cleanup deployment SUCCESS, 제품 Chat·Router 연결 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. provider-independent content-free evidence gate를 동결된 16건 corpus에 결속하고
+   의미 anchor·exact literal·언어·두 injection directive·비용·지연을 deterministic하게 판정한다.
+2. Claude Code Max 독립 검토와 전체 Linux CI를 통과시킨다.
+3. 새 confirmatory shadow 계약이 proposal을 메모리에서만 판정하고 content-free evidence만
+   저장하도록 설계한 뒤, exact 비용·운영 승인을 별도로 받는다.
+4. confirmatory pass 뒤에만 suggestion UI를 default-off로 연결하고 사용자 accept/keep
+   evidence를 수집한다.
+5. 그 증거 뒤 Refiner→Router 결합을 ROUTE-03 지연 계약 아래 실험하고 full-catalog
+   모델 선택 개선으로 진행한다.

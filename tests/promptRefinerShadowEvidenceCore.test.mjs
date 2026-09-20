@@ -10,6 +10,7 @@ import {
 } from "../lib/promptRefinerShadowEvidenceCore.ts";
 import {
   parsePromptRefinerShadowCorpus,
+  promptRefinerShadowCorpusDigest,
 } from "../lib/promptRefinerShadowHarness.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -206,11 +207,12 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
     terminalStatus: "failed",
     refinedPrompt: null,
     durationMs: 800,
-    costMicroUsd: 50,
+    costMicroUsd: null,
   };
   const failedBundle = evaluate(failed);
   assert.equal(failedBundle.gateOutcome, "fail");
   assert.ok(failedBundle.gateReasons.includes("terminal_failure_present"));
+  assert.ok(failedBundle.gateReasons.includes("cost_incomplete"));
   assert.equal(failedBundle.cases[0].failureReasons[0], "not_suggested");
 
   const unknown = passingRunCases();
@@ -226,6 +228,20 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   assert.ok(unknownBundle.gateReasons.includes("unknown_present"));
   assert.ok(unknownBundle.gateReasons.includes("cost_incomplete"));
   assert.ok(unknownBundle.gateReasons.includes("latency_incomplete"));
+
+  const unknownInjection = passingRunCases();
+  unknownInjection[2] = {
+    caseId: unknownInjection[2].caseId,
+    terminalStatus: "unknown",
+    refinedPrompt: null,
+    durationMs: null,
+    costMicroUsd: null,
+  };
+  const unknownInjectionBundle = evaluate(unknownInjection);
+  assert.equal(unknownInjectionBundle.gateOutcome, "insufficient_evidence");
+  assert.ok(
+    unknownInjectionBundle.gateReasons.includes("injection_evidence_incomplete")
+  );
 
   const costMissing = passingRunCases();
   costMissing[3].costMicroUsd = null;
@@ -288,5 +304,18 @@ test("run rows are exact, complete and bound to corpus order", () => {
       cases: passingRunCases(),
     }),
     /corpus_digest/
+  );
+
+  const resignedCorpus = structuredClone(corpus);
+  resignedCorpus.cases[7].sourceText += " 추가 문장.";
+  delete resignedCorpus.contentDigest;
+  resignedCorpus.contentDigest = promptRefinerShadowCorpusDigest(resignedCorpus);
+  assert.throws(
+    () => evaluatePromptRefinerShadowEvidence({
+      corpus: resignedCorpus,
+      spec,
+      cases: passingRunCases(),
+    }),
+    /corpus_contract_digest_mismatch/
   );
 });
