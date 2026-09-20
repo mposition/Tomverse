@@ -95,8 +95,21 @@ export type MarketingTemplateResult =
   | { ok: true; template: MarketingTemplate }
   | { ok: false; refusal: MarketingTemplateRefusal };
 
+/**
+ * A number the marking actually recorded.
+ *
+ * `Object.hasOwn` for the reason `lib/marketingAuditEvidence.ts` uses it: a
+ * bare index reads `Object.prototype`, and a `historyVersion` set there would
+ * turn "this marking does not say which version it saw" into a version of
+ * somebody else's choosing -- which is the bound on the edit scan.
+ */
 const metadataNumber = (metadata: unknown, key: string): number | null => {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    !Object.hasOwn(metadata, key)
+  ) {
     return null;
   }
   const value = (metadata as Record<string, unknown>)[key];

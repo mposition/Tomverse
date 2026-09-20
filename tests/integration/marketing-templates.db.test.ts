@@ -272,6 +272,53 @@ async function autonomousPost(
   });
 }
 
+const RETENTION_ON = `SET LOCAL tomverse.marketing_retention_compaction = 'on'`;
+
+/**
+ * Carry an approved post all the way to a purged one, the way retention does.
+ *
+ * The envelope cannot simply be nulled: the history trigger refuses a purge
+ * outside retention, refuses one with no `contentPurgedAt`, and refuses one on
+ * a row younger than twenty-four months. So the post is published with a
+ * `publishedAt` two years back -- which is the only field of the three a
+ * caller may set, and only in the update that publishes it -- and the purge
+ * happens in a transaction with the retention setting on.
+ */
+async function purgedPost(channelId: string) {
+  const post = await approvedPost(channelId);
+  await markReusable(post.id);
+
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { status: "scheduled" },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      status: "publishing",
+      publishAttempt: 1,
+      providerRequestKey: post.logicalKey,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      status: "published",
+      publishedAt: new Date(Date.now() - 25 * 30 * 24 * 60 * 60 * 1000),
+    },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: post.id },
+      data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
+    });
+  });
+
+  return post;
+}
+
 /** Mark an approved post reusable, which is the second human decision. */
 async function markReusable(
   postId: string,
@@ -522,14 +569,7 @@ test("a purged or deleted post is not a template, even when both audit rows stan
   // it approved had been removed.
   const row = await channel();
 
-  const purged = await approvedPost(row.id);
-  await markReusable(purged.id);
-  await prisma.marketingPost.update({
-    where: { id: purged.id },
-    // The envelope goes with it: `MarketingPost_purge_is_consistent_check`
-    // says the two states cannot be told apart any other way.
-    data: { contentPurgedAt: new Date(), envelope: Prisma.DbNull },
-  });
+  const purged = await purgedPost(row.id);
   assert.deepEqual(await loadApprovedTemplate(prisma, purged.id), {
     ok: false,
     refusal: "content_purged",
@@ -840,8 +880,15 @@ test("two edits cannot share one audit row", async () => {
   const row = await channel();
   const post = await approvedPost(row.id);
 
+  // Two legal appends, because the history trigger moves the version by
+  // exactly one per update -- writing both at once fails there instead of at
+  // the duplicate-id check this test is about.
   const edit = await editEntry(post.id);
   const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { history: [...history, edit], historyVersion: 1 },
+  });
   await prisma.marketingPost.update({
     where: { id: post.id },
     data: { history: [...history, edit, edit], historyVersion: 2 },
@@ -917,4 +964,72 @@ test("an edit, a fresh approval and a fresh marking make it a template again", a
   const result = await loadApprovedTemplate(prisma, post.id);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.template.envelopeDigest, NEW_DIGEST);
+});
+
+test("a marking version inherited from the prototype is not one the marking recorded", async () => {
+  // `metadataNumber()` read `metadata[key]` with no own-property check, and
+  // Prisma hands back a plain object. A `historyVersion` on `Object.prototype`
+  // would have turned "this marking does not say which version it saw" into a
+  // version of somebody else's choosing -- and that number is the bound on the
+  // edit scan.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  await auditRow({
+    action: MARKETING_POST_MARK_REUSABLE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { reusableAsTemplate: true },
+  });
+
+  Object.defineProperty(Object.prototype, "historyVersion", {
+    value: 0,
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+      ok: false,
+      refusal: "marking_version_missing",
+    });
+  } finally {
+    delete (Object.prototype as Record<string, unknown>).historyVersion;
+  }
+});
+
+test("an inherited actorHadMarketingWrite is not a recorded permission", async () => {
+  // The same hole in `lib/marketingAuditEvidence.ts`, on the field that says a
+  // person had permission to do the thing the row is evidence of.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  // A marking written without the permission flag.
+  await auditRow({
+    action: MARKETING_POST_MARK_REUSABLE_ACTION,
+    targetId: post.id,
+    metadata: { digest: DIGEST, historyVersion: 0 },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { reusableAsTemplate: true },
+  });
+
+  Object.defineProperty(Object.prototype, "actorHadMarketingWrite", {
+    value: true,
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+      ok: false,
+      refusal: "marking_not_evidence",
+    });
+  } finally {
+    delete (Object.prototype as Record<string, unknown>).actorHadMarketingWrite;
+  }
 });

@@ -128,7 +128,12 @@ export function resolveMarketingPageEvidence({
     return { ok: false, refusal: "route_not_evidence_bearing" };
   }
 
-  const language = MARKETING_LOCALE_PAGE_LANGUAGE[locale];
+  // Own property: a locale that is not one of ours must not pick up a value
+  // from `Object.prototype`. The schema already limits a registered claim to
+  // the four, so this is the runtime caller's edge rather than a live hole.
+  const language = Object.hasOwn(MARKETING_LOCALE_PAGE_LANGUAGE, locale)
+    ? MARKETING_LOCALE_PAGE_LANGUAGE[locale]
+    : null;
   if (!language) return { ok: false, refusal: "locale_has_no_page" };
 
   const page = infoPages[MARKETING_EVIDENCE_PAGES[pageRoute]] as Record<

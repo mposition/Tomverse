@@ -556,6 +556,95 @@ test("a registry that did not come from the loader is refused outright", () => {
   );
 });
 
+test("the loader mark cannot be copied onto a forged registry", () => {
+  // The first attempt at this used a private symbol, which is not private
+  // enough: `Object.getOwnPropertySymbols()` reaches it and a spread copies
+  // it, so `{ ...loaded, assets: [forged] }` carried the mark and passed.
+  // Identity cannot be copied, so membership is what is checked.
+  const loaded = loadMarketingAssetRegistry({ version: 1, assets: [asset()] });
+  const on = new Date("2026-09-20T00:00:00.000Z");
+
+  const forgedAsset = {
+    ...asset(),
+    provenance: "ai_generated",
+    depictsProductInterface: true,
+    disclosure: { linkedin: "none" },
+  };
+
+  // Everything reflection offers, carried across onto an object of our own.
+  const copy = { ...loaded, assets: [forgedAsset] };
+  for (const key of Object.getOwnPropertySymbols(loaded)) {
+    copy[key] = loaded[key];
+  }
+  Object.freeze(copy);
+
+  assert.deepEqual(
+    resolveMarketingAsset({
+      id: forgedAsset.id,
+      channel: "linkedin",
+      locale: "en",
+      on,
+      registry: copy,
+    }),
+    { ok: false, refusal: "registry_not_loaded" },
+  );
+
+  // An object with the loader's own prototype is still not the loader's object.
+  const impostor = Object.freeze(
+    Object.assign(Object.create(Object.getPrototypeOf(loaded)), {
+      version: 1,
+      assets: [forgedAsset],
+    }),
+  );
+  assert.deepEqual(
+    resolveMarketingAsset({
+      id: forgedAsset.id,
+      channel: "linkedin",
+      locale: "en",
+      on,
+      registry: impostor,
+    }),
+    { ok: false, refusal: "registry_not_loaded" },
+  );
+
+  // And the real one still resolves, so the check is identity rather than luck.
+  assert.equal(
+    resolveMarketingAsset({
+      id: "asset.compare-hero",
+      channel: "linkedin",
+      locale: "en",
+      on,
+      registry: loaded,
+    }).ok,
+    true,
+  );
+});
+
+test("a disclosure inherited from the prototype does not satisfy the schema", () => {
+  // The schema reads `asset.disclosure[channel]` while checking that every
+  // allowed channel has a decision. Without an own-property check, a property
+  // on `Object.prototype` answers for a channel the asset never named -- and
+  // an AI asset parses with no disclosure of its own.
+  Object.defineProperty(Object.prototype, "threads", {
+    value: "platform_label",
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    const parsed = marketingAssetSchema.safeParse(
+      asset({
+        provenance: "ai_generated",
+        allowedChannels: ["threads"],
+        disclosure: {},
+      }),
+    );
+    assert.equal(parsed.success, false, "an empty disclosure is still empty");
+  } finally {
+    delete Object.prototype.threads;
+  }
+});
+
 test("an inherited locale or channel is not the asset's own", () => {
   // A deep-frozen registry still inherits from `Object.prototype`. Setting a
   // property there would otherwise give every English-only asset alt text in

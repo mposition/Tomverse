@@ -130,7 +130,13 @@ export const marketingAssetSchema = z
     }
 
     for (const channel of asset.allowedChannels) {
-      const disclosure = asset.disclosure[channel];
+      // `Object.hasOwn`, for the reason the resolver uses it: a plain index
+      // reads `Object.prototype`, so a property set there would satisfy this
+      // rule for a channel the asset never named -- and an AI asset would then
+      // parse with no disclosure of its own.
+      const disclosure = Object.hasOwn(asset.disclosure, channel)
+        ? asset.disclosure[channel]
+        : undefined;
       if (!disclosure) {
         context.addIssue({
           code: "custom",
@@ -233,30 +239,36 @@ const deepFreeze = <T>(value: T): T => {
  * to be a photograph of the product.
  */
 export function loadMarketingAssetRegistry(raw: unknown): LoadedAssetRegistry {
-  const parsed = deepFreeze(marketingAssetRegistrySchema.parse(raw));
-  return deepFreeze({ [LOADED]: true, ...parsed }) as LoadedAssetRegistry;
+  const parsed = deepFreeze(
+    marketingAssetRegistrySchema.parse(raw),
+  ) as LoadedAssetRegistry;
+  loadedRegistries.add(parsed);
+  return parsed;
 }
 
 /**
  * A registry that went through the loader, and that the resolver will accept.
  *
- * The brand is a symbol this module owns and does not export, so the type is
- * not a promise a caller can make about an object it assembled itself:
- * `marketingAssetRegistrySchema.parse(x)` produces a valid registry that is
- * still mutable, and that was exactly what the resolver was being handed.
- * Checked at runtime as well as in the type, because a cast is free.
+ * Membership of a module-private `WeakSet`, not a property. The first attempt
+ * at this used a private symbol, which is not private enough: a symbol is
+ * reachable through `Object.getOwnPropertySymbols()` and an enumerable one is
+ * copied by a spread, so `{ ...loaded, assets: [forged] }` carried the brand
+ * and passed. Identity cannot be copied -- an object either is the one the
+ * loader produced or it is not.
+ *
+ * The type is a brand only so the signature reads correctly; it promises
+ * nothing, which is why the resolver checks the set at runtime.
  */
-const LOADED: unique symbol = Symbol("marketingAssetRegistryLoaded");
+const loadedRegistries = new WeakSet<object>();
+
+declare const LOADED_BRAND: unique symbol;
 
 export type LoadedAssetRegistry = MarketingAssetRegistry & {
-  readonly [LOADED]: true;
+  readonly [LOADED_BRAND]?: true;
 };
 
 const isLoadedRegistry = (value: unknown): value is LoadedAssetRegistry =>
-  !!value &&
-  typeof value === "object" &&
-  (value as Record<PropertyKey, unknown>)[LOADED] === true &&
-  Object.isFrozen(value);
+  !!value && typeof value === "object" && loadedRegistries.has(value);
 
 export function resolveMarketingAsset({
   id,
