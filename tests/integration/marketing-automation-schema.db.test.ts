@@ -296,6 +296,8 @@ beforeEach(async () => {
   await reset();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "PromptRefinerShadowAttempt",
+      "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AdminAuditLog"
