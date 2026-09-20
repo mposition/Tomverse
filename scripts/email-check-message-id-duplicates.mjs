@@ -26,8 +26,9 @@ try {
       `\nNo duplicate at the moment of this read. ${report.totalRows} rows in ` +
         "EmailDelivery: the index build takes a SHARE lock on the table, so " +
         "reads continue and writes -- new mail being enqueued, deliveries being " +
-        "marked sent -- wait for it to finish. Judge that wait against this " +
-        "count before the deploy rather than during it."
+        "marked sent -- wait for it to finish. The migration's last statement " +
+        "then takes ACCESS EXCLUSIVE briefly, which stops reads too. Judge both " +
+        "against this count before the deploy rather than during it."
     );
   } else {
     console.error(

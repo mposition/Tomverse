@@ -61,12 +61,29 @@
 -- the account-aware unique exists to allow. It is a recovery, not a routine.
 
 -- ---------------------------------------------------------------------------
+-- All of it, or none of it.
+--
+-- `prisma migrate deploy` does not wrap a migration file in a transaction, so
+-- without this the file can half-apply: the index is built and committed, a
+-- later statement fails on a lock timeout or a dropped connection, and the
+-- migration is recorded as failed with the new index already in place. There is
+-- then no good move. `migrate resolve --rolled-back` and re-run fails on the
+-- first statement, because the index it wants to create exists; `--applied`
+-- marks as done a migration whose remaining statements never ran, and which of
+-- them ran depends on where it stopped. Recovery means reading the catalogue by
+-- hand while cross-account webhooks keep being refused.
+--
+-- Every statement here is transactional DDL in Postgres, so the file says so
+-- itself. A failure anywhere rolls the whole thing back, the migration is
+-- recorded as failed with the database untouched, and re-running it after the
+-- cause is fixed is an ordinary retry.
+BEGIN;
+
 -- The statement that can fail on data goes first.
 --
--- Nothing above it has run, so a failure here -- a duplicate written after the
--- check was taken -- costs the deploy and nothing else, whether or not the
--- runner wraps this file in a transaction. Everything below it is a drop, and a
--- drop has no data to disagree with.
+-- Nothing has run before it, so its failure is the cheapest failure available:
+-- a duplicate written after the check was taken costs the deploy and nothing
+-- else.
 --
 -- No `IF NOT EXISTS`. It would let an index that merely shares this name stand
 -- in for this one, and "merely shares the name" covers more than it sounds: an
@@ -76,18 +93,13 @@
 -- catalogue check written to tell them apart is a second thing to get exactly
 -- right. Failing loudly on the name is cheaper and needs nothing to be right.
 --
--- The build takes a SHARE lock on `EmailDelivery`: reads continue, writes wait.
--- `CREATE INDEX CONCURRENTLY` would avoid even that and cannot be used here --
--- Postgres refuses it inside a transaction block and this file may be in one.
--- `email:check-message-id-duplicates` prints the row count, so the wait is
--- judged before the deploy rather than during it.
+-- The build itself takes a SHARE lock on `EmailDelivery`: reads continue,
+-- writes wait. `CREATE INDEX CONCURRENTLY` would avoid even that and cannot be
+-- used here -- Postgres refuses it inside a transaction block, and the BEGIN
+-- above puts us firmly in one. `email:check-message-id-duplicates` prints the
+-- row count, so the wait is judged before the deploy rather than during it.
 CREATE UNIQUE INDEX "EmailDelivery_providerAccount_providerMessageId_key"
     ON "EmailDelivery"("providerAccount", "providerMessageId");
-
--- Only now: the plain index of the same columns answered the same question and
--- the unique one answers it with a guarantee. Keeping both would be two
--- structures for one question.
-DROP INDEX IF EXISTS "EmailDelivery_providerAccount_providerMessageId_idx";
 
 -- The account-aware unique carries every read now
 -- (ProviderWebhookEvent_account_event_key, added 20260917180000).
@@ -105,3 +117,15 @@ DROP INDEX IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
 -- One writer, and it names the account. A default here would let the next one
 -- not name it.
 ALTER TABLE "ProviderWebhookEvent" ALTER COLUMN "providerAccount" DROP DEFAULT;
+
+-- Last, because it is the one statement that takes ACCESS EXCLUSIVE on
+-- `EmailDelivery`, and a lock taken inside a transaction is held until it
+-- commits. Reads of that table stop here rather than at the start of the build,
+-- which is the long part.
+--
+-- The plain index of the same columns answered the same question and the unique
+-- one answers it with a guarantee; keeping both would be two structures for one
+-- question.
+DROP INDEX IF EXISTS "EmailDelivery_providerAccount_providerMessageId_idx";
+
+COMMIT;

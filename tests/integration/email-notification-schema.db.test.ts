@@ -518,6 +518,9 @@ test("the delivery message id index is unique, and is exactly what was asked for
       is_ready: boolean;
       is_live: boolean;
       nulls_not_distinct: boolean;
+      is_immediate: boolean;
+      access_method: string;
+      operator_classes: string[];
       key_atts: number;
       total_atts: number;
       has_expressions: boolean;
@@ -529,6 +532,13 @@ test("the delivery message id index is unique, and is exactly what was asked for
            i.indisvalid          AS is_valid,
            i.indisready          AS is_ready,
            i.indislive           AS is_live,
+           i.indimmediate        AS is_immediate,
+           am.amname             AS access_method,
+           (
+             SELECT array_agg(oc.opcname ORDER BY c.ord)
+               FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(oid, ord)
+               JOIN pg_opclass oc ON oc.oid = c.oid
+           ) AS operator_classes,
            i.indnullsnotdistinct AS nulls_not_distinct,
            i.indnkeyatts         AS key_atts,
            i.indnatts            AS total_atts,
@@ -544,6 +554,7 @@ test("the delivery message id index is unique, and is exactly what was asked for
       JOIN pg_class ix ON ix.oid = i.indexrelid
       JOIN pg_class tb ON tb.oid = i.indrelid
       JOIN pg_namespace ns ON ns.oid = ix.relnamespace
+      JOIN pg_am am ON am.oid = ix.relam
      WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
        AND tb.relname = 'EmailDelivery'
        AND ns.nspname = current_schema()
@@ -560,6 +571,14 @@ test("the delivery message id index is unique, and is exactly what was asked for
   assert.equal(Number(index.key_atts), 2);
   assert.equal(Number(index.total_atts), 2);
   assert.deepEqual(index.columns, ["providerAccount", "providerMessageId"]);
+  // Immediate, because a deferred unique lets a transaction hold two rows with
+  // the same pair until it commits, and the webhook matcher reads inside one.
+  assert.equal(index.is_immediate, true);
+  // And plain btree equality on both columns. An index that sorted by something
+  // other than equality would not be the constraint this asked for, whatever
+  // else about it matched.
+  assert.equal(index.access_method, "btree");
+  assert.deepEqual(index.operator_classes, ["text_ops", "text_ops"]);
 
   // And the plain index it replaced is gone: two structures for one question is
   // how they drift apart.

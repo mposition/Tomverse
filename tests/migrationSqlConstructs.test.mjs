@@ -158,14 +158,32 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
  *
  * Counting tags does not find it -- a lone dollar is not a tag, so the count
  * stays even and the guard stays quiet. What finds it is looking for a dollar
- * that is not part of any tag: outside a string and outside a dollar-quoted
- * body, every dollar in this repository's SQL belongs to a tag.
+ * that is not part of any tag.
+ *
+ * Which is not the same as "every dollar outside a tag is a mistake". Postgres
+ * allows a dollar in three other places, and each is excluded by what sits
+ * beside it rather than by parsing the statement:
+ *
+ *   - a positional parameter, `$1`, is a dollar followed by a digit;
+ *   - an identifier may contain one after its first character, as in `foo$bar`
+ *     or `"foo$bar"`, so a dollar preceded by an identifier character belongs
+ *     to a name;
+ *   - a dollar inside a single-quoted string, or inside a dollar-quoted body,
+ *     is data and is skipped with the rest of it.
+ *
+ * The same rule read the other way closes a gap: a tag must be separated from
+ * whatever precedes it, so `DO$body$` is not a dollar quote at all even though
+ * it looks like one, and an opening tag preceded by an identifier character is
+ * reported rather than believed.
+ *
+ * This is a guard, not a lexer. It does not know statements, only neighbours.
  *
  * Returns each stray dollar's offset, and the end of the file when a block was
  * opened and never closed.
  */
 const strayDollars = (sql) => {
   const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
+  const identifierCharacter = /[A-Za-z0-9_$]/;
   const stray = [];
   let index = 0;
   let inString = false;
@@ -195,10 +213,18 @@ const strayDollars = (sql) => {
       continue;
     }
     if (current === "$") {
+      const previous = index > 0 ? sql[index - 1] : "";
+      const attached = identifierCharacter.test(previous);
       const tag = openingTag.exec(sql.slice(index));
-      if (tag) {
+      if (tag && !attached) {
         openTag = tag[0];
         index += tag[0].length;
+        continue;
+      }
+      // Part of a name, or a positional parameter. Neither is a tag and
+      // neither is a mistake.
+      if (!tag && (attached || /[0-9]/.test(sql[index + 1] ?? ""))) {
+        index += 1;
         continue;
       }
       stray.push(index);
@@ -245,6 +271,20 @@ test("the dollar-quote guard finds what it is for", () => {
   );
   // A block that is opened and never closed is reported too.
   assert.equal(strayDollars(`DO ${doubled} BEGIN END;`).length, 1);
+
+  // The three legitimate dollars that are not tags, which a rule of "every
+  // dollar belongs to a tag" would have rejected.
+  assert.deepEqual(
+    strayDollars("PREPARE q(text) AS SELECT * FROM t WHERE value = $1;"),
+    []
+  );
+  assert.deepEqual(strayDollars(`CREATE TABLE foo$bar (id integer);`), []);
+  assert.deepEqual(strayDollars(`CREATE TABLE "foo$bar" (id integer);`), []);
+
+  // And the shape that looks like a tag and is not one: a dollar quote has to
+  // be separated from what precedes it, so this is an identifier followed by a
+  // syntax error rather than a block.
+  assert.equal(strayDollars(`DO${doubled}\nBEGIN\nEND\n${doubled};`).length > 0, true);
 });
 
 test("the guard finds what it is for", () => {

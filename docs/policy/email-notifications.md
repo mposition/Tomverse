@@ -43,15 +43,24 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    가두는 닫힌 lane 이름입니다). **그 판독은 멈출 근거이지 가도 된다는 보증이 아닙니다** —
    읽은 시점과 migration 실행 시점 사이에 잠금이 없으므로, 필드 이름은
    `noDuplicatesAtReadTime`입니다. 판정하는 것은 index 빌드 자신입니다.
-5. **그래서 순서가 계약입니다.** 새 unique를 **먼저** 만들고, 성공한 뒤에 같은 컬럼의
-   일반 index를 지웁니다. migration 파일이 transaction 안에서 도는지 아닌지에 판정이
-   걸리지 않게 하려는 것입니다 — 안에서 돌면 실패가 전체를 되돌리고, 밖에서 돌면 실패가
-   DROP에 닿기 전에 멈춥니다. 어느 쪽이든 기존 index가 남으므로 배포 실패가 webhook
-   matcher를 순차 스캔으로 떨어뜨리지 않습니다.
-6. **빌드는 `EmailDelivery`에 SHARE 잠금을 겁니다** — 읽기는 계속되고 쓰기가
-   기다립니다. `CONCURRENTLY`는 그마저 피하지만 transaction 안에서 Postgres가
-   거부하므로 migration에 쓸 수 없습니다. 행 수는 검사 script의 `totalRows`가
-   알려 주며, 기다림을 배포 **전에** 판단하라고 있는 숫자입니다.
+5. **이 migration은 명시적 transaction으로 스스로를 감쌉니다**(`BEGIN`/`COMMIT`).
+   `prisma migrate deploy`는 migration 파일을 transaction으로 감싸지 않으므로,
+   그냥 두면 **절반만 적용된 상태**가 만들어집니다 — index는 만들어져 commit됐는데
+   뒤 문장이 lock timeout이나 연결 끊김으로 실패하고, migration은 failed로 기록됩니다.
+   그 상태에서 좋은 수가 없습니다. `resolve --rolled-back` 후 재실행은 이미 있는
+   index 때문에 첫 문장에서 실패하고, `--applied`는 **실행되지 않은 문장들을 실행된
+   것으로** 표시하며, 어디까지 실행됐는지는 어디서 멈췄는지에 달려 있습니다. 여기의
+   모든 문장은 Postgres에서 transactional DDL이므로 파일이 직접 말하게 합니다.
+6. **순서는 여전히 계약입니다.** 데이터 때문에 실패할 수 있는 문장(unique 빌드)이
+   **맨 앞**이고, 나머지는 전부 drop입니다. 그리고 같은 컬럼의 일반 index 제거는
+   **맨 뒤**입니다 — 그것이 `EmailDelivery`에 ACCESS EXCLUSIVE를 잡는 유일한 문장이고
+   transaction 안에서 잡은 잠금은 commit까지 유지되므로, 읽기가 멈추는 구간을 긴
+   빌드 시간이 아니라 마지막 한 문장으로 미룹니다.
+7. **빌드 자체는 `EmailDelivery`에 SHARE 잠금을 겁니다** — 읽기는 계속되고 쓰기가
+   기다립니다. 파일 전체가 "읽기는 계속된다"는 뜻은 아닙니다(6번). `CONCURRENTLY`는
+   그마저 피하지만 transaction 안에서 Postgres가 거부하므로 쓸 수 없고, 5번의
+   `BEGIN`이 바로 그 transaction입니다. 행 수는 검사 script의 `totalRows`가 알려
+   주며, 기다림을 배포 **전에** 판단하라고 있는 숫자입니다.
    **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index — 실패한
    `CREATE INDEX CONCURRENTLY`가 남긴 INVALID index, `NULLS NOT DISTINCT`로
    만들어진 index, expression key가 하나 더 붙은 index — 가 빌드를 건너뛰게 하고
@@ -59,7 +68,7 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    **정확히 맞아야 하는 두 번째 물건**이고, 이름 충돌에서 시끄럽게 실패하는 쪽이
    더 쌉니다.
 
-7. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+8. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
    schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지 않고
    insert하며 이 migration이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
    insert가 `NOT NULL`로 실패하고, 충돌 해소는 이 migration이 지운
