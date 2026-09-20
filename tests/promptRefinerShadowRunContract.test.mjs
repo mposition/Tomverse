@@ -15,12 +15,18 @@ import {
   PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
   PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
   PROMPT_REFINER_SHADOW_CASE_IDS,
+  PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
   PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
   PROMPT_REFINER_SHADOW_RUN_ID,
   PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
+  PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS,
   PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
+  PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS,
+  PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
   buildPromptRefinerShadowRunPreviewBinding,
   buildPromptRefinerShadowRunSourceManifest,
   promptRefinerShadowRunPreviewBindingDigest,
@@ -62,6 +68,13 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
       satisfiesActualTokenizerRequirement: false,
     },
   );
+  assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.request.actualTokenizer, {
+    package: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+    packageVersion: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+    encoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+    framingTokenAllowance: 32,
+    satisfiesActualTokenizerRequirement: true,
+  });
   assert.equal(
     PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.unknownOutcomePolicy,
     "stop_no_redispatch",
@@ -70,6 +83,21 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
     PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.requiresExplicitCostApproval,
     true,
   );
+  assert.equal(PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS, 240_000);
+  assert.equal(PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS, 300);
+  assert.equal(
+    PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.routeMaxDurationSeconds,
+    PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS,
+  );
+  assert.equal(PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS, 10_000);
+  assert.equal(
+    PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.invocationBudgetMs,
+    PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS,
+  );
+  assert.equal(
+    PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.terminalWriteMarginMs,
+    PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS,
+  );
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.runId, PROMPT_REFINER_SHADOW_RUN_ID);
   assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.caseIds, PROMPT_REFINER_SHADOW_CASE_IDS);
   assert.equal(PROMPT_REFINER_SHADOW_CASE_IDS.length, 16);
@@ -77,12 +105,12 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
   assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
 });
 
-test("shipping the durable writer still does not make the run or product executable", () => {
+test("v3 admits only the owner-only shadow entry point, never the product path", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady, true);
-  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady, false);
-  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted, false);
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady, true);
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.productAdapterReady, false);
   assert.match(
     PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
@@ -133,6 +161,13 @@ test("run preview digest binds deployment, stage closure, delta and cost", () =>
       buildPromptRefinerShadowRunPreviewBinding({ ...base, deploymentId: "deploy-2" }),
     ),
   );
-  assert.equal(binding.executionAdmitted, false);
+  assert.equal(binding.executionAdmitted, true);
   assert.equal(binding.productAdapterReady, false);
+  assert.equal(binding.tokenizerPackage, PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE);
+  assert.equal(
+    binding.tokenizerPackageVersion,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+  );
+  assert.equal(binding.tokenizerEncoding, PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING);
+  assert.equal(binding.maxInputTokens, 100_000);
 });

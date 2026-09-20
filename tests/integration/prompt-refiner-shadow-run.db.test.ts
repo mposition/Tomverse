@@ -27,10 +27,14 @@ import {
     PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG,
     PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
     PROMPT_REFINER_SHADOW_RUN_ID,
+    PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
 } from "@/lib/promptRefinerShadowRunContract";
 import {
     createPromptRefinerShadowRun,
     promptRefinerShadowRunPreview,
+    readPromptRefinerShadowExecutionState,
     recordPromptRefinerShadowDispatchIntent,
     recordPromptRefinerShadowTerminal,
     sweepPromptRefinerShadowUnknowns,
@@ -138,6 +142,11 @@ const dispatch = async (input: {
             maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
             timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
             retryCount: PROMPT_REFINER_RETRY_COUNT,
+            tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+            tokenizerPackageVersion:
+                PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+            tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+            admissionInputTokens: 100,
         },
     });
     assert.equal(result.ok, true);
@@ -226,7 +235,20 @@ test("dispatch intent, reservation consume, audit and run accounting commit atom
     assert.equal(run.dispatchCount, 1);
     assert.equal(run.terminalCount, 0);
     assert.equal(audit.action, "prompt_refiner.shadow_dispatch.intent_recorded");
-    assert.equal((audit.metadata as { systemActor: string }).systemActor, "prompt-refiner-shadow-runner");
+    const metadata = audit.metadata as Record<string, unknown>;
+    assert.equal(metadata.systemActor, "prompt-refiner-shadow-runner");
+    assert.equal(metadata.tokenizerPackage, PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE);
+    assert.equal(
+        metadata.tokenizerPackageVersion,
+        PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION
+    );
+    assert.equal(metadata.tokenizerEncoding, PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING);
+    assert.equal(metadata.admissionInputTokens, 100);
+    const state = await readPromptRefinerShadowExecutionState();
+    assert.equal(state.dispatchCount, 1);
+    assert.equal(state.terminalCount, 0);
+    assert.equal(state.nextCaseIndex, null);
+    assert.equal(state.inFlightAttemptId, result.attempt.id);
 });
 
 test("an injected attempt failure rolls audit, attempt, consume and run counter back", async () => {
@@ -261,6 +283,11 @@ test("an injected attempt failure rolls audit, attempt, consume and run counter 
                     maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
                     timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
                     retryCount: 0,
+                    tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+                    tokenizerPackageVersion:
+                        PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+                    tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+                    admissionInputTokens: 100,
                 },
             }),
             /injected attempt failure/
@@ -386,6 +413,11 @@ test("unknown terminal latches the run and refuses every later case without redi
                 maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
                 timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
                 retryCount: 0,
+                tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+                tokenizerPackageVersion:
+                    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+                tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+                admissionInputTokens: 100,
             },
         }),
         (error: unknown) =>

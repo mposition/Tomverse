@@ -5175,7 +5175,14 @@ model EmailDelivery {
   @@index([emailAddress, createdAt])
   @@index([status, snapshotPurgedAt])
   @@index([unsubscribeKeyVersion, sentAt])
-  @@index([providerAccount, providerMessageId])
+  /// A message id identifies a delivery within an account. Plain rather than
+  /// partial: Postgres does not compare nulls, so a delivery that never reached
+  /// the provider -- no account, no message id -- conflicts with nothing, which
+  /// is the whole of what a `WHERE both NOT NULL` predicate would have said.
+  /// Written here rather than only in the migration because `prisma db push`
+  /// and the drift check read this file and not migration SQL; a partial index
+  /// is invisible to both (see 20260801190000_plan_change_pending_slot).
+  @@unique([providerAccount, providerMessageId], map: "EmailDelivery_providerAccount_providerMessageId_key")
 }
 
 /// One inert unsubscribe token per key version, minted with that key the first
@@ -5235,12 +5242,13 @@ model ProviderWebhookEvent {
   /// signing secret the event came through. Event ids are unique per account,
   /// and a message id is matched only within the account that sent it
   /// (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56).
-  /// The default is for the previous build, which does not write the column
-  /// and only ever served the transactional account; it goes with the old
-  /// unique in a later migration.
-  providerAccount String @default("transactional")
+  /// No default: there is one writer and it always names the account, and a
+  /// default is how that stops being true without anyone noticing. The column
+  /// carried one while the previous build -- which did not write it -- was
+  /// still serving webhooks; 20260920100100 dropped it once that build was
+  /// gone, together with the old (provider, providerEventId) unique.
+  providerAccount String
 
-  @@unique([provider, providerEventId])
   @@unique([provider, providerAccount, providerEventId], map: "ProviderWebhookEvent_account_event_key")
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])

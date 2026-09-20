@@ -288,8 +288,8 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/promptRefinerShadowRunStore.ts",
     table: "PromptRefinerShadowRun",
-    tableMentions: 3,
-    writeVerbs: 5,
+    tableMentions: 4,
+    writeVerbs: 6,
     reason:
       "The sole run/attempt writer uses Prisma delegates for mutations. Its raw SQL is limited to constant SELECT ... FOR UPDATE statements used to enforce the documented lock order; it never interpolates a table name.",
   },
@@ -297,7 +297,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/promptRefinerShadowRunStore.ts",
     table: "PromptRefinerShadowAttempt",
     tableMentions: 1,
-    writeVerbs: 5,
+    writeVerbs: 6,
     reason:
       "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
   },
@@ -364,6 +364,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 22,
     reason:
       "The migration creates the content-free attempt table and its immutable terminal trigger, and binds reservation consume to one intent. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 9,
+    reason:
+      "The execution-runner migration replaces only the v3 run/attempt constraint and trigger functions. It reads the already-linked audit rows to enforce exact authorization and tokenizer provenance; it never writes AdminAuditLog and seeds no row.",
+  },
+  {
+    path: "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 11,
+    writeVerbs: 9,
+    reason:
+      "The execution-runner migration fails closed on existing runs, then replaces the exact v3 contract and insert guard. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no run.",
+  },
+  {
+    path: "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 7,
+    writeVerbs: 9,
+    reason:
+      "The execution-runner migration fails closed on existing attempts, then replaces the exact v3 binding and insert guard for tokenizer facts. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no attempt.",
   },
   {
     path: "scripts/report-unswept-tables-core.mjs",

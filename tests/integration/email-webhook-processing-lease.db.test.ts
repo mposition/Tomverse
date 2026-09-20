@@ -320,27 +320,44 @@ test("a message id is matched only within the account that sent it", async () =>
   assert.equal(await prisma.providerWebhookEvent.count(), 2);
 });
 
-test("two deliveries sharing a message id in one account are matched to neither", async () => {
+test("two deliveries cannot share a message id in one account", async () => {
+  // This test used to create that state and prove the matcher refused to guess
+  // between the two rows. It cannot create it any more: 20260920100000 made
+  // `(providerAccount, providerMessageId)` unique, so the ambiguity the handler
+  // guards against is refused a row before the handler ever sees it.
+  //
+  // The guard stays in the handler and is no longer exercised from here,
+  // because there is no way left to reach it from this side. That is the right
+  // order of things -- a constraint the database holds beats a branch that
+  // reads the rows afterwards -- but it is worth saying rather than letting the
+  // branch become unreachable code nobody can account for.
   const address = `${randomUUID()}@example.com`;
   const messageId = await deliverOne(address);
-  await deliverOne(address);
-  // A second row claiming the same provider message id.
-  await prisma.emailDelivery.updateMany({ data: { providerMessageId: messageId } });
-  const result = await processResendWebhook({
-    providerAccount: "transactional",
-    providerEventId: `msg_${randomUUID()}`,
-    payload: {
-      type: "email.bounced",
-      data: { email_id: messageId, to: [address], bounce: { type: "Permanent" } },
-    },
+  const second = await deliverOne(address);
+  assert.notEqual(messageId, second);
+
+  await assert.rejects(
+    () =>
+      prisma.emailDelivery.updateMany({
+        where: { providerMessageId: second },
+        data: { providerMessageId: messageId },
+      }),
+    /EmailDelivery_providerAccount_providerMessageId_key|Unique constraint failed/
+  );
+
+  // And the same id through the other account is still a different message,
+  // which is the whole reason the unique names the account.
+  const marketing = await prisma.emailDelivery.findFirstOrThrow({
+    where: { providerMessageId: second },
+    select: { id: true },
   });
-  assert.equal(result.handled && result.deliveryId, null);
-  const statuses = (await prisma.emailDelivery.findMany({ select: { status: true } })).map((row) => row.status);
-  assert.ok(statuses.every((status) => status !== "bounced"), "neither delivery was updated");
+  await prisma.emailDelivery.update({
+    where: { id: marketing.id },
+    data: { providerAccount: "marketing", providerMessageId: messageId },
+  });
   assert.equal(
-    await prisma.suppressionCause.count({ where: { emailAddress: address, reason: "hard_bounce" } }),
-    1,
-    "the address is still suppressed"
+    await prisma.emailDelivery.count({ where: { providerMessageId: messageId } }),
+    2
   );
 });
 
@@ -389,13 +406,26 @@ test("the same new event arriving twice at once is recorded once and applied onc
   assert.equal(await prisma.providerWebhookEvent.count(), 1);
 });
 
-test("an event id already recorded for the other account fails rather than being acknowledged", async () => {
+test("the same event id through the other account is its own event", async () => {
+  // This is what the contraction was for (C56). While the old
+  // `(provider, providerEventId)` unique existed, a marketing event that
+  // happened to carry a transactional event's id could not be stored at all --
+  // the handler refused it and the provider retried forever. They are different
+  // events from different accounts, and the account-aware unique is what says
+  // so.
   const providerEventId = `msg_${randomUUID()}`;
   const payload = { type: "email.sent", data: { email_id: `resend-${randomUUID()}`, to: ["c@example.com"] } };
   await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
-  await assert.rejects(
-    processResendWebhook({ providerAccount: "marketing", providerEventId, payload }),
-    /other account/
-  );
-  assert.equal(await prisma.providerWebhookEvent.count(), 1);
+  const marketing = await processResendWebhook({
+    providerAccount: "marketing",
+    providerEventId,
+    payload,
+  });
+  assert.equal(marketing.handled, true);
+  assert.equal(await prisma.providerWebhookEvent.count({ where: { providerEventId } }), 2);
+
+  // And within one account it is still one event: a redelivery is acknowledged
+  // rather than stored twice.
+  await processResendWebhook({ providerAccount: "marketing", providerEventId, payload });
+  assert.equal(await prisma.providerWebhookEvent.count({ where: { providerEventId } }), 2);
 });

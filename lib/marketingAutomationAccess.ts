@@ -170,9 +170,31 @@ export const computeMarketingWebhookPipelineFingerprint = (
   return hash.digest("hex");
 };
 
-/** Updated only by the fingerprint test after reviewing a declared file change. */
+/**
+ * Updated only by the fingerprint test after reviewing a declared file change.
+ *
+ * 2026-09-20: `prisma/schema.prisma` is one of the watched files, and the
+ * webhook account contraction changed it -- the old
+ * `(provider, providerEventId)` unique and the `providerAccount` default are
+ * gone, and `EmailDelivery(providerAccount, providerMessageId)` became unique
+ * (docs/policy/email-notifications.md v24).
+ *
+ * This is not a change the marketing pipeline merely happens to sit beside: it
+ * changes the storage rules the pipeline depends on. A marketing webhook event
+ * carrying the same provider event id as a transactional one is now stored
+ * rather than refused, and a marketing delivery's message id is now unique
+ * within the marketing account rather than merely indexed. Both make the
+ * per-account matching S1b-2b built true instead of assumed, and neither
+ * changes a decision this module makes -- which is what the second look was
+ * for.
+ *
+ * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
+ * the same watched schema. None changes a marketing model, the descriptor, or
+ * an admission decision; the fingerprint moves because the closed file digest
+ * deliberately requires this review whenever any schema bytes move.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "04e654a58c88c3f96589365b2f40e5d4ce484878c45a20089f475322febbbcdf";
+  "138fc152de2bd631e63892cb1e64e5209a75f920b7083c41ca32f8b87c8aba04";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

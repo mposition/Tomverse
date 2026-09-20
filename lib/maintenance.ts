@@ -23,6 +23,7 @@ import {
   sweepStaleRoutingAttempts,
 } from "@/lib/routingAttemptSweep";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { sweepPromptRefinerShadowUnknowns } from "@/lib/promptRefinerShadowRunStore";
 
 /**
  * How long an unapplied cost correction may sit before it is an incident.
@@ -548,6 +549,15 @@ export async function cleanupExpiredData() {
     return { ...replayed, ...backlog };
   });
 
+  // This is recovery only. It closes stale Prompt Refiner dispatch intents
+  // using the database clock and the frozen no-redispatch policy. Maintenance
+  // deliberately imports the durable store, not the runner or live adapter,
+  // so this step can never initiate a provider request.
+  const promptRefinerShadowUnknowns = await step(
+    "prompt_refiner_shadow_unknowns",
+    () => sweepPromptRefinerShadowUnknowns()
+  );
+
   const testerPassReminders = await step("tester_pass_reminders", () =>
     sendFoundingTesterPassReminders(now)
   );
@@ -973,6 +983,7 @@ export async function cleanupExpiredData() {
     creditReservations,
     staleRoutingAttempts,
     costAdjustments,
+    promptRefinerShadowUnknowns,
     testerPassReminders,
     testerPassExpirations,
     testerPassEndedNotices,
