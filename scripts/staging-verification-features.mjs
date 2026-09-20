@@ -16,6 +16,12 @@
 
 export const STAGING_VERIFICATION_FEATURES = [
     {
+        key: "amux",
+        label: "AMUX development-agent orchestration",
+        checklist: "docs/ops/amux/staging-checklist.md",
+        records: "docs/ops/amux/staging-verification-records",
+    },
+    {
         key: "chat-starter-catalog",
         label: "Chat starter catalogue (welcome screen entry point)",
         checklist: "docs/ops/chat-starter-catalog-staging-checklist.md",
