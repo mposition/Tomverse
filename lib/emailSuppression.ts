@@ -9,7 +9,6 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   markCauseWriter,
   recordSuppressionCause,
-  releaseSelectorCauses,
 } from "@/lib/emailSuppressionCauses";
 import {
   holdSuppressionFence,
@@ -93,21 +92,32 @@ export type RecordSuppressionInput = {
 };
 
 /**
- * Records a suppression, or strengthens one that already exists.
+ * Records one suppression cause.
  *
- * Strengthening rather than overwriting: an address holding a permanent
- * complaint that later soft-bounces must not have its complaint replaced by a
- * hold that expires in a day. The unique key is (address, scope, purposeKey),
- * so the row is the same one either way -- what has to be decided is whether
- * the new event says something worse than the old one.
+ * ## What used to be here
+ *
+ * This wrote two records: a cause, and a `SuppressionEntry` that merged the
+ * causes down to one row per selector. That merge carried rules -- a
+ * `privacy_request` is never overwritten, a permanent reason is never
+ * downgraded by a transient one -- because one row had to stand for several
+ * facts and choosing wrongly meant a suppression that quietly stopped
+ * suppressing.
+ *
+ * Those rules are gone with the entry, and not because they stopped mattering.
+ * They are inherent once every cause is its own row: the verdict reads all of
+ * them, so a soft bounce arriving after a complaint does not replace the
+ * complaint, it sits beside it. A rule that has to be written down is a rule
+ * that can be written down wrongly.
+ *
+ * The contraction (deploy C) stopped writing entries; `suppressionCheck` reads
+ * causes and nothing else.
  */
 export async function recordSuppression(
   input: RecordSuppressionInput,
   // A transaction when the suppression must commit with the change that caused
-  // it -- a withdrawal and its hold are one fact. Without one, the entry and its
-  // cause still commit together in a transaction of their own.
+  // it -- a withdrawal and its hold are one fact.
   client?: Prisma.TransactionClient
-): Promise<{ id: string | null; changed: boolean; duplicate?: true }> {
+): Promise<{ id: string; changed: boolean; duplicate?: true }> {
   if (!client) {
     return prisma.$transaction((tx) => recordSuppression(input, tx));
   }
@@ -129,11 +139,12 @@ export async function recordSuppression(
   await holdSuppressionFence(client);
   await lockSuppressionAddress(client, emailAddress);
 
-  // The cause first and unconditionally: every event is its own fact, including
-  // one the entry's merge rule below declines to record. Marked so the entry
-  // trigger does not add a second cause for the same write.
+  // Every event is its own fact. Still marked as a cause writer while the
+  // mirroring trigger exists in databases that have not run the contraction's
+  // drop yet; the mark costs one `set_config` and stops a second cause being
+  // written for the same event there.
   await markCauseWriter(client);
-  const recorded = await recordSuppressionCause(client, {
+  const cause = await recordSuppressionCause(client, {
     emailAddress,
     scope,
     purposeKey,
@@ -152,73 +163,13 @@ export async function recordSuppression(
     expiresAt: input.expiresAt ?? null,
   });
 
-  // No entry for a classification cause; see RecordSuppressionInput.scope.
-  if (scope === "classification") {
-    return recorded ? { id: null, changed: true } : { id: null, changed: false, duplicate: true };
-  }
-
-  // The same event again -- a redelivered webhook, a retried admin request. It
-  // is a no-op for the entry too: re-merging it would restamp the entry with the
-  // retry's time and provenance while the cause keeps the first, and the two
-  // records would disagree about one event.
-  if (!recorded) {
-    const current = await client.suppressionEntry.findUnique({
-      where: { emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey } },
-      select: { id: true },
-    });
-    return { id: current?.id ?? null, changed: false, duplicate: true };
-  }
-
-  const existing = await client.suppressionEntry.findUnique({
-    where: {
-      emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey },
-    },
-    select: { id: true, reason: true },
-  });
-
-  const permanent = (reason: string) =>
-    reason === "hard_bounce" ||
-    reason === "complaint" ||
-    reason === "manual" ||
-    reason === "privacy_request";
-
-  if (existing?.reason === "privacy_request") {
-    // A data-subject request is never overwritten, not by another permanent
-    // reason and not by a later request restamping it: the entry would then read as liftable and the only record of the
-    // request would be gone (docs/policy/email-product-news-redesign-draft.md,
-    // section 7.4). The new event is still its own cause above.
-    return { id: existing.id, changed: false };
-  }
-
-  if (existing && permanent(existing.reason) && !permanent(input.reason)) {
-    // The stored entry already says something stronger. Leaving it alone is the
-    // whole point: a permanent suppression that a transient event can downgrade
-    // is not a permanent suppression.
-    return { id: existing.id, changed: false };
-  }
-
-  const data = {
-    reason: input.reason,
-    source: input.source,
-    expiresAt: input.expiresAt ?? null,
-    sourceStream: input.sourceStream ?? null,
-    sourceDomain: input.sourceDomain ?? null,
-    sourceClassification: input.sourceClassification ?? null,
-    sourceDeliveryId: input.sourceDeliveryId ?? null,
-    sourceMessageId: input.sourceMessageId ?? null,
-    occurredAt,
-    ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
-  };
-
-  const row = await client.suppressionEntry.upsert({
-    where: {
-      emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey },
-    },
-    update: data,
-    create: { emailAddress, scope, purposeKey, ...data },
-    select: { id: true },
-  });
-  return { id: row.id, changed: true };
+  return cause.recorded
+    ? { id: cause.id, changed: true }
+    : // The same event again -- a redelivered webhook, a retried admin request.
+      // The cause is already there and says what it said the first time; the
+      // caller is told so rather than being handed a second identity for one
+      // event.
+      { id: cause.id, changed: false, duplicate: true };
 }
 
 /**
@@ -251,59 +202,6 @@ export const APPROVAL_REQUIRED_SUPPRESSION_REASONS = [
  * and taking the fence. Nothing was released; asking again takes the other path.
  */
 export type SuppressionRemovalRefusal = "not_found" | "unliftable" | "authority_changed";
-
-/**
- * Lifts one suppression, returning what it was so the audit entry can hold it.
- *
- * The row is read and deleted in one transaction: an audit entry describing a
- * row that a concurrent lift already removed would be a record of something
- * that did not happen, and the reason column is the only trace of why mail to
- * this address was re-enabled (§13.7).
- */
-export async function removeSuppression(input: {
-  id: string;
-}): Promise<
-  | { removed: true; entry: Prisma.SuppressionEntryGetPayload<object> }
-  | { removed: false; refusal: SuppressionRemovalRefusal }
-> {
-  return prisma.$transaction(async (tx) => {
-    await holdSuppressionFence(tx);
-    // Read under the fence: a cutover that committed after the caller chose
-    // this path means entries no longer decide, and lifting a whole selector
-    // here would release causes the release matrix keeps.
-    if ((await readSuppressionAuthority(tx)) !== "entry") {
-      return { removed: false as const, refusal: "authority_changed" as const };
-    }
-    const found = await tx.suppressionEntry.findUnique({
-      where: { id: input.id },
-      select: { emailAddress: true },
-    });
-    if (!found) return { removed: false as const, refusal: "not_found" as const };
-    await lockSuppressionAddress(tx, found.emailAddress);
-    const entry = await tx.suppressionEntry.findUnique({
-      where: { id: input.id },
-    });
-    if (!entry) return { removed: false as const, refusal: "not_found" as const };
-    if (
-      (UNLIFTABLE_SUPPRESSION_REASONS as readonly string[]).includes(entry.reason)
-    ) {
-      return { removed: false as const, refusal: "unliftable" as const };
-    }
-    // While sends are decided from entries, lifting the row lifts everything
-    // behind it, so every active cause of the selector is released with it.
-    await markCauseWriter(tx);
-    await releaseSelectorCauses(tx, {
-      emailAddress: entry.emailAddress,
-      scope: entry.scope as "global" | "purpose",
-      purposeKey: entry.purposeKey,
-      releaseKind: "entry_removed",
-      releaseEvidence: { kind: "entry_removed", entryId: entry.id },
-      releasedAt: new Date(),
-    });
-    await tx.suppressionEntry.delete({ where: { id: entry.id } });
-    return { removed: true as const, entry };
-  });
-}
 
 /** Address plus scope plus purpose: what a suppression is actually about. */
 export type SuppressionSelector = {
@@ -549,9 +447,6 @@ export async function liftSuppressionCauses(input: {
         },
       });
     }
-    if (remaining.length === 0) {
-      await tx.suppressionEntry.deleteMany({ where: selector });
-    }
     return {
       removed: true as const,
       selector,
@@ -564,10 +459,11 @@ export async function liftSuppressionCauses(input: {
 /**
  * Whether this message may go out.
  *
- * Reads every entry for the address -- global and per-purpose -- and hands them
- * to the pure decision in emailSuppressionCore. The split exists so the table
- * in §13.3 can be exercised exhaustively without a database, which matters
- * because it is the table most likely to be quietly inverted later.
+ * Reads every active cause for the address -- global, per-classification and
+ * per-purpose -- and hands them to the pure decision in emailSuppressionCore.
+ * The split exists so the table in §13.3 can be exercised exhaustively without
+ * a database, which matters because it is the table most likely to be quietly
+ * inverted later.
  */
 export async function suppressionCheck(input: {
   emailAddress: string;
@@ -584,35 +480,49 @@ export async function suppressionCheck(input: {
 }): Promise<SuppressionVerdict> {
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const db = input.client ?? prisma;
-  // Which record decides is read on every call; see lib/emailSuppressionAuthority.ts.
+
+  // Causes, whatever the setting says.
+  //
+  // This is the change deploy C makes to the send path, and it is not a
+  // simplification. Nothing writes `SuppressionEntry` any more, so that table
+  // is a snapshot of the moment entry writes stopped: reading it would miss
+  // every hard bounce, complaint and privacy request recorded since, and the
+  // messages it would let through are messages to people who have told us to
+  // stop. Honouring a setting that selects it would mean honouring a request to
+  // be wrong.
+  //
+  // The setting is read anyway, so that finding it set to `entry` is loud
+  // rather than silent -- it means somebody rolled the authority back below
+  // this build's floor and is expecting a behaviour that no longer exists.
+  // Deploy D removes the setting and this read with it.
   const authority = await readSuppressionAuthority(db);
-  const records =
-    authority === "causes"
-      ? await db.suppressionCause.findMany({
-          where: {
-            emailAddress,
-            releasedAt: null,
-            OR: [
-              { scope: "global" },
-              // A classification-scope cause stops every message of that
-              // classification, whatever its purpose.
-              { scope: "classification", purposeKey: input.classification },
-              ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
-            ],
-          },
-          // Expired soft bounces are filtered by the verdict itself.
-          select: { reason: true, sourceStream: true, expiresAt: true },
-        })
-      : await db.suppressionEntry.findMany({
-          where: {
-            emailAddress,
-            OR: [
-              { scope: "global" },
-              ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
-            ],
-          },
-          select: { reason: true, sourceStream: true, expiresAt: true },
-        });
+  if (authority !== "causes") {
+    await reportOperationalIncident({
+      code: "EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR",
+      title: "The suppression read authority is set to entries",
+      error:
+        "This build does not write SuppressionEntry, so entries are a stale snapshot; causes decided this send regardless. Put the setting back to causes.",
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "email-suppression", authority },
+    });
+  }
+
+  const records = await db.suppressionCause.findMany({
+    where: {
+      emailAddress,
+      releasedAt: null,
+      OR: [
+        { scope: "global" },
+        // A classification-scope cause stops every message of that
+        // classification, whatever its purpose.
+        { scope: "classification", purposeKey: input.classification },
+        ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
+      ],
+    },
+    // Expired soft bounces are filtered by the verdict itself.
+    select: { reason: true, sourceStream: true, expiresAt: true },
+  });
 
   return suppressionVerdict({
     classification: input.classification,

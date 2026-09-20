@@ -245,11 +245,9 @@ test("the sweep releases expired causes and the entries left with nothing behind
 
   const result = await releaseExpiredSuppressionCauses();
   assert.equal(result.released, 1);
-  assert.equal(result.entriesRemoved, 1);
   const released = await prisma.suppressionCause.findFirstOrThrow({ where: { emailAddress: address } });
   assert.equal(released.releaseKind, "expired");
   assert.deepEqual(released.releaseEvidence, { kind: "expiry" });
-  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress: address } }), 0);
   assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: hard, releasedAt: null } }), 1);
 
   const again = await releaseExpiredSuppressionCauses();
@@ -412,7 +410,7 @@ test("a spent budget does no sweep work", async () => {
   });
   for (const timeBudgetMs of [0, -1, 500]) {
     const result = await releaseExpiredSuppressionCauses({ timeBudgetMs });
-    assert.deepEqual(result, { released: 0, entriesRemoved: 0, addresses: 0, exhausted: false });
+    assert.deepEqual(result, { released: 0, addresses: 0, exhausted: false });
   }
   assert.equal((await releaseExpiredSuppressionCauses({ timeBudgetMs: Number.NaN })).released, 1);
 });

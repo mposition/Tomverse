@@ -16,7 +16,7 @@ import {
   listSuppressions,
 } from "@/lib/adminEmailDeliveries";
 import { parseDeliveryFilters } from "@/lib/adminEmailDeliveryFilters";
-import { recordSuppression, removeSuppression } from "@/lib/emailSuppression";
+import { recordSuppression } from "@/lib/emailSuppression";
 import { enqueuedRow } from "../support/enqueuedEmail";
 
 // Reading the outbox back, against a real database.
@@ -252,12 +252,17 @@ test("a suppression created by a privacy request cannot be lifted from here", as
     source: "admin",
   });
 
-  const result = await removeSuppression({ id: created.id! });
-  assert.equal(result.removed, false);
-  if (!result.removed) assert.equal(result.refusal, "unliftable");
-
+  // The refusal itself is the cause lift's, and
+  // tests/integration/admin-suppression-lift-route.db.test.ts drives it through
+  // the route. What this file is responsible for is the listing: the row is
+  // there, and it says what makes it unliftable.
   const rows = await listSuppressions({ emailAddress: null, limit: 10 });
-  assert.equal(rows.length, 1, "the entry was removed anyway");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    rows[0].causes.map((cause) => cause.reason),
+    ["privacy_request"]
+  );
+  assert.equal(rows[0].id, created.id);
 });
 
 test("one row per suppressed selector, carrying every active cause on it", async () => {
@@ -408,10 +413,10 @@ test("a cause that has expired, or been released, stops being listed", async () 
   );
 });
 
-test("lifting returns what it removed, so the audit entry can hold it", async () => {
-  // The row is read and deleted in one transaction. An audit entry describing
-  // a row a concurrent lift already removed would be a record of something
-  // that did not happen.
+test("a released cause leaves the listing", async () => {
+  // What the console shows after a lift. The lift itself is the cause path's
+  // and is driven through the route elsewhere; here the release is written
+  // directly, because the claim under test is what the *listing* does with it.
   const created = await recordSuppression({
     sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "bounced@example.com",
@@ -419,19 +424,11 @@ test("lifting returns what it removed, so the audit entry can hold it", async ()
     source: "provider_webhook",
     sourceClassification: "transactional",
   });
+  assert.equal((await listSuppressions({ emailAddress: null, limit: 10 })).length, 1);
 
-  const result = await removeSuppression({ id: created.id! });
-  assert.equal(result.removed, true);
-  if (result.removed) {
-    assert.equal(result.entry.emailAddress, "bounced@example.com");
-    assert.equal(result.entry.reason, "hard_bounce");
-    assert.equal(result.entry.source, "provider_webhook");
-  }
+  await prisma.suppressionCause.update({
+    where: { id: created.id },
+    data: { releasedAt: new Date(), releaseKind: "admin" },
+  });
   assert.equal((await listSuppressions({ emailAddress: null, limit: 10 })).length, 0);
-
-  // A second lift of the same id is not found, rather than a second audit
-  // entry for one removal.
-  const again = await removeSuppression({ id: created.id! });
-  assert.equal(again.removed, false);
-  if (!again.removed) assert.equal(again.refusal, "not_found");
 });

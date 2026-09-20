@@ -35,7 +35,7 @@ export type CutoverReport = {
   stricter: number;
   repairedCauses: number;
   switched: boolean;
-  refusal: "unsafe_mismatches" | null;
+  refusal: "unsafe_mismatches" | "already_cut_over" | null;
 };
 
 const loadParity = async (tx: Prisma.TransactionClient, now: Date) => {
@@ -93,6 +93,32 @@ export async function runSuppressionCutover(input: {
       await holdSuppressionFenceExclusive(tx);
       const authorityBefore = await readSuppressionAuthority(tx);
 
+      // Already on causes: this has run here, and running it again is not a
+      // no-op.
+      //
+      // `SuppressionEntry` stopped being written at the contraction (deploy C),
+      // so its rows are a snapshot of that moment -- including suppressions
+      // lifted since. The comparison below would read those as causes that are
+      // missing, and `--repair` would write them back. An address somebody
+      // deliberately un-suppressed would start being refused mail again, with
+      // a cause whose provenance says `reconcile:entry:`.
+      //
+      // Reported rather than thrown, so a dry run still answers and the report
+      // says which state it found.
+      if (authorityBefore === "causes") {
+        return {
+          authorityBefore,
+          authorityAfter: authorityBefore,
+          entries: 0,
+          activeCauses: 0,
+          unsafe: [],
+          stricter: 0,
+          repairedCauses: 0,
+          switched: false,
+          refusal: "already_cut_over" as const,
+        };
+      }
+
       let { entries, causes, parity } = await loadParity(tx, now);
       let repairedCauses = 0;
 
@@ -122,13 +148,15 @@ export async function runSuppressionCutover(input: {
             occurredAt: entry.occurredAt,
             expiresAt: entry.expiresAt,
           });
-          if (wrote) repairedCauses += 1;
+          if (wrote.recorded) repairedCauses += 1;
         }
         ({ entries, causes, parity } = await loadParity(tx, now));
       }
 
       const refusal = parity.unsafe.length > 0 ? ("unsafe_mismatches" as const) : null;
-      const switched = input.apply && refusal === null && authorityBefore !== "causes";
+      // `authorityBefore` is `entry` by here -- the `causes` case returned
+      // above -- so the switch is decided by the comparison alone.
+      const switched = input.apply && refusal === null;
       if (switched) {
         await tx.appSetting.upsert({
           where: { key: SUPPRESSION_READ_AUTHORITY_KEY },

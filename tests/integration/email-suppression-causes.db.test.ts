@@ -3,11 +3,17 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { setPreference } from "@/lib/emailPreferences";
-import { recordSuppression, removeSuppression } from "@/lib/emailSuppression";
+import { recordSuppression } from "@/lib/emailSuppression";
 import { processResendWebhook } from "@/lib/emailWebhookProcessing";
 import { prisma } from "@/lib/prisma";
 
-// Suppression causes written beside entries -- the shadow deploy.
+// Suppression causes: the record, now that nothing is written beside them.
+//
+// This file began as the shadow deploy's -- causes written beside entries, the
+// trigger carrying an older build's writes, the merge rule the entry needed.
+// Deploy C removed all three, and the tests that pinned them went with the
+// thing they were pinning rather than being rewritten to assert something
+// weaker.
 //
 // Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
 //
@@ -50,105 +56,31 @@ test("a suppression writes its cause once, however often the event is replayed",
     sourceStream: "transactional",
     sourceEventKey: `webhook:${randomUUID()}`,
   };
-  await recordSuppression({ ...input, occurredAt: new Date("2026-09-16T00:00:00.000Z") });
-  const entryBefore = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
+  const first = await recordSuppression({
+    ...input,
+    occurredAt: new Date("2026-09-16T00:00:00.000Z"),
+  });
   const replay = await recordSuppression({
     ...input,
     occurredAt: new Date("2026-09-16T01:00:00.000Z"),
     sourceMessageId: "a-retry",
   });
   assert.equal(replay.duplicate, true);
-  const entryAfter = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
-  assert.deepEqual(
-    [entryAfter.occurredAt.toISOString(), entryAfter.sourceMessageId],
-    [entryBefore.occurredAt.toISOString(), entryBefore.sourceMessageId],
-    "a replayed event must not restamp the entry"
-  );
+  // The same event, so the same identity: a retry is told about the cause that
+  // is already there rather than being handed a second one.
+  assert.equal(replay.id, first.id);
 
   const causes = await causesFor(emailAddress);
-  assert.equal(causes.length, 1, "the marked write must not also be carried by the trigger");
+  assert.equal(causes.length, 1);
   assert.equal(causes[0].reason, "hard_bounce");
   assert.equal(causes[0].providerAccount, "transactional");
-  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 1);
-});
+  // And the retry did not restamp it. The row keeps what the first event said,
+  // which used to have to be asserted of the mirrored entry as well.
+  assert.equal(causes[0].occurredAt.toISOString(), "2026-09-16T00:00:00.000Z");
+  assert.equal(causes[0].sourceMessageId, null);
 
-test("an event the entry's merge rule declines is still recorded as a cause", async () => {
-  const emailAddress = address();
-  await recordSuppression({
-    emailAddress,
-    reason: "complaint",
-    source: "provider_webhook",
-    sourceEventKey: `webhook:${randomUUID()}`,
-  });
-  const softer = await recordSuppression({
-    emailAddress,
-    reason: "soft_bounce",
-    source: "provider_webhook",
-    expiresAt: new Date(Date.now() + 60_000),
-    sourceEventKey: `softbounce:${randomUUID()}`,
-  });
-
-  assert.equal(softer.changed, false, "the entry keeps the complaint");
-  const reasons = (await causesFor(emailAddress)).map((cause) => cause.reason).sort();
-  assert.deepEqual(reasons, ["complaint", "soft_bounce"]);
-});
-
-test("a write from a build that does not write causes is carried by the trigger", async () => {
-  const emailAddress = address();
-  const id = randomUUID();
-
-  // The previous build: a plain insert, then a strengthening update, then a
-  // no-op update, then a lift -- none marking its transaction.
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "SuppressionEntry" ("id", "emailAddress", "scope", "purposeKey", "reason", "source", "occurredAt", "updatedAt")
-     VALUES ($1, $2, 'global', '*', 'soft_bounce', 'provider_webhook', NOW(), NOW())`,
-    id,
-    emailAddress
-  );
-  await prisma.$executeRawUnsafe(
-    `UPDATE "SuppressionEntry" SET "reason" = 'hard_bounce', "sourceMessageId" = 'm-2' WHERE "id" = $1`,
-    id
-  );
-  await prisma.$executeRawUnsafe(
-    `UPDATE "SuppressionEntry" SET "updatedAt" = NOW() WHERE "id" = $1`,
-    id
-  );
-
-  let causes = await causesFor(emailAddress);
-  assert.deepEqual(
-    causes.map((cause) => cause.reason),
-    ["soft_bounce", "hard_bounce"],
-    "an insert and a provenance change each become a cause; a no-op update does not"
-  );
-  assert.ok(causes.every((cause) => cause.sourceEventKey.startsWith(`legacy-trigger:${id}:`)));
-
-  await prisma.$executeRawUnsafe(`DELETE FROM "SuppressionEntry" WHERE "id" = $1`, id);
-  causes = await causesFor(emailAddress);
-  assert.ok(causes.every((cause) => cause.releasedAt && cause.releaseKind === "legacy_delete"));
-});
-
-test("lifting an entry releases every cause behind it", async () => {
-  const emailAddress = address();
-  const entry = await recordSuppression({
-    emailAddress,
-    reason: "manual",
-    source: "admin",
-    sourceEventKey: `admin:${randomUUID()}`,
-  });
-  await recordSuppression({
-    emailAddress,
-    reason: "soft_bounce",
-    source: "provider_webhook",
-    expiresAt: new Date(Date.now() + 60_000),
-    sourceEventKey: `softbounce:${randomUUID()}`,
-  });
-
-  const result = await removeSuppression({ id: entry.id! });
-  assert.equal(result.removed, true);
-
-  const causes = await causesFor(emailAddress);
-  assert.equal(causes.length, 2);
-  assert.ok(causes.every((cause) => cause.releaseKind === "entry_removed"));
+  // Nothing writes the mirror any more.
+  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 0);
 });
 
 test("a preference switched off and on leaves transitions and a released cause", async () => {

@@ -314,16 +314,24 @@ test("switching a purpose back on is refused while another cause still stops it"
   assert.deepEqual(result, { changed: false, reason: "suppressed" });
 });
 
-test("an entry-path removal that finds causes deciding releases nothing", async () => {
+test("the setting cannot make a send read entries", async () => {
+  // The deploy C hazard, and the reason this build ignores the setting rather
+  // than honouring it. Nothing writes `SuppressionEntry` any more, so a
+  // rollback of the authority would have sends consult a table frozen at the
+  // moment those writes stopped -- and every suppression recorded since would
+  // be invisible. The address below is suppressed by a cause and has no entry
+  // at all, which is what every new suppression looks like now.
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "manual");
-  await setAuthority("causes");
+  await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
+  await setAuthority("entry");
 
-  const { removeSuppression } = await import("@/lib/emailSuppression");
-  const result = await removeSuppression({ id: entry.id! });
-  assert.deepEqual(result, { removed: false, refusal: "authority_changed" });
-  const causes = await prisma.suppressionCause.findMany({ where: { emailAddress } });
-  assert.ok(causes.every((cause) => cause.releasedAt === null));
+  assert.equal(
+    await prisma.suppressionEntry.count({ where: { emailAddress } }),
+    0,
+    "the fixture is only meaningful if nothing mirrored the cause"
+  );
+  const verdict = await suppressionCheck({ emailAddress, classification: "transactional" });
+  assert.equal(verdict.allowed, false, "the setting was honoured and the complaint was missed");
 });
 
 test("a cause written while a lift waits for the address is seen by the lift", async () => {
