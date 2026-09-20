@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import {
+  PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES,
   PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
   evaluatePromptRefinerShadowEvidence,
   parsePromptRefinerShadowEvidenceSpec,
   validatePromptRefinerShadowEvidenceSpec,
 } from "../lib/promptRefinerShadowEvidenceCore.ts";
+import { parseBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
 import {
   parsePromptRefinerShadowCorpus,
   promptRefinerShadowCorpusDigest,
@@ -69,11 +71,19 @@ test("the preregistered evidence spec is strict, bound and complete", () => {
     2
   );
 
+  const duplicateSpecText = specText.replace(
+    '"purpose": "development-only",',
+    '"purpose": "development-only",\n  "purpose": "development-only",'
+  );
   assert.throws(
-    () => parsePromptRefinerShadowEvidenceSpec(specText.replace(
-      '"schemaVersion"',
-      '"schemaVersion"\n, "schemaVersion"'
-    )),
+    () => parseBenchmarkJson(
+      duplicateSpecText,
+      PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES
+    ),
+    /json_duplicate_key/
+  );
+  assert.throws(
+    () => parsePromptRefinerShadowEvidenceSpec(duplicateSpecText),
     /spec_json_invalid/
   );
   assert.throws(
@@ -221,6 +231,11 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   const failedBundle = evaluate(failed);
   assert.equal(failedBundle.gateOutcome, "fail");
   assert.ok(failedBundle.gateReasons.includes("terminal_failure_present"));
+  assert.ok(failedBundle.gateReasons.includes("case_evidence_failed"));
+  assert.equal(
+    failedBundle.gateReasons.includes("case_evidence_incomplete"),
+    false
+  );
   assert.ok(failedBundle.gateReasons.includes("cost_incomplete"));
   assert.equal(failedBundle.cases[0].failureReasons[0], "not_suggested");
 
@@ -235,6 +250,11 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   const unknownBundle = evaluate(unknown);
   assert.equal(unknownBundle.gateOutcome, "insufficient_evidence");
   assert.ok(unknownBundle.gateReasons.includes("unknown_present"));
+  assert.ok(unknownBundle.gateReasons.includes("case_evidence_incomplete"));
+  assert.equal(
+    unknownBundle.gateReasons.includes("case_evidence_failed"),
+    false
+  );
   assert.ok(unknownBundle.gateReasons.includes("cost_incomplete"));
   assert.ok(unknownBundle.gateReasons.includes("latency_incomplete"));
   assert.deepEqual(unknownBundle.cases[0].failureReasons, []);

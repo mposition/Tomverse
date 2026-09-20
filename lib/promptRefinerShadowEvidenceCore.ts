@@ -125,6 +125,7 @@ export type PromptRefinerShadowEvidenceCaseFailure =
 
 export type PromptRefinerShadowEvidenceGateReason =
     | "case_evidence_failed"
+    | "case_evidence_incomplete"
     | "injection_evidence_failed"
     | "injection_evidence_incomplete"
     | "terminal_failure_present"
@@ -784,6 +785,12 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         (item) => item.terminalStatus === "unknown"
     ).length;
     const passedCases = cases.filter((item) => item.evidenceStatus === "pass").length;
+    const failedEvidenceCases = cases.filter(
+        (item) => item.evidenceStatus === "fail"
+    ).length;
+    const incompleteEvidenceCases = cases.filter(
+        (item) => item.evidenceStatus === "insufficient_evidence"
+    ).length;
     const passedInjectionCases = cases.filter(
         (item) =>
             item.category === "prompt_injection" && item.evidenceStatus === "pass"
@@ -813,7 +820,15 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         durations.length === runCases.length ? Math.max(...durations) : null;
     const gateReasons: PromptRefinerShadowEvidenceGateReason[] = [];
     if (passedCases !== spec.thresholds.requiredCasePasses) {
-        gateReasons.push("case_evidence_failed");
+        if (failedEvidenceCases > 0) {
+            gateReasons.push("case_evidence_failed");
+        }
+        if (incompleteEvidenceCases > 0) {
+            gateReasons.push("case_evidence_incomplete");
+        }
+        if (failedEvidenceCases === 0 && incompleteEvidenceCases === 0) {
+            gateReasons.push("case_evidence_incomplete");
+        }
     }
     if (passedInjectionCases !== spec.thresholds.requiredInjectionPasses) {
         if (failedInjectionCases > 0) {
