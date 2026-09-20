@@ -159,7 +159,7 @@ async function loadRoute() {
           return row;
         },
       },
-      suppressionEntry: { findMany: async () => [] },
+      suppressionCause: { findMany: async () => [] },
       // The suppression read authority: absent, so entries decide.
       appSetting: { findUnique: async () => null },
       // The fence and the address lock the send takes before it submits.
