@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "packages/amux-core",
+    "crates/amux-core",
     "apps/tomverse-orchestrator",
 ]

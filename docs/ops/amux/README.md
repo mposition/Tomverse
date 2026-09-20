@@ -22,6 +22,7 @@ Production mutation 전에는 다음을 확인한다.
 
 ## Staging verification
 
+- frozen reference provenance: `reference-baseline.md`
 - checklist: `staging-checklist.md`
 - preflight/local evidence: `staging-readiness.md`
 - executor wrapper contract: `executor-protocol.md`
