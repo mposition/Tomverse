@@ -174,23 +174,27 @@ export function modelClaimDecision({
  * Australian consumer law requires a single price inclusive of GST, and whether
  * these numbers are GST-inclusive is not derivable from the numbers.
  *
- * **There is no such flag in the catalogue today.** `billingPriceCatalogSchema`
- * (lib/billingPriceCatalog.ts) carries prices and no tax metadata, so this
- * always refuses, and that is the intended state: the alternative is deciding
- * from a number's magnitude whether tax is in it. When the catalogue gains the
- * flag, `gstInclusiveDeclared` starts arriving as `true` and the refusal stops
- * -- at which point the claim is still `approval_required` (§7.4), never
- * autonomous.
+ * **There is no such flag in the catalogue today**, so this always refuses, and
+ * it takes no argument that could change that. `billingPriceCatalogSchema`
+ * (lib/billingPriceCatalog.ts) carries prices and no tax metadata.
+ *
+ * It used to take a `gstInclusiveDeclared` boolean, which made the rule say
+ * something different from what the amendment says: not "refused until the
+ * catalogue proves it" but "refused unless the caller says so". A caller
+ * assembling `true` is not a stored flag, and the caller assembling it would be
+ * the Guard, from nothing. The refusal is unconditional because the fact it
+ * needs does not exist yet.
+ *
+ * Making it conditional again means adding a typed field to the catalogue
+ * schema and reading it here, in one change. The test asserts the schema still
+ * has no such field, so that change cannot happen quietly.
  */
 export function australianPriceClaimDecision({
   currency,
   catalogueSource,
-  gstInclusiveDeclared,
 }: {
   currency: string;
   catalogueSource: BillingPriceCatalogSource;
-  /** Undefined means the catalogue has no such field, which is today's state. */
-  gstInclusiveDeclared?: boolean;
 }): MarketingFactDecision {
   const catalogue = catalogueClaimSourceDecision(catalogueSource);
   if (!catalogue.ok) return catalogue;
@@ -205,12 +209,13 @@ export function australianPriceClaimDecision({
       detail: `currency=${currency}`,
     };
   }
-  if (gstInclusiveDeclared !== true) {
-    return {
-      ok: false,
-      refusal: "au_price_gst_unverifiable",
-      detail: "no stored gst-inclusive flag",
-    };
-  }
-  return { ok: true };
+  return {
+    ok: false,
+    refusal: "au_price_gst_unverifiable",
+    detail: "the price catalogue carries no gst-inclusive flag",
+  };
 }
+
+// What this becomes when the catalogue can answer: a typed stored field is read
+// here, `true` passes, anything else keeps the refusal -- and the claim is
+// still `approval_required` at the Guard (§7.4), never autonomous.

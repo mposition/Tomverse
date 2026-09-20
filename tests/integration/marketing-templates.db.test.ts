@@ -522,3 +522,71 @@ test("a non-integer version is not a version", async () => {
     refusal: "marking_version_missing",
   });
 });
+
+test("a marking that overstates the version it saw cannot hide a later edit", async () => {
+  // The forgery the index scan allowed. Mark at version zero but record `1`,
+  // then append an `edit_revision` at index 1 that leaves the digest alone.
+  // The post's version and the marking's now both read 1, `slice(2)` looks at
+  // nothing, and the digest comparison sees no change -- so every check the
+  // module had agreed the template stood. The scan is by timestamp instead.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  await auditRow({
+    action: MARKETING_POST_MARK_REUSABLE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST, historyVersion: 1 },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { reusableAsTemplate: true },
+  });
+
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("edit_revision", {
+          envelopeDigest: DIGEST,
+          previousEnvelopeDigest: DIGEST,
+          byAuditLogId: null,
+        }),
+      ],
+      historyVersion: 1,
+    },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edited_since_marking",
+  });
+});
+
+test("an edit before the marking does not break the template", async () => {
+  // The other direction, so the timestamp scan is not simply refusing
+  // everything: a post edited, then approved, then marked, is a template.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("edit_revision", {
+          envelopeDigest: DIGEST,
+          previousEnvelopeDigest: OTHER_DIGEST,
+          byAuditLogId: null,
+        }),
+      ],
+      historyVersion: 1,
+    },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  const result = await loadApprovedTemplate(prisma, post.id);
+  assert.equal(result.ok, true, JSON.stringify(result));
+});

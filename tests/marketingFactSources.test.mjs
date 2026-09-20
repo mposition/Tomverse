@@ -88,23 +88,29 @@ test("the catalogue still carries no GST flag, so AU price claims refuse", () =>
   assert.equal(withoutFlag.ok, false);
   assert.equal(withoutFlag.refusal, "au_price_gst_unverifiable");
 
-  // And when the flag one day exists, a stored AUD price passes this gate --
-  // it is still approval_required by §7.4, which is the Guard's decision.
-  assert.equal(
-    australianPriceClaimDecision({
+  // And nothing a caller passes can change that. The function used to take a
+  // `gstInclusiveDeclared` boolean, which turned "refused until the catalogue
+  // proves it" into "refused unless the caller says so" -- and the caller
+  // asserting it would be the Guard, from nothing.
+  for (const extra of [
+    { gstInclusiveDeclared: true },
+    { gstInclusive: true },
+    { gstInclusiveDeclared: "true" },
+  ]) {
+    const attempted = australianPriceClaimDecision({
       currency: "AUD",
       catalogueSource: "stored",
-      gstInclusiveDeclared: true,
-    }).ok,
-    true,
-  );
+      ...extra,
+    });
+    assert.equal(attempted.ok, false, JSON.stringify(extra));
+    assert.equal(attempted.refusal, "au_price_gst_unverifiable");
+  }
 });
 
 test("an AU claim on a non-stored catalogue refuses for the catalogue first", () => {
   const decision = australianPriceClaimDecision({
     currency: "AUD",
     catalogueSource: "default_row_invalid",
-    gstInclusiveDeclared: true,
   });
   assert.equal(decision.ok, false);
   assert.equal(decision.refusal, "catalogue_source_not_stored");
@@ -114,7 +120,6 @@ test("a non-AUD price is not an Australian price, and says so", () => {
   const decision = australianPriceClaimDecision({
     currency: "USD",
     catalogueSource: "stored",
-    gstInclusiveDeclared: true,
   });
   assert.equal(decision.ok, false);
   assert.equal(
@@ -341,4 +346,42 @@ test("a claim naming a moved sentence is reported per locale", () => {
       refusal: "evidence_not_page",
     },
   ]);
+});
+
+test("a page claim whose statement key drifted from its evidence key is reported", () => {
+  // The rule is that the rendered claim and the evidence are the same bytes.
+  // The schema refuses this at parse time; this is the second signal, for a
+  // registry that reached the checker without being parsed.
+  assert.deepEqual(
+    unresolvedClaimEvidence([
+      {
+        id: "feature.drifted",
+        type: "feature",
+        statementKey: "sections.0.body",
+        locales: ["en"],
+        evidence: { kind: "page", pageRoute: "/faq", localeKey: "title" },
+      },
+    ]),
+    [
+      {
+        claimId: "feature.drifted",
+        locale: null,
+        refusal: "statement_key_not_evidence_key",
+      },
+    ],
+  );
+
+  // And a claim whose keys agree is not reported for that.
+  assert.deepEqual(
+    unresolvedClaimEvidence([
+      {
+        id: "feature.fine",
+        type: "feature",
+        statementKey: "title",
+        locales: ["en"],
+        evidence: { kind: "page", pageRoute: "/faq", localeKey: "title" },
+      },
+    ]),
+    [],
+  );
 });

@@ -196,14 +196,29 @@ export async function loadApprovedTemplate(
   // refuses content that changed; this refuses a history that says it did, so
   // the row cannot answer the two questions differently.
   //
-  // `markedVersion + 1`, because a post starts at version zero with one entry:
-  // the entry at index N is the one that existed *at* version N, and "after the
-  // marking" begins at the next one. Slicing from `markedVersion` would count
-  // the marking's own entry as something that happened since.
+  // **Found by time, not by index.** `historyVersion` is a compare-and-set
+  // revision that the marking's own metadata asserts, and using it as an array
+  // index trusts that assertion twice over: a marking taken at version zero
+  // can record `1`, and an `edit_revision` appended at index 1 then falls
+  // outside `slice(2)` while the post's version reads 1 as well. Retention
+  // compaction moves the indices too, since it removes elements without
+  // rewinding the version.
+  //
+  // Every entry carries `at`, and r5 amendment 2 forbids compaction from
+  // removing an `edit_revision` at any age, so the timestamps are both present
+  // and complete. `>=` rather than `>`: two records in the same millisecond
+  // cannot be ordered, and the safe answer is that the template stops
+  // resolving until a person approves the post again.
+  //
+  // The index scan is kept alongside it. It is what r4 amendment 5 literally
+  // describes, the two disagree only when something is wrong, and either one
+  // refusing is the direction that costs an approval rather than a publication.
   const history = marketingHistorySchema.parse(post.history);
-  const editedSinceMarking = history
-    .slice(markedVersion + 1)
-    .some((entry) => isEdit(entry));
+  const markedAt = marking.createdAt.getTime();
+  const editedSinceMarking =
+    history.some(
+      (entry) => isEdit(entry) && Date.parse(entry.at) >= markedAt,
+    ) || history.slice(markedVersion + 1).some((entry) => isEdit(entry));
   if (editedSinceMarking || post.historyVersion < markedVersion) {
     return { ok: false, refusal: "edited_since_marking" };
   }

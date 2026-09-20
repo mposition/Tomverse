@@ -77,7 +77,9 @@ export type MarketingEvidenceRefusal =
   | "key_not_found"
   | "key_not_a_string"
   /** A claim whose type requires page evidence and carries none. */
-  | "evidence_not_page";
+  | "evidence_not_page"
+  /** A page claim whose rendered sentence and evidence are no longer one key. */
+  | "statement_key_not_evidence_key";
 
 export type MarketingEvidenceResolution =
   | { ok: true; text: string }
@@ -166,6 +168,7 @@ export function unresolvedClaimEvidence(
   claims: ReadonlyArray<{
     id: string;
     type: string;
+    statementKey?: string;
     locales: readonly MarketingLocale[];
     evidence: { kind: string; pageRoute?: string; localeKey?: string } | null;
   }>,
@@ -194,6 +197,21 @@ export function unresolvedClaimEvidence(
       }
       continue;
     }
+    // The schema refuses this at parse time, and the registry is parsed. Said
+    // twice on purpose: the rule is that the rendered claim and the evidence
+    // are the same bytes, and a registry reaching this function unparsed would
+    // otherwise be checked for a moved key while a drifted one went unmentioned.
+    if (
+      claim.statementKey !== undefined &&
+      claim.statementKey !== claim.evidence.localeKey
+    ) {
+      unresolved.push({
+        claimId: claim.id,
+        locale: null,
+        refusal: "statement_key_not_evidence_key",
+      });
+    }
+
     for (const locale of claim.locales) {
       const resolution = resolveMarketingPageEvidence({
         pageRoute: claim.evidence.pageRoute ?? "",
