@@ -122,3 +122,16 @@ bd8584ca778a3f1774740f39b2af8568afa16d71:tests/server-contract/email-provider-po
 #
 # Scope: exactly this one finding in that one commit -- nothing wider.
 a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure.test.mjs:generic-api-key:64
+
+# A locale key path, not a credential.
+#
+# Commit 308652d added a claim fixture whose `statementKey` was
+# "sections.0.body" -- the dotted path to the body of the first FAQ answer,
+# used to show a claim whose statement key has drifted from its evidence key.
+# The generic-api-key rule matched it on entropy alone: it is fifteen
+# characters of mixed letters, digits and dots sitting after a colon, which is
+# the shape that rule looks for, and it names a sentence on a public page.
+#
+# The fixture now uses "description", which does not trip the rule, so this
+# pins only the immutable commit that introduced the earlier value.
+308652dc486cacdb395b53dbd52ee2c4c907706c:tests/marketingFactSources.test.mjs:generic-api-key:360

@@ -357,7 +357,7 @@ test("a page claim whose statement key drifted from its evidence key is reported
       {
         id: "feature.drifted",
         type: "feature",
-        statementKey: "sections.0.body",
+        statementKey: "description",
         locales: ["en"],
         evidence: { kind: "page", pageRoute: "/faq", localeKey: "title" },
       },
