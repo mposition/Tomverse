@@ -504,6 +504,13 @@ export async function suppressionCheck(input: {
     // hold that lock for the length of somebody else's HTTP request, and a
     // failure to *report* would become a failure to *send*. The report is worth
     // making and is worth nothing at that price.
+    //
+    // Not awaiting it does not lose the record. `reportOperationalIncident`
+    // writes its structured `console.error` before its first `await`, and the
+    // body of an async function runs synchronously up to that point -- so the
+    // line is emitted before this returns. What is left to the microtask queue
+    // is the external notification and the Sentry flush, which are the parts
+    // worth losing rather than holding a lock for.
     void reportOperationalIncident({
       code: "EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR",
       title: "The suppression read authority is set to entries",

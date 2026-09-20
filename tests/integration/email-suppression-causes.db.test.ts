@@ -84,14 +84,23 @@ test("a suppression writes its cause once, however often the event is replayed",
 });
 
 test("a later transient cause does not unseat a permanent one", async () => {
-  // The claim that let deploy C delete the entry's merge rules.
+  // The safety property that let deploy C delete the entry's merge rules.
   //
   // Those rules existed because one row had to stand for several facts: a
   // `privacy_request` must not be overwritten, a permanent reason must not be
   // downgraded to a soft bounce. With a row per cause there is nothing to
-  // overwrite -- but "nothing to overwrite" is only equivalent to the old rules
-  // if the verdict actually reads every active cause rather than the newest
-  // one, and that is what this pins.
+  // overwrite -- but that is only *safe* if the verdict reads every active
+  // cause rather than the newest one, and that is what this pins.
+  //
+  // Deliberately not a claim of full equivalence, and the difference is worth
+  // naming. The old entry kept the last permanent reason written to it, so
+  // `hard_bounce` then `complaint` left a row saying complaint; the verdict
+  // ranks by reason and answers `hard_bounce`. Both refuse the send; the
+  // `skipReason` differs. Likewise a long soft bounce followed by a short one:
+  // one row was overwritten and could start allowing earlier, while the causes
+  // keep both and the longer one still decides. Those differences arrived with
+  // the read authority at deploy B. C-2 only stops maintaining the row that
+  // used to disagree.
   const complained = address();
   await recordSuppression({
     emailAddress: complained,
