@@ -1,0 +1,655 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-shadow-execution-runner-v1",
+  "requirement": "Prompt Refiner의 승인된 one-run 계약을 실제로 수행할 수 있는 owner-only, default-off staging shadow runner를 구현한다. 시작·resume마다 DB-clock stale-intent sweep과 exact stage/run/runtime/expiry 검증을 수행하고, frozen synthetic corpus 16건을 순차적으로 reservation -> durable dispatch intent/consume -> 고정 provider adapter -> immutable terminal receipt 순서로만 처리한다. js-tiktoken 1.0.21의 o200k_base 계수를 dispatch 전에 강제하며 tokenizer identity와 count를 audit에 결속한다. retry, redispatch, fallback, parallel dispatch, 제품 Chat 연결, prompt/output 저장은 금지한다. maintenance는 sweeper만 호출하고 provider 경계에는 도달할 수 없어야 한다. 이 변경은 flag 활성화, stage/run 생성, provider 호출, 유료 실행 또는 제품 공개를 수행하지 않는다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.",
+  "completionCriteria": [
+    "run contract v3는 actual tokenizer identity, exact 16-case order, 100000 input cap, 4096 output cap, 15000ms timeout, 240000ms invocation admission budget, 10000ms terminal-write margin, retry 0, 요청당/전체 비용 ceiling과 stop-no-redispatch를 고정하고 productAdapterReady=false를 유지한다.",
+    "owner-only execute GET/POST는 recent authentication, no-store, origin guard, DB rate limit, 4 KiB strict JSON, exact run id/digest/confirmation을 강제하며 product prompt나 model output을 반환하지 않는다.",
+    "runner는 첫 동작으로 DB-clock sweeper를 실행하고 unresolved incident나 in-flight intent에서 새 dispatch를 만들지 않는다. 각 terminal 뒤와 다음 case 시작 전에 default-off kill switch를 다시 확인하되, 이미 dispatch한 case의 terminal 기록은 kill switch로 건너뛰지 않는다.",
+    "각 case는 exact reservation과 durable intent가 성공한 뒤에만 provider adapter에 도달한다. pre-intent failure는 reservation을 한 번 release하고, post-intent 또는 terminal-write 불명 결과는 retry·redispatch 없이 중단한다.",
+    "frozen 16건은 corpus order대로 한 번씩만 실행되며 unknown_after_dispatch가 하나라도 있으면 run latch 뒤 다음 case를 시작하지 않는다. transient refined prompt는 durable store나 route 응답에 남지 않는다.",
+    "js-tiktoken@1.0.21 o200k_base가 system/user content를 계수하고 fixed framing 32를 더한 admission count를 dispatch 전에 검사한다. DB trigger는 tokenizer package/version/encoding과 0..100000 count가 결속된 system audit만 허용한다.",
+    "15분 maintenance는 durable sweeper만 import·호출하며 runner/live adapter/provider를 import하지 않는다. kill switch와 무관하게 stale intent를 unknown으로 닫되 새 reservation·dispatch를 생성하지 않는다.",
+    "v3 migration은 기존 run/attempt가 있으면 fail-closed하고 v3 contract/audit constraints만 교체하며 어떤 승인·attempt도 seed하지 않는다.",
+    "unit, server-contract, DB integration, typecheck, 대상 lint, 문서·정책·encoding·security·runtime source closure 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다."
+  ],
+  "baseCommit": "af9423311a3cb7726ca92062f89d1e7add9ececf",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:4b382e114bef45d11ddd8c33ce103e31be6ba1d45ac5d35413d3e6f40a29840e",
+      "commit": null,
+      "filesChanged": [
+        "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+        "app/api/admin/prompt-refiner/shadow-run/route.ts",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.task.json",
+        "docs/ops/prompt-refiner-durable-run-writer-contract.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/maintenance.ts",
+        "lib/promptRefinerShadowLiveAdapter.ts",
+        "lib/promptRefinerShadowRunContract.ts",
+        "lib/promptRefinerShadowRunStore.ts",
+        "lib/promptRefinerShadowRunner.ts",
+        "lib/promptRefinerShadowSystemAudit.ts",
+        "lib/promptRefinerShadowTokenizer.ts",
+        "package.json",
+        "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+        "tests/promptRefinerShadowLiveAdapter.test.mjs",
+        "tests/promptRefinerShadowRunContract.test.mjs",
+        "tests/promptRefinerShadowRunner.test.mjs",
+        "tests/promptRefinerShadowTokenizer.test.mjs",
+        "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+        "tests/server-contract/maintenance-step-isolation.test.ts"
+      ],
+      "changeSummary": "Prompt Refiner one-run shadow 실행 runner와 actual-tokenizer admission, owner-only 진입점, durable no-retry/unknown 경계 및 maintenance sweeper를 default-off로 구현",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow-live-adapter",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3651.4231",
+          "durationMs": 4255
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:server-contract",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 205722.2082",
+          "durationMs": 206332
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 44980
+        },
+        {
+          "rule": "npx eslint app/api/admin/prompt-refiner/shadow-run/execute/route.ts app/api/admin/prompt-refiner/shadow-run/route.ts lib/maintenance.ts lib/promptRefinerShadowLiveAdapter.ts lib/promptRefinerShadowRunContract.ts lib/promptRefinerShadowRunner.ts lib/promptRefinerShadowRunStore.ts lib/promptRefinerShadowSystemAudit.ts lib/promptRefinerShadowTokenizer.ts scripts/check-protected-table-writers-core.mjs tests/integration/prompt-refiner-shadow-run.db.test.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/maintenance-step-isolation.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3636
+        },
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+          "durationMs": 3470
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1429
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 117 instruction document(s), and 1013 path(s) named by comments across 3049 source file(s), all present.",
+          "durationMs": 1469
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1090
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 133 suite(s) in tests/integration/, all 133 named by the runner.",
+          "durationMs": 664
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 214 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 766
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 117 closed list(s) in the schema — 61 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1067
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 808
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+          "durationMs": 640
+        },
+        {
+          "rule": "git diff --check af9423311a3cb7726ca92062f89d1e7add9ececf -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 64
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "package.json:309 (devDependencies) vs lib/promptRefinerShadowTokenizer.ts:3",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "The pinned admission tokenizer `js-tiktoken` is declared only as a devDependency, yet it is now a static runtime import on the shipped paid-dispatch path (execute/route.ts -> promptRefinerShadowRunner.ts:11 -> promptRefinerShadowLiveAdapter.ts:33 -> promptRefinerShadowTokenizer.ts:3), so it is excluded from the repo's production vulnerability audit and from any dev-omitting install.",
+          "reproduction": "grep -n 'js-tiktoken' package.json -> line 309 is inside the devDependencies block (lines 300-314); package-lock.json:10184-10188 shows `\"dev\": true`. Before this change the only importer was scripts/report-token-estimate-accuracy.mjs:32 (a dev script). Consequence 1: .github/workflows/daily-security-audit.yml:113 runs `npm audit --omit=dev`, so any future CVE in a package that now executes inside app/api/admin/prompt-refiner/shadow-run/execute/route.ts is invisible to that audit. Consequence 2: `npm ci --omit=dev && npx next build` fails to resolve `js-tiktoken` from lib/promptRefinerShadowTokenizer.ts. Fix: move `js-tiktoken` into `dependencies` and regenerate package-lock.json (the frozen-version assertion in tests/promptRefinerShadowTokenizer.test.mjs:19 still holds).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowRunner.ts:144-234 and app/api/admin/prompt-refiner/shadow-run/execute/route.ts:2",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The sequential loop has no wall-clock budget guard against the route's `maxDuration = 300`, so a worst-case invocation can be killed between a durable intent and its terminal write, which permanently latches the one-run authority to `stopped_unknown`.",
+          "reproduction": "Arithmetic against the frozen contract: 16 cases x PROMPT_REFINER_TIMEOUT_MS 15000 = 240s of provider budget alone, plus ~65 DB transactions (16 reserve, 16 intent, 16 terminal, 17 readState) and ~33 full run-source-manifest builds (readRunSourceFiles at lib/promptRefinerShadowRunStore.ts:206-227 re-reads and hashes all 14 paths, including package-lock.json, on every recordPromptRefinerShadowDispatchIntent and readPromptRefinerShadowExecutionState). At 30-80ms RTT that overhead alone is tens of seconds, so total can exceed the 300s cap. If the platform kills the function while an attempt is in `dispatch_intent`, sweepPromptRefinerShadowUnknowns closes it as `unknown_after_dispatch` (lib/promptRefinerShadowRunStore.ts:1000-1006), the run trigger makes `stopped_unknown` immutable (20260920120000 migration.sql:310-312), and `PromptRefinerShadowRun_runContractDigest_key` (same file, line 84) forbids a replacement run without a new contract digest. Suggested fix: record a start timestamp in the runner and return `paused` before reserving a case when remaining budget < timeoutMs + write margin.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowRunner.ts:29",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The runner validates the bundled corpus only for self-consistency and never binds it to the frozen PROMPT_REFINER_SHADOW_CORPUS_DIGEST, so the exact bytes it sends to the provider are verified only indirectly via a different (on-disk) copy.",
+          "reproduction": "lib/promptRefinerShadowHarness.ts:405 compares the recomputed digest against the file's own embedded `contentDigest` field, never against PROMPT_REFINER_SHADOW_CORPUS_DIGEST (lib/promptRefinerShadowHarness.ts:29). The frozen-digest binding exists only in the stage-admission path, which reads the file from process.cwd() (lib/promptRefinerStageAdmission.ts:202, lib/promptRefinerShadowAdmissionCore.ts:734-741), while the runner dispatches `item.sourceText` from the webpack-bundled import at lib/promptRefinerShadowRunner.ts:5. Edit any `sourceText` in docs/ops/prompt-refiner-shadow/corpus-v1.json and update its `contentDigest` field, then call createPromptRefinerShadowRunner with stubbed store deps: the runner accepts and dispatches the altered text. Fix: `if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) throw ...` next to line 29.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/server-contract/maintenance-step-isolation.test.ts:172-180",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The new maintenance-step mock returns a sweeper shape the real export never produces, so the added assertions (`examined`, `closedUnknown`) do not exercise the real sweeper's contract.",
+          "reproduction": "Compare the mock's `{ examined, closedUnknown, completedRuns, unresolvedStaleAttemptIds, consumedWithoutAttempt }` with the real return at lib/promptRefinerShadowRunStore.ts:1095-1103, which is `{ observedAt, staleCandidates, closedUnknownAttemptIds, unresolvedStaleAttemptIds, consumedWithoutAttempt, retryCount, redispatched }`. `examined`, `closedUnknown` and `completedRuns` do not exist on the real value, so `result.promptRefinerShadowUnknowns?.examined === 2` (test line ~403) would keep passing after any incompatible change to the sweeper's return shape. Fix: mock the real field names.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "app/api/admin/prompt-refiner/shadow-run/execute/route.ts:93-113",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "GET enforces no DB rate limit even though it performs a full source-manifest read and takes `FOR UPDATE` row locks plus a share lock on ModelRegistryEntry on every call.",
+          "reproduction": "route.ts GET calls readPromptRefinerShadowExecutionState() with no consumeApiRateLimit; tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts asserts `world.rateLimitCalls === 0` for GET. Each call runs readRunSourceFiles (14 files incl. package-lock.json) and lib/promptRefinerShadowRunStore.ts:400-407 (`lockStage` FOR UPDATE, `LOCK TABLE \"ModelRegistryEntry\" IN SHARE MODE`, run FOR UPDATE). The completion criterion lists the DB rate limit for 'execute GET/POST'; add a read-scoped limit or state explicitly that it is POST-only.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Move js-tiktoken to production dependencies and regenerate the lockfile; the three warnings (invocation budget guard, corpus digest binding, maintenance mock shape) are cheap follow-ups that should land in the same revision."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:c5e83225d23071119bf0345b373e3ebd18da7c8afe181afe24e9c2c1153ba049",
+      "commit": null,
+      "filesChanged": [
+        "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+        "app/api/admin/prompt-refiner/shadow-run/route.ts",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.task.json",
+        "docs/ops/prompt-refiner-durable-run-writer-contract.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/maintenance.ts",
+        "lib/promptRefinerShadowLiveAdapter.ts",
+        "lib/promptRefinerShadowRunContract.ts",
+        "lib/promptRefinerShadowRunStore.ts",
+        "lib/promptRefinerShadowRunner.ts",
+        "lib/promptRefinerShadowSystemAudit.ts",
+        "lib/promptRefinerShadowTokenizer.ts",
+        "package-lock.json",
+        "package.json",
+        "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+        "tests/promptRefinerShadowLiveAdapter.test.mjs",
+        "tests/promptRefinerShadowRunContract.test.mjs",
+        "tests/promptRefinerShadowRunner.test.mjs",
+        "tests/promptRefinerShadowTokenizer.test.mjs",
+        "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+        "tests/server-contract/maintenance-step-isolation.test.ts"
+      ],
+      "changeSummary": "Claude round 0의 5개 finding을 반영해 tokenizer를 production dependency로 이동하고 invocation budget, corpus digest binding, 실제 sweeper shape, GET rate limit을 추가",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow-live-adapter",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3360.3639",
+          "durationMs": 3895
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:server-contract",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 213309.7144",
+          "durationMs": 213889
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 44767
+        },
+        {
+          "rule": "npx eslint app/api/admin/prompt-refiner/shadow-run/execute/route.ts app/api/admin/prompt-refiner/shadow-run/route.ts lib/maintenance.ts lib/promptRefinerShadowLiveAdapter.ts lib/promptRefinerShadowRunContract.ts lib/promptRefinerShadowRunner.ts lib/promptRefinerShadowRunStore.ts lib/promptRefinerShadowSystemAudit.ts lib/promptRefinerShadowTokenizer.ts scripts/check-protected-table-writers-core.mjs tests/integration/prompt-refiner-shadow-run.db.test.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/maintenance-step-isolation.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3722
+        },
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+          "durationMs": 3202
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1873
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 117 instruction document(s), and 1013 path(s) named by comments across 3049 source file(s), all present.",
+          "durationMs": 1527
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1097
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 133 suite(s) in tests/integration/, all 133 named by the runner.",
+          "durationMs": 531
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 214 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 709
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 117 closed list(s) in the schema — 61 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1070
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 800
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+          "durationMs": 655
+        },
+        {
+          "rule": "git diff --check af9423311a3cb7726ca92062f89d1e7add9ececf -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 71
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "app/api/admin/prompt-refiner/shadow-run/execute/route.ts (POST consumeApiRateLimit `{ minute: 1, day: 2 }`) vs lib/promptRefinerShadowRunner.ts:164-176",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The new invocation budget can force a second POST to finish the 16 cases, but the POST bucket allows only 2 calls per day and is consumed before validation, so a single rejected or wasted POST inside the 60-minute approval window can strand the one-run authority permanently after paid dispatches.",
+          "reproduction": "Arithmetic on the shipped constants: if every case hits the 15,000 ms provider timeout, case k starts at ~(k-1)*15,000 ms; the guard at lib/promptRefinerShadowRunner.ts:171-176 pauses once elapsed > 240,000-15,000-10,000 = 215,000 ms, i.e. before case 15, so the run needs a 2nd POST. Observable in the unit test by extending tests/promptRefinerShadowRunner.test.mjs with `nowMs` advancing 15,500 ms per call: the result is `status: \"paused\"` with `attemptedThisInvocation < 16`. Meanwhile, in tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts the three invalid POSTs in \"POST accepts only the exact 4 KiB execution binding\" each reach `consumeApiRateLimit` before `readLimitedJson` (assert `world.rateLimitCalls === 3` there to see it), so wrong-body or 503 attempts burn the same 2/day quota that the resume needs, and lib/promptRefinerShadowRunStore.ts refuses once `run.approvalExpiresAt <= now` (60 min), leaving the run below 16 terminals with no legal resume.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerShadowRunner.test.mjs:38-49 (fixture `sweep`)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The runner fixture's sweeper fake returns `{ examined, closedUnknown, completedRuns, ... }`, a shape lib/promptRefinerShadowRunStore.ts:1095-1103 never produces (it returns `staleCandidates`/`closedUnknownAttemptIds`), so the runner's declared `sweep: typeof sweepPromptRefinerShadowUnknowns` dependency is not pinned by the test — the same class of drift that was fixed for the maintenance test this round.",
+          "reproduction": "Compare tests/promptRefinerShadowRunner.test.mjs:41-47 with the real return object at lib/promptRefinerShadowRunStore.ts:1095-1103; only `unresolvedStaleAttemptIds` and `consumedWithoutAttempt` exist in both. Replacing the fake with the real field names keeps the test green, which shows the extra keys assert nothing.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowRunner.ts:237-243",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "On the defensive `INTENT_MISSING` path (adapter resolved without ever invoking `onDispatch`) the runner refuses without releasing the reservation it just took, leaving a `reserved` row to age out instead of being closed once like the pre-intent path does.",
+          "reproduction": "In tests/promptRefinerShadowRunner.test.mjs, add a fixture whose `adapter` resolves an outcome without calling `onDispatch`: `run()` rejects with `PROMPT_REFINER_SHADOW_INTENT_MISSING` and `events` contains `reserve:...` but no `release`.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: app/api/admin/prompt-refiner/shadow-run/execute/route.ts (POST consumeApiRateLimit `{ minute: 1, day: 2 }`) vs lib/promptRefinerShadowRunner.ts:164-176; open finding: tests/promptRefinerShadowRunner.test.mjs:38-49 (fixture `sweep`); open finding: lib/promptRefinerShadowRunner.ts:237-243); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:4c06d3cc46da2bb5d92bf4077b4c10fd973f06c7f5fed71ff8066ede673b8858",
+      "commit": null,
+      "filesChanged": [
+        "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+        "app/api/admin/prompt-refiner/shadow-run/route.ts",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.task.json",
+        "docs/ops/prompt-refiner-durable-run-writer-contract.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/maintenance.ts",
+        "lib/promptRefinerShadowLiveAdapter.ts",
+        "lib/promptRefinerShadowRunContract.ts",
+        "lib/promptRefinerShadowRunStore.ts",
+        "lib/promptRefinerShadowRunner.ts",
+        "lib/promptRefinerShadowSystemAudit.ts",
+        "lib/promptRefinerShadowTokenizer.ts",
+        "package-lock.json",
+        "package.json",
+        "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+        "tests/promptRefinerShadowLiveAdapter.test.mjs",
+        "tests/promptRefinerShadowRunContract.test.mjs",
+        "tests/promptRefinerShadowRunner.test.mjs",
+        "tests/promptRefinerShadowTokenizer.test.mjs",
+        "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+        "tests/server-contract/maintenance-step-isolation.test.ts"
+      ],
+      "changeSummary": "Claude round 1 open finding 3건을 반영해 valid-body 이전 quota 소비를 제거하고 resume allowance를 늘리며 sweep fixture와 intent-missing release 경계를 고정",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow-live-adapter",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3406.9073",
+          "durationMs": 3937
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:server-contract",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 199326.0812",
+          "durationMs": 199872
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 42466
+        },
+        {
+          "rule": "npx eslint app/api/admin/prompt-refiner/shadow-run/execute/route.ts app/api/admin/prompt-refiner/shadow-run/route.ts lib/maintenance.ts lib/promptRefinerShadowLiveAdapter.ts lib/promptRefinerShadowRunContract.ts lib/promptRefinerShadowRunner.ts lib/promptRefinerShadowRunStore.ts lib/promptRefinerShadowSystemAudit.ts lib/promptRefinerShadowTokenizer.ts scripts/check-protected-table-writers-core.mjs tests/integration/prompt-refiner-shadow-run.db.test.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/maintenance-step-isolation.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3504
+        },
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+          "durationMs": 3055
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1402
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 117 instruction document(s), and 1013 path(s) named by comments across 3049 source file(s), all present.",
+          "durationMs": 1451
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1056
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 133 suite(s) in tests/integration/, all 133 named by the runner.",
+          "durationMs": 512
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 214 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 696
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 117 closed list(s) in the schema — 61 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1059
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 739
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+          "durationMs": 594
+        },
+        {
+          "rule": "git diff --check af9423311a3cb7726ca92062f89d1e7add9ececf -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 66
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowRunner.ts:215, 259 (bare `catch {`)",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "Every failure path in the one-run runner discards the causal error without binding it, logging it, or reporting an incident, so a halted paid shadow leaves only a generic code (`PROMPT_REFINER_SHADOW_PRE_DISPATCH_FAILED` / `OUTCOME_UNKNOWN` / `TERMINAL_WRITE_UNKNOWN`) and no record of why, in a system that forbids retrying to find out.",
+          "reproduction": "`rg -n 'console\\.|reportOperationalIncident' lib/promptRefinerShadowRunner.ts` returns nothing, and both catch clauses bind no error variable. The route cannot compensate: app/api/admin/prompt-refiner/shadow-run/execute/route.ts:152-153 returns `promptRefinerShadowRunnerErrorResponse(error)` before ever reaching its `console.error` at line 160. Concretely, tests/promptRefinerShadowRunner.test.mjs `failAfterIntentAt` throws `new Error(\"after intent\")` and the only observable output is the 503 code — the message reaches no sink. lib/maintenance.ts:26 shows the project's existing `reportOperationalIncident` channel for exactly this class of event.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "lib/promptRefinerShadowRunner.ts:237-251 vs lib/promptRefinerShadowRunStore.ts:781-787",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "When `recordPromptRefinerShadowDispatchIntent` returns `reservation_expired` it has already transitioned the row to `expired`, so the runner's subsequent release necessarily fails and the operator is told `PROMPT_REFINER_SHADOW_PRE_DISPATCH_RELEASE_FAILED` (\"could not close its reservation\") about a reservation that is in fact correctly closed.",
+          "reproduction": "lib/promptRefinerShadowRunStore.ts:782-786 sets `status: \"expired\"` and returns `{ok:false, reason:\"reservation_expired\"}`; that `!intent.ok` branch (runner line 205-211) throws inside `onDispatch`, so the runner's catch at line 215 sees `attemptId === null` and calls `dependencies.release(reservation)`. lib/promptRefinerReservationAuthority.ts:316 refuses any non-`reserved` row with `reservation_not_active`, so `released.ok` is false and the runner refuses with the release-failure code instead of the real `reservation_expired` cause. No test covers this path: tests/promptRefinerShadowRunner.test.mjs has no fixture where `recordIntent` returns `ok:false`.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "lib/promptRefinerShadowRunContract.ts:221-228 (`invocation_budget_mismatch`)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The budget guard compares against the literal `300_000` rather than the route's declared `maxDuration`, so lowering `export const maxDuration` would leave a 240 s admission budget that exceeds the platform cap with no gate failing.",
+          "reproduction": "Change `export const maxDuration = 300;` to `60` in app/api/admin/prompt-refiner/shadow-run/execute/route.ts and run `npm run test:prompt-refiner-shadow-live-adapter`; it stays green, and `promptRefinerShadowRunContractProblems()` still returns `[]`. tests/cronClientTimeouts.test.mjs:52 shows the project's existing idiom for parsing `export const maxDuration` out of a route and binding it to an in-code budget.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowRunner.ts:215, 259 (bare `catch {`); open finding: lib/promptRefinerShadowRunner.ts:237-251 vs lib/promptRefinerShadowRunStore.ts:781-787; open finding: lib/promptRefinerShadowRunContract.ts:221-228 (`invocation_budget_mismatch`)) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:4c06d3cc46da2bb5d92bf4077b4c10fd973f06c7f5fed71ff8066ede673b8858",
+  "commit": null,
+  "changeSummary": "Claude round 1 open finding 3건을 반영해 valid-body 이전 quota 소비를 제거하고 resume allowance를 늘리며 sweep fixture와 intent-missing release 경계를 고정",
+  "testResults": [
+    {
+      "command": "npm run test:prompt-refiner-shadow-live-adapter",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3406.9073",
+      "durationMs": 3937
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run test:server-contract",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 199326.0812",
+      "durationMs": 199872
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 42466
+    },
+    {
+      "rule": "npx eslint app/api/admin/prompt-refiner/shadow-run/execute/route.ts app/api/admin/prompt-refiner/shadow-run/route.ts lib/maintenance.ts lib/promptRefinerShadowLiveAdapter.ts lib/promptRefinerShadowRunContract.ts lib/promptRefinerShadowRunner.ts lib/promptRefinerShadowRunStore.ts lib/promptRefinerShadowSystemAudit.ts lib/promptRefinerShadowTokenizer.ts scripts/check-protected-table-writers-core.mjs tests/integration/prompt-refiner-shadow-run.db.test.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/maintenance-step-isolation.test.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3504
+    },
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+      "durationMs": 3055
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1402
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 117 instruction document(s), and 1013 path(s) named by comments across 3049 source file(s), all present.",
+      "durationMs": 1451
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1056
+    },
+    {
+      "rule": "npm run check:db-integration-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 133 suite(s) in tests/integration/, all 133 named by the runner.",
+      "durationMs": 512
+    },
+    {
+      "rule": "npm run check:api-cache-control",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 214 route(s), 5 choosing their own caching, every one of them listed.",
+      "durationMs": 696
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 117 closed list(s) in the schema — 61 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+      "durationMs": 1059
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 739
+    },
+    {
+      "rule": "npm run security:regression",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (190 checks).",
+      "durationMs": 594
+    },
+    {
+      "rule": "git diff --check af9423311a3cb7726ca92062f89d1e7add9ececf -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 66
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "lib/promptRefinerShadowRunner.ts:215, 259 (bare `catch {`)",
+      "severity": "warning",
+      "basis": "judgement",
+      "claim": "Every failure path in the one-run runner discards the causal error without binding it, logging it, or reporting an incident, so a halted paid shadow leaves only a generic code (`PROMPT_REFINER_SHADOW_PRE_DISPATCH_FAILED` / `OUTCOME_UNKNOWN` / `TERMINAL_WRITE_UNKNOWN`) and no record of why, in a system that forbids retrying to find out.",
+      "reproduction": "`rg -n 'console\\.|reportOperationalIncident' lib/promptRefinerShadowRunner.ts` returns nothing, and both catch clauses bind no error variable. The route cannot compensate: app/api/admin/prompt-refiner/shadow-run/execute/route.ts:152-153 returns `promptRefinerShadowRunnerErrorResponse(error)` before ever reaching its `console.error` at line 160. Concretely, tests/promptRefinerShadowRunner.test.mjs `failAfterIntentAt` throws `new Error(\"after intent\")` and the only observable output is the 503 code — the message reaches no sink. lib/maintenance.ts:26 shows the project's existing `reportOperationalIncident` channel for exactly this class of event.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "lib/promptRefinerShadowRunner.ts:237-251 vs lib/promptRefinerShadowRunStore.ts:781-787",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "When `recordPromptRefinerShadowDispatchIntent` returns `reservation_expired` it has already transitioned the row to `expired`, so the runner's subsequent release necessarily fails and the operator is told `PROMPT_REFINER_SHADOW_PRE_DISPATCH_RELEASE_FAILED` (\"could not close its reservation\") about a reservation that is in fact correctly closed.",
+      "reproduction": "lib/promptRefinerShadowRunStore.ts:782-786 sets `status: \"expired\"` and returns `{ok:false, reason:\"reservation_expired\"}`; that `!intent.ok` branch (runner line 205-211) throws inside `onDispatch`, so the runner's catch at line 215 sees `attemptId === null` and calls `dependencies.release(reservation)`. lib/promptRefinerReservationAuthority.ts:316 refuses any non-`reserved` row with `reservation_not_active`, so `released.ok` is false and the runner refuses with the release-failure code instead of the real `reservation_expired` cause. No test covers this path: tests/promptRefinerShadowRunner.test.mjs has no fixture where `recordIntent` returns `ok:false`.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "lib/promptRefinerShadowRunContract.ts:221-228 (`invocation_budget_mismatch`)",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The budget guard compares against the literal `300_000` rather than the route's declared `maxDuration`, so lowering `export const maxDuration` would leave a 240 s admission budget that exceeds the platform cap with no gate failing.",
+      "reproduction": "Change `export const maxDuration = 300;` to `60` in app/api/admin/prompt-refiner/shadow-run/execute/route.ts and run `npm run test:prompt-refiner-shadow-live-adapter`; it stays green, and `promptRefinerShadowRunContractProblems()` still returns `[]`. tests/cronClientTimeouts.test.mjs:52 shows the project's existing idiom for parsing `export const maxDuration` out of a route and binding it to an in-code budget.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 3 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-20T11:28:19.528Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "af9423311a3cb7726ca92062f89d1e7add9ececf",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+    "app/api/admin/prompt-refiner/shadow-run/route.ts",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1.task.json",
+    "docs/ops/prompt-refiner-durable-run-writer-contract.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/maintenance.ts",
+    "lib/promptRefinerShadowLiveAdapter.ts",
+    "lib/promptRefinerShadowRunContract.ts",
+    "lib/promptRefinerShadowRunStore.ts",
+    "lib/promptRefinerShadowRunner.ts",
+    "lib/promptRefinerShadowSystemAudit.ts",
+    "lib/promptRefinerShadowTokenizer.ts",
+    "package-lock.json",
+    "package.json",
+    "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/promptRefinerShadowLiveAdapter.test.mjs",
+    "tests/promptRefinerShadowRunContract.test.mjs",
+    "tests/promptRefinerShadowRunner.test.mjs",
+    "tests/promptRefinerShadowTokenizer.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+    "tests/server-contract/maintenance-step-isolation.test.ts"
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-execution-runner-followup-v2",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T12:43:02.548Z",
+  "durationMs": 175152,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 18,
+    "cachedInputTokens": 816460,
+    "outputTokens": 14067,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.9731089999999998,
+    "raw": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 115704,
+      "cache_read_input_tokens": 816460,
+      "output_tokens": 14067,
+      "output_tokens_details": {
+        "thinking_tokens": 10920
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 115704,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2556,
+          "cache_read_input_tokens": 116491,
+          "cache_creation_input_tokens": 2106,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2106
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T12:45:57.770Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-execution-runner-followup-v2",
+    "round": 0,
+    "reviewedDigest": "sha256:0f87954c02d800defcd7211867be36c8d004e3f039116155e6b5aac00bc9a7b4",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:81-86, 297-305, 336-344",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "`runnerCauseCode` only understands thrown values, so the two incidents whose cause is a non-thrown fixed enum — the reservation-release refusal (`released.reason`, a `PromptRefinerReservationRefusal`) and the literal `\"intent_missing\"` — are reported as `causeCode: \"non_error_throw\"`, discarding the one diagnostic code available on a release failure in a system that forbids retrying to find out.",
+        "reproduction": "In tests/promptRefinerShadowRunner.test.mjs replace the fixture's `release` with `async () => { events.push(\"release\"); return { ok: false, reason: \"reservation_not_found\" }; }` and run `npm run test:prompt-refiner-shadow-live-adapter`. In the \"a pre-intent failure releases once\" case, the second incident (`context.phase === \"reservation_release\"`) has `error === \"non_error_throw\"` and `context.causeCode === \"non_error_throw\"`, and `\"reservation_not_found\"` appears nowhere in `JSON.stringify(world.incidents)` — even though that refusal union (lib/promptRefinerReservationAuthority.ts:41-48) is already a fixed content-free enum that the criterion's \"고정 코드\" allows. Expected: the refusal code reaches the incident."
+      },
+      {
+        "location": "tests/promptRefinerShadowRunner.test.mjs:164-166",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The `failIncidentReporting` fixture option is defined but never set by any test, so the completion criterion that a failed incident delivery preserves the original error classification (lib/promptRefinerShadowRunner.ts:121-133) has code but no regression guarding it.",
+        "reproduction": "`rg -n \"failIncidentReporting\" tests/` returns only the fixture definition at line 164; no test passes the option. Adding `const world = fixture({ failBeforeIntentAt: 0, failIncidentReporting: true })` and asserting the rejection is still `PROMPT_REFINER_SHADOW_PRE_DISPATCH_FAILED` (and that the swallowing path is taken) closes it; removing the `try/catch` in `reportRunnerIncident` currently breaks no test."
+      }
+    ],
+    "nextAction": "All three inherited findings are closed with verifiable mechanisms — every caught pre/post-dispatch, intent-missing, release-failure and terminal-write path reports a fixed content-free incident before responding, `reservation_expired` skips release and re-throws PROMPT_REFINER_SHADOW_DISPATCH_REFUSED (adapter propagates onDispatch throws, lib/promptRefinerShadowLiveAdapter.ts:269), and the route's static maxDuration literal is compared directly against PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS; merge as is and optionally carry the two recorded nits into a later cleanup."
+  }
+}

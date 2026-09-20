@@ -146,7 +146,7 @@ export async function POST(request: Request) {
                         result.run.approvalExpiresAt.toISOString(),
                     authorizationAuditLogId:
                         result.run.authorizationAuditLogId,
-                    executionAdmitted: false,
+                    executionAdmitted: true,
                     productAdapterReady: false,
                 },
                 created: result.created,

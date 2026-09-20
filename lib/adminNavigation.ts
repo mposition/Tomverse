@@ -601,6 +601,20 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 
 export const ADMIN_DETAIL_ROUTES = [
   {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // those tables feed the palette for every admin role, while this one-shot
+    // cost-authority surface is owner-only and should not be advertised to
+    // roles that receive a 404 from the page and API routes.
+    id: "prompt-refiner-shadow",
+    pattern: /^\/admin\/prompt-refiner-shadow$/,
+    label: "Prompt Refiner shadow run",
+    description:
+      "Owner-only approval and execution for the frozen synthetic shadow run",
+    parentLabel: "Models",
+    parentHref: "/admin/models",
+    group: "AI Platform" as const,
+  },
+  {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
