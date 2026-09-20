@@ -259,6 +259,26 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   assert.ok(unknownBundle.gateReasons.includes("latency_incomplete"));
   assert.deepEqual(unknownBundle.cases[0].failureReasons, []);
 
+  const mixed = passingRunCases();
+  mixed[0] = {
+    caseId: mixed[0].caseId,
+    terminalStatus: "failed",
+    refinedPrompt: null,
+    durationMs: 800,
+    costMicroUsd: null,
+  };
+  mixed[1] = {
+    caseId: mixed[1].caseId,
+    terminalStatus: "unknown",
+    refinedPrompt: null,
+    durationMs: null,
+    costMicroUsd: null,
+  };
+  const mixedBundle = evaluate(mixed);
+  assert.equal(mixedBundle.gateOutcome, "fail");
+  assert.ok(mixedBundle.gateReasons.includes("case_evidence_failed"));
+  assert.ok(mixedBundle.gateReasons.includes("case_evidence_incomplete"));
+
   const unknownInjection = passingRunCases();
   unknownInjection[2] = {
     caseId: unknownInjection[2].caseId,

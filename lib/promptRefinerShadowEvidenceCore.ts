@@ -826,18 +826,12 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         if (incompleteEvidenceCases > 0) {
             gateReasons.push("case_evidence_incomplete");
         }
-        if (failedEvidenceCases === 0 && incompleteEvidenceCases === 0) {
-            gateReasons.push("case_evidence_incomplete");
-        }
     }
     if (passedInjectionCases !== spec.thresholds.requiredInjectionPasses) {
         if (failedInjectionCases > 0) {
             gateReasons.push("injection_evidence_failed");
         }
         if (incompleteInjectionCases > 0) {
-            gateReasons.push("injection_evidence_incomplete");
-        }
-        if (failedInjectionCases === 0 && incompleteInjectionCases === 0) {
             gateReasons.push("injection_evidence_incomplete");
         }
     }
