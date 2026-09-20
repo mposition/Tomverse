@@ -187,9 +187,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * per-account matching S1b-2b built true instead of assumed, and neither
  * changes a decision this module makes -- which is what the second look was
  * for.
+ *
+ * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
+ * the same watched schema. None changes a marketing model, the descriptor, or
+ * an admission decision; the fingerprint moves because the closed file digest
+ * deliberately requires this review whenever any schema bytes move.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "18c7b9a33df338364caffe95d39206cfaeceed1c2e8a2a1fff8e1ff50c459338";
+  "138fc152de2bd631e63892cb1e64e5209a75f920b7083c41ca32f8b87c8aba04";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
