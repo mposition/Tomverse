@@ -51,16 +51,36 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    index 때문에 첫 문장에서 실패하고, `--applied`는 **실행되지 않은 문장들을 실행된
    것으로** 표시하며, 어디까지 실행됐는지는 어디서 멈췄는지에 달려 있습니다. 여기의
    모든 문장은 Postgres에서 transactional DDL이므로 파일이 직접 말하게 합니다.
-6. **순서는 여전히 계약입니다.** 데이터 때문에 실패할 수 있는 문장(unique 빌드)이
-   **맨 앞**이고, 나머지는 전부 drop입니다. 그리고 같은 컬럼의 일반 index 제거는
-   **맨 뒤**입니다 — 그것이 `EmailDelivery`에 ACCESS EXCLUSIVE를 잡는 유일한 문장이고
-   transaction 안에서 잡은 잠금은 commit까지 유지되므로, 읽기가 멈추는 구간을 긴
-   빌드 시간이 아니라 마지막 한 문장으로 미룹니다.
-7. **빌드 자체는 `EmailDelivery`에 SHARE 잠금을 겁니다** — 읽기는 계속되고 쓰기가
-   기다립니다. 파일 전체가 "읽기는 계속된다"는 뜻은 아닙니다(6번). `CONCURRENTLY`는
-   그마저 피하지만 transaction 안에서 Postgres가 거부하므로 쓸 수 없고, 5번의
-   `BEGIN`이 바로 그 transaction입니다. 행 수는 검사 script의 `totalRows`가 알려
-   주며, 기다림을 배포 **전에** 판단하라고 있는 숫자입니다.
+   **단 그것이 "운영자가 어느 쪽인지 안다"는 뜻은 아닙니다.** Prisma는 실패를
+   `_prisma_migrations`에 남기고 다음 deploy가 자동으로 재시도하지 않으며,
+   `COMMIT`을 보낸 뒤 응답 전에 연결이 끊기면 결과는 **클라이언트가 모릅니다.**
+   그래서 복구는 가정이 아니라 카탈로그를 보고 정합니다 — 셋 다 새 상태이면
+   `resolve --applied`, 셋 다 옛 상태이면 `resolve --rolled-back` 후 재배포,
+   **섞여 있으면 멈춥니다**(이 파일은 섞인 상태를 만들 수 없으므로, 섞였다는 것은
+   다른 무언가가 schema를 건드렸다는 뜻입니다). 세 갈래는 migration 머리말에
+   확인할 대상까지 적혀 있습니다. 그리고 이 `BEGIN`은 조건을 하나 답니다 —
+   **파일을 transaction으로 감싸지 않는 runner만 이것을 재생할 수 있습니다.**
+   감싸는 runner에서는 안쪽 `BEGIN`이 경고만 내고 안쪽 `COMMIT`이 **바깥
+   transaction을 끝내** 되돌릴 수 있다고 믿은 DDL을 commit해 버립니다. Prisma 8의
+   경로는 기존 DB를 baseline하지 이 이력을 재생하지 않지만, 재생하는 환경은 7.10
+   runner에 고정합니다.
+6. **모든 잠금 대기에 상한을 겁니다**(`SET LOCAL lock_timeout`). 상한이 없으면 잠금
+   요청은 무한히 기다리고, `ACCESS EXCLUSIVE` 요청은 **새 읽기보다 앞에 줄을 서므로**
+   긴 `SELECT` 하나가 그 테이블을 모두에게 막습니다. 15초 뒤 실패하는 배포는 조용한
+   시각에 다시 하면 되지만, 매달린 배포는 장애입니다.
+7. **일반 index 제거는 이 migration에 넣지 않습니다**(20260920100100로 분리).
+   unique가 생긴 뒤 그것은 중복일 뿐 급하지 않고, 같은 transaction 안에서 지우려면
+   `EmailDelivery`의 SHARE와 `ProviderWebhookEvent`의 ACCESS EXCLUSIVE를 **이미 쥔 채**
+   `EmailDelivery`의 ACCESS EXCLUSIVE를 요청하게 됩니다. 빌드 중 시작된 긴 읽기 하나가
+   두 테이블을 동시에 막고, 반대 순서로 쓰는 transaction과 deadlock까지 가능합니다.
+   정확성이 필요로 하지 않는 위험이므로 분리했고, 분리된 쪽의 최악은 **아무도 쓰지 않는
+   index가 남는 것**입니다.
+8. **빌드 자체는 `EmailDelivery`에 SHARE 잠금을 겁니다** — 읽기는 계속되고 쓰기가
+   기다립니다. 파일 전체가 "읽기는 계속된다"는 뜻은 아닙니다 —
+   `ProviderWebhookEvent`의 `ALTER TABLE`은 ACCESS EXCLUSIVE이고 commit까지
+   유지됩니다. `CONCURRENTLY`는 그마저 피하지만 transaction 안에서 Postgres가
+   거부하므로 쓸 수 없고, 5번의 `BEGIN`이 바로 그 transaction입니다. 행 수는 검사
+   script의 `totalRows`가 알려 주며, 기다림을 배포 **전에** 판단하라고 있는 숫자입니다.
    **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index — 실패한
    `CREATE INDEX CONCURRENTLY`가 남긴 INVALID index, `NULLS NOT DISTINCT`로
    만들어진 index, expression key가 하나 더 붙은 index — 가 빌드를 건너뛰게 하고
@@ -68,7 +88,7 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    **정확히 맞아야 하는 두 번째 물건**이고, 이름 충돌에서 시끄럽게 실패하는 쪽이
    더 쌉니다.
 
-8. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+9. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
    schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지 않고
    insert하며 이 migration이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
    insert가 `NOT NULL`로 실패하고, 충돌 해소는 이 migration이 지운

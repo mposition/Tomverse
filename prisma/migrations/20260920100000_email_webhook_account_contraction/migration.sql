@@ -74,24 +74,65 @@
 -- hand while cross-account webhooks keep being refused.
 --
 -- Every statement here is transactional DDL in Postgres, so the file says so
--- itself. A failure anywhere rolls the whole thing back, the migration is
--- recorded as failed with the database untouched, and re-running it after the
--- cause is fixed is an ordinary retry.
+-- itself. A failure anywhere rolls the whole thing back and the schema is
+-- either entirely old or entirely new.
+--
+-- **That is not the same as the operator knowing which.** Two things still need
+-- a human:
+--
+--   * Prisma records the failed attempt in `_prisma_migrations` and the next
+--     `migrate deploy` does not retry it. It has to be resolved first;
+--   * a connection lost between sending `COMMIT` and reading its reply leaves
+--     the outcome unknown to the client. The server may have committed while
+--     Prisma's bookkeeping did not.
+--
+-- So the recovery is decided by looking at the database, never by assuming:
+--
+--   1. all three of `EmailDelivery_providerAccount_providerMessageId_key`
+--      present, `ProviderWebhookEvent_provider_providerEventId_key` absent, and
+--      `ProviderWebhookEvent.providerAccount` with no default
+--      -> it committed: `prisma migrate resolve --applied 20260920100000_email_webhook_account_contraction`;
+--   2. none of them -- the new index absent, the old unique present, the
+--      default present -> it rolled back:
+--      `prisma migrate resolve --rolled-back ...`, then deploy again;
+--   3. any mix -> stop. This file cannot produce one, so a mix means something
+--      other than this migration changed the schema, and guessing a `resolve`
+--      direction from there writes the wrong history.
+--
+-- One more constraint this `BEGIN` carries: the file must be replayed only by a
+-- runner that does not wrap it. Prisma 7.10 does not, which is what makes this
+-- work; a runner that did would see the inner `BEGIN` warn and do nothing and
+-- the inner `COMMIT` end *its* transaction, committing DDL it believed it could
+-- still roll back. Prisma 8's path baselines an existing database rather than
+-- replaying this history, so it does not reach here -- but an environment that
+-- does replay old migrations stays on the 7.10 runner.
 BEGIN;
+
+-- Bound the wait for every lock below.
+--
+-- Without it a lock request waits indefinitely, and an `ACCESS EXCLUSIVE`
+-- request queues *ahead of* new readers, so one long-running `SELECT` on a
+-- table this touches would stall that table for everyone until it finished.
+-- A deploy that fails after fifteen seconds is a deploy that can be retried at
+-- a quieter moment; a deploy that hangs is an incident.
+SET LOCAL lock_timeout = '15s';
 
 -- The statement that can fail on data goes first.
 --
--- Nothing has run before it, so its failure is the cheapest failure available:
--- a duplicate written after the check was taken costs the deploy and nothing
--- else.
+-- Not for safety -- the transaction above makes the order irrelevant to that --
+-- but because it is the long one, and the locks it takes are held until commit.
+-- Putting the `ProviderWebhookEvent` changes ahead of it would hold ACCESS
+-- EXCLUSIVE on that table for the whole build, which is the difference between
+-- webhooks pausing for the length of a statement and pausing for the length of
+-- an index build.
 --
 -- No `IF NOT EXISTS`. It would let an index that merely shares this name stand
 -- in for this one, and "merely shares the name" covers more than it sounds: an
 -- index left INVALID by a failed `CREATE INDEX CONCURRENTLY`, one built NULLS
 -- NOT DISTINCT, one carrying a third expression key. Each would satisfy the
--- name, skip the build, and then be relied on by the DROP below -- and a
--- catalogue check written to tell them apart is a second thing to get exactly
--- right. Failing loudly on the name is cheaper and needs nothing to be right.
+-- name and skip the build -- and a catalogue check written to tell them apart
+-- is a second thing to get exactly right. Failing loudly on the name is cheaper
+-- and needs nothing to be right.
 --
 -- The build itself takes a SHARE lock on `EmailDelivery`: reads continue,
 -- writes wait. `CREATE INDEX CONCURRENTLY` would avoid even that and cannot be
@@ -118,14 +159,14 @@ DROP INDEX IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
 -- not name it.
 ALTER TABLE "ProviderWebhookEvent" ALTER COLUMN "providerAccount" DROP DEFAULT;
 
--- Last, because it is the one statement that takes ACCESS EXCLUSIVE on
--- `EmailDelivery`, and a lock taken inside a transaction is held until it
--- commits. Reads of that table stop here rather than at the start of the build,
--- which is the long part.
---
--- The plain index of the same columns answered the same question and the unique
--- one answers it with a guarantee; keeping both would be two structures for one
--- question.
-DROP INDEX IF EXISTS "EmailDelivery_providerAccount_providerMessageId_idx";
-
 COMMIT;
+
+-- The plain index of the same columns is NOT dropped here. It is redundant
+-- once the unique one exists, and redundant is not urgent: dropping it inside
+-- this transaction would ask for ACCESS EXCLUSIVE on `EmailDelivery` while this
+-- transaction already holds SHARE on it and ACCESS EXCLUSIVE on
+-- `ProviderWebhookEvent`, all held until commit. One long-running read of
+-- `EmailDelivery` started during the build would then stall both tables at
+-- once, and a transaction writing them in the other order could deadlock with
+-- it. The correctness this migration is for does not need that risk, so the
+-- drop is 20260920100100 and its worst case is an index nobody uses.

@@ -157,33 +157,38 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
  * exactly that reason.
  *
  * Counting tags does not find it -- a lone dollar is not a tag, so the count
- * stays even and the guard stays quiet. What finds it is looking for a dollar
- * that is not part of any tag.
+ * stays even and the guard stays quiet.
  *
- * Which is not the same as "every dollar outside a tag is a mistake". Postgres
- * allows a dollar in three other places, and each is excluded by what sits
- * beside it rather than by parsing the statement:
+ * ## What this claims, and what it does not
  *
- *   - a positional parameter, `$1`, is a dollar followed by a digit;
- *   - an identifier may contain one after its first character, as in `foo$bar`
- *     or `"foo$bar"`, so a dollar preceded by an identifier character belongs
- *     to a name;
- *   - a dollar inside a single-quoted string, or inside a dollar-quoted body,
- *     is data and is skipped with the rest of it.
+ * It reports a dollar **standing alone as a token**: nothing but whitespace or
+ * punctuation on either side of it. That is exactly the shape of the mistake --
+ * `DO $` and `END $;` -- and nothing else in Postgres is written that way.
  *
- * The same rule read the other way closes a gap: a tag must be separated from
- * whatever precedes it, so `DO$body$` is not a dollar quote at all even though
- * it looks like one, and an opening tag preceded by an identifier character is
- * reported rather than believed.
+ * The tempting rule, "every dollar outside a tag is a mistake", is false, and
+ * the first attempt at this used it. Postgres allows a dollar in a positional
+ * parameter (`$1`), inside an unquoted identifier after its first character
+ * (`foo$bar`, and `foo$$` where the pair is part of the name), anywhere inside
+ * a quoted one (`"$foo"`), and inside string literals whose escaping this does
+ * not model (`E'it\\'s $x'`). Each of those has a dollar with a letter, a digit
+ * or a quote beside it, so standing alone excludes them all without needing to
+ * know which one it is looking at.
  *
- * This is a guard, not a lexer. It does not know statements, only neighbours.
+ * What it does not catch, stated rather than implied: an invalid tag whose
+ * dollars are *not* alone. `DO $1$ BEGIN END $1$;` is not a valid dollar quote
+ * -- a tag cannot begin with a digit -- and this reports nothing, because every
+ * dollar in it is touching a character. Catching that means lexing Postgres,
+ * and this is a guard for one regression, not a lexer.
+ *
+ * Strings and dollar-quoted bodies are still skipped, so a lone dollar inside
+ * either is data rather than a finding.
  *
  * Returns each stray dollar's offset, and the end of the file when a block was
  * opened and never closed.
  */
 const strayDollars = (sql) => {
   const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
-  const identifierCharacter = /[A-Za-z0-9_$]/;
+  const alone = /[\s;,()[\]]|^$/;
   const stray = [];
   let index = 0;
   let inString = false;
@@ -213,21 +218,15 @@ const strayDollars = (sql) => {
       continue;
     }
     if (current === "$") {
-      const previous = index > 0 ? sql[index - 1] : "";
-      const attached = identifierCharacter.test(previous);
       const tag = openingTag.exec(sql.slice(index));
-      if (tag && !attached) {
+      if (tag) {
         openTag = tag[0];
         index += tag[0].length;
         continue;
       }
-      // Part of a name, or a positional parameter. Neither is a tag and
-      // neither is a mistake.
-      if (!tag && (attached || /[0-9]/.test(sql[index + 1] ?? ""))) {
-        index += 1;
-        continue;
-      }
-      stray.push(index);
+      const before = index > 0 ? sql[index - 1] : "";
+      const after = sql[index + 1] ?? "";
+      if (alone.test(before) && alone.test(after)) stray.push(index);
       index += 1;
       continue;
     }
@@ -272,19 +271,21 @@ test("the dollar-quote guard finds what it is for", () => {
   // A block that is opened and never closed is reported too.
   assert.equal(strayDollars(`DO ${doubled} BEGIN END;`).length, 1);
 
-  // The three legitimate dollars that are not tags, which a rule of "every
-  // dollar belongs to a tag" would have rejected.
+  // The legitimate dollars that are not tags, which the rule "every dollar
+  // belongs to a tag" rejected when this was first written.
   assert.deepEqual(
     strayDollars("PREPARE q(text) AS SELECT * FROM t WHERE value = $1;"),
     []
   );
   assert.deepEqual(strayDollars(`CREATE TABLE foo$bar (id integer);`), []);
   assert.deepEqual(strayDollars(`CREATE TABLE "foo$bar" (id integer);`), []);
+  assert.deepEqual(strayDollars(`SELECT "$foo";`), []);
+  assert.deepEqual(strayDollars(`SELECT E'it\\'s $x';`), []);
 
-  // And the shape that looks like a tag and is not one: a dollar quote has to
-  // be separated from what precedes it, so this is an identifier followed by a
-  // syntax error rather than a block.
-  assert.equal(strayDollars(`DO${doubled}\nBEGIN\nEND\n${doubled};`).length > 0, true);
+  // And what it does not catch, asserted so the limit is a decision rather
+  // than a surprise: a tag cannot begin with a digit, so this is invalid SQL,
+  // and every dollar in it touches a character.
+  assert.deepEqual(strayDollars("DO $1$ BEGIN END $1$;"), []);
 });
 
 test("the guard finds what it is for", () => {
