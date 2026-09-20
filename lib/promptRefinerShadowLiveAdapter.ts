@@ -25,8 +25,12 @@ import { promptRefinerModelMessages } from "@/lib/promptRefinerModelPrompt";
 import {
     PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
     PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
+    PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
     promptRefinerShadowRunContractProblems,
 } from "@/lib/promptRefinerShadowRunContract";
+import { countPromptRefinerShadowInputTokens } from "@/lib/promptRefinerShadowTokenizer";
 import { parsePromptRefinerShadowOutput } from "@/lib/promptRefinerShadowHarness";
 import {
     promptRefinerRequestSchema,
@@ -85,6 +89,10 @@ export type PromptRefinerShadowDispatchFact = {
     maxOutputTokens: typeof PROMPT_REFINER_MAX_OUTPUT_TOKENS;
     timeoutMs: typeof PROMPT_REFINER_TIMEOUT_MS;
     retryCount: typeof PROMPT_REFINER_RETRY_COUNT;
+    tokenizerPackage: typeof PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE;
+    tokenizerPackageVersion: typeof PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION;
+    tokenizerEncoding: typeof PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING;
+    admissionInputTokens: number;
 };
 
 export type PromptRefinerShadowAdapterRequest = PromptRefinerRequest & {
@@ -192,12 +200,10 @@ const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
 };
 
 /**
- * Byte-level BPE safety prefilter: every content token covers at least one
- * UTF-8 byte. The fixed allowance covers message framing. This deliberately
- * does not satisfy the frozen preregistration's future actual-tokenizer
- * requirement. The run remains unadmitted until that requirement is fulfilled
- * or a separate contract revision is approved; this adapter only fails closed
- * before dispatch when even the conservative bound exceeds the ceiling.
+ * Byte-level safety prefilter: every content token covers at least one UTF-8
+ * byte. The fixed allowance covers message framing. This remains an early,
+ * conservative rejection only; the pinned BPE tokenizer below is the actual
+ * dispatch-admission measurement and its identity/count are audit-bound.
  */
 export const promptRefinerRenderedInputTokenUpperBound = (
     request: PromptRefinerRequest
@@ -253,6 +259,12 @@ export function createPromptRefinerShadowSdkAdapter(
                 "prompt_refiner_input_token_ceiling_exceeded"
             );
         }
+        const tokenCount = countPromptRefinerShadowInputTokens(request);
+        if (!tokenCount.admitted) {
+            throw new PromptRefinerShadowPreDispatchError(
+                "prompt_refiner_input_token_ceiling_exceeded"
+            );
+        }
         const messages = promptRefinerModelMessages(request);
         await unsafeRequest.onDispatch({
             requestId: request.requestId,
@@ -263,6 +275,10 @@ export function createPromptRefinerShadowSdkAdapter(
             maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
             timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
             retryCount: PROMPT_REFINER_RETRY_COUNT,
+            tokenizerPackage: tokenCount.package,
+            tokenizerPackageVersion: tokenCount.packageVersion,
+            tokenizerEncoding: tokenCount.encoding,
+            admissionInputTokens: tokenCount.totalInputTokens,
         });
 
         const started = now();

@@ -21,6 +21,10 @@ export const writePromptRefinerDispatchAudit = (input: {
     modelId: string;
     timeoutMs: number;
     retryCount: number;
+    tokenizerPackage: string;
+    tokenizerPackageVersion: string;
+    tokenizerEncoding: string;
+    admissionInputTokens: number;
 }): Promise<string> =>
     writeSystemAuditLog({
         tx: input.tx,
@@ -41,6 +45,10 @@ export const writePromptRefinerDispatchAudit = (input: {
             modelId: input.modelId,
             timeoutMs: input.timeoutMs,
             retryCount: input.retryCount,
+            tokenizerPackage: input.tokenizerPackage,
+            tokenizerPackageVersion: input.tokenizerPackageVersion,
+            tokenizerEncoding: input.tokenizerEncoding,
+            admissionInputTokens: input.admissionInputTokens,
         },
     });
 

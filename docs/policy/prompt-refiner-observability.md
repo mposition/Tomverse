@@ -341,12 +341,17 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
 
 ## 12. 격리된 live adapter와 단일 실행 계약
 
-`prompt-refiner-shadow-run-v2`는 위 stage의 100개 reservation pool을 실제 실행
+`prompt-refiner-shadow-run-v3`는 위 stage의 100개 reservation pool을 실제 실행
 승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
 좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
-retry는 0, timeout은 15초이며 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
+retry는 0, timeout은 15초다. route의 300초 platform cap보다 짧은 240초 호출 admission
+budget과 10초 terminal-write 여유를 고정해, 다음 case를 안전하게 끝낼 시간이 없으면
+reservation 전에 pause한다. 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
 같은 요청을 다시 보내지 않는다. 이 값은 실행 가능한 budget이 아니라 별도 비용 승인이
 결속될 때 적용할 ceiling이다.
+계약은 `routeMaxDurationSeconds=300`도 digest에 포함하며 회귀 검사가 route의 정적
+`maxDuration` literal과 직접 비교한다. 따라서 platform cap 변경이 admission budget과 분리되어
+조용히 배포될 수 없다.
 
 `prompt-refiner-openai-sdk-adapter-v1`은 고정된 OpenAI 모델·가격·reasoning 설정과 기존
 strict JSON parser를 연결한 서버 전용 모듈이다. provider SDK와 credential boundary는
@@ -354,14 +359,15 @@ strict JSON parser를 연결한 서버 전용 모듈이다. provider SDK와 cred
 script, cron과 다른 runtime library는 이 모듈을 import하지 않는다. 따라서 이 변경만으로
 provider 호출, stage/reservation 소비, DB mutation 또는 사용자 UI 효과가 생기지 않는다.
 
-입력 사전 검사는 provider tokenizer를 소유한다고 주장하지 않는다. system/data message의
-UTF-8 byte 수는 byte-level BPE token 수의 보수적 상한이고, 여기에 고정 framing allowance를
-더해 100,000-token 계약을 넘으면 dispatch 전에 거부한다. 실제 provider usage는 nullable로
+입력 사전 검사는 두 층이다. system/data message의 UTF-8 byte 수와 고정 framing allowance는
+조기 거부용 보수적 상한이다. 이어 `js-tiktoken@1.0.21`의 `o200k_base` BPE로 같은 두 content를
+실제 계수하고 framing 32 tokens를 더해 100,000-token 계약을 넘으면 dispatch intent 전에 거부한다.
+`js-tiktoken`은 production dependency에 exact version으로 고정하며 bundled corpus digest도
+동결 digest에 직접 결속한다.
+tokenizer package/version/encoding과 admission token 수는 content-free dispatch audit에 결속한다. 실제 provider usage는 nullable로
 기록하며 알 수 없는 값을 0으로 만들지 않는다. warning, multi-step, usage cap 초과 또는
 provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 않는다. 계산된 비용은 고정
-단가의 보수적 upper bound이지 provider invoice가 아니다. 이 prefilter는 기존 동결 계약이
-요구한 actual-tokenizer 식별·계수를 충족하지 않으므로 실행 승인 근거가 아니다. durable
-runner가 열리기 전에 그 요구를 구현하거나 별도 계약 변경으로 다시 승인해야 한다.
+단가의 보수적 upper bound이지 provider invoice가 아니다.
 
 durable run writer와 owner-only 승인 route는 구현되었다. GET은 배포·stage·run source의
 exact digest와 고정 비용 계약을 no-write preview로 반환한다. POST는 별도 default-off flag와
@@ -384,7 +390,17 @@ dispatch된 attempt의 known receipt가 뒤늦게 도착하면 terminal과 cost�
 있다.
 
 현재 readiness 값은 `durableRunWriterReady=true`, `runApprovalPreviewReady=true`,
-`entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`다. 관리자 route는
-비용 승인 행만 만들며 dispatch entry point나 live adapter를 import하지 않는다. 다음 변경은
-실제 16건을 순서대로 reserve하고, 위 dispatch/terminal writer를 호출하는 별도 실행 entry point를
-추가해야 한다. 그 변경 전에는 run 승인을 받아도 provider 호출은 발생하지 않는다.
+`entryPointReady=true`, `executionAdmitted=true`, `productAdapterReady=false`다. 승인 route는
+비용 승인 행만 만들고 live adapter를 import하지 않는다. 별도 owner-only execute GET/POST는
+각각 DB rate limit과 no-store를 적용하고, POST만 frozen
+16건을 순서대로 reserve하고 dispatch/terminal writer를 호출할 수 있으며, 서버 kill switch는
+default-off다. 시작·resume 시 unknown sweep을 먼저 수행하고, maintenance는 15분마다 sweeper만
+실행한다. 어느 경로에도 retry·fallback·parallel dispatch·제품 Chat 연결은 없다. 배포만으로는
+stage/run 승인 행이나 flag가 생기지 않으므로 provider 호출은 발생하지 않는다.
+
+runner의 pre/post-dispatch, intent 누락, reservation release 실패와 terminal-write 불명 경로는
+응답 전에 운영 incident를 남긴다. payload는 고정 phase/cause code와 run/case/attempt 식별자만
+허용하고 prompt·제안문·provider 오류 원문·model output은 전달하지 않는다. incident 전달 실패는
+고정 content-free 로그만 남기고 원래 실행 결과를 바꾸지 않는다. intent writer가 DB에서
+`reservation_expired`로 이미 닫은 예약은 release를 재시도하지 않으며 원래 dispatch 거부를
+보존한다.

@@ -12,7 +12,13 @@ import {
   createPromptRefinerShadowSdkAdapter,
   promptRefinerRenderedInputTokenUpperBound,
 } from "../lib/promptRefinerShadowLiveAdapter.ts";
-import { PROMPT_REFINER_SHADOW_ADAPTER_VERSION } from "../lib/promptRefinerShadowRunContract.ts";
+import {
+  PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
+  PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+} from "../lib/promptRefinerShadowRunContract.ts";
+import { countPromptRefinerShadowInputTokens } from "../lib/promptRefinerShadowTokenizer.ts";
 
 const validRequest = (overrides = {}) => ({
   requestId: "shadow-case-01",
@@ -58,6 +64,10 @@ test("adapter records dispatch immediately before one exact bounded generation",
     validRequest({
       onDispatch: async (fact) => {
         events.push("dispatch");
+        const tokenCount = countPromptRefinerShadowInputTokens({
+          requestId: "shadow-case-01",
+          prompt: "Summarize the launch plan.",
+        });
         assert.deepEqual(fact, {
           requestId: "shadow-case-01",
           adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
@@ -67,6 +77,11 @@ test("adapter records dispatch immediately before one exact bounded generation",
           maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
           timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
           retryCount: PROMPT_REFINER_RETRY_COUNT,
+          tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+          tokenizerPackageVersion:
+            PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+          tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+          admissionInputTokens: tokenCount.totalInputTokens,
         });
       },
     }),
@@ -244,6 +259,11 @@ const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
 const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const LIVE_ADAPTER_REFERENCE = "promptRefinerShadowLiveAdapter";
 const RUN_CONTRACT_PATH = "lib/promptRefinerShadowRunContract.ts";
+const RUNNER_PATH = "lib/promptRefinerShadowRunner.ts";
+const EXECUTE_ROUTE_PATH =
+  "app/api/admin/prompt-refiner/shadow-run/execute/route.ts";
+const RUNNER_REFERENCE = "promptRefinerShadowRunner";
+const RUNNER_MANIFEST_ENTRY = '    "lib/promptRefinerShadowRunner.ts",';
 const RUN_CONTRACT_MANIFEST_ENTRY =
   '    "lib/promptRefinerShadowLiveAdapter.ts",';
 const STATIC_AI_IMPORT_PATTERN =
@@ -267,6 +287,16 @@ const sourceFiles = (root) =>
   });
 
 const shippedSourceReferencesLiveAdapter = ({ relativePath, source }) => {
+  if (relativePath === RUNNER_PATH) {
+    const importLine =
+      'import { runPromptRefinerShadowLiveAdapter } from "@/lib/promptRefinerShadowLiveAdapter";';
+    assert.equal(
+      source.split(importLine).length - 1,
+      1,
+      "the runner must carry exactly one static live-adapter import",
+    );
+    return source.replace(importLine, "").includes(LIVE_ADAPTER_REFERENCE);
+  }
   if (relativePath !== RUN_CONTRACT_PATH) {
     return source.includes(LIVE_ADAPTER_REFERENCE);
   }
@@ -281,7 +311,7 @@ const shippedSourceReferencesLiveAdapter = ({ relativePath, source }) => {
   );
 };
 
-test("no shipped entry point imports the live adapter", () => {
+test("only the reviewed runner imports the live adapter", () => {
   const root = resolve(import.meta.dirname, "..");
   const adapterPath = join(root, "lib/promptRefinerShadowLiveAdapter.ts");
   const scanned = sourceFiles(root).filter((path) => path !== adapterPath);
@@ -295,6 +325,9 @@ test("no shipped entry point imports the live adapter", () => {
     })
     .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
   assert.deepEqual(offenders, []);
+  const maintenance = readFileSync(join(root, "lib/maintenance.ts"), "utf8");
+  assert.equal(maintenance.includes(LIVE_ADAPTER_REFERENCE), false);
+  assert.equal(maintenance.includes("promptRefinerShadowRunner"), false);
   assert.equal(
     readFileSync(join(root, "package.json"), "utf8").includes(
       "lib/promptRefinerShadowLiveAdapter",
@@ -312,6 +345,39 @@ test("no shipped entry point imports the live adapter", () => {
   assert.doesNotMatch(
     adapterSource,
     STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
+  );
+});
+
+test("only the owner-only execute route can import the runner", () => {
+  const root = resolve(import.meta.dirname, "..");
+  const runnerPath = join(root, RUNNER_PATH);
+  const scanned = sourceFiles(root).filter((path) => path !== runnerPath);
+  const offenders = scanned
+    .filter((path) => {
+      const source = readFileSync(path, "utf8");
+      const relativePath = path.slice(root.length + 1).replaceAll("\\", "/");
+      if (relativePath === EXECUTE_ROUTE_PATH) {
+        return false;
+      }
+      if (relativePath === RUN_CONTRACT_PATH) {
+        const occurrences = source.split(RUNNER_MANIFEST_ENTRY).length - 1;
+        assert.equal(occurrences, 1);
+        return source.replace(RUNNER_MANIFEST_ENTRY, "").includes(RUNNER_REFERENCE);
+      }
+      return source.includes(RUNNER_REFERENCE);
+    })
+    .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
+  assert.deepEqual(offenders, []);
+  const route = readFileSync(join(root, EXECUTE_ROUTE_PATH), "utf8");
+  assert.match(
+    route,
+    /from "@\/lib\/promptRefinerShadowRunner";/,
+  );
+  assert.equal(
+    readFileSync(join(root, "lib/maintenance.ts"), "utf8").includes(
+      RUNNER_REFERENCE,
+    ),
+    false,
   );
 });
 
@@ -369,6 +435,14 @@ test("live-adapter guard rejects every reference syntax and exempts only the exa
     shippedSourceReferencesLiveAdapter({
       relativePath: RUN_CONTRACT_PATH,
       source: `${RUN_CONTRACT_MANIFEST_ENTRY}\n`,
+    }),
+    false,
+  );
+  assert.equal(
+    shippedSourceReferencesLiveAdapter({
+      relativePath: RUNNER_PATH,
+      source:
+        'import { runPromptRefinerShadowLiveAdapter } from "@/lib/promptRefinerShadowLiveAdapter";\n',
     }),
     false,
   );

@@ -20,7 +20,7 @@ process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 const preview = {
     status: "ready_for_explicit_cost_approval",
-    runId: "prompt-refiner-shadow-run-v2",
+    runId: "prompt-refiner-shadow-run-v3",
     stageId: "prompt-refiner-shadow-v1",
     stageRuntimeSourceManifestDigest: digest("1"),
     runSourceManifestDigest: digest("2"),
@@ -36,11 +36,15 @@ const preview = {
     apiModelId: "gpt-5.6-luna",
     timeoutMs: 15_000,
     retryCount: 0,
+    tokenizerPackage: "js-tiktoken",
+    tokenizerPackageVersion: "1.0.21",
+    tokenizerEncoding: "o200k_base",
+    maxInputTokens: 100_000,
     maxDispatches: 16,
     perRequestCostMicroUsd: 24_916,
     costCeilingMicroUsd: 398_656,
     unknownOutcomePolicy: "stop_no_redispatch",
-    executionAdmitted: false,
+    executionAdmitted: true,
     productAdapterReady: false,
     previewBindingDigest: digest("4"),
     confirmation: PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
@@ -222,7 +226,7 @@ test("POST accepts only the fixed 4 KiB approval binding", async () => {
     assert.equal(world.createCalls, 0);
 });
 
-test("POST records approval only and exposes no executable readiness", async () => {
+test("POST records the exact v3 execution authority without calling a provider", async () => {
     const route = await loadRoute();
     const oldFetch = globalThis.fetch;
     globalThis.fetch = async () => {
@@ -243,7 +247,7 @@ test("POST records approval only and exposes no executable readiness", async () 
         });
         assert.equal("confirmation" in forwarded, false);
         const body = await response.json();
-        assert.equal(body.run.executionAdmitted, false);
+        assert.equal(body.run.executionAdmitted, true);
         assert.equal(body.run.productAdapterReady, false);
     } finally {
         globalThis.fetch = oldFetch;

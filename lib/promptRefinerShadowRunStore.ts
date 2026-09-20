@@ -15,6 +15,7 @@ import { registryRowToModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import {
     PROMPT_REFINER_EXECUTION_MODEL_PIN,
+    PROMPT_REFINER_MAX_INPUT_TOKENS,
     PROMPT_REFINER_MAX_OUTPUT_TOKENS,
     PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
     PROMPT_REFINER_RETRY_COUNT,
@@ -53,6 +54,9 @@ import {
     PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
     PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH,
     PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
+    PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+    PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
     buildPromptRefinerShadowRunPreviewBinding,
     buildPromptRefinerShadowRunSourceManifest,
     promptRefinerShadowRunContractProblems,
@@ -74,6 +78,10 @@ type PromptRefinerShadowDispatchFact = {
     maxOutputTokens: number;
     timeoutMs: number;
     retryCount: number;
+    tokenizerPackage: string;
+    tokenizerPackageVersion: string;
+    tokenizerEncoding: string;
+    admissionInputTokens: number;
 };
 
 type PromptRefinerShadowUsage = {
@@ -258,7 +266,7 @@ const runApprovalMetadata = (run: StoredRun) => ({
     unknownOutcomePolicy: "stop_no_redispatch",
     approvedAt: run.approvedAt.toISOString(),
     approvalExpiresAt: run.approvalExpiresAt.toISOString(),
-    executionAdmitted: false,
+    executionAdmitted: true,
     productAdapterReady: false,
 });
 
@@ -361,6 +369,148 @@ const runMatchesRuntime = (
         run.approvedAt.getTime() <= now.getTime() &&
         run.approvalExpiresAt.getTime() > now.getTime()
     );
+};
+
+export type PromptRefinerShadowExecutionState = Readonly<{
+    observedAt: string;
+    runId: string;
+    status: string;
+    dispatchCount: number;
+    terminalCount: number;
+    nextCaseIndex: number | null;
+    nextCaseId: string | null;
+    inFlightAttemptId: string | null;
+    approvalExpiresAt: string;
+}>;
+
+/**
+ * Reads the next durable work item under the same locks and runtime checks as
+ * dispatch. It never reserves, consumes or calls a provider. A non-terminal
+ * intent blocks the next case; the caller must let the DB-clock sweeper decide
+ * whether that intent is stale rather than guessing or redispatching it.
+ */
+export const readPromptRefinerShadowExecutionState = async (): Promise<
+    PromptRefinerShadowExecutionState
+> => {
+    const facts = await loadPromptRefinerShadowRunRuntimeFacts();
+    return prisma.$transaction(async (tx) => {
+        const foundStage = await lockStage(tx);
+        if (!foundStage) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_STAGE_REQUIRED", "The approved stage does not exist.");
+        }
+        const stage = foundStage!;
+        if (!(await promptRefinerStageAuthorizationIsValid(tx, stage))) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_STAGE_INVALID", "The stage authorization is invalid.");
+        }
+        await lockAndValidateRegistry(tx);
+        const runRows = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "PromptRefinerShadowRun"
+            WHERE "id" = ${PROMPT_REFINER_SHADOW_RUN_ID} FOR UPDATE
+        `;
+        if (runRows.length !== 1) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_RUN_REQUIRED", "The approved run does not exist.");
+        }
+        const run = await tx.promptRefinerShadowRun.findUniqueOrThrow({
+            where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
+        });
+        const now = await dbClock(tx);
+        const previewBinding = buildPromptRefinerShadowRunPreviewBinding({
+            stageRuntimeSourceManifestDigest:
+                stage.runtimeSourceManifestDigest,
+            runSourceManifestDigest: facts.runSourceManifestDigest,
+            deploymentId: facts.stageFacts.runtimeDeploymentId,
+            commitSha: facts.stageFacts.runtimeCommitSha,
+            stageApprovalExpiresAt: stage.approvalExpiresAt,
+        });
+        if (
+            !(await runAuthorizationIsValid(tx, run)) ||
+            promptRefinerReservationStageProblems(stage).length > 0 ||
+            !promptRefinerStoredStageMatchesRuntime(stage, facts.stageFacts, now) ||
+            run.id !== PROMPT_REFINER_SHADOW_RUN_ID ||
+            run.stageId !== PROMPT_REFINER_RESERVATION_STAGE_ID ||
+            run.runContractVersion !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION ||
+            run.runContractDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST ||
+            run.corpusDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST ||
+            run.adapterVersion !== PROMPT_REFINER_SHADOW_ADAPTER_VERSION ||
+            run.perRequestCostMicroUsd !==
+                BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD) ||
+            run.maxDispatches !== PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES ||
+            run.costCeilingMicroUsd !==
+                BigInt(PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD) ||
+            run.knownActualCostMicroUsd > run.costCeilingMicroUsd ||
+            run.runtimeCommitSha !== facts.stageFacts.runtimeCommitSha ||
+            run.runtimeDeploymentId !== facts.stageFacts.runtimeDeploymentId ||
+            canonicalBenchmarkJson(run.runtimeSourceManifest) !==
+                canonicalBenchmarkJson(facts.runSourceManifest) ||
+            run.runtimeSourceManifestDigest !== facts.runSourceManifestDigest ||
+            run.previewBindingDigest !==
+                promptRefinerShadowRunPreviewBindingDigest(previewBinding) ||
+            run.approvalExpiresAt.getTime() !== stage.approvalExpiresAt.getTime() ||
+            run.approvalExpiresAt.getTime() <= now.getTime()
+        ) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_AUTHORITY_INVALID", "The execution authority is expired or drifted.");
+        }
+        const attempts = await tx.promptRefinerShadowAttempt.findMany({
+            where: { runId: run.id },
+            orderBy: [{ caseIndex: "asc" }],
+            select: {
+                id: true,
+                caseId: true,
+                caseIndex: true,
+                status: true,
+            },
+        });
+        if (
+            attempts.length !== run.dispatchCount ||
+            attempts.some(
+                (attempt, index) =>
+                    attempt.caseIndex !== index ||
+                    PROMPT_REFINER_SHADOW_CASE_IDS[index] !== attempt.caseId
+            ) ||
+            attempts.filter((attempt) => attempt.status === "terminal").length !==
+                run.terminalCount
+        ) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_SEQUENCE_INVALID", "The durable case sequence is inconsistent.");
+        }
+        const inFlight = attempts.find(
+            (attempt) => attempt.status === "dispatch_intent"
+        );
+        if (
+            inFlight &&
+            (inFlight.caseIndex !== attempts.length - 1 ||
+                attempts.some(
+                    (attempt) =>
+                        attempt.caseIndex > inFlight.caseIndex &&
+                        attempt.status !== "terminal"
+                ))
+        ) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_IN_FLIGHT_INVALID", "More than one case is in flight.");
+        }
+        const nextCaseIndex =
+            ["completed", "stopped_unknown"].includes(run.status) || inFlight
+                ? null
+                : attempts.length;
+        if (
+            nextCaseIndex !== null &&
+            nextCaseIndex >= PROMPT_REFINER_SHADOW_CASE_IDS.length
+        ) {
+            refuse(409, "PROMPT_REFINER_SHADOW_EXECUTION_COMPLETION_INVALID", "The run did not close after all cases.");
+        }
+        return Object.freeze({
+            observedAt: now.toISOString(),
+            runId: run.id,
+            status: run.status,
+            dispatchCount: run.dispatchCount,
+            terminalCount: run.terminalCount,
+            nextCaseIndex,
+            nextCaseId:
+                nextCaseIndex === null
+                    ? null
+                    : PROMPT_REFINER_SHADOW_CASE_IDS[nextCaseIndex]!,
+            inFlightAttemptId: inFlight?.id ?? null,
+            approvalExpiresAt: run.approvalExpiresAt.toISOString(),
+        });
+    });
 };
 
 export const promptRefinerShadowRunPreview = async () => {
@@ -533,7 +683,14 @@ const dispatchFactIsExact = (
     fact.apiModelId === PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId &&
     fact.maxOutputTokens === PROMPT_REFINER_MAX_OUTPUT_TOKENS &&
     fact.timeoutMs === PROMPT_REFINER_TIMEOUT_MS &&
-    fact.retryCount === PROMPT_REFINER_RETRY_COUNT;
+    fact.retryCount === PROMPT_REFINER_RETRY_COUNT &&
+    fact.tokenizerPackage === PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE &&
+    fact.tokenizerPackageVersion ===
+        PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION &&
+    fact.tokenizerEncoding === PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING &&
+    Number.isSafeInteger(fact.admissionInputTokens) &&
+    fact.admissionInputTokens >= 0 &&
+    fact.admissionInputTokens <= PROMPT_REFINER_MAX_INPUT_TOKENS;
 
 export const recordPromptRefinerShadowDispatchIntent = async (input: {
     runId: string;
@@ -644,6 +801,10 @@ export const recordPromptRefinerShadowDispatchIntent = async (input: {
             modelId: input.fact.modelId,
             timeoutMs: input.fact.timeoutMs,
             retryCount: input.fact.retryCount,
+            tokenizerPackage: input.fact.tokenizerPackage,
+            tokenizerPackageVersion: input.fact.tokenizerPackageVersion,
+            tokenizerEncoding: input.fact.tokenizerEncoding,
+            admissionInputTokens: input.fact.admissionInputTokens,
         });
         const attempt = await tx.promptRefinerShadowAttempt.create({
             data: {
