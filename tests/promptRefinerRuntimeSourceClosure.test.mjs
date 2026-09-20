@@ -67,10 +67,16 @@ const compilerOptions = parsedConfig.options;
 // line and column -- `path + expression text` for every entry -- came back
 // byte-identical, so nothing was added, removed or changed. Only the snapshot's
 // positions moved.
+//
+// 2026-09-21: repinned for moved positions only, again and for the same file.
+// Two branches each raised `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` for their
+// own watched file, and resolving that merge rewrote the comment above it. The
+// count is still 228 and the position-free inventory is byte-identical against
+// `origin/develop`, so nothing was added, removed or changed here either.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "895feb8cb275a0fe8ccaeccf6db3f743",
-  "c8895a459cc7fea4561e7d3f57d1b308",
+  "683f4d17fa301293b685f3dfcca7f5e3",
+  "668c5f083bfd60da99e09f0f0aa89cdf",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
