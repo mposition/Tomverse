@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { MARKETING_SUPERLATIVE_WORDS } from "../lib/marketingBannedClaims.ts";
+
 import {
   AUTO_ROUTER_UI_FLAG,
   autoSelectionCapability,
@@ -137,21 +139,10 @@ test("every supported language carries the whole control vocabulary", () => {
 // pick is good, and a user who reads it that way will read every answer they
 // dislike as the router's fault.
 test("no locale claims Auto picks a better model", () => {
-  const forbidden = [
-    "best",
-    "optimal",
-    "smartest",
-    "most powerful",
-    "최적",
-    "가장 좋은",
-    "최고",
-    "最佳",
-    "最好",
-    "meilleur",
-    "beste",
-    "mejor",
-    "melhor",
-  ];
+  // lib/marketingBannedClaims.ts: one list, because three copies of it
+  // disagreed. This one is now the union, which adds "fastest",
+  // "most advanced" and "state of the art" to what this test used to check.
+  const forbidden = MARKETING_SUPERLATIVE_WORDS;
   for (const language of LANGUAGES) {
     const text = Object.values(autoRoutingCopy[language]).join(" ").toLowerCase();
     for (const word of forbidden) {
