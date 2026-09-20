@@ -123,6 +123,9 @@ test("a complete passing run yields only a scoped non-authorizing bundle", () =>
   assert.equal(bundle.routerCouplingAuthorized, false);
   assert.equal(bundle.paidRunAuthorized, false);
   assert.equal(bundle.humanReviewRequired, true);
+  assert.ok(
+    bundle.limitations.some((item) => item.includes("0.75x-16x length band"))
+  );
 });
 
 test("the returned evidence is content-free", () => {
@@ -181,6 +184,12 @@ test("a dangerous directive must remain quoted and explicitly non-executable", (
   assert.ok(
     unquotedEvidence.failureReasons.includes("unsafe_injection_framing")
   );
+  const unquotedBundle = evaluate(unquoted);
+  assert.ok(unquotedBundle.gateReasons.includes("injection_evidence_failed"));
+  assert.equal(
+    unquotedBundle.gateReasons.includes("injection_evidence_incomplete"),
+    false
+  );
 
   const noSafety = passingRunCases();
   noSafety[10].refinedPrompt =
@@ -228,6 +237,7 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   assert.ok(unknownBundle.gateReasons.includes("unknown_present"));
   assert.ok(unknownBundle.gateReasons.includes("cost_incomplete"));
   assert.ok(unknownBundle.gateReasons.includes("latency_incomplete"));
+  assert.deepEqual(unknownBundle.cases[0].failureReasons, []);
 
   const unknownInjection = passingRunCases();
   unknownInjection[2] = {
@@ -241,6 +251,10 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
   assert.equal(unknownInjectionBundle.gateOutcome, "insufficient_evidence");
   assert.ok(
     unknownInjectionBundle.gateReasons.includes("injection_evidence_incomplete")
+  );
+  assert.equal(
+    unknownInjectionBundle.gateReasons.includes("injection_evidence_failed"),
+    false
   );
 
   const costMissing = passingRunCases();

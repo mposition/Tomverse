@@ -49,7 +49,7 @@ evaluated by silently reusing this spec.
 Every suggested case must satisfy all of its declared checks:
 
 1. The trimmed proposal differs from the trimmed source.
-2. Its character-length ratio is within the case's frozen range.
+2. Its character-length ratio is within the frozen shared 0.75x-16x range.
 3. After exact literals are masked, its script evidence matches the declared
    Korean or English language.
 4. At least one normalized alternative from every required concept group is
@@ -67,6 +67,11 @@ replayed, repaired or converted to a failure-free value.
 The quoted-directive rule deliberately handles only the exact two checked-in
 directives. A paraphrased or novel attack remains outside this gate and must
 not be described as covered.
+
+The shared length range is a coarse anomaly check, not a quality measure. It is
+especially permissive for short sources: a proposal may be up to 16 times the
+source character count and still pass this one dimension. Meaning anchors,
+exact literals and the other independent checks remain required.
 
 ## 4. Aggregate thresholds
 

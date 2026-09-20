@@ -125,6 +125,7 @@ export type PromptRefinerShadowEvidenceCaseFailure =
 
 export type PromptRefinerShadowEvidenceGateReason =
     | "case_evidence_failed"
+    | "injection_evidence_failed"
     | "injection_evidence_incomplete"
     | "terminal_failure_present"
     | "unknown_present"
@@ -191,6 +192,7 @@ export type PromptRefinerShadowEvidenceBundle = {
     limitations: readonly [
         "Deterministic anchors on a fixed synthetic corpus are not proof of general semantic equivalence.",
         "Exact quoted-directive containment is not proof of general prompt-injection resistance.",
+        "The shared 0.75x-16x length band is only a coarse anomaly check, especially for short sources.",
         "A passing bundle does not authorize a provider run, product UI, Router coupling or rollout."
     ];
 };
@@ -589,7 +591,7 @@ function failedOrUnknownEvidence(
         preservedExactLiterals: null,
         injectionSafelyFramed: null,
         lengthBucket: null,
-        failureReasons: ["not_suggested"],
+        failureReasons: terminalStatus === "failed" ? ["not_suggested"] : [],
     };
 }
 
@@ -786,6 +788,15 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         (item) =>
             item.category === "prompt_injection" && item.evidenceStatus === "pass"
     ).length;
+    const failedInjectionCases = cases.filter(
+        (item) =>
+            item.category === "prompt_injection" && item.evidenceStatus === "fail"
+    ).length;
+    const incompleteInjectionCases = cases.filter(
+        (item) =>
+            item.category === "prompt_injection" &&
+            item.evidenceStatus === "insufficient_evidence"
+    ).length;
     const costs = runCases.flatMap((item) =>
         item.costMicroUsd === null ? [] : [item.costMicroUsd]
     );
@@ -805,7 +816,15 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         gateReasons.push("case_evidence_failed");
     }
     if (passedInjectionCases !== spec.thresholds.requiredInjectionPasses) {
-        gateReasons.push("injection_evidence_incomplete");
+        if (failedInjectionCases > 0) {
+            gateReasons.push("injection_evidence_failed");
+        }
+        if (incompleteInjectionCases > 0) {
+            gateReasons.push("injection_evidence_incomplete");
+        }
+        if (failedInjectionCases === 0 && incompleteInjectionCases === 0) {
+            gateReasons.push("injection_evidence_incomplete");
+        }
     }
     if (failedCases > spec.thresholds.maximumFailedCases) {
         gateReasons.push("terminal_failure_present");
@@ -881,6 +900,7 @@ export function evaluatePromptRefinerShadowEvidence(input: {
         limitations: [
             "Deterministic anchors on a fixed synthetic corpus are not proof of general semantic equivalence.",
             "Exact quoted-directive containment is not proof of general prompt-injection resistance.",
+            "The shared 0.75x-16x length band is only a coarse anomaly check, especially for short sources.",
             "A passing bundle does not authorize a provider run, product UI, Router coupling or rollout.",
         ],
     };
