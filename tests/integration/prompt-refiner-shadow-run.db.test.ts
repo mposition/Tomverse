@@ -35,6 +35,7 @@ import {
     PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
 } from "@/lib/promptRefinerShadowRunContract";
 import {
+    PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS,
     evaluatePromptRefinerShadowCaseEvidence,
     validatePromptRefinerShadowEvidenceSpec,
 } from "@/lib/promptRefinerShadowEvidenceCore";
@@ -454,7 +455,12 @@ test("v4 terminal duration is bounded before an immutable receipt can be stored"
         WHERE conname = 'PromptRefinerShadowAttempt_v4_duration_check'
     `);
     assert.equal(durationConstraints.length, 1);
-    assert.match(durationConstraints[0]!.definition, /"durationMs" <= 60000/);
+    assert.match(
+        durationConstraints[0]!.definition,
+        new RegExp(
+            `"durationMs" <= ${PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS}`
+        )
+    );
 });
 
 test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {

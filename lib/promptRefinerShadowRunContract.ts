@@ -21,6 +21,7 @@ import {
     PROMPT_REFINER_SHADOW_CORPUS_VERSION,
 } from "@/lib/promptRefinerShadowHarness";
 import {
+    PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS,
     PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
     PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_ID,
     PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_VERSION,
@@ -46,7 +47,11 @@ export const PROMPT_REFINER_SHADOW_EXECUTION_FLAG =
     "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED" as const;
 export const PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION =
     "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V4 ONCE" as const;
-export const PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS = 60_000 as const;
+// Unknown sweeps persist this threshold as terminal telemetry. Deriving it
+// from the evidence ceiling prevents the sweep from producing a receipt that
+// the writer or the durable aggregate reader must reject.
+export const PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS =
+    PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS;
 export const PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH = 16 as const;
 export const PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS = 300 as const;
 /**
