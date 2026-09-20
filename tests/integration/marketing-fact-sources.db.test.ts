@@ -42,12 +42,20 @@ test("the new reader returns exactly the plans the existing one does", async () 
   );
 });
 
-test("with no row, every field is the compiled default", async () => {
+test("with no row, every field is the compiled default except the derived one", async () => {
   const withSources = await getBillingPlansWithFieldSources();
   assert.ok(withSources.length > 0, "the defaults are the plans");
 
   for (const { plan, sources } of withSources) {
     for (const [field, source] of Object.entries(sources)) {
+      if (field === "tier") {
+        // `getBillingPlans()` computes this from the plan id with
+        // `tierForPlanId()` and never reads the column, so it is arithmetic
+        // whether or not a row exists. This assertion said
+        // `compiled_default` until CI ran it against a real database.
+        assert.equal(source, "derived_formula", `${plan.id}.tier`);
+        continue;
+      }
       assert.equal(
         source,
         "compiled_default",

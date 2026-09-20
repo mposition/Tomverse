@@ -170,9 +170,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
   return hash.digest("hex");
 };
 
-/** Updated only by the fingerprint test after reviewing a declared file change. */
+/**
+ * Updated only by the fingerprint test after reviewing a declared file change.
+ *
+ * Moved on 2026-09-21 because `lib/marketingAutomationSchema.ts` changed:
+ * `edit_revision.byAuditLogId` became non-null. An edit with no audit row
+ * cannot be placed in time against a template marking, and because history is
+ * append-only one such entry would have made that post permanently unusable as
+ * a template. Requiring the field while nothing writes an edit yet is the
+ * moment to do it. A webhook verification record pinned to the old fingerprint
+ * no longer applies, which is what this constant is for.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5439839348d7e0f5b6e63261d430b4248476d0e275defc09bba7f49a6c61a4c0";
+  "90db4a2db8d68785bd49d4b502189218bd022846f7c957bc9539db1a57bfd332";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
