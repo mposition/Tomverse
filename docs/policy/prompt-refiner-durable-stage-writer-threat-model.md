@@ -42,6 +42,16 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시
 | prompt/credential/provider error가 provenance에 유입 | manifest schema는 path/size/hash와 고정 실행 숫자만 허용; audit reason은 request가 아니라 서버 내부 상수 |
 | 승인 endpoint 탐색·CSRF·탈취 session | 비관리자 404, owner-only, recent authentication, global origin guard, DB atomic rate limit |
 | stage 행 존재가 provider 실행으로 오인 | execution manifest 및 response에서 두 readiness boolean이 false; 새 adapter/caller 없음 |
+| run 승인 행 존재가 provider 실행 승인으로 오인 | run contract와 승인 응답은 `entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`; 승인 route는 live adapter를 import하거나 호출하지 않음 |
+| caller가 run 비용·corpus·model·배포 identity를 바꿈 | GET preview가 stage/runtime/run source와 고정 비용 계약의 canonical digest를 반환하고 POST는 exact digest와 고정 confirmation만 받음; 별도 default-off flag를 서버에서 검사 |
+| run 승인 audit만 남거나 run만 남음 | owner action audit과 `PromptRefinerShadowRun` insert를 한 transaction에 기록하고 linked audit HMAC·metadata를 commit 전에 재검증 |
+| run/attempt 외래키가 서명된 audit 행을 사후 변경·삭제 | audit id는 immutable plain column으로 두고 referential action을 만들지 않음; trigger가 insert/terminal 시 exact audit action·target·actor·metadata를 같은 transaction에서 검증 |
+| reservation이 dispatch evidence 없이 consumed 됨 | stage→registry→run→reservation 고정 lock 순서 안에서 system audit, dispatch intent, consume, run counter를 함께 commit; application authority와 DB trigger가 attempt 없는 consume을 모두 거부 |
+| 같은 case/request/reservation을 이중 dispatch | reservation/request와 run+case id/index의 unique key 및 transaction 안 duplicate 검사; 이미 기록된 dispatch intent는 재호출 권한으로 해석하지 않음 |
+| terminal receipt가 경쟁하거나 사후 변경됨 | attempt row lock과 `dispatch_intent -> terminal` compare-and-set; 동일 facts replay만 idempotent, 다른 receipt는 409, terminal 행 UPDATE/DELETE는 DB trigger가 거부 |
+| provider dispatch 뒤 process가 죽어 결과를 모름 | PostgreSQL clock 기준 60초 stale intent만 bounded sweeper가 `unknown_after_dispatch`로 terminal 처리하고 run을 `stopped_unknown`으로 latch; 같은 snapshot의 나머지 stale intent도 latch 뒤 닫고 경쟁으로 닫지 못한 id를 보고; sweeper는 adapter 호출·reserve·retry·redispatch를 하지 않음 |
+| unknown run에서 다음 case를 계속 실행 | run authorization/runtime/state 재검증과 terminal latch가 새 dispatch intent를 거부; latch 전 이미 dispatch된 attempt의 늦은 known receipt만 terminal/cost 충실도를 위해 기록하고 latch는 유지; retry count는 항상 0 |
+| prompt/refined output/provider body가 run DB나 audit에 유입 | run/attempt schema와 audit metadata는 식별자·상태·duration·nullable token usage·cost upper bound만 허용하고 content 필드는 두지 않음 |
 
 ## 4. 잔여 위험
 
@@ -58,3 +68,9 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시
   60분과 감사 증거 retention은 서로 다른 개념이다.
 - 이 writer는 actual dispatch를 열지 않으므로 provider 실패, 품질, 의미 보존과 행동상
   injection resistance에 대한 새 증거를 만들지 않는다.
+- DB transaction은 provider network 호출과 원자적일 수 없다. dispatch intent가 commit된 뒤
+  호출 여부나 결과를 확정할 수 없으면 보수적으로 unknown에 latch하며 자동 복구나 재전송으로
+  비용·중복 실행을 추측하지 않는다.
+- `consumed`인데 attempt가 없는 행은 새 migration 이후 정상 writer가 만들 수 없지만, legacy,
+  trigger 비활성화 또는 privileged SQL 사고의 증거일 수 있다. sweeper는 이를 고치거나 다시
+  보내지 않고 incident 목록으로만 반환한다.

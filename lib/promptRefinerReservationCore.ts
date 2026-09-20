@@ -82,6 +82,7 @@ export const PROMPT_REFINER_RESERVATION_REFUSALS = Object.freeze([
     "reservation_not_found",
     "reservation_not_active",
     "reservation_expired",
+    "dispatch_intent_required",
     "stage_capacity_exhausted",
 ] as const);
 export type PromptRefinerReservationRefusal =

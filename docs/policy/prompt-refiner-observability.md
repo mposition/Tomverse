@@ -341,7 +341,7 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
 
 ## 12. 격리된 live adapter와 단일 실행 계약
 
-`prompt-refiner-shadow-run-v1`은 위 stage의 100개 reservation pool을 실제 실행
+`prompt-refiner-shadow-run-v2`는 위 stage의 100개 reservation pool을 실제 실행
 승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
 좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
 retry는 0, timeout은 15초이며 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
@@ -363,9 +363,28 @@ provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 �
 요구한 actual-tokenizer 식별·계수를 충족하지 않으므로 실행 승인 근거가 아니다. durable
 runner가 열리기 전에 그 요구를 구현하거나 별도 계약 변경으로 다시 승인해야 한다.
 
-이 단계의 readiness 값은 `durableRunWriterReady=false`, `entryPointReady=false`,
-`executionAdmitted=false`, `productAdapterReady=false`다. 다음 변경은 별도 검토에서 exact
-승인·reservation consume·dispatch intent·terminal receipt를 한 transaction 경계에
-결속하고, dispatch 뒤 unknown outcome을 운영자가 확인하기 전 재시도하지 못하게 해야 한다.
-그 writer와 owner-only entry point가 배포되기 전에는 비용 승인을 받아도 live adapter를
-호출할 수 없다.
+durable run writer와 owner-only 승인 route는 구현되었다. GET은 배포·stage·run source의
+exact digest와 고정 비용 계약을 no-write preview로 반환한다. POST는 별도 default-off flag와
+고정 confirmation을 요구하며, run 승인 행과 사람 audit을 한 transaction에 쓴다. 이 승인은
+provider 실행 승인이 아니다. `recordPromptRefinerShadowDispatchIntent()`는 stage, model registry,
+run, reservation 순으로 lock한 뒤 system audit, attempt의 `dispatch_intent`, reservation consume와
+run accounting을 한 transaction에 결속한다. 따라서 attempt 없는 consume은 application과 DB
+양쪽에서 거부된다.
+
+terminal receipt는 같은 attempt에 대한 compare-and-set으로 한 번만 기록되고, 동일 facts replay만
+idempotent하다. 다른 receipt는 충돌로 거부한다. dispatch intent가 PostgreSQL clock 기준 60초 동안
+terminal receipt를 얻지 못하면 bounded sweeper가 `unknown_after_dispatch`로 닫고 run 전체를
+`stopped_unknown`으로 latch한다. 같은 snapshot의 나머지 stale intent도 latch 뒤 accounting
+catch-up으로 모두 닫으며, 경쟁으로 닫지 못한 id는 결과에 명시한다. sweeper는 adapter 호출,
+reservation 생성 또는 재전송을 하지 않는다. content는 저장하지 않으며 case id, provider/model
+identity, 상태, duration, nullable usage와 보수적 cost upper bound만 기록한다. latch 전에 이미
+dispatch된 attempt의 known receipt가 뒤늦게 도착하면 terminal과 cost는 보존하되 latch는 풀지
+않는다. 세부 운영 계약은
+[`prompt-refiner-durable-run-writer-contract.md`](../ops/prompt-refiner-durable-run-writer-contract.md)에
+있다.
+
+현재 readiness 값은 `durableRunWriterReady=true`, `runApprovalPreviewReady=true`,
+`entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`다. 관리자 route는
+비용 승인 행만 만들며 dispatch entry point나 live adapter를 import하지 않는다. 다음 변경은
+실제 16건을 순서대로 reserve하고, 위 dispatch/terminal writer를 호출하는 별도 실행 entry point를
+추가해야 한다. 그 변경 전에는 run 승인을 받아도 provider 호출은 발생하지 않는다.

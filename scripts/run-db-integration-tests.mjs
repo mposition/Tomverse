@@ -206,6 +206,9 @@ run(
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    // One-run approval, atomic dispatch-intent/reservation consume, immutable
+    // terminal receipts and stop-without-retry unknown recovery.
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",

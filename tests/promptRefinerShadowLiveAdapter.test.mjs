@@ -242,6 +242,10 @@ const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
   "tests",
 ]);
 const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const LIVE_ADAPTER_REFERENCE = "promptRefinerShadowLiveAdapter";
+const RUN_CONTRACT_PATH = "lib/promptRefinerShadowRunContract.ts";
+const RUN_CONTRACT_MANIFEST_ENTRY =
+  '    "lib/promptRefinerShadowLiveAdapter.ts",';
 const STATIC_AI_IMPORT_PATTERN =
   /(?:^|\n)\s*import\b(?!\s*\()[^;]*?["']ai["']\s*;/;
 const STATIC_ACTIVE_MODEL_IMPORT_PATTERN =
@@ -262,6 +266,21 @@ const sourceFiles = (root) =>
     return SOURCE_FILE_PATTERN.test(entry.name) ? [path] : [];
   });
 
+const shippedSourceReferencesLiveAdapter = ({ relativePath, source }) => {
+  if (relativePath !== RUN_CONTRACT_PATH) {
+    return source.includes(LIVE_ADAPTER_REFERENCE);
+  }
+  const occurrences = source.split(RUN_CONTRACT_MANIFEST_ENTRY).length - 1;
+  assert.equal(
+    occurrences,
+    1,
+    "the run contract must carry exactly one literal manifest entry for the adapter",
+  );
+  return source.replace(RUN_CONTRACT_MANIFEST_ENTRY, "").includes(
+    LIVE_ADAPTER_REFERENCE,
+  );
+};
+
 test("no shipped entry point imports the live adapter", () => {
   const root = resolve(import.meta.dirname, "..");
   const adapterPath = join(root, "lib/promptRefinerShadowLiveAdapter.ts");
@@ -269,9 +288,11 @@ test("no shipped entry point imports the live adapter", () => {
   assert.ok(scanned.some((path) => path === join(root, "instrumentation.ts")));
   assert.ok(scanned.some((path) => path.startsWith(join(root, "components"))));
   const offenders = scanned
-    .filter((path) =>
-      readFileSync(path, "utf8").includes("promptRefinerShadowLiveAdapter"),
-    )
+    .filter((path) => {
+      const source = readFileSync(path, "utf8");
+      const relativePath = path.slice(root.length + 1).replaceAll("\\", "/");
+      return shippedSourceReferencesLiveAdapter({ relativePath, source });
+    })
     .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
   assert.deepEqual(offenders, []);
   assert.equal(
@@ -325,4 +346,37 @@ test("unreachability guard recognizes multiline imports and JS entry extensions"
   ]) {
     assert.equal(SOURCE_FILE_PATTERN.test(name), true, name);
   }
+});
+
+test("live-adapter guard rejects every reference syntax and exempts only the exact manifest entry", () => {
+  for (const source of [
+    'import { x } from "@/lib/promptRefinerShadowLiveAdapter";',
+    'const x = import("@/lib/promptRefinerShadowLiveAdapter");',
+    'export * from "@/lib/promptRefinerShadowLiveAdapter";',
+    'const x = require("@/lib/promptRefinerShadowLiveAdapter");',
+    'const x = module.require("@/lib/promptRefinerShadowLiveAdapter");',
+  ]) {
+    assert.equal(
+      shippedSourceReferencesLiveAdapter({
+        relativePath: "app/api/example/route.ts",
+        source,
+      }),
+      true,
+      source,
+    );
+  }
+  assert.equal(
+    shippedSourceReferencesLiveAdapter({
+      relativePath: RUN_CONTRACT_PATH,
+      source: `${RUN_CONTRACT_MANIFEST_ENTRY}\n`,
+    }),
+    false,
+  );
+  assert.equal(
+    shippedSourceReferencesLiveAdapter({
+      relativePath: RUN_CONTRACT_PATH,
+      source: `${RUN_CONTRACT_MANIFEST_ENTRY}\nexport * from "@/lib/promptRefinerShadowLiveAdapter";`,
+    }),
+    true,
+  );
 });

@@ -14,10 +14,16 @@ import {
 import {
   PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
   PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
+  PROMPT_REFINER_SHADOW_CASE_IDS,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
   PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
+  PROMPT_REFINER_SHADOW_RUN_ID,
   PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
+  PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
+  buildPromptRefinerShadowRunPreviewBinding,
+  buildPromptRefinerShadowRunSourceManifest,
+  promptRefinerShadowRunPreviewBindingDigest,
   promptRefinerShadowRunContractProblems,
 } from "../lib/promptRefinerShadowRunContract.ts";
 import {
@@ -64,12 +70,17 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
     PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.requiresExplicitCostApproval,
     true,
   );
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.runId, PROMPT_REFINER_SHADOW_RUN_ID);
+  assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.caseIds, PROMPT_REFINER_SHADOW_CASE_IDS);
+  assert.equal(PROMPT_REFINER_SHADOW_CASE_IDS.length, 16);
+  assert.equal(new Set(PROMPT_REFINER_SHADOW_CASE_IDS).size, 16);
   assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
 });
 
-test("shipping the adapter does not make the run or product executable", () => {
+test("shipping the durable writer still does not make the run or product executable", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
-  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, false);
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, true);
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady, false);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted, false);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.productAdapterReady, false);
@@ -77,4 +88,51 @@ test("shipping the adapter does not make the run or product executable", () => {
     PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
     /^sha256:[a-f0-9]{64}$/,
   );
+});
+
+test("run source manifest is exact, bounded and commit-bound", () => {
+  const files = new Map(
+    PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.map((path, index) => [
+      path,
+      new TextEncoder().encode(`fixture-${index}`),
+    ]),
+  );
+  const built = buildPromptRefinerShadowRunSourceManifest({
+    commitSha: "a".repeat(40),
+    files,
+  });
+  assert.equal(built.manifest.files.length, PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.length);
+  assert.deepEqual(
+    built.manifest.files.map((entry) => entry.path),
+    [...PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS],
+  );
+  assert.match(built.manifestDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.throws(
+    () => buildPromptRefinerShadowRunSourceManifest({
+      commitSha: "a".repeat(40),
+      files: new Map([...files].slice(1)),
+    }),
+    /source_path_allowlist/,
+  );
+});
+
+test("run preview digest binds deployment, stage closure, delta and cost", () => {
+  const base = {
+    stageRuntimeSourceManifestDigest: `sha256:${"1".repeat(64)}`,
+    runSourceManifestDigest: `sha256:${"2".repeat(64)}`,
+    deploymentId: "deploy-1",
+    commitSha: "a".repeat(40),
+    stageApprovalExpiresAt: new Date("2026-09-20T03:00:00.000Z"),
+  };
+  const binding = buildPromptRefinerShadowRunPreviewBinding(base);
+  const digest = promptRefinerShadowRunPreviewBindingDigest(binding);
+  assert.match(digest, /^sha256:[a-f0-9]{64}$/);
+  assert.notEqual(
+    digest,
+    promptRefinerShadowRunPreviewBindingDigest(
+      buildPromptRefinerShadowRunPreviewBinding({ ...base, deploymentId: "deploy-2" }),
+    ),
+  );
+  assert.equal(binding.executionAdmitted, false);
+  assert.equal(binding.productAdapterReady, false);
 });

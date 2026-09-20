@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-run-writer-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-run-writer-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-run-writer-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T04:35:30.528Z",
+  "durationMs": 296357,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 30,
+    "cachedInputTokens": 2114526,
+    "outputTokens": 24466,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.11974975,
+    "raw": {
+      "input_tokens": 30,
+      "cache_creation_input_tokens": 168231,
+      "cache_read_input_tokens": 2114526,
+      "output_tokens": 24466,
+      "output_tokens_details": {
+        "thinking_tokens": 19167
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 89048,
+        "ephemeral_5m_input_tokens": 79183
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 5745,
+          "cache_read_input_tokens": 172362,
+          "cache_creation_input_tokens": 704,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 704,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T04:40:26.942Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-run-writer-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:8ce80e0f737ca9040f39db30f3757961a21601e09ba6152b4e5a8ddbcdf58ce3",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowRunStore.ts:918-929 (sweepPromptRefinerShadowUnknowns catch)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The swallow-list covers two codes that cannot occur while the attempt row lock is held, and omits PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT, the one race a second terminal writer can actually cause, so that race aborts the sweep and discards the already-computed closedUnknownAttemptIds/unresolvedStaleAttemptIds report instead of listing the id.",
+        "reproduction": "In tests/integration/prompt-refiner-shadow-run.db.test.ts, approve stage+run, dispatch two cases, backdate both dispatchIntentAt by 61s (as the existing sweep test does), then call recordPromptRefinerShadowTerminal({attemptId: secondAttempt.id, terminalReason: 'suggested', durationMs: 12, usage: usage(44)}) before sweeping. sweepPromptRefinerShadowUnknowns() closes the first attempt (latching the run) and then throws PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT on the second; expected instead is a returned result naming the second id as unresolved. PROMPT_REFINER_SHADOW_TERMINAL_CAS_LOST and PROMPT_REFINER_SHADOW_RUN_TERMINAL cannot be reached from this loop: the SELECT ... FOR UPDATE at store:763-766 makes the CAS lose impossible, and a run whose attempt is still dispatch_intent can never be 'completed'. Currently unreachable in production because no runner exists (entryPointReady=false)."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunStore.ts:779-787 (mayCloseAfterUnknownLatch)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "After the run latches to stopped_unknown, a genuinely known receipt for another in-flight attempt is refused with PROMPT_REFINER_SHADOW_RUN_TERMINAL, so that attempt is later closed by the sweeper as unknown_after_dispatch with null cost, and its real actualCostMicroUsd never reaches knownActualCostMicroUsd — under-reporting, not over-reporting, actual spend, which reads against the contract's \"보수적 cost\" wording in docs/ops/prompt-refiner-durable-run-writer-contract.md §4.",
+        "reproduction": "Approve stage+run, dispatch cases 0 and 1, then recordPromptRefinerShadowTerminal(attempt0, 'unknown_after_dispatch', …) followed by recordPromptRefinerShadowTerminal({attemptId: attempt1.id, terminalReason: 'suggested', durationMs: 12, usage: usage(44)}). The second call throws PROMPT_REFINER_SHADOW_RUN_TERMINAL; after the sweeper closes attempt1 as unknown, run.knownActualCostMicroUsd is 0 rather than 44. No dispatch or spend is created by this path, so it is a record-fidelity observation for the future runner contract, not a boundary violation."
+      }
+    ],
+    "nextAction": "Merge as-is; both remaining items are non-blocking record-fidelity notes for the future runner/entry-point change, which needs its own review anyway."
+  }
+}
