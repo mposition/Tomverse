@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
     PROMPT_REFINER_EXECUTION_MODEL_PIN,
     PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
+    PROMPT_REFINER_MAX_INPUT_TOKENS,
     PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
     PROMPT_REFINER_RETRY_COUNT,
     PROMPT_REFINER_TIMEOUT_MS,
@@ -21,20 +22,35 @@ import {
 } from "@/lib/promptRefinerShadowHarness";
 
 export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
-    "prompt-refiner-shadow-run-v2" as const;
+    "prompt-refiner-shadow-run-v3" as const;
 export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
     "prompt-refiner-openai-sdk-adapter-v1" as const;
 export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
+export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE = "js-tiktoken" as const;
+export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION = "1.0.21" as const;
+export const PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING = "o200k_base" as const;
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION =
     "prompt-refiner-shadow-run-source-v1" as const;
 export const PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG =
     "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED" as const;
 export const PROMPT_REFINER_SHADOW_RUN_CONFIRMATION =
-    "APPROVE PROMPT REFINER SHADOW RUN V2 FOR THE DISPLAYED COST CEILING" as const;
+    "APPROVE PROMPT REFINER SHADOW RUN V3 FOR THE DISPLAYED COST CEILING" as const;
 export const PROMPT_REFINER_SHADOW_RUN_ID =
-    "prompt-refiner-shadow-run-v2" as const;
+    "prompt-refiner-shadow-run-v3" as const;
+export const PROMPT_REFINER_SHADOW_EXECUTION_FLAG =
+    "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED" as const;
+export const PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION =
+    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V3 ONCE" as const;
 export const PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS = 60_000 as const;
 export const PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH = 16 as const;
+export const PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS = 300 as const;
+/**
+ * Stop admitting new cases well before the route's platform cap.
+ * A case already dispatched still receives its terminal write; this budget is
+ * checked only before the next reservation.
+ */
+export const PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS = 240_000 as const;
+export const PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS = 10_000 as const;
 export const PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES =
     PROMPT_REFINER_SHADOW_CORPUS_CASES;
 export const PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD =
@@ -64,12 +80,19 @@ export type PromptRefinerShadowAttemptStatus =
  */
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS = Object.freeze([
     "app/api/admin/prompt-refiner/shadow-run/route.ts",
+    "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
     "lib/adminAuditSystemActors.ts",
+    "lib/maintenance.ts",
     "lib/promptRefinerShadowLiveAdapter.ts",
     "lib/promptRefinerShadowRunContract.ts",
+    "lib/promptRefinerShadowRunner.ts",
     "lib/promptRefinerShadowRunStore.ts",
     "lib/promptRefinerShadowSystemAudit.ts",
+    "lib/promptRefinerShadowTokenizer.ts",
+    "package-lock.json",
+    "package.json",
     "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
+    "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
 ] as const);
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
@@ -135,6 +158,14 @@ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
                 PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
             satisfiesActualTokenizerRequirement: false,
         }),
+        actualTokenizer: Object.freeze({
+            package: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+            packageVersion: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+            encoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+            framingTokenAllowance:
+                PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
+            satisfiesActualTokenizerRequirement: true,
+        }),
     }),
     run: Object.freeze({
         runId: PROMPT_REFINER_SHADOW_RUN_ID,
@@ -146,12 +177,17 @@ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
         unknownOutcomePolicy: "stop_no_redispatch" as const,
         consumedWithoutTerminalAfterMs:
             PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
+        routeMaxDurationSeconds:
+            PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS,
+        invocationBudgetMs: PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS,
+        terminalWriteMarginMs:
+            PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS,
     }),
     shadowAdapterImplemented: true,
     durableRunWriterReady: true,
     runApprovalPreviewReady: true,
-    entryPointReady: false,
-    executionAdmitted: false,
+    entryPointReady: true,
+    executionAdmitted: true,
     productAdapterReady: false,
 } as const);
 
@@ -161,7 +197,7 @@ const computedDigest = `sha256:${createHash("sha256")
 
 // Replaced with the computed literal before review. A mismatch fails import.
 export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
-    "sha256:a48ca37275c72f5a39d6029c9952d0ab4e35de7e55a4fd7086cb8a148eb6222a" as const;
+    "sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280" as const;
 
 if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
     throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);
@@ -186,6 +222,15 @@ export const promptRefinerShadowRunContractProblems = (): string[] => {
     }
     if (PROMPT_REFINER_RETRY_COUNT !== 0) problems.push("retry_mismatch");
     if (
+        PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS >=
+            PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS * 1_000 ||
+        PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS <=
+            PROMPT_REFINER_TIMEOUT_MS +
+                PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS
+    ) {
+        problems.push("invocation_budget_mismatch");
+    }
+    if (
         PROMPT_REFINER_SHADOW_CASE_IDS.length !==
             PROMPT_REFINER_SHADOW_CORPUS_CASES ||
         new Set(PROMPT_REFINER_SHADOW_CASE_IDS).size !==
@@ -193,17 +238,26 @@ export const promptRefinerShadowRunContractProblems = (): string[] => {
     ) {
         problems.push("run_case_ids_mismatch");
     }
-    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted !== false) {
-        problems.push("execution_must_remain_unadmitted");
+    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted !== true) {
+        problems.push("execution_must_be_admitted");
     }
-    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady !== false) {
-        problems.push("entry_point_must_remain_unready");
+    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady !== true) {
+        problems.push("entry_point_must_be_ready");
+    }
+    if (
+        PROMPT_REFINER_SHADOW_RUN_CONTRACT.request.actualTokenizer
+            .satisfiesActualTokenizerRequirement !== true
+    ) {
+        problems.push("actual_tokenizer_must_be_ready");
     }
     if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady !== true) {
         problems.push("durable_writer_must_be_ready");
     }
     if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady !== true) {
         problems.push("run_preview_must_be_ready");
+    }
+    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.productAdapterReady !== false) {
+        problems.push("product_adapter_must_remain_unready");
     }
     return problems;
 };
@@ -291,11 +345,15 @@ export type PromptRefinerShadowRunPreviewBinding = Readonly<{
     apiModelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId;
     timeoutMs: typeof PROMPT_REFINER_TIMEOUT_MS;
     retryCount: typeof PROMPT_REFINER_RETRY_COUNT;
+    tokenizerPackage: typeof PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE;
+    tokenizerPackageVersion: typeof PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION;
+    tokenizerEncoding: typeof PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING;
+    maxInputTokens: typeof PROMPT_REFINER_MAX_INPUT_TOKENS;
     maxDispatches: typeof PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES;
     perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
     costCeilingMicroUsd: typeof PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD;
     unknownOutcomePolicy: "stop_no_redispatch";
-    executionAdmitted: false;
+    executionAdmitted: true;
     productAdapterReady: false;
 }>;
 
@@ -323,13 +381,18 @@ export const buildPromptRefinerShadowRunPreviewBinding = (input: {
         apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
         timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
         retryCount: PROMPT_REFINER_RETRY_COUNT,
+        tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
+        tokenizerPackageVersion:
+            PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
+        tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
+        maxInputTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
         maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
         perRequestCostMicroUsd:
             PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
         costCeilingMicroUsd:
             PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
         unknownOutcomePolicy: "stop_no_redispatch",
-        executionAdmitted: false,
+        executionAdmitted: true,
         productAdapterReady: false,
     });
 

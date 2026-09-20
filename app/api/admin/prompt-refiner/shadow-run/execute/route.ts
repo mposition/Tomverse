@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
@@ -16,23 +17,30 @@ import {
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
-    PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
+    PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION,
+    PROMPT_REFINER_SHADOW_EXECUTION_FLAG,
+    PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
+    PROMPT_REFINER_SHADOW_RUN_ID,
 } from "@/lib/promptRefinerShadowRunContract";
 import {
-    createPromptRefinerShadowRun,
+    promptRefinerShadowRunnerErrorResponse,
+    runPromptRefinerShadowExecution,
+} from "@/lib/promptRefinerShadowRunner";
+import {
     promptRefinerShadowRunErrorResponse,
-    promptRefinerShadowRunPreview,
+    readPromptRefinerShadowExecutionState,
 } from "@/lib/promptRefinerShadowRunStore";
 import { promptRefinerStageAdmissionErrorResponse } from "@/lib/promptRefinerStageAdmission";
 
-const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-const createSchema = z
+const executeSchema = z
     .object({
-        runContractDigest: digest,
-        stageRuntimeSourceManifestDigest: digest,
-        runSourceManifestDigest: digest,
-        previewBindingDigest: digest,
-        confirmation: z.literal(PROMPT_REFINER_SHADOW_RUN_CONFIRMATION),
+        runId: z.literal(PROMPT_REFINER_SHADOW_RUN_ID),
+        runContractDigest: z.literal(
+            PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST
+        ),
+        confirmation: z.literal(
+            PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION
+        ),
     })
     .strict();
 
@@ -82,80 +90,32 @@ const requireOwner = async () => {
     return { session } as const;
 };
 
-export async function GET() {
-    try {
-        const auth = await requireOwner();
-        if ("response" in auth) return auth.response;
-        const preview = await promptRefinerShadowRunPreview();
-        return NextResponse.json({ preview }, { headers: noStoreHeaders });
-    } catch (error) {
-        const run = promptRefinerShadowRunErrorResponse(error);
-        if (run) return withNoStore(run);
-        const stage = promptRefinerStageAdmissionErrorResponse(error);
-        if (stage) return withNoStore(stage);
-        console.error("Failed to preview Prompt Refiner shadow run:", error);
-        return NextResponse.json(
-            { error: "Failed to preview Prompt Refiner shadow run." },
-            { status: 500, headers: noStoreHeaders }
-        );
-    }
-}
-/** Records approval only. It cannot import or invoke the provider adapter. */
-export async function POST(request: Request) {
+export async function GET(request: Request) {
     try {
         const auth = await requireOwner();
         if ("response" in auth) return auth.response;
         await consumeApiRateLimit(
             request,
             auth.session.user.id,
-            "admin-prompt-refiner-shadow-run-approve",
-            { minute: 2, day: 4 }
+            "admin-prompt-refiner-shadow-run-execution-preview",
+            { minute: 10, day: 40 }
         );
-        const body = await readLimitedJson(request, 4 * 1024, createSchema);
-        const result = await createPromptRefinerShadowRun({
-            session: auth.session,
-            request,
-            expected: {
-                runContractDigest: body.runContractDigest,
-                stageRuntimeSourceManifestDigest:
-                    body.stageRuntimeSourceManifestDigest,
-                runSourceManifestDigest: body.runSourceManifestDigest,
-                previewBindingDigest: body.previewBindingDigest,
-            },
-        });
+        const state = await readPromptRefinerShadowExecutionState();
         return NextResponse.json(
             {
-                run: {
-                    id: result.run.id,
-                    status: result.run.status,
-                    runContractDigest: result.run.runContractDigest,
-                    corpusDigest: result.run.corpusDigest,
-                    adapterVersion: result.run.adapterVersion,
-                    environment: "staging",
-                    deploymentId: result.run.runtimeDeploymentId,
-                    commitSha: result.run.runtimeCommitSha,
-                    perRequestCostMicroUsd: Number(
-                        result.run.perRequestCostMicroUsd
-                    ),
-                    maxDispatches: result.run.maxDispatches,
-                    costCeilingMicroUsd: Number(
-                        result.run.costCeilingMicroUsd
-                    ),
-                    approvedAt: result.run.approvedAt.toISOString(),
-                    approvalExpiresAt:
-                        result.run.approvalExpiresAt.toISOString(),
-                    authorizationAuditLogId:
-                        result.run.authorizationAuditLogId,
-                    executionAdmitted: true,
+                execution: {
+                    ...state,
+                    runContractDigest:
+                        PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
+                    enabled:
+                        process.env[PROMPT_REFINER_SHADOW_EXECUTION_FLAG] ===
+                        "true",
+                    confirmation:
+                        PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION,
                     productAdapterReady: false,
                 },
-                created: result.created,
-                replayed: result.replayed,
             },
-            {
-                status: result.created ? 201 : 200,
-                headers: noStoreHeaders,
-            }
+            { headers: noStoreHeaders }
         );
     } catch (error) {
         const run = promptRefinerShadowRunErrorResponse(error);
@@ -164,9 +124,42 @@ export async function POST(request: Request) {
         if (stage) return withNoStore(stage);
         const security = apiSecurityResponse(error);
         if (security) return withNoStore(security);
-        console.error("Failed to approve Prompt Refiner shadow run:", error);
+        console.error("Failed to preview Prompt Refiner shadow execution:", error);
         return NextResponse.json(
-            { error: "Failed to approve Prompt Refiner shadow run." },
+            { error: "Failed to preview Prompt Refiner shadow execution." },
+            { status: 500, headers: noStoreHeaders }
+        );
+    }
+}
+
+export async function POST(request: Request) {
+    try {
+        const auth = await requireOwner();
+        if ("response" in auth) return auth.response;
+        await readLimitedJson(request, 4 * 1024, executeSchema);
+        await consumeApiRateLimit(
+            request,
+            auth.session.user.id,
+            "admin-prompt-refiner-shadow-run-execute",
+            { minute: 2, day: 8 }
+        );
+        const result = await runPromptRefinerShadowExecution();
+        return NextResponse.json(
+            { execution: result, productAdapterReady: false },
+            { headers: noStoreHeaders }
+        );
+    } catch (error) {
+        const runner = promptRefinerShadowRunnerErrorResponse(error);
+        if (runner) return withNoStore(runner);
+        const run = promptRefinerShadowRunErrorResponse(error);
+        if (run) return withNoStore(run);
+        const stage = promptRefinerStageAdmissionErrorResponse(error);
+        if (stage) return withNoStore(stage);
+        const security = apiSecurityResponse(error);
+        if (security) return withNoStore(security);
+        console.error("Failed to execute Prompt Refiner shadow run:", error);
+        return NextResponse.json(
+            { error: "Failed to execute Prompt Refiner shadow run." },
             { status: 500, headers: noStoreHeaders }
         );
     }
