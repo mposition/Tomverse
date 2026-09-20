@@ -365,10 +365,11 @@ test("a hard bounce lift is authorised, and the entry names the authorisation", 
     releasedReasons: string[];
   };
   assert.deepEqual(metadata.releasedReasons, ["hard_bounce"]);
-  assert.ok(
-    metadata.evidenceKind === "sole_admin" || metadata.evidenceKind === "dual_approval",
-    `a permanent reason was lifted as ${metadata.evidenceKind}`
-  );
+  // Exactly the sole-admin branch, because this file configures one
+  // administrator. Accepting either branch would let the test pass in a
+  // configuration it never runs in and say nothing about the one it does.
+  assert.equal(metadata.evidenceKind, "sole_admin");
+  assert.equal(metadata.approvalId, null);
   assert.ok(
     metadata.authorizationAuditLogId,
     "the entry does not name the authorisation that allowed it"
@@ -379,13 +380,79 @@ test("a hard bounce lift is authorised, and the entry names the authorisation", 
       where: { id: metadata.authorizationAuditLogId! },
     })
   );
-  if (metadata.evidenceKind === "dual_approval") {
-    assert.ok(metadata.approvalId);
-    assert.ok(
-      await prisma.adminActionApproval.findUnique({
-        where: { id: metadata.approvalId! },
-      })
+});
+
+test("with two administrators the first request approves nothing and releases nothing", async () => {
+  // The two-person rule for a permanent reason, from the side this change owns:
+  // the request is refused, nothing is released, and the approval that is
+  // recorded is bound to **the cause set** rather than to the row handle.
+  //
+  // What this does not cover, stated rather than implied: the second
+  // administrator reviewing that approval and the requester's retry succeeding.
+  // The approval row belongs to its requester (`requestedById: actorId` in
+  // `claimApproval`), so the second half runs through the approval-review
+  // surface rather than through this endpoint, and it is
+  // `lib/adminApproval.ts`'s contract rather than this one's.
+  const second = "suppression-second@tomverse.test";
+  const configuredAdmins = process.env.ADMIN_EMAILS;
+  const configuredOwners = process.env.ADMIN_OWNER_EMAILS;
+  process.env.ADMIN_EMAILS = `${configuredAdmins},${second}`;
+  process.env.ADMIN_OWNER_EMAILS = `${configuredOwners},${second}`;
+  try {
+    await signInAsOwner();
+    await prisma.user.create({ data: { email: second, lastLoginAt: new Date() } });
+    await setAuthority("causes");
+    const emailAddress = `two-admin-${randomUUID()}@example.test`;
+    await recordSuppression({
+      emailAddress,
+      reason: "hard_bounce",
+      source: "provider_webhook",
+      sourceEventKey: `test:${randomUUID()}`,
+    });
+    const handle = await prisma.suppressionCause.findFirstOrThrow({
+      where: { emailAddress, reason: "hard_bounce" },
+      select: { id: true },
+    });
+    const digest = await liveDigest(emailAddress);
+
+    const before = await suppressionState();
+    const response = await post({
+      action: "remove",
+      id: handle.id,
+      causeSetDigest: digest,
+      reason: "The mailbox was recreated by the provider and now accepts mail.",
+    });
+
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { code: string; approvalId: string };
+    assert.equal(body.code, "ADMIN_APPROVAL_REQUIRED");
+
+    // Nothing released, and no release audit entry. The approval row and the
+    // request entry that go with it are expected new rows, so this compares
+    // what the change is responsible for rather than the whole table.
+    const after = await suppressionState();
+    assert.deepEqual(after.causes, before.causes);
+    assert.deepEqual(after.entries, before.entries);
+    assert.equal(
+      after.audit.filter((row) => row.action === "email_suppression.removed").length,
+      0
     );
+
+    const approval = await prisma.adminActionApproval.findUniqueOrThrow({
+      where: { id: body.approvalId },
+    });
+    assert.equal(approval.action, "email_suppression.remove");
+    assert.equal(approval.targetType, "SuppressionCauseSet");
+    assert.equal(approval.targetId, digest);
+    // The payload names the set, not the row the operator clicked, so a cause
+    // arriving after the request cannot be covered by that approval.
+    assert.deepEqual(approval.payload, {
+      viaCauseId: handle.id,
+      causeSetDigest: digest,
+    });
+  } finally {
+    process.env.ADMIN_EMAILS = configuredAdmins;
+    process.env.ADMIN_OWNER_EMAILS = configuredOwners;
   }
 });
 
