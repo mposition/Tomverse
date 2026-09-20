@@ -18,16 +18,13 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { listSuppressions } from "@/lib/adminEmailDeliveries";
-import { prisma } from "@/lib/prisma";
 import { suppressionRemovalProblem } from "@/lib/adminEmailDeliveryFilters";
 import {
-  APPROVAL_REQUIRED_SUPPRESSION_REASONS,
   GLOBAL_PURPOSE_KEY,
-  activeCausesForEntry,
+  activeCausesForSelector,
   liftSuppressionCauses,
   normalizeSuppressionAddress,
   recordSuppression,
-  removeSuppression,
 } from "@/lib/emailSuppression";
 import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
 
@@ -200,7 +197,7 @@ export async function POST(req: Request) {
     // approval is bound to the exact set of active causes it was asked for
     // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
     if ((await readSuppressionAuthority()) === "causes") {
-      const active = await activeCausesForEntry(body.id);
+      const active = await activeCausesForSelector(body.id);
       if (!active) {
         return NextResponse.json({ error: "Not found." }, { status: 404 });
       }
@@ -210,14 +207,14 @@ export async function POST(req: Request) {
             session,
             request: req,
             action: "email_suppression.removed",
-            targetType: "SuppressionEntry",
+            targetType: "SuppressionCause",
             targetId: body.id,
-            summary: `Lifted suppression causes on ${active.entry.emailAddress}.`,
+            summary: `Lifted suppression causes on ${active.selector.emailAddress}.`,
             metadata: {
               reason: body.reason,
-              emailAddress: active.entry.emailAddress,
-              scope: active.entry.scope,
-              purposeKey: active.entry.purposeKey,
+              emailAddress: active.selector.emailAddress,
+              scope: active.selector.scope,
+              purposeKey: active.selector.purposeKey,
               causeIds: active.causeIds,
               causeReasons: active.reasons,
               evidenceKind,
@@ -236,7 +233,7 @@ export async function POST(req: Request) {
                 session,
                 request: req,
                 action: "email_suppression.remove",
-                targetType: "SuppressionEntry",
+                targetType: "SuppressionCause",
                 targetId: body.id,
                 // The cause ids are part of what is approved: a cause added after
                 // the request is a different approval.
@@ -245,7 +242,7 @@ export async function POST(req: Request) {
               },
               async (context) => {
                 const outcome = await liftSuppressionCauses({
-                  entryId: body.id,
+                  causeId: body.id,
                   approvedCauseIds: active.causeIds,
                   action: "approved_admin",
                   evidence: context.approvalId
@@ -262,7 +259,7 @@ export async function POST(req: Request) {
               }
             )
           : await liftSuppressionCauses({
-              entryId: body.id,
+              causeId: body.id,
               approvedCauseIds: active.causeIds,
               action: "admin",
               evidence: { kind: "admin" },
@@ -294,86 +291,27 @@ export async function POST(req: Request) {
       });
     }
 
-    // Which reason the *stored* row holds decides whether a second
-    // administrator is needed. Deriving that from the request body would let
-    // the caller choose its own approval requirement, and the row is read again
-    // inside the removal transaction, so this read only picks the path.
-    const stored = await prisma.suppressionEntry.findUnique({
-      where: { id: body.id },
-      select: { reason: true },
-    });
-    if (!stored) {
-      return NextResponse.json({ error: "Not found." }, { status: 404 });
-    }
-
-    const lift = async () => removeSuppression({ id: body.id });
-
-    const needsApproval = (
-      APPROVAL_REQUIRED_SUPPRESSION_REASONS as readonly string[]
-    ).includes(stored.reason);
-
-    const result = needsApproval
-      ? await runWithAdminApproval(
-          {
-            session,
-            request: req,
-            action: "email_suppression.remove",
-            targetType: "SuppressionEntry",
-            targetId: body.id,
-            payload: { id: body.id },
-            reason: body.reason,
-          },
-          lift
-        )
-      : await lift();
-
-    if (!result.removed) {
-      if (result.refusal === "authority_changed") {
-        return NextResponse.json(
-          {
-            error: "Suppression decisions changed over while this was in progress. Try again.",
-            code: "authority_changed",
-          },
-          { status: 409 }
-        );
-      }
-      return NextResponse.json(
-        {
-          error:
-            result.refusal === "unliftable"
-              ? "A suppression created by a privacy request is lifted by the privacy process that created it, not from here."
-              : "Not found.",
-          code: result.refusal,
-        },
-        { status: result.refusal === "unliftable" ? 409 : 404 }
-      );
-    }
-
-    await writeAdminAuditLog({
-      session,
-      request: req,
-      action: "email_suppression.removed",
-      targetType: "SuppressionEntry",
-      targetId: result.entry.id,
-      summary: `Lifted the ${result.entry.reason} suppression on ${result.entry.emailAddress}.`,
-      metadata: {
-        reason: body.reason,
-        emailAddress: result.entry.emailAddress,
-        scope: result.entry.scope,
-        purposeKey: result.entry.purposeKey,
-        suppressionReason: result.entry.reason,
-        source: result.entry.source,
-        occurredAt: result.entry.occurredAt.toISOString(),
-        requiredApproval: needsApproval,
+    // Entry authority, and the console no longer speaks it.
+    //
+    // The lift above is reached by a cause id, because that is what the list
+    // hands out now (docs/policy/email-product-news-redesign-draft.md, section
+    // 7.4). An entry-authority lift would have to resolve the same id as a
+    // `SuppressionEntry` row, find nothing, and answer 404 -- which reads as
+    // "that suppression is gone" when what happened is that the setting was
+    // moved back below this build's floor.
+    //
+    // So it says which of those it is. Production has read causes since
+    // 2026-09-17 and the rollback floor for this deploy is the causes cutover;
+    // an environment that finds itself here is one whose setting went backwards
+    // and needs it put back, not an operator who should try again.
+    return NextResponse.json(
+      {
+        error:
+          "This build's suppression console lists causes, and the suppression setting is back on entries. Nothing was changed. Put the setting back to causes before lifting anything here.",
+        code: "authority_changed",
       },
-    });
-
-    return NextResponse.json({
-      removed: true,
-      // Said plainly, because the opposite assumption is the expensive one:
-      // our list is not the provider's, and Resend's is account-wide (§5.3.1).
-      providerListUnchanged: true,
-    });
+      { status: 409 }
+    );
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

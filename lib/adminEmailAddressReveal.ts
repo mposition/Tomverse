@@ -46,7 +46,10 @@ export async function revealEmailAddresses(input: {
     input.kind === "delivery"
       ? await prisma.emailDelivery.findMany({ where, select })
       : input.kind === "suppression"
-        ? await prisma.suppressionEntry.findMany({ where, select })
+        ? // A cause id, not an entry id: the console lists causes, so these are
+          // the ids it handed out (docs/policy/email-product-news-redesign-draft.md,
+          // section 7.4).
+          await prisma.suppressionCause.findMany({ where, select })
         : await prisma.emailCampaignRecipient.findMany({ where, select });
 
   return Object.fromEntries(rows.map((row) => [row.id, row.emailAddress]));

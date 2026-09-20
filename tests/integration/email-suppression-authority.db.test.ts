@@ -4,7 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { setPreference } from "@/lib/emailPreferences";
 import {
-  activeCausesForEntry,
+  activeCausesForSelector,
   liftSuppressionCauses,
   recordSuppression,
   suppressionCheck,
@@ -51,6 +51,20 @@ const suppress = (emailAddress: string, reason: "manual" | "complaint" | "hard_b
     sourceEventKey: `test:${randomUUID()}`,
     ...extra,
   });
+
+/**
+ * A cause id for an address, which is the handle the console hands out.
+ *
+ * The lift is reached by a cause and acts on its whole selector, so which cause
+ * this is does not matter -- only that it is not an entry id.
+ */
+const causeFor = async (emailAddress: string, reason: string) =>
+  (
+    await prisma.suppressionCause.findFirstOrThrow({
+      where: { emailAddress, reason },
+      select: { id: true },
+    })
+  ).id;
 
 /** An audit row written in the lift's transaction, standing in for the route's. */
 const auditInTx = async (tx: Parameters<Parameters<typeof liftSuppressionCauses>[0]["writeReleaseAudit"]>[0]) => {
@@ -126,16 +140,17 @@ test("the cutover refuses while causes would let through what an entry stops, an
 
 test("a lift releases only what its action may, and keeps the entry while a cause remains", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "manual");
+  await suppress(emailAddress, "manual");
   await suppress(emailAddress, "privacy_request");
   await setAuthority("causes");
 
-  const active = await activeCausesForEntry(entry.id!);
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await activeCausesForSelector(handle);
   assert.ok(active);
   assert.equal(active.needsApproval, false);
 
   const lifted = await liftSuppressionCauses({
-    entryId: entry.id!,
+    causeId: handle,
     approvedCauseIds: active.causeIds,
     action: "admin",
     evidence: { kind: "admin" },
@@ -156,15 +171,16 @@ test("a lift releases only what its action may, and keeps the entry while a caus
 
 test("an approval for one cause set does not lift a set that changed since", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
+  await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
   await setAuthority("causes");
-  const active = await activeCausesForEntry(entry.id!);
+  const handle = await causeFor(emailAddress, "complaint");
+  const active = await activeCausesForSelector(handle);
   assert.ok(active?.needsApproval);
 
   await suppress(emailAddress, "hard_bounce");
 
   const lifted = await liftSuppressionCauses({
-    entryId: entry.id!,
+    causeId: handle,
     approvedCauseIds: active!.causeIds,
     action: "approved_admin",
     evidence: { kind: "sole_admin", authorizationAuditLogId: "audit-start" },
@@ -210,9 +226,10 @@ test("an entry-path removal that finds causes deciding releases nothing", async 
 
 test("a cause written while a lift waits for the address is seen by the lift", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "manual");
+  await suppress(emailAddress, "manual");
   await setAuthority("causes");
-  const active = await activeCausesForEntry(entry.id!);
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await activeCausesForSelector(handle);
 
   const { lockSuppressionAddress, holdSuppressionFence } = await import(
     "@/lib/emailSuppressionAuthority"
@@ -248,7 +265,7 @@ test("a cause written while a lift waits for the address is seen by the lift", a
 
   await held;
   const lift = liftSuppressionCauses({
-    entryId: entry.id!,
+    causeId: handle,
     approvedCauseIds: active!.causeIds,
     action: "admin",
     evidence: { kind: "admin" },

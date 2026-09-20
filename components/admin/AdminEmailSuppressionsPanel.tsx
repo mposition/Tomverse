@@ -21,6 +21,13 @@ import {
  * comment. Resend's suppression is account- and region-wide (§5.3.1), so an
  * operator who lifts an entry here and expects mail to flow is an operator who
  * will conclude the lift did not work.
+ *
+ * **One row is one selector, not one cause.** An address can be blocked by a
+ * hard bounce and a complaint and an unsubscribe at once, and the block is
+ * their sum -- so the row shows every active reason, and lifting acts on all of
+ * them. Showing a row per cause would repeat the address and invite somebody to
+ * lift a third of a block
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
  */
 
 const REASON_TONE: Record<string, string> = {
@@ -110,31 +117,49 @@ export async function AdminEmailSuppressionsPanel({
                   />
                 </td>
                 <td className="py-3 pr-4">
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                      REASON_TONE[row.reason] ??
-                      "border-zinc-700 bg-zinc-900 text-zinc-300"
-                    }`}
-                  >
-                    {row.reason}
+                  <span className="flex flex-wrap gap-1">
+                    {row.causes.map((cause) => (
+                      <span
+                        key={cause.id}
+                        data-testid="email-suppression-reason"
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          REASON_TONE[cause.reason] ??
+                          "border-zinc-700 bg-zinc-900 text-zinc-300"
+                        }`}
+                      >
+                        {cause.reason}
+                      </span>
+                    ))}
                   </span>
                 </td>
                 <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
                   {row.scope === "global" ? m.allMail : row.purposeKey}
                 </td>
                 <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
-                  {row.source}
-                  {row.sourceClassification ? (
-                    <span className="mt-1 block text-[11px] text-zinc-500">
-                      {row.sourceClassification}
+                  {row.causes.map((cause) => (
+                    <span key={cause.id} className="mt-1 block first:mt-0">
+                      {cause.source}
+                      {cause.sourceClassification ? (
+                        <span className="block text-[11px] text-zinc-500">
+                          {cause.sourceClassification}
+                        </span>
+                      ) : null}
                     </span>
-                  ) : null}
+                  ))}
                 </td>
                 <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {when(row.occurredAt)}
+                  {row.causes.map((cause) => (
+                    <span key={cause.id} className="mt-1 block first:mt-0">
+                      {when(cause.occurredAt)}
+                    </span>
+                  ))}
                 </td>
                 <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {row.expiresAt ? when(row.expiresAt) : m.never}
+                  {row.causes.map((cause) => (
+                    <span key={cause.id} className="mt-1 block first:mt-0">
+                      {cause.expiresAt ? when(cause.expiresAt) : m.never}
+                    </span>
+                  ))}
                 </td>
               </tr>
             ))}

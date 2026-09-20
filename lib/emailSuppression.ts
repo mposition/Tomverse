@@ -303,41 +303,64 @@ export async function removeSuppression(input: {
   });
 }
 
+/** Address plus scope plus purpose: what a suppression is actually about. */
+export type SuppressionSelector = {
+  emailAddress: string;
+  scope: string;
+  purposeKey: string;
+};
+
 /**
- * The active causes behind one entry's selector, for deciding how an
- * administrator may lift it once causes decide.
+ * The active causes on the selector one cause belongs to, for deciding how an
+ * administrator may lift them.
+ *
+ * **Keyed on a cause, not on an entry.** The operator console lists causes, so
+ * the handle it hands back is a cause id; an entry id would be a handle to a
+ * row that the contraction stops writing
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4). The cause is
+ * only a way in -- what is read, approved and lifted is every active cause on
+ * its selector, because the block is their sum and lifting one of several
+ * changes nothing a sender would notice.
+ *
+ * A released or expired cause is still a valid handle: its selector may well
+ * have live causes on it, and refusing here would make a stale console row
+ * unliftable rather than merely stale.
  */
-export async function activeCausesForEntry(entryId: string, now: Date = new Date()) {
-  const entry = await prisma.suppressionEntry.findUnique({
-    where: { id: entryId },
+export async function activeCausesForSelector(causeId: string, now: Date = new Date()) {
+  const cause = await prisma.suppressionCause.findUnique({
+    where: { id: causeId },
     select: { emailAddress: true, scope: true, purposeKey: true },
   });
-  if (!entry) return null;
+  if (!cause) return null;
+  const selector: SuppressionSelector = cause;
   const causes = await prisma.suppressionCause.findMany({
-    where: { ...entry, releasedAt: null },
+    where: { ...selector, releasedAt: null },
     select: { id: true, reason: true, expiresAt: true, releasedAt: true },
     orderBy: { id: "asc" },
   });
-  const active = causes.filter((cause) => isActiveCause(cause, now));
+  const active = causes.filter((row) => isActiveCause(row, now));
   return {
-    entry,
-    causeIds: active.map((cause) => cause.id),
-    reasons: active.map((cause) => cause.reason),
-    needsApproval: removalNeedsApproval(active.map((cause) => cause.reason)),
+    selector,
+    causeIds: active.map((row) => row.id),
+    reasons: active.map((row) => row.reason),
+    needsApproval: removalNeedsApproval(active.map((row) => row.reason)),
   };
 }
 
 export type CauseLiftResult =
   | {
       removed: true;
-      entry: Prisma.SuppressionEntryGetPayload<object>;
+      selector: SuppressionSelector;
       released: Array<{ id: string; reason: string }>;
       remaining: Array<{ id: string; reason: string }>;
     }
   | { removed: false; refusal: SuppressionRemovalRefusal | "approval_stale" };
 
 /**
- * Lifts an entry's causes by the release matrix, once causes decide.
+ * Lifts a selector's causes by the release matrix, once causes decide.
+ *
+ * Reached by a cause id, for the reason `activeCausesForSelector` gives: the
+ * console's handles are causes now.
  *
  * Run inside the approved operation. Everything is re-read under the fence and
  * compared with the cause set the approval was granted for: a cause that
@@ -346,12 +369,15 @@ export type CauseLiftResult =
  * entry and the release are one transaction, so a rolled-back lift leaves no
  * record of a release that did not happen.
  *
- * The entry itself is removed only when no cause remains active; while an
+ * The mirrored entry is removed only when no cause remains active; while an
  * older build may still read entries, an entry with a live cause behind it
- * keeps blocking there too.
+ * keeps blocking there too. It goes by selector rather than by id, and deleting
+ * none of them is not a failure -- once the contraction stops writing entries
+ * there will be nothing there to delete, and this is the path that has to keep
+ * working across that change.
  */
 export async function liftSuppressionCauses(input: {
-  entryId: string;
+  causeId: string;
   approvedCauseIds: readonly string[];
   action: "admin" | "approved_admin";
   evidence:
@@ -367,29 +393,30 @@ export async function liftSuppressionCauses(input: {
     if ((await readSuppressionAuthority(tx)) !== "causes") {
       return { removed: false as const, refusal: "authority_changed" as const };
     }
-    const found = await tx.suppressionEntry.findUnique({
-      where: { id: input.entryId },
-      select: { emailAddress: true },
+    const found = await tx.suppressionCause.findUnique({
+      where: { id: input.causeId },
+      select: { emailAddress: true, scope: true, purposeKey: true },
     });
     if (!found) return { removed: false as const, refusal: "not_found" as const };
     // The address lock before the causes are read, so no cause can appear
-    // between the read and the decision to remove the entry.
+    // between the read and the decision.
     await lockSuppressionAddress(tx, found.emailAddress);
-    const entry = await tx.suppressionEntry.findUnique({ where: { id: input.entryId } });
-    if (!entry) return { removed: false as const, refusal: "not_found" as const };
+    const selector: SuppressionSelector = found;
 
     const causes = (
       await tx.suppressionCause.findMany({
-        where: {
-          emailAddress: entry.emailAddress,
-          scope: entry.scope,
-          purposeKey: entry.purposeKey,
-          releasedAt: null,
-        },
+        where: { ...selector, releasedAt: null },
         select: { id: true, reason: true, expiresAt: true, releasedAt: true },
         orderBy: { id: "asc" },
       })
     ).filter((cause) => isActiveCause(cause, now));
+    if (causes.length === 0) {
+      // The handle resolved and nothing is active on its selector. That is not
+      // "not found" in the sense the caller means -- it is a console row
+      // somebody else has already lifted -- and the approval it was granted
+      // against named causes that are gone.
+      return { removed: false as const, refusal: "approval_stale" as const };
+    }
 
     const current = causes.map((cause) => cause.id).join(",");
     if (current !== [...input.approvedCauseIds].sort().join(",")) {
@@ -415,11 +442,11 @@ export async function liftSuppressionCauses(input: {
       });
     }
     if (remaining.length === 0) {
-      await tx.suppressionEntry.delete({ where: { id: entry.id } });
+      await tx.suppressionEntry.deleteMany({ where: selector });
     }
     return {
       removed: true as const,
-      entry,
+      selector,
       released: releasable.map(({ id, reason }) => ({ id, reason })),
       remaining: remaining.map(({ id, reason }) => ({ id, reason })),
     };

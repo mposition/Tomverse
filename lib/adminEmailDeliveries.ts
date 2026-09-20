@@ -165,7 +165,7 @@ export async function abandonedLegalEmailCount(): Promise<number> {
   });
 }
 
-const SUPPRESSION_SELECT = {
+const SUPPRESSION_CAUSE_SELECT = {
   id: true,
   emailAddress: true,
   scope: true,
@@ -177,30 +177,106 @@ const SUPPRESSION_SELECT = {
   occurredAt: true,
   expiresAt: true,
   createdAt: true,
-} satisfies Prisma.SuppressionEntrySelect;
+} satisfies Prisma.SuppressionCauseSelect;
 
-type AdminSuppressionRecord = Prisma.SuppressionEntryGetPayload<{
-  select: typeof SUPPRESSION_SELECT;
+type AdminSuppressionCauseRecord = Prisma.SuppressionCauseGetPayload<{
+  select: typeof SUPPRESSION_CAUSE_SELECT;
 }>;
 
-/** Masked for the same reason, and by the same rule, as a delivery row. */
-export type AdminSuppressionRow = Omit<
-  AdminSuppressionRecord,
-  "emailAddress"
-> & { emailAddressMasked: string | null };
+/** One active cause, as the console shows it. */
+export type AdminSuppressionCause = Omit<
+  AdminSuppressionCauseRecord,
+  "emailAddress" | "scope" | "purposeKey"
+>;
 
+/**
+ * One suppressed selector -- an address, a scope and a purpose -- and every
+ * active cause on it.
+ *
+ * Masked for the same reason, and by the same rule, as a delivery row.
+ */
+export type AdminSuppressionRow = {
+  /**
+   * The newest active cause on this selector, and the handle the lift uses.
+   *
+   * A cause id rather than an entry id: `SuppressionEntry` is the mirror the
+   * contraction stops writing, and a console keyed on it would go blind to
+   * every new hard bounce the moment that happened
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4). Which
+   * cause it is does not matter to the lift, which resolves the selector and
+   * acts on all of them; it matters to the reveal, which reads an address by
+   * this id.
+   */
+  id: string;
+  emailAddressMasked: string | null;
+  scope: string;
+  purposeKey: string;
+  /** Newest first, and never empty -- a selector with none is not listed. */
+  causes: AdminSuppressionCause[];
+};
+
+/**
+ * What we will not mail, and why, read from the causes that decide it.
+ *
+ * `SuppressionCause` is append-only and one selector can carry several at once
+ * -- a soft bounce that hardened, an unsubscribe on top of a complaint -- and
+ * the block is their sum. So this groups rather than lists: one row per
+ * selector, every active cause on it, newest first. Listing a row per cause
+ * would show one address three times and invite an operator to lift a third of
+ * a block.
+ *
+ * Expiry is applied here rather than left to the reader. A soft bounce whose
+ * `expiresAt` has passed stops mail nowhere, and a screen that still lists it
+ * is a screen that asks somebody to lift something that is not there.
+ */
 export async function listSuppressions(input: {
   emailAddress: string | null;
   limit: number;
+  now?: Date;
 }): Promise<AdminSuppressionRow[]> {
-  const rows = await prisma.suppressionEntry.findMany({
-    where: input.emailAddress ? { emailAddress: input.emailAddress } : {},
-    select: SUPPRESSION_SELECT,
+  const now = input.now ?? new Date();
+  const causes = await prisma.suppressionCause.findMany({
+    where: {
+      ...(input.emailAddress ? { emailAddress: input.emailAddress } : {}),
+      releasedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    select: SUPPRESSION_CAUSE_SELECT,
     orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-    take: input.limit,
+    // One selector can hold several causes, so the row limit is not the cause
+    // limit. Read enough causes to fill the rows and cut the rows below.
+    take: input.limit * SUPPRESSION_CAUSES_PER_ROW_BUDGET,
   });
-  return rows.map(({ emailAddress, ...rest }) => ({
-    ...rest,
-    emailAddressMasked: maskEmailAddress(emailAddress),
-  }));
+
+  const rows = new Map<string, AdminSuppressionRow>();
+  for (const { emailAddress, scope, purposeKey, ...cause } of causes) {
+    const key = [emailAddress, scope, purposeKey].join("\u0000");
+    const existing = rows.get(key);
+    if (existing) {
+      existing.causes.push(cause);
+      continue;
+    }
+    rows.set(key, {
+      // The first cause of a selector in this order is its newest, which is
+      // also the one an operator is most likely to have come here about.
+      id: cause.id,
+      emailAddressMasked: maskEmailAddress(emailAddress),
+      scope,
+      purposeKey,
+      causes: [cause],
+    });
+  }
+
+  return Array.from(rows.values()).slice(0, input.limit);
 }
+
+/**
+ * How many causes one selector is assumed to be able to hold, for sizing the
+ * read behind the row limit.
+ *
+ * A guess, and it only ever costs rows: if a page of addresses each carried
+ * more than this many active causes, the last rows would be missing rather than
+ * wrong. Four is already an address that hard-bounced, complained,
+ * unsubscribed and was suppressed by hand.
+ */
+const SUPPRESSION_CAUSES_PER_ROW_BUDGET = 4;
