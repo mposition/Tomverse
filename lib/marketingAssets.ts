@@ -203,6 +203,34 @@ export type MarketingAssetResolution =
   | { ok: true; asset: MarketingAsset; disclosure: MarketingAssetDisclosure }
   | { ok: false; refusal: MarketingAssetRefusal };
 
+const deepFreeze = <T>(value: T): T => {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const inner of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(inner);
+    }
+  }
+  return value;
+};
+
+/**
+ * Parse the asset registry file and freeze what comes out of it.
+ *
+ * This registry is the one input the Guard cannot hold as a module constant:
+ * it lives in `docs/marketing/asset-registry.json` and is read at runtime. So
+ * the protection the other registries get from being module-private has to
+ * come from the value being immutable once it has been checked.
+ *
+ * Without the freeze, `provenance` is an ordinary property of an ordinary
+ * object: parse a `capture` asset, set it to `ai_generated`, and the
+ * `depictsProductInterface` rule that `superRefine` enforced at parse time has
+ * already run. The asset would resolve with a `none` disclosure while claiming
+ * to be a photograph of the product.
+ */
+export function loadMarketingAssetRegistry(raw: unknown): MarketingAssetRegistry {
+  return deepFreeze(marketingAssetRegistrySchema.parse(raw));
+}
+
 export function resolveMarketingAsset({
   id,
   channel,

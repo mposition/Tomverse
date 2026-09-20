@@ -16,10 +16,13 @@ import {
   MARKETING_CLAIM_TYPES,
   generatorProjection,
   marketingClaimRegistrySchema,
+  marketingClaimUsable,
   marketingClaimSchema,
   resolveMarketingClaim,
 } from "../lib/marketingClaims.ts";
 import {
+  MARKETING_EVIDENCE_PAGES,
+  MARKETING_LOCALE_PAGE_LANGUAGE,
   isMarketingEvidenceRoute,
   unresolvedClaimEvidence,
 } from "../lib/marketingEvidencePages.ts";
@@ -28,6 +31,7 @@ import {
   marketingAssetRegistrySchema,
   marketingAssetSchema,
   resolveMarketingAsset,
+  loadMarketingAssetRegistry,
 } from "../lib/marketingAssets.ts";
 
 const featureClaim = (overrides = {}) => ({
@@ -155,80 +159,60 @@ test("the generator is given the claims without their evidence", () => {
 });
 
 test("a claim resolves for a locale, on a date, behind its gate", () => {
-  const registry = [
-    marketingClaimSchema.parse(featureClaim({ gate: "feature.compare" })),
-  ];
+  // Asked of the claim rather than of a registry. `resolveMarketingClaim()`
+  // looks an id up in the registry this module owns and then asks this, and it
+  // has no parameter through which a caller could name a different table --
+  // the rule the link builders established.
+  const claim = marketingClaimSchema.parse(
+    featureClaim({ gate: "feature.compare" }),
+  );
   const on = new Date("2026-09-20T00:00:00.000Z");
 
   assert.deepEqual(
-    resolveMarketingClaim({ id: "claim.missing", locale: "en", on, registry }),
+    resolveMarketingClaim({ id: "claim.missing", locale: "en", on }),
     { ok: false, refusal: "unknown_claim" },
   );
   assert.deepEqual(
-    resolveMarketingClaim({
-      id: registry[0].id,
-      locale: "ko",
-      on,
-      gateEnabled: true,
-      registry,
-    }),
+    marketingClaimUsable({ claim, locale: "ko", on, gateEnabled: true }),
     { ok: false, refusal: "locale_not_covered" },
   );
   assert.deepEqual(
-    resolveMarketingClaim({
-      id: registry[0].id,
+    marketingClaimUsable({
+      claim,
       locale: "en",
       on: new Date("2027-02-01T00:00:00.000Z"),
       gateEnabled: true,
-      registry,
     }),
     { ok: false, refusal: "claim_expired" },
   );
 
   // An unreadable flag and a flag that is off are different facts, and neither
   // publishes.
+  assert.deepEqual(marketingClaimUsable({ claim, locale: "en", on }), {
+    ok: false,
+    refusal: "gate_unreadable",
+  });
   assert.deepEqual(
-    resolveMarketingClaim({ id: registry[0].id, locale: "en", on, registry }),
+    marketingClaimUsable({ claim, locale: "en", on, gateEnabled: null }),
     { ok: false, refusal: "gate_unreadable" },
   );
   assert.deepEqual(
-    resolveMarketingClaim({
-      id: registry[0].id,
-      locale: "en",
-      on,
-      gateEnabled: null,
-      registry,
-    }),
-    { ok: false, refusal: "gate_unreadable" },
-  );
-  assert.deepEqual(
-    resolveMarketingClaim({
-      id: registry[0].id,
-      locale: "en",
-      on,
-      gateEnabled: false,
-      registry,
-    }),
+    marketingClaimUsable({ claim, locale: "en", on, gateEnabled: false }),
     { ok: false, refusal: "gate_off" },
   );
 
-  const resolved = resolveMarketingClaim({
-    id: registry[0].id,
-    locale: "en",
-    on,
-    gateEnabled: true,
-    registry,
-  });
-  assert.equal(resolved.ok, true);
+  assert.equal(
+    marketingClaimUsable({ claim, locale: "en", on, gateEnabled: true }).ok,
+    true,
+  );
 
   // The last day is inclusive, which is what a person writing that date means.
   assert.equal(
-    resolveMarketingClaim({
-      id: registry[0].id,
+    marketingClaimUsable({
+      claim,
       locale: "en",
       on: new Date("2027-01-31T23:59:59.000Z"),
       gateEnabled: true,
-      registry,
     }).ok,
     true,
   );
@@ -458,4 +442,77 @@ test("a registry that has content no longer calls itself version one", () => {
       "raise the asset registry version in the change that adds an asset",
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// The tables a decision is made against cannot be edited by the caller
+// ---------------------------------------------------------------------------
+
+test("every registry a Guard decision reads is frozen", () => {
+  // `as const` is erased at build time and `Object.freeze` is shallow, so each
+  // of these is asserted at runtime rather than believed. A writable table here
+  // is a decision somebody outside this module gets to make: flipping
+  // `zh-Hant` to `zh` would let a Traditional Chinese claim cite a Simplified
+  // page, which is the drift the null exists to refuse.
+  const frozen = [
+    ["MARKETING_CLAIMS", MARKETING_CLAIMS],
+    ["MARKETING_CLAIM_TYPES", MARKETING_CLAIM_TYPES],
+    ["MARKETING_EVIDENCE_PAGES", MARKETING_EVIDENCE_PAGES],
+    ["MARKETING_LOCALE_PAGE_LANGUAGE", MARKETING_LOCALE_PAGE_LANGUAGE],
+  ];
+  for (const [name, table] of frozen) {
+    assert.equal(Object.isFrozen(table), true, name);
+  }
+
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"] = "zh";
+    },
+    TypeError,
+  );
+  assert.equal(MARKETING_LOCALE_PAGE_LANGUAGE["zh-Hant"], null);
+
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_CLAIMS.push(featureClaim());
+    },
+    TypeError,
+  );
+
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_EVIDENCE_PAGES["/pricing"] = "faq";
+    },
+    TypeError,
+  );
+  assert.equal(isMarketingEvidenceRoute("/pricing"), false);
+});
+
+test("a parsed asset registry cannot have its provenance changed afterwards", () => {
+  // The one registry that cannot be a module constant: it is read from a file
+  // at runtime. So what protects it is that the checked value is immutable --
+  // `superRefine` has already run by the time anybody could set `provenance`,
+  // and an AI-generated asset claiming to be a capture resolves with no
+  // disclosure at all.
+  const loaded = loadMarketingAssetRegistry({
+    version: 1,
+    assets: [asset()],
+  });
+
+  assert.equal(Object.isFrozen(loaded), true);
+  assert.equal(Object.isFrozen(loaded.assets), true);
+  assert.equal(Object.isFrozen(loaded.assets[0]), true);
+  assert.equal(Object.isFrozen(loaded.assets[0].disclosure), true);
+
+  assert.throws(
+    () => {
+      "use strict";
+      loaded.assets[0].provenance = "ai_generated";
+    },
+    TypeError,
+  );
+  assert.equal(loaded.assets[0].provenance, "capture");
 });

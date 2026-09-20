@@ -409,3 +409,37 @@ test("neither registry can be edited through what is exported", () => {
   assert.equal(buildMarketingLink(request()).ok, true);
   assert.equal(new URL(buildMarketingLink(request()).url).pathname, "/pricing");
 });
+
+test("the profile-link channel list cannot be spliced out from under the rule", () => {
+  // `as const` is erased at build time. Removing "instagram" from this array
+  // would make `usesProfileLink()` false and skip the refusal above, which is
+  // the round-4 bypass reopened through a different shared object.
+  assert.equal(Object.isFrozen(MARKETING_PROFILE_LINK_CHANNELS), true);
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_PROFILE_LINK_CHANNELS.splice(0, 1);
+    },
+    TypeError,
+  );
+
+  assert.deepEqual(
+    buildMarketingLink(request({ channel: "instagram", accountSlug: "instagram-1" })),
+    { ok: false, refusal: "channel_uses_profile_link" },
+  );
+});
+
+test("the channel refusal comes before the link id is looked up", () => {
+  // So the answer for one of these channels is the same whichever id was
+  // asked for, rather than depending on whether the id happened to exist.
+  assert.deepEqual(
+    buildMarketingLink(
+      request({
+        channel: "tiktok",
+        accountSlug: "tiktok-1",
+        linkId: "link.does-not-exist",
+      }),
+    ),
+    { ok: false, refusal: "channel_uses_profile_link" },
+  );
+});

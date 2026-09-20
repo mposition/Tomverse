@@ -40,7 +40,10 @@ export const MARKETING_CAMPAIGN_MAX_LENGTH = 60;
  * The channels whose captions cannot carry a link
  * (docs/policy/marketing-automation.md §7.3, O15).
  */
-export const MARKETING_PROFILE_LINK_CHANNELS = ["instagram", "tiktok"] as const;
+export const MARKETING_PROFILE_LINK_CHANNELS = Object.freeze([
+  "instagram",
+  "tiktok",
+] as const);
 export type MarketingProfileLinkChannel =
   (typeof MARKETING_PROFILE_LINK_CHANNELS)[number];
 
@@ -188,18 +191,20 @@ function assembleMarketingLink(
   request: MarketingLinkRequest,
   links: Readonly<Record<string, string>>,
 ): MarketingLinkResult {
-  const path = Object.prototype.hasOwnProperty.call(links, request.linkId)
-    ? links[request.linkId]
-    : undefined;
-  if (path === undefined) {
-    return { ok: false, refusal: "unknown_link_id" };
-  }
-  // The other half of the channel rule. `buildMarketingProfileLink()` refuses a
+  // First, so the refusal a caller gets for one of these channels is the same
+  // whichever link id it asked for. The other half of the channel rule. `buildMarketingProfileLink()` refuses a
   // channel that can carry a link in its caption; without this, the channels
   // that cannot could still get an ordinary per-post URL -- which is what §7.3
   // says they do not get, on the two channels whose posts no API can retract.
   if (usesProfileLink(request.channel)) {
     return { ok: false, refusal: "channel_uses_profile_link" };
+  }
+
+  const path = Object.prototype.hasOwnProperty.call(links, request.linkId)
+    ? links[request.linkId]
+    : undefined;
+  if (path === undefined) {
+    return { ok: false, refusal: "unknown_link_id" };
   }
   if (
     request.campaign.length > MARKETING_CAMPAIGN_MAX_LENGTH ||

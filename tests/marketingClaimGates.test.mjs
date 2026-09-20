@@ -3,9 +3,10 @@ import test from "node:test";
 
 import {
   MARKETING_CLAIM_GATES,
+  readGateSafely,
   resolveMarketingClaimGate,
 } from "@/lib/marketingClaimGates";
-import { resolveMarketingClaim } from "@/lib/marketingClaims";
+import { marketingClaimUsable } from "@/lib/marketingClaims";
 
 // The S1 plan's S1e fact-source list: "feature public: claim `gate` resolves
 // via existing production flag reader; unreadable -> not public".
@@ -34,21 +35,16 @@ test("an unbound gate is unreadable, not off", () => {
 });
 
 test("a bound gate answers what its reader answers", async () => {
-  const registry = {
-    "feature.on": async () => true,
-    "feature.off": async () => false,
-  };
-  assert.equal(await resolveMarketingClaimGate("feature.on", registry), true);
-  assert.equal(await resolveMarketingClaimGate("feature.off", registry), false);
+  // Asked of the reader, not of a registry handed to the resolver: the
+  // resolver reads only this module's registry, the way the link builders do.
+  assert.equal(await readGateSafely(async () => true), true);
+  assert.equal(await readGateSafely(async () => false), false);
 });
 
 test("a reader that throws is unreadable, and carries nothing out with it", async () => {
-  const registry = {
-    "feature.broken": async () => {
-      throw new Error("connect ECONNREFUSED 10.0.0.4:5432");
-    },
-  };
-  const value = await resolveMarketingClaimGate("feature.broken", registry);
+  const value = await readGateSafely(async () => {
+    throw new Error("connect ECONNREFUSED 10.0.0.4:5432");
+  });
   assert.equal(
     value,
     null,
@@ -75,23 +71,11 @@ test("the two unreadable states reach the claim resolver as different codes", ()
   const on = new Date("2026-09-20T00:00:00Z");
 
   assert.equal(
-    resolveMarketingClaim({
-      id: claim.id,
-      locale: "en",
-      on,
-      gateEnabled: null,
-      registry: [claim],
-    }).refusal,
+    marketingClaimUsable({ claim, locale: "en", on, gateEnabled: null }).refusal,
     "gate_unreadable",
   );
   assert.equal(
-    resolveMarketingClaim({
-      id: claim.id,
-      locale: "en",
-      on,
-      gateEnabled: false,
-      registry: [claim],
-    }).refusal,
+    marketingClaimUsable({ claim, locale: "en", on, gateEnabled: false }).refusal,
     "gate_off",
   );
 });

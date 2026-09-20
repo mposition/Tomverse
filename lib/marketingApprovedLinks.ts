@@ -50,9 +50,9 @@ export const MARKETING_APPROVED_LINKS = Object.freeze({
 
 export type MarketingLinkId = keyof typeof MARKETING_APPROVED_LINKS;
 
-export const MARKETING_LINK_IDS = Object.keys(
-  MARKETING_APPROVED_LINKS,
-) as MarketingLinkId[];
+export const MARKETING_LINK_IDS: readonly MarketingLinkId[] = Object.freeze(
+  Object.keys(MARKETING_APPROVED_LINKS) as MarketingLinkId[],
+);
 
 export const isMarketingLinkId = (value: unknown): value is MarketingLinkId =>
   typeof value === "string" &&

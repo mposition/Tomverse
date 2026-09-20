@@ -46,18 +46,21 @@ import { MARKETING_LOCALES } from "@/lib/marketingAutomationSchema";
  *   meaning, so it carries a URL and a scope and is always a human decision
  *   (§7.4: competitor names and comparisons are always approved).
  */
-export const MARKETING_CLAIM_TYPES = [
+export const MARKETING_CLAIM_TYPES = Object.freeze([
   "pricing",
   "plan",
   "model",
   "feature",
   "comparison",
   "availability",
-] as const;
+] as const);
 export type MarketingClaimType = (typeof MARKETING_CLAIM_TYPES)[number];
 
 /** The claim kinds whose evidence is a string on one of our own pages. */
-export const MARKETING_PAGE_EVIDENCE_TYPES = ["feature", "availability"] as const;
+export const MARKETING_PAGE_EVIDENCE_TYPES = Object.freeze([
+  "feature",
+  "availability",
+] as const);
 
 const registryId = z
   .string()
@@ -211,7 +214,7 @@ export const marketingClaimRegistrySchema = z
  * are not here, so an empty registry means no claim-bearing copy publishes --
  * which is the correct state before anybody has approved one.
  */
-export const MARKETING_CLAIMS: readonly MarketingClaim[] = [];
+export const MARKETING_CLAIMS: readonly MarketingClaim[] = Object.freeze([]);
 
 /**
  * The registry version, which a post records so a later read knows what it saw.
@@ -225,10 +228,8 @@ export const MARKETING_CLAIMS: readonly MarketingClaim[] = [];
  */
 export const MARKETING_CLAIM_REGISTRY_VERSION = 1;
 
-export const marketingClaimById = (
-  id: string,
-  registry: readonly MarketingClaim[] = MARKETING_CLAIMS,
-): MarketingClaim | null => registry.find((claim) => claim.id === id) ?? null;
+export const marketingClaimById = (id: string): MarketingClaim | null =>
+  MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;
 
 /** A claim with its evidence removed. This is what a generator is given. */
 export type MarketingClaimProjection = Omit<MarketingClaim, "evidence">;
@@ -243,6 +244,10 @@ export type MarketingClaimProjection = Omit<MarketingClaim, "evidence">;
 export function generatorProjection(
   registry: readonly MarketingClaim[] = MARKETING_CLAIMS,
 ): MarketingClaimProjection[] {
+  // This one keeps its parameter. It returns the projection of whatever it is
+  // handed, so a caller passing its own claims gets a projection of its own
+  // claims, which decides nothing. What decides is `resolveMarketingClaim()`,
+  // and that reads only this module's registry.
   return registry.map((claim) => {
     // Built by naming what the generator gets rather than by removing what it
     // does not. A destructuring rest would do the same thing today and would
@@ -273,29 +278,34 @@ export type MarketingClaimResolution =
   | { ok: false; refusal: MarketingClaimRefusal };
 
 /**
- * Whether a claim may be used, for a locale, on a date.
+ * Whether a claim that is already in hand may be used, for a locale, on a date.
+ *
+ * Takes the claim rather than an id, and so has no registry to be told about.
+ * `resolveMarketingClaim()` below is what the Guard calls: it looks the id up
+ * in the registry this module owns and then asks this.
+ *
+ * The split is the rule round 3 established for the link builders -- a
+ * production decision function does not take a parameter naming the table it
+ * decides against, because "injectable for tests" is also injectable by a
+ * caller. This one is safe to export because it decides nothing about which
+ * claims exist; it is a predicate on a claim somebody already holds.
  *
  * `gateEnabled` is three-valued on purpose: a flag that cannot be read is not
  * the same as a flag that is off, but both refuse. Passing `null` for "could
  * not read" keeps the caller from turning an unreadable input into `false` and
  * losing which of the two happened.
  */
-export function resolveMarketingClaim({
-  id,
+export function marketingClaimUsable({
+  claim,
   locale,
   on,
   gateEnabled,
-  registry = MARKETING_CLAIMS,
 }: {
-  id: string;
+  claim: MarketingClaim;
   locale: string;
   on: Date;
   gateEnabled?: boolean | null;
-  registry?: readonly MarketingClaim[];
 }): MarketingClaimResolution {
-  const claim = marketingClaimById(id, registry);
-  if (!claim) return { ok: false, refusal: "unknown_claim" };
-
   if (!(claim.locales as readonly string[]).includes(locale)) {
     return { ok: false, refusal: "locale_not_covered" };
   }
@@ -314,4 +324,26 @@ export function resolveMarketingClaim({
   }
 
   return { ok: true, claim };
+}
+
+/**
+ * Whether the claim with this id may be used, for a locale, on a date.
+ *
+ * What the Guard calls. The registry is this module's and there is no argument
+ * through which a caller could supply another one.
+ */
+export function resolveMarketingClaim({
+  id,
+  locale,
+  on,
+  gateEnabled,
+}: {
+  id: string;
+  locale: string;
+  on: Date;
+  gateEnabled?: boolean | null;
+}): MarketingClaimResolution {
+  const claim = marketingClaimById(id);
+  if (!claim) return { ok: false, refusal: "unknown_claim" };
+  return marketingClaimUsable({ claim, locale, on, gateEnabled });
 }

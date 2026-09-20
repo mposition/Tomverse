@@ -55,12 +55,12 @@ export const MARKETING_POST_MARK_REUSABLE_ACTION = "marketing_post.mark_reusable
 export const MARKETING_POST_EDIT_ACTION = "marketing_post.edit";
 
 /** The post states in which an approved template still stands. */
-export const MARKETING_TEMPLATE_POST_STATUSES = [
+export const MARKETING_TEMPLATE_POST_STATUSES = Object.freeze([
   "approved",
   "scheduled",
   "published",
   "verified",
-] as const;
+] as const);
 
 /** Why a template is not usable. Codes, because the Guard records them. */
 export type MarketingTemplateRefusal =

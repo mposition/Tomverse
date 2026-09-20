@@ -40,14 +40,14 @@ import { MARKETING_PAGE_EVIDENCE_TYPES } from "@/lib/marketingClaims";
  * (lib/marketingFactSources.ts) rather than on a sentence, which is the case
  * those pages would otherwise be used for.
  */
-export const MARKETING_EVIDENCE_PAGES = {
+export const MARKETING_EVIDENCE_PAGES = Object.freeze({
   "/about": "about",
   "/faq": "faq",
   "/refund": "refund",
   "/safety": "safety",
   "/support/help-centre": "helpCentre",
   "/terms": "terms",
-} as const;
+} as const);
 
 export type MarketingEvidenceRoute = keyof typeof MARKETING_EVIDENCE_PAGES;
 
@@ -61,15 +61,17 @@ export const isMarketingEvidenceRoute = (
  *
  * `null` is a decision, not a gap: see the note above about `zh-Hant`.
  */
-export const MARKETING_LOCALE_PAGE_LANGUAGE: Record<
-  MarketingLocale,
-  Language | null
-> = {
+export const MARKETING_LOCALE_PAGE_LANGUAGE: Readonly<
+  Record<MarketingLocale, Language | null>
+> = Object.freeze({
   en: "en",
   ko: "ko",
   "zh-Hans": "zh",
+  // Frozen with the rest: changing this one entry to "zh" would let a
+  // Traditional Chinese claim cite a Simplified page, which is the drift the
+  // null is there to refuse.
   "zh-Hant": null,
-};
+});
 
 export type MarketingEvidenceRefusal =
   | "route_not_evidence_bearing"

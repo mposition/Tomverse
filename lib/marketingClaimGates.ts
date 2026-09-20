@@ -49,15 +49,29 @@ export const MARKETING_CLAIM_GATES: Readonly<
  */
 export async function resolveMarketingClaimGate(
   gate: string,
-  registry: Readonly<
-    Record<string, () => Promise<boolean>>
-  > = MARKETING_CLAIM_GATES,
 ): Promise<boolean | null> {
-  const reader = Object.prototype.hasOwnProperty.call(registry, gate)
-    ? registry[gate]
+  const reader = Object.prototype.hasOwnProperty.call(
+    MARKETING_CLAIM_GATES,
+    gate,
+  )
+    ? MARKETING_CLAIM_GATES[gate]
     : undefined;
   if (!reader) return null;
+  return readGateSafely(reader);
+}
 
+/**
+ * Run one gate reader, turning a failure into "could not read".
+ *
+ * Separate from the lookup so that behaviour can be exercised without handing
+ * the resolver a registry of its own -- the rule round 3 established for the
+ * link builders. A caller passing its own reader here learns what that reader
+ * says, which is nothing about which gates exist; the function that answers
+ * that reads only this module's registry.
+ */
+export async function readGateSafely(
+  reader: () => Promise<boolean>,
+): Promise<boolean | null> {
   try {
     return await reader();
   } catch {

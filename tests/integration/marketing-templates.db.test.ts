@@ -824,6 +824,20 @@ test("an edit, a fresh approval and a fresh marking make it a template again", a
     },
   });
 
+  // The old marking carries the old digest, so it stops being evidence for the
+  // newly approved content before anything looks at the history. (The first
+  // draft of this test expected `edited_since_marking` here, which is not the
+  // order the loader checks in.)
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "marking_not_evidence",
+  });
+
+  // A marking of the new words that records the version it saw as the one
+  // before the edit. Now the history is what refuses, and it is the index scan
+  // doing it: this marking was written after the edit's audit row, so the
+  // chain-order scan is satisfied and the two disagree exactly here.
+  await markReusable(post.id, { digest: NEW_DIGEST, historyVersion: 0 });
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
     ok: false,
     refusal: "edited_since_marking",
