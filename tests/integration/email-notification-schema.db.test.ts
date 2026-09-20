@@ -396,10 +396,10 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
     },
   });
 
-  // Both the per-account unique and, until a later migration removes it, the
-  // older (provider, providerEventId) one refuse this row; which one the
-  // database names is not defined, so either is accepted here and the new
-  // index is checked in the catalogue.
+  // One unique now: the older (provider, providerEventId) one was scaffolding
+  // for the build that wrote no account, and the contraction dropped it. While
+  // both existed the database could name either, and this test accepted either;
+  // with one there is one name and it is asserted.
   const [index] = await prisma.$queryRaw<Array<{ indexdef: string }>>`
     SELECT indexdef FROM pg_indexes WHERE indexname = 'ProviderWebhookEvent_account_event_key'
   `;
@@ -411,7 +411,7 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
     /UNIQUE INDEX .*\(\s*"?provider"?,\s*"providerAccount",\s*"providerEventId"\s*\)/
   );
 
-  await rejectsWithEither(["ProviderWebhookEvent_account_event_key", "ProviderWebhookEvent_provider_providerEventId_key"], () =>
+  await rejectsWithEither(["ProviderWebhookEvent_account_event_key"], () =>
     prisma.providerWebhookEvent.create({
       data: {
         provider: "resend",
@@ -423,5 +423,81 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
     })
   );
 
+  // And the same id through the *other* account is a different event, which is
+  // what the account-aware unique exists to say. The dropped one refused this.
+  await prisma.providerWebhookEvent.create({
+    data: {
+      provider: "resend",
+      providerAccount: "marketing",
+      providerEventId,
+      eventType: "email.bounced",
+      payload: {},
+    },
+  });
+  assert.equal(
+    await prisma.providerWebhookEvent.count({ where: { providerEventId } }),
+    2
+  );
+});
 
+test("a stored webhook event has to name the account it came through", async () => {
+  // The column carried a default while the previous build was still inserting
+  // without it. There is one writer now and it always names the account; a
+  // default is how that stops being true without anyone noticing.
+  const [column] = await prisma.$queryRaw<Array<{ column_default: string | null }>>`
+    SELECT column_default
+      FROM information_schema.columns
+     WHERE table_name = 'ProviderWebhookEvent' AND column_name = 'providerAccount'
+  `;
+  assert.equal(column?.column_default ?? null, null);
+
+  // Asked of the database rather than of the client: the field is required in
+  // TypeScript, so only raw SQL can put the question.
+  await assert.rejects(
+    () =>
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "ProviderWebhookEvent" ("id", "provider", "providerEventId", "eventType", "payload")
+         VALUES ($1, 'resend', $2, 'email.bounced', '{}'::jsonb)`,
+        randomUUID(),
+        `svix-${randomUUID()}`
+      ),
+    /providerAccount/
+  );
+});
+
+test("one provider message id belongs to one delivery, within its account", async () => {
+  // The webhook matches a delivery by (account, message id), so two deliveries
+  // claiming the same pair would make that match ambiguous -- and the handler
+  // would have to guess which message a bounce was about.
+  const providerMessageId = `resend-${randomUUID()}`;
+  const sent = (overrides: Record<string, unknown>) =>
+    delivery({ status: "sent", providerMessageId, ...overrides });
+
+  await prisma.emailDelivery.create({
+    data: sent({ providerAccount: "transactional" }),
+  });
+
+  await rejects("EmailDelivery_providerAccount_providerMessageId_key", () =>
+    prisma.emailDelivery.create({
+      data: sent({ providerAccount: "transactional" }),
+    })
+  );
+
+  // The same id through the other account is a different message: the accounts
+  // are separate Resend accounts and the id space is theirs, not ours.
+  await prisma.emailDelivery.create({
+    data: sent({ providerAccount: "marketing" }),
+  });
+
+  // And the index is partial, so the many deliveries that never reached the
+  // provider -- no account, no message id -- stay free of it.
+  for (let i = 0; i < 2; i += 1) {
+    await prisma.emailDelivery.create({
+      data: delivery({ providerAccount: null, providerMessageId: null }),
+    });
+  }
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { providerMessageId } }),
+    2
+  );
 });

@@ -5175,7 +5175,11 @@ model EmailDelivery {
   @@index([emailAddress, createdAt])
   @@index([status, snapshotPurgedAt])
   @@index([unsubscribeKeyVersion, sentAt])
-  @@index([providerAccount, providerMessageId])
+  /// Unique, and partial, so it lives in the migration rather than here:
+  /// Prisma has no partial index. A message id identifies a delivery within an
+  /// account; a delivery that never reached the provider has no message id and
+  /// those rows stay free (20260920100000_email_webhook_account_contraction).
+  @@index([providerAccount, providerMessageId], map: "EmailDelivery_providerAccount_providerMessageId_key")
 }
 
 /// One inert unsubscribe token per key version, minted with that key the first
@@ -5238,9 +5242,8 @@ model ProviderWebhookEvent {
   /// The default is for the previous build, which does not write the column
   /// and only ever served the transactional account; it goes with the old
   /// unique in a later migration.
-  providerAccount String @default("transactional")
+  providerAccount String
 
-  @@unique([provider, providerEventId])
   @@unique([provider, providerAccount, providerEventId], map: "ProviderWebhookEvent_account_event_key")
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])

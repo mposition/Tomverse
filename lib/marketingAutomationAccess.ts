@@ -170,9 +170,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
   return hash.digest("hex");
 };
 
-/** Updated only by the fingerprint test after reviewing a declared file change. */
+/**
+ * Updated only by the fingerprint test after reviewing a declared file change.
+ *
+ * 2026-09-20: `prisma/schema.prisma` is one of the watched files, and the
+ * webhook account contraction changed it -- the old
+ * `(provider, providerEventId)` unique and the `providerAccount` default are
+ * gone, and `EmailDelivery(providerAccount, providerMessageId)` became a
+ * partial unique (docs/policy/email-notifications.md v24). Nothing in the
+ * marketing pipeline itself moved; the fingerprint covers the whole schema
+ * file, so any schema change asks for this second look.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5439839348d7e0f5b6e63261d430b4248476d0e275defc09bba7f49a6c61a4c0";
+  "50790ff74d6318308577b52079b9df72716a8db1953770a7d246c1f1fe7c0630";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

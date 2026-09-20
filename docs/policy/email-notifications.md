@@ -13,6 +13,26 @@
 
 ## 0. 개정 이력
 
+### v24 (2026-09-20) — 계정 분리의 축소(contraction)
+
+v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초안
+(docs/policy/email-product-news-redesign-draft.md) 7.4의 C56·C72입니다.
+
+1. **옛 `(provider, providerEventId)` unique를 제거합니다.** 계정이 다르면 같은
+   provider 사건 id라도 **다른 사건**이고, 그것을 말하는 것이 계정 포함 unique입니다.
+   옛 것은 marketing 사건을 transactional 사건과 충돌한다며 거절할 수 있었습니다.
+2. **`ProviderWebhookEvent.providerAccount`의 default를 제거합니다.** writer는 하나이고
+   항상 계정을 말합니다. default는 그것이 조용히 참이 아니게 되는 경로입니다.
+3. **`EmailDelivery(providerAccount, providerMessageId)`에 부분 unique를 겁니다.**
+   메시지 id는 **계정 안에서** delivery 하나를 가리키고, S1b-2b의 결속이 그렇게 읽습니다.
+   둘 다 NULL이 아닌 행에만 걸립니다 — provider에 닿지 못한 발송은 메시지 id가 없고
+   그런 행이 많습니다. Prisma는 부분 index를 표현하지 못하므로 migration에 있고,
+   schema에는 어디 있는지를 적어 둡니다.
+4. **이 migration은 눈감고 적용할 수 없습니다.** unique index 빌드는 처음 만나는
+   중복에서 **배포 도중** 실패하고, 답은 이 파일이 아니라 데이터에 있습니다.
+   `npm run email:check-message-id-duplicates`가 읽기 전용으로 묻고 개수만 출력합니다
+   (주소·메시지 id 없음). `safeToAddUnique`가 false이면 각 중복이 무엇인지 정하기
+   전에는 배포하지 않습니다.
 ### v23 (2026-09-18) — 발송 진입점 allowlist와 로그인 방법 안내의 lane 이동(S1b-3b)
 
 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C41·C35·C36·C49입니다.
