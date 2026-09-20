@@ -28,33 +28,37 @@
 -- timeout and why the file is one transaction -- half of this applied is a
 -- database whose events name no account *and* have no unique to conflict on.
 --
--- **If it fails and Prisma records it**, look at the two objects. Both halves
--- are pinned to `current_schema()`, and the column's *existence* is asked
--- separately from its default -- otherwise a table that is not there answers
--- the same as a column with no default, and "both gone" would be indistinguish-
--- able from "there is no table here at all":
+-- **If it fails and Prisma records it**, look at the two objects. The table is
+-- named by `to_regclass`, which resolves the bare name the same way the
+-- statements below do -- `current_schema()` is the first schema on the search
+-- path and need not be the one they resolved to. The column's *existence* is
+-- asked separately from its default, because otherwise a table that is not
+-- there answers the same as a column with no default, and "both gone" would be
+-- indistinguishable from "there is no table here at all":
 --
---     SELECT (SELECT tb.relname
+--     SELECT (SELECT ns.nspname || '.' || tb.relname
 --               FROM pg_class ix
---               JOIN pg_namespace ns ON ns.oid = ix.relnamespace
 --               JOIN pg_index i ON i.indexrelid = ix.oid
 --               JOIN pg_class tb ON tb.oid = i.indrelid
---              WHERE ix.relname = 'ProviderWebhookEvent_provider_providerEventId_key'
---                AND ns.nspname = current_schema()) AS old_unique_on_table,
---            (SELECT count(*) FROM information_schema.columns
---              WHERE table_schema = current_schema()
---                AND table_name = 'ProviderWebhookEvent'
---                AND column_name = 'providerAccount') AS column_rows,
---            (SELECT column_default FROM information_schema.columns
---              WHERE table_schema = current_schema()
---                AND table_name = 'ProviderWebhookEvent'
---                AND column_name = 'providerAccount') AS column_default;
+--               JOIN pg_namespace ns ON ns.oid = tb.relnamespace
+--              WHERE ix.oid = to_regclass('"ProviderWebhookEvent_provider_providerEventId_key"'))
+--              AS old_unique_on_table,
+--            (SELECT count(*) FROM pg_attribute
+--              WHERE attrelid = to_regclass('"ProviderWebhookEvent"')
+--                AND attname = 'providerAccount'
+--                AND NOT attisdropped) AS column_rows,
+--            (SELECT pg_get_expr(d.adbin, d.adrelid)
+--               FROM pg_attribute a
+--               LEFT JOIN pg_attrdef d
+--                 ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+--              WHERE a.attrelid = to_regclass('"ProviderWebhookEvent"')
+--                AND a.attname = 'providerAccount') AS column_default;
 --
 -- `column_rows` must be 1. If it is 0 the query is looking at the wrong
 -- database or schema, and nothing below applies.
 --
---   * `old_unique_on_table = 'ProviderWebhookEvent'` and a default -> it rolled
---     back: `prisma migrate resolve --rolled-back
+--   * `old_unique_on_table` ending in `.ProviderWebhookEvent` and a default ->
+--     it rolled back: `prisma migrate resolve --rolled-back
 --     20260920100100_email_webhook_account_contraction`, then deploy again;
 --   * `old_unique_on_table` null and no default -> it committed:
 --     `prisma migrate resolve --applied ...`;
@@ -65,6 +69,15 @@
 --     replay here would drop that other table's index, and the reading that
 --     sent you to replay -- "the old unique is still present" -- would have
 --     been about an index this migration never created.
+--
+-- That last branch is the recovery for a hazard this file shares with every
+-- other migration in the repository: an unqualified `DROP INDEX` resolves
+-- through the search path, and none of the two hundred migrations here
+-- qualifies one. It does not arise from this codebase's own connections --
+-- `lib/postgresConnectionConfigCore.mjs` installs `-c search_path=<schema>`, a
+-- single schema with no public fallback, so there is one schema to resolve in
+-- and `current_schema()` is it. Changing that is a decision about every
+-- migration, not about this one.
 --
 -- **Rollback floor: the commit that introduced 20260917180000** (the
 -- account-aware build, live since 2026-09-17). Below it this schema is not

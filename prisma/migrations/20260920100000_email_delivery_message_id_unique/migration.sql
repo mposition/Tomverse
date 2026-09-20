@@ -64,12 +64,16 @@
 --              AS collations_are_the_columns_own
 --       FROM pg_index i
 --       JOIN pg_class ix ON ix.oid = i.indexrelid
---       JOIN pg_class tb ON tb.oid = i.indrelid
---       JOIN pg_namespace ns ON ns.oid = ix.relnamespace
 --       JOIN pg_am am ON am.oid = ix.relam
 --      WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
---        AND tb.relname = 'EmailDelivery'
---        AND ns.nspname = current_schema();
+--        AND i.indrelid = to_regclass('"EmailDelivery"');
+--
+-- The table is named by `to_regclass`, not by `relname` plus
+-- `current_schema()`. `current_schema()` is the first schema on the search
+-- path, which is not necessarily the schema the unqualified `"EmailDelivery"`
+-- in the statement below resolved to; `to_regclass` resolves the same name the
+-- same way the statement does, so the query is asking about the table the
+-- migration actually touched.
 --
 --   * no row -> it rolled back: `prisma migrate resolve --rolled-back
 --     20260920100000_email_delivery_message_id_unique`, then deploy again;

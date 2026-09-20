@@ -338,22 +338,25 @@ export async function processResendWebhook(input: {
   });
   if (!existing) {
     // The insert stored nothing and the lookup finds nothing, which after the
-    // contraction (20260920100100) should not be reachable: the only arbiter
-    // left is `(provider, providerAccount, providerEventId)`, so a conflict
-    // means this account's own event is on file and the lookup above finds it.
+    // contraction (20260920100100) has no ordinary explanation: the unique an
+    // event id conflicts on is `(provider, providerAccount, providerEventId)`,
+    // so a conflict there means this account's own event is on file and the
+    // lookup above finds it. Not *impossible* -- the primary key is an arbiter
+    // too, a future unique would be another, and a row can be deleted between
+    // the insert and the read -- which is the reason to fail loudly rather than
+    // to claim the state cannot occur.
     //
     // Until that migration the old `(provider, providerEventId)` unique made
     // this the ordinary way a marketing event carrying a transactional event's
     // id was refused -- which is the behaviour the contraction exists to end.
-    // What is left is a row that vanished between the insert and the read, and
-    // the answer is the same as it was: not a duplicate to acknowledge, because
+    // The answer is the same as it was: not a duplicate to acknowledge, because
     // nothing was recorded. It fails, the provider retries, and somebody is
     // told.
     await reportOperationalIncident({
       code: "EMAIL_WEBHOOK_EVENT_ID_COLLISION",
       title: "A provider event was neither stored nor found",
       error:
-        "A provider event conflicted on insert and was absent on the read that followed, which the account-aware unique should make impossible",
+        "A provider event conflicted on insert and was absent on the read that followed; the account-aware unique leaves no ordinary explanation for that",
       severity: "error",
       cooldownMs: 30 * 60 * 1_000,
       context: { component: "email-webhook", account: providerAccount },
