@@ -20,6 +20,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "marketing-retention",
   "marketing-guard",
   "prompt-refiner-shadow-runner",
+  "tomverse-amux-orchestrator",
 ] as const;
 
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];

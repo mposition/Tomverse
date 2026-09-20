@@ -5797,3 +5797,143 @@ model AiVisibilityRun {
   @@index([promptSetVersion, promptId])
   @@index([retentionUntil])
 }
+
+model AmuxWorkerRuntime {
+  workerName    String   @id
+  instanceId    String
+  generation    Int      @default(1)
+  status        String   @default("starting")
+  dispatchReady Boolean  @default(false)
+  heartbeatAt   DateTime
+  leaseExpiresAt DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([leaseExpiresAt])
+  @@index([status, dispatchReady, leaseExpiresAt])
+  @@index([instanceId, generation])
+}
+
+model AmuxWorkItem {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?
+  status         String   @default("todo")
+  kind           String   @default("unknown")
+  priority       String   @default("p3")
+  pinned         Boolean  @default(false)
+  drag           Int      @default(0)
+  owner          String?
+  classification Json?
+  revision       Int      @default(0)
+  claimedAt      DateTime?
+  archivedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  dependencies   AmuxWorkDependency[] @relation("AmuxTaskDependencies")
+  dependents     AmuxWorkDependency[] @relation("AmuxTaskDependents")
+  routeDecisions     AmuxRouteDecision[]
+  executionAttempts AmuxExecutionAttempt[]
+
+  @@index([status, owner, archivedAt, createdAt])
+  @@index([priority, createdAt])
+  @@index([owner, status])
+}
+
+model AmuxWorkDependency {
+  taskId       String
+  dependencyId String
+  createdAt    DateTime @default(now())
+
+  task       AmuxWorkItem @relation("AmuxTaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependency AmuxWorkItem @relation("AmuxTaskDependents", fields: [dependencyId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependencyId])
+  @@index([dependencyId, taskId])
+}
+
+model AmuxExecutionAttempt {
+  /// Server-minted execution fence. A worker never chooses this id.
+  id                 String   @id
+  taskId             String
+  worker             String
+  workerInstanceId   String
+  workerGeneration   Int
+  /// Task revision after the atomic todo -> doing transition.
+  taskRevision       Int
+
+  heartbeatAt        DateTime
+  leaseExpiresAt     DateTime?
+  startedAt          DateTime
+  endedAt            DateTime?
+
+  /// Null while running; succeeded | failed | blocked | expired when terminal.
+  outcome            String?
+  /// todo | review | done | blocked | cancelled when terminal.
+  toStatus           String?
+  endedBy            String?
+  reason             String?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  delivery AmuxWorkDelivery?
+
+  @@index([taskId, startedAt])
+  @@index([worker, endedAt, leaseExpiresAt])
+  @@index([workerInstanceId, workerGeneration])
+}
+
+model AmuxWorkDelivery {
+  /// Stable delivery identity: exactly the execution attempt that created it.
+  attemptId        String @id
+  taskId           String
+  worker           String
+  workerInstanceId String
+  workerGeneration Int
+  taskRevision     Int
+
+  /// Durable work payload. Delivery success means this row committed, not that
+  /// text happened to reach a terminal process.
+  prompt String
+
+  /// queued | leased | acknowledged | cancelled
+  status String @default("queued")
+
+  /// Minted on pull. Retries while the receipt lease is live reuse it; after
+  /// expiry the server rotates to a fresh receipt so stale ACKs are fenced.
+  receiptId      String? @unique
+  leasedAt       DateTime?
+  leaseExpiresAt DateTime?
+
+  acknowledgedAt DateTime?
+  cancelledAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@index([worker, status, createdAt])
+  @@index([workerInstanceId, workerGeneration, status])
+  @@index([status, leaseExpiresAt])
+}
+
+model AmuxRouteDecision {
+  id               String   @id @default(cuid())
+  taskId           String
+  worker           String
+  schedulerScore   Int
+  scoringVersion   String
+  taskRevision     Int
+  signals          Json
+  createdAt        DateTime @default(now())
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([worker, createdAt])
+  @@index([scoringVersion, createdAt])
+}
