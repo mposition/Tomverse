@@ -32,8 +32,20 @@ export const MARKETING_PUBLIC_ORIGIN = "https://tomverse.app";
  * Narrow because it ends up in an analytics dimension that is grouped on: a
  * campaign that differs only by case or by a stray space becomes two rows in
  * every report, and nobody notices until the numbers are already wrong.
+ *
+ * Not exported, and rebuilt on each call. A `RegExp` is an object with its own
+ * mutable matcher: `.compile()` replaces the pattern in place and
+ * `Object.freeze` does not stop it. An exported one would let anything sharing
+ * this module turn "one shape per campaign" into "any string", and a campaign
+ * with spaces and capitals would then assemble into a perfectly ordinary
+ * published URL. A new object per call rather than a frozen constant, because
+ * freezing would not help and one allocation on a path that builds a URL is
+ * nothing.
  */
-export const MARKETING_CAMPAIGN_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const campaignPattern = () => /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** The shape, for anything that needs to describe it rather than test with it. */
+export const MARKETING_CAMPAIGN_PATTERN_SOURCE = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 export const MARKETING_CAMPAIGN_MAX_LENGTH = 60;
 
 /**
@@ -208,7 +220,7 @@ function assembleMarketingLink(
   }
   if (
     request.campaign.length > MARKETING_CAMPAIGN_MAX_LENGTH ||
-    !MARKETING_CAMPAIGN_PATTERN.test(request.campaign)
+    !campaignPattern().test(request.campaign)
   ) {
     return { ok: false, refusal: "campaign_invalid" };
   }
@@ -301,7 +313,7 @@ function assembleMarketingProfileLink(
 ): MarketingLinkResult {
   if (
     campaign.length > MARKETING_CAMPAIGN_MAX_LENGTH ||
-    !MARKETING_CAMPAIGN_PATTERN.test(campaign)
+    !campaignPattern().test(campaign)
   ) {
     return { ok: false, refusal: "campaign_invalid" };
   }

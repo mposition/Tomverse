@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -193,6 +193,85 @@ async function approvedPost(channelId: string, digest = DIGEST) {
   });
 }
 
+/**
+ * A post in `autonomous` mode, carried to `approved`.
+ *
+ * Two of the loader's refusals describe states that
+ * `MarketingPost_approval_binding_check` forbids for an approval-mode post:
+ * an approved row whose `envelopeDigest` has moved away from its
+ * `approvedDigest`, and an approved row with no `approvalAuditLogId`. The
+ * constraint is scoped to `mode = 'approval'`, so an autonomous-mode row is
+ * where those states are legal -- and it is the mode the loader exists to
+ * gate, which makes it the right fixture rather than a way around a check.
+ */
+async function autonomousPost(
+  channelId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const draft = await prisma.marketingPost.create({
+    data: {
+      channelId,
+      locale: "en",
+      kind: "social",
+      logicalKey: `autonomous-${Math.random().toString(36).slice(2)}`,
+      envelope: {
+        channel: "linkedin",
+        accountSlug: "linkedin-1",
+        locale: "en",
+        renderedText: "Three answers to one question, side by side.",
+        claimIds: [],
+        assets: [],
+        finalUrl: null,
+        scheduledAt: null,
+        disclosureFlags: ["advertising"],
+      },
+      envelopeDigest: DIGEST,
+      rendererVersion: "r1",
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: {
+        priceRows: [],
+        catalogue: null,
+        modelRegistryRows: [],
+        evidenceDigests: [],
+      },
+      guardDecision: "autonomous_eligible",
+      guardCodes: [],
+      guardRuleIds: [],
+      status: "drafted",
+      mode: "autonomous",
+      templateId: "template-under-test",
+      templateDigest: DIGEST,
+      history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+      historyVersion: 0,
+    },
+  });
+
+  await prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: { status: "pending_approval" },
+  });
+
+  const approvalId = await auditRow({
+    action: MARKETING_POST_APPROVE_ACTION,
+    targetId: draft.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+  });
+
+  return prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: {
+      status: "approved",
+      approvalAuditLogId: approvalId,
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+      ...overrides,
+    },
+  });
+}
+
 /** Mark an approved post reusable, which is the second human decision. */
 async function markReusable(
   postId: string,
@@ -285,15 +364,13 @@ test("a marking of different content is not a marking of this content", async ()
 });
 
 test("an edit after the approval breaks the template until it is approved again", async () => {
+  // An autonomous-mode row, because `MarketingPost_approval_binding_check`
+  // requires `approvedDigest = envelopeDigest` for an approved approval-mode
+  // post -- so this state is unreachable there, and reachable in the mode the
+  // loader exists to gate.
   const row = await channel();
-  const post = await approvedPost(row.id);
+  const post = await autonomousPost(row.id, { envelopeDigest: OTHER_DIGEST });
   await markReusable(post.id);
-
-  // Any edit changes the digest, and the approval named the old one.
-  await prisma.marketingPost.update({
-    where: { id: post.id },
-    data: { envelopeDigest: OTHER_DIGEST },
-  });
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
     ok: false,
@@ -449,7 +526,9 @@ test("a purged or deleted post is not a template, even when both audit rows stan
   await markReusable(purged.id);
   await prisma.marketingPost.update({
     where: { id: purged.id },
-    data: { contentPurgedAt: new Date() },
+    // The envelope goes with it: `MarketingPost_purge_is_consistent_check`
+    // says the two states cannot be told apart any other way.
+    data: { contentPurgedAt: new Date(), envelope: Prisma.DbNull },
   });
   assert.deepEqual(await loadApprovedTemplate(prisma, purged.id), {
     ok: false,
@@ -471,13 +550,11 @@ test("a purged or deleted post is not a template, even when both audit rows stan
 test("an approved post with no approval row on it proves nothing", async () => {
   // Fail-closed: `approvalAuditLogId` is nullable, so a row that reached
   // `approved` without one must not resolve.
+  // Autonomous mode again: the approval-binding constraint requires the id on
+  // an approved approval-mode row.
   const row = await channel();
-  const post = await approvedPost(row.id);
+  const post = await autonomousPost(row.id, { approvalAuditLogId: null });
   await markReusable(post.id);
-  await prisma.marketingPost.update({
-    where: { id: post.id },
-    data: { approvalAuditLogId: null },
-  });
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
     ok: false,
@@ -791,6 +868,18 @@ test("an edit, a fresh approval and a fresh marking make it a template again", a
     envelopeDigest: NEW_DIGEST,
     previousEnvelopeDigest: DIGEST,
   });
+  const reapproval = await auditRow({
+    action: MARKETING_POST_APPROVE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: NEW_DIGEST },
+  });
+
+  // The edit and the approval of what it produced land together, because
+  // `MarketingPost_approval_binding_check` does not let an approved
+  // approval-mode row hold an envelope its approval did not name. So the
+  // intermediate "edited but not yet re-approved" state this test used to
+  // write is one the database refuses, and the refusal to demonstrate here is
+  // the marking's.
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
@@ -798,26 +887,6 @@ test("an edit, a fresh approval and a fresh marking make it a template again", a
       history: [...history, edit],
       historyVersion: 1,
       envelopeDigest: NEW_DIGEST,
-    },
-  });
-
-  // The digest check catches it first, which is the earlier of the two
-  // answers this module keeps in agreement.
-  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
-    ok: false,
-    refusal: "content_changed_since_approval",
-  });
-
-  // A person approves the new words. The edit is still recorded, so the
-  // marking has to be renewed as well.
-  const reapproval = await auditRow({
-    action: MARKETING_POST_APPROVE_ACTION,
-    targetId: post.id,
-    metadata: { actorHadMarketingWrite: true, digest: NEW_DIGEST },
-  });
-  await prisma.marketingPost.update({
-    where: { id: post.id },
-    data: {
       approvalAuditLogId: reapproval,
       approvedAt: new Date(),
       approvedDigest: NEW_DIGEST,

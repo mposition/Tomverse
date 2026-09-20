@@ -32,6 +32,9 @@ import {
   marketingAssetSchema,
   resolveMarketingAsset,
   loadMarketingAssetRegistry,
+  AI_ORIGIN_PROVENANCES,
+  MARKETING_ASSET_DISCLOSURES,
+  MARKETING_ASSET_PROVENANCES,
 } from "../lib/marketingAssets.ts";
 
 const featureClaim = (overrides = {}) => ({
@@ -311,7 +314,9 @@ test("channels and disclosures name the same set", () => {
 test("an asset needs alt text, and it resolves per locale", () => {
   assert.equal(marketingAssetSchema.safeParse(asset({ alt: {} })).success, false);
 
-  const registry = marketingAssetRegistrySchema.parse({
+  // Through the loader, which is the only thing that makes a registry the
+  // resolver accepts -- a bare `.parse()` gives a valid but mutable one.
+  const registry = loadMarketingAssetRegistry({
     version: 1,
     assets: [marketingAssetSchema.parse(asset())],
   });
@@ -515,4 +520,111 @@ test("a parsed asset registry cannot have its provenance changed afterwards", ()
     TypeError,
   );
   assert.equal(loaded.assets[0].provenance, "capture");
+});
+
+test("a registry that did not come from the loader is refused outright", () => {
+  // `.parse()` produces a valid registry that is still mutable, and handing
+  // one to the resolver was how a checked `capture` asset could be turned into
+  // `ai_generated` after every rule had run. The resolver takes only what the
+  // loader made, and checks that at runtime rather than trusting the type.
+  const parsed = marketingAssetRegistrySchema.parse({
+    version: 1,
+    assets: [asset()],
+  });
+
+  assert.deepEqual(
+    resolveMarketingAsset({
+      id: "asset.compare-hero",
+      channel: "linkedin",
+      locale: "en",
+      on: new Date("2026-09-20T00:00:00.000Z"),
+      registry: parsed,
+    }),
+    { ok: false, refusal: "registry_not_loaded" },
+  );
+
+  // A hand-made object claiming to be one is refused too.
+  assert.deepEqual(
+    resolveMarketingAsset({
+      id: "asset.compare-hero",
+      channel: "linkedin",
+      locale: "en",
+      on: new Date("2026-09-20T00:00:00.000Z"),
+      registry: { ...parsed, assets: [{ ...asset(), provenance: "ai_generated" }] },
+    }),
+    { ok: false, refusal: "registry_not_loaded" },
+  );
+});
+
+test("an inherited locale or channel is not the asset's own", () => {
+  // A deep-frozen registry still inherits from `Object.prototype`. Setting a
+  // property there would otherwise give every English-only asset alt text in
+  // a locale nobody wrote it for, and a disclosure for a channel nobody
+  // decided about.
+  const registry = loadMarketingAssetRegistry({ version: 1, assets: [asset()] });
+  const on = new Date("2026-09-20T00:00:00.000Z");
+
+  Object.defineProperty(Object.prototype, "ko", {
+    value: "alt text nobody wrote",
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  Object.defineProperty(Object.prototype, "threads", {
+    value: "none",
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    assert.deepEqual(
+      resolveMarketingAsset({
+        id: "asset.compare-hero",
+        channel: "linkedin",
+        locale: "ko",
+        on,
+        registry,
+      }),
+      { ok: false, refusal: "no_alt_for_locale" },
+    );
+    assert.deepEqual(
+      resolveMarketingAsset({
+        id: "asset.compare-hero",
+        channel: "threads",
+        locale: "en",
+        on,
+        registry,
+      }),
+      { ok: false, refusal: "channel_not_allowed" },
+    );
+  } finally {
+    delete Object.prototype.ko;
+    delete Object.prototype.threads;
+  }
+});
+
+test("the asset provenance lists are frozen", () => {
+  // Splicing `ai_generated` out of the AI-origin list would let an asset claim
+  // to depict the product interface with no disclosure at all, and the schema
+  // reads this list at parse time.
+  for (const [name, list] of [
+    ["MARKETING_ASSET_PROVENANCES", MARKETING_ASSET_PROVENANCES],
+    ["AI_ORIGIN_PROVENANCES", AI_ORIGIN_PROVENANCES],
+    ["MARKETING_ASSET_DISCLOSURES", MARKETING_ASSET_DISCLOSURES],
+  ]) {
+    assert.equal(Object.isFrozen(list), true, name);
+  }
+
+  assert.throws(
+    () => {
+      "use strict";
+      AI_ORIGIN_PROVENANCES.splice(0, 1);
+    },
+    TypeError,
+  );
+
+  const aiClaimingUi = marketingAssetSchema.safeParse(
+    asset({ provenance: "ai_generated", depictsProductInterface: true }),
+  );
+  assert.equal(aiClaimingUi.success, false);
 });

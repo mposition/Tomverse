@@ -17,6 +17,7 @@ import {
 } from "../lib/marketingApprovedLinks.ts";
 import {
   MARKETING_CAMPAIGN_MAX_LENGTH,
+  MARKETING_CAMPAIGN_PATTERN_SOURCE,
   MARKETING_PROFILE_ACCOUNT_SLUGS,
   MARKETING_PROFILE_LINK_CHANNELS,
   MARKETING_PUBLIC_ORIGIN,
@@ -441,5 +442,25 @@ test("the channel refusal comes before the link id is looked up", () => {
       }),
     ),
     { ok: false, refusal: "channel_uses_profile_link" },
+  );
+});
+
+test("the campaign shape cannot be replaced from outside the module", () => {
+  // A RegExp carries its own mutable matcher: `.compile()` replaces the
+  // pattern in place and `Object.freeze` does not stop it. So the pattern is
+  // not exported -- what is exported is its source, which is a string and
+  // cannot be tested with.
+  assert.equal(typeof MARKETING_CAMPAIGN_PATTERN_SOURCE, "string");
+
+  // Loosening a local copy built from that source changes nothing, because the
+  // builder does not read it.
+  const mine = new RegExp(MARKETING_CAMPAIGN_PATTERN_SOURCE);
+  mine.compile(/.*/);
+  assert.equal(mine.test("Autumn Compare"), true, "the local copy is loosened");
+
+  assert.deepEqual(
+    buildMarketingLink(request({ campaign: "Autumn Compare" })),
+    { ok: false, refusal: "campaign_invalid" },
+    "and the builder still refuses it",
   );
 });

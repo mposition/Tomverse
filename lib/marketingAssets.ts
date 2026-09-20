@@ -44,17 +44,20 @@ import {
  * as one of the first two and was changed by one. The last two are the ones a
  * disclosure rule cares about.
  */
-export const MARKETING_ASSET_PROVENANCES = [
+export const MARKETING_ASSET_PROVENANCES = Object.freeze([
   "capture",
   "operator_upload",
   "ai_generated",
   "ai_modified",
-] as const;
+] as const);
 export type MarketingAssetProvenance =
   (typeof MARKETING_ASSET_PROVENANCES)[number];
 
 /** The provenances that carry an AI origin, whatever a platform then requires. */
-export const AI_ORIGIN_PROVENANCES = ["ai_generated", "ai_modified"] as const;
+export const AI_ORIGIN_PROVENANCES = Object.freeze([
+  "ai_generated",
+  "ai_modified",
+] as const);
 
 /**
  * What a channel is told about an asset's origin.
@@ -65,12 +68,12 @@ export const AI_ORIGIN_PROVENANCES = ["ai_generated", "ai_modified"] as const;
  * that has neither would be `none`, which is a decision somebody has to make
  * rather than an absence.
  */
-export const MARKETING_ASSET_DISCLOSURES = [
+export const MARKETING_ASSET_DISCLOSURES = Object.freeze([
   "none",
   "platform_label",
   "caption_disclosure",
   "platform_label_and_caption",
-] as const;
+] as const);
 export type MarketingAssetDisclosure =
   (typeof MARKETING_ASSET_DISCLOSURES)[number];
 
@@ -197,7 +200,9 @@ export type MarketingAssetRefusal =
   | "channel_not_allowed"
   | "asset_expired"
   | "no_alt_for_locale"
-  | "no_disclosure_for_channel";
+  | "no_disclosure_for_channel"
+  /** A registry that did not come from `loadMarketingAssetRegistry()`. */
+  | "registry_not_loaded";
 
 export type MarketingAssetResolution =
   | { ok: true; asset: MarketingAsset; disclosure: MarketingAssetDisclosure }
@@ -227,9 +232,31 @@ const deepFreeze = <T>(value: T): T => {
  * already run. The asset would resolve with a `none` disclosure while claiming
  * to be a photograph of the product.
  */
-export function loadMarketingAssetRegistry(raw: unknown): MarketingAssetRegistry {
-  return deepFreeze(marketingAssetRegistrySchema.parse(raw));
+export function loadMarketingAssetRegistry(raw: unknown): LoadedAssetRegistry {
+  const parsed = deepFreeze(marketingAssetRegistrySchema.parse(raw));
+  return deepFreeze({ [LOADED]: true, ...parsed }) as LoadedAssetRegistry;
 }
+
+/**
+ * A registry that went through the loader, and that the resolver will accept.
+ *
+ * The brand is a symbol this module owns and does not export, so the type is
+ * not a promise a caller can make about an object it assembled itself:
+ * `marketingAssetRegistrySchema.parse(x)` produces a valid registry that is
+ * still mutable, and that was exactly what the resolver was being handed.
+ * Checked at runtime as well as in the type, because a cast is free.
+ */
+const LOADED: unique symbol = Symbol("marketingAssetRegistryLoaded");
+
+export type LoadedAssetRegistry = MarketingAssetRegistry & {
+  readonly [LOADED]: true;
+};
+
+const isLoadedRegistry = (value: unknown): value is LoadedAssetRegistry =>
+  !!value &&
+  typeof value === "object" &&
+  (value as Record<PropertyKey, unknown>)[LOADED] === true &&
+  Object.isFrozen(value);
 
 export function resolveMarketingAsset({
   id,
@@ -242,8 +269,19 @@ export function resolveMarketingAsset({
   channel: string;
   locale: string;
   on: Date;
-  registry: MarketingAssetRegistry;
+  /**
+   * The registry, as `loadMarketingAssetRegistry()` returned it. Only that
+   * function can make one: a plain `.parse()` gives a valid registry that is
+   * still mutable, and handing the resolver one of those was how a checked
+   * `capture` asset could be turned into `ai_generated` after every rule had
+   * run.
+   */
+  registry: LoadedAssetRegistry;
 }): MarketingAssetResolution {
+  if (!isLoadedRegistry(registry)) {
+    return { ok: false, refusal: "registry_not_loaded" };
+  }
+
   const asset = registry.assets.find((candidate) => candidate.id === id);
   if (!asset) return { ok: false, refusal: "unknown_asset" };
 
@@ -254,7 +292,13 @@ export function resolveMarketingAsset({
     return { ok: false, refusal: "asset_expired" };
   }
 
-  const alt = (asset.alt as Record<string, string | undefined>)[locale];
+  // `Object.hasOwn` rather than a bare index. A deep-frozen registry still
+  // inherits from `Object.prototype`, so setting `Object.prototype.ko`
+  // anywhere in the process would give every English-only asset a Korean alt
+  // text -- and the asset would resolve for a locale nobody wrote it for.
+  const alt = Object.hasOwn(asset.alt, locale)
+    ? (asset.alt as Record<string, string | undefined>)[locale]
+    : undefined;
   if (!alt) return { ok: false, refusal: "no_alt_for_locale" };
 
   // The schema's `superRefine` guarantees a disclosure for every allowed
@@ -263,9 +307,11 @@ export function resolveMarketingAsset({
   // never went through `.parse()` -- a literal in a test, or a caller who
   // trusted the type -- would put `undefined` where the decision about
   // labelling an image as AI-generated is made.
-  const disclosure = (
-    asset.disclosure as Record<string, MarketingAssetDisclosure | undefined>
-  )[channel];
+  const disclosure = Object.hasOwn(asset.disclosure, channel)
+    ? (asset.disclosure as Record<string, MarketingAssetDisclosure | undefined>)[
+        channel
+      ]
+    : undefined;
   if (!disclosure) return { ok: false, refusal: "no_disclosure_for_channel" };
 
   return { ok: true, asset, disclosure };
