@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { maskEmailAddress } from "@/lib/emailAddressMaskingCore";
+import { causeSetDigest } from "@/lib/emailSuppression";
 import {
   DELIVERY_STATUSES,
   type DeliveryFilters,
@@ -213,6 +214,15 @@ export type AdminSuppressionRow = {
   purposeKey: string;
   /** Newest first, and never empty -- a selector with none is not listed. */
   causes: AdminSuppressionCause[];
+  /**
+   * Names this row's set of active causes, and is what a lift request carries
+   * back so the server can tell that the row has not changed since.
+   *
+   * Fixed size on purpose: the ids themselves are unbounded and a request body
+   * is not, so carrying them would put a ceiling on how many causes a selector
+   * may hold and still be liftable (`causeSetDigest`).
+   */
+  causeSetDigest: string;
 };
 
 /**
@@ -315,6 +325,8 @@ export async function listSuppressions(input: {
       scope,
       purposeKey,
       causes: [cause],
+      // Filled below, once the row has all of its causes.
+      causeSetDigest: "",
     });
   }
 
@@ -324,5 +336,9 @@ export async function listSuppressions(input: {
     .map(({ emailAddress, scope, purposeKey }) =>
       rows.get([emailAddress, scope, purposeKey].join(SELECTOR_KEY_SEPARATOR))
     )
-    .filter((row): row is AdminSuppressionRow => row !== undefined);
+    .filter((row): row is AdminSuppressionRow => row !== undefined)
+    .map((row) => ({
+      ...row,
+      causeSetDigest: causeSetDigest(row.causes.map((cause) => cause.id)),
+    }));
 }

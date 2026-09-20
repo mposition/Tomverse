@@ -13,7 +13,7 @@ import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityC
 // The library tests beside this one prove what `liftSuppressionCauses()` does
 // when it is called correctly. What they cannot prove is the part deploy C-1
 // actually changed: **which requests reach it at all.** The whole point of
-// carrying `causeIds` in from the caller is that the server refuses before it
+// carrying the caller's own `causeSetDigest` is that the server refuses before it
 // writes anything, and a refusal that only exists inside the library is a
 // refusal an operator never meets.
 //
@@ -63,10 +63,11 @@ type RouteModule = {
 let prisma: (typeof import("@/lib/prisma"))["prisma"];
 let route: RouteModule;
 let recordSuppression: (typeof import("@/lib/emailSuppression"))["recordSuppression"];
+let causeSetDigest: (typeof import("@/lib/emailSuppression"))["causeSetDigest"];
 
 before(async () => {
   ({ prisma } = (await import(mod("lib/prisma.ts"))) as typeof import("@/lib/prisma"));
-  ({ recordSuppression } = (await import(
+  ({ recordSuppression, causeSetDigest } = (await import(
     mod("lib/emailSuppression.ts")
   )) as typeof import("@/lib/emailSuppression"));
   route = (await import(
@@ -77,8 +78,8 @@ before(async () => {
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "AdminAuditLog", "SuppressionCause", "SuppressionEntry", "AppSetting",
-      "User"
+      "AdminAuditLog", "AdminActionApproval", "SuppressionCause",
+      "SuppressionEntry", "AppSetting", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -140,24 +141,49 @@ const suppress = async (emailAddress: string, extra: Record<string, unknown> = {
   });
 };
 
-const activeCauseIds = (emailAddress: string) =>
+/** The digest of a selector's live causes, as its console row would carry. */
+const liveDigest = (emailAddress: string) =>
   prisma.suppressionCause
     .findMany({
-      where: { emailAddress, releasedAt: null },
+      where: {
+        emailAddress,
+        releasedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
       select: { id: true },
     })
-    .then((rows) => rows.map((row) => row.id));
+    .then((rows) => causeSetDigest(rows.map((row) => row.id)));
 
-/** Nothing was released and nothing was audited. */
-const nothingHappened = async (emailAddress: string) => {
-  const released = await prisma.suppressionCause.count({
-    where: { emailAddress, releasedAt: { not: null } },
-  });
-  assert.equal(released, 0, "a cause was released by a refused request");
-  assert.equal(
-    await prisma.adminAuditLog.count({ where: { action: "email_suppression.removed" } }),
-    0,
-    "a refused request wrote a release audit entry"
+/**
+ * Everything a refused request could have touched, for comparing before and
+ * after.
+ *
+ * A count of released causes and a count of release audit entries is not the
+ * claim "nothing was written" -- it leaves out the entry being deleted, a cause
+ * gaining a field, an audit entry under some other action, and an approval
+ * being recorded. Snapshotting the rows themselves and requiring them to be
+ * identical afterwards is the claim, and it does not need updating when
+ * something new becomes writable.
+ *
+ * Absolute counts would not do either: the dead-handle case starts with a cause
+ * already released, so "zero released" is false before the request is even
+ * made. The comparison is a diff.
+ */
+const everythingWritable = async () => ({
+  causes: await prisma.suppressionCause.findMany({ orderBy: { id: "asc" } }),
+  entries: await prisma.suppressionEntry.findMany({ orderBy: { id: "asc" } }),
+  audit: await prisma.adminAuditLog.findMany({
+    orderBy: { id: "asc" },
+    select: { id: true, action: true, targetType: true, targetId: true },
+  }),
+  approvals: await prisma.adminActionApproval.count(),
+});
+
+const nothingHappened = async (before: Awaited<ReturnType<typeof everythingWritable>>) => {
+  assert.deepEqual(
+    await everythingWritable(),
+    before,
+    "a refused request changed something"
   );
   assert.deepEqual(unexpectedHostCalls, []);
 };
@@ -171,7 +197,7 @@ test("a lift releases what the caller listed", async () => {
   const response = await post({
     action: "remove",
     id: handle.id,
-    causeIds: await activeCauseIds(emailAddress),
+    causeSetDigest: await liveDigest(emailAddress),
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
 
@@ -187,6 +213,21 @@ test("a lift releases what the caller listed", async () => {
     }),
     0
   );
+
+  // The audit entry is the only record of why mail to this address was
+  // re-enabled (§13.7), and it commits with the release rather than after it.
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "email_suppression.removed" },
+  });
+  assert.equal(audit.targetType, "SuppressionCause");
+  assert.equal(audit.targetId, handle.id);
+  const released = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress },
+  });
+  assert.deepEqual(
+    (released.releaseEvidence as { releaseAuditLogId: string }).releaseAuditLogId,
+    audit.id
+  );
 });
 
 test("a cause added after the listing refuses the lift instead of being released with it", async () => {
@@ -198,7 +239,7 @@ test("a cause added after the listing refuses the lift instead of being released
   await setAuthority("causes");
   const emailAddress = `stale-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
-  const seen = await activeCauseIds(emailAddress);
+  const seen = await liveDigest(emailAddress);
 
   await recordSuppression({
     emailAddress,
@@ -207,16 +248,17 @@ test("a cause added after the listing refuses the lift instead of being released
     sourceEventKey: `test:${randomUUID()}`,
   });
 
+  const before = await everythingWritable();
   const response = await post({
     action: "remove",
     id: handle.id,
-    causeIds: seen,
+    causeSetDigest: seen,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
 
   assert.equal(response.status, 409);
   assert.equal(((await response.json()) as { code: string }).code, "approval_stale");
-  await nothingHappened(emailAddress);
+  await nothingHappened(before);
 });
 
 test("a handle that is no longer active is stale, and one that never existed is not found", async () => {
@@ -227,29 +269,34 @@ test("a handle that is no longer active is stale, and one that never existed is 
   await setAuthority("causes");
   const emailAddress = `dead-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
-  const seen = await activeCauseIds(emailAddress);
+  const seen = await liveDigest(emailAddress);
 
   await prisma.suppressionCause.update({
     where: { id: handle.id },
     data: { releasedAt: new Date(), releaseKind: "admin" },
   });
 
+  // A diff rather than a count: this selector already has a released cause, so
+  // "nothing is released" is false before the request is made.
+  const before = await everythingWritable();
   const stale = await post({
     action: "remove",
     id: handle.id,
-    causeIds: seen,
+    causeSetDigest: seen,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
   assert.equal(stale.status, 409);
   assert.equal(((await stale.json()) as { code: string }).code, "approval_stale");
+  await nothingHappened(before);
 
   const missing = await post({
     action: "remove",
     id: "no-such-cause-id",
-    causeIds: seen,
+    causeSetDigest: seen,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
   assert.equal(missing.status, 404);
+  await nothingHappened(before);
 });
 
 test("a selector with more causes than any cap can still be lifted", async () => {
@@ -265,13 +312,18 @@ test("a selector with more causes than any cap can still be lifted", async () =>
   for (let index = 0; index < 51; index += 1) {
     handle = await suppress(emailAddress);
   }
-  const seen = await activeCauseIds(emailAddress);
-  assert.equal(seen.length, 51);
+  const seen = await liveDigest(emailAddress);
+  assert.equal(
+    await prisma.suppressionCause.count({
+      where: { emailAddress, releasedAt: null },
+    }),
+    51
+  );
 
   const response = await post({
     action: "remove",
     id: handle.id,
-    causeIds: seen,
+    causeSetDigest: seen,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
 
@@ -292,14 +344,15 @@ test("the entry authority refuses the lift and says which of the two it is", asy
   await setAuthority("causes");
   const emailAddress = `authority-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
-  const seen = await activeCauseIds(emailAddress);
+  const seen = await liveDigest(emailAddress);
 
   await setAuthority("entry");
 
+  const before = await everythingWritable();
   const response = await post({
     action: "remove",
     id: handle.id,
-    causeIds: seen,
+    causeSetDigest: seen,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
 
@@ -307,7 +360,7 @@ test("the entry authority refuses the lift and says which of the two it is", asy
   const body = (await response.json()) as { code: string; error: string };
   assert.equal(body.code, "authority_changed");
   assert.match(body.error, /causes/);
-  await nothingHappened(emailAddress);
+  await nothingHappened(before);
 });
 
 test("the request has to carry the causes it saw", async () => {
@@ -318,6 +371,7 @@ test("the request has to carry the causes it saw", async () => {
   const emailAddress = `bare-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
 
+  const before = await everythingWritable();
   const response = await post({
     action: "remove",
     id: handle.id,
@@ -325,5 +379,5 @@ test("the request has to carry the causes it saw", async () => {
   });
 
   assert.equal(response.status, 400);
-  await nothingHappened(emailAddress);
+  await nothingHappened(before);
 });

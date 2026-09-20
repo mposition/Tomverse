@@ -5,6 +5,7 @@ import { after, beforeEach, test } from "node:test";
 import { setPreference } from "@/lib/emailPreferences";
 import {
   activeCausesForSelector,
+  causeSetDigest,
   liftSuppressionCauses,
   recordSuppression,
   suppressionCheck,
@@ -163,7 +164,7 @@ test("a lift releases only what its action may, and keeps the entry while a caus
 
   const lifted = await liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active.causeIds,
+    approvedDigest: active.digest,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
@@ -193,7 +194,7 @@ test("an approval for one cause set does not lift a set that changed since", asy
 
   const lifted = await liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active.causeIds,
+    approvedDigest: active.digest,
     action: "approved_admin",
     evidence: { kind: "sole_admin", authorizationAuditLogId: "audit-start" },
     writeReleaseAudit: auditInTx,
@@ -243,7 +244,7 @@ test("a handle that is no longer active cannot reach what replaced it", async ()
     causeId: stale,
     // The set the stale screen showed, which is the only set an operator could
     // have approved.
-    approvedCauseIds: [stale],
+    approvedDigest: causeSetDigest([stale]),
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
@@ -281,7 +282,7 @@ test("a lift works with no SuppressionEntry behind it", async () => {
 
   const lifted = await liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active.causeIds,
+    approvedDigest: active.digest,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
@@ -367,7 +368,7 @@ test("a cause written while a lift waits for the address is seen by the lift", a
   await held;
   const lift = liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active.causeIds,
+    approvedDigest: active.digest,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -311,6 +313,32 @@ export type SuppressionSelector = {
 };
 
 /**
+ * A fixed-size name for a set of active causes.
+ *
+ * The lift has to be bound to the set the operator saw, and the first attempt
+ * at that carried the ids themselves in the request. That works until a
+ * selector holds more of them than a request body can carry -- and causes are
+ * append-only with nothing bounding how many a selector accumulates, so "more
+ * than fits" is a state the system reaches on its own. At that point the
+ * selector is *visible and permanently unliftable*: send them all and the body
+ * limit refuses, send fewer and the set does not match, and there is no request
+ * in between. Raising the limit moves the wall rather than removing it.
+ *
+ * So the request carries this instead. Sorted first, because the set is what
+ * matters and neither side may depend on the other's ordering -- one comes back
+ * in PostgreSQL's order and the other in whatever order a caller sent. The
+ * separator is a character a cuid cannot contain, so no two different sets can
+ * spell the same string.
+ *
+ * Not a secret and not a signature: it names a set, and the server recomputes
+ * it from the database under the address lock before releasing anything.
+ */
+export const causeSetDigest = (ids: readonly string[]): string =>
+  createHash("sha256")
+    .update([...ids].sort().join(String.fromCharCode(0)))
+    .digest("hex");
+
+/**
  * The active causes on the selector one cause belongs to, for deciding how an
  * administrator may lift them.
  *
@@ -344,6 +372,8 @@ export type ActiveCausesForSelector =
       stale: false;
       selector: SuppressionSelector;
       causeIds: string[];
+      /** `causeSetDigest(causeIds)`, which is what a lift request carries. */
+      digest: string;
       reasons: string[];
       needsApproval: boolean;
     };
@@ -375,34 +405,17 @@ export async function activeCausesForSelector(
     orderBy: { id: "asc" },
   });
   const active = causes.filter((row) => isActiveCause(row, now));
+  const causeIds = active.map((row) => row.id);
   return {
     found: true,
     stale: false,
     selector,
-    causeIds: active.map((row) => row.id),
+    causeIds,
+    digest: causeSetDigest(causeIds),
     reasons: active.map((row) => row.reason),
     needsApproval: removalNeedsApproval(active.map((row) => row.reason)),
   };
 }
-
-/**
- * Whether two cause-id sets are the same set.
- *
- * By membership, not by a sorted join. One side comes back in PostgreSQL's
- * order and the other in whatever order a caller sent, and sorting only one of
- * them -- or sorting them with two different collations -- makes equal sets
- * compare unequal and refuses a lift that should have gone through.
- */
-export const sameCauseIdSet = (
-  left: readonly string[],
-  right: readonly string[]
-): boolean => {
-  const wanted = new Set(left);
-  const got = new Set(right);
-  return (
-    wanted.size === got.size && [...wanted].every((id) => got.has(id))
-  );
-};
 
 export type CauseLiftResult =
   | {
@@ -426,13 +439,18 @@ export type CauseLiftResult =
  * entry and the release are one transaction, so a rolled-back lift leaves no
  * record of a release that did not happen.
  *
- * `approvedCauseIds` has to be the set the *operator saw*, carried in from the
+ * `approvedDigest` has to name the set the *operator saw*, carried in from the
  * request, and not a set the server read for itself a moment ago. Read it here
  * and the comparison compares a value with itself: whatever is live at this
  * instant is approved by definition, and a cause added since the screen was
  * drawn is released without anyone having looked at it. The handle must be in
  * that set too -- a lift is of the row that was on the screen, and a row whose
  * own handle is no longer active is not that row.
+ *
+ * A digest rather than the ids, because the ids are unbounded and a request
+ * body is not; see `causeSetDigest`. It is recomputed here, from the rows read
+ * under the address lock, so the comparison is against what is true at the
+ * moment of the release and not against what the caller said was true.
  *
  * The mirrored entry is removed only when no cause remains active; while an
  * older build may still read entries, an entry with a live cause behind it
@@ -443,7 +461,7 @@ export type CauseLiftResult =
  */
 export async function liftSuppressionCauses(input: {
   causeId: string;
-  approvedCauseIds: readonly string[];
+  approvedDigest: string;
   action: "admin" | "approved_admin";
   evidence:
     | { kind: "admin" }
@@ -484,12 +502,7 @@ export async function liftSuppressionCauses(input: {
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 
-    if (
-      !sameCauseIdSet(
-        causes.map((cause) => cause.id),
-        input.approvedCauseIds
-      )
-    ) {
+    if (causeSetDigest(causes.map((cause) => cause.id)) !== input.approvedDigest) {
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 

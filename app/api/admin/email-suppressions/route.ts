@@ -23,7 +23,6 @@ import {
   GLOBAL_PURPOSE_KEY,
   activeCausesForSelector,
   liftSuppressionCauses,
-  sameCauseIdSet,
   normalizeSuppressionAddress,
   recordSuppression,
 } from "@/lib/emailSuppression";
@@ -67,24 +66,27 @@ const removeSchema = z.object({
   action: z.literal("remove"),
   id: z.string().trim().min(1).max(60),
   /**
-   * The active cause ids the caller was looking at, from its own GET.
+   * `causeSetDigest` from the row the caller was looking at, out of its own GET.
    *
    * Required, and carried in rather than read here. A set the server reads for
    * itself at this instant is approved by definition: a cause added between the
    * listing and the click -- a fresh unsubscribe on an address being lifted for
    * a stale soft bounce -- would be released with nobody having seen it, and we
-   * would resume mailing somebody who asked us to stop. Sending what was on the
+   * would resume mailing somebody who asked us to stop. Naming what was on the
    * screen is what makes the comparison mean anything.
    *
-   * No upper bound, deliberately. `SuppressionCause` is append-only and nothing
-   * limits how many active causes one selector can hold -- a provider retrying
-   * a soft bounce adds a row each time -- while the listing returns every one
-   * of them. A cap here would make a selector that can be *seen* and never
-   * lifted: send them all and the schema refuses, send fewer and the set does
-   * not match, and there is no request in between. The body is already bounded
-   * by `readLimitedJson`.
+   * A digest rather than the ids themselves, and this is not a stylistic
+   * choice. Causes are append-only and nothing bounds how many a selector
+   * accumulates, while the listing returns all of them -- so a request carrying
+   * the ids has a ceiling wherever the body limit falls, and past it the
+   * selector is visible and permanently unliftable: send them all and the body
+   * is refused, send fewer and the set does not match. Sixty-four hex
+   * characters do not move.
    */
-  causeIds: z.array(z.string().trim().min(1).max(60)).min(1),
+  causeSetDigest: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{64}$/, "a sha-256 digest in lower-case hex"),
   reason: z.string().trim().min(1).max(1_000),
 });
 
@@ -222,17 +224,17 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Not found." }, { status: 404 });
       }
 
-      // A handle that resolved but is no longer active, and a caller whose set
-      // does not match, are the same situation: the screen this came from is
-      // describing a suppression that has changed. Saying "not found" for the
-      // first would tell an operator whose page went stale that the
-      // suppression they were looking at has vanished.
+      // A handle that resolved but is no longer active, and a caller naming a
+      // set that is not the live one, are the same situation: the screen this
+      // came from is describing a suppression that has changed. Saying "not
+      // found" for the first would tell an operator whose page went stale that
+      // the suppression they were looking at has vanished.
       //
-      // The set comparison is by membership rather than by sorting and
-      // joining: one side arrives in PostgreSQL's order and the other in
-      // whatever order the caller sent, and sorting them under two different
-      // collations makes equal sets compare unequal.
-      if (active.stale || !sameCauseIdSet(active.causeIds, body.causeIds)) {
+      // This is the early refusal, and it is not the one that matters: the set
+      // is checked again inside the lift's transaction, under the address lock,
+      // against the rows that are there at the moment of the release. What this
+      // buys is refusing before an approval is asked for.
+      if (active.stale || active.digest !== body.causeSetDigest) {
         return NextResponse.json(
           {
             error:
@@ -279,13 +281,13 @@ export async function POST(req: Request) {
                 targetId: body.id,
                 // The cause ids are part of what is approved: a cause added after
                 // the request is a different approval.
-                payload: { id: body.id, causeIds: active.causeIds },
+                payload: { id: body.id, causeSetDigest: active.digest },
                 reason: body.reason,
               },
               async (context) => {
                 const outcome = await liftSuppressionCauses({
                   causeId: body.id,
-                  approvedCauseIds: active.causeIds,
+                  approvedDigest: active.digest,
                   action: "approved_admin",
                   evidence: context.approvalId
                     ? {
@@ -302,7 +304,7 @@ export async function POST(req: Request) {
             )
           : await liftSuppressionCauses({
               causeId: body.id,
-              approvedCauseIds: active.causeIds,
+              approvedDigest: active.digest,
               action: "admin",
               evidence: { kind: "admin" },
               writeReleaseAudit: releaseAudit("admin"),
