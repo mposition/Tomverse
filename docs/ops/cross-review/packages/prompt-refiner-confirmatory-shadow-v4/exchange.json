@@ -265,9 +265,18 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowRunStore.ts:1210-1211 (unknownTelemetry) vs lib/promptRefinerShadowEvidenceCore.ts:37 vs prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:387",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The 60,000 ms ceiling now exists as three independent values — PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS (evidence core), PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS (run contract, which unknownTelemetry writes verbatim as the sweep's durationMs), and a literal 60000 in the DB CHECK — with no assertion that the writer bound stays greater than or equal to the unknown-after interval.",
+          "reproduction": "Raise PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS in lib/promptRefinerShadowRunContract.ts to 90_000 (and refresh the contract digest literal the module's self-check prints). unknownTelemetry() then emits durationMs 90_000, terminalInputIsValid refuses it, and every unknown sweep returns PROMPT_REFINER_SHADOW_TERMINAL_INVALID, so stale dispatch intents can never be closed. The DB integration sweep tests would surface this, so it is a latent coupling rather than a live defect; deriving the bound (or asserting PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS <= PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS in tests/promptRefinerShadowRunContract.test.mjs, and pinning the migration literal to the constant) would close it.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowRunStore.ts:1210-1211 (unknownTelemetry) vs lib/promptRefinerShadowEvidenceCore.ts:37 vs prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:387); the author fixes it and the change is re-reviewed"
     }
   ],
   "changeDigest": "sha256:ca6993ff6879a2e464dfae85ec1750112a1ea55926e197d83d1ad9b3f07d3d8b",
@@ -327,13 +336,22 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 1) to the claude reviewer; its verdict must name digest sha256:ca6993ff6879a2e464dfae85ec1750112a1ea55926e197d83d1ad9b3f07d3d8b",
-  "status": "awaiting_review",
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "lib/promptRefinerShadowRunStore.ts:1210-1211 (unknownTelemetry) vs lib/promptRefinerShadowEvidenceCore.ts:37 vs prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:387",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The 60,000 ms ceiling now exists as three independent values — PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS (evidence core), PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS (run contract, which unknownTelemetry writes verbatim as the sweep's durationMs), and a literal 60000 in the DB CHECK — with no assertion that the writer bound stays greater than or equal to the unknown-after interval.",
+      "reproduction": "Raise PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS in lib/promptRefinerShadowRunContract.ts to 90_000 (and refresh the contract digest literal the module's self-check prints). unknownTelemetry() then emits durationMs 90_000, terminalInputIsValid refuses it, and every unknown sweep returns PROMPT_REFINER_SHADOW_TERMINAL_INVALID, so stale dispatch intents can never be closed. The DB integration sweep tests would surface this, so it is a latent coupling rather than a live defect; deriving the bound (or asserting PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS <= PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS in tests/promptRefinerShadowRunContract.test.mjs, and pinning the migration literal to the constant) would close it.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowRunStore.ts:1210-1211 (unknownTelemetry) vs lib/promptRefinerShadowEvidenceCore.ts:37 vs prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:387); the author fixes it and the change is re-reviewed; package round 2 once the change is revised",
+  "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-20T22:59:45.475Z",
+  "producedAt": "2026-09-20T23:07:59.417Z",
   "packagedRounds": 2,
   "concludedAtRound": null,
   "lineage": [],
