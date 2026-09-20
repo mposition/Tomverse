@@ -138,7 +138,9 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
    읽어 재해석하지 않음)
 2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (provider-independent
    schema와 오프라인 집계는 구현됨; writer·저장소·제품 수집은 미구현)
-3. 원문 대비 제안문 주입·의미 보존 평가
+3. 원문 대비 제안문 주입·의미 보존 평가 (동결 16건의 provider-independent
+   content-free anchor gate는 구현됨. 이는 일반 의미 동등성·주입 저항 인증이 아니며,
+   과거 v3 output이 보존되지 않아 새 confirmatory 계약과 별도 실행 승인이 필요함)
 4. 승인된 품질 증거와 release gate disposition
 5. server-owned offered 결정과 kill switch
 

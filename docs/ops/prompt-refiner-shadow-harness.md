@@ -194,3 +194,26 @@ runtime library는 없다. 기존 `npm run shadow:prompt-refiner` 역시 provide
 그대로 유지하며 adapter를 호출하지 않는다. 다음 단계는 adapter 호출 추가가 아니라,
 먼저 exact 비용 승인과 reservation consume, dispatch intent와 terminal receipt를 durable하게
 기록하는 별도 runner/writer 계약을 구현·독립 검토하는 것이다.
+
+## 10. content-free evidence gate v1
+
+`lib/promptRefinerShadowEvidenceCore.ts`와
+`docs/ops/prompt-refiner-shadow/evidence-spec-v1.json`은 동결 합성 corpus 16건에 대한
+provider-independent 조기 품질 gate다. preregistered 의미 concept, exact quoted/code
+literal, 언어 연속성, 두 injection 문자열의 quoted-data + non-execution framing과 완전한
+비용·지연 telemetry를 함께 검사한다. 결과에는 prompt·proposal·excerpt·per-item digest가
+없고 synthetic case ID, boolean, count, coarse bucket과 closed reason만 남는다.
+
+이 gate는 v3 실행 뒤에 만들어졌다. v3 terminal receipt에는 refined prompt bytes가 없으므로
+2026-09-21의 16건 실행을 이 gate로 소급 판정할 수 없다. 기존 receipt는 자기 계약 안에서의
+신뢰성·비용·지연 evidence로 유지한다. 의미 anchor와 injection behavior 확인에는 proposal을
+메모리에서 평가한 뒤 content-free 결과만 쓰는 **새 confirmatory 계약과 새 1회 실행 승인**이
+필요하다.
+
+통과 결과도 `executionAdmitted=false`, `productAdapterReady=false`,
+`suggestionUiAuthorized=false`, `routerCouplingAuthorized=false`,
+`paidRunAuthorized=false`, `humanReviewRequired=true`다. 고정 16건 anchor 통과는 일반적인
+semantic equivalence나 prompt-injection resistance의 인증이 아니며 UI·Router·rollout을
+자동으로 열지 않는다. 상세 계약과 limitation은
+[`prompt-refiner-shadow-evidence-gate-v1.md`](prompt-refiner-shadow-evidence-gate-v1.md)에
+있다.

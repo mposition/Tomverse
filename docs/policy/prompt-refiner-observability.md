@@ -202,9 +202,13 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
 1. 구현된 사전등록을 독립 검토와 통합 CI로 검증한다. 이는 실행 승인이 아니다.
 2. 별도 승인된 작은 shadow가 execution bundle을 생성한다. 사용자에게 UI를
    노출하지 않으므로 disposition은 만들지 않는다.
-3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
-4. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
-5. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
+3. 동결 16건의 provider-independent evidence gate는 구현됐지만, 과거 v3 receipt에는
+   proposal bytes가 없어 의미 anchor·주입 behavior를 소급 판정할 수 없다. 새 계약은
+   proposal을 메모리에서 평가한 뒤 content-free case 결과만 영속화해야 하며, 별도
+   독립 검토·exact 비용 승인·1회 authority 없이는 실행하지 않는다.
+4. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
+5. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
+6. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
 
 ## 9. provider-free shadow harness 관측 경계
 
