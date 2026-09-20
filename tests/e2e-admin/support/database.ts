@@ -904,13 +904,28 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     ],
   });
 
-  await prisma.suppressionEntry.create({
+  // Both records, because deploy C-1 moved the console onto causes while
+  // entries are still written beside them.
+  //
+  // The cause is written explicitly rather than left to the trigger that
+  // mirrors entries into causes: this database is built with `prisma db push`,
+  // which creates what schema.prisma can express and no triggers at all. The
+  // entry on its own would leave the suppressions screen empty here while
+  // being perfectly correct in production -- a fixture that proves the wrong
+  // thing.
+  const suppression = {
+    emailAddress: FIXTURE_SUPPRESSION.emailAddress,
+    scope: FIXTURE_SUPPRESSION.scope,
+    purposeKey: FIXTURE_SUPPRESSION.purposeKey,
+    reason: FIXTURE_SUPPRESSION.reason,
+    source: FIXTURE_SUPPRESSION.source,
+  };
+  await prisma.suppressionEntry.create({ data: suppression });
+  await prisma.suppressionCause.create({
     data: {
-      emailAddress: FIXTURE_SUPPRESSION.emailAddress,
-      scope: FIXTURE_SUPPRESSION.scope,
-      purposeKey: FIXTURE_SUPPRESSION.purposeKey,
-      reason: FIXTURE_SUPPRESSION.reason,
-      source: FIXTURE_SUPPRESSION.source,
+      ...suppression,
+      sourceEventKey: `e2e:${FIXTURE_SUPPRESSION.emailAddress}`,
+      occurredAt: new Date(),
     },
   });
 
