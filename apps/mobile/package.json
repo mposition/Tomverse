@@ -17,8 +17,8 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.1",
-    "@capacitor/cli": "^8.5.1",
-    "@capacitor/ios": "^8.5.1"
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/ios": "^8.5.2"
   }
 }
