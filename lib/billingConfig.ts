@@ -88,10 +88,15 @@ const parsePlanIds = (value: string): BillingPlanId[] => {
  */
 export const BILLING_PLAN_ADMIN_SAVED = "admin_saved";
 
+// `Object.hasOwn`: Prisma hands back a plain object, so without it a
+// `provenance` on `Object.prototype` would make every row -- including the
+// seeder's and every legacy one -- read as an administrator's decision, which
+// is the whole of what this function is asked.
 const isAdminSavedRow = (metadata: unknown): boolean =>
   !!metadata &&
   typeof metadata === "object" &&
   !Array.isArray(metadata) &&
+  Object.hasOwn(metadata, "provenance") &&
   (metadata as Record<string, unknown>).provenance === BILLING_PLAN_ADMIN_SAVED;
 
 /**

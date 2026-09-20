@@ -282,3 +282,31 @@ test("a metadata value that is not the marker does not count as one", async () =
     );
   }
 });
+
+test("a provenance inherited from the prototype is not an administrator's decision", async () => {
+  // `metadata.provenance` was read with a bare index, and Prisma hands back a
+  // plain object. A property on `Object.prototype` would have made every row
+  // -- the seeder's and every legacy one -- read as a decision, which is the
+  // whole of what this reader is asked.
+  await syncBillingDefaultsToDatabase();
+
+  Object.defineProperty(Object.prototype, "provenance", {
+    value: BILLING_PLAN_ADMIN_SAVED,
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    const withSources = await getBillingPlansWithFieldSources();
+    assert.ok(withSources.length > 0);
+    for (const { plan, sources } of withSources) {
+      assert.equal(
+        sources.monthlyPriceCents,
+        "compiled_default",
+        `${plan.id} was seeded, whatever the prototype says`,
+      );
+    }
+  } finally {
+    delete (Object.prototype as Record<string, unknown>).provenance;
+  }
+});
