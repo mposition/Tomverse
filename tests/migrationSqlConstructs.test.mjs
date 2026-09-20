@@ -145,6 +145,108 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
   );
 });
 
+/**
+ * A dollar quote opens and closes with a tag, and the tag needs both dollars.
+ *
+ * `DO $ ... END $;` is not a shortened `DO $` + `$`; it is a syntax error, and
+ * Postgres reports it at apply time having parsed none of the rest of the file.
+ * It is easy to write by accident, because a lone dollar survives almost
+ * everything a doubled one does not: a shell expands the pair to a process id,
+ * and more than one templating layer eats one of them. On 2026-09-20 a
+ * verification block reached review having lost a dollar at each end for
+ * exactly that reason.
+ *
+ * Counting tags does not find it -- a lone dollar is not a tag, so the count
+ * stays even and the guard stays quiet. What finds it is looking for a dollar
+ * that is not part of any tag: outside a string and outside a dollar-quoted
+ * body, every dollar in this repository's SQL belongs to a tag.
+ *
+ * Returns each stray dollar's offset, and the end of the file when a block was
+ * opened and never closed.
+ */
+const strayDollars = (sql) => {
+  const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
+  const stray = [];
+  let index = 0;
+  let inString = false;
+  let openTag = null;
+
+  while (index < sql.length) {
+    if (openTag) {
+      // Inside the body nothing is special except the closing tag -- not a
+      // quote, and not a dollar.
+      if (sql.startsWith(openTag, index)) {
+        index += openTag.length;
+        openTag = null;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+    const current = sql[index];
+    if (inString) {
+      if (current === "'") inString = false;
+      index += 1;
+      continue;
+    }
+    if (current === "'") {
+      inString = true;
+      index += 1;
+      continue;
+    }
+    if (current === "$") {
+      const tag = openingTag.exec(sql.slice(index));
+      if (tag) {
+        openTag = tag[0];
+        index += tag[0].length;
+        continue;
+      }
+      stray.push(index);
+      index += 1;
+      continue;
+    }
+    index += 1;
+  }
+  if (openTag) stray.push(sql.length);
+  return stray;
+};
+
+test("no migration carries a dollar outside a dollar-quote tag", () => {
+  const offenders = [];
+  for (const file of migrationFiles()) {
+    for (const offset of strayDollars(withoutSqlComments(file.sql))) {
+      const line = file.sql.slice(0, offset).split("\n").length;
+      offenders.push(`${file.path}:${line}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "a dollar here belongs to no dollar-quote tag, which is what a tag that " +
+      "lost one of its dollars looks like; the migration fails to parse:\n" +
+      offenders.join("\n")
+  );
+});
+
+test("the dollar-quote guard finds what it is for", () => {
+  const doubled = "$" + "$";
+
+  // The exact shape that got through review.
+  assert.equal(strayDollars("DO $\nBEGIN\nEND $;").length, 2);
+  // And the shapes that are right.
+  assert.deepEqual(strayDollars(`DO ${doubled}\nBEGIN\nEND ${doubled};`), []);
+  assert.deepEqual(strayDollars("DO $verify$\nBEGIN\nEND $verify$;"), []);
+  // A dollar inside an ordinary string is not a tag and is not a mistake.
+  assert.deepEqual(strayDollars("SELECT 'a$b' AS value;"), []);
+  // Nor is one inside a dollar-quoted body, where quoting rules do not apply.
+  assert.deepEqual(
+    strayDollars(`DO ${doubled} RAISE EXCEPTION 'a$b'; ${doubled};`),
+    []
+  );
+  // A block that is opened and never closed is reported too.
+  assert.equal(strayDollars(`DO ${doubled} BEGIN END;`).length, 1);
+});
+
 test("the guard finds what it is for", () => {
   // Written against the exact shape that broke the chain, so a future edit to
   // the pattern cannot quietly stop matching it.

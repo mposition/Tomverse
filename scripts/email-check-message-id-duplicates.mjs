@@ -24,10 +24,10 @@ try {
   if (report.noDuplicatesAtReadTime) {
     console.log(
       `\nNo duplicate at the moment of this read. ${report.totalRows} rows in ` +
-        "EmailDelivery: the index build holds an ACCESS EXCLUSIVE lock on the " +
-        "table for its duration, so if that count makes the lock unacceptable, " +
-        "build the index CONCURRENTLY by hand first -- the migration accepts a " +
-        "correct pre-built index and refuses a wrong one."
+        "EmailDelivery: the index build takes a SHARE lock on the table, so " +
+        "reads continue and writes -- new mail being enqueued, deliveries being " +
+        "marked sent -- wait for it to finish. Judge that wait against this " +
+        "count before the deploy rather than during it."
     );
   } else {
     console.error(

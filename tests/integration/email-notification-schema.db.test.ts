@@ -497,16 +497,42 @@ test("one provider message id belongs to one delivery, within its account", asyn
   );
 });
 
-test("the delivery message id index is unique, and is not partial", async () => {
+test("the delivery message id index is unique, and is exactly what was asked for", async () => {
   // Rows with nulls pass a plain unique index and a partial one alike, so the
   // test above cannot tell the two apart -- and the difference is the whole
-  // reason this index is written the way it is: schema.prisma cannot express a
-  // partial index, so a partial one here would be invisible to `db push` and
-  // would be reported as drift on every run. Asked of the catalogue directly.
+  // reason this index is written the way it is: schema.prisma can express a
+  // partial index only behind a preview feature this schema does not enable, so
+  // a partial one here would be invisible to `db push` and reported as drift on
+  // every run. Asked of the catalogue directly.
+  //
+  // And asked about more than the predicate. An index of this name could be
+  // several things that are not this one -- left INVALID by a failed
+  // CONCURRENTLY build, built NULLS NOT DISTINCT (which would refuse the second
+  // delivery that has not reached the provider yet), or carrying a third
+  // expression key that makes the pair no longer unique on its own. Each is a
+  // way for a future migration to satisfy the name and lose the guarantee.
   const [index] = await prisma.$queryRaw<
-    Array<{ is_unique: boolean; predicate: string | null; columns: string[] }>
+    Array<{
+      is_unique: boolean;
+      is_valid: boolean;
+      is_ready: boolean;
+      is_live: boolean;
+      nulls_not_distinct: boolean;
+      key_atts: number;
+      total_atts: number;
+      has_expressions: boolean;
+      predicate: string | null;
+      columns: string[];
+    }>
   >`
-    SELECT i.indisunique AS is_unique,
+    SELECT i.indisunique         AS is_unique,
+           i.indisvalid          AS is_valid,
+           i.indisready          AS is_ready,
+           i.indislive           AS is_live,
+           i.indnullsnotdistinct AS nulls_not_distinct,
+           i.indnkeyatts         AS key_atts,
+           i.indnatts            AS total_atts,
+           (i.indexprs IS NOT NULL) AS has_expressions,
            pg_get_expr(i.indpred, i.indrelid) AS predicate,
            (
              SELECT array_agg(a.attname ORDER BY k.ord)
@@ -517,21 +543,32 @@ test("the delivery message id index is unique, and is not partial", async () => 
       FROM pg_index i
       JOIN pg_class ix ON ix.oid = i.indexrelid
       JOIN pg_class tb ON tb.oid = i.indrelid
+      JOIN pg_namespace ns ON ns.oid = ix.relnamespace
      WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
        AND tb.relname = 'EmailDelivery'
+       AND ns.nspname = current_schema()
   `;
 
   assert.ok(index, "the index is missing entirely");
   assert.equal(index.is_unique, true);
+  assert.equal(index.is_valid, true);
+  assert.equal(index.is_ready, true);
+  assert.equal(index.is_live, true);
+  assert.equal(index.nulls_not_distinct, false);
   assert.equal(index.predicate, null);
+  assert.equal(index.has_expressions, false);
+  assert.equal(Number(index.key_atts), 2);
+  assert.equal(Number(index.total_atts), 2);
   assert.deepEqual(index.columns, ["providerAccount", "providerMessageId"]);
 
   // And the plain index it replaced is gone: two structures for one question is
   // how they drift apart.
   const [old] = await prisma.$queryRaw<Array<{ count: bigint }>>`
     SELECT count(*) AS count
-      FROM pg_class
-     WHERE relname = 'EmailDelivery_providerAccount_providerMessageId_idx'
+      FROM pg_class ix
+      JOIN pg_namespace ns ON ns.oid = ix.relnamespace
+     WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_idx'
+       AND ns.nspname = current_schema()
   `;
   assert.equal(Number(old?.count ?? 0), 0);
 });

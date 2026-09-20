@@ -48,13 +48,17 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    걸리지 않게 하려는 것입니다 — 안에서 돌면 실패가 전체를 되돌리고, 밖에서 돌면 실패가
    DROP에 닿기 전에 멈춥니다. 어느 쪽이든 기존 index가 남으므로 배포 실패가 webhook
    matcher를 순차 스캔으로 떨어뜨리지 않습니다.
-6. **빌드는 `EmailDelivery`에 ACCESS EXCLUSIVE 잠금을 겁니다.** `CONCURRENTLY`는
-   transaction 안에서 Postgres가 거부하므로 migration에 쓸 수 없습니다. 대신 `CREATE
-   UNIQUE INDEX IF NOT EXISTS`로 두어, 행 수가 그 잠금을 감당할 수 없을 때 운영자가
-   같은 이름·같은 컬럼으로 **먼저 CONCURRENTLY 빌드**할 수 있게 합니다. 이름만 믿지
-   않기 위해 migration이 곧바로 카탈로그에서 그 index가 unique이고 부분이 아니며 컬럼과
-   순서가 맞는지 읽고, 아니면 `RAISE EXCEPTION`으로 멈춥니다. 행 수는 검사 script의
-   `totalRows`가 알려 줍니다.
+6. **빌드는 `EmailDelivery`에 SHARE 잠금을 겁니다** — 읽기는 계속되고 쓰기가
+   기다립니다. `CONCURRENTLY`는 그마저 피하지만 transaction 안에서 Postgres가
+   거부하므로 migration에 쓸 수 없습니다. 행 수는 검사 script의 `totalRows`가
+   알려 주며, 기다림을 배포 **전에** 판단하라고 있는 숫자입니다.
+   **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index — 실패한
+   `CREATE INDEX CONCURRENTLY`가 남긴 INVALID index, `NULLS NOT DISTINCT`로
+   만들어진 index, expression key가 하나 더 붙은 index — 가 빌드를 건너뛰게 하고
+   그 다음 DROP이 그것에 의존하게 됩니다. 그것들을 구분하는 카탈로그 검사는
+   **정확히 맞아야 하는 두 번째 물건**이고, 이름 충돌에서 시끄럽게 실패하는 쪽이
+   더 쌉니다.
+
 7. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
    schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지 않고
    insert하며 이 migration이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`

@@ -24,20 +24,23 @@
 -- Plain, not partial. A `WHERE "providerAccount" IS NOT NULL AND
 -- "providerMessageId" IS NOT NULL` predicate would enforce exactly what a plain
 -- unique index already enforces -- Postgres does not compare nulls, so a
--- delivery that never reached the provider conflicts with nothing -- and it
--- would cost the one thing that matters here: schema.prisma cannot express a
--- partial index, so `prisma db push` would not create it and `migrate diff`
--- would report drift on every run. 20260801190000_plan_change_pending_slot is
--- this same lesson, learned on a constraint that turned out not to exist in the
--- database the tests were written against.
+-- delivery that never reached the provider conflicts with nothing. Prisma can
+-- express a partial index since 7.4, but only behind the `partialIndexes`
+-- preview feature, and this schema enables no preview features at all. Turning
+-- one on is a commitment across the whole schema; the predicate would buy
+-- nothing for it, and without it `prisma db push` would not create the index
+-- and `migrate diff` would call it drift on every run.
+-- 20260801190000_plan_change_pending_slot is this same lesson, learned on a
+-- constraint that turned out not to exist in the database its test was written
+-- against.
 --
 -- **This one cannot be applied blind.** A unique index fails on the first
 -- duplicate it meets, part-way through a deploy, and the answer lives in the
 -- data rather than in this file. `npm run email:check-message-id-duplicates`
 -- asks it read-only and prints counts. That reading is a reason to stop, never
 -- a promise to go: it is taken before the deploy and a writer can add a
--- duplicate after it. The index build is the only statement that decides, so
--- this file is ordered so that its failure costs nothing but the deploy.
+-- duplicate after it. The build is the only statement here that can fail on
+-- data, so it goes first.
 --
 -- **Rollback floor: the commit that introduced 20260917180000** (the
 -- account-aware build, live since 2026-09-17). Below it this schema is not
@@ -57,13 +60,42 @@
 -- -- and that CREATE can itself fail, on exactly the cross-account collision
 -- the account-aware unique exists to allow. It is a recovery, not a routine.
 
+-- ---------------------------------------------------------------------------
+-- The statement that can fail on data goes first.
+--
+-- Nothing above it has run, so a failure here -- a duplicate written after the
+-- check was taken -- costs the deploy and nothing else, whether or not the
+-- runner wraps this file in a transaction. Everything below it is a drop, and a
+-- drop has no data to disagree with.
+--
+-- No `IF NOT EXISTS`. It would let an index that merely shares this name stand
+-- in for this one, and "merely shares the name" covers more than it sounds: an
+-- index left INVALID by a failed `CREATE INDEX CONCURRENTLY`, one built NULLS
+-- NOT DISTINCT, one carrying a third expression key. Each would satisfy the
+-- name, skip the build, and then be relied on by the DROP below -- and a
+-- catalogue check written to tell them apart is a second thing to get exactly
+-- right. Failing loudly on the name is cheaper and needs nothing to be right.
+--
+-- The build takes a SHARE lock on `EmailDelivery`: reads continue, writes wait.
+-- `CREATE INDEX CONCURRENTLY` would avoid even that and cannot be used here --
+-- Postgres refuses it inside a transaction block and this file may be in one.
+-- `email:check-message-id-duplicates` prints the row count, so the wait is
+-- judged before the deploy rather than during it.
+CREATE UNIQUE INDEX "EmailDelivery_providerAccount_providerMessageId_key"
+    ON "EmailDelivery"("providerAccount", "providerMessageId");
+
+-- Only now: the plain index of the same columns answered the same question and
+-- the unique one answers it with a guarantee. Keeping both would be two
+-- structures for one question.
+DROP INDEX IF EXISTS "EmailDelivery_providerAccount_providerMessageId_idx";
+
 -- The account-aware unique carries every read now
 -- (ProviderWebhookEvent_account_event_key, added 20260917180000).
 --
 -- 20260821090000 line 330 created this with `CREATE UNIQUE INDEX`, so in every
 -- database built from this history it is an index and the DROP INDEX below is
--- the statement that removes it. The DROP CONSTRAINT is for a database that
--- got it some other way, and it comes first: if the object were a constraint,
+-- the statement that removes it. The DROP CONSTRAINT is for a database that got
+-- it some other way, and it comes first: if the object were a constraint,
 -- `DROP INDEX` would fail on the dependency rather than skip it, and
 -- `IF EXISTS` does not cover that.
 ALTER TABLE "ProviderWebhookEvent"
@@ -73,55 +105,3 @@ DROP INDEX IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
 -- One writer, and it names the account. A default here would let the next one
 -- not name it.
 ALTER TABLE "ProviderWebhookEvent" ALTER COLUMN "providerAccount" DROP DEFAULT;
-
--- Build the unique index BEFORE dropping the plain one of the same columns.
---
--- The build is the statement that can fail -- on a duplicate written after the
--- check was taken -- and whether this file runs inside a transaction decides
--- nothing here: if it does, the failure rolls the whole thing back; if it does
--- not, the failure stops before the DROP is reached. Either way the plain index
--- is still there afterwards, and the webhook matcher does not start sequentially
--- scanning `EmailDelivery` because a deploy failed.
---
--- `IF NOT EXISTS` is how an operator may build it `CONCURRENTLY` beforehand.
--- The build takes an ACCESS EXCLUSIVE lock on `EmailDelivery` for its duration,
--- and `CONCURRENTLY` cannot be used here -- Postgres refuses it inside a
--- transaction block, and this file may be running in one. When the row count
--- from `email:check-message-id-duplicates` makes that lock unacceptable, the
--- index is created by hand, outside any transaction, with exactly this name and
--- these columns, and this statement then finds it and does nothing.
-CREATE UNIQUE INDEX IF NOT EXISTS "EmailDelivery_providerAccount_providerMessageId_key"
-    ON "EmailDelivery"("providerAccount", "providerMessageId");
-
--- ...which means the name alone must not be taken as proof. A pre-built index
--- that is partial, or not unique, or on other columns, would satisfy
--- `IF NOT EXISTS` and leave the guarantee absent, so it is read back here.
-DO $
-DECLARE
-    correct boolean;
-BEGIN
-    SELECT i.indisunique
-       AND i.indpred IS NULL
-       AND (
-             SELECT array_agg(a.attname ORDER BY k.ord)
-               FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
-               JOIN pg_attribute a
-                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum
-           ) = ARRAY['providerAccount', 'providerMessageId']
-      INTO correct
-      FROM pg_index i
-      JOIN pg_class ix ON ix.oid = i.indexrelid
-      JOIN pg_class tb ON tb.oid = i.indrelid
-     WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
-       AND tb.relname = 'EmailDelivery';
-
-    IF correct IS DISTINCT FROM true THEN
-        RAISE EXCEPTION
-            'EmailDelivery_providerAccount_providerMessageId_key must be a non-partial UNIQUE index on ("providerAccount", "providerMessageId")';
-    END IF;
-END $;
-
--- Only now: the plain index of the same columns answered the same question and
--- the unique one answers it with a guarantee. Keeping both would be two
--- structures for one question.
-DROP INDEX IF EXISTS "EmailDelivery_providerAccount_providerMessageId_idx";
