@@ -13,7 +13,6 @@ import {
   recordPrivacyCompletion,
   recordPrivacyIntake,
 } from "@/lib/emailPrivacySuppression";
-import { holdSuppressionFence } from "@/lib/emailSuppressionAuthority";
 import { prisma } from "@/lib/prisma";
 
 const createSchema = z.object({
@@ -180,7 +179,6 @@ export async function PATCH(req: Request) {
     // state again records nothing new.
     const privacyRequest = await prisma.$transaction(
       async (tx) => {
-        await holdSuppressionFence(tx);
         const updated = await tx.privacyRequest.update({
           where: { id: body.id },
           data: {

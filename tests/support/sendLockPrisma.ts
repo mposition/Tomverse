@@ -3,11 +3,14 @@
  *
  * Contract: docs/policy/email-notifications.md section 9.8.
  *
- * Every customer-facing send now takes the suppression fence and the address
- * lock before it submits, and those are advisory locks -- `$executeRaw`, not a
- * model call. A fake client that answers `suppressionEntry.findMany` but has no
- * raw surface makes the send throw, and the suite reports "the email did not
- * go" for a reason that has nothing to do with what it is testing.
+ * Every customer-facing send takes the address lock before it submits, and that
+ * is an advisory lock -- `$executeRaw`, not a model call. A fake client that
+ * answers `suppressionCause.findMany` but has no raw surface makes the send
+ * throw, and the suite reports "the email did not go" for a reason that has
+ * nothing to do with what it is testing.
+ *
+ * It was two locks until deploy D: the suppression fence went with the setting
+ * it fenced. Nothing here changed, because a fake contends with nobody.
  *
  * Shared rather than copied into each fixture: there are four of these, and the
  * next suite to gain a customer-facing send should not have to discover this
