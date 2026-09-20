@@ -52,6 +52,19 @@ const suppress = (emailAddress: string, reason: "manual" | "complaint" | "hard_b
     ...extra,
   });
 
+/** The live set behind a handle, or a failure naming which kind it was. */
+const liveSet = async (causeId: string, now?: Date) => {
+  const active = await activeCausesForSelector(causeId, now);
+  assert.equal(active.found, true, "the handle did not resolve");
+  assert.equal(
+    active.found && active.stale,
+    false,
+    "the handle resolved but is not active"
+  );
+  if (!active.found || active.stale) throw new Error("unreachable");
+  return active;
+};
+
 /**
  * A cause id for an address, which is the handle the console hands out.
  *
@@ -145,8 +158,7 @@ test("a lift releases only what its action may, and keeps the entry while a caus
   await setAuthority("causes");
 
   const handle = await causeFor(emailAddress, "manual");
-  const active = await activeCausesForSelector(handle);
-  assert.ok(active);
+  const active = await liveSet(handle);
   assert.equal(active.needsApproval, false);
 
   const lifted = await liftSuppressionCauses({
@@ -174,14 +186,14 @@ test("an approval for one cause set does not lift a set that changed since", asy
   await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
   await setAuthority("causes");
   const handle = await causeFor(emailAddress, "complaint");
-  const active = await activeCausesForSelector(handle);
-  assert.ok(active?.needsApproval);
+  const active = await liveSet(handle);
+  assert.ok(active.needsApproval);
 
   await suppress(emailAddress, "hard_bounce");
 
   const lifted = await liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active!.causeIds,
+    approvedCauseIds: active.causeIds,
     action: "approved_admin",
     evidence: { kind: "sole_admin", authorizationAuditLogId: "audit-start" },
     writeReleaseAudit: auditInTx,
@@ -210,7 +222,15 @@ test("a handle that is no longer active cannot reach what replaced it", async ()
   // Both the read and the lift are asked as of a moment past the expiry, so the
   // test does not wait on a clock.
   const later = new Date(Date.now() + 120_000);
-  assert.equal(await activeCausesForSelector(stale, later), null);
+  // Resolved, and stale: a handle that never existed is a different answer,
+  // and the route says different things about them.
+  assert.deepEqual(await activeCausesForSelector(stale, later), {
+    found: true,
+    stale: true,
+  });
+  assert.deepEqual(await activeCausesForSelector("no-such-cause", later), {
+    found: false,
+  });
 
   await recordSuppression({
     emailAddress,
@@ -248,8 +268,7 @@ test("a lift works with no SuppressionEntry behind it", async () => {
   await prisma.suppressionEntry.deleteMany({ where: { emailAddress } });
 
   const handle = await causeFor(emailAddress, "manual");
-  const active = await activeCausesForSelector(handle);
-  assert.ok(active);
+  const active = await liveSet(handle);
 
   const lifted = await liftSuppressionCauses({
     causeId: handle,
@@ -302,7 +321,7 @@ test("a cause written while a lift waits for the address is seen by the lift", a
   await suppress(emailAddress, "manual");
   await setAuthority("causes");
   const handle = await causeFor(emailAddress, "manual");
-  const active = await activeCausesForSelector(handle);
+  const active = await liveSet(handle);
 
   const { lockSuppressionAddress, holdSuppressionFence } = await import(
     "@/lib/emailSuppressionAuthority"
@@ -339,7 +358,7 @@ test("a cause written while a lift waits for the address is seen by the lift", a
   await held;
   const lift = liftSuppressionCauses({
     causeId: handle,
-    approvedCauseIds: active!.causeIds,
+    approvedCauseIds: active.causeIds,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,

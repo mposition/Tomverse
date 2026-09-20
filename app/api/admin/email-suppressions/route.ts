@@ -23,6 +23,7 @@ import {
   GLOBAL_PURPOSE_KEY,
   activeCausesForSelector,
   liftSuppressionCauses,
+  sameCauseIdSet,
   normalizeSuppressionAddress,
   recordSuppression,
 } from "@/lib/emailSuppression";
@@ -74,8 +75,16 @@ const removeSchema = z.object({
    * a stale soft bounce -- would be released with nobody having seen it, and we
    * would resume mailing somebody who asked us to stop. Sending what was on the
    * screen is what makes the comparison mean anything.
+   *
+   * No upper bound, deliberately. `SuppressionCause` is append-only and nothing
+   * limits how many active causes one selector can hold -- a provider retrying
+   * a soft bounce adds a row each time -- while the listing returns every one
+   * of them. A cap here would make a selector that can be *seen* and never
+   * lifted: send them all and the schema refuses, send fewer and the set does
+   * not match, and there is no request in between. The body is already bounded
+   * by `readLimitedJson`.
    */
-  causeIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50),
+  causeIds: z.array(z.string().trim().min(1).max(60)).min(1),
   reason: z.string().trim().min(1).max(1_000),
 });
 
@@ -209,18 +218,21 @@ export async function POST(req: Request) {
     // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
     if ((await readSuppressionAuthority()) === "causes") {
       const active = await activeCausesForSelector(body.id);
-      if (!active) {
+      if (!active.found) {
         return NextResponse.json({ error: "Not found." }, { status: 404 });
       }
 
-      // What the caller saw against what is there. Everything below binds to
-      // `active.causeIds`, so this is the one place the operator's view enters
-      // the decision; without it the approval would be granted against a set
-      // the server chose for itself and a cause added since the listing would
-      // be released unseen. Order does not matter, membership does.
-      if (
-        [...body.causeIds].sort().join(",") !== [...active.causeIds].sort().join(",")
-      ) {
+      // A handle that resolved but is no longer active, and a caller whose set
+      // does not match, are the same situation: the screen this came from is
+      // describing a suppression that has changed. Saying "not found" for the
+      // first would tell an operator whose page went stale that the
+      // suppression they were looking at has vanished.
+      //
+      // The set comparison is by membership rather than by sorting and
+      // joining: one side arrives in PostgreSQL's order and the other in
+      // whatever order the caller sent, and sorting them under two different
+      // collations makes equal sets compare unequal.
+      if (active.stale || !sameCauseIdSet(active.causeIds, body.causeIds)) {
         return NextResponse.json(
           {
             error:

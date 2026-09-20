@@ -328,9 +328,30 @@ export type SuppressionSelector = {
  * showing one `soft_bounce`, released and replaced by an `unsubscribe` while
  * the page sat open, would click lift and release the unsubscribe they never
  * saw, and we would start mailing somebody who asked us to stop. So a stale
- * handle resolves to nothing and the caller is told to look again.
+ * handle does not resolve.
+ *
+ * **"No such cause" and "that cause is no longer active" are different
+ * answers**, and the caller says different things about them: the first is a
+ * handle that never existed, the second is a row somebody was looking at a
+ * moment ago. Collapsing them into `null` told an operator whose page had gone
+ * stale that their suppression had vanished.
  */
-export async function activeCausesForSelector(causeId: string, now: Date = new Date()) {
+export type ActiveCausesForSelector =
+  | { found: false }
+  | { found: true; stale: true }
+  | {
+      found: true;
+      stale: false;
+      selector: SuppressionSelector;
+      causeIds: string[];
+      reasons: string[];
+      needsApproval: boolean;
+    };
+
+export async function activeCausesForSelector(
+  causeId: string,
+  now: Date = new Date()
+): Promise<ActiveCausesForSelector> {
   const cause = await prisma.suppressionCause.findUnique({
     where: { id: causeId },
     select: {
@@ -341,7 +362,8 @@ export async function activeCausesForSelector(causeId: string, now: Date = new D
       releasedAt: true,
     },
   });
-  if (!cause || !isActiveCause(cause, now)) return null;
+  if (!cause) return { found: false };
+  if (!isActiveCause(cause, now)) return { found: true, stale: true };
   const selector: SuppressionSelector = {
     emailAddress: cause.emailAddress,
     scope: cause.scope,
@@ -354,12 +376,33 @@ export async function activeCausesForSelector(causeId: string, now: Date = new D
   });
   const active = causes.filter((row) => isActiveCause(row, now));
   return {
+    found: true,
+    stale: false,
     selector,
     causeIds: active.map((row) => row.id),
     reasons: active.map((row) => row.reason),
     needsApproval: removalNeedsApproval(active.map((row) => row.reason)),
   };
 }
+
+/**
+ * Whether two cause-id sets are the same set.
+ *
+ * By membership, not by a sorted join. One side comes back in PostgreSQL's
+ * order and the other in whatever order a caller sent, and sorting only one of
+ * them -- or sorting them with two different collations -- makes equal sets
+ * compare unequal and refuses a lift that should have gone through.
+ */
+export const sameCauseIdSet = (
+  left: readonly string[],
+  right: readonly string[]
+): boolean => {
+  const wanted = new Set(left);
+  const got = new Set(right);
+  return (
+    wanted.size === got.size && [...wanted].every((id) => got.has(id))
+  );
+};
 
 export type CauseLiftResult =
   | {
@@ -441,8 +484,12 @@ export async function liftSuppressionCauses(input: {
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 
-    const current = causes.map((cause) => cause.id).join(",");
-    if (current !== [...input.approvedCauseIds].sort().join(",")) {
+    if (
+      !sameCauseIdSet(
+        causes.map((cause) => cause.id),
+        input.approvedCauseIds
+      )
+    ) {
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 
