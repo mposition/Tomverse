@@ -173,7 +173,34 @@ export const marketingClaimSchema = z
 
 export type MarketingClaim = z.infer<typeof marketingClaimSchema>;
 
-export const marketingClaimRegistrySchema = z.array(marketingClaimSchema);
+/**
+ * The registry as a whole.
+ *
+ * Duplicate ids are refused for the reason `marketingAssetRegistrySchema`
+ * refuses them: `marketingClaimById()` returns the first match, so a second
+ * entry under the same id is a claim that is in the registry, passes review,
+ * and is never the one that resolves.
+ *
+ * `MARKETING_CLAIMS` is typed, which checks its shape but not its rules --
+ * `z.infer` carries neither `.strict()` nor a `superRefine`. So the registry is
+ * parsed through this schema by `tests/marketingRegistries.test.mjs` rather
+ * than trusted, and a claim that is a `feature` with no page evidence, or whose
+ * `statementKey` has drifted from its evidence key, fails there.
+ */
+export const marketingClaimRegistrySchema = z
+  .array(marketingClaimSchema)
+  .superRefine((claims, context) => {
+    const seen = new Set<string>();
+    for (const claim of claims) {
+      if (seen.has(claim.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `${claim.id} appears twice`,
+        });
+      }
+      seen.add(claim.id);
+    }
+  });
 
 /**
  * The registered claims.
@@ -186,7 +213,16 @@ export const marketingClaimRegistrySchema = z.array(marketingClaimSchema);
  */
 export const MARKETING_CLAIMS: readonly MarketingClaim[] = [];
 
-/** The registry version, which a post records so a later read knows what it saw. */
+/**
+ * The registry version, which a post records so a later read knows what it saw.
+ *
+ * **Raise it in the same change that adds, removes or edits a claim.**
+ * `MarketingPost.claimRegistryVersion` stores this number against a published
+ * post, and a version that never moves answers "what did this post see" with
+ * the same number for every registry there has ever been. Version 1 is the
+ * empty registry, which is why the test refuses a non-empty registry still
+ * calling itself 1.
+ */
 export const MARKETING_CLAIM_REGISTRY_VERSION = 1;
 
 export const marketingClaimById = (

@@ -28,6 +28,7 @@
 import type { Language } from "@/components/LanguageProvider";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import type { MarketingLocale } from "@/lib/marketingAutomationSchema";
+import { MARKETING_PAGE_EVIDENCE_TYPES } from "@/lib/marketingClaims";
 
 /**
  * The marketing routes whose copy a claim may cite, and the `infoPages` entry
@@ -74,7 +75,9 @@ export type MarketingEvidenceRefusal =
   | "route_not_evidence_bearing"
   | "locale_has_no_page"
   | "key_not_found"
-  | "key_not_a_string";
+  | "key_not_a_string"
+  /** A claim whose type requires page evidence and carries none. */
+  | "evidence_not_page";
 
 export type MarketingEvidenceResolution =
   | { ok: true; text: string }
@@ -151,24 +154,46 @@ export function resolveMarketingPageEvidence({
  * post is being checked.
  *
  * Checked per locale, because a claim covering `en` and `ko` makes the same
- * statement on two pages and either of them can be the one that moved. A claim
- * with no page evidence is not this function's business and is skipped.
+ * statement on two pages and either of them can be the one that moved.
+ *
+ * A claim whose *type* requires page evidence and carries none is reported
+ * rather than skipped. Skipping on `evidence?.kind !== "page"` reads as "not my
+ * business", and it is how a `feature` claim with `evidence: null` would pass
+ * the check written to catch exactly that -- the check would agree it had
+ * nothing to verify.
  */
 export function unresolvedClaimEvidence(
   claims: ReadonlyArray<{
     id: string;
+    type: string;
     locales: readonly MarketingLocale[];
     evidence: { kind: string; pageRoute?: string; localeKey?: string } | null;
   }>,
-): Array<{ claimId: string; locale: MarketingLocale; refusal: MarketingEvidenceRefusal }> {
+): Array<{
+  claimId: string;
+  locale: MarketingLocale | null;
+  refusal: MarketingEvidenceRefusal;
+}> {
   const unresolved: Array<{
     claimId: string;
-    locale: MarketingLocale;
+    locale: MarketingLocale | null;
     refusal: MarketingEvidenceRefusal;
   }> = [];
 
   for (const claim of claims) {
-    if (claim.evidence?.kind !== "page") continue;
+    if (claim.evidence?.kind !== "page") {
+      if (
+        (MARKETING_PAGE_EVIDENCE_TYPES as readonly string[]).includes(claim.type)
+      ) {
+        // No locale: the claim has no evidence to be wrong in one.
+        unresolved.push({
+          claimId: claim.id,
+          locale: null,
+          refusal: "evidence_not_page",
+        });
+      }
+      continue;
+    }
     for (const locale of claim.locales) {
       const resolution = resolveMarketingPageEvidence({
         pageRoute: claim.evidence.pageRoute ?? "",

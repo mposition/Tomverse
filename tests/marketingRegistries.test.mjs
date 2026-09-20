@@ -12,11 +12,17 @@ import test from "node:test";
 
 import {
   MARKETING_CLAIMS,
+  MARKETING_CLAIM_REGISTRY_VERSION,
   MARKETING_CLAIM_TYPES,
   generatorProjection,
+  marketingClaimRegistrySchema,
   marketingClaimSchema,
   resolveMarketingClaim,
 } from "../lib/marketingClaims.ts";
+import {
+  isMarketingEvidenceRoute,
+  unresolvedClaimEvidence,
+} from "../lib/marketingEvidencePages.ts";
 import {
   MARKETING_ASSET_REGISTRY_PATH,
   marketingAssetRegistrySchema,
@@ -387,4 +393,69 @@ test("the registry refuses two assets with one id", () => {
     }).success,
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The registry itself, rather than the shape of one entry
+// ---------------------------------------------------------------------------
+
+test("the claim registry is parsed, not just typed", () => {
+  // `MARKETING_CLAIMS` carries a type annotation, and `z.infer` carries
+  // neither `.strict()` nor a `superRefine`. So a feature claim with no page
+  // evidence, or one whose statementKey has drifted from its evidence key,
+  // would satisfy the compiler and reach the Guard. The asset registry is
+  // parsed from its JSON file and had no such gap; this is the claim
+  // registry's version of that check.
+  const parsed = marketingClaimRegistrySchema.safeParse(MARKETING_CLAIMS);
+  assert.equal(parsed.success, true, parsed.error?.message);
+});
+
+test("a duplicate id is refused, because the second one never resolves", () => {
+  // `marketingClaimById()` returns the first match, so a second entry under
+  // the same id is in the registry, passes review, and is never used.
+  const duplicated = marketingClaimRegistrySchema.safeParse([
+    featureClaim(),
+    featureClaim({ statementKey: "marketing.compare.different" }),
+  ]);
+  assert.equal(duplicated.success, false);
+});
+
+test("a registered page claim names a route whose copy can be read", () => {
+  // Empty today. The day a claim is registered, this says whether the route it
+  // cites is one `resolveMarketingPageEvidence()` can actually read -- a claim
+  // pointing at a page whose copy is not addressable by key would otherwise
+  // only fail when a post was being checked.
+  for (const claim of MARKETING_CLAIMS) {
+    if (claim.evidence?.kind !== "page") continue;
+    assert.equal(
+      isMarketingEvidenceRoute(claim.evidence.pageRoute),
+      true,
+      `${claim.id} cites ${claim.evidence.pageRoute}`,
+    );
+  }
+
+  assert.deepEqual(unresolvedClaimEvidence(MARKETING_CLAIMS), []);
+});
+
+test("a registry that has content no longer calls itself version one", () => {
+  // `MarketingPost.claimRegistryVersion` and `assetRegistryVersion` record
+  // what a published post saw. A version that never moves answers that
+  // question with the same number for every registry there has ever been, so
+  // version 1 is reserved for the empty ones.
+  if (MARKETING_CLAIMS.length > 0) {
+    assert.ok(
+      MARKETING_CLAIM_REGISTRY_VERSION > 1,
+      "raise the claim registry version in the change that adds a claim",
+    );
+  }
+
+  const registry = JSON.parse(
+    readFileSync(MARKETING_ASSET_REGISTRY_PATH, "utf8"),
+  );
+  if (registry.assets.length > 0) {
+    assert.ok(
+      registry.version > 1,
+      "raise the asset registry version in the change that adds an asset",
+    );
+  }
 });

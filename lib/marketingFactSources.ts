@@ -36,7 +36,8 @@ export type MarketingFactRefusal =
   | "model_not_publicly_selectable"
   | "model_minimum_plan_mismatch"
   | "model_not_in_registry"
-  | "au_price_gst_unverifiable";
+  | "au_price_gst_unverifiable"
+  | "au_price_not_in_aud";
 
 export type MarketingFactDecision<T = undefined> =
   | ({ ok: true } & (T extends undefined ? { fact?: undefined } : { fact: T }))
@@ -194,10 +195,13 @@ export function australianPriceClaimDecision({
   const catalogue = catalogueClaimSourceDecision(catalogueSource);
   if (!catalogue.ok) return catalogue;
 
+  // Its own code: a price in the wrong currency is not an unverifiable GST
+  // claim, and a refusal that names the wrong problem sends whoever reads it
+  // looking for a tax flag.
   if (currency !== "AUD") {
     return {
       ok: false,
-      refusal: "au_price_gst_unverifiable",
+      refusal: "au_price_not_in_aud",
       detail: `currency=${currency}`,
     };
   }

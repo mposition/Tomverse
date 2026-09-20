@@ -110,14 +110,18 @@ test("an AU claim on a non-stored catalogue refuses for the catalogue first", ()
   assert.equal(decision.refusal, "catalogue_source_not_stored");
 });
 
-test("a non-AUD price is not an Australian price", () => {
+test("a non-AUD price is not an Australian price, and says so", () => {
   const decision = australianPriceClaimDecision({
     currency: "USD",
     catalogueSource: "stored",
     gstInclusiveDeclared: true,
   });
   assert.equal(decision.ok, false);
-  assert.equal(decision.refusal, "au_price_gst_unverifiable");
+  assert.equal(
+    decision.refusal,
+    "au_price_not_in_aud",
+    "a currency problem named as a GST problem sends somebody looking for a tax flag",
+  );
 });
 
 const registryRow = (overrides = {}) => ({
@@ -302,18 +306,28 @@ test("a claim naming a moved sentence is reported per locale", () => {
   const claims = [
     {
       id: "feature.gone",
+      type: "feature",
       locales: ["en", "ko", "zh-Hant"],
       evidence: { kind: "page", pageRoute: "/faq", localeKey: "movedAway" },
     },
     {
       id: "feature.fine",
+      type: "feature",
       locales: ["en"],
       evidence: { kind: "page", pageRoute: "/faq", localeKey: "title" },
     },
     {
       id: "comparison.elsewhere",
+      type: "comparison",
       locales: ["en"],
       evidence: { kind: "external", pageRoute: undefined, localeKey: undefined },
+    },
+    {
+      // The one a skip-on-kind check agrees it has nothing to verify.
+      id: "feature.noEvidenceAtAll",
+      type: "availability",
+      locales: ["en"],
+      evidence: null,
     },
   ];
 
@@ -321,5 +335,10 @@ test("a claim naming a moved sentence is reported per locale", () => {
     { claimId: "feature.gone", locale: "en", refusal: "key_not_found" },
     { claimId: "feature.gone", locale: "ko", refusal: "key_not_found" },
     { claimId: "feature.gone", locale: "zh-Hant", refusal: "locale_has_no_page" },
+    {
+      claimId: "feature.noEvidenceAtAll",
+      locale: null,
+      refusal: "evidence_not_page",
+    },
   ]);
 });

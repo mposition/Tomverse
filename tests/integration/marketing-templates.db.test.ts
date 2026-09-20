@@ -408,3 +408,117 @@ test("a post that is not approved, purged or deleted is not a template", async (
     refusal: "post_missing",
   });
 });
+
+test("a purged or deleted post is not a template, even when both audit rows stand", async () => {
+  // §12.2 purges the envelope at 24 months. The audit chain survives it, so
+  // without these two checks a template would keep resolving after the words
+  // it approved had been removed.
+  const row = await channel();
+
+  const purged = await approvedPost(row.id);
+  await markReusable(purged.id);
+  await prisma.marketingPost.update({
+    where: { id: purged.id },
+    data: { contentPurgedAt: new Date() },
+  });
+  assert.deepEqual(await loadApprovedTemplate(prisma, purged.id), {
+    ok: false,
+    refusal: "content_purged",
+  });
+
+  const deleted = await approvedPost(row.id);
+  await markReusable(deleted.id);
+  await prisma.marketingPost.update({
+    where: { id: deleted.id },
+    data: { deletedAt: new Date() },
+  });
+  assert.deepEqual(await loadApprovedTemplate(prisma, deleted.id), {
+    ok: false,
+    refusal: "post_deleted",
+  });
+});
+
+test("an approved post with no approval row on it proves nothing", async () => {
+  // Fail-closed: `approvalAuditLogId` is nullable, so a row that reached
+  // `approved` without one must not resolve.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+  await markReusable(post.id);
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { approvalAuditLogId: null },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "approval_missing",
+  });
+});
+
+test("a marking that predates its approval is a decision about content that did not exist", async () => {
+  // r4 amendment 5 names this explicitly. Built by marking first and then
+  // re-approving, which is the order an attacker would have available: the
+  // marking is real, human and chain-valid, and it is still not a decision
+  // about the approval that followed it.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+  await markReusable(post.id);
+
+  const laterApproval = await auditRow({
+    action: MARKETING_POST_APPROVE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { approvalAuditLogId: laterApproval, approvedAt: new Date() },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "marking_precedes_approval",
+  });
+});
+
+test("a marking that does not say which version it saw cannot bound the edit scan", async () => {
+  // The other clause of r4 amendment 5. Without `historyVersion` there is no
+  // answer to "edited since the marking", and guessing one would mean choosing
+  // between scanning nothing and scanning everything.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  await auditRow({
+    action: MARKETING_POST_MARK_REUSABLE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { reusableAsTemplate: true },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "marking_version_missing",
+  });
+});
+
+test("a non-integer version is not a version", async () => {
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  await auditRow({
+    action: MARKETING_POST_MARK_REUSABLE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST, historyVersion: 0.5 },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { reusableAsTemplate: true },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "marking_version_missing",
+  });
+});

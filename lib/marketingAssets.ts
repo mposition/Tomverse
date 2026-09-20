@@ -196,7 +196,8 @@ export type MarketingAssetRefusal =
   | "unknown_asset"
   | "channel_not_allowed"
   | "asset_expired"
-  | "no_alt_for_locale";
+  | "no_alt_for_locale"
+  | "no_disclosure_for_channel";
 
 export type MarketingAssetResolution =
   | { ok: true; asset: MarketingAsset; disclosure: MarketingAssetDisclosure }
@@ -228,11 +229,16 @@ export function resolveMarketingAsset({
   const alt = (asset.alt as Record<string, string | undefined>)[locale];
   if (!alt) return { ok: false, refusal: "no_alt_for_locale" };
 
-  return {
-    ok: true,
-    asset,
-    disclosure: asset.disclosure[
-      channel as keyof typeof asset.disclosure
-    ] as MarketingAssetDisclosure,
-  };
+  // The schema's `superRefine` guarantees a disclosure for every allowed
+  // channel; the type does not. Casting the lookup would make that guarantee
+  // load-bearing at the one place it is not expressed, so a registry that
+  // never went through `.parse()` -- a literal in a test, or a caller who
+  // trusted the type -- would put `undefined` where the decision about
+  // labelling an image as AI-generated is made.
+  const disclosure = (
+    asset.disclosure as Record<string, MarketingAssetDisclosure | undefined>
+  )[channel];
+  if (!disclosure) return { ok: false, refusal: "no_disclosure_for_channel" };
+
+  return { ok: true, asset, disclosure };
 }

@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import type { BillingPromotion } from "@prisma/client";
+import { Prisma, type BillingPromotion } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -370,6 +370,12 @@ export async function PATCH(req: Request) {
           sortOrder: plan.id === "free" ? 10 : plan.id === "pro" ? 20 : 30,
         },
         update: {
+          // An administrator submitted this row, so it is no longer the
+          // seeder's copy of the compiled defaults.
+          // `getBillingPlansWithFieldSources()` reads this to tell the two
+          // apart, and a public price claim may only rest on the latter
+          // (docs/policy/marketing-automation.md §7.2).
+          metadata: Prisma.DbNull,
           monthlyPriceCents: plan.monthlyPriceCents,
           annualPriceCents: plan.annualPriceCents,
           stripeProductId: plan.stripeProductId,

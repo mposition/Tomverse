@@ -98,23 +98,37 @@ test("the account slug in utm_content is the generated kind", () => {
 });
 
 test("a registry path that escaped the origin would be refused, not published", () => {
-  // The registry is a fixed list, so this is about the check rather than about
-  // today's data: these are the four shapes that leave an origin when they are
-  // resolved against it, and the assertion is that the parser's answer is what
-  // decides.
+  // The builder is handed a wrong registry on purpose. With the real one the
+  // id lookup already restricts the path to a fixed list, so the origin
+  // comparison never runs -- and a check that never runs is not a check that
+  // holds. The module's claim is that the comparison would catch a bad
+  // registry, and this is the only way to make it say so.
   for (const path of [
     "//evil.test/pricing",
     "https://evil.test/pricing",
     "\\\\evil.test/pricing",
     "https://user:pass@evil.test/pricing",
+    "https://tomverse.app.evil.test/pricing",
+    "https://tomverse.app:8443/pricing",
   ]) {
-    const url = new URL(path, MARKETING_PUBLIC_ORIGIN);
-    assert.notEqual(
-      url.origin,
-      MARKETING_PUBLIC_ORIGIN,
-      `${path} should not resolve to our origin`,
+    assert.deepEqual(
+      buildMarketingLink(request(), { "link.pricing": path }),
+      { ok: false, refusal: "origin_escaped" },
+      `${path} should be refused`,
     );
   }
+
+  // A path that stays on the origin still builds, so the refusals above are
+  // about where it points and not about the registry being injected.
+  const same = buildMarketingLink(request(), { "link.pricing": "/pricing" });
+  assert.equal(same.ok, true);
+  assert.equal(new URL(same.url).origin, MARKETING_PUBLIC_ORIGIN);
+
+  // An id the given registry does not hold is refused before any of that.
+  assert.deepEqual(buildMarketingLink(request(), {}), {
+    ok: false,
+    refusal: "unknown_link_id",
+  });
 
   // And every path actually in the registry does resolve to ours.
   for (const id of MARKETING_LINK_IDS) {
@@ -173,4 +187,91 @@ test("a profile link is https, has no userinfo, and carries the campaign", () =>
       `${profileUrl} should be refused`,
     );
   }
+});
+
+test("a slug has to belong to the channel it is tagged with", () => {
+  // The database says
+  // `accountSlug LIKE channel || '-%'`; carrying only the regex here let a
+  // LinkedIn post go out as utm_source=linkedin&utm_content=instagram-1.
+  assert.deepEqual(
+    buildMarketingLink(request({ channel: "linkedin", accountSlug: "instagram-1" })),
+    { ok: false, refusal: "account_slug_invalid" },
+  );
+
+  const matching = buildMarketingLink(
+    request({ channel: "instagram", accountSlug: "instagram-1" }),
+  );
+  assert.equal(matching.ok, true);
+  assert.equal(new URL(matching.url).searchParams.get("utm_source"), "instagram");
+
+  // A prefix that merely starts the same is not the channel.
+  assert.deepEqual(
+    buildMarketingLink(request({ channel: "link", accountSlug: "linkedin-1" })),
+    { ok: false, refusal: "account_slug_invalid" },
+  );
+});
+
+test("a profile link must be on the channel's own site", () => {
+  // This link goes on every post for a channel whose posts the API cannot
+  // retract, so a wrong row must not be able to become a published link.
+  for (const [channel, profileUrl] of [
+    ["instagram", "https://evil.test/tomverse/"],
+    ["instagram", "https://www.tiktok.com/@tomverse"],
+    ["instagram", "https://www.instagram.com.evil.test/tomverse/"],
+    ["instagram", "https://www.instagram.com:8443/tomverse/"],
+    ["tiktok", "https://www.instagram.com/tomverse/"],
+  ]) {
+    assert.deepEqual(
+      buildMarketingProfileLink({
+        profileUrl,
+        channel,
+        accountSlug: `${channel}-1`,
+        campaign: "autumn-compare",
+      }),
+      { ok: false, refusal: "profile_host_not_allowed" },
+      `${channel} <- ${profileUrl}`,
+    );
+  }
+
+  // An IDN look-alike is punycoded by the parser before the comparison, so it
+  // is refused on its bytes rather than on how it reads.
+  assert.deepEqual(
+    buildMarketingProfileLink({
+      profileUrl: "https://\u026Anstagram.com/tomverse/",
+      channel: "instagram",
+      accountSlug: "instagram-1",
+      campaign: "autumn-compare",
+    }),
+    { ok: false, refusal: "profile_host_not_allowed" },
+  );
+
+  // A channel with no profile link at all cannot get one.
+  assert.deepEqual(
+    buildMarketingProfileLink({
+      profileUrl: "https://www.linkedin.com/company/tomverse/",
+      channel: "linkedin",
+      accountSlug: "linkedin-1",
+      campaign: "autumn-compare",
+    }),
+    { ok: false, refusal: "profile_host_not_allowed" },
+  );
+});
+
+test("a URL longer than the field it is stored in is refused", () => {
+  // r4 amendment 9 caps an https URL field at 2,048 characters.
+  const long = `https://www.instagram.com/${"a".repeat(2100)}`;
+  assert.deepEqual(
+    buildMarketingProfileLink({
+      profileUrl: long,
+      channel: "instagram",
+      accountSlug: "instagram-1",
+      campaign: "autumn-compare",
+    }),
+    { ok: false, refusal: "url_too_long" },
+  );
+
+  assert.deepEqual(
+    buildMarketingLink(request(), { "link.pricing": `/${"a".repeat(2100)}` }),
+    { ok: false, refusal: "url_too_long" },
+  );
 });

@@ -21,11 +21,7 @@
  * Pure: no server-only import, no network, no Prisma.
  */
 
-import {
-  MARKETING_APPROVED_LINKS,
-  isMarketingLinkId,
-  type MarketingLinkId,
-} from "@/lib/marketingApprovedLinks";
+import { MARKETING_APPROVED_LINKS } from "@/lib/marketingApprovedLinks";
 
 /** Where marketing links point. One origin, and it is ours. */
 export const MARKETING_PUBLIC_ORIGIN = "https://tomverse.app";
@@ -56,7 +52,10 @@ export type MarketingLinkRefusal =
   | "unknown_link_id"
   | "campaign_invalid"
   | "account_slug_invalid"
-  | "origin_escaped";
+  | "origin_escaped"
+  /** A profile link pointing somewhere that is not the channel's own site. */
+  | "profile_host_not_allowed"
+  | "url_too_long";
 
 export type MarketingLinkResult =
   | { ok: true; url: string }
@@ -69,7 +68,42 @@ export type MarketingLinkRequest = {
   campaign: string;
 };
 
+/**
+ * The slug shape, which is only half the rule.
+ *
+ * The database says
+ * `"accountSlug" ~ '^[a-z]+-[0-9]{1,3}$' AND "accountSlug" LIKE "channel" || '-%'`
+ * (prisma/migrations/20260918120000_marketing_automation_tables/migration.sql).
+ * Carrying only the first half here would let a LinkedIn post go out tagged
+ * `utm_source=linkedin&utm_content=instagram-1`, naming two different accounts
+ * in one link and making every report that groups by either of them wrong.
+ */
 const ACCOUNT_SLUG_PATTERN = /^[a-z]+-[0-9]{1,3}$/;
+
+const accountSlugMatchesChannel = (accountSlug: string, channel: string) =>
+  ACCOUNT_SLUG_PATTERN.test(accountSlug) &&
+  accountSlug.startsWith(`${channel}-`);
+
+/**
+ * The hosts a channel's profile link may point at.
+ *
+ * Without this the builder accepts any https URL a caller hands it, and the
+ * result goes into every post on Instagram and TikTok -- the two channels whose
+ * posts cannot be retracted through an API (§7.3, O15). The caller reads the
+ * URL from a channel row, so this is defence in depth, which is exactly why it
+ * is worth having: the row is the thing that could be wrong.
+ *
+ * Compared against `url.host`, so a port fails and a look-alike host fails: the
+ * URL parser has already punycoded an IDN by then, so `ɪnstagram.com` arrives
+ * as `xn--nstagram-j1a.com` rather than matching by eye.
+ */
+const PROFILE_LINK_HOSTS: Record<string, readonly string[]> = {
+  instagram: ["instagram.com", "www.instagram.com"],
+  tiktok: ["tiktok.com", "www.tiktok.com"],
+};
+
+/** r4 amendment 9: an https URL field is capped at 2,048 characters. */
+export const MARKETING_URL_MAX_LENGTH = 2048;
 
 /**
  * The campaign parameters, in a fixed order and set rather than appended.
@@ -95,8 +129,18 @@ const applyCampaign = (
  */
 export function buildMarketingLink(
   request: MarketingLinkRequest,
+  /**
+   * The approved paths. Injectable only so a test can hand this function the
+   * wrong registry and watch the origin comparison below hold -- with the real
+   * one the id lookup already restricts the input to a fixed list, which makes
+   * the comparison unreachable and therefore unproven.
+   */
+  links: Readonly<Record<string, string>> = MARKETING_APPROVED_LINKS,
 ): MarketingLinkResult {
-  if (!isMarketingLinkId(request.linkId)) {
+  const path = Object.prototype.hasOwnProperty.call(links, request.linkId)
+    ? links[request.linkId]
+    : undefined;
+  if (path === undefined) {
     return { ok: false, refusal: "unknown_link_id" };
   }
   if (
@@ -105,11 +149,9 @@ export function buildMarketingLink(
   ) {
     return { ok: false, refusal: "campaign_invalid" };
   }
-  if (!ACCOUNT_SLUG_PATTERN.test(request.accountSlug)) {
+  if (!accountSlugMatchesChannel(request.accountSlug, request.channel)) {
     return { ok: false, refusal: "account_slug_invalid" };
   }
-
-  const path = MARKETING_APPROVED_LINKS[request.linkId as MarketingLinkId];
 
   let url: URL;
   try {
@@ -126,7 +168,11 @@ export function buildMarketingLink(
   }
 
   applyCampaign(url, request);
-  return { ok: true, url: url.toString() };
+  const assembled = url.toString();
+  if (assembled.length > MARKETING_URL_MAX_LENGTH) {
+    return { ok: false, refusal: "url_too_long" };
+  }
+  return { ok: true, url: assembled };
 }
 
 /**
@@ -134,8 +180,10 @@ export function buildMarketingLink(
  * profile link, with the same campaign parameters.
  *
  * The profile link is the account's, not the post's, so it is supplied by the
- * caller from the channel row rather than looked up here -- this module knows
- * about our own site and nothing about anybody's profile pages.
+ * caller from the channel row rather than looked up here. The host is still
+ * checked against the channel: this link goes on every post for a channel that
+ * cannot retract one, so accepting whatever URL a row happens to hold would
+ * make a bad row unrecoverable rather than merely wrong.
  */
 export function buildMarketingProfileLink({
   profileUrl,
@@ -154,8 +202,11 @@ export function buildMarketingProfileLink({
   ) {
     return { ok: false, refusal: "campaign_invalid" };
   }
-  if (!ACCOUNT_SLUG_PATTERN.test(accountSlug)) {
+  if (!accountSlugMatchesChannel(accountSlug, channel)) {
     return { ok: false, refusal: "account_slug_invalid" };
+  }
+  if (profileUrl.length > MARKETING_URL_MAX_LENGTH) {
+    return { ok: false, refusal: "url_too_long" };
   }
 
   let url: URL;
@@ -170,6 +221,19 @@ export function buildMarketingProfileLink({
   // reads as one host reaches another.
   if (url.protocol !== "https:" || url.username || url.password) {
     return { ok: false, refusal: "origin_escaped" };
+  }
+
+  // And it has to be the channel's own site. `url.host` includes the port, so
+  // an explicit one fails, and an IDN has already been punycoded by the parser
+  // so a look-alike does not match by eye.
+  const allowed = Object.prototype.hasOwnProperty.call(
+    PROFILE_LINK_HOSTS,
+    channel,
+  )
+    ? PROFILE_LINK_HOSTS[channel]
+    : undefined;
+  if (!allowed || !allowed.includes(url.host)) {
+    return { ok: false, refusal: "profile_host_not_allowed" };
   }
 
   applyCampaign(url, { channel, accountSlug, campaign });
