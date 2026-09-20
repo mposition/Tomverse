@@ -199,6 +199,10 @@ run(
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
+    // AMUX scheduling ownership is a database CAS: two claimants must leave
+    // exactly one owner and one append-only route decision, and a failed
+    // decision write must roll the ownership change back.
+    "tests/integration/amux-orchestration.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
