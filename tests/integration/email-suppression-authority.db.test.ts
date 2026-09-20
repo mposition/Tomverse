@@ -89,18 +89,16 @@ const auditInTx = async (tx: Parameters<Parameters<typeof liftSuppressionCauses>
   return row.id;
 };
 
-test("the send decision follows the setting, read on every call", async () => {
+test("a hold the entry's merge would have overwritten still decides", async () => {
   const emailAddress = address();
-  // A manual hold overwritten on the entry by a marketing complaint.
+  // Deploy A merged these into one row and the complaint won, so transactional
+  // mail went out to somebody an administrator had put a hold on. Two causes,
+  // and the hold is still one of them.
   await suppress(emailAddress, "manual");
   await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
 
-  const byEntry = await suppressionCheck({ emailAddress, classification: "transactional" });
-  assert.equal(byEntry.allowed, true, "the entry kept only the complaint");
-
-  await setAuthority("causes");
-  const byCauses = await suppressionCheck({ emailAddress, classification: "transactional" });
-  assert.equal(byCauses.allowed, false, "the manual hold is still a cause");
+  const verdict = await suppressionCheck({ emailAddress, classification: "transactional" });
+  assert.equal(verdict.allowed, false, "the manual hold is still a cause");
 });
 
 test("a classification cause stops marketing only, once causes decide", async () => {
@@ -152,7 +150,7 @@ test("the cutover refuses while causes would let through what an entry stops, an
   assert.equal(applied.authorityAfter, "causes");
 });
 
-test("a lift releases only what its action may, and keeps the entry while a cause remains", async () => {
+test("a lift releases only what its action may", async () => {
   const emailAddress = address();
   await suppress(emailAddress, "manual");
   await suppress(emailAddress, "privacy_request");
@@ -172,7 +170,6 @@ test("a lift releases only what its action may, and keeps the entry while a caus
   assert.equal(lifted.removed, true);
   assert.ok(lifted.removed && lifted.released.every((cause) => cause.reason === "manual"));
   assert.ok(lifted.removed && lifted.remaining.some((cause) => cause.reason === "privacy_request"));
-  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 1);
 
   const released = await prisma.suppressionCause.findFirstOrThrow({
     where: { emailAddress, reason: "manual" },
@@ -267,15 +264,11 @@ test("a lift works with no SuppressionEntry behind it", async () => {
   await suppress(emailAddress, "manual");
   await setAuthority("causes");
 
-  // Marked as a cause writer, because `suppression_entry_to_cause` fires on
-  // DELETE as well as on INSERT and UPDATE: an unmarked delete of the mirror
-  // releases the causes behind it. That is right for the mirror and is the
-  // opposite of the state this test is trying to reach. C-2 drops the trigger;
-  // until then this is how a database with causes and no entry is made.
-  await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT set_config('app.suppression_writer', 'causes', true)`;
-    await tx.suppressionEntry.deleteMany({ where: { emailAddress } });
-  });
+  // No fixture work is needed any more: with the mirroring trigger dropped and
+  // nothing writing the entry, causes-and-no-entry is simply what a suppression
+  // is. Asserted rather than assumed, because the shape of the row this runs
+  // against is the whole point of the test.
+  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 0);
 
   const handle = await causeFor(emailAddress, "manual");
   const active = await liveSet(handle);
@@ -322,7 +315,10 @@ test("the setting cannot make a send read entries", async () => {
   // be invisible. The address below is suppressed by a cause and has no entry
   // at all, which is what every new suppression looks like now.
   const emailAddress = address();
-  await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
+  // A hard bounce, because it is the one reason that stops transactional mail
+  // as well: a complaint about marketing never did, so it could not tell a
+  // build reading the wrong table from one reading the right one.
+  await suppress(emailAddress, "hard_bounce");
   await setAuthority("entry");
 
   assert.equal(
@@ -331,7 +327,7 @@ test("the setting cannot make a send read entries", async () => {
     "the fixture is only meaningful if nothing mirrored the cause"
   );
   const verdict = await suppressionCheck({ emailAddress, classification: "transactional" });
-  assert.equal(verdict.allowed, false, "the setting was honoured and the complaint was missed");
+  assert.equal(verdict.allowed, false, "the setting was honoured and the hard bounce was missed");
 });
 
 test("a cause written while a lift waits for the address is seen by the lift", async () => {
@@ -398,5 +394,4 @@ test("a cause written while a lift waits for the address is seen by the lift", a
 
   const lifted = await lift;
   assert.deepEqual(lifted, { removed: false, refusal: "approval_stale" });
-  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 1);
 });

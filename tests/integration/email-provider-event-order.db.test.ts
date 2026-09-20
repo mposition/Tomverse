@@ -162,11 +162,10 @@ test("soft bounces older than a delivery neither suppress nor survive it, in eit
     const active = await prisma.suppressionCause.count({
       where: { emailAddress: address, releasedAt: null },
     });
-    const entries = await prisma.suppressionEntry.count({ where: { emailAddress: address } });
     const allowed = (await suppressionCheck({ emailAddress: address, classification: "marketing" })).allowed;
-    outcomes.add(`${active}|${entries}|${allowed}`);
+    outcomes.add(`${active}|${allowed}`);
   }
-  assert.deepEqual([...outcomes], ["0|0|true"]);
+  assert.deepEqual([...outcomes], ["0|true"]);
 });
 
 test("a soft bounce at the same instant as a delivery stands", async () => {
@@ -288,15 +287,10 @@ const replayRun = async (input: { bounceSeconds: number[]; deliveredAt: number; 
       where: { emailAddress: address, releasedAt: null },
       select: { reason: true, occurredAt: true, expiresAt: true },
     });
-    const entry = await prisma.suppressionEntry.findFirst({
-      where: { emailAddress: address },
-      select: { reason: true, expiresAt: true },
-    });
     const allowed = (await suppressionCheck({ emailAddress: address, classification: "marketing" })).allowed;
     states.add(
       JSON.stringify({
         active: active.map((cause) => [cause.reason, cause.occurredAt.getTime() - base, cause.expiresAt?.getTime()]),
-        entry: entry ? [entry.reason, entry.expiresAt?.getTime()] : null,
         allowed,
       })
     );
@@ -317,7 +311,7 @@ const ORDERS = [
 test("a delivery in the middle of a run ends the same in every order: too short to suppress", async () => {
   assert.equal(SOFT_BOUNCE_SUPPRESSION_THRESHOLD, 5);
   const states = await replayRun({ bounceSeconds: [1, 2, 3, 4, 5], deliveredAt: 3, orders: ORDERS });
-  assert.deepEqual(states, [JSON.stringify({ active: [], entry: null, allowed: true })]);
+  assert.deepEqual(states, [JSON.stringify({ active: [], allowed: true })]);
 });
 
 test("a run that still crosses the threshold after a delivery ends with one cause, dated by the crossing", async () => {
@@ -354,7 +348,7 @@ test("a soft bounce matched to no delivery never suppresses", async () => {
   assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: address } }), 0);
 });
 
-test("at one instant the crossing delivery, and the entry, do not depend on arrival order", async () => {
+test("at one instant the crossing delivery does not depend on arrival order", async () => {
   const outcomes = new Set<string>();
   for (const reverse of [false, true]) {
     await reset();
@@ -380,21 +374,18 @@ test("at one instant the crossing delivery, and the entry, do not depend on arri
       where: { emailAddress: address, releasedAt: null },
       select: { sourceDeliveryId: true, expiresAt: true },
     });
-    const entry = await prisma.suppressionEntry.findFirstOrThrow({
-      where: { emailAddress: address },
-      select: { sourceDeliveryId: true, expiresAt: true },
-    });
     outcomes.add(
       JSON.stringify({
         causes: active.length,
         causeIsCrossing: active[0]?.sourceDeliveryId === expected,
-        entryIsCrossing: entry.sourceDeliveryId === expected,
-        entryMatchesCause: entry.expiresAt?.getTime() === active[0]?.expiresAt?.getTime(),
       })
     );
   }
+  // The entry used to be read here too, to pin that the mirror agreed with the
+  // cause about which delivery crossed the threshold. Nothing writes the entry
+  // now, so there is no second answer to disagree.
   assert.deepEqual([...outcomes], [
-    JSON.stringify({ causes: 1, causeIsCrossing: true, entryIsCrossing: true, entryMatchesCause: true }),
+    JSON.stringify({ causes: 1, causeIsCrossing: true }),
   ]);
 });
 

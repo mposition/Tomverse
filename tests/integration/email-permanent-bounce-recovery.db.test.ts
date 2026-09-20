@@ -96,10 +96,6 @@ test("an apply records each missing hard bounce once, and a second run records n
   assert.equal(cause.reason, "hard_bounce");
   assert.equal(cause.sourceEventKey, `webhook:${event.id}`);
   assert.equal(
-    (await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress: dead } })).reason,
-    "hard_bounce"
-  );
-  assert.equal(
     (await suppressionCheck({ emailAddress: dead, classification: "transactional" })).allowed,
     false
   );
@@ -127,7 +123,7 @@ test("a hard bounce already recorded for the message under another key is not re
   assert.equal(report.recorded, 0);
 });
 
-test("an existing permanent entry keeps its reason; the cause is still added", async () => {
+test("an existing permanent cause keeps its reason; the hard bounce is still added", async () => {
   const address = `${randomUUID()}@example.com`;
   await recordSuppression({
     emailAddress: address,
