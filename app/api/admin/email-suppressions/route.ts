@@ -259,7 +259,11 @@ export async function POST(req: Request) {
       // transaction rather than from the read above, because the decision is
       // made there.
       const releaseAudit =
-        (evidenceKind: string) =>
+        (evidence: {
+          kind: string;
+          approvalId?: string;
+          authorizationAuditLogId?: string;
+        }) =>
         (
           tx: Parameters<typeof writeAdminAuditLog>[0]["tx"],
           outcome: {
@@ -294,7 +298,14 @@ export async function POST(req: Request) {
               releasedReasons: outcome.released.map((cause) => cause.reason),
               remainingCauseIds: outcome.remaining.map((cause) => cause.id),
               remainingReasons: outcome.remaining.map((cause) => cause.reason),
-              evidenceKind,
+              // Which authorisation this was, and which one specifically. The
+              // kind alone says a second administrator approved it somewhere;
+              // the ids say which approval and which authorisation entry, so
+              // the release can be followed from this row rather than from the
+              // cause's own evidence.
+              evidenceKind: evidence.kind,
+              approvalId: evidence.approvalId ?? null,
+              authorizationAuditLogId: evidence.authorizationAuditLogId ?? null,
             },
             tx,
           });
@@ -329,7 +340,11 @@ export async function POST(req: Request) {
                         authorizationAuditLogId: context.authorizationAuditLogId,
                       }
                     : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
-                  writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
+                  writeReleaseAudit: releaseAudit({
+                    kind: context.approvalId ? "dual_approval" : "sole_admin",
+                    ...(context.approvalId ? { approvalId: context.approvalId } : {}),
+                    authorizationAuditLogId: context.authorizationAuditLogId,
+                  }),
                 });
                 if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
                 return outcome;
@@ -340,7 +355,7 @@ export async function POST(req: Request) {
               approvedDigest: body.causeSetDigest,
               action: "admin",
               evidence: { kind: "admin" },
-              writeReleaseAudit: releaseAudit("admin"),
+              writeReleaseAudit: releaseAudit({ kind: "admin" }),
             });
       } catch (error) {
         if (!(error instanceof SuppressionLiftRefused)) throw error;

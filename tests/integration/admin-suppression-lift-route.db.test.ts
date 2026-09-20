@@ -199,11 +199,12 @@ test("a lift releases what the caller listed", async () => {
   await setAuthority("causes");
   const emailAddress = `lift-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
+  const digest = await liveDigest(emailAddress);
 
   const response = await post({
     action: "remove",
     id: handle.id,
-    causeSetDigest: await liveDigest(emailAddress),
+    causeSetDigest: digest,
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
 
@@ -222,17 +223,27 @@ test("a lift releases what the caller listed", async () => {
 
   // The audit entry is the only record of why mail to this address was
   // re-enabled (§13.7), and it commits with the release rather than after it.
+  // Its target is the cause set, named by the digest the caller sent.
   const audit = await prisma.adminAuditLog.findFirstOrThrow({
     where: { action: "email_suppression.removed" },
   });
-  assert.equal(audit.targetType, "SuppressionCause");
-  assert.equal(audit.targetId, handle.id);
+  assert.equal(audit.targetType, "SuppressionCauseSet");
+  assert.equal(audit.targetId, digest);
   const released = await prisma.suppressionCause.findFirstOrThrow({
     where: { emailAddress },
   });
   assert.deepEqual(
     (released.releaseEvidence as { releaseAuditLogId: string }).releaseAuditLogId,
     audit.id
+  );
+  assert.deepEqual(
+    (audit.metadata as { releasedCauseIds: string[]; remainingCauseIds: string[] })
+      .releasedCauseIds,
+    [handle.id]
+  );
+  assert.deepEqual(
+    (audit.metadata as { remainingCauseIds: string[] }).remainingCauseIds,
+    []
   );
 });
 
@@ -293,18 +304,89 @@ test("a partial lift is audited as what it released, not as the row it came from
   });
   assert.equal(audit.targetType, "SuppressionCauseSet");
   assert.equal(audit.targetId, digest);
+  // Every field, because the claim is that this entry alone says what happened.
+  assert.deepEqual(audit.metadata, {
+    reason: "The manual hold was added by mistake during the migration.",
+    emailAddress,
+    scope: "global",
+    purposeKey: "*",
+    // The handle is recorded as the row the operator acted from, not as what
+    // was removed.
+    viaCauseId: privacy.id,
+    causeSetDigest: digest,
+    releasedCauseIds: [manual.id],
+    releasedReasons: ["manual"],
+    remainingCauseIds: [privacy.id],
+    remainingReasons: ["privacy_request"],
+    evidenceKind: "admin",
+    approvalId: null,
+    authorizationAuditLogId: null,
+  });
+});
+
+test("a hard bounce lift is authorised, and the entry names the authorisation", async () => {
+  // §13.3 calls a hard bounce permanent, so lifting one is not an ordinary
+  // remove: it goes through the approval path. With one administrator on the
+  // account that resolves to the sole-admin branch, and either way the audit
+  // entry has to name *which* authorisation allowed it -- "a second
+  // administrator approved it somewhere" is not a record anybody can follow.
+  await signInAsOwner();
+  await setAuthority("causes");
+  const emailAddress = `bounced-${randomUUID()}@example.test`;
+  await recordSuppression({
+    emailAddress,
+    reason: "hard_bounce",
+    source: "provider_webhook",
+    sourceEventKey: `test:${randomUUID()}`,
+  });
+  const handle = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress, reason: "hard_bounce" },
+    select: { id: true },
+  });
+  const digest = await liveDigest(emailAddress);
+
+  const response = await post({
+    action: "remove",
+    id: handle.id,
+    causeSetDigest: digest,
+    reason: "The mailbox was recreated by the provider and now accepts mail.",
+  });
+  assert.equal(response.status, 200);
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "email_suppression.removed" },
+  });
+  assert.equal(audit.targetType, "SuppressionCauseSet");
+  assert.equal(audit.targetId, digest);
   const metadata = audit.metadata as {
-    viaCauseId: string;
-    releasedCauseIds: string[];
-    remainingCauseIds: string[];
-    remainingReasons: string[];
+    evidenceKind: string;
+    approvalId: string | null;
+    authorizationAuditLogId: string | null;
+    releasedReasons: string[];
   };
-  assert.deepEqual(metadata.releasedCauseIds, [manual.id]);
-  assert.deepEqual(metadata.remainingCauseIds, [privacy.id]);
-  assert.deepEqual(metadata.remainingReasons, ["privacy_request"]);
-  // The handle is recorded as the row the operator acted from, not as what was
-  // removed.
-  assert.equal(metadata.viaCauseId, privacy.id);
+  assert.deepEqual(metadata.releasedReasons, ["hard_bounce"]);
+  assert.ok(
+    metadata.evidenceKind === "sole_admin" || metadata.evidenceKind === "dual_approval",
+    `a permanent reason was lifted as ${metadata.evidenceKind}`
+  );
+  assert.ok(
+    metadata.authorizationAuditLogId,
+    "the entry does not name the authorisation that allowed it"
+  );
+  // And the authorisation it names is a real entry, not a string.
+  assert.ok(
+    await prisma.adminAuditLog.findUnique({
+      where: { id: metadata.authorizationAuditLogId! },
+    })
+  );
+  if (metadata.evidenceKind === "dual_approval") {
+    assert.ok(metadata.approvalId);
+    assert.ok(
+      await prisma.adminActionApproval.findUnique({
+        where: { id: metadata.approvalId! },
+      })
+    );
+  }
 });
 
 test("a cause added after the listing refuses the lift instead of being released with it", async () => {
