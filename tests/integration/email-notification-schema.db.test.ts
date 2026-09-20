@@ -521,6 +521,7 @@ test("the delivery message id index is unique, and is exactly what was asked for
       is_immediate: boolean;
       access_method: string;
       operator_classes: string[];
+      collations_are_the_columns_own: boolean;
       key_atts: number;
       total_atts: number;
       has_expressions: boolean;
@@ -535,10 +536,19 @@ test("the delivery message id index is unique, and is exactly what was asked for
            i.indimmediate        AS is_immediate,
            am.amname             AS access_method,
            (
-             SELECT array_agg(oc.opcname ORDER BY c.ord)
+             SELECT array_agg(oc.opcname || '@' || ocns.nspname ORDER BY c.ord)
                FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(oid, ord)
                JOIN pg_opclass oc ON oc.oid = c.oid
+               JOIN pg_namespace ocns ON ocns.oid = oc.opcnamespace
            ) AS operator_classes,
+           (
+             SELECT bool_and(coll.indcoll = a.attcollation)
+               FROM unnest(i.indcollation) WITH ORDINALITY AS coll(indcoll, ord)
+               JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                 ON k.ord = coll.ord
+               JOIN pg_attribute a
+                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+           ) AS collations_are_the_columns_own,
            i.indnullsnotdistinct AS nulls_not_distinct,
            i.indnkeyatts         AS key_atts,
            i.indnatts            AS total_atts,
@@ -577,8 +587,17 @@ test("the delivery message id index is unique, and is exactly what was asked for
   // And plain btree equality on both columns. An index that sorted by something
   // other than equality would not be the constraint this asked for, whatever
   // else about it matched.
+  //
+  // The opclass is qualified because `text_ops` is a name, and a schema earlier
+  // in the search path can define its own; the collation is compared against
+  // each column's own because an index built `COLLATE` something else sorts by
+  // a different rule, and a lookup using the column's collation cannot use it.
   assert.equal(index.access_method, "btree");
-  assert.deepEqual(index.operator_classes, ["text_ops", "text_ops"]);
+  assert.deepEqual(index.operator_classes, [
+    "text_ops@pg_catalog",
+    "text_ops@pg_catalog",
+  ]);
+  assert.equal(index.collations_are_the_columns_own, true);
 
   // And the plain index it replaced is gone: two structures for one question is
   // how they drift apart.

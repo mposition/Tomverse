@@ -34,12 +34,13 @@
 -- the same as a column with no default, and "both gone" would be indistinguish-
 -- able from "there is no table here at all":
 --
---     SELECT EXISTS (
---              SELECT 1 FROM pg_class ix
---                JOIN pg_namespace ns ON ns.oid = ix.relnamespace
---               WHERE ix.relname = 'ProviderWebhookEvent_provider_providerEventId_key'
---                 AND ns.nspname = current_schema()
---            ) AS old_unique_present,
+--     SELECT (SELECT tb.relname
+--               FROM pg_class ix
+--               JOIN pg_namespace ns ON ns.oid = ix.relnamespace
+--               JOIN pg_index i ON i.indexrelid = ix.oid
+--               JOIN pg_class tb ON tb.oid = i.indrelid
+--              WHERE ix.relname = 'ProviderWebhookEvent_provider_providerEventId_key'
+--                AND ns.nspname = current_schema()) AS old_unique_on_table,
 --            (SELECT count(*) FROM information_schema.columns
 --              WHERE table_schema = current_schema()
 --                AND table_name = 'ProviderWebhookEvent'
@@ -52,11 +53,18 @@
 -- `column_rows` must be 1. If it is 0 the query is looking at the wrong
 -- database or schema, and nothing below applies.
 --
---   * the old unique present and a default -> it rolled back: `prisma migrate
---     resolve --rolled-back 20260920100100_email_webhook_account_contraction`,
---     then deploy again;
---   * neither -> it committed: `prisma migrate resolve --applied ...`;
---   * one of each -> stop. This file cannot produce that.
+--   * `old_unique_on_table = 'ProviderWebhookEvent'` and a default -> it rolled
+--     back: `prisma migrate resolve --rolled-back
+--     20260920100100_email_webhook_account_contraction`, then deploy again;
+--   * `old_unique_on_table` null and no default -> it committed:
+--     `prisma migrate resolve --applied ...`;
+--   * one of each -> stop. This file cannot produce that;
+--   * `old_unique_on_table` naming **some other table** -> stop, and do not
+--     re-run. `DROP INDEX` takes a name and resolves it through the search
+--     path; it has no way to say which table the index must belong to. So a
+--     replay here would drop that other table's index, and the reading that
+--     sent you to replay -- "the old unique is still present" -- would have
+--     been about an index this migration never created.
 --
 -- **Rollback floor: the commit that introduced 20260917180000** (the
 -- account-aware build, live since 2026-09-17). Below it this schema is not

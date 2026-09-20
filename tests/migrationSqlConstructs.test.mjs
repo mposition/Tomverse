@@ -196,11 +196,28 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
 const strayDollars = (sql) => {
   const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
   const alone = /[\s;,()[\]]|^$/;
-  // An unquoted identifier may hold any letter or digit, not only ASCII ones,
-  // so an ASCII-only class would read a dollar pair after a non-ASCII name as an
-  // opening tag -- and then skip to the next pair, hiding whatever is between
-  // them.
-  const identifierCharacter = /[\p{L}\p{N}_$]/u;
+  // An unquoted identifier may hold any letter, digit or combining mark, not
+  // only ASCII ones, so an ASCII-only class would read a dollar pair after a
+  // non-ASCII name as an opening tag -- and then skip to the next pair, hiding
+  // whatever is between them.
+  const identifierCharacter = /[\p{L}\p{N}\p{M}_$]/u;
+
+  /**
+   * The code point before `at`, not the code unit.
+   *
+   * A letter outside the basic plane is two units in a JavaScript string, and
+   * reading one of them gives a lone surrogate, which matches no letter class.
+   * The identifier would then look as though it ended, and the dollar pair
+   * after it as though it opened a block.
+   */
+  const characterBefore = (at) => {
+    if (at <= 0) return "";
+    const previous = sql.charCodeAt(at - 1);
+    const leadsASurrogate =
+      at >= 2 && previous >= 0xdc00 && previous <= 0xdfff;
+    return sql.slice(leadsASurrogate ? at - 2 : at - 1, at);
+  };
+
   const stray = [];
   let index = 0;
 
@@ -208,7 +225,7 @@ const strayDollars = (sql) => {
     const current = sql[index];
 
     if (current === "$") {
-      const attached = identifierCharacter.test(sql[index - 1] ?? "");
+      const attached = identifierCharacter.test(characterBefore(index));
       const tag = attached ? null : openingTag.exec(sql.slice(index));
       if (tag) {
         const close = sql.indexOf(tag[0], index + tag[0].length);
@@ -235,7 +252,7 @@ const strayDollars = (sql) => {
       const escapes =
         current === "'" &&
         /[Ee]/.test(sql[index - 1] ?? "") &&
-        !identifierCharacter.test(sql[index - 2] ?? "");
+        !identifierCharacter.test(characterBefore(index - 1));
       index += 1;
       while (index < sql.length) {
         if (escapes && sql[index] === "\\") {
@@ -311,6 +328,13 @@ test("the dollar-quote guard finds what it is for", () => {
   assert.deepEqual(strayDollars(`SELECT foo${doubled};`), []);
   // A lone dollar inside a quoted identifier is a character in a name.
   assert.deepEqual(strayDollars(`SELECT "a $ b";`), []);
+  // An identifier does not have to be ASCII, and a letter outside the basic
+  // plane is two code units -- reading one of them gives a lone surrogate that
+  // matches no letter class, so the name would look as though it ended and the
+  // pair after it as though it opened a block. Which would then skip to the
+  // next pair and hide whatever was between them.
+  assert.deepEqual(strayDollars(`SELECT 계정${doubled};`), []);
+  assert.deepEqual(strayDollars(`SELECT \u{10400}${doubled};`), []);
   // A doubled quote is content, so this string does not end early and take the
   // rest of the file with it.
   assert.deepEqual(strayDollars(`SELECT 'it''s $x' AS value;`), []);
