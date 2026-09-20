@@ -62,8 +62,8 @@ const compilerOptions = parsedConfig.options;
 // be reviewed and must update this digest before the closure gate can pass.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "778c2fc68dc5e77dc584478c007e1f5d",
-  "b930dc321a1b2b6a60dcf19b52a0d627",
+  "151ba90d010480e4e17a0a01fa60f28b",
+  "45acad0c4a40ee4f40684d80b8083141",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

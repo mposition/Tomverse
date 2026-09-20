@@ -38,6 +38,7 @@ type NullableCount = number | null;
 export type PromptRefinerShadowUsage = {
     inputTokens: NullableCount;
     cachedInputTokens: NullableCount;
+    cacheWriteInputTokens: NullableCount;
     outputTokens: NullableCount;
     reasoningTokens: NullableCount;
     /** Conservative pinned-rate amount, not a provider invoice. */
@@ -116,6 +117,7 @@ export class PromptRefinerShadowPreDispatchError extends Error {
 const nullUsage = (): PromptRefinerShadowUsage => ({
     inputTokens: null,
     cachedInputTokens: null,
+    cacheWriteInputTokens: null,
     outputTokens: null,
     reasoningTokens: null,
     costUpperBoundMicroUsd: null,
@@ -158,7 +160,9 @@ const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
     const usage = asRecord(value);
     const inputTokens = count(usage.inputTokens);
     const outputTokens = count(usage.outputTokens);
-    const cachedInputTokens = count(asRecord(usage.inputTokenDetails).cacheReadTokens);
+    const inputTokenDetails = asRecord(usage.inputTokenDetails);
+    const cachedInputTokens = count(inputTokenDetails.cacheReadTokens);
+    const cacheWriteInputTokens = count(inputTokenDetails.cacheWriteTokens);
     const reasoningTokens = count(
         asRecord(usage.outputTokenDetails).reasoningTokens
     );
@@ -180,6 +184,7 @@ const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
     return {
         inputTokens,
         cachedInputTokens,
+        cacheWriteInputTokens,
         outputTokens,
         reasoningTokens,
         costUpperBoundMicroUsd,

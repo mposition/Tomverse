@@ -29,7 +29,7 @@ const validResult = (overrides = {}) => ({
   usage: {
     inputTokens: 100,
     outputTokens: 20,
-    inputTokenDetails: { cacheReadTokens: 0 },
+    inputTokenDetails: { cacheReadTokens: 0, cacheWriteTokens: 0 },
     outputTokenDetails: { reasoningTokens: 8 },
   },
   warnings: [],
@@ -96,6 +96,7 @@ test("adapter records dispatch immediately before one exact bounded generation",
   assert.deepEqual(outcome.usage, {
     inputTokens: 100,
     cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
     outputTokens: 20,
     reasoningTokens: 8,
     costUpperBoundMicroUsd: 44,
@@ -188,6 +189,7 @@ test("post-dispatch errors separate timeout, known provider failure, and unknown
       assert.deepEqual(outcome.usage, {
         inputTokens: null,
         cachedInputTokens: null,
+        cacheWriteInputTokens: null,
         outputTokens: null,
         reasoningTokens: null,
         costUpperBoundMicroUsd: null,
@@ -222,6 +224,7 @@ test("partial usage keeps cost unknown rather than fabricating complete telemetr
   assert.deepEqual(outcome.usage, {
     inputTokens: 100,
     cachedInputTokens: null,
+    cacheWriteInputTokens: null,
     outputTokens: 20,
     reasoningTokens: null,
     costUpperBoundMicroUsd: null,
