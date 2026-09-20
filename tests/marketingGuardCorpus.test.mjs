@@ -47,12 +47,9 @@ const decide = (input) =>
     templates: [],
     context: {
       priceFallbackAlertReady: false,
-      channelAlwaysApproves: false,
-      mentionsCompetitor: false,
-      mentionsPriceOrPromotion: false,
-      mentionsIncidentOrSecurity: false,
-      mentionsTestimonial: false,
-      mentionsLegalOrPolicy: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
     },
   });
 

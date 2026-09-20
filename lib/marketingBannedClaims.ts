@@ -70,6 +70,8 @@ export const MARKETING_SUPERLATIVE_TERMS: readonly MarketingBannedTerm[] =
     term("state of the art", "en", "word"),
 
     term("최고", "ko", "substring"),
+    term("제일 좋은", "ko", "substring"),
+    term("제일 뛰어난", "ko", "substring"),
     term("최적", "ko", "substring"),
     term("최강", "ko", "substring"),
     term("가장 좋은", "ko", "substring"),
@@ -77,6 +79,7 @@ export const MARKETING_SUPERLATIVE_TERMS: readonly MarketingBannedTerm[] =
     term("가장 똑똑", "ko", "substring"),
 
     term("最佳", "zh", "substring"),
+    term("最优", "zh", "substring"),
     term("最好", "zh", "substring"),
     term("最强", "zh", "substring"),
     term("最快", "zh", "substring"),

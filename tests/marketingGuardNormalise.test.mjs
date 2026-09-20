@@ -10,7 +10,8 @@ import test from "node:test";
 
 import {
   MARKETING_HYGIENE_CODES,
-  foldMarketingRuleText,
+  marketingTermPattern,
+  marketingTextForms,
   marketingTextHygiene,
   marketingTextVariants,
 } from "../lib/marketingGuardNormalise.ts";
@@ -28,16 +29,10 @@ const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 const RIGHT_TO_LEFT_OVERRIDE = String.fromCharCode(0x202e);
 
 
-/** How a rule is checked: the rule folded the same way, with word boundaries. */
-const matches = (text, rule) => {
-  const needle = foldMarketingRuleText(rule);
-  const variants = marketingTextVariants(text);
-  const pattern = new RegExp(`\\b${needle.collapsed}\\b`, "u");
-  return (
-    pattern.test(variants.folded) ||
-    pattern.test(variants.leet) ||
-    pattern.test(variants.collapsed)
-  );
+/** How a rule is checked: the term compiled, run against every folded form. */
+const matches = (text, rule, mode = "word") => {
+  const pattern = marketingTermPattern(rule, mode);
+  return marketingTextForms(text).some((form) => pattern.test(form));
 };
 
 test("every way of writing a banned word is the same string", () => {
@@ -78,31 +73,41 @@ test("a longer word that contains a banned one is not the banned one", () => {
   }
 });
 
-test("the variants are nested, so a match in one is a match in the later ones", () => {
+test("the two leet readings leave the letters alone", () => {
   const variants = marketingTextVariants("The Best Model");
   assert.equal(variants.readable, "The Best Model");
   assert.equal(variants.folded, "the best model");
-  // `l` and `i` fold together, which is what makes "1" and "l" one character.
-  assert.equal(variants.leet, "the best modei");
-  assert.equal(variants.collapsed, "the best modei");
+  // Neither reading touches a letter, which is what lets a rule keep its own.
+  assert.equal(variants.leetRound, "the best model");
+  assert.equal(variants.leetStraight, "the best model");
+
+  // The digit is where they differ: "1" is "i" in one and "l" in the other.
+  const digits = marketingTextVariants("on1y 1eet");
+  assert.equal(digits.leetRound, "oniy ieet");
+  assert.equal(digits.leetStraight, "only leet");
 });
 
-test("a rule is folded by the same function as the text", () => {
-  // The property the whole design rests on: whatever a rule is written as, it
-  // arrives in the form the draft has been folded into.
-  assert.equal(foldMarketingRuleText("Best").collapsed, "best");
-  assert.equal(foldMarketingRuleText("optimal").collapsed, "optimai");
-  assert.equal(marketingTextVariants("0ptimal").collapsed, "optimai");
+test("a rule written once matches every spelling of itself", () => {
+  // The property the whole design rests on.
   assert.equal(matches("0pt1mal", "optimal"), true);
+  assert.equal(matches("0ptimal", "optimal"), true);
+  assert.equal(matches("optimal", "optimal"), true);
+
+  // And a pattern written with ordinary letters still matches the digit
+  // spelling, which the single-alphabet fold broke.
+  const forms = marketingTextForms("The on1y AI that compares.");
+  const boundary = String.fromCharCode(92) + 'b';
+  const onlyAi = new RegExp(boundary + "only ai" + boundary, "iu");
+  assert.equal(forms.some((form) => onlyAi.test(form)), true);
 });
 
 test("Korean and Chinese fold to themselves", () => {
   // The confusable table is Latin look-alikes only. Folding CJK would make the
   // Korean rules match Korean text at random, which is worse than missing an
   // evasion nobody has attempted.
-  assert.equal(marketingTextVariants("최고").collapsed, "최고");
-  assert.equal(marketingTextVariants("最好").collapsed, "最好");
-  assert.equal(marketingTextVariants("최 고").collapsed, "최고");
+  assert.equal(marketingTextVariants("최고").folded, "최고");
+  assert.equal(marketingTextVariants("最好").folded, "最好");
+  assert.equal(matches("최 고 모델", "최고", "substring"), true);
 });
 
 test("a word boundary is a Latin idea, which is why a rule carries its match mode", () => {
@@ -112,7 +117,7 @@ test("a word boundary is a Latin idea, which is why a rule carries its match mod
   // `lib/marketingGuardRules.ts` is where that lives, and 최고기온 is the case
   // it exists for.
   assert.equal(new RegExp("\\b최고\\b", "u").test("최고 모델"), false);
-  assert.equal(marketingTextVariants("최고 모델").collapsed.includes("최고"), true);
+  assert.equal(matches("최고 모델", "최고", "substring"), true);
 
   // The Latin side is the opposite: a substring match is what makes "bestow"
   // a false positive, so those rules need the boundary.

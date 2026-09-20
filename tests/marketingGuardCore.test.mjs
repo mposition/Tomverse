@@ -7,23 +7,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createHash } from "node:crypto";
+
 import {
   MARKETING_APPROVAL_CODES,
   MARKETING_REJECT_CODES,
   guardDraft,
   guardTemplateForApproval,
+  sealMarketingTemplateProof,
 } from "../lib/marketingGuardCore.ts";
 
-const TEMPLATE_DIGEST = "a".repeat(64);
+const TEMPLATE_TEXT = "Three answers to one question, side by side.";
+const TEMPLATE_DIGEST = createHash("sha256")
+  .update(TEMPLATE_TEXT, "utf8")
+  .digest("hex");
 
 const context = (overrides = {}) => ({
   priceFallbackAlertReady: false,
-  channelAlwaysApproves: false,
-  mentionsCompetitor: false,
-  mentionsPriceOrPromotion: false,
-  mentionsIncidentOrSecurity: false,
-  mentionsTestimonial: false,
-  mentionsLegalOrPolicy: false,
+  incidentOrSecurity: "proved_false",
+  testimonial: "proved_false",
+  legalOrPolicy: "proved_false",
   ...overrides,
 });
 
@@ -42,35 +45,41 @@ const input = (overrides = {}) => ({
 });
 
 /** A draft that would be autonomous if every other input allowed it. */
-const autonomousReady = (overrides = {}) =>
-  input({
+const autonomousReady = (overrides = {}) => {
+  const facts = {
+    claims: [
+      {
+        claimId: "claim.compare",
+        type: "feature",
+        known: true,
+        featurePublic: true,
+        usedBefore: true,
+      },
+    ],
+    assets: [{ assetId: "asset.hero", known: true, usedBefore: true }],
+    ...(overrides.facts ?? {}),
+  };
+  return input({
     draft: {
       templateId: "template.compare",
-      renderedDigest: TEMPLATE_DIGEST,
+      renderedText: TEMPLATE_TEXT,
+      // Derived, because the Guard refuses a draft whose declared ids are not
+      // the facts it was given -- which is the point of that check.
+      claimIds: facts.claims.map((claim) => claim.claimId),
+      assetIds: facts.assets.map((asset) => asset.assetId),
       ...(overrides.draft ?? {}),
     },
-    facts: {
-      claims: [
-        {
-          claimId: "claim.compare",
-          type: "feature",
-          known: true,
-          featurePublic: true,
-          usedBefore: true,
-        },
-      ],
-      assets: [{ assetId: "asset.hero", known: true, usedBefore: true }],
-      ...(overrides.facts ?? {}),
-    },
+    facts,
     templates: overrides.templates ?? [
-      {
+      sealMarketingTemplateProof({
         templateId: "template.compare",
         approvedDigest: TEMPLATE_DIGEST,
         slotsFromRegistry: true,
-      },
+      }),
     ],
     context: { priceFallbackAlertReady: true, ...(overrides.context ?? {}) },
   });
+};
 
 test("a reject beats an approval, whatever else is true", () => {
   // Precedence is the shape of the whole function: one refused rule is
@@ -78,7 +87,7 @@ test("a reject beats an approval, whatever else is true", () => {
   const decision = guardDraft(
     input({
       draft: { renderedText: "The best workspace, guaranteed." },
-      context: { mentionsCompetitor: true, mentionsPriceOrPromotion: true },
+      context: { incidentOrSecurity: "proved_true", testimonial: "proved_true" },
     }),
   );
   assert.equal(decision.verdict, "reject");
@@ -99,23 +108,19 @@ test("free copy is never autonomous, whatever the draft says about itself", () =
 });
 
 test("a template whose digest does not match is not a template", () => {
+  // The digest is computed here from the text, so "does not match" means the
+  // words changed -- not that a caller supplied a different number.
   const decision = guardDraft(
-    autonomousReady({ draft: { renderedDigest: "b".repeat(64) } }),
+    autonomousReady({ draft: { renderedText: "Completely different words." } }),
   );
   assert.equal(decision.verdict, "approval_required");
   assert.ok(decision.codes.includes("new_copy"));
 });
 
-test("a template that did not prove its approval is not a template", () => {
+test("a template the loader never proved is not a template", () => {
   const decision = guardDraft(
     autonomousReady({
-      templates: [
-        {
-          templateId: "template.compare",
-          approvedDigest: null,
-          slotsFromRegistry: true,
-        },
-      ],
+      templates: [],
     }),
   );
   assert.equal(decision.verdict, "approval_required");
@@ -126,11 +131,11 @@ test("a template with a slot filled from free text is not a template", () => {
   const decision = guardDraft(
     autonomousReady({
       templates: [
-        {
+        sealMarketingTemplateProof({
           templateId: "template.compare",
           approvedDigest: TEMPLATE_DIGEST,
           slotsFromRegistry: false,
-        },
+        }),
       ],
     }),
   );
@@ -204,9 +209,11 @@ test("a price claim on anything but stored values is refused", () => {
   }
 });
 
-test("a stored Australian price is an approval rather than a refusal", () => {
-  // §7.4: an Australian price post is always a person's decision, even when
-  // every field behind it is stored.
+test("an Australian price with no stored GST flag is refused", () => {
+  // S1 plan, B2 amendment. A stored AUD amount is not enough: Australian
+  // Consumer Law requires a single price inclusive of GST, and whether these
+  // numbers include it is not derivable from the numbers. The catalogue
+  // carries no such flag today, so this is where every Australian price lands.
   const decision = guardDraft(
     autonomousReady({
       facts: {
@@ -217,6 +224,57 @@ test("a stored Australian price is an approval rather than a refusal", () => {
             known: true,
             priceSourcesAllStored: true,
             targetsAustralia: true,
+            currency: "AUD",
+            usedBefore: true,
+          },
+        ],
+        assets: [],
+      },
+    }),
+  );
+  assert.equal(decision.verdict, "reject");
+  assert.ok(decision.codes.includes("au_price_gst_unverifiable"));
+});
+
+test("an Australian price in the wrong currency is refused too", () => {
+  const decision = guardDraft(
+    autonomousReady({
+      facts: {
+        claims: [
+          {
+            claimId: "claim.pro-price-au",
+            type: "pricing",
+            known: true,
+            priceSourcesAllStored: true,
+            targetsAustralia: true,
+            currency: "USD",
+            gstInclusiveStored: true,
+            usedBefore: true,
+          },
+        ],
+        assets: [],
+      },
+    }),
+  );
+  assert.equal(decision.verdict, "reject");
+  assert.ok(decision.codes.includes("au_price_gst_unverifiable"));
+});
+
+test("when the catalogue can prove GST, an Australian price is an approval", () => {
+  // §7.4: still a person's decision, never autonomous. Reachable only once
+  // the catalogue carries the flag, which is why both halves are inputs.
+  const decision = guardDraft(
+    autonomousReady({
+      facts: {
+        claims: [
+          {
+            claimId: "claim.pro-price-au",
+            type: "pricing",
+            known: true,
+            priceSourcesAllStored: true,
+            targetsAustralia: true,
+            currency: "AUD",
+            gstInclusiveStored: true,
             usedBefore: true,
           },
         ],
@@ -226,6 +284,7 @@ test("a stored Australian price is an approval rather than a refusal", () => {
   );
   assert.equal(decision.verdict, "approval_required");
   assert.ok(decision.codes.includes("australian_price"));
+  assert.ok(decision.codes.includes("price_or_promotion"));
 });
 
 test("a model claim the registry does not agree with is refused", () => {
@@ -348,7 +407,7 @@ test("a number with no claim behind it goes to a person, not to a refusal", () =
 
 test("RedNote is an approval whatever the post says", () => {
   const decision = guardDraft(
-    autonomousReady({ context: { channelAlwaysApproves: true } }),
+    autonomousReady({ draft: { channel: "rednote" } }),
   );
   assert.equal(decision.verdict, "approval_required");
   assert.ok(decision.codes.includes("rednote_channel"));
@@ -392,18 +451,40 @@ test("every reject code is reachable", () => {
   collect(
     guardDraft(input({ draft: { renderedText: "Start free today with no limits." } })),
   );
-  for (const claim of [
+
+  // A declared id with no resolved fact behind it, and the other way round.
+  collect(guardDraft(input({ draft: { claimIds: ["claim.undeclared"] } })));
+
+  const claims = [
     { claimId: "a", type: "pricing", known: true, priceSourcesAllStored: false, usedBefore: true },
-    { claimId: "b", type: "model", known: true, modelMatches: false, usedBefore: true },
-    { claimId: "c", type: "feature", known: true, featurePublic: false, usedBefore: true },
-    { claimId: "d", type: "comparison", known: true, comparisonEvidence: false, usedBefore: true },
-    { claimId: "e", type: "feature", known: false, usedBefore: true },
-  ]) {
-    collect(guardDraft(input({ facts: { claims: [claim], assets: [] } })));
+    {
+      claimId: "a",
+      type: "pricing",
+      known: true,
+      priceSourcesAllStored: true,
+      targetsAustralia: true,
+      currency: "AUD",
+      usedBefore: true,
+    },
+    { claimId: "a", type: "model", known: true, modelMatches: false, usedBefore: true },
+    { claimId: "a", type: "feature", known: true, featurePublic: false, usedBefore: true },
+    { claimId: "a", type: "comparison", known: true, comparisonEvidence: false, usedBefore: true },
+    { claimId: "a", type: "feature", known: false, usedBefore: true },
+    { claimId: "a", type: "invented", known: true, usedBefore: true },
+  ];
+  for (const claim of claims) {
+    collect(
+      guardDraft(
+        input({ draft: { claimIds: ["a"] }, facts: { claims: [claim], assets: [] } }),
+      ),
+    );
   }
   collect(
     guardDraft(
-      input({ facts: { claims: [], assets: [{ assetId: "x", known: false, usedBefore: true }] } }),
+      input({
+        draft: { assetIds: ["x"] },
+        facts: { claims: [], assets: [{ assetId: "x", known: false, usedBefore: true }] },
+      }),
     ),
   );
 

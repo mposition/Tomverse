@@ -12,6 +12,14 @@
  * decision anything sharing this module could change. They are compiled per
  * call instead.
  *
+ * **A rule names what the claim is about, rather than matching a word.** 第一
+ * is "first" in "第一章" -- chapter one -- and 唯一 is "unique" in "唯一标识符",
+ * a unique identifier. Both are ordinary Chinese, and a Guard that refuses
+ * ordinary Chinese is a Guard somebody switches off. So the rank and
+ * uniqueness rules require the sentence to say what it is first at or unique
+ * among, and the age rule does not fire on a notice saying the product is *not*
+ * for children.
+ *
  * **What this file is not.** It does not decide anything: it is the data, and
  * `lib/marketingGuardCore.ts` is the decision. Keeping them apart is what lets
  * the corpus address a rule by id without knowing how the Guard is wired.
@@ -24,7 +32,7 @@ import {
   MARKETING_SUPERLATIVE_TERMS,
   type MarketingBannedTerm,
 } from "@/lib/marketingBannedClaims";
-import { FORBIDDEN_MEMORY_CLAIMS } from "@/lib/marketingMemoryClaims";
+import { findForbiddenMemoryClaims } from "@/lib/marketingMemoryClaims";
 
 /** Which paragraph of §7.1 a rule comes from. */
 export const MARKETING_RULE_CATEGORIES = Object.freeze([
@@ -48,14 +56,27 @@ export type MarketingRulePattern = {
   readonly language: string;
 };
 
+/**
+ * A rule that is a function rather than a pattern.
+ *
+ * One rule needs this. `lib/marketingMemoryClaims.ts` owns what this product
+ * may say about account memory, and its detector is sentence-aware: it does not
+ * fire on "projects do not share AI memory", which mentions memory in order to
+ * deny it. An earlier version copied that module's raw patterns and lost the
+ * negation handling with them, so a sentence denying the claim was refused for
+ * making it.
+ */
+export type MarketingRuleDetector = (text: string) => boolean;
+
 export type MarketingGuardRule = {
   readonly id: string;
   readonly category: MarketingRuleCategory;
   /** Every §7.1 rule refuses. The approval categories are §7.4 and live in the core. */
   readonly verdict: "reject";
-  /** Literal terms, folded by the Guard and matched by their own mode. */
+  /** Literal terms, compiled by the Guard into separator-tolerant patterns. */
   readonly terms: readonly MarketingBannedTerm[];
   readonly patterns: readonly MarketingRulePattern[];
+  readonly detectors: readonly MarketingRuleDetector[];
   /** Longer strings that contain a term and are not the claim. */
   readonly exceptions: readonly string[];
 };
@@ -72,6 +93,7 @@ const rule = (
   parts: {
     terms?: readonly MarketingBannedTerm[];
     patterns?: readonly MarketingRulePattern[];
+    detectors?: readonly MarketingRuleDetector[];
     exceptions?: readonly string[];
   },
 ): MarketingGuardRule =>
@@ -81,31 +103,27 @@ const rule = (
     verdict: "reject" as const,
     terms: Object.freeze(parts.terms ? [...parts.terms] : []),
     patterns: Object.freeze(parts.patterns ? [...parts.patterns] : []),
+    detectors: Object.freeze(parts.detectors ? [...parts.detectors] : []),
     exceptions: Object.freeze(parts.exceptions ? [...parts.exceptions] : []),
   });
 
 /**
- * §7.1, first item: the repository's ban words, superlatives, guarantees, "#1".
+ * §7.1, first item: the repository's ban words, superlatives and comparatives.
  *
- * `better` is in the policy's list and deliberately *not* in
- * `MARKETING_SUPERLATIVE_TERMS`, because that list is also what checks the
- * copy this repository wrote -- and `lib/autoRoutingCopy.ts` says "no model was
- * a better fit for this message", which is the denial of the claim rather than
- * the claim. So it is a pattern here with the negations excluded, and both
- * forms are in the corpus.
+ * `better` is refused here without exception. It is in the policy's list, and
+ * an earlier version tried to allow the denials -- "no model was a better fit"
+ * -- with a negative lookbehind, which then read "Nothing is better than
+ * Tomverse" and "No competitor is better than Tomverse" as denials too. Those
+ * are the claim stated as strongly as it can be. A generated post has no reason
+ * to write the denial, so the Guard refuses the word; the repository's own copy
+ * keeps saying it, which is why `MARKETING_SUPERLATIVE_TERMS` does not carry it
+ * and `lib/marketingBannedClaims.ts` explains that split.
  */
 const SUPERLATIVE = rule("rule.superlative", "superlative", {
   terms: MARKETING_SUPERLATIVE_TERMS,
   patterns: [
-    // "better" unless something in front of it is turning it down. The
-    // alternation is the shapes a denial actually takes, not every possible
-    // negation: a rule that tried to parse English would be a rule that is
-    // wrong in a way nobody can see.
-    pattern(
-      "(?<!\\b(?:no|not|never|isn't|aren't|nothing)\\s(?:\\w+\\s){0,4})\\bbetter\\b",
-      "en",
-    ),
-    pattern("(?<!\\S)더\\s*나은", "ko"),
+    pattern("\\bbetter\\b", "en"),
+    pattern("더\\s*나은", "ko"),
     pattern("更好(?!的时光)", "zh"),
   ],
   exceptions: MARKETING_SUPERLATIVE_EXCEPTIONS,
@@ -120,15 +138,14 @@ const GUARANTEE = rule("rule.guarantee", "guarantee", {
     pattern("약속드립니다", "ko"),
     pattern("保证|保障", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
  * "#1" and every way of writing it.
  *
- * `\b` does not help here: `#` and `1` are not word characters in the same
- * sense, and "No. 1" has a full stop in the middle. The patterns are written
- * out rather than derived.
+ * The Chinese pattern names what the claim is first at. 第一 on its own is
+ * "first" -- 第一章 is chapter one and 第一次 is the first time -- and a rule
+ * that refused it would refuse a sentence explaining how to start.
  */
 const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
   patterns: [
@@ -138,9 +155,9 @@ const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
     pattern("\\btop[- ]rated\\b", "en"),
     pattern("1\\s*위", "ko"),
     pattern("업계\\s*1", "ko"),
-    pattern("第一(?!次|步|时间)", "zh"),
+    pattern("第一(?:的)?\\s*(?:AI|平台|产品|工具|选择|品牌|名)", "zh"),
+    pattern("(?:排名|销量|市场)\\s*第一", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
@@ -167,17 +184,18 @@ const AI_REVIEW_CONTRACT = rule("rule.ai-review-contract", "ai_review_contract",
     pattern("정확도\\s*(?:점수|평가)", "ko"),
     pattern("事实核查|模型达成一致|不同的?(?:提供商|供应商)", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
  * §7.1, third item: superiority claims with a known counter-example.
  *
- * Each of these is false, and known to be false, which is a different thing
- * from unsupported. "The only multi-model comparison" is not true; "the only
- * AI that reads HWP" is not true. A claim in this category is refused rather
- * than sent for approval, because there is nothing an approver could check
- * that would make it true.
+ * Each is false and known to be false, which is a different thing from
+ * unsupported: there is nothing an approver could check that would make "the
+ * only AI that reads HWP" true, so it is refused rather than queued.
+ *
+ * The Chinese pattern names what the claim is unique among, for the reason the
+ * rank rule does: 唯一标识符 is a unique identifier and appears in any sentence
+ * about file handling.
  */
 const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiority", {
   patterns: [
@@ -187,13 +205,12 @@ const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiorit
     ),
     pattern("\\bfirst (?:and only|ever)\\b", "en"),
     pattern("\\bonly (?:one|place|way) to compare\\b", "en"),
-    pattern("\\bonly .{0,20}\\bhwp\\b", "en"),
-    pattern("유일(?:한|하게)", "ko"),
+    pattern("\\bonly .{0,30}\\bhwp\\b", "en"),
+    pattern("유일(?:한|하게)\\s*(?:AI|도구|서비스|플랫폼|제품)?", "ko"),
     pattern("최초의?\\s*(?:다중|멀티|교차)", "ko"),
     pattern("우리만", "ko"),
-    pattern("唯一(?:的)?(?:一个)?(?:AI|工具|平台|产品)?", "zh"),
+    pattern("唯一(?:的)?\\s*(?:AI|工具|平台|产品|服务|选择)", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
@@ -213,16 +230,15 @@ const CHINA_MAINLAND = rule("rule.china-mainland", "china_mainland", {
     pattern("大陆(?:用户)?(?:可|能)(?:注册|订阅|付款)", "zh"),
     pattern("중국\\s*본토(?:에서)?\\s*(?:이용|사용|결제)", "ko"),
   ],
-  exceptions: [],
 });
 
 /**
  * §7.1, fifth item, first half: manufactured urgency.
  *
  * Australian Consumer Law treats a deadline that is not a deadline as
- * misleading conduct. The rule is about the shape of the sentence, not about
- * whether a promotion exists: a real promotion's end date is a fact the post
- * can state without "hurry".
+ * misleading conduct. The rule is about the shape of the sentence rather than
+ * about whether a promotion exists: a real promotion's end date is a fact the
+ * post can state without "hurry".
  */
 const AUSTRALIA_URGENCY = rule("rule.australia-urgency", "australia_urgency", {
   patterns: [
@@ -238,50 +254,42 @@ const AUSTRALIA_URGENCY = rule("rule.australia-urgency", "australia_urgency", {
     pattern("마감\\s*임박", "ko"),
     pattern("仅限今(?:天|日)|最后机会|抓紧时间", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
  * §7.1, fifth item, second half: copy aimed at people under sixteen.
  *
  * Not a rule about mentioning young people -- a post about a classroom is
- * ordinary -- but about addressing them as the buyer.
+ * ordinary -- but about addressing them as the buyer. The negative lookbehind
+ * is why "Tomverse is not for under 16s" survives: that is a safety notice, and
+ * refusing it would make the rule refuse the thing it wants said.
  */
 const AUSTRALIA_MINORS = rule("rule.australia-minors", "australia_minors", {
   patterns: [
-    pattern("\\bfor (?:kids|children|teens|teenagers)\\b", "en"),
+    pattern("(?<!\\bnot )\\bfor (?:kids|children|teens|teenagers)\\b", "en"),
     pattern("\\b(?:kids|teens),? (?:sign up|try it|get started)\\b", "en"),
-    pattern("\\bunder (?:13|16|18)s?\\b", "en"),
+    pattern("(?<!\\bnot )\\bfor under (?:13|16|18)s?\\b", "en"),
     pattern("\\bhigh ?school(?:ers)? ?(?:can|should|get)\\b", "en"),
-    pattern("(?:어린이|청소년|중학생|초등학생)(?:들)?(?:을|를|도)?\\s*(?:위한|대상)", "ko"),
+    pattern(
+      "(?:어린이|청소년|중학생|초등학생)(?:들)?(?:을|를|도)?\\s*(?:위한|대상)",
+      "ko",
+    ),
     pattern("(?:青少年|中学生|小学生)(?:专用|适用|快来)", "zh"),
   ],
-  exceptions: [],
 });
 
 /**
  * §7.1, last item: the memory-claim prohibitions.
  *
- * Imported from `lib/marketingMemoryClaims.ts` rather than restated. That
- * module owns what this product may say about account memory and about
- * importing from another AI service, its patterns are already negation-aware,
- * and a second copy here would drift from it.
+ * A detector rather than copied patterns. `lib/marketingMemoryClaims.ts` owns
+ * this question and its matcher is sentence-aware -- it does not fire on
+ * "projects do not share AI memory", which mentions memory in order to deny
+ * it. An earlier version copied its raw patterns and lost that with them, so
+ * "Tomverse does not clone your memories" was refused for making the claim it
+ * denies.
  */
 const MEMORY_CLAIM = rule("rule.memory-claim", "memory_claim", {
-  // Each of those patterns is a `RegExp` this module does not own, so its
-  // source is copied and recompiled rather than the object being held: a
-  // shared `RegExp` is a matcher anything can replace. The `g` and `y` flags
-  // are dropped because they carry `lastIndex`, which makes a shared pattern
-  // return different answers on successive calls.
-  //
-  // The claim id rather than a language: these patterns match Korean and
-  // English in one alternation, and calling them either would be wrong.
-  patterns: FORBIDDEN_MEMORY_CLAIMS.flatMap((claim) =>
-    claim.patterns.map((expression) =>
-      pattern(expression.source, claim.id, expression.flags.replace(/[gy]/g, "")),
-    ),
-  ),
-  exceptions: [],
+  detectors: [(text: string) => findForbiddenMemoryClaims(text).length > 0],
 });
 
 export const MARKETING_GUARD_RULES: readonly MarketingGuardRule[] =

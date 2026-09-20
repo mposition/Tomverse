@@ -14,26 +14,33 @@
  *
  * **Free copy is never autonomous.** Not "usually not" -- there is no input a
  * draft can carry that makes new words publishable without a person. The third
- * verdict requires the rendered text to be the server's rendering of a template
- * an approved chain proves, with every slot filled from a registry id, and
- * every claim and asset already used on this account. A draft that says it is
- * safe is a draft asserting the thing being checked, so `isNewCopy` and
- * anything like it is ignored.
+ * verdict requires the rendered text to hash to the digest a proved template
+ * carries, with every slot filled from a registry id, and every claim and asset
+ * already used on this account.
+ *
+ * **What the Guard decides for itself, and what it is told.** An earlier
+ * version took the §7.4 categories as plain booleans, so a caller passing
+ * `false` published a price post without a person. Everything derivable is
+ * derived here -- the channel from the draft, the price and comparison
+ * categories from the resolved claim types, "free" from the folded text -- and
+ * the few categories that need a reader are three-valued, where "not checked"
+ * means approval rather than permission.
  *
  * Pure: no server-only import, no network, no Prisma. Every fact it needs is an
  * input, which is what lets the corpus state a case without a database.
  */
+
+import { createHash } from "node:crypto";
 
 import {
   MARKETING_GUARD_RULES,
   type MarketingGuardRule,
 } from "@/lib/marketingGuardRules";
 import {
-  foldMarketingRuleText,
+  marketingTermPattern,
+  marketingTextForms,
   marketingTextHygiene,
-  marketingTextVariants,
   type MarketingHygieneCode,
-  type MarketingTextVariants,
 } from "@/lib/marketingGuardNormalise";
 
 /** Why a draft is refused. Closed, because a post records the code. */
@@ -41,17 +48,15 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "hygiene",
   "banned_claim",
   "price_source_not_stored",
+  "au_price_gst_unverifiable",
   "free_wording_without_condition",
   "model_claim_false",
   "feature_not_public",
   "comparison_without_evidence",
   "claim_unknown",
+  "claim_type_unknown",
+  "claim_not_declared",
   "asset_unknown",
-  // No `template_digest_mismatch`: a rendering whose digest does not match the
-  // template it names is `approval_required` with `new_copy`, not a refusal.
-  // The words may be perfectly good and only their provenance is in doubt, and
-  // a person is who settles that. A code nothing produces would describe
-  // nothing.
 ] as const);
 export type MarketingRejectCode = (typeof MARKETING_REJECT_CODES)[number];
 
@@ -68,16 +73,34 @@ export const MARKETING_APPROVAL_CODES = Object.freeze([
   "legal_or_policy",
   "rednote_channel",
   "undeclared_fact",
+  "category_unreadable",
   "alert_path_not_ready",
 ] as const);
 export type MarketingApprovalCode = (typeof MARKETING_APPROVAL_CODES)[number];
 
+/** The claim kinds §7.2 knows how to check. Anything else fails closed. */
+export const MARKETING_CLAIM_KINDS = Object.freeze([
+  "pricing",
+  "plan",
+  "model",
+  "feature",
+  "availability",
+  "comparison",
+] as const);
+export type MarketingClaimKind = (typeof MARKETING_CLAIM_KINDS)[number];
+
+/**
+ * A category a reader has to determine, in three states.
+ *
+ * `unreadable` is not a synonym for `no`. An earlier version took booleans, and
+ * a caller that had not looked passed `false` -- which published a post about
+ * an incident without a person. Whatever nobody checked goes to the approval
+ * queue, which is §7.2 rule 8 applied to §7.4.
+ */
+export type MarketingCategoryVerdict = "proved_true" | "proved_false" | "unreadable";
+
 export type MarketingGuardDecision =
-  | {
-      verdict: "reject";
-      codes: MarketingRejectCode[];
-      ruleIds: string[];
-    }
+  | { verdict: "reject"; codes: MarketingRejectCode[]; ruleIds: string[] }
   | {
       verdict: "approval_required";
       codes: MarketingApprovalCode[];
@@ -100,12 +123,15 @@ export type MarketingGuardDecision =
  */
 export type MarketingGuardClaimFact = {
   readonly claimId: string;
+  /** Checked against the closed list; an unrecognised kind is refused. */
   readonly type: string;
   /** `false` when the claim id is not in the registry at all. */
   readonly known: boolean;
   /** For `pricing` and `plan`: whether every field it uses is `stored`. */
   readonly priceSourcesAllStored?: boolean;
-  /** For a price claim aimed at Australia. */
+  /** For a price claim: the stored currency, and whether GST is stored as included. */
+  readonly currency?: string;
+  readonly gstInclusiveStored?: boolean;
   readonly targetsAustralia?: boolean;
   /** For `model`: the runtime row agreed with the claim. */
   readonly modelMatches?: boolean;
@@ -128,24 +154,56 @@ export type MarketingGuardDraft = {
   readonly renderedText: string;
   readonly locale: string;
   readonly channel: string;
+  /** The ids the draft declares. Checked against the resolved facts. */
   readonly claimIds: readonly string[];
   readonly assetIds: readonly string[];
-  /**
-   * The template this text claims to be a rendering of, if any.
-   *
-   * A claim, not a fact: it is checked against `templates`.
-   */
+  /** The template this text claims to render, if any. Checked, not believed. */
   readonly templateId?: string;
-  readonly renderedDigest?: string;
 };
 
-export type MarketingGuardTemplateFact = {
+/**
+ * A template the loader proved, sealed so it cannot be assembled by a caller.
+ *
+ * `lib/marketingTemplates.ts` walks the approval chain; this is the only shape
+ * the Guard accepts as its answer, and `sealMarketingTemplateProof()` is the
+ * only way to make one. An earlier version took a plain object, so a caller
+ * supplying `{ approvedDigest: <sha256 of my own text>, slotsFromRegistry:
+ * true }` published whatever it liked without an approval existing.
+ *
+ * Identity in a module-private `WeakSet`, not a property: a symbol is reachable
+ * through `Object.getOwnPropertySymbols()` and copied by a spread, which is how
+ * the same mistake was made in S1e and found there.
+ */
+const sealedProofs = new WeakSet<object>();
+
+declare const TEMPLATE_PROOF_BRAND: unique symbol;
+
+export type MarketingTemplateProof = {
   readonly templateId: string;
-  /** The digest the approval chain proved. `null` when no template resolved. */
-  readonly approvedDigest: string | null;
-  /** Whether every slot is filled from a registry id rather than free text. */
+  /** The digest the approval chain proved. */
+  readonly approvedDigest: string;
+  /** Whether every slot was filled from a registry id rather than free text. */
   readonly slotsFromRegistry: boolean;
+  readonly [TEMPLATE_PROOF_BRAND]?: true;
 };
+
+/**
+ * Seal a template the loader proved.
+ *
+ * Only `lib/marketingTemplates.ts` may call this, and
+ * `scripts/check-protected-table-writers.mjs` counts the call sites: the seal
+ * is what stands between a caller and an autonomous publication, so who may
+ * mint one is a fact the build checks rather than a comment.
+ */
+export function sealMarketingTemplateProof(proof: {
+  templateId: string;
+  approvedDigest: string;
+  slotsFromRegistry: boolean;
+}): MarketingTemplateProof {
+  const sealed = Object.freeze({ ...proof }) as MarketingTemplateProof;
+  sealedProofs.add(sealed);
+  return sealed;
+}
 
 export type MarketingGuardContext = {
   /**
@@ -157,14 +215,16 @@ export type MarketingGuardContext = {
    * `approval_required` today.
    */
   readonly priceFallbackAlertReady: boolean;
-  /** §7.4: RedNote is always an approval, whatever the post says. */
-  readonly channelAlwaysApproves: boolean;
-  /** §7.4 categories the caller has already determined about this draft. */
-  readonly mentionsCompetitor: boolean;
-  readonly mentionsPriceOrPromotion: boolean;
-  readonly mentionsIncidentOrSecurity: boolean;
-  readonly mentionsTestimonial: boolean;
-  readonly mentionsLegalOrPolicy: boolean;
+  /**
+   * The §7.4 categories that need a reader rather than a field.
+   *
+   * Three-valued, and `unreadable` sends the draft to a person. The categories
+   * that can be derived -- the channel, prices, competitors -- are derived
+   * below and are not here.
+   */
+  readonly incidentOrSecurity: MarketingCategoryVerdict;
+  readonly testimonial: MarketingCategoryVerdict;
+  readonly legalOrPolicy: MarketingCategoryVerdict;
 };
 
 export type MarketingGuardInput = {
@@ -173,48 +233,61 @@ export type MarketingGuardInput = {
     readonly claims: readonly MarketingGuardClaimFact[];
     readonly assets: readonly MarketingGuardAssetFact[];
   };
-  readonly templates: readonly MarketingGuardTemplateFact[];
+  readonly templates: readonly MarketingTemplateProof[];
   readonly context: MarketingGuardContext;
 };
 
+/** §7.4: the channel that always needs a person, read from the draft. */
+const ALWAYS_APPROVING_CHANNELS: readonly string[] = Object.freeze(["rednote"]);
+
 /**
- * Patterns that mean the text is asserting a fact it has not declared.
+ * Patterns that mean the text is asserting a fact.
  *
  * Deliberately crude. The point is not to extract the fact -- that is the
  * generator's job and the claim registry's -- but to notice that one is being
- * stated with no claim id behind it, which §7.2 rule 8 sends to a person.
+ * stated, which §7.2 rule 8 sends to a person unless a template approval has
+ * already checked it.
  */
-const UNDECLARED_FACT_PATTERNS: readonly { source: string; flags: string }[] =
-  Object.freeze([
-    Object.freeze({ source: "[$₩¥€£]\\s?\\d", flags: "u" }),
-    Object.freeze({ source: "\\b\\d+(?:[.,]\\d+)?\\s?(?:usd|aud|krw|cny|%)\\b", flags: "iu" }),
-    Object.freeze({ source: "\\b(?:gpt|claude|gemini|llama|mistral|grok|qwen)\\b", flags: "iu" }),
-    Object.freeze({ source: "\\b\\d+\\s?(?:x|times)\\s+(?:faster|cheaper|more)\\b", flags: "iu" }),
-    Object.freeze({ source: "무료", flags: "u" }),
-    Object.freeze({ source: "\\bfree\\b", flags: "iu" }),
-  ]);
-
-/** The credit condition a "free" post has to carry with it (§7.2 rule 4). */
-const FREE_CONDITION_PATTERNS: readonly { source: string; flags: string }[] =
-  Object.freeze([
-    Object.freeze({ source: "\\bcredits?\\b", flags: "iu" }),
-    Object.freeze({ source: "크레딧", flags: "u" }),
-    Object.freeze({ source: "额度|积分", flags: "u" }),
-  ]);
-
-const FREE_WORDING: readonly { source: string; flags: string }[] = Object.freeze(
+const FACT_PATTERNS: readonly { source: string; flags: string }[] = Object.freeze(
   [
-    Object.freeze({ source: "\\bfree\\b", flags: "iu" }),
-    Object.freeze({ source: "무료", flags: "u" }),
-    Object.freeze({ source: "免费", flags: "u" }),
+    Object.freeze({ source: "[$₩¥€£]\\s?\\d", flags: "u" }),
+    Object.freeze({
+      source: "\\b\\d+(?:[.,]\\d+)?\\s?(?:usd|aud|krw|cny|%)\\b",
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: "\\b(?:gpt|claude|gemini|llama|mistral|grok|qwen)\\b",
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: "\\b\\d+\\s?(?:x|times)\\s+(?:faster|cheaper|more)\\b",
+      flags: "iu",
+    }),
   ],
 );
 
-const matchesAny = (
-  text: string,
+/** The credit condition a "free" post has to carry with it (§7.2 rule 4). */
+const FREE_CONDITION = Object.freeze(["credit", "크레딧", "额度", "积分"]);
+const FREE_WORDING = Object.freeze(["free", "무료", "免费"]);
+
+const anyTermMatches = (
+  forms: readonly string[],
+  terms: readonly string[],
+  match: "word" | "substring" = "substring",
+): boolean =>
+  terms.some((term) => {
+    const pattern = marketingTermPattern(term, match);
+    return forms.some((form) => pattern.test(form));
+  });
+
+const anyPatternMatches = (
+  forms: readonly string[],
   patterns: readonly { source: string; flags: string }[],
 ): boolean =>
-  patterns.some((entry) => new RegExp(entry.source, entry.flags).test(text));
+  patterns.some((entry) => {
+    const expression = new RegExp(entry.source, entry.flags);
+    return forms.some((form) => expression.test(form));
+  });
 
 /**
  * Whether a rule fires on any of the folded forms.
@@ -223,48 +296,34 @@ const matchesAny = (
  * an English ban word, and the locale field is the author's assertion rather
  * than a fact about the bytes.
  */
-const ruleFires = (
-  rule: MarketingGuardRule,
-  variants: MarketingTextVariants,
-): boolean => {
-  const forms = [variants.folded, variants.leet, variants.collapsed];
-
+const ruleFires = (rule: MarketingGuardRule, forms: readonly string[]): boolean => {
   // An exception is a longer string that contains a term and is not the claim.
   // Removed from the forms before matching, so 최고기온 stops 최고 firing while
   // "최고기온과 최고 모델" still fires on the second one.
   const cleaned = forms.map((form) =>
-    rule.exceptions.reduce(
-      (text, exception) =>
-        text.split(foldMarketingRuleText(exception).collapsed).join(" "),
-      form,
-    ),
+    rule.exceptions.reduce((text, exception) => {
+      const pattern = marketingTermPattern(exception, "substring");
+      return text.replace(new RegExp(pattern.source, "gu"), " ");
+    }, form),
   );
 
   for (const term of rule.terms) {
-    const needle = foldMarketingRuleText(term.text).collapsed;
-    if (!needle) continue;
-    const expression =
-      term.match === "word"
-        ? new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "u")
-        : null;
-    const hit = cleaned.some((form) =>
-      expression ? expression.test(form) : form.includes(needle),
-    );
-    if (hit) return true;
+    const pattern = marketingTermPattern(term.text, term.match);
+    if (cleaned.some((form) => pattern.test(form))) return true;
   }
 
-  for (const entry of rule.patterns) {
-    const expression = new RegExp(entry.source, entry.flags);
-    // Patterns are written against readable text, so they run on the readable
-    // form too: a Korean lookahead does not survive the leet fold.
-    if (expression.test(variants.readable)) return true;
-    if (cleaned.some((form) => expression.test(form))) return true;
-  }
+  if (anyPatternMatches(cleaned, rule.patterns)) return true;
 
-  return false;
+  // A detector reads the text as a person would rather than as folded forms:
+  // the memory detector is sentence-aware, and folding would break the
+  // negation handling that keeps a denial from reading as a claim.
+  return rule.detectors.some((detector) => detector(forms[0] ?? ""));
 };
 
 const uniqueInOrder = <T>(values: readonly T[]): T[] => [...new Set(values)];
+
+const sha256 = (value: string): string =>
+  createHash("sha256").update(value, "utf8").digest("hex");
 
 /**
  * The decision.
@@ -288,18 +347,44 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   }
 
   // --- 2. what it says ----------------------------------------------------
-  const variants = marketingTextVariants(draft.renderedText);
+  const forms = marketingTextForms(draft.renderedText);
   for (const rule of MARKETING_GUARD_RULES) {
-    if (ruleFires(rule, variants)) {
+    if (ruleFires(rule, forms)) {
       rejectCodes.push("banned_claim");
       ruleIds.push(rule.id);
     }
   }
 
-  // --- 3. the claims it declares -----------------------------------------
+  // --- 3. the ids the draft declares are the facts it was given -----------
+  // An earlier version never read `claimIds` at all, so a draft could declare
+  // a claim nobody resolved and publish it.
+  const resolvedClaimIds = facts.claims.map((claim) => claim.claimId);
+  const resolvedAssetIds = facts.assets.map((asset) => asset.assetId);
+  const sameSet = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((value) => right.includes(value));
+
+  if (!sameSet([...draft.claimIds], resolvedClaimIds)) {
+    rejectCodes.push("claim_not_declared");
+    ruleIds.push("claim.set-mismatch");
+  }
+  if (!sameSet([...draft.assetIds], resolvedAssetIds)) {
+    rejectCodes.push("claim_not_declared");
+    ruleIds.push("asset.set-mismatch");
+  }
+
+  // --- 4. the claims ------------------------------------------------------
   for (const claim of facts.claims) {
     if (!claim.known) {
       rejectCodes.push("claim_unknown");
+      ruleIds.push(`claim.${claim.claimId}`);
+      continue;
+    }
+
+    if (!(MARKETING_CLAIM_KINDS as readonly string[]).includes(claim.type)) {
+      // Fail closed: a kind §7.2 has no check for is a kind nothing checked.
+      rejectCodes.push("claim_type_unknown");
       ruleIds.push(`claim.${claim.claimId}`);
       continue;
     }
@@ -309,10 +394,18 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
         rejectCodes.push("price_source_not_stored");
         ruleIds.push(`claim.${claim.claimId}`);
       } else if (claim.targetsAustralia === true) {
-        // §7.4: an Australian price post is always an approval, even when
-        // every field behind it is stored.
-        approvalCodes.push("australian_price");
+        // S1 plan, B2 amendment: an Australian price needs a stored AUD
+        // amount *and* a stored flag proving the displayed price includes
+        // GST. Neither is derivable from the number, and the catalogue
+        // carries no such flag today, so this refuses.
+        if (claim.currency !== "AUD" || claim.gstInclusiveStored !== true) {
+          rejectCodes.push("au_price_gst_unverifiable");
+          ruleIds.push(`claim.${claim.claimId}`);
+        } else {
+          approvalCodes.push("australian_price");
+        }
       }
+      approvalCodes.push("price_or_promotion");
     }
 
     if (claim.type === "model" && claim.modelMatches !== true) {
@@ -349,36 +442,31 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     if (!asset.usedBefore) approvalCodes.push("first_use_of_asset");
   }
 
-  // --- 4. "free" needs its condition in the same post ---------------------
+  // --- 5. "free" needs its condition in the same post ---------------------
+  // Checked on the folded forms, so "frее" with Cyrillic е is the same word.
   if (
-    matchesAny(variants.readable, FREE_WORDING) &&
-    !matchesAny(variants.readable, FREE_CONDITION_PATTERNS)
+    anyTermMatches(forms, FREE_WORDING) &&
+    !anyTermMatches(forms, FREE_CONDITION)
   ) {
     rejectCodes.push("free_wording_without_condition");
     ruleIds.push("rule.free-wording");
   }
 
-  // --- 5. §7.4, the categories that always need a person -------------------
-  if (context.channelAlwaysApproves) approvalCodes.push("rednote_channel");
-  if (context.mentionsCompetitor) approvalCodes.push("competitor_named");
-  if (context.mentionsPriceOrPromotion) approvalCodes.push("price_or_promotion");
-  if (context.mentionsIncidentOrSecurity) {
-    approvalCodes.push("incident_or_security");
+  // --- 6. §7.4 ------------------------------------------------------------
+  // Derived from the draft rather than taken on trust.
+  if (ALWAYS_APPROVING_CHANNELS.includes(draft.channel.toLowerCase())) {
+    approvalCodes.push("rednote_channel");
   }
-  if (context.mentionsTestimonial) approvalCodes.push("testimonial");
-  if (context.mentionsLegalOrPolicy) approvalCodes.push("legal_or_policy");
-
-  // A fact stated with no claim id behind it. §7.2 rule 8: what cannot be
-  // verified goes to the approval queue rather than being refused, because the
-  // failure is the extraction's and a person can read the sentence.
-  if (
-    facts.claims.length === 0 &&
-    matchesAny(variants.readable, UNDECLARED_FACT_PATTERNS)
-  ) {
-    approvalCodes.push("undeclared_fact");
+  for (const [verdict, code] of [
+    [context.incidentOrSecurity, "incident_or_security"],
+    [context.testimonial, "testimonial"],
+    [context.legalOrPolicy, "legal_or_policy"],
+  ] as const) {
+    if (verdict === "proved_true") approvalCodes.push(code);
+    if (verdict === "unreadable") approvalCodes.push("category_unreadable");
   }
 
-  // --- 6. the verdict -----------------------------------------------------
+  // --- 7. the verdict -----------------------------------------------------
   if (rejectCodes.length > 0) {
     return {
       verdict: "reject",
@@ -387,21 +475,27 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     };
   }
 
-  const template = draft.templateId
+  const named = draft.templateId
     ? templates.find((entry) => entry.templateId === draft.templateId)
     : undefined;
 
-  // Free copy is at best an approval, and so is a template that did not prove.
+  // The seal, the slots, and a digest this function computed from the text it
+  // was given. An earlier version compared two values the caller supplied.
   const templateStands =
-    !!template &&
-    !!template.approvedDigest &&
-    template.slotsFromRegistry &&
-    !!draft.renderedDigest &&
-    draft.renderedDigest === template.approvedDigest;
+    !!named &&
+    sealedProofs.has(named) &&
+    named.slotsFromRegistry &&
+    named.approvedDigest === sha256(draft.renderedText);
 
   if (!templateStands) approvalCodes.push("new_copy");
 
-  // The alert path has to exist before a refusal could be heard about.
+  // A fact stated in free copy goes to a person. For a proved template the
+  // same check ran when the template was approved, which is §7.2's "템플릿은
+  // 템플릿 승인 시".
+  if (!templateStands && anyPatternMatches(forms, FACT_PATTERNS)) {
+    approvalCodes.push("undeclared_fact");
+  }
+
   if (!context.priceFallbackAlertReady) {
     approvalCodes.push("alert_path_not_ready");
   }
@@ -414,13 +508,10 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     };
   }
 
-  // Unreachable in S1: nothing writes the audit rows a template needs, and
-  // `priceFallbackAlertReady` is false. Both are inputs rather than constants
-  // so the corpus can prove the path exists and refuses correctly.
   return {
     verdict: "autonomous_eligible",
-    templateId: template!.templateId,
-    templateDigest: template!.approvedDigest!,
+    templateId: named!.templateId,
+    templateDigest: named!.approvedDigest,
     ruleIds: uniqueInOrder(ruleIds),
   };
 }
@@ -430,10 +521,15 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
  *
  * A template is approved words, and the words are checked then rather than on
  * every post that renders them -- otherwise a rule added later would silently
- * stop applying to the posts that matter most.
+ * stop applying to the posts that matter most, and the fact patterns would
+ * never be checked at all for a template rendering.
  */
 export function guardTemplateForApproval(
-  template: { readonly renderedText: string; readonly locale: string; readonly channel: string },
+  template: {
+    readonly renderedText: string;
+    readonly locale: string;
+    readonly channel: string;
+  },
   facts: MarketingGuardInput["facts"],
   context: MarketingGuardContext,
 ): MarketingGuardDecision {

@@ -7,35 +7,66 @@
  * leetspeak. None of those are things a person types by accident; they are what
  * somebody types when a filter is in the way.
  *
- * **The needles are folded by the same functions as the haystack.** That is the
- * whole design. Folding `1` to `i` also folds `l` to `i`, so "leetspeak" and
- * "1eetspeak" and "ieetspeak" are one string -- and a rule written as "leet"
- * becomes "ieet" too, so it still matches. Trying to fold only the text would
- * mean enumerating every spelling of every rule; trying to enumerate variants
- * of the input means a combinatorial explosion for every ambiguous character.
- * Folding both sides collapses that to one comparison.
+ * **Separators are tolerated by the needle, not removed from the haystack.**
+ * An earlier version collapsed separators in the text, which forced a choice
+ * between two wrong answers: collapse everything and "bestow" becomes "best",
+ * or collapse only between single characters and "be.st" gets through. The text
+ * keeps its separators, and a term is compiled into a pattern that allows them
+ * between its own characters with boundary assertions at the ends. "best" then
+ * matches "b e s t", "be.st" and "b.e.s.t", and does not match "bestow".
+ *
+ * **Leetspeak produces two variants rather than one collapsed alphabet.**
+ * `1` is `i` in "1eet" and `l` in "1ogin". An earlier version folded `l`, `i`
+ * and `1` together to avoid choosing -- which also folded every rule's own `l`
+ * into `i`, so a pattern written as "only" stopped matching "on1y". Two
+ * variants, one reading each digit as its round-shaped letter and one as its
+ * straight-shaped letter, cover both readings and leave the letters alone.
  *
  * Every variant is checked by every rule, whatever the draft's locale says: a
- * Korean draft can carry an English ban word and a English draft can carry a
+ * Korean draft can carry an English ban word and an English draft can carry a
  * Korean one, and the locale field is the author's claim rather than a fact
  * about the bytes.
  *
  * Pure: no server-only import, no network, no Prisma.
  */
 
+const codePoint = (value: number): string => String.fromCodePoint(value);
+
+const BIDI_SOURCE =
+  `[${codePoint(0x061c)}${codePoint(0x200e)}${codePoint(0x200f)}` +
+  `${codePoint(0x202a)}-${codePoint(0x202e)}` +
+  `${codePoint(0x2066)}-${codePoint(0x2069)}]`;
+
+const CONTROL_SOURCE =
+  `[${codePoint(0x00)}-${codePoint(0x08)}${codePoint(0x0b)}${codePoint(0x0c)}` +
+  `${codePoint(0x0e)}-${codePoint(0x1f)}` +
+  `${codePoint(0x7f)}-${codePoint(0x9f)}]`;
+
 /**
- * Characters that are invisible, or that change how the text after them reads.
+ * Characters that are invisible or that have no width of their own.
  *
- * Zero-width joiners and non-joiners are legitimate in Indic and emoji
- * sequences and are still refused here, because a marketing caption in the four
- * locales this product publishes in has no use for one -- and the Guard's
- * refusal costs an operator a rewrite, while a false accept costs a published
- * post that says something other than what was reviewed.
+ * One Unicode property rather than a hand-written range, because a hand-written
+ * range is a list of the tricks somebody has already played. The first version
+ * named five code points and missed the soft hyphen, the combining grapheme
+ * joiner and the whole tag block: `b`, soft hyphen, `est` reads as "best" and
+ * folded to something else.
  */
-const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF\u180E]/u;
+const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
+
+/**
+ * The two default-ignorable characters a caption may legitimately contain.
+ *
+ * They select whether the character before them renders as an emoji or as
+ * text, and a caption with an emoji carries one. They are still stripped before
+ * folding, so they cannot be used to split a word.
+ */
+const VARIATION_SELECTORS = new RegExp(
+  `[${codePoint(0xfe0e)}${codePoint(0xfe0f)}]`,
+  "gu",
+);
 
 /** Left-to-right and right-to-left overrides, isolates and embeddings. */
-const BIDI_CONTROL = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+const BIDI_CONTROL = new RegExp(BIDI_SOURCE, "u");
 
 /**
  * C0 and C1 controls, less the three a caption may legitimately contain.
@@ -43,17 +74,18 @@ const BIDI_CONTROL = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
  * Tab, newline and carriage return are ordinary in a multi-line caption. Every
  * other control is either invisible or terminal-specific.
  */
-const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
+const CONTROL = new RegExp(CONTROL_SOURCE, "u");
 
 /**
- * An `@` mention in any of the shapes a platform recognises.
+ * An `@` mention, in any script and at any length.
  *
- * Full-width `＠` is folded to `@` by NFKC before this runs, and the small
- * commercial at `﹫` with it, so the pattern only has to know about one. A post
- * this product publishes does not address an account: a mention notifies
- * somebody, and which somebody is a decision no template records.
+ * The first version required two ASCII characters after the `@`, which let
+ * `@x` and `@홍길동` through. A mention notifies somebody, and which somebody
+ * is a decision no template records, so the shape is what matters rather than
+ * the handle's plausibility. Full-width `＠` is folded to `@` by NFKC before
+ * this runs.
  */
-const MENTION = /(^|[^\w])@[A-Za-z0-9._]{2,}/u;
+const MENTION = /(?:^|[^\p{L}\p{N}_])@[\p{L}\p{N}_.]/u;
 
 /**
  * Anything that reads as a web address.
@@ -61,22 +93,28 @@ const MENTION = /(^|[^\w])@[A-Za-z0-9._]{2,}/u;
  * Wide on purpose. The one URL a post may carry is assembled by
  * `lib/marketingLinks.ts` from an approved id and attached by the publisher, so
  * a URL *in the generated text* is always something the model produced -- and a
- * model that produces a URL has produced a destination nobody approved. The
- * obfuscations are here because they are what somebody writes when a plain URL
- * is refused: `hxxp`, `example[.]com`, `example(dot)com`.
+ * model that produces a URL has produced a destination nobody approved.
+ *
+ * The host pattern takes any label of two or more letters as its suffix rather
+ * than a fixed list: the first version listed thirty and `evil.cloud` was not
+ * among them, and there are well over a thousand. `\p{L}` rather than `a-z`,
+ * because `例子.中国` is an address too, and the dot is matched in its
+ * full-width and ideographic shapes for the same reason.
  */
 const URL_LIKE = new RegExp(
   [
     "\\b[a-z][a-z0-9+.-]*://",
     "\\bh[xt]{2}ps?\\b",
-    "\\bwww\\d{0,3}\\.",
-    // A bare host: a label, a dot, and a plausible TLD. `xn--` covers IDN
-    // punycode, which is how a look-alike domain is written once it is encoded.
-    "\\b(?:xn--[a-z0-9-]+|[a-z0-9][a-z0-9-]{0,62})\\.(?:com|net|org|io|ai|app|co|kr|cn|tw|hk|jp|us|uk|dev|xyz|link|site|online|shop|store|info|biz|me|tv|cc)\\b",
-    // The same, written to survive a filter.
+    `\\bwww\\d{0,3}[.${codePoint(0xff0e)}${codePoint(0x3002)}]`,
+    // Lookarounds rather than `\b`, for the reason the terms use them: `\b` is
+    // an ASCII word boundary, so there is none before 例 and `\b例子.中国\b`
+    // matches nothing at all -- which is how an entirely ordinary Chinese
+    // domain got past the first version of this.
+    `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}[.${codePoint(0xff0e)}${codePoint(0x3002)}${codePoint(0xfe52)}]\\p{L}{2,24}(?![\\p{L}\\p{N}-])`,
+    `\\b\\d{1,3}(?:[.${codePoint(0xff0e)}${codePoint(0x3002)}]\\d{1,3}){3}\\b`,
     "\\[\\s*\\.\\s*\\]",
-    "\\(\\s*(?:dot|점)\\s*\\)",
-    "\\s(?:dot|점)\\s[a-z]{2,}",
+    "\\(\\s*(?:dot|점|点)\\s*\\)",
+    "\\s(?:dot|점|点)\\s\\p{L}{2,}",
   ].join("|"),
   "iu",
 );
@@ -121,61 +159,46 @@ export const MARKETING_HYGIENE_CODES = Object.freeze([
 export type MarketingHygieneCode = (typeof MARKETING_HYGIENE_CODES)[number];
 
 /**
- * Letters that are not the letter they look like.
- *
- * Curated rather than generated: the full Unicode confusables table maps
- * thousands of characters, including many a Korean or Chinese caption uses
- * legitimately, and folding those would make the Korean rules match Korean
- * text at random. What is here is the Cyrillic and Greek that look like Latin
- * in a sans-serif face, which is the set somebody reaches for to write an
- * English ban word that does not look like one.
- *
- * Full-width Latin, mathematical alphanumerics and the enclosed forms are not
- * here because NFKC already folds them, which runs first.
- */
-/**
  * The circled and squared letter forms, mapped to the letter they enclose.
  *
  * Generated from their code point ranges rather than typed out, because there
- * are a hundred and four of them and a hand-written table would have holes --
- * which is exactly how `b🅴st` got through the first version of this module.
- * NFKC folds two of these four ranges and leaves the negative forms alone, so
- * the generated table covers all four and the duplicates cost nothing.
- *
- * Symbols rather than letters, so they would otherwise be read as separators
- * and split a word rather than spell one.
+ * are over a hundred and a hand-written table would have holes -- which is how
+ * `b🅴st` got through the first version. NFKC folds two of these ranges and
+ * leaves the negative forms alone, so the table covers all of them and the
+ * duplicates cost nothing.
  */
 function enclosedLatinLetters(): Record<string, string> {
   const map: Record<string, string> = {};
-  const starts = [
-    0x24b6, // Ⓐ circled capital
-    0x24d0, // ⓐ circled small
-    0x1f130, // 🄰 squared capital
-    0x1f150, // 🅐 negative circled capital
-    0x1f170, // 🅰 negative squared capital
-  ];
-  for (const start of starts) {
+  for (const start of [0x24b6, 0x24d0, 0x1f130, 0x1f150, 0x1f170]) {
     for (let index = 0; index < 26; index += 1) {
-      map[String.fromCodePoint(start + index)] = String.fromCharCode(
-        "a".charCodeAt(0) + index,
-      );
+      map[codePoint(start + index)] = String.fromCharCode(97 + index);
     }
   }
   return map;
 }
 
+/**
+ * Letters that are not the letter they look like.
+ *
+ * Curated rather than generated: the full Unicode confusables table maps
+ * thousands of characters, including many a Korean or Chinese caption uses
+ * legitimately, and folding those would make the Korean rules match Korean text
+ * at random. What is here is the Cyrillic and Greek that look like Latin in a
+ * sans-serif face, which is the set somebody reaches for to write an English
+ * ban word that does not look like one.
+ *
+ * Full-width Latin, mathematical alphanumerics and the enclosed forms are
+ * folded by NFKC, which runs first.
+ */
 const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
-  // Cyrillic
   а: "a", б: "b", в: "b", г: "r", д: "d", е: "e", ж: "x", з: "3", и: "n",
   й: "n", к: "k", л: "n", м: "m", н: "h", о: "o", п: "n", р: "p", с: "c",
   т: "t", у: "y", ф: "o", х: "x", ц: "u", ч: "y", ш: "w", щ: "w", ъ: "b",
   ы: "b", ь: "b", э: "e", ю: "o", я: "r", і: "i", ј: "j", ѕ: "s", ԁ: "d",
   ԛ: "q", ԝ: "w", ё: "e",
-  // Greek
   α: "a", β: "b", γ: "y", δ: "d", ε: "e", ζ: "z", η: "n", θ: "o", ι: "i",
   κ: "k", λ: "n", μ: "m", ν: "v", ξ: "e", ο: "o", π: "n", ρ: "p", ς: "s",
   σ: "o", τ: "t", υ: "u", φ: "o", χ: "x", ψ: "y", ω: "w",
-  // Latin letters that are not the ASCII one
   ɪ: "i", ʟ: "l", ɴ: "n", ʀ: "r", ᴀ: "a", ᴄ: "c", ᴅ: "d", ᴇ: "e", ɢ: "g",
   ʜ: "h", ᴊ: "j", ᴋ: "k", ᴍ: "m", ᴏ: "o", ᴘ: "p", ᴛ: "t", ᴜ: "u", ᴠ: "v",
   ᴡ: "w", ʏ: "y", ᴢ: "z", ǀ: "l", ı: "i", ɡ: "g",
@@ -183,128 +206,134 @@ const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /**
- * Characters that stand in for letters when somebody is writing around a
- * filter, folded into one class each.
+ * Digits and symbols that stand in for letters, in the two readings each has.
  *
- * `1`, `l` and `i` all become `i`, and `0` and `o` both become `o`, because the
- * point is not to guess which the author meant -- it is to make every spelling
- * one string. The rules are folded by the same function, so a rule containing
- * `l` still matches after its own `l` has become `i`.
+ * `round` reads `1` as `i`; `straight` reads it as `l`. Both variants are
+ * produced and every rule is checked against both, which is what lets a rule
+ * keep its own letters: an earlier version folded `l` into `i` to avoid
+ * choosing, and a pattern written as "only" then failed to match "on1y" --
+ * because the pattern's own `l` had become `i` and the text's `1` had too, but
+ * they met at different letters.
  */
-const LEET: Readonly<Record<string, string>> = Object.freeze({
-  "0": "o", o: "o",
-  "1": "i", l: "i", i: "i", "!": "i", "|": "i",
-  "3": "e", e: "e",
-  "4": "a", "@": "a", a: "a",
-  "5": "s", $: "s", s: "s",
-  "7": "t", t: "t",
-  "8": "b", b: "b",
-  "9": "g", g: "g",
-  "6": "g",
-  "2": "z", z: "z",
+const LEET_ROUND: Readonly<Record<string, string>> = Object.freeze({
+  "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t",
+  "8": "b", "9": "g", "@": "a", $: "s", "!": "i", "|": "i",
 });
+
+const LEET_STRAIGHT: Readonly<Record<string, string>> = Object.freeze({
+  ...LEET_ROUND,
+  "1": "l",
+  "!": "l",
+  "|": "l",
+});
+
+const foldWith = (
+  value: string,
+  table: Readonly<Record<string, string>>,
+): string =>
+  Array.from(value)
+    .map((character) =>
+      Object.hasOwn(table, character) ? table[character] : character,
+    )
+    .join("");
 
 /**
  * What a reader sees: NFKC applied, and nothing invisible left in it.
  *
  * The invisible characters are removed rather than kept, because a rule that
- * had to allow for one between every pair of letters would be a rule nobody
- * can read. Their *presence* is reported separately by `marketingTextHygiene`
- * and refuses the draft on its own.
+ * had to allow for one between every pair of letters would be a rule nobody can
+ * read. Their *presence* is reported separately by `marketingTextHygiene` and
+ * refuses the draft on its own.
  */
 const readableForm = (raw: string): string =>
   raw
     .normalize("NFKC")
-    .replace(/[\u200B-\u200D\u2060\uFEFF\u180E]/gu, "")
-    .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, "")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "");
-
-const foldConfusables = (value: string): string =>
-  Array.from(value)
-    .map((character) =>
-      Object.hasOwn(CONFUSABLES, character)
-        ? CONFUSABLES[character]
-        : character,
-    )
-    .join("");
-
-const foldLeet = (value: string): string =>
-  Array.from(value)
-    .map((character) =>
-      Object.hasOwn(LEET, character) ? LEET[character] : character,
-    )
-    .join("");
-
-/**
- * Separators between single characters removed, and nothing else.
- *
- * This is the variant that catches "b e s t" and "b.e.s.t" and "b🅴s🅴t". What
- * it must not do is remove every separator. A global collapse turns "the best"
- * into "thebest", where a rule with a word boundary no longer matches, and --
- * worse in the other direction -- it makes "bestow" and "asbestos"
- * indistinguishable from "best" for any rule that then has to match without
- * boundaries. The S1 plan names both of those as cases the corpus must show are
- * not rejected.
- *
- * So the rule is the plan's own wording: separators *between letters*, where a
- * letter is a run of one. Text spaced out to defeat a filter is a sequence of
- * one-character runs; ordinary prose is not.
- */
-const collapseSeparators = (value: string): string => {
-  const tokens = value.match(/[\p{L}\p{N}]+/gu);
-  if (!tokens) return "";
-
-  const out: string[] = [];
-  let run = "";
-  for (const token of tokens) {
-    if (Array.from(token).length === 1) {
-      run += token;
-      continue;
-    }
-    if (run) {
-      out.push(run);
-      run = "";
-    }
-    out.push(token);
-  }
-  if (run) out.push(run);
-  return out.join(" ");
-};
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+    .replace(new RegExp(BIDI_SOURCE, "gu"), "")
+    .replace(new RegExp(CONTROL_SOURCE, "gu"), "");
 
 export type MarketingTextVariants = {
   /** NFKC, invisible characters stripped. What a person would read. */
   readable: string;
   /** Lower-cased with look-alike letters folded to Latin. */
   folded: string;
-  /** `folded`, with digit and symbol stand-ins folded into letter classes. */
-  leet: string;
-  /** `leet`, with every separator removed. */
-  collapsed: string;
+  /** `folded` with digits read as their round-shaped letters. */
+  leetRound: string;
+  /** `folded` with digits read as their straight-shaped letters. */
+  leetStraight: string;
 };
 
 /**
  * The four forms every rule is checked against.
  *
- * Nested rather than parallel: each is the one before it with one more fold
- * applied, so a rule that matches an earlier form matches every later one. That
- * ordering is what makes "checked against all variants" cheap to reason about.
+ * Separators are *not* removed from any of them. A term tolerates separators
+ * through the pattern `marketingTermPattern()` builds, which is what keeps
+ * "be.st" caught and "bestow" clean at the same time.
  */
 export function marketingTextVariants(raw: string): MarketingTextVariants {
   const readable = readableForm(raw);
-  const folded = foldConfusables(readable.toLowerCase());
-  const leet = foldLeet(folded);
-  return { readable, folded, leet, collapsed: collapseSeparators(leet) };
+  const folded = foldWith(readable.toLowerCase(), CONFUSABLES);
+  return {
+    readable,
+    folded,
+    leetRound: foldWith(folded, LEET_ROUND),
+    leetStraight: foldWith(folded, LEET_STRAIGHT),
+  };
 }
 
+/** Every form a rule should be checked against, in one array. */
+export function marketingTextForms(raw: string): string[] {
+  const variants = marketingTextVariants(raw);
+  return [
+    variants.readable,
+    variants.folded,
+    variants.leetRound,
+    variants.leetStraight,
+  ];
+}
+
+/** The same folds applied to a rule's own text, so needle and haystack meet. */
+export function foldMarketingRuleText(raw: string): string {
+  return marketingTextVariants(raw).leetRound;
+}
+
+const escapeForRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Anything between two characters of a word that a person did not mean to type. */
+const SEPARATOR = "[^\\p{L}\\p{N}]*";
+
 /**
- * The same folds, applied to a rule's own text.
+ * A term compiled into a pattern that tolerates separators inside it.
  *
- * Exported because a rule is written as the word a person would write, and the
- * Guard needs it in the form the draft has been folded into. A rule folded by
- * anything other than this would silently stop matching.
+ * This is where "checked against every spelling" actually happens. The term is
+ * folded first, then its characters are joined by an optional run of
+ * non-alphanumerics, so "b e s t", "be.st" and "b🅴s🅴t" all match.
+ *
+ * `word` terms get boundary assertions written as lookarounds rather than
+ * `\b`, because `\b` is defined on ASCII word characters and would be wrong at
+ * both ends of a Korean term -- `\b최고\b` matches nothing at all.
  */
-export function foldMarketingRuleText(raw: string): MarketingTextVariants {
-  return marketingTextVariants(raw);
+export function marketingTermPattern(
+  term: string,
+  match: "word" | "substring",
+): RegExp {
+  const body = Array.from(foldMarketingRuleText(term))
+    .filter((character) => /[\p{L}\p{N}]/u.test(character))
+    .map(escapeForRegExp)
+    .join(SEPARATOR);
+
+  // A term with nothing alphanumeric in it would compile to an empty pattern,
+  // which matches everywhere. Never matching is the safe answer for a term
+  // somebody wrote wrong.
+  if (!body) return /(?!)/u;
+
+  return new RegExp(
+    match === "word"
+      ? `(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`
+      : body,
+    "u",
+  );
 }
 
 /**
@@ -318,7 +347,13 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
 
   if (CONTROL.test(raw)) codes.push("control_character");
   if (BIDI_CONTROL.test(raw)) codes.push("bidi_control");
-  if (ZERO_WIDTH.test(raw)) codes.push("zero_width");
+  // Bidi controls are default-ignorable too, and they already have their own
+  // code. Reporting both would make every direction override arrive with a
+  // second finding that says nothing more.
+  const invisible = raw
+    .replace(VARIATION_SELECTORS, "")
+    .replace(new RegExp(BIDI_SOURCE, "gu"), "");
+  if (DEFAULT_IGNORABLE.test(invisible)) codes.push("zero_width");
 
   // The readable form for the rest: a mention written with a zero-width space
   // after the `@` is still a mention, and the invisible character has already
