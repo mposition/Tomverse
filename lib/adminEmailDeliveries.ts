@@ -244,6 +244,18 @@ export type AdminSuppressionRow = {
  * cause released between them can leave a selector with nothing active, and
  * that selector is dropped rather than drawn as an empty row.
  */
+/**
+ * What joins a selector's three parts into one map key.
+ *
+ * A NUL, because Postgres text cannot contain one, so no address, scope or
+ * purpose can spell a different selector's key. Written with
+ * `String.fromCharCode` rather than as an escape: the escape is the thing that
+ * arrives as a literal control character when it passes through one editing
+ * tool too many, and the repository's control-character check refuses the file
+ * when it does.
+ */
+const SELECTOR_KEY_SEPARATOR = String.fromCharCode(0);
+
 export async function listSuppressions(input: {
   emailAddress: string | null;
   limit: number;
@@ -289,7 +301,7 @@ export async function listSuppressions(input: {
 
   const rows = new Map<string, AdminSuppressionRow>();
   for (const { emailAddress, scope, purposeKey, ...cause } of causes) {
-    const key = [emailAddress, scope, purposeKey].join("\u0000");
+    const key = [emailAddress, scope, purposeKey].join(SELECTOR_KEY_SEPARATOR);
     const existing = rows.get(key);
     if (existing) {
       existing.causes.push(cause);
@@ -310,7 +322,7 @@ export async function listSuppressions(input: {
   // last cause between the two reads is simply absent from the map.
   return selectors
     .map(({ emailAddress, scope, purposeKey }) =>
-      rows.get([emailAddress, scope, purposeKey].join(" "))
+      rows.get([emailAddress, scope, purposeKey].join(SELECTOR_KEY_SEPARATOR))
     )
     .filter((row): row is AdminSuppressionRow => row !== undefined);
 }

@@ -265,7 +265,16 @@ test("a lift works with no SuppressionEntry behind it", async () => {
   const emailAddress = address();
   await suppress(emailAddress, "manual");
   await setAuthority("causes");
-  await prisma.suppressionEntry.deleteMany({ where: { emailAddress } });
+
+  // Marked as a cause writer, because `suppression_entry_to_cause` fires on
+  // DELETE as well as on INSERT and UPDATE: an unmarked delete of the mirror
+  // releases the causes behind it. That is right for the mirror and is the
+  // opposite of the state this test is trying to reach. C-2 drops the trigger;
+  // until then this is how a database with causes and no entry is made.
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.suppression_writer', 'causes', true)`;
+    await tx.suppressionEntry.deleteMany({ where: { emailAddress } });
+  });
 
   const handle = await causeFor(emailAddress, "manual");
   const active = await liveSet(handle);
