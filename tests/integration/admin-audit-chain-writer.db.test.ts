@@ -25,6 +25,8 @@ const SECRET = "admin-audit-chain-writer-db-secret-0032";
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "PromptRefinerShadowAttempt",
+      "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AdminAuditLog"

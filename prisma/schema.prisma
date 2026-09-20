@@ -5541,6 +5541,7 @@ model PromptRefinerReservationStage {
   updatedAt                      DateTime @updatedAt
 
   reservations          PromptRefinerReservation[]
+  shadowRuns            PromptRefinerShadowRun[]
   authorizationAuditLog AdminAuditLog              @relation(fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
@@ -5558,9 +5559,91 @@ model PromptRefinerReservation {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  stage PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  stage         PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  shadowAttempt PromptRefinerShadowAttempt?
 
   @@index([stageId, status, expiresAt])
+}
+
+/// One separately approved, content-free Prompt Refiner staging shadow.
+/// The run contract digest is unique so v1 can execute at most once; a retry
+/// after an unknown outcome requires a new reviewed contract rather than a
+/// second row with the same authority.
+model PromptRefinerShadowRun {
+  id                          String    @id
+  stageId                     String
+  runContractVersion          String
+  runContractDigest           String    @unique
+  corpusDigest                String
+  adapterVersion              String
+  status                      String    @default("approved")
+  perRequestCostMicroUsd      BigInt
+  maxDispatches               Int
+  costCeilingMicroUsd         BigInt
+  dispatchCount               Int       @default(0)
+  terminalCount               Int       @default(0)
+  knownActualCostMicroUsd     BigInt    @default(0)
+  runtimeCommitSha            String
+  runtimeDeploymentId         String
+  runtimeSourceManifest       Json
+  runtimeSourceManifestDigest String
+  previewBindingDigest        String
+  approvedBy                  String
+  approvedAt                  DateTime
+  approvalExpiresAt           DateTime
+  authorizationAuditLogId     String    @unique
+  startedAt                   DateTime?
+  completedAt                 DateTime?
+  stoppedAt                   DateTime?
+  stopReason                  String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  stage                 PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempts              PromptRefinerShadowAttempt[]
+
+  @@index([stageId, status])
+}
+
+/// A dispatch intent and its immutable terminal receipt. No prompt, refined
+/// prompt, provider body/error prose, credential or customer identifier has a
+/// column in this table.
+model PromptRefinerShadowAttempt {
+  id                        String    @id
+  runId                     String
+  reservationId             String    @unique
+  requestId                 String    @unique
+  caseId                    String
+  caseIndex                 Int
+  stageId                   String
+  reservationContractDigest String
+  runContractDigest         String
+  provider                  String
+  modelId                   String
+  adapterVersion            String
+  status                    String    @default("dispatch_intent")
+  terminalReason            String?
+  failureLayer              String?
+  failureCode               String?
+  dispatchIntentAt          DateTime
+  terminalAt                DateTime?
+  durationMs                Int?
+  inputTokens               Int?
+  cachedInputTokens         Int?
+  cacheWriteInputTokens     Int?
+  outputTokens              Int?
+  reasoningTokens           Int?
+  actualCostMicroUsd        BigInt?
+  dispatchAuditLogId        String    @unique
+  terminalAuditLogId        String?   @unique
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  run              PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reservation      PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([runId, caseId])
+  @@unique([runId, caseIndex])
+  @@index([status, dispatchIntentAt])
 }
 
 // The marketing automation tables (docs/policy/marketing-automation.md).

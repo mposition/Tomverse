@@ -28,6 +28,7 @@ test("the system actor list is closed and changes only by review", () => {
     "marketing-publisher",
     "marketing-retention",
     "marketing-guard",
+    "prompt-refiner-shadow-runner",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

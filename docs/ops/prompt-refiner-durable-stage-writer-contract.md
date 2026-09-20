@@ -136,8 +136,11 @@ stage와 비교한다. audit 위조, 불일치 또는 만료면 fail-closed한�
 source/deployment/execution, model/pricing이 모두 현재일 때만 기존 reservation을 idempotent하게
 반환하며, drift 뒤 replay는 과거 reservation을 새 실행 권한으로 되살리지 않는다.
 
-이 회차에는 stage를 소비하는 actual provider admission/caller가 없다. stage가 생겨도 제품
-요청, credential lookup, network, provider call, receipt 또는 flag mutation은 발생하지 않는다.
+후속 durable run writer는 stage를 exact 16건 run 승인과 dispatch/terminal 기록 경계로 더
+좁혔지만 actual provider admission/caller는 여전히 없다. stage나 run 승인이 생겨도 제품 요청,
+credential lookup, network, provider call 또는 flag mutation은 발생하지 않는다. 후속 계약은
+[`prompt-refiner-durable-run-writer-contract.md`](prompt-refiner-durable-run-writer-contract.md)에
+있다.
 
 ## 8. 오류와 운영 판단
 

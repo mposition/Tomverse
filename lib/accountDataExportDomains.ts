@@ -350,6 +350,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
   },
   {
+    domain: "promptRefinerShadowRun",
+    publicName: "prompt_refiner_shadow_run_approvals",
+    prismaModel: "PromptRefinerShadowRun",
+    state: "excluded",
+    exclusionReason:
+      "Content-free, immutable staging run approval evidence. It contains deployment/source digests, bounded cost and capacity, lifecycle counters and the approving operator id, but no customer id, prompt, output, credential, provider response or error prose. Operator access requests remain on the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+  },
+  {
     domain: "adminNote",
     publicName: "admin_notes",
     prismaModel: "AdminNote",

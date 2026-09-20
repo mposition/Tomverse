@@ -323,6 +323,14 @@ const transitionReservation = async (input: {
             return refuse("reservation_expired");
         }
 
+        if (input.transition === "consume") {
+            const intent = await tx.promptRefinerShadowAttempt.findUnique({
+                where: { reservationId: current.id },
+                select: { id: true },
+            });
+            if (!intent) return refuse("dispatch_intent_required");
+        }
+
         const updated = await tx.promptRefinerReservation.updateMany({
             where: { id: current.id, status: "reserved" },
             data:

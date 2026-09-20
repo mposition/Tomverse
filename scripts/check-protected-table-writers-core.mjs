@@ -150,6 +150,18 @@ export const PROTECTED_TABLES = [
     writers: ["lib/marketingStore.ts"],
     contract: "docs/policy/marketing-automation.md §5",
   },
+  {
+    table: "PromptRefinerShadowRun",
+    delegate: "promptRefinerShadowRun",
+    writers: ["lib/promptRefinerShadowRunStore.ts"],
+    contract: "docs/policy/prompt-refiner-observability.md §12",
+  },
+  {
+    table: "PromptRefinerShadowAttempt",
+    delegate: "promptRefinerShadowAttempt",
+    writers: ["lib/promptRefinerShadowRunStore.ts"],
+    contract: "docs/policy/prompt-refiner-observability.md §12",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -244,6 +256,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
   },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "promptRefinerShadowRun",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
 ];
 
 /**
@@ -258,6 +276,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 3,
     reason:
       "The data-domain registry names the model as prismaModel and in prose, and other domains' prose uses delete and update. No SQL is built from this file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the content-free run model and describes retention and deletion. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/promptRefinerShadowRunStore.ts",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 3,
+    writeVerbs: 5,
+    reason:
+      "The sole run/attempt writer uses Prisma delegates for mutations. Its raw SQL is limited to constant SELECT ... FOR UPDATE statements used to enforce the documented lock order; it never interpolates a table name.",
+  },
+  {
+    path: "lib/promptRefinerShadowRunStore.ts",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 1,
+    writeVerbs: 5,
+    reason:
+      "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
   },
   {
     path: "scripts/report-issue-backlog-core.mjs",
@@ -298,6 +340,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 14,
     reason:
       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The run-writer migration deliberately keeps audit IDs as plain immutable columns, then trigger-checks the linked human/system audit rows without giving a foreign key any path to rewrite the signed audit chain. It never writes AdminAuditLog; its write verbs create and constrain the content-free run, attempt and reservation tables.",
+  },
+  {
+    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 23,
+    writeVerbs: 22,
+    reason:
+      "The migration creates the content-free run table and its fail-closed insert/update/delete triggers. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 24,
+    writeVerbs: 22,
+    reason:
+      "The migration creates the content-free attempt table and its immutable terminal trigger, and binds reservation consume to one intent. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "scripts/report-unswept-tables-core.mjs",

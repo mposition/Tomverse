@@ -442,7 +442,15 @@ test("every exact direct insert consumes budget and forged or 101st inserts fail
         stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
         contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
     });
-    assert.equal(consumed.ok, true, consumed.ok ? undefined : consumed.reason);
+    assert.deepEqual(consumed, { ok: false, reason: "dispatch_intent_required" });
+    assert.equal(
+        (
+            await prisma.promptRefinerReservation.findUniqueOrThrow({
+                where: { id: firstId },
+            })
+        ).status,
+        "reserved"
+    );
 
     await assert.rejects(
         prisma.promptRefinerReservation.create({
@@ -530,7 +538,7 @@ test("every exact direct insert consumes budget and forged or 101st inserts fail
     assert.equal(await prisma.promptRefinerReservation.count(), 100);
 });
 
-test("consume requires the four-part binding and succeeds exactly once under race", async () => {
+test("standalone consume requires the four-part binding and refuses without a dispatch intent", async () => {
     await createStage();
     const reserved = await reservePromptRefinerExecution({ requestId: "request_consume" });
     assert.equal(reserved.ok, true);
@@ -545,16 +553,15 @@ test("consume requires the four-part binding and succeeds exactly once under rac
         consumePromptRefinerReservation(binding),
         consumePromptRefinerReservation(binding),
     ]);
-    assert.equal(outcomes.filter((result) => result.ok).length, 1);
-    assert.equal(
-        outcomes.filter((result) => !result.ok && result.reason === "reservation_not_active").length,
-        1
-    );
+    assert.deepEqual(outcomes, [
+        { ok: false, reason: "dispatch_intent_required" },
+        { ok: false, reason: "dispatch_intent_required" },
+    ]);
     const row = await prisma.promptRefinerReservation.findUniqueOrThrow({
         where: { id: binding.reservationId },
     });
-    assert.equal(row.status, "consumed");
-    assert.ok(row.consumedAt);
+    assert.equal(row.status, "reserved");
+    assert.equal(row.consumedAt, null);
 });
 
 test("the database owns terminal clocks and turns every late direct transition into expiry", async () => {
@@ -564,7 +571,7 @@ test("the database owns terminal clocks and turns every late direct transition i
     `;
     const nearExpiryCreatedAt = new Date(clock!.now.getTime() - 298_800);
     await prisma.promptRefinerReservation.createMany({
-        data: ["late_consume", "late_release"].map((requestId) => ({
+        data: ["late_release_one", "late_release_two"].map((requestId) => ({
             id: requestId,
             stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
             requestId,
@@ -588,15 +595,11 @@ test("the database owns terminal clocks and turns every late direct transition i
         FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_a_test_delay_transition"();
     `);
     try {
-        assert.deepEqual(
-            await consumePromptRefinerReservation({
-                reservationId: "late_consume",
-                requestId: "late_consume",
-                stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
-                contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-            }),
-            { ok: false, reason: "reservation_expired" }
-        );
+        await prisma.$executeRaw`
+            UPDATE "PromptRefinerReservation"
+            SET "status" = 'released'
+            WHERE "id" = 'late_release_one'
+        `;
     } finally {
         await prisma.$executeRawUnsafe(`
             DROP TRIGGER IF EXISTS "prompt_refiner_a_test_delay_transition_trigger"
@@ -607,10 +610,10 @@ test("the database owns terminal clocks and turns every late direct transition i
     await prisma.$executeRaw`
         UPDATE "PromptRefinerReservation"
         SET "status" = 'released'
-        WHERE "id" = 'late_release'
+        WHERE "id" = 'late_release_two'
     `;
     const lateRows = await prisma.promptRefinerReservation.findMany({
-        where: { id: { in: ["late_consume", "late_release"] } },
+        where: { id: { in: ["late_release_one", "late_release_two"] } },
         orderBy: { id: "asc" },
     });
     assert.deepEqual(
@@ -645,21 +648,21 @@ test("the database owns terminal clocks and turns every late direct transition i
     );
     await prisma.$executeRaw`
         UPDATE "PromptRefinerReservation"
-        SET "status" = 'consumed'
+        SET "status" = 'released'
         WHERE "id" = ${active.value.reservation.reservationId}
     `;
     const after = await prisma.$queryRaw<Array<{ now: Date }>>`
         SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
-    const consumed = await prisma.promptRefinerReservation.findUniqueOrThrow({
+    const released = await prisma.promptRefinerReservation.findUniqueOrThrow({
         where: { id: active.value.reservation.reservationId },
     });
-    assert.equal(consumed.status, "consumed");
-    assert.ok(consumed.consumedAt);
-    assert.ok(consumed.consumedAt.getTime() >= before[0]!.now.getTime());
-    assert.ok(consumed.consumedAt.getTime() <= after[0]!.now.getTime());
-    assert.equal(consumed.releasedAt, null);
-    assert.equal(consumed.expiredAt, null);
+    assert.equal(released.status, "released");
+    assert.ok(released.releasedAt);
+    assert.ok(released.releasedAt.getTime() >= before[0]!.now.getTime());
+    assert.ok(released.releasedAt.getTime() <= after[0]!.now.getTime());
+    assert.equal(released.consumedAt, null);
+    assert.equal(released.expiredAt, null);
 });
 
 test("naive reservation timestamps remain UTC under non-UTC database sessions", async () => {
@@ -667,9 +670,9 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions", 
     const [databaseZone] = await prisma.$queryRaw<Array<{ zone: string }>>`
         SELECT current_setting('TimeZone') AS "zone"
     `;
-    for (const [zone, requestedStatus] of [
-        ["America/New_York", "consumed"],
-        ["Asia/Seoul", "released"],
+    for (const [zone, suffix] of [
+        ["America/New_York", "new_york"],
+        ["Asia/Seoul", "seoul"],
     ] as const) {
         await assert.rejects(
             prisma.$transaction(async (tx) => {
@@ -679,7 +682,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions", 
                 const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
                     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
                 `;
-                const exactId = `timezone_exact_${requestedStatus}`;
+                const exactId = `timezone_exact_${suffix}`;
                 await tx.promptRefinerReservation.create({
                     data: {
                         id: exactId,
@@ -697,7 +700,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions", 
                 });
                 assert.equal(exact.expiresAt.getTime() - exact.createdAt.getTime(), 300_000);
 
-                const lateId = `timezone_late_${requestedStatus}`;
+                const lateId = `timezone_late_${suffix}`;
                 const lateCreatedAt = new Date(clock!.now.getTime() - 299_700);
                 await tx.promptRefinerReservation.create({
                     data: {
@@ -714,7 +717,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions", 
                 await wait(400);
                 await tx.$executeRaw`
                     UPDATE "PromptRefinerReservation"
-                    SET "status" = ${requestedStatus}
+                    SET "status" = 'released'
                     WHERE "id" = ${lateId}
                 `;
                 const late = await tx.promptRefinerReservation.findUniqueOrThrow({
@@ -910,9 +913,17 @@ test("runtime pricing drift rolls back without consuming a stage slot", async ()
         where: { id: reserved.value.reservation.reservationId },
     });
     assert.equal(stillReserved.status, "reserved");
+    assert.deepEqual(
+        await consumePromptRefinerReservation(bindingOf(reserved.value.reservation)),
+        { ok: false, reason: "dispatch_intent_required" }
+    );
     assert.equal(
-        (await consumePromptRefinerReservation(bindingOf(reserved.value.reservation))).ok,
-        true
+        (
+            await prisma.promptRefinerReservation.findUniqueOrThrow({
+                where: { id: reserved.value.reservation.reservationId },
+            })
+        ).status,
+        "reserved"
     );
 });
 
@@ -984,7 +995,10 @@ test("a registry admin update cannot slip between consume validation and reserva
         releaseReservation();
         await reservationBlocker;
     }
-    assert.equal((await consumePromise).ok, true);
+    assert.deepEqual(await consumePromise, {
+        ok: false,
+        reason: "dispatch_intent_required",
+    });
 });
 
 test("a failure after reservation insert rolls the row and stage accounting back together", async () => {
@@ -1167,7 +1181,7 @@ test("database constraints reject malformed state and triggers prevent deletion 
     assert.equal(reserved.ok, true);
     if (!reserved.ok) return;
     const consumed = await consumePromptRefinerReservation(bindingOf(reserved.value.reservation));
-    assert.equal(consumed.ok, true);
+    assert.deepEqual(consumed, { ok: false, reason: "dispatch_intent_required" });
     await assert.rejects(
         prisma.promptRefinerReservation.delete({
             where: { id: reserved.value.reservation.reservationId },
