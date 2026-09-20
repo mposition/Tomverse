@@ -1,0 +1,94 @@
+-- One message id, one delivery, within its account.
+--
+-- Contract: docs/policy/email-product-news-redesign-draft.md section 7.4 (C72),
+-- docs/policy/email-notifications.md v24.
+--
+-- S1b-2b made the webhook match a delivery by `(providerAccount,
+-- providerMessageId)` and left the pair merely indexed, because the build
+-- before it wrote neither column. This makes it unique, which is what that
+-- matching has been assuming.
+--
+-- **One table.** The `ProviderWebhookEvent` half of the same contraction is
+-- 20260920100100, and it is separate for a reason rather than for tidiness:
+-- together in one transaction they lock two tables in the opposite order to the
+-- webhook handler, which writes `ProviderWebhookEvent` and then updates
+-- `EmailDelivery`. Holding SHARE here to commit and then asking for ACCESS
+-- EXCLUSIVE there is a deadlock with any webhook in flight, and the loser is
+-- either a long index build thrown away or a bounce that was not recorded.
+-- Each migration now takes one table's locks and lets them go.
+--
+-- Plain, not partial. A `WHERE "providerAccount" IS NOT NULL AND
+-- "providerMessageId" IS NOT NULL` predicate would enforce exactly what a plain
+-- unique index already enforces -- Postgres does not compare nulls, so a
+-- delivery that never reached the provider conflicts with nothing. Prisma can
+-- express a partial index since 7.4, but only behind the `partialIndexes`
+-- preview feature, and this schema enables no preview features at all. Turning
+-- one on is a commitment across the whole schema; the predicate would buy
+-- nothing for it, and without it `prisma db push` would not create the index
+-- and `migrate diff` would call it drift on every run.
+-- 20260801190000_plan_change_pending_slot is this same lesson, learned on a
+-- constraint that turned out not to exist in the database its test was written
+-- against.
+--
+-- **This one cannot be applied blind.** A unique index fails on the first
+-- duplicate it meets, part-way through a deploy, and the answer lives in the
+-- data rather than in this file. `npm run email:check-message-id-duplicates`
+-- asks it read-only and prints counts. That reading is a reason to stop, never
+-- a promise to go: it is taken before the deploy and a writer can add a
+-- duplicate after it. The build is the statement that decides.
+--
+-- **If this fails and Prisma records it**, the recovery is decided by looking
+-- at the index rather than by assuming. Its name is not enough -- that is the
+-- same reason `IF NOT EXISTS` is refused below -- so ask what it is:
+--
+--     SELECT i.indisunique, i.indisvalid, i.indisready, i.indislive,
+--            i.indimmediate, i.indnullsnotdistinct, i.indnkeyatts, i.indnatts,
+--            i.indexprs IS NOT NULL AS has_expressions,
+--            pg_get_expr(i.indpred, i.indrelid) AS predicate,
+--            am.amname
+--       FROM pg_index i
+--       JOIN pg_class ix ON ix.oid = i.indexrelid
+--       JOIN pg_class tb ON tb.oid = i.indrelid
+--       JOIN pg_namespace ns ON ns.oid = ix.relnamespace
+--       JOIN pg_am am ON am.oid = ix.relam
+--      WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
+--        AND tb.relname = 'EmailDelivery'
+--        AND ns.nspname = current_schema();
+--
+--   * no row -> it rolled back: `prisma migrate resolve --rolled-back
+--     20260920100000_email_delivery_message_id_unique`, then deploy again;
+--   * a row that is unique, valid, ready, live, immediate, NOT nulls-not-
+--     distinct, two key attributes and two total, no expressions, no predicate,
+--     btree -> it committed: `prisma migrate resolve --applied ...`;
+--   * a row that is anything else -> stop. This file cannot have created it, so
+--     something else did, and marking the migration applied would seal a
+--     guarantee that is not there.
+
+BEGIN;
+
+-- Bound the wait for the lock below.
+--
+-- Without it a lock request waits indefinitely. `CREATE INDEX` takes SHARE on
+-- `EmailDelivery`, which reads pass and writes wait behind -- so an unbounded
+-- wait here is mail queueing up with nobody being told why. A deploy that gives
+-- up after fifteen seconds can be retried at a quieter moment.
+--
+-- It bounds the *wait for the lock*, not the build. A large table still takes
+-- as long as it takes once the lock is held.
+SET LOCAL lock_timeout = '15s';
+
+-- No `IF NOT EXISTS`. It would let an index that merely shares this name stand
+-- in for this one, and "merely shares the name" covers more than it sounds: an
+-- index left INVALID by a failed `CREATE INDEX CONCURRENTLY`, one built NULLS
+-- NOT DISTINCT, one carrying a third expression key. Each would satisfy the
+-- name and skip the build -- and a catalogue check written to tell them apart
+-- is a second thing to get exactly right. Failing loudly on the name is cheaper
+-- and needs nothing to be right.
+--
+-- `CREATE INDEX CONCURRENTLY` would avoid the SHARE lock entirely and cannot be
+-- used here: Postgres refuses it inside a transaction block, and the BEGIN
+-- above puts us in one.
+CREATE UNIQUE INDEX "EmailDelivery_providerAccount_providerMessageId_key"
+    ON "EmailDelivery"("providerAccount", "providerMessageId");
+
+COMMIT;

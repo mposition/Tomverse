@@ -291,7 +291,7 @@ export async function processResendWebhook(input: {
       ${JSON.stringify(input.payload)}::jsonb,
       ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
     )
-    -- No conflict target. The contraction (20260920100000) left one arbiter,
+    -- No conflict target. The contraction (20260920100100) left one arbiter,
     -- so naming it would behave identically -- and not naming it stays right if
     -- a second one is ever added, which is what went wrong while the old
     -- (provider, providerEventId) unique sat beside the per-account one: a

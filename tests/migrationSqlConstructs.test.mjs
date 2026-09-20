@@ -169,19 +169,26 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
  * the first attempt at this used it. Postgres allows a dollar in a positional
  * parameter (`$1`), inside an unquoted identifier after its first character
  * (`foo$bar`, and `foo$$` where the pair is part of the name), anywhere inside
- * a quoted one (`"$foo"`), and inside string literals whose escaping this does
- * not model (`E'it\\'s $x'`). Each of those has a dollar with a letter, a digit
- * or a quote beside it, so standing alone excludes them all without needing to
- * know which one it is looking at.
+ * a quoted one (`"a $ b"`), and inside a string literal. Standing alone
+ * excludes the first two by what is beside them; the last two need this to know
+ * where a quoted region begins and ends, which is what the scan below does.
  *
- * What it does not catch, stated rather than implied: an invalid tag whose
- * dollars are *not* alone. `DO $1$ BEGIN END $1$;` is not a valid dollar quote
- * -- a tag cannot begin with a digit -- and this reports nothing, because every
- * dollar in it is touching a character. Catching that means lexing Postgres,
- * and this is a guard for one regression, not a lexer.
+ * Three regions are skipped whole, and the order they are recognised in is the
+ * point: a dollar-quoted body first, because inside one an apostrophe is an
+ * ordinary character and treating it as a quote would swallow the closing tag
+ * (`$$ it's fine $$`); then `'...'`, where a doubled quote escapes and a
+ * backslash does so only in an `E'...'` string; then `"..."`, where a doubled
+ * quote escapes and nothing else does.
  *
- * Strings and dollar-quoted bodies are still skipped, so a lone dollar inside
- * either is data rather than a finding.
+ * A tag also has to be separated from what precedes it, so `foo$$` is an
+ * identifier rather than an opening tag.
+ *
+ * What it does not catch, stated rather than implied: `DO $1$ BEGIN END $1$;`
+ * is invalid -- a tag cannot begin with a digit -- and passes, because every
+ * dollar in it touches a character. `DO$$ ... $$;` is invalid for the other
+ * reason and *is* reported, though as a block that never closes rather than as
+ * an attached tag. Catching the first properly means lexing Postgres, and this
+ * is a guard for one regression, not a lexer.
  *
  * Returns each stray dollar's offset, and the end of the file when a block was
  * opened and never closed.
@@ -189,50 +196,64 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
 const strayDollars = (sql) => {
   const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
   const alone = /[\s;,()[\]]|^$/;
+  const identifierCharacter = /[A-Za-z0-9_$]/;
   const stray = [];
   let index = 0;
-  let inString = false;
-  let openTag = null;
 
   while (index < sql.length) {
-    if (openTag) {
-      // Inside the body nothing is special except the closing tag -- not a
-      // quote, and not a dollar.
-      if (sql.startsWith(openTag, index)) {
-        index += openTag.length;
-        openTag = null;
-        continue;
-      }
-      index += 1;
-      continue;
-    }
     const current = sql[index];
-    if (inString) {
-      if (current === "'") inString = false;
-      index += 1;
-      continue;
-    }
-    if (current === "'") {
-      inString = true;
-      index += 1;
-      continue;
-    }
+
     if (current === "$") {
-      const tag = openingTag.exec(sql.slice(index));
+      const attached = identifierCharacter.test(sql[index - 1] ?? "");
+      const tag = attached ? null : openingTag.exec(sql.slice(index));
       if (tag) {
-        openTag = tag[0];
-        index += tag[0].length;
+        const close = sql.indexOf(tag[0], index + tag[0].length);
+        if (close < 0) {
+          // Opened and never closed: everything after it is body, and the file
+          // does not parse.
+          stray.push(sql.length);
+          break;
+        }
+        index = close + tag[0].length;
         continue;
       }
-      const before = index > 0 ? sql[index - 1] : "";
-      const after = sql[index + 1] ?? "";
-      if (alone.test(before) && alone.test(after)) stray.push(index);
+      if (alone.test(sql[index - 1] ?? "") && alone.test(sql[index + 1] ?? "")) {
+        stray.push(index);
+      }
       index += 1;
       continue;
     }
+
+    if (current === "'" || current === '"') {
+      // A backslash escapes only in an E-string, and only for the single-quoted
+      // kind. `standard_conforming_strings` has been on by default since 9.1,
+      // so a plain '...' takes backslashes literally.
+      const escapes =
+        current === "'" &&
+        /[Ee]/.test(sql[index - 1] ?? "") &&
+        !identifierCharacter.test(sql[index - 2] ?? "");
+      index += 1;
+      while (index < sql.length) {
+        if (escapes && sql[index] === "\\") {
+          index += 2;
+          continue;
+        }
+        if (sql[index] === current) {
+          // A doubled quote is one quote of content, not the end.
+          if (sql[index + 1] === current) {
+            index += 2;
+            continue;
+          }
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     index += 1;
   }
-  if (openTag) stray.push(sql.length);
   return stray;
 };
 
@@ -281,10 +302,28 @@ test("the dollar-quote guard finds what it is for", () => {
   assert.deepEqual(strayDollars(`CREATE TABLE "foo$bar" (id integer);`), []);
   assert.deepEqual(strayDollars(`SELECT "$foo";`), []);
   assert.deepEqual(strayDollars(`SELECT E'it\\'s $x';`), []);
+  // A trailing pair is part of the identifier, not an opening tag -- which is
+  // why a tag has to be separated from what precedes it.
+  assert.deepEqual(strayDollars(`SELECT foo${doubled};`), []);
+  // A lone dollar inside a quoted identifier is a character in a name.
+  assert.deepEqual(strayDollars(`SELECT "a $ b";`), []);
+  // A doubled quote is content, so this string does not end early and take the
+  // rest of the file with it.
+  assert.deepEqual(strayDollars(`SELECT 'it''s $x' AS value;`), []);
 
-  // And what it does not catch, asserted so the limit is a decision rather
-  // than a surprise: a tag cannot begin with a digit, so this is invalid SQL,
-  // and every dollar in it touches a character.
+  // An escaped quote inside an E-string does not end it, so the mistake after
+  // it is still found rather than swallowed as string content.
+  assert.equal(strayDollars(`SELECT E'it\\'s'; DO $ BEGIN END $;`).length, 2);
+
+  // `DO$$` is not an opening tag -- a tag has to be separated from what
+  // precedes it -- so the pair that closes the block opens one instead, and the
+  // file is reported as ending inside it. Invalid SQL, reported for the wrong
+  // reason, which beats not reported.
+  assert.equal(strayDollars(`DO${doubled} BEGIN END ${doubled};`).length, 1);
+
+  // And what it does not catch, asserted so the limit is a decision rather than
+  // a surprise: a tag cannot begin with a digit, so this is invalid SQL, and
+  // every dollar in it touches a character.
   assert.deepEqual(strayDollars("DO $1$ BEGIN END $1$;"), []);
 });
 

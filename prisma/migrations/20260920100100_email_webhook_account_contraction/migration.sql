@@ -1,0 +1,87 @@
+-- The webhook half of the contraction the account split left owing.
+--
+-- Contract: docs/policy/email-product-news-redesign-draft.md section 7.4
+-- (C56), docs/policy/email-notifications.md v24.
+--
+-- 20260917180000 was expand-only: it added `providerAccount`, gave it a default
+-- so the build before it could keep inserting without the column, and left the
+-- old `(provider, providerEventId)` unique in place so that build's conflict
+-- resolution kept working. Both were scaffolding for a rollout that is over --
+-- the account-aware build has been live since 2026-09-17 -- and each of them is
+-- now a way to be wrong:
+--
+--   * the old unique refuses a marketing event that happens to carry the same
+--     provider event id as a transactional one. They are different events from
+--     different accounts, and the account-aware unique is what says so;
+--   * the default answers "which account did this come through" with a guess
+--     for any writer that forgets to say. There is one writer and it always
+--     says, and a default is how that stops being true without anyone noticing.
+--
+-- **One table.** The `EmailDelivery` half is 20260920100000, and they are
+-- separate because together they lock two tables in the opposite order to the
+-- webhook handler -- which writes `ProviderWebhookEvent` and then updates
+-- `EmailDelivery`. Holding SHARE on one to commit and then asking for ACCESS
+-- EXCLUSIVE on the other is a deadlock with any webhook in flight.
+--
+-- Nothing here can fail on data: both statements are drops, and a drop has no
+-- rows to disagree with. What it can fail on is a lock, which is why there is a
+-- timeout and why the file is one transaction -- half of this applied is a
+-- database whose events name no account *and* have no unique to conflict on.
+--
+-- **If it fails and Prisma records it**, look at the two objects:
+--
+--     SELECT to_regclass('"ProviderWebhookEvent_provider_providerEventId_key"'),
+--            (SELECT column_default FROM information_schema.columns
+--              WHERE table_name = 'ProviderWebhookEvent'
+--                AND column_name = 'providerAccount');
+--
+--   * both still present -> it rolled back: `prisma migrate resolve
+--     --rolled-back 20260920100100_email_webhook_account_contraction`, then
+--     deploy again;
+--   * both gone -> it committed: `prisma migrate resolve --applied ...`;
+--   * one of each -> stop. This file cannot produce that.
+--
+-- **Rollback floor: the commit that introduced 20260917180000** (the
+-- account-aware build, live since 2026-09-17). Below it this schema is not
+-- merely degraded, it refuses work: that build inserts a webhook event without
+-- naming the account and relies on the default this migration drops, so every
+-- `ProviderWebhookEvent` insert fails `NOT NULL`, and its conflict handling
+-- names `(provider, providerEventId)`, whose unique this migration drops. The
+-- cost is every inbound webhook rejected and bounce and complaint handling
+-- stopped for the length of the rollback. A rollback that has to go further
+-- back than the floor reverts this migration first:
+--
+--   ALTER TABLE "ProviderWebhookEvent"
+--       ALTER COLUMN "providerAccount" SET DEFAULT 'transactional';
+--   CREATE UNIQUE INDEX "ProviderWebhookEvent_provider_providerEventId_key"
+--       ON "ProviderWebhookEvent"("provider", "providerEventId");
+--
+-- -- and that CREATE can itself fail, on exactly the cross-account collision
+-- the account-aware unique exists to allow. It is a recovery, not a routine.
+
+BEGIN;
+
+-- Both statements take ACCESS EXCLUSIVE on `ProviderWebhookEvent`, which stops
+-- reads as well as writes, and an ACCESS EXCLUSIVE request queues ahead of new
+-- readers -- so an unbounded wait behind one long query shuts the table for
+-- everyone. The statements themselves are catalogue edits and take no time.
+SET LOCAL lock_timeout = '5s';
+
+-- The account-aware unique carries every read now
+-- (ProviderWebhookEvent_account_event_key, added 20260917180000).
+--
+-- 20260821090000 line 330 created this with `CREATE UNIQUE INDEX`, so in every
+-- database built from this history it is an index and the DROP INDEX below is
+-- the statement that removes it. The DROP CONSTRAINT is for a database that got
+-- it some other way, and it comes first: if the object were a constraint,
+-- `DROP INDEX` would fail on the dependency rather than skip it, and
+-- `IF EXISTS` does not cover that.
+ALTER TABLE "ProviderWebhookEvent"
+    DROP CONSTRAINT IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
+DROP INDEX IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
+
+-- One writer, and it names the account. A default here would let the next one
+-- not name it.
+ALTER TABLE "ProviderWebhookEvent" ALTER COLUMN "providerAccount" DROP DEFAULT;
+
+COMMIT;

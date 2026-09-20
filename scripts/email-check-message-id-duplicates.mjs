@@ -10,8 +10,8 @@
 //
 // It is a reason to stop, never a permission to go. The reading is taken at one
 // moment and the migration runs at another, and no lock is held in between.
-// The index build is what decides; the migration is written to survive its own
-// failure with the existing index intact.
+// The index build is what decides. The migration holding it is its own file,
+// touching one table, so a failure there leaves everything else untouched.
 //
 // Prints counts only -- no address, no message id. The output is safe to paste.
 
@@ -24,11 +24,13 @@ try {
   if (report.noDuplicatesAtReadTime) {
     console.log(
       `\nNo duplicate at the moment of this read. ${report.totalRows} rows in ` +
-        "EmailDelivery: the index build takes a SHARE lock on the table, so " +
-        "reads continue and writes -- new mail being enqueued, deliveries being " +
-        "marked sent -- wait for it to finish. The migration's last statement " +
-        "then takes ACCESS EXCLUSIVE briefly, which stops reads too. Judge both " +
-        "against this count before the deploy rather than during it."
+        "EmailDelivery. The index build takes a SHARE lock on that table for " +
+        "as long as it runs: reads continue, and writes -- mail being enqueued, " +
+        "deliveries being marked sent -- wait behind it. That wait is what this " +
+        "count is for, and it is worth judging before the deploy rather than " +
+        "during it. The ACCESS EXCLUSIVE locks in the two migrations that " +
+        "follow are on catalogue edits that take no measurable time, and this " +
+        "count says nothing about them."
     );
   } else {
     console.error(
