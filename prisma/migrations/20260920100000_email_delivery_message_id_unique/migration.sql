@@ -45,7 +45,14 @@
 --            i.indimmediate, i.indnullsnotdistinct, i.indnkeyatts, i.indnatts,
 --            i.indexprs IS NOT NULL AS has_expressions,
 --            pg_get_expr(i.indpred, i.indrelid) AS predicate,
---            am.amname
+--            am.amname,
+--            (SELECT array_agg(a.attname ORDER BY k.ord)
+--               FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+--               JOIN pg_attribute a
+--                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS columns,
+--            (SELECT array_agg(oc.opcname ORDER BY c.ord)
+--               FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(oid, ord)
+--               JOIN pg_opclass oc ON oc.oid = c.oid) AS operator_classes
 --       FROM pg_index i
 --       JOIN pg_class ix ON ix.oid = i.indexrelid
 --       JOIN pg_class tb ON tb.oid = i.indrelid
@@ -59,10 +66,19 @@
 --     20260920100000_email_delivery_message_id_unique`, then deploy again;
 --   * a row that is unique, valid, ready, live, immediate, NOT nulls-not-
 --     distinct, two key attributes and two total, no expressions, no predicate,
---     btree -> it committed: `prisma migrate resolve --applied ...`;
+--     btree, with columns {providerAccount,providerMessageId} in that order and
+--     operator classes {text_ops,text_ops} -> it committed:
+--     `prisma migrate resolve --applied ...`;
 --   * a row that is anything else -> stop. This file cannot have created it, so
 --     something else did, and marking the migration applied would seal a
 --     guarantee that is not there.
+--
+-- The columns are part of the question, not decoration. An index of this name
+-- over `("providerAccount", "id")` is unique, valid, immediate, plain btree and
+-- two-keyed -- it satisfies every other line above -- and it guarantees nothing
+-- about message ids. Sealing that with `--applied` would then let
+-- 20260920100200 drop the plain index that was doing the real work, leaving
+-- neither the guarantee nor an index behind the webhook matcher.
 
 BEGIN;
 

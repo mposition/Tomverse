@@ -196,7 +196,11 @@ test("no migration qualifies a SQL construct as a catalog function", () => {
 const strayDollars = (sql) => {
   const openingTag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
   const alone = /[\s;,()[\]]|^$/;
-  const identifierCharacter = /[A-Za-z0-9_$]/;
+  // An unquoted identifier may hold any letter or digit, not only ASCII ones,
+  // so an ASCII-only class would read a dollar pair after a non-ASCII name as an
+  // opening tag -- and then skip to the next pair, hiding whatever is between
+  // them.
+  const identifierCharacter = /[\p{L}\p{N}_$]/u;
   const stray = [];
   let index = 0;
 

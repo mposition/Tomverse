@@ -28,17 +28,34 @@
 -- timeout and why the file is one transaction -- half of this applied is a
 -- database whose events name no account *and* have no unique to conflict on.
 --
--- **If it fails and Prisma records it**, look at the two objects:
+-- **If it fails and Prisma records it**, look at the two objects. Both halves
+-- are pinned to `current_schema()`, and the column's *existence* is asked
+-- separately from its default -- otherwise a table that is not there answers
+-- the same as a column with no default, and "both gone" would be indistinguish-
+-- able from "there is no table here at all":
 --
---     SELECT to_regclass('"ProviderWebhookEvent_provider_providerEventId_key"'),
+--     SELECT EXISTS (
+--              SELECT 1 FROM pg_class ix
+--                JOIN pg_namespace ns ON ns.oid = ix.relnamespace
+--               WHERE ix.relname = 'ProviderWebhookEvent_provider_providerEventId_key'
+--                 AND ns.nspname = current_schema()
+--            ) AS old_unique_present,
+--            (SELECT count(*) FROM information_schema.columns
+--              WHERE table_schema = current_schema()
+--                AND table_name = 'ProviderWebhookEvent'
+--                AND column_name = 'providerAccount') AS column_rows,
 --            (SELECT column_default FROM information_schema.columns
---              WHERE table_name = 'ProviderWebhookEvent'
---                AND column_name = 'providerAccount');
+--              WHERE table_schema = current_schema()
+--                AND table_name = 'ProviderWebhookEvent'
+--                AND column_name = 'providerAccount') AS column_default;
 --
---   * both still present -> it rolled back: `prisma migrate resolve
---     --rolled-back 20260920100100_email_webhook_account_contraction`, then
---     deploy again;
---   * both gone -> it committed: `prisma migrate resolve --applied ...`;
+-- `column_rows` must be 1. If it is 0 the query is looking at the wrong
+-- database or schema, and nothing below applies.
+--
+--   * the old unique present and a default -> it rolled back: `prisma migrate
+--     resolve --rolled-back 20260920100100_email_webhook_account_contraction`,
+--     then deploy again;
+--   * neither -> it committed: `prisma migrate resolve --applied ...`;
 --   * one of each -> stop. This file cannot produce that.
 --
 -- **Rollback floor: the commit that introduced 20260917180000** (the

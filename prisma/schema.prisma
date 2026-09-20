@@ -5245,7 +5245,7 @@ model ProviderWebhookEvent {
   /// No default: there is one writer and it always names the account, and a
   /// default is how that stops being true without anyone noticing. The column
   /// carried one while the previous build -- which did not write it -- was
-  /// still serving webhooks; 20260920100000 dropped it once that build was
+  /// still serving webhooks; 20260920100100 dropped it once that build was
   /// gone, together with the old (provider, providerEventId) unique.
   providerAccount String
 
