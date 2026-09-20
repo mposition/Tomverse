@@ -16,6 +16,12 @@
 
 export const STAGING_VERIFICATION_FEATURES = [
     {
+        key: "amux",
+        label: "AMUX development-agent orchestration",
+        checklist: "docs/ops/amux/staging-checklist.md",
+        records: "docs/ops/amux/staging-verification-records",
+    },
+    {
         key: "admin-usage-analytics",
         label: "Admin Console usage tab (active users, model share, time, geography)",
         checklist: "docs/ops/admin-usage-analytics-staging-checklist.md",
