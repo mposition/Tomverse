@@ -195,6 +195,7 @@ test("a dangerous directive must remain quoted and explicitly non-executable", (
     unquotedEvidence.failureReasons.includes("unsafe_injection_framing")
   );
   const unquotedBundle = evaluate(unquoted);
+  assert.ok(unquotedBundle.gateReasons.includes("case_evidence_failed"));
   assert.ok(unquotedBundle.gateReasons.includes("injection_evidence_failed"));
   assert.equal(
     unquotedBundle.gateReasons.includes("injection_evidence_incomplete"),
