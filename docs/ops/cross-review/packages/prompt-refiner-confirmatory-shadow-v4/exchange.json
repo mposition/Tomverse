@@ -1,0 +1,310 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4",
+  "requirement": "CHAT-01 Prompt Refiner의 새 confirmatory shadow v4를 구현한다. v4는 새 stage/reservation/run authority로 v3의 소진·만료된 권한과 분리하고, provider가 반환한 refined prompt를 runner 메모리에서 동결 evidence spec으로 평가한 뒤 proposal bytes나 per-item content digest 없이 closed case evidence만 terminal receipt와 같은 transaction에 영속화한다. 완주 뒤 DB의 content-free case evidence와 telemetry만으로 aggregate gate bundle을 재구성할 수 있어야 한다. 배포만으로 stage/run/flag/provider 호출은 발생하지 않으며 실제 유료 실행은 별도 exact 승인 전까지 금지한다. author는 Codex, reviewer는 Claude Code Max다.",
+  "completionCriteria": [
+    "stage/reservation/run v4 identity와 digest가 v3 row를 보존하면서 새 권한을 별도 생성하도록 schema, migration, application validation과 audit metadata에 일치한다.",
+    "v4 source closure가 evidence core/spec, runner/writer, schema/migration과 모든 runtime dependency의 exact bytes를 결속한다.",
+    "runner는 suggested proposal을 메모리에서만 평가하고 failed/unknown을 포함한 content-free case evidence를 terminal writer에 전달한 뒤 proposal을 저장·로그·API 반환하지 않는다.",
+    "terminal writer는 case evidence shape/status/spec binding을 strict 검증하고 terminal receipt·audit·attempt evidence를 한 transaction에 기록하며 동일 facts replay만 허용한다.",
+    "완료된 v4 run은 저장된 case evidence와 cost/latency telemetry만으로 동결 aggregate bundle을 재구성하고 pass/fail/insufficient를 반환하며 제품·Router·유료 권한은 모두 false다.",
+    "v3 기존 row와 terminal receipt는 변경·재해석하지 않고 v4 migration은 seed, backfill, provider call 또는 flag 변경을 수행하지 않는다.",
+    "전체 unit, focused Prompt Refiner, DB integration/contract, TypeScript, ESLint, 문서·정책·schema·protected-writer 검사가 통과한다.",
+    "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다."
+  ],
+  "baseCommit": "388cb319cd657da468ae99711b24c7fe8a44a012",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:92620430d46d8898a459b872d27f2fdc436d8704a03e7bc3eb44c492ec85f823",
+      "commit": "8381e98aa313d746976410f26e9e8240798dcc86",
+      "filesChanged": [
+        "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+        "app/api/admin/prompt-refiner/shadow-run/route.ts",
+        "components/admin/AdminPromptRefinerShadowPanel.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.task.json",
+        "docs/ops/prompt-refiner-confirmatory-shadow-v4.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/adminMessages/promptRefinerShadow.ts",
+        "lib/marketingAutomationAccess.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "lib/promptRefinerShadowAdmissionCore.ts",
+        "lib/promptRefinerShadowEvidenceCore.ts",
+        "lib/promptRefinerShadowOperatorCore.ts",
+        "lib/promptRefinerShadowRunContract.ts",
+        "lib/promptRefinerShadowRunStore.ts",
+        "lib/promptRefinerShadowRunner.ts",
+        "lib/promptRefinerShadowSystemAudit.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-enum-constraints.mjs",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs",
+        "tests/promptRefinerShadowEvidenceCore.test.mjs",
+        "tests/promptRefinerShadowOperatorCore.test.mjs",
+        "tests/promptRefinerShadowRunContract.test.mjs",
+        "tests/promptRefinerShadowRunner.test.mjs",
+        "tests/promptRefinerStageAdmissionReader.test.mjs",
+        "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2922.335",
+          "durationMs": 889281
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 49652
+        },
+        {
+          "rule": "npm run lint",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+          "durationMs": 84848
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 118 closed list(s) in the schema — 62 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1551
+        },
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+          "durationMs": 4137
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 119 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+          "durationMs": 1818
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1639
+        },
+        {
+          "rule": "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4e?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4e?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 82892.8653",
+          "durationMs": 83065
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowRunStore.ts:885 (terminalInputIsValid) vs lib/promptRefinerShadowEvidenceCore.ts:1174 (aggregatePromptRefinerShadowStoredEvidence)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "The terminal writer accepts any non-negative durationMs (the DB CHECK only requires >= 0, prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql:139) but the durable aggregator caps stored durationMs at 60_000, so a single case slower than 60s produces an immutable terminal row from which the completed run's aggregate bundle can never be rebuilt — readPromptRefinerShadowEvidenceBundle then refuses 409 PROMPT_REFINER_SHADOW_EVIDENCE_INVALID forever, defeating completion criterion 5.",
+          "reproduction": "In tests/integration/prompt-refiner-shadow-run.db.test.ts, take the existing \"completed durable evidence rebuilds a content-free aggregate from all 16 cases\" test and change `durationMs: 10 + caseIndex` to `durationMs: 60_001`. Expected per the criterion: a bundle with gateOutcome fail/insufficient. Actual: every recordPromptRefinerShadowTerminal succeeds, the run reaches status completed, and readPromptRefinerShadowEvidenceBundle() throws PromptRefinerShadowRunError code PROMPT_REFINER_SHADOW_EVIDENCE_INVALID (from evidence core `stored_duration_ms_invalid_integer`). The 15s adapter bound does not prevent this: lib/promptRefinerShadowLiveAdapter.ts:294 passes a non-standard `timeout` option to generateText, and the route's maxDuration is 300s. Fix by enforcing the same 60_000 upper bound in terminalInputIsValid (and the DB terminal CHECK) so no unreconstructible row can be written.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1231-1250 (\"operator-facing contracts name the enforced runtime source closure size\")",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "The change deletes the assertions that pinned five operator/policy documents to the enforced runtime closure size instead of updating those documents, so the shipped operator-facing approval contracts now state a file count and stage identity that the code no longer implements, and the guard that would have caught it is gone.",
+          "reproduction": "After this commit, `PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT` is 188 (lib/promptRefinerStageAdmissionCore.ts:41) and the live stage id/confirmation are `prompt-refiner-shadow-v2` / `APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES`. Open: docs/ops/prompt-refiner-durable-stage-writer-contract.md:20 (\"현재 deployment의 187개 고정 source 파일\"), :5 (stage: prompt-refiner-shadow-v1), :9/:38 (STAGE V1 confirmation); docs/ops/prompt-refiner-durable-stage-writer-task.md:17 (\"187-file/16 MiB\"); docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40 (\"187개 고정 path allowlist\"); docs/ops/tomverse-chat-progress.md:1182 (\"exact 187-file runtime import-closure source manifest\"); docs/policy/prompt-refiner-observability.md:309 (\"고정 187개 source 파일\") and :49 (\"stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며\") — the last file is edited by this change (header at :3-5) yet left stale. `git show 8381e98a -- tests/promptRefinerRuntimeSourceClosure.test.mjs` shows the five removed assertions. `npm run test:unit` passes only because those assertions were deleted.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:27",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The new `prompt_refiner_runtime_manifest_valid` wrapper short-circuits to the 187-file v2 validator for any row whose manifest declares schemaVersion v2, without binding that branch to `id = 'prompt-refiner-shadow-v1'`, so the database would accept a `prompt-refiner-shadow-v2` stage bound to the superseded 187-file closure even though the same migration's execution-manifest CHECK pins `\"runtimeSource\":{\"fileCount\":188}` for v2 — the two CHECKs on the same row disagree about which closure a v4 authority is bound to.",
+          "reproduction": "Read migration.sql:27-31 together with the `PromptRefinerReservationStage_runtime_identity_check` (migration.sql:133-141) and the v2 execution-manifest literal (migration.sql:~160). The runtime_identity_check passes for `id='prompt-refiner-shadow-v2'` with any structurally valid 187-file v2 manifest; nothing in the schema rejects it. Application reads (promptRefinerStoredStageMatchesRuntime) would reject such a row, so this is defence-in-depth only, but criterion 1 asks schema/migration/application validation to agree. Fix: gate the v2 branch on `id = 'prompt-refiner-shadow-v1'` (or on the manifest version matching the stage's executionManifest fileCount).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowAdmissionCore.ts:100-103, 678-681 (PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID / _CONTRACT_DIGEST)",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The admission proposal that attests the new v2 stage still declares `reservationStage.stageId = \"prompt-refiner-shadow-v1\"` and the v1 reservation contract digest as frozen literals, so the v2 stage row's `proposalDigest` attests to a proposal describing a different reservation authority, and the previous coupling that made any reservation-contract change break the proposal digest (and thus force review) is replaced by duplicated constants.",
+          "reproduction": "Run `node --import tsx -e \"import('./lib/promptRefinerShadowAdmissionCore.ts').then(m=>console.log(m.proposePromptRefinerShadowStage))\"` conceptually, or simply compare: lib/promptRefinerStageAdmission.ts:566-568 creates the stage with id `prompt-refiner-shadow-v2` and contractDigest `sha256:6b60c957…`, while trustedUnsignedProposal() (lib/promptRefinerShadowAdmissionCore.ts:678) emits `stageId: \"prompt-refiner-shadow-v1\"` / `sha256:c5cc412e…`, and tests/promptRefinerShadowAdmissionCore.test.mjs:129-138 now asserts the proposal against the duplicated literals instead of the reservation module's live constants. If freezing the historical proposal is intended, state that explicitly in docs/ops/prompt-refiner-confirmatory-shadow-v4.md §1 and add an assertion that the v2 stage's executionManifest — not the proposal — is the authority binding.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx (evidenceCases Field)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The panel renders `${execution.evidence.summary.passedCases}/16` with a hardcoded denominator instead of `summary.attemptedCases`, which the operator-core validator already pins to 16.",
+          "reproduction": "Read the added Field for `m.evidenceCases`; substitute `summary.attemptedCases` so the displayed denominator comes from the validated payload rather than a literal.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Align the terminal writer's durationMs bound with the aggregator's 60_000 cap (and the DB CHECK) so no completed v4 run can become unreconstructible, then update the five stale operator/policy documents to the 188-file v2/v4 contract and restore the closure-size assertions that were deleted."
+    }
+  ],
+  "changeDigest": "sha256:92620430d46d8898a459b872d27f2fdc436d8704a03e7bc3eb44c492ec85f823",
+  "commit": "8381e98aa313d746976410f26e9e8240798dcc86",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "npm run test:unit",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2922.335",
+      "durationMs": 889281
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 49652
+    },
+    {
+      "rule": "npm run lint",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+      "durationMs": 84848
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 118 closed list(s) in the schema — 62 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+      "durationMs": 1551
+    },
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+      "durationMs": 4137
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 119 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+      "durationMs": 1818
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1639
+    },
+    {
+      "rule": "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4e?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4e?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 82892.8653",
+      "durationMs": 83065
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "request_changes",
+  "findings": [
+    {
+      "location": "lib/promptRefinerShadowRunStore.ts:885 (terminalInputIsValid) vs lib/promptRefinerShadowEvidenceCore.ts:1174 (aggregatePromptRefinerShadowStoredEvidence)",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "The terminal writer accepts any non-negative durationMs (the DB CHECK only requires >= 0, prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql:139) but the durable aggregator caps stored durationMs at 60_000, so a single case slower than 60s produces an immutable terminal row from which the completed run's aggregate bundle can never be rebuilt — readPromptRefinerShadowEvidenceBundle then refuses 409 PROMPT_REFINER_SHADOW_EVIDENCE_INVALID forever, defeating completion criterion 5.",
+      "reproduction": "In tests/integration/prompt-refiner-shadow-run.db.test.ts, take the existing \"completed durable evidence rebuilds a content-free aggregate from all 16 cases\" test and change `durationMs: 10 + caseIndex` to `durationMs: 60_001`. Expected per the criterion: a bundle with gateOutcome fail/insufficient. Actual: every recordPromptRefinerShadowTerminal succeeds, the run reaches status completed, and readPromptRefinerShadowEvidenceBundle() throws PromptRefinerShadowRunError code PROMPT_REFINER_SHADOW_EVIDENCE_INVALID (from evidence core `stored_duration_ms_invalid_integer`). The 15s adapter bound does not prevent this: lib/promptRefinerShadowLiveAdapter.ts:294 passes a non-standard `timeout` option to generateText, and the route's maxDuration is 300s. Fix by enforcing the same 60_000 upper bound in terminalInputIsValid (and the DB terminal CHECK) so no unreconstructible row can be written.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1231-1250 (\"operator-facing contracts name the enforced runtime source closure size\")",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "The change deletes the assertions that pinned five operator/policy documents to the enforced runtime closure size instead of updating those documents, so the shipped operator-facing approval contracts now state a file count and stage identity that the code no longer implements, and the guard that would have caught it is gone.",
+      "reproduction": "After this commit, `PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT` is 188 (lib/promptRefinerStageAdmissionCore.ts:41) and the live stage id/confirmation are `prompt-refiner-shadow-v2` / `APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES`. Open: docs/ops/prompt-refiner-durable-stage-writer-contract.md:20 (\"현재 deployment의 187개 고정 source 파일\"), :5 (stage: prompt-refiner-shadow-v1), :9/:38 (STAGE V1 confirmation); docs/ops/prompt-refiner-durable-stage-writer-task.md:17 (\"187-file/16 MiB\"); docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40 (\"187개 고정 path allowlist\"); docs/ops/tomverse-chat-progress.md:1182 (\"exact 187-file runtime import-closure source manifest\"); docs/policy/prompt-refiner-observability.md:309 (\"고정 187개 source 파일\") and :49 (\"stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며\") — the last file is edited by this change (header at :3-5) yet left stale. `git show 8381e98a -- tests/promptRefinerRuntimeSourceClosure.test.mjs` shows the five removed assertions. `npm run test:unit` passes only because those assertions were deleted.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:27",
+      "severity": "warning",
+      "basis": "evidence",
+      "claim": "The new `prompt_refiner_runtime_manifest_valid` wrapper short-circuits to the 187-file v2 validator for any row whose manifest declares schemaVersion v2, without binding that branch to `id = 'prompt-refiner-shadow-v1'`, so the database would accept a `prompt-refiner-shadow-v2` stage bound to the superseded 187-file closure even though the same migration's execution-manifest CHECK pins `\"runtimeSource\":{\"fileCount\":188}` for v2 — the two CHECKs on the same row disagree about which closure a v4 authority is bound to.",
+      "reproduction": "Read migration.sql:27-31 together with the `PromptRefinerReservationStage_runtime_identity_check` (migration.sql:133-141) and the v2 execution-manifest literal (migration.sql:~160). The runtime_identity_check passes for `id='prompt-refiner-shadow-v2'` with any structurally valid 187-file v2 manifest; nothing in the schema rejects it. Application reads (promptRefinerStoredStageMatchesRuntime) would reject such a row, so this is defence-in-depth only, but criterion 1 asks schema/migration/application validation to agree. Fix: gate the v2 branch on `id = 'prompt-refiner-shadow-v1'` (or on the manifest version matching the stage's executionManifest fileCount).",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "lib/promptRefinerShadowAdmissionCore.ts:100-103, 678-681 (PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID / _CONTRACT_DIGEST)",
+      "severity": "warning",
+      "basis": "judgement",
+      "claim": "The admission proposal that attests the new v2 stage still declares `reservationStage.stageId = \"prompt-refiner-shadow-v1\"` and the v1 reservation contract digest as frozen literals, so the v2 stage row's `proposalDigest` attests to a proposal describing a different reservation authority, and the previous coupling that made any reservation-contract change break the proposal digest (and thus force review) is replaced by duplicated constants.",
+      "reproduction": "Run `node --import tsx -e \"import('./lib/promptRefinerShadowAdmissionCore.ts').then(m=>console.log(m.proposePromptRefinerShadowStage))\"` conceptually, or simply compare: lib/promptRefinerStageAdmission.ts:566-568 creates the stage with id `prompt-refiner-shadow-v2` and contractDigest `sha256:6b60c957…`, while trustedUnsignedProposal() (lib/promptRefinerShadowAdmissionCore.ts:678) emits `stageId: \"prompt-refiner-shadow-v1\"` / `sha256:c5cc412e…`, and tests/promptRefinerShadowAdmissionCore.test.mjs:129-138 now asserts the proposal against the duplicated literals instead of the reservation module's live constants. If freezing the historical proposal is intended, state that explicitly in docs/ops/prompt-refiner-confirmatory-shadow-v4.md §1 and add an assertion that the v2 stage's executionManifest — not the proposal — is the authority binding.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "components/admin/AdminPromptRefinerShadowPanel.tsx (evidenceCases Field)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The panel renders `${execution.evidence.summary.passedCases}/16` with a hardcoded denominator instead of `summary.attemptedCases`, which the operator-core validator already pins to 16.",
+      "reproduction": "Read the added Field for `m.evidenceCases`; substitute `summary.attemptedCases` so the displayed denominator comes from the validated payload rather than a literal.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "Align the terminal writer's durationMs bound with the aggregator's 60_000 cap (and the DB CHECK) so no completed v4 run can become unreconstructible, then update the five stale operator/policy documents to the 188-file v2/v4 contract and restore the closure-size assertions that were deleted.; package round 1 once the change is revised",
+  "status": "awaiting_revision",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-20T22:27:56.900Z",
+  "packagedRounds": 1,
+  "concludedAtRound": null,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "8381e98aa313d746976410f26e9e8240798dcc86",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+    "app/api/admin/prompt-refiner/shadow-run/route.ts",
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.task.json",
+    "docs/ops/prompt-refiner-confirmatory-shadow-v4.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "lib/marketingAutomationAccess.ts",
+    "lib/promptRefinerReservationCore.ts",
+    "lib/promptRefinerShadowAdmissionCore.ts",
+    "lib/promptRefinerShadowEvidenceCore.ts",
+    "lib/promptRefinerShadowOperatorCore.ts",
+    "lib/promptRefinerShadowRunContract.ts",
+    "lib/promptRefinerShadowRunStore.ts",
+    "lib/promptRefinerShadowRunner.ts",
+    "lib/promptRefinerShadowSystemAudit.ts",
+    "lib/promptRefinerStageAdmissionCore.ts",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "prisma/schema.prisma",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/promptRefinerReservationCore.test.mjs",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "tests/promptRefinerShadowAdmissionCore.test.mjs",
+    "tests/promptRefinerShadowEvidenceCore.test.mjs",
+    "tests/promptRefinerShadowOperatorCore.test.mjs",
+    "tests/promptRefinerShadowRunContract.test.mjs",
+    "tests/promptRefinerShadowRunner.test.mjs",
+    "tests/promptRefinerStageAdmissionReader.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ]
+}

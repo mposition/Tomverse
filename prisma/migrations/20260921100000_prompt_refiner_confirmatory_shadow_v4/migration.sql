@@ -132,6 +132,13 @@ ALTER TABLE "PromptRefinerReservationStage"
         AND "runtimeDeploymentId" ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
         AND "runtimeSourceIdentityDigest" ~ '^sha256:[a-f0-9]{64}$'
         AND "runtimeSourceManifestDigest" ~ '^sha256:[a-f0-9]{64}$'
+        AND (
+            ("id" = 'prompt-refiner-shadow-v1'
+             AND "runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2')
+            OR
+            ("id" = 'prompt-refiner-shadow-v2'
+             AND "runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3')
+        )
         AND "prompt_refiner_runtime_manifest_valid"(
             "runtimeSourceManifest",
             "runtimeCommitSha",
@@ -374,6 +381,11 @@ ALTER TABLE "PromptRefinerShadowAttempt"
     DROP CONSTRAINT "PromptRefinerShadowAttempt_binding_check",
     DROP CONSTRAINT "PromptRefinerShadowAttempt_terminal_check";
 ALTER TABLE "PromptRefinerShadowAttempt"
+    ADD CONSTRAINT "PromptRefinerShadowAttempt_v4_duration_check" CHECK (
+        "runContractDigest" <> 'sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7'
+        OR "durationMs" IS NULL
+        OR "durationMs" <= 60000
+    ),
     ADD CONSTRAINT "PromptRefinerShadowAttempt_binding_check" CHECK (
         "id" ~ '^[A-Za-z0-9:_-]{1,128}$'
         AND "runId" ~ '^[A-Za-z0-9:_-]{1,128}$'

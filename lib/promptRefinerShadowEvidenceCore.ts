@@ -34,6 +34,7 @@ export const PROMPT_REFINER_SHADOW_EVIDENCE_BUNDLE_VERSION =
 export const PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST =
     "7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1" as const;
 export const PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES = 64 * 1024;
+export const PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS = 60_000;
 
 const LANGUAGES = ["ko", "en"] as const;
 const CATEGORIES = [
@@ -456,13 +457,13 @@ export function validatePromptRefinerShadowEvidenceSpec(
             thresholds.maximumLatencyP90Ms,
             "maximum_latency_p90",
             1,
-            60_000
+            PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS
         ),
         maximumLatencyMaxMs: safeInteger(
             thresholds.maximumLatencyMaxMs,
             "maximum_latency_max",
             1,
-            60_000
+            PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS
         ),
     };
     if (parsedThresholds.maximumLatencyMaxMs < parsedThresholds.maximumLatencyP90Ms) {
@@ -944,7 +945,12 @@ function validateRunCase(
     const durationMs =
         object.durationMs === null
             ? null
-            : safeInteger(object.durationMs, "duration_ms", 0, 60_000);
+            : safeInteger(
+                  object.durationMs,
+                  "duration_ms",
+                  0,
+                  PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS
+              );
     const costMicroUsd =
         object.costMicroUsd === null
             ? null
@@ -1171,7 +1177,12 @@ export function aggregatePromptRefinerShadowStoredEvidence(input: {
         const durationMs =
             object.durationMs === null
                 ? null
-                : safeInteger(object.durationMs, "stored_duration_ms", 0, 60_000);
+                : safeInteger(
+                      object.durationMs,
+                      "stored_duration_ms",
+                      0,
+                      PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS
+                  );
         const costMicroUsd =
             object.costMicroUsd === null
                 ? null

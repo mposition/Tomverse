@@ -22,6 +22,12 @@ Router 결합 또는 rollout을 승인하지 않는다.
 188-file 계약과 case별 evidence를 요구한다. migration은 행을 seed하거나 기존 행을
 backfill하지 않는다.
 
+stage proposal v1은 과거 provider-free evidence에 결속된 역사적 byte identity이므로 그
+내부의 `prompt-refiner-shadow-v1` 및 v1 reservation digest를 수정하지 않는다. 이는 현행
+authority 선언이 아니다. 새 `prompt-refiner-shadow-v2`와 v2 reservation digest는 stage의
+execution manifest, runtime manifest v3 및 DB CHECK가 별도로 결속하며 application validation도
+그 현행 manifest를 authority로 사용한다.
+
 ## 2. 현행 runtime 결속
 
 관리자 stage preview와 create-only writer는 승인 시점 staging deployment의 full commit
@@ -46,7 +52,9 @@ Refiner 결과 문자열은 요청 처리 중 메모리에서만 평가하고 DB
 
 terminal replay는 reason, usage, latency와 evidence가 모두 정확히 같을 때만 idempotent하다.
 DB CHECK와 trigger는 v4 terminal에 evidence object가 없거나 case/status/audit 결속이
-다르면 거부한다. unknown sweep도 prompt 없이 결정적인 insufficient evidence를 만든다.
+다르면 거부한다. latency는 application writer와 DB CHECK 모두 0~60,000ms로 제한해 저장된
+terminal이 aggregate validator에서 재구성 불가능해지는 상태를 막는다. unknown sweep도
+prompt 없이 결정적인 insufficient evidence를 만든다.
 
 완료된 16개 terminal row는 고정 corpus와 evidence spec으로 다시 검증한 뒤 aggregate
 bundle을 재구성한다. 누락·순서 변경·위조·내부 불일치는 fail-closed다. 관리자 API는

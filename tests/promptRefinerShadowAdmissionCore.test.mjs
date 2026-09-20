@@ -35,8 +35,11 @@ import {
     admitPromptRefinerExecution,
 } from "../lib/promptRefinerExecutionContract.ts";
 import {
+    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+    PROMPT_REFINER_RESERVATION_STAGE_ID,
     PROMPT_REFINER_RESERVATION_TTL_MS,
 } from "../lib/promptRefinerReservationCore.ts";
+import { promptRefinerExecutionManifest } from "../lib/promptRefinerStageAdmissionCore.ts";
 import {
     canonicalBenchmarkJson,
 } from "../lib/routerDevelopmentBenchmark.ts";
@@ -136,6 +139,22 @@ test("checked-in evidence emits only the fixed content-free proposal", () => {
     assert.equal(
         proposal.reservationStage.contractDigest,
         PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST
+    );
+    assert.notEqual(
+        proposal.reservationStage.stageId,
+        PROMPT_REFINER_RESERVATION_STAGE_ID,
+        "the frozen proposal must retain its historical v1 stage identity"
+    );
+    assert.notEqual(
+        proposal.reservationStage.contractDigest,
+        PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+        "the frozen proposal must retain its historical v1 reservation digest"
+    );
+    const currentExecutionManifest = promptRefinerExecutionManifest();
+    assert.equal(currentExecutionManifest.stageId, PROMPT_REFINER_RESERVATION_STAGE_ID);
+    assert.equal(
+        currentExecutionManifest.reservationContractDigest,
+        PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST
     );
     assert.equal(proposal.reservationStage.perRequestCostMicroUsd, 24_916);
     assert.equal(proposal.reservationStage.maxReservations, 100);

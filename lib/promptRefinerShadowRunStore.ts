@@ -69,6 +69,7 @@ import {
 import {
     aggregatePromptRefinerShadowStoredEvidence,
     evaluatePromptRefinerShadowCaseEvidence,
+    PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS,
     PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
     validatePromptRefinerShadowCaseEvidence,
     validatePromptRefinerShadowEvidenceSpec,
@@ -884,6 +885,7 @@ const terminalInputIsValid = (
     DISPATCH_TERMINAL_REASONS.has(reason) &&
     Number.isSafeInteger(telemetry.durationMs) &&
     telemetry.durationMs >= 0 &&
+    telemetry.durationMs <= PROMPT_REFINER_SHADOW_EVIDENCE_MAX_DURATION_MS &&
     nullableNonnegativeInteger(telemetry.usage.inputTokens) &&
     nullableNonnegativeInteger(telemetry.usage.cachedInputTokens) &&
     nullableNonnegativeInteger(telemetry.usage.cacheWriteInputTokens) &&

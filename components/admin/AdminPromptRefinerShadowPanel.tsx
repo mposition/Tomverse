@@ -516,7 +516,7 @@ export function AdminPromptRefinerShadowPanel() {
                 />
                 <Field
                   label={m.evidenceCases}
-                  value={`${execution.evidence.summary.passedCases}/16`}
+                  value={`${execution.evidence.summary.passedCases}/${execution.evidence.summary.attemptedCases}`}
                 />
                 <Field
                   label={m.evidenceCost}

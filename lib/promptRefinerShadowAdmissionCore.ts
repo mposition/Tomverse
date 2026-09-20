@@ -97,6 +97,9 @@ export const PROMPT_REFINER_SHADOW_ADMISSION_MANIFEST_SHA256 =
     "9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d" as const;
 export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST =
     "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2" as const;
+// These two values are part of the already-reviewed v1 proposal bytes. They
+// describe the historical proposal, not the live reservation authority. The
+// current v2 authority is bound independently by promptRefinerExecutionManifest.
 export const PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID =
     "prompt-refiner-shadow-v1" as const;
 export const PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST =

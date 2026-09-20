@@ -420,6 +420,43 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
     );
 });
 
+test("v4 terminal duration is bounded before an immutable receipt can be stored", async () => {
+    await approveStage();
+    await approveRun();
+    const { attempt } = await dispatch({
+        requestId: "shadow_db_duration_bound",
+        caseIndex: 0,
+    });
+    await assert.rejects(
+        recordPromptRefinerShadowTerminal({
+            attemptId: attempt.id,
+            terminalReason: "provider_error",
+            durationMs: 60_001,
+            usage: usage(null),
+            evidence: evidenceFor(0, "failed"),
+        }),
+        (error: unknown) =>
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "PROMPT_REFINER_SHADOW_TERMINAL_INVALID"
+    );
+    assert.equal(
+        (
+            await prisma.promptRefinerShadowAttempt.findUniqueOrThrow({
+                where: { id: attempt.id },
+            })
+        ).status,
+        "dispatch_intent"
+    );
+    const durationConstraints = await prisma.$queryRawUnsafe<Array<{ definition: string }>>(`
+        SELECT pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conname = 'PromptRefinerShadowAttempt_v4_duration_check'
+    `);
+    assert.equal(durationConstraints.length, 1);
+    assert.match(durationConstraints[0]!.definition, /"durationMs" <= 60000/);
+});
+
 test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {
     await approveStage();
     await approveRun();

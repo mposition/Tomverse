@@ -62,8 +62,8 @@ const compilerOptions = parsedConfig.options;
 // be reviewed and must update this digest before the closure gate can pass.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "35bbf0f8b2c925df480da5b0d90cc54e",
-  "fd9d6b000c000bb41688c606daa90164",
+  "2d9db67900d0c542d6d1091626f6a461",
+  "b75d9999dc8b4b3076e917f9f4efd1e7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -1224,6 +1224,11 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
     "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
   );
+  assert.match(
+    migration,
+    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'/,
+    "database stage identity must select the matching runtime manifest generation"
+  );
 });
 
 test("operator-facing contracts name the enforced runtime source closure size", () => {
@@ -1231,6 +1236,10 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   const expectedRuntimeSourceCount = String(runtimeImportClosure().length);
   for (const [path, pattern] of [
     ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
+    ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
+    ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
+    ["docs/ops/tomverse-chat-progress.md", /confirmatory v2\/v4 현재 계약은 exact (\d+)-file/],
+    ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
     ["docs/ops/prompt-refiner-confirmatory-shadow-v4.md", /\*\*(\d+)개 고정 source 파일\*\*/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
@@ -1247,5 +1256,37 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     contract,
     new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개는 8개 실행 root의 local TypeScript/JavaScript`),
     "runtime TypeScript/JavaScript source-count contract drifted"
+  );
+  const stageContract = readFileSync(
+    join(repositoryRoot, "docs/ops/prompt-refiner-durable-stage-writer-contract.md"),
+    "utf8"
+  );
+  assert.match(
+    stageContract,
+    new RegExp(`${expectedCount}개 경로의 순서`),
+    "database path-count contract drifted"
+  );
+  assert.match(
+    stageContract,
+    new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),
+    "stage writer runtime-source count drifted"
+  );
+  const observabilityPolicy = readFileSync(
+    join(repositoryRoot, "docs/policy/prompt-refiner-observability.md"),
+    "utf8"
+  );
+  const observabilityClosureCounts = observabilityPolicy.match(
+    /고정 (\d+)개 source\r?\n파일의 exact bytes\(개별\/총 size와 SHA-256\)를 canonical manifest로 만든다\. (\d+)개 source는/
+  );
+  assert.ok(observabilityClosureCounts, "observability policy runtime closure paragraph is missing");
+  assert.equal(
+    observabilityClosureCounts[1],
+    expectedCount,
+    "observability policy total source count drifted"
+  );
+  assert.equal(
+    observabilityClosureCounts[2],
+    expectedRuntimeSourceCount,
+    "observability policy runtime-source count drifted"
   );
 });
