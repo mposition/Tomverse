@@ -173,16 +173,33 @@ export const computeMarketingWebhookPipelineFingerprint = (
 /**
  * Updated only by the fingerprint test after reviewing a declared file change.
  *
- * Moved on 2026-09-21 because `lib/marketingAutomationSchema.ts` changed:
- * `edit_revision.byAuditLogId` became non-null. An edit with no audit row
- * cannot be placed in time against a template marking, and because history is
- * append-only one such entry would have made that post permanently unusable as
- * a template. Requiring the field while nothing writes an edit yet is the
- * moment to do it. A webhook verification record pinned to the old fingerprint
- * no longer applies, which is what this constant is for.
+ * 2026-09-20: `prisma/schema.prisma` is one of the watched files, and the
+ * webhook account contraction changed it -- the old
+ * `(provider, providerEventId)` unique and the `providerAccount` default are
+ * gone, and `EmailDelivery(providerAccount, providerMessageId)` became unique
+ * (docs/policy/email-notifications.md v24).
+ *
+ * This is not a change the marketing pipeline merely happens to sit beside: it
+ * changes the storage rules the pipeline depends on. A marketing webhook event
+ * carrying the same provider event id as a transactional one is now stored
+ * rather than refused, and a marketing delivery's message id is now unique
+ * within the marketing account rather than merely indexed. Both make the
+ * per-account matching S1b-2b built true instead of assumed, and neither
+ * changes a decision this module makes -- which is what the second look was
+ * for.
+ *
+ * 2026-09-21: the other watched file, `lib/marketingAutomationSchema.ts`,
+ * changed too -- `edit_revision.byAuditLogId` became non-null. An edit with no
+ * audit row cannot be placed in time against a template marking, and because
+ * history is append-only one such entry would have made that post permanently
+ * unusable as a template; requiring the field while nothing writes an edit yet
+ * is the moment to do it. The value below is recomputed over both changes, not
+ * either one: two branches each moved this constant for their own file, and
+ * taking one side of that merge would have left a fingerprint describing a
+ * pipeline that never existed.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "90db4a2db8d68785bd49d4b502189218bd022846f7c957bc9539db1a57bfd332";
+  "722babd0d23333823127ac229131db33cd5c14b1f37172e39836ba3469c40299";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

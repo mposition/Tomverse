@@ -1,0 +1,1579 @@
+diff --git a/app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx b/app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx
+new file mode 100644
+index 00000000..9c49f237
+--- /dev/null
++++ b/app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx
+@@ -0,0 +1,15 @@
++export const dynamic = "force-dynamic";
++
++import { notFound } from "next/navigation";
++import { getServerSession } from "next-auth/next";
++
++import { AdminPromptRefinerShadowPanel } from "@/components/admin/AdminPromptRefinerShadowPanel";
++import { getAdminRole } from "@/lib/adminAuth";
++import { authOptions } from "@/lib/auth";
++
++export default async function AdminPromptRefinerShadowPage() {
++  const session = await getServerSession(authOptions);
++  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
++  return <AdminPromptRefinerShadowPanel />;
++}
++
+diff --git a/components/admin/AdminPromptRefinerShadowPanel.tsx b/components/admin/AdminPromptRefinerShadowPanel.tsx
+new file mode 100644
+index 00000000..950334d3
+--- /dev/null
++++ b/components/admin/AdminPromptRefinerShadowPanel.tsx
+@@ -0,0 +1,556 @@
++"use client";
++
++import Link from "next/link";
++import {
++  CheckCircle2,
++  CircleStop,
++  Loader2,
++  LockKeyhole,
++  Play,
++  RefreshCw,
++  ShieldAlert,
++} from "lucide-react";
++import { useCallback, useEffect, useState } from "react";
++
++import {
++  useAdminLocale,
++  useAdminMessages,
++} from "@/components/admin/AdminLocaleProvider";
++import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
++import { adminPromptRefinerShadowMessages } from "@/lib/adminMessages/promptRefinerShadow";
++import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
++import {
++  PROMPT_REFINER_SHADOW_EXECUTION_PATH,
++  PROMPT_REFINER_SHADOW_OPERATOR_PATH,
++  PROMPT_REFINER_SHADOW_RUN_PATH,
++  PROMPT_REFINER_SHADOW_STAGE_PATH,
++  parsePromptRefinerExecutionPreview,
++  parsePromptRefinerExecutionResult,
++  parsePromptRefinerRunPreview,
++  parsePromptRefinerStagePreview,
++  promptRefinerExecutionBody,
++  promptRefinerRunApprovalBody,
++  promptRefinerStageApprovalBody,
++  type PromptRefinerExecutionPreview,
++  type PromptRefinerExecutionResult,
++  type PromptRefinerRunPreview,
++  type PromptRefinerStagePreview,
++} from "@/lib/promptRefinerShadowOperatorCore";
++
++type Busy = "stage" | "run" | "execution" | "refresh" | null;
++type FailureBody = { error?: string; code?: string };
++
++const usd = (microUsd: number) => `US$${(microUsd / 1_000_000).toFixed(6)}`;
++
++const responseJson = async (response: Response): Promise<unknown> =>
++  response.json().catch(() => null);
++
++const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
++  <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2.5">
++    <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
++      {label}
++    </dt>
++    <dd className="mt-1 min-w-0 break-all font-mono text-xs text-zinc-200">
++      {value}
++    </dd>
++  </div>
++);
++
++const Step = ({
++  title,
++  description,
++  children,
++}: {
++  title: string;
++  description: string;
++  children: React.ReactNode;
++}) => (
++  <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
++    <h2 className="text-lg font-bold text-white">{title}</h2>
++    <p className="mt-1 text-sm leading-6 text-zinc-400">{description}</p>
++    <div className="mt-5">{children}</div>
++  </section>
++);
++
++export function AdminPromptRefinerShadowPanel() {
++  const m = useAdminMessages(adminPromptRefinerShadowMessages);
++  const { locale } = useAdminLocale();
++  const [stage, setStage] = useState<PromptRefinerStagePreview | null>(null);
++  const [run, setRun] = useState<PromptRefinerRunPreview | null>(null);
++  const [execution, setExecution] =
++    useState<PromptRefinerExecutionPreview | null>(null);
++  const [lastExecution, setLastExecution] =
++    useState<PromptRefinerExecutionResult | null>(null);
++  const [busy, setBusy] = useState<Busy>("stage");
++  const [error, setError] = useState<string | null>(null);
++  const [reauthenticationRequired, setReauthenticationRequired] =
++    useState(false);
++  // Once an execution POST has no response or is refused, this mounted screen
++  // cannot prove whether the provider boundary was crossed. A GET is allowed;
++  // another POST is not. A successful, explicit `paused` response is the only
++  // state that opens the continuation button again.
++  const [executionPostLocked, setExecutionPostLocked] = useState(false);
++
++  const failResponse = useCallback(
++    (response: Response, body: unknown, fallback = m.requestFailed) => {
++      const candidate =
++        body && typeof body === "object" ? (body as FailureBody) : null;
++      const failure = describeAdminApiFailure({
++        status: response.status,
++        error: candidate?.error,
++        code: candidate?.code,
++        fallback,
++        locale,
++      });
++      setError(failure.message);
++      setReauthenticationRequired(failure.requiresReauthentication);
++      return failure.message;
++    },
++    [locale, m.requestFailed]
++  );
++
++  const readStage = useCallback(async () => {
++    setError(null);
++    setReauthenticationRequired(false);
++    const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
++      cache: "no-store",
++    });
++    const body = await responseJson(response);
++    if (!response.ok) {
++      failResponse(response, body);
++      return null;
++    }
++    const parsed = parsePromptRefinerStagePreview(body);
++    if (!parsed) {
++      setError(m.previewInvalid);
++      return null;
++    }
++    setStage(parsed);
++    return parsed;
++  }, [failResponse, m.previewInvalid]);
++
++  const readRun = useCallback(
++    async (knownStage: PromptRefinerStagePreview) => {
++      setError(null);
++      setReauthenticationRequired(false);
++      const response = await fetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
++        cache: "no-store",
++      });
++      const body = await responseJson(response);
++      if (!response.ok) {
++        failResponse(response, body);
++        return null;
++      }
++      const parsed = parsePromptRefinerRunPreview(body, knownStage);
++      if (!parsed) {
++        setError(m.previewInvalid);
++        return null;
++      }
++      setRun(parsed);
++      return parsed;
++    },
++    [failResponse, m.previewInvalid]
++  );
++
++  const readExecution = useCallback(
++    async (knownRun: PromptRefinerRunPreview) => {
++      setError(null);
++      setReauthenticationRequired(false);
++      const response = await fetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
++        cache: "no-store",
++      });
++      const body = await responseJson(response);
++      if (!response.ok) {
++        failResponse(response, body);
++        return null;
++      }
++      const parsed = parsePromptRefinerExecutionPreview(body, knownRun);
++      if (!parsed) {
++        setError(m.responseInvalid);
++        return null;
++      }
++      setExecution(parsed);
++      return parsed;
++    },
++    [failResponse, m.responseInvalid]
++  );
++
++  useEffect(() => {
++    let active = true;
++    queueMicrotask(() => {
++      if (!active) return;
++      void readStage()
++        .catch(() => {
++          if (active) setError(m.requestFailed);
++        })
++        .finally(() => {
++          if (active) setBusy(null);
++        });
++    });
++    return () => {
++      active = false;
++    };
++  }, [m.requestFailed, readStage]);
++
++  const approveStage = async () => {
++    if (!stage || busy) return;
++    setBusy("stage");
++    setError(null);
++    try {
++      if (stage.status === "ready_for_explicit_cost_approval") {
++        const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify(promptRefinerStageApprovalBody(stage)),
++        });
++        const body = await responseJson(response);
++        if (!response.ok) {
++          failResponse(response, body);
++          return;
++        }
++        const returned =
++          body && typeof body === "object"
++            ? (body as { stage?: { deploymentId?: unknown; commitSha?: unknown } })
++                .stage
++            : null;
++        if (
++          returned?.deploymentId !== stage.deploymentId ||
++          returned?.commitSha !== stage.commitSha
++        ) {
++          setError(m.responseInvalid);
++          return;
++        }
++      }
++      await readRun(stage);
++    } catch {
++      setError(m.requestFailed);
++    } finally {
++      setBusy(null);
++    }
++  };
++
++  const approveRun = async () => {
++    if (
++      !stage ||
++      !run ||
++      busy ||
++      (run.status === "ready_for_explicit_cost_approval" &&
++        !run.approvalEnabled)
++    ) {
++      return;
++    }
++    setBusy("run");
++    setError(null);
++    try {
++      if (run.status === "ready_for_explicit_cost_approval") {
++        const response = await fetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify(promptRefinerRunApprovalBody(run)),
++        });
++        const body = await responseJson(response);
++        if (!response.ok) {
++          failResponse(response, body);
++          return;
++        }
++        const returned =
++          body && typeof body === "object"
++            ? (body as { run?: { deploymentId?: unknown; commitSha?: unknown } })
++                .run
++            : null;
++        if (
++          returned?.deploymentId !== stage.deploymentId ||
++          returned?.commitSha !== stage.commitSha
++        ) {
++          setError(m.responseInvalid);
++          return;
++        }
++      }
++      await readExecution(run);
++    } catch {
++      setError(m.requestFailed);
++    } finally {
++      setBusy(null);
++    }
++  };
++
++  const execute = async () => {
++    if (
++      !execution ||
++      busy ||
++      !execution.enabled ||
++      executionPostLocked ||
++      execution.inFlightAttemptId ||
++      execution.status === "completed" ||
++      execution.status === "stopped_unknown"
++    ) {
++      return;
++    }
++    setBusy("execution");
++    setError(null);
++    setExecutionPostLocked(true);
++    let parsed: PromptRefinerExecutionResult | null = null;
++    try {
++      const response = await fetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify(promptRefinerExecutionBody(execution)),
++      });
++      const body = await responseJson(response);
++      if (!response.ok) {
++        const failure = failResponse(response, body);
++        setError(`${failure} ${m.postFailureStop}`);
++        setBusy(null);
++        return;
++      }
++      parsed = parsePromptRefinerExecutionResult(body);
++      if (!parsed) {
++        setError(m.responseInvalid);
++        setBusy(null);
++        return;
++      }
++      setLastExecution(parsed);
++    } catch {
++      setError(m.transportUnknown);
++      setBusy(null);
++      return;
++    }
++
++    try {
++      const refreshed = await readExecution(run!);
++      if (refreshed && parsed?.status === "paused") {
++        setExecutionPostLocked(false);
++      }
++    } catch {
++      setError(m.statusRefreshFailed);
++    } finally {
++      setBusy(null);
++    }
++  };
++
++  const refresh = async () => {
++    if (busy) return;
++    setBusy("refresh");
++    try {
++      if (execution && run) await readExecution(run);
++      else if (run && stage) await readRun(stage);
++      else await readStage();
++    } catch {
++      setError(m.requestFailed);
++    } finally {
++      setBusy(null);
++    }
++  };
++
++  const terminal =
++    execution?.status === "completed" ||
++    execution?.status === "stopped_unknown";
++  const canExecute =
++    Boolean(execution?.enabled) &&
++    !terminal &&
++    !execution?.inFlightAttemptId &&
++    !executionPostLocked;
++
++  return (
++    <div className="flex min-w-0 flex-col gap-5" data-testid="prompt-refiner-shadow-operator">
++      <section className="rounded-3xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-zinc-950 to-zinc-950 p-6">
++        <div className="flex flex-wrap items-start justify-between gap-4">
++          <div className="max-w-3xl">
++            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
++              {m.eyebrow}
++            </p>
++            <h1 className="mt-2 text-2xl font-black text-white">{m.title}</h1>
++            <p className="mt-3 text-sm leading-6 text-zinc-300">{m.description}</p>
++          </div>
++          <button
++            type="button"
++            onClick={() => void refresh()}
++            disabled={busy !== null}
++            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
++          >
++            {busy === "refresh" ? (
++              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
++            ) : (
++              <RefreshCw className="h-4 w-4" aria-hidden />
++            )}
++            {m.refresh}
++          </button>
++        </div>
++        <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
++          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
++          <p>{m.boundary}</p>
++        </div>
++      </section>
++
++      {error ? (
++        <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100">
++          <p>{error}</p>
++          {reauthenticationRequired ? (
++            <Link
++              href={adminRecentAuthenticationHref(
++                PROMPT_REFINER_SHADOW_OPERATOR_PATH
++              )}
++              className="mt-2 inline-flex min-h-11 items-center font-bold text-red-50 underline underline-offset-4"
++            >
++              {m.reauthenticate}
++            </Link>
++          ) : null}
++        </div>
++      ) : null}
++
++      {!stage && busy === "stage" ? (
++        <div role="status" className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-4 text-sm text-zinc-300">
++          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
++          {m.loading}
++        </div>
++      ) : null}
++
++      {stage ? (
++        <Step title={m.stageTitle} description={m.stageBody}>
++          <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
++            <Field label={m.status} value={stage.status} />
++            <Field label={m.deployment} value={stage.deploymentId} />
++            <Field label={m.commit} value={stage.commitSha} />
++            <Field label={m.expires} value={`${stage.approvalTtlMinutes} min`} />
++            <Field
++              label={m.perRequestCeiling}
++              value={usd(stage.perRequestCostMicroUsd)}
++            />
++            <Field
++              label={m.stageCeiling}
++              value={usd(stage.costCeilingMicroUsd)}
++            />
++            <Field label={m.maxReservations} value={stage.maxReservations} />
++          </dl>
++          {!run ? (
++            <button
++              type="button"
++              onClick={() => void approveStage()}
++              disabled={busy !== null}
++              className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
++            >
++              {busy === "stage" ? (
++                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
++              ) : (
++                <LockKeyhole className="h-4 w-4" aria-hidden />
++              )}
++              {stage.status === "already_exists"
++                ? m.continueToRun
++                : m.approveStage}
++            </button>
++          ) : null}
++        </Step>
++      ) : null}
++
++      {run ? (
++        <Step title={m.runTitle} description={m.runBody}>
++          <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
++            <Field label={m.status} value={run.status} />
++            <Field label={m.model} value={`${run.provider}/${run.modelId}`} />
++            <Field label={m.runCeiling} value={usd(run.costCeilingMicroUsd)} />
++            <Field label={m.maxDispatches} value={run.maxDispatches} />
++            <Field label={m.retryCount} value={run.retryCount} />
++            <Field label={m.timeout} value={`${run.timeoutMs} ms`} />
++            <Field
++              label={m.approvalFlag}
++              value={run.approvalEnabled ? m.enabled : m.disabled}
++            />
++          </dl>
++          {!run.approvalEnabled &&
++          run.status === "ready_for_explicit_cost_approval" ? (
++            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
++              {m.runApprovalFlagDisabled}
++            </p>
++          ) : null}
++          {!execution ? (
++            <button
++              type="button"
++              onClick={() => void approveRun()}
++              disabled={
++                busy !== null ||
++                (run.status === "ready_for_explicit_cost_approval" &&
++                  !run.approvalEnabled)
++              }
++              className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
++            >
++              {busy === "run" ? (
++                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
++              ) : (
++                <LockKeyhole className="h-4 w-4" aria-hidden />
++              )}
++              {run.status === "already_exists"
++                ? m.continueToExecution
++                : m.approveRun}
++            </button>
++          ) : null}
++        </Step>
++      ) : null}
++
++      {execution ? (
++        <Step title={m.executionTitle} description={m.executionBody}>
++          <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
++            <Field label={m.status} value={execution.status} />
++            <Field label={m.dispatches} value={execution.dispatchCount} />
++            <Field label={m.terminals} value={execution.terminalCount} />
++            <Field
++              label={m.nextCase}
++              value={execution.nextCaseId || m.none}
++            />
++            <Field
++              label={m.inFlight}
++              value={execution.inFlightAttemptId || m.none}
++            />
++            <Field label={m.expires} value={execution.approvalExpiresAt} />
++            <Field
++              label={m.executionFlag}
++              value={execution.enabled ? m.enabled : m.disabled}
++            />
++          </dl>
++
++          {execution.status === "completed" ? (
++            <p className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
++              <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden />
++              {m.completed}
++            </p>
++          ) : null}
++          {execution.status === "stopped_unknown" ? (
++            <p className="mt-5 flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
++              <CircleStop className="h-5 w-5 shrink-0" aria-hidden />
++              {m.stoppedUnknown}
++            </p>
++          ) : null}
++          {!execution.enabled && !terminal ? (
++            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
++              {m.executionFlagDisabled}
++            </p>
++          ) : null}
++          {lastExecution ? (
++            <p className="mt-4 font-mono text-xs text-zinc-400">
++              {lastExecution.status} · {lastExecution.attemptedThisInvocation} · {lastExecution.dispatchCount}/{lastExecution.terminalCount}
++            </p>
++          ) : null}
++
++          {!terminal ? (
++            <button
++              type="button"
++              onClick={() => void execute()}
++              disabled={busy !== null || !canExecute}
++              className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
++            >
++              {busy === "execution" ? (
++                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
++              ) : (
++                <Play className="h-4 w-4" aria-hidden />
++              )}
++              {busy === "execution"
++                ? m.working
++                : execution.status === "running"
++                  ? m.resume
++                  : m.execute}
++            </button>
++          ) : null}
++        </Step>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md
+new file mode 100644
+index 00000000..0e779595
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md
+@@ -0,0 +1,28 @@
++# Prompt Refiner shadow 운영 화면 Claude 독립 검토 제한 승인
++
++Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 권장 순서에 따른 자동 진행과
++필요한 Claude 독립 검토를 요청했고, 이 작업에 `--skip-preflight` 예외를 명시적으로
++승인했다. 이 문서는 전자서명, 제품 실행 승인, 배포 승인 또는 검토 통과 기록이 아니다.
++
++## 적용 범위
++
++이 승인은
++[검토 task](prompt-refiner-shadow-operator-ui-v1.task.json)에 정의된 Prompt Refiner
++shadow 운영 화면의 Claude 읽기 전용 독립 검토에만 적용한다. 최초 검토와 actionable
++finding 대응 후 최대 두 번의 수정 검토에만 유효하다.
++
++## 유지되는 경계
++
++- Claude는 저장된 Claude Code Max `claude.ai` 로그인만 사용한다. 실행 직전
++  `claude auth status --json`이 `loggedIn=true`, `authMethod=claude.ai`,
++  `apiProvider=firstParty`, `subscriptionType=max`임을 확인한다.
++- child 환경에서 `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 대소문자와 무관하게
++  제거한다. API key나 Anthropic API로 전환하지 않는다.
++- reviewer는 `--print --safe-mode --output-format json --tools Read,Grep,Glob
++  --allowedTools Read,Grep,Glob --strict-mcp-config`로만 실행한다. shell, write, hook,
++  plugin, skill, MCP는 허용하지 않는다.
++- `--skip-preflight`만 허용한다. 실패한 test/guard 우회, provider/model 호출,
++  Railway 변경, database mutation, stage/run 승인, flag 활성화, 유료 shadow 실행,
++  push·merge·deploy는 이 검토에 포함하지 않는다.
++- 실제 shadow 실행은 별도로 동결된 16건·retry 0·US$0.398656 승인 경계와 owner의
++  명시적 웹 조작을 따라야 한다. 이 검토 기록은 그 실행을 대신하지 않는다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json
+new file mode 100644
+index 00000000..1de634a4
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json
+@@ -0,0 +1,28 @@
++{
++  "taskId": "prompt-refiner-shadow-operator-ui-v1",
++  "requirement": "CHAT-01 Prompt Refiner의 동결된 staging shadow 실행을 owner가 제품의 기존 관리자 인증 세션 안에서 안전하게 조작할 최소 운영 화면을 추가한다. 화면은 stage preview/승인, 정확히 16건·retry 0·US$0.398656 run preview/승인, execution preview/명시적 실행을 순서대로 제공한다. 서버가 준 deployment·commit·digest·confirmation과 고정 model/cost/runtime 사실을 client에서도 fail-closed 검증하고 승인 body는 검증된 서버 값만 재사용한다. mount와 refresh는 GET-only이며 POST는 각각 명시적 버튼 동작에서만 발생한다. 실행 POST는 전송 전에 잠그고, transport unknown·서버 거부·malformed response에서는 자동 재시도나 같은 화면의 재전송을 금지한다. 오직 명시적 paused 응답만 남은 case의 수동 continuation을 다시 연다. page와 기존 API는 owner 및 recent-auth 경계를 유지하고 재인증 복귀 링크를 제공한다. prompt·refined prompt·모델 출력·provider error·credential은 화면에 표시하지 않으며 제품 Chat 트래픽과 연결하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
++  "completionCriteria": [
++    "관리자 detail route는 owner가 아니면 notFound하고 최근 인증이 만료된 API 응답에는 기존 admin 재인증 복귀 경로를 렌더링한다.",
++    "stage/run/execution preview parser가 정확한 환경·배포·commit·digest·model·tokenizer·timeout·retry·case 수·비용 상한·confirmation을 검증하고 drift나 malformed 응답을 fail-closed한다.",
++    "mount와 status refresh는 GET-only이며 세 POST는 각각 사용자의 버튼 동작에서만 시작되고 검증된 preview의 exact binding body만 전송한다.",
++    "execution POST는 전송 전에 잠기며 unknown/refusal/malformed 결과는 재시도를 열지 않고, retryCount=0·redispatched=0인 valid paused 응답만 수동 continuation을 다시 허용한다.",
++    "운영 화면과 응답 처리는 prompt·refined prompt·모델 출력·원시 provider 오류를 노출하지 않고 content-free status·count·고정 비용 사실만 표시한다.",
++    "focused UI/core/navigation tests, 기존 shadow live-adapter tests, owner-only API server-contract tests, TypeScript, ESLint, encoding, production build와 diff whitespace 검사가 통과한다.",
++    "Claude verdict는 package digest와 결속하고 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
++  ],
++  "baseCommit": "51c1648f0d721d975617260342c2b7fe1ae77aa7",
++  "writableScope": [
++    "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
++    "components/admin/AdminPromptRefinerShadowPanel.tsx",
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
++    "lib/adminMessages/promptRefinerShadow.ts",
++    "lib/adminNavigation.ts",
++    "lib/adminNavigationLocale.ts",
++    "lib/promptRefinerShadowOperatorCore.ts",
++    "tests/adminNavigation.test.mjs",
++    "tests/adminPromptRefinerShadowOperator.test.mjs",
++    "tests/promptRefinerShadowOperatorCore.test.mjs"
++  ],
++  "generatedPaths": []
++}
+diff --git a/lib/adminMessages/promptRefinerShadow.ts b/lib/adminMessages/promptRefinerShadow.ts
+new file mode 100644
+index 00000000..93b6744e
+--- /dev/null
++++ b/lib/adminMessages/promptRefinerShadow.ts
+@@ -0,0 +1,136 @@
++import { defineAdminMessages } from "@/lib/adminLocale";
++
++export const adminPromptRefinerShadowMessages = defineAdminMessages({
++  en: {
++    eyebrow: "Prompt Refiner",
++    title: "Bounded shadow run",
++    description:
++      "Approve and execute the frozen 16-case staging shadow. This screen never displays prompt or model-output content and cannot connect the Refiner to product Chat traffic.",
++    boundary:
++      "One deployment, one model, retry 0. An unknown outcome stops the run and this screen never resends it automatically.",
++    loading: "Loading exact server preview...",
++    refresh: "Refresh status",
++    stageTitle: "1. Reservation stage",
++    stageBody:
++      "Creates a 60-minute immutable reservation authority. It does not call a provider.",
++    runTitle: "2. Frozen run approval",
++    runBody:
++      "Narrows the stage to exactly 16 synthetic cases and a US$0.398656 worst-case ceiling.",
++    executionTitle: "3. Execute and observe",
++    executionBody:
++      "Runs only the approved synthetic corpus. No product conversation or customer content is read.",
++    approveStage: "Approve 60-minute stage",
++    continueToRun: "Load run preview",
++    approveRun: "Approve frozen 16-case run",
++    continueToExecution: "Load execution status",
++    execute: "Execute approved run",
++    resume: "Resume remaining cases",
++    working: "Working...",
++    deployment: "Deployment",
++    commit: "Commit",
++    model: "Model",
++    status: "Status",
++    expires: "Expires",
++    perRequestCeiling: "Per-request ceiling",
++    stageCeiling: "Stage authority ceiling",
++    runCeiling: "Run ceiling",
++    maxReservations: "Stage slots",
++    maxDispatches: "Run cases",
++    retryCount: "Retries",
++    timeout: "Timeout",
++    approvalFlag: "Run approval flag",
++    executionFlag: "Execution flag",
++    dispatches: "Dispatches",
++    terminals: "Terminals",
++    nextCase: "Next case",
++    inFlight: "In flight",
++    enabled: "enabled",
++    disabled: "disabled",
++    none: "none",
++    previewInvalid:
++      "The server preview does not match the frozen operator contract. Nothing was approved.",
++    responseInvalid:
++      "The server response was malformed or drifted. Stop and inspect the deployment.",
++    requestFailed: "The operator request failed.",
++    transportUnknown:
++      "The execution request outcome is unknown. Do not resend it. Refresh status and inspect provider and billing records.",
++    statusRefreshFailed:
++      "The execution response was received, but its follow-up status read failed. The execution button remains locked; refresh status before any new action.",
++    stoppedUnknown:
++      "The run is stopped on an unknown provider outcome. Automatic continuation is forbidden.",
++    completed: "All 16 cases have durable terminal receipts.",
++    postFailureStop:
++      "The server refused the execution request. It is not a retry signal; inspect status before any new action.",
++    runApprovalFlagDisabled:
++      "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED is off. Enable it and redeploy before approving a new run.",
++    executionFlagDisabled:
++      "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED is off. Enable it and redeploy before executing the approved run.",
++    reauthenticate: "Sign in again and return to this screen",
++  },
++  ko: {
++    eyebrow: "Prompt Refiner",
++    title: "제한된 shadow 실행",
++    description:
++      "동결된 staging 합성 16건을 승인하고 실행합니다. 이 화면은 prompt나 모델 출력 내용을 표시하지 않으며 Refiner를 제품 Chat 트래픽에 연결할 수 없습니다.",
++    boundary:
++      "단일 배포·단일 모델·재시도 0입니다. 결과가 불명이면 실행을 멈추고 이 화면은 자동 재전송하지 않습니다.",
++    loading: "서버의 exact preview를 불러오는 중...",
++    refresh: "상태 새로고침",
++    stageTitle: "1. 예약 stage",
++    stageBody:
++      "60분짜리 immutable 예약 권한을 만듭니다. 이 단계에서는 provider를 호출하지 않습니다.",
++    runTitle: "2. 동결 run 승인",
++    runBody:
++      "stage를 정확히 16개 합성 case와 최악 비용 상한 US$0.398656로 좁힙니다.",
++    executionTitle: "3. 실행 및 관찰",
++    executionBody:
++      "승인된 합성 corpus만 실행합니다. 제품 대화나 고객 content는 읽지 않습니다.",
++    approveStage: "60분 stage 승인",
++    continueToRun: "run preview 불러오기",
++    approveRun: "동결된 16건 run 승인",
++    continueToExecution: "실행 상태 불러오기",
++    execute: "승인된 run 실행",
++    resume: "남은 case 이어서 실행",
++    working: "처리 중...",
++    deployment: "배포",
++    commit: "커밋",
++    model: "모델",
++    status: "상태",
++    expires: "만료",
++    perRequestCeiling: "요청당 상한",
++    stageCeiling: "stage 권한 상한",
++    runCeiling: "run 상한",
++    maxReservations: "stage slot",
++    maxDispatches: "run case",
++    retryCount: "재시도",
++    timeout: "timeout",
++    approvalFlag: "run 승인 flag",
++    executionFlag: "실행 flag",
++    dispatches: "dispatch",
++    terminals: "terminal",
++    nextCase: "다음 case",
++    inFlight: "진행 중",
++    enabled: "활성",
++    disabled: "비활성",
++    none: "없음",
++    previewInvalid:
++      "서버 preview가 동결된 운영 계약과 일치하지 않습니다. 아무것도 승인하지 않았습니다.",
++    responseInvalid:
++      "서버 응답 형식이 잘못됐거나 계약이 drift했습니다. 중단하고 배포를 확인하세요.",
++    requestFailed: "운영 요청을 처리하지 못했습니다.",
++    transportUnknown:
++      "실행 요청의 결과를 알 수 없습니다. 재전송하지 마세요. 상태를 새로고침하고 provider·결제 기록을 확인하세요.",
++    statusRefreshFailed:
++      "실행 응답은 받았지만 후속 상태 조회에 실패했습니다. 실행 버튼은 잠긴 상태이므로 새 작업 전에 상태를 새로고침하세요.",
++    stoppedUnknown:
++      "provider 결과 불명으로 run이 중단됐습니다. 자동으로 이어서 실행할 수 없습니다.",
++    completed: "16개 case 모두 durable terminal receipt가 있습니다.",
++    postFailureStop:
++      "서버가 실행 요청을 거부했습니다. 재시도 신호가 아니므로 새 작업 전에 상태를 확인하세요.",
++    runApprovalFlagDisabled:
++      "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED가 꺼져 있습니다. 새 run 승인 전에 활성화하고 다시 배포하세요.",
++    executionFlagDisabled:
++      "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED가 꺼져 있습니다. 승인된 run 실행 전에 활성화하고 다시 배포하세요.",
++    reauthenticate: "다시 로그인한 뒤 이 화면으로 돌아오기",
++  },
++});
+diff --git a/lib/adminNavigation.ts b/lib/adminNavigation.ts
+index ec7cb077..cb6a06bd 100644
+--- a/lib/adminNavigation.ts
++++ b/lib/adminNavigation.ts
+@@ -600,6 +600,20 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
+   ADMIN_NAVIGATION.find((item) => matchesRoute(pathname, item.href)) || null;
+ 
+ export const ADMIN_DETAIL_ROUTES = [
++  {
++    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
++    // those tables feed the palette for every admin role, while this one-shot
++    // cost-authority surface is owner-only and should not be advertised to
++    // roles that receive a 404 from the page and API routes.
++    id: "prompt-refiner-shadow",
++    pattern: /^\/admin\/prompt-refiner-shadow$/,
++    label: "Prompt Refiner shadow run",
++    description:
++      "Owner-only approval and execution for the frozen synthetic shadow run",
++    parentLabel: "Models",
++    parentHref: "/admin/models",
++    group: "AI Platform" as const,
++  },
+   {
+     id: "user-detail",
+     pattern: /^\/admin\/users\/[^/]+$/,
+diff --git a/lib/adminNavigationLocale.ts b/lib/adminNavigationLocale.ts
+index 90e2e560..8c2867b4 100644
+--- a/lib/adminNavigationLocale.ts
++++ b/lib/adminNavigationLocale.ts
+@@ -229,6 +229,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
+ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
+   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
+ > = {
++  "prompt-refiner-shadow": {
++    label: "Prompt Refiner shadow 실행",
++    description: "동결된 합성 shadow run의 owner 전용 승인과 실행",
++  },
+   "user-detail": {
+     label: "고객 상세",
+     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
+diff --git a/lib/promptRefinerShadowOperatorCore.ts b/lib/promptRefinerShadowOperatorCore.ts
+new file mode 100644
+index 00000000..3473b774
+--- /dev/null
++++ b/lib/promptRefinerShadowOperatorCore.ts
+@@ -0,0 +1,397 @@
++/**
++ * Client-safe validation for the owner-only Prompt Refiner shadow operator.
++ *
++ * The server routes remain the authority. This second, deliberately duplicated
++ * boundary keeps the browser from turning a drifted or malformed preview into
++ * an approval request. Changing any frozen cost/model/runtime fact therefore
++ * requires an explicit operator-UI review as well as a server-contract change.
++ */
++
++const DIGEST = /^sha256:[a-f0-9]{64}$/;
++const HEX_DIGEST = /^[a-f0-9]{64}$/;
++const FULL_SHA = /^[a-f0-9]{40}$/;
++
++export const PROMPT_REFINER_SHADOW_OPERATOR_PATH =
++  "/admin/prompt-refiner-shadow" as const;
++export const PROMPT_REFINER_SHADOW_STAGE_PATH =
++  "/api/admin/prompt-refiner/shadow-stage" as const;
++export const PROMPT_REFINER_SHADOW_RUN_PATH =
++  "/api/admin/prompt-refiner/shadow-run" as const;
++export const PROMPT_REFINER_SHADOW_EXECUTION_PATH =
++  "/api/admin/prompt-refiner/shadow-run/execute" as const;
++
++export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
++  stageId: "prompt-refiner-shadow-v1",
++  runId: "prompt-refiner-shadow-run-v3",
++  environment: "staging",
++  provider: "openai",
++  modelId: "gpt-5-6-luna",
++  apiModelId: "gpt-5.6-luna",
++  perRequestCostMicroUsd: 24_916,
++  stageMaxReservations: 100,
++  stageCostCeilingMicroUsd: 2_491_600,
++  runMaxDispatches: 16,
++  runCostCeilingMicroUsd: 398_656,
++  approvalTtlMinutes: 60,
++  timeoutMs: 15_000,
++  retryCount: 0,
++  tokenizerPackage: "js-tiktoken",
++  tokenizerPackageVersion: "1.0.21",
++  tokenizerEncoding: "o200k_base",
++  maxInputTokens: 100_000,
++  stageConfirmation:
++    "APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES",
++  runConfirmation:
++    "APPROVE PROMPT REFINER SHADOW RUN V3 FOR THE DISPLAYED COST CEILING",
++  executionConfirmation:
++    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V3 ONCE",
++});
++
++type UnknownRecord = Record<string, unknown>;
++
++const record = (value: unknown): UnknownRecord | null =>
++  value !== null && typeof value === "object" && !Array.isArray(value)
++    ? (value as UnknownRecord)
++    : null;
++
++const string = (value: unknown): string | null =>
++  typeof value === "string" ? value : null;
++const integer = (value: unknown): number | null =>
++  Number.isSafeInteger(value) ? (value as number) : null;
++const boolean = (value: unknown): boolean | null =>
++  typeof value === "boolean" ? value : null;
++
++export type PromptRefinerStagePreview = Readonly<{
++  stageId: string;
++  status: "ready_for_explicit_cost_approval" | "already_exists";
++  proposalDigest: string;
++  runtimeSourceManifestDigest: string;
++  executionManifestDigest: string;
++  environment: string;
++  deploymentId: string;
++  commitSha: string;
++  perRequestCostMicroUsd: number;
++  maxReservations: number;
++  costCeilingMicroUsd: number;
++  approvalTtlMinutes: number;
++  previewBindingDigest: string;
++  confirmation: string;
++  executionAdmitted: false;
++  productAdapterReady: false;
++}>;
++
++export type PromptRefinerRunPreview = Readonly<{
++  status: "ready_for_explicit_cost_approval" | "already_exists";
++  runId: string;
++  stageId: string;
++  stageRuntimeSourceManifestDigest: string;
++  runSourceManifestDigest: string;
++  environment: string;
++  deploymentId: string;
++  commitSha: string;
++  stageApprovalExpiresAt: string;
++  runContractDigest: string;
++  corpusDigest: string;
++  adapterVersion: string;
++  provider: string;
++  modelId: string;
++  apiModelId: string;
++  timeoutMs: number;
++  retryCount: number;
++  tokenizerPackage: string;
++  tokenizerPackageVersion: string;
++  tokenizerEncoding: string;
++  maxInputTokens: number;
++  maxDispatches: number;
++  perRequestCostMicroUsd: number;
++  costCeilingMicroUsd: number;
++  unknownOutcomePolicy: string;
++  executionAdmitted: true;
++  productAdapterReady: false;
++  previewBindingDigest: string;
++  confirmation: string;
++  approvalEnabled: boolean;
++}>;
++
++export type PromptRefinerExecutionPreview = Readonly<{
++  observedAt: string;
++  runId: string;
++  status: "approved" | "running" | "completed" | "stopped_unknown";
++  dispatchCount: number;
++  terminalCount: number;
++  nextCaseIndex: number | null;
++  nextCaseId: string | null;
++  inFlightAttemptId: string | null;
++  approvalExpiresAt: string;
++  runContractDigest: string;
++  enabled: boolean;
++  confirmation: string;
++  productAdapterReady: false;
++}>;
++
++export type PromptRefinerExecutionResult = Readonly<{
++  status: "completed" | "stopped_unknown" | "in_flight" | "paused";
++  attemptedThisInvocation: number;
++  dispatchCount: number;
++  terminalCount: number;
++  inFlightAttemptId: string | null;
++  observedAt: string;
++  retryCount: 0;
++  redispatched: 0;
++}>;
++
++const expectDigest = (value: unknown) => {
++  const parsed = string(value);
++  return parsed && DIGEST.test(parsed) ? parsed : null;
++};
++
++export const promptRefinerStagePreviewProblems = (
++  value: unknown
++): readonly string[] => {
++  const wrapper = record(value);
++  const preview = record(wrapper?.preview);
++  if (!preview) return ["preview_missing"];
++  const contract = PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT;
++  const problems: string[] = [];
++  if (preview.stageId !== contract.stageId) problems.push("stage_id");
++  if (
++    preview.status !== "ready_for_explicit_cost_approval" &&
++    preview.status !== "already_exists"
++  ) {
++    problems.push("status");
++  }
++  for (const key of [
++    "proposalDigest",
++    "runtimeSourceManifestDigest",
++    "executionManifestDigest",
++    "previewBindingDigest",
++  ] as const) {
++    if (!expectDigest(preview[key])) problems.push(key);
++  }
++  if (preview.environment !== contract.environment) problems.push("environment");
++  if (!string(preview.deploymentId)) problems.push("deployment_id");
++  if (!FULL_SHA.test(string(preview.commitSha) || "")) problems.push("commit_sha");
++  if (preview.perRequestCostMicroUsd !== contract.perRequestCostMicroUsd)
++    problems.push("per_request_cost");
++  if (preview.maxReservations !== contract.stageMaxReservations)
++    problems.push("max_reservations");
++  if (preview.costCeilingMicroUsd !== contract.stageCostCeilingMicroUsd)
++    problems.push("stage_cost_ceiling");
++  if (preview.approvalTtlMinutes !== contract.approvalTtlMinutes)
++    problems.push("approval_ttl");
++  if (preview.confirmation !== contract.stageConfirmation)
++    problems.push("confirmation");
++  if (preview.executionAdmitted !== false) problems.push("execution_admitted");
++  if (preview.productAdapterReady !== false) problems.push("product_adapter");
++  return problems;
++};
++
++export const parsePromptRefinerStagePreview = (
++  value: unknown
++): PromptRefinerStagePreview | null => {
++  if (promptRefinerStagePreviewProblems(value).length > 0) return null;
++  return record(value)!.preview as PromptRefinerStagePreview;
++};
++
++export const promptRefinerRunPreviewProblems = (
++  value: unknown,
++  stage: PromptRefinerStagePreview
++): readonly string[] => {
++  const wrapper = record(value);
++  const preview = record(wrapper?.preview);
++  if (!preview) return ["preview_missing"];
++  const contract = PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT;
++  const problems: string[] = [];
++  if (preview.runId !== contract.runId) problems.push("run_id");
++  if (preview.stageId !== contract.stageId) problems.push("stage_id");
++  if (
++    preview.status !== "ready_for_explicit_cost_approval" &&
++    preview.status !== "already_exists"
++  ) {
++    problems.push("status");
++  }
++  for (const key of [
++    "stageRuntimeSourceManifestDigest",
++    "runSourceManifestDigest",
++    "runContractDigest",
++    "previewBindingDigest",
++  ] as const) {
++    if (!expectDigest(preview[key])) problems.push(key);
++  }
++  if (!HEX_DIGEST.test(string(preview.corpusDigest) || ""))
++    problems.push("corpusDigest");
++  if (preview.environment !== contract.environment) problems.push("environment");
++  if (preview.deploymentId !== stage.deploymentId) problems.push("deployment_id");
++  if (preview.commitSha !== stage.commitSha) problems.push("commit_sha");
++  if (preview.provider !== contract.provider) problems.push("provider");
++  if (preview.modelId !== contract.modelId) problems.push("model_id");
++  if (preview.apiModelId !== contract.apiModelId) problems.push("api_model_id");
++  if (preview.timeoutMs !== contract.timeoutMs) problems.push("timeout");
++  if (preview.retryCount !== contract.retryCount) problems.push("retry_count");
++  if (preview.tokenizerPackage !== contract.tokenizerPackage)
++    problems.push("tokenizer_package");
++  if (preview.tokenizerPackageVersion !== contract.tokenizerPackageVersion)
++    problems.push("tokenizer_version");
++  if (preview.tokenizerEncoding !== contract.tokenizerEncoding)
++    problems.push("tokenizer_encoding");
++  if (preview.maxInputTokens !== contract.maxInputTokens)
++    problems.push("max_input_tokens");
++  if (preview.maxDispatches !== contract.runMaxDispatches)
++    problems.push("max_dispatches");
++  if (preview.perRequestCostMicroUsd !== contract.perRequestCostMicroUsd)
++    problems.push("per_request_cost");
++  if (preview.costCeilingMicroUsd !== contract.runCostCeilingMicroUsd)
++    problems.push("run_cost_ceiling");
++  if (preview.unknownOutcomePolicy !== "stop_no_redispatch")
++    problems.push("unknown_policy");
++  if (preview.executionAdmitted !== true) problems.push("execution_admitted");
++  if (preview.productAdapterReady !== false) problems.push("product_adapter");
++  if (preview.confirmation !== contract.runConfirmation)
++    problems.push("confirmation");
++  if (boolean(preview.approvalEnabled) === null)
++    problems.push("approval_enabled");
++  if (!string(preview.adapterVersion)) problems.push("adapter_version");
++  if (!string(preview.stageApprovalExpiresAt)) problems.push("stage_expiry");
++  return problems;
++};
++
++export const parsePromptRefinerRunPreview = (
++  value: unknown,
++  stage: PromptRefinerStagePreview
++): PromptRefinerRunPreview | null => {
++  if (promptRefinerRunPreviewProblems(value, stage).length > 0) return null;
++  return record(value)!.preview as PromptRefinerRunPreview;
++};
++
++export const promptRefinerExecutionPreviewProblems = (
++  value: unknown,
++  run: PromptRefinerRunPreview
++): readonly string[] => {
++  const wrapper = record(value);
++  const execution = record(wrapper?.execution);
++  if (!execution) return ["execution_missing"];
++  const contract = PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT;
++  const problems: string[] = [];
++  if (execution.runId !== contract.runId) problems.push("run_id");
++  if (execution.runContractDigest !== run.runContractDigest)
++    problems.push("run_contract_digest");
++  if (
++    execution.status !== "approved" &&
++    execution.status !== "running" &&
++    execution.status !== "completed" &&
++    execution.status !== "stopped_unknown"
++  ) {
++    problems.push("status");
++  }
++  for (const key of ["dispatchCount", "terminalCount"] as const) {
++    const parsed = integer(execution[key]);
++    if (parsed === null || parsed < 0 || parsed > contract.runMaxDispatches)
++      problems.push(key);
++  }
++  const nextCaseIndex = execution.nextCaseIndex;
++  if (
++    nextCaseIndex !== null &&
++    (integer(nextCaseIndex) === null ||
++      (nextCaseIndex as number) < 0 ||
++      (nextCaseIndex as number) >= contract.runMaxDispatches)
++  ) {
++    problems.push("next_case_index");
++  }
++  if (execution.nextCaseId !== null && !string(execution.nextCaseId))
++    problems.push("next_case_id");
++  if (
++    execution.inFlightAttemptId !== null &&
++    !string(execution.inFlightAttemptId)
++  ) {
++    problems.push("in_flight_attempt");
++  }
++  if (!string(execution.observedAt)) problems.push("observed_at");
++  if (execution.approvalExpiresAt !== run.stageApprovalExpiresAt)
++    problems.push("approval_expiry");
++  if (boolean(execution.enabled) === null) problems.push("enabled");
++  if (execution.confirmation !== contract.executionConfirmation)
++    problems.push("confirmation");
++  if (execution.productAdapterReady !== false) problems.push("product_adapter");
++  return problems;
++};
++
++export const parsePromptRefinerExecutionPreview = (
++  value: unknown,
++  run: PromptRefinerRunPreview
++): PromptRefinerExecutionPreview | null => {
++  if (promptRefinerExecutionPreviewProblems(value, run).length > 0) return null;
++  return record(value)!.execution as PromptRefinerExecutionPreview;
++};
++
++export const parsePromptRefinerExecutionResult = (
++  value: unknown
++): PromptRefinerExecutionResult | null => {
++  const wrapper = record(value);
++  const execution = record(wrapper?.execution);
++  if (!execution || wrapper?.productAdapterReady !== false) return null;
++  if (
++    execution.status !== "completed" &&
++    execution.status !== "stopped_unknown" &&
++    execution.status !== "in_flight" &&
++    execution.status !== "paused"
++  ) {
++    return null;
++  }
++  for (const key of [
++    "attemptedThisInvocation",
++    "dispatchCount",
++    "terminalCount",
++  ] as const) {
++    const parsed = integer(execution[key]);
++    if (
++      parsed === null ||
++      parsed < 0 ||
++      parsed > PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT.runMaxDispatches
++    ) {
++      return null;
++    }
++  }
++  if (
++    execution.inFlightAttemptId !== null &&
++    !string(execution.inFlightAttemptId)
++  ) {
++    return null;
++  }
++  if (
++    !string(execution.observedAt) ||
++    execution.retryCount !== 0 ||
++    execution.redispatched !== 0
++  ) {
++    return null;
++  }
++  return execution as PromptRefinerExecutionResult;
++};
++
++export const promptRefinerStageApprovalBody = (
++  preview: PromptRefinerStagePreview
++) => ({
++  proposalDigest: preview.proposalDigest,
++  runtimeSourceManifestDigest: preview.runtimeSourceManifestDigest,
++  executionManifestDigest: preview.executionManifestDigest,
++  previewBindingDigest: preview.previewBindingDigest,
++  confirmation: preview.confirmation,
++});
++
++export const promptRefinerRunApprovalBody = (
++  preview: PromptRefinerRunPreview
++) => ({
++  runContractDigest: preview.runContractDigest,
++  stageRuntimeSourceManifestDigest:
++    preview.stageRuntimeSourceManifestDigest,
++  runSourceManifestDigest: preview.runSourceManifestDigest,
++  previewBindingDigest: preview.previewBindingDigest,
++  confirmation: preview.confirmation,
++});
++
++export const promptRefinerExecutionBody = (
++  preview: PromptRefinerExecutionPreview
++) => ({
++  runId: preview.runId,
++  runContractDigest: preview.runContractDigest,
++  confirmation: preview.confirmation,
++});
+diff --git a/tests/adminNavigation.test.mjs b/tests/adminNavigation.test.mjs
+index 8001a866..f35dc392 100644
+--- a/tests/adminNavigation.test.mjs
++++ b/tests/adminNavigation.test.mjs
+@@ -147,6 +147,10 @@ test("detail routes keep their parent breadcrumb and their parent nav entry", ()
+   const provider = resolveAdminPageMeta("/admin/providers/openai");
+   assert.equal(provider.label, "Provider detail");
+   assert.equal(provider.parentHref, "/admin/providers");
++
++  const refiner = resolveAdminPageMeta("/admin/prompt-refiner-shadow");
++  assert.equal(refiner.label, "Prompt Refiner shadow run");
++  assert.equal(refiner.parentHref, "/admin/models");
+ });
+ 
+ test("the palette can reach every page, including the unlisted ones", () => {
+diff --git a/tests/adminPromptRefinerShadowOperator.test.mjs b/tests/adminPromptRefinerShadowOperator.test.mjs
+new file mode 100644
+index 00000000..5f40dcd6
+--- /dev/null
++++ b/tests/adminPromptRefinerShadowOperator.test.mjs
+@@ -0,0 +1,81 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { readFileSync } from "node:fs";
++import { join } from "node:path";
++
++const root = process.cwd();
++const panel = readFileSync(
++  join(root, "components", "admin", "AdminPromptRefinerShadowPanel.tsx"),
++  "utf8"
++);
++const page = readFileSync(
++  join(
++    root,
++    "app",
++    "(site)",
++    "(application)",
++    "admin",
++    "prompt-refiner-shadow",
++    "page.tsx"
++  ),
++  "utf8"
++);
++
++test("the operator page is owner-only", () => {
++  assert.match(page, /getServerSession\(authOptions\)/);
++  assert.match(page, /getAdminRole\(session\) !== "owner"/);
++  assert.match(page, /notFound\(\)/);
++});
++
++test("the mounted effect reads only and every mutation is a named click action", () => {
++  const effect = panel.match(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/)?.[1];
++  assert.ok(effect, "the initial effect remains inspectable");
++  assert.match(effect, /readStage\(\)/);
++  assert.doesNotMatch(effect, /method:\s*"POST"/);
++  assert.doesNotMatch(panel, /setInterval|setTimeout/);
++  assert.match(panel, /onClick=\{\(\) => void approveStage\(\)\}/);
++  assert.match(panel, /onClick=\{\(\) => void approveRun\(\)\}/);
++  assert.match(panel, /onClick=\{\(\) => void execute\(\)\}/);
++});
++
++test("the execution boundary locks before POST and unlocks only on paused", () => {
++  assert.match(
++    panel,
++    /setExecutionPostLocked\(true\);[\s\S]*?fetch\(PROMPT_REFINER_SHADOW_EXECUTION_PATH/
++  );
++  assert.match(
++    panel,
++    /if \(refreshed && parsed\?\.status === "paused"\) \{\s*setExecutionPostLocked\(false\)/
++  );
++  assert.match(panel, /setError\(m\.statusRefreshFailed\)/);
++  assert.doesNotMatch(panel, /retry\s*\(|redispatch\s*\(/i);
++});
++
++test("the page exposes recent-auth recovery but no prompt or model output", () => {
++  assert.match(panel, /adminRecentAuthenticationHref\(/);
++  assert.doesNotMatch(panel, /refinedPrompt|promptText|modelOutput|outputText/);
++  assert.match(panel, /promptRefinerStageApprovalBody\(stage\)/);
++  assert.match(panel, /promptRefinerRunApprovalBody\(run\)/);
++  assert.match(panel, /promptRefinerExecutionBody\(execution\)/);
++});
++
++test("refresh re-reads the visible step instead of advancing the workflow", () => {
++  const refresh = panel.match(/const refresh = async \(\) => \{([\s\S]*?)\n  \};/)?.[1];
++  assert.ok(refresh, "refresh remains inspectable");
++  assert.match(refresh, /if \(execution && run\) await readExecution\(run\)/);
++  assert.match(refresh, /else if \(run && stage\) await readRun\(stage\)/);
++  assert.match(refresh, /else await readStage\(\)/);
++  assert.doesNotMatch(refresh, /else if \(stage\) await readRun\(stage\)/);
++});
++
++test("an existing run can load execution status after the approval flag is off", () => {
++  assert.match(
++    panel,
++    /run\.status === "ready_for_explicit_cost_approval" &&\s*!run\.approvalEnabled/
++  );
++  assert.match(
++    panel,
++    /!run\.approvalEnabled &&\s*run\.status === "ready_for_explicit_cost_approval"/
++  );
++  assert.match(panel, /setError\(`\$\{failure\} \$\{m\.postFailureStop\}`\)/);
++});
+diff --git a/tests/promptRefinerShadowOperatorCore.test.mjs b/tests/promptRefinerShadowOperatorCore.test.mjs
+new file mode 100644
+index 00000000..91060b08
+--- /dev/null
++++ b/tests/promptRefinerShadowOperatorCore.test.mjs
+@@ -0,0 +1,235 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++  PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT,
++  parsePromptRefinerExecutionPreview,
++  parsePromptRefinerExecutionResult,
++  parsePromptRefinerRunPreview,
++  parsePromptRefinerStagePreview,
++  promptRefinerExecutionBody,
++  promptRefinerRunApprovalBody,
++  promptRefinerStageApprovalBody,
++} from "../lib/promptRefinerShadowOperatorCore.ts";
++import {
++  PROMPT_REFINER_EXECUTION_MODEL_PIN,
++  PROMPT_REFINER_MAX_INPUT_TOKENS,
++  PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++  PROMPT_REFINER_RETRY_COUNT,
++  PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
++  PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
++  PROMPT_REFINER_TIMEOUT_MS,
++} from "../lib/promptRefinerExecutionContract.ts";
++import { PROMPT_REFINER_RESERVATION_STAGE_ID } from "../lib/promptRefinerReservationCore.ts";
++import {
++  PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION,
++  PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++  PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++  PROMPT_REFINER_SHADOW_RUN_ID,
++  PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++  PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
++  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
++  PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
++} from "../lib/promptRefinerShadowRunContract.ts";
++import {
++  PROMPT_REFINER_STAGE_APPROVAL_TTL_MS,
++  PROMPT_REFINER_STAGE_CONFIRMATION,
++  PROMPT_REFINER_STAGE_ENVIRONMENT,
++} from "../lib/promptRefinerStageAdmissionCore.ts";
++
++const digest = (character) => `sha256:${character.repeat(64)}`;
++const contract = PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT;
++
++test("the duplicated browser contract exactly matches server-owned constants", () => {
++  assert.deepEqual(contract, {
++    stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++    runId: PROMPT_REFINER_SHADOW_RUN_ID,
++    environment: PROMPT_REFINER_STAGE_ENVIRONMENT,
++    provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++    modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++    apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++    perRequestCostMicroUsd: PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++    stageMaxReservations: PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
++    stageCostCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
++    runMaxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++    runCostCeilingMicroUsd: PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++    approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
++    timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++    retryCount: PROMPT_REFINER_RETRY_COUNT,
++    tokenizerPackage: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
++    tokenizerPackageVersion: PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION,
++    tokenizerEncoding: PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
++    maxInputTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
++    stageConfirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
++    runConfirmation: PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++    executionConfirmation: PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION,
++  });
++});
++
++const stageBody = () => ({
++  preview: {
++    stageId: contract.stageId,
++    status: "ready_for_explicit_cost_approval",
++    proposalDigest: digest("1"),
++    runtimeSourceManifestDigest: digest("2"),
++    executionManifestDigest: digest("3"),
++    environment: contract.environment,
++    deploymentId: "deployment-1",
++    commitSha: "a".repeat(40),
++    perRequestCostMicroUsd: contract.perRequestCostMicroUsd,
++    maxReservations: contract.stageMaxReservations,
++    costCeilingMicroUsd: contract.stageCostCeilingMicroUsd,
++    approvalTtlMinutes: contract.approvalTtlMinutes,
++    previewBindingDigest: digest("4"),
++    confirmation: contract.stageConfirmation,
++    executionAdmitted: false,
++    productAdapterReady: false,
++  },
++});
++
++const runBody = () => ({
++  preview: {
++    status: "ready_for_explicit_cost_approval",
++    runId: contract.runId,
++    stageId: contract.stageId,
++    stageRuntimeSourceManifestDigest: digest("2"),
++    runSourceManifestDigest: digest("5"),
++    environment: contract.environment,
++    deploymentId: "deployment-1",
++    commitSha: "a".repeat(40),
++    stageApprovalExpiresAt: "2026-09-21T02:00:00.000Z",
++    runContractDigest: digest("6"),
++    corpusDigest: "b".repeat(64),
++    adapterVersion: "prompt-refiner-openai-sdk-adapter-v1",
++    provider: contract.provider,
++    modelId: contract.modelId,
++    apiModelId: contract.apiModelId,
++    timeoutMs: contract.timeoutMs,
++    retryCount: contract.retryCount,
++    tokenizerPackage: contract.tokenizerPackage,
++    tokenizerPackageVersion: contract.tokenizerPackageVersion,
++    tokenizerEncoding: contract.tokenizerEncoding,
++    maxInputTokens: contract.maxInputTokens,
++    maxDispatches: contract.runMaxDispatches,
++    perRequestCostMicroUsd: contract.perRequestCostMicroUsd,
++    costCeilingMicroUsd: contract.runCostCeilingMicroUsd,
++    unknownOutcomePolicy: "stop_no_redispatch",
++    executionAdmitted: true,
++    productAdapterReady: false,
++    previewBindingDigest: digest("7"),
++    confirmation: contract.runConfirmation,
++    approvalEnabled: true,
++  },
++});
++
++const executionBody = () => ({
++  execution: {
++    observedAt: "2026-09-21T01:00:00.000Z",
++    runId: contract.runId,
++    status: "approved",
++    dispatchCount: 0,
++    terminalCount: 0,
++    nextCaseIndex: 0,
++    nextCaseId: "general-short-ko",
++    inFlightAttemptId: null,
++    approvalExpiresAt: "2026-09-21T02:00:00.000Z",
++    runContractDigest: digest("6"),
++    enabled: true,
++    confirmation: contract.executionConfirmation,
++    productAdapterReady: false,
++  },
++});
++
++test("the exact frozen stage, run, and execution previews are accepted", () => {
++  const stage = parsePromptRefinerStagePreview(stageBody());
++  assert.ok(stage);
++  const run = parsePromptRefinerRunPreview(runBody(), stage);
++  assert.ok(run);
++  const execution = parsePromptRefinerExecutionPreview(executionBody(), run);
++  assert.ok(execution);
++  assert.equal(run.corpusDigest, "b".repeat(64));
++});
++
++test("approval bodies reuse only exact server-bound values", () => {
++  const stage = parsePromptRefinerStagePreview(stageBody());
++  assert.ok(stage);
++  assert.deepEqual(promptRefinerStageApprovalBody(stage), {
++    proposalDigest: digest("1"),
++    runtimeSourceManifestDigest: digest("2"),
++    executionManifestDigest: digest("3"),
++    previewBindingDigest: digest("4"),
++    confirmation: contract.stageConfirmation,
++  });
++
++  const run = parsePromptRefinerRunPreview(runBody(), stage);
++  assert.ok(run);
++  assert.deepEqual(promptRefinerRunApprovalBody(run), {
++    runContractDigest: digest("6"),
++    stageRuntimeSourceManifestDigest: digest("2"),
++    runSourceManifestDigest: digest("5"),
++    previewBindingDigest: digest("7"),
++    confirmation: contract.runConfirmation,
++  });
++
++  const execution = parsePromptRefinerExecutionPreview(executionBody(), run);
++  assert.ok(execution);
++  assert.deepEqual(promptRefinerExecutionBody(execution), {
++    runId: contract.runId,
++    runContractDigest: digest("6"),
++    confirmation: contract.executionConfirmation,
++  });
++});
++
++test("cost, model, deployment, and run-contract drift fail closed", () => {
++  const stage = parsePromptRefinerStagePreview(stageBody());
++  assert.ok(stage);
++
++  for (const mutate of [
++    (preview) => (preview.costCeilingMicroUsd += 1),
++    (preview) => (preview.modelId = "another-model"),
++    (preview) => (preview.deploymentId = "deployment-2"),
++    (preview) => (preview.corpusDigest = digest("b")),
++  ]) {
++    const candidate = structuredClone(runBody());
++    mutate(candidate.preview);
++    assert.equal(parsePromptRefinerRunPreview(candidate, stage), null);
++  }
++
++  const run = parsePromptRefinerRunPreview(runBody(), stage);
++  assert.ok(run);
++  const execution = executionBody();
++  execution.execution.runContractDigest = digest("8");
++  assert.equal(parsePromptRefinerExecutionPreview(execution, run), null);
++
++  const wrongExpiry = executionBody();
++  wrongExpiry.execution.approvalExpiresAt = "2030-01-01T00:00:00.000Z";
++  assert.equal(parsePromptRefinerExecutionPreview(wrongExpiry, run), null);
++});
++
++test("execution results accept only bounded, no-retry receipts", () => {
++  const valid = {
++    execution: {
++      status: "paused",
++      attemptedThisInvocation: 8,
++      dispatchCount: 8,
++      terminalCount: 8,
++      inFlightAttemptId: null,
++      observedAt: "2026-09-21T01:05:00.000Z",
++      retryCount: 0,
++      redispatched: 0,
++    },
++    productAdapterReady: false,
++  };
++  assert.ok(parsePromptRefinerExecutionResult(valid));
++
++  for (const mutate of [
++    (execution) => (execution.retryCount = 1),
++    (execution) => (execution.redispatched = 1),
++    (execution) => (execution.dispatchCount = 17),
++    (execution) => (execution.status = "retry"),
++  ]) {
++    const candidate = structuredClone(valid);
++    mutate(candidate.execution);
++    assert.equal(parsePromptRefinerExecutionResult(candidate), null);
++  }
++});

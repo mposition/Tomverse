@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-execution-runner-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T11:07:40.812Z",
+  "durationMs": 343817,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 40,
+    "cachedInputTokens": 1980437,
+    "outputTokens": 27042,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.78920375,
+    "raw": {
+      "input_tokens": 40,
+      "cache_creation_input_tokens": 131690,
+      "cache_read_input_tokens": 1980437,
+      "output_tokens": 27042,
+      "output_tokens_details": {
+        "thinking_tokens": 21284
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 66757,
+        "ephemeral_5m_input_tokens": 64933
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3065,
+          "cache_read_input_tokens": 134234,
+          "cache_creation_input_tokens": 2291,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 2291,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T11:13:24.679Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-execution-runner-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:c5e83225d23071119bf0345b373e3ebd18da7c8afe181afe24e9c2c1153ba049",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "app/api/admin/prompt-refiner/shadow-run/execute/route.ts (POST consumeApiRateLimit `{ minute: 1, day: 2 }`) vs lib/promptRefinerShadowRunner.ts:164-176",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "The new invocation budget can force a second POST to finish the 16 cases, but the POST bucket allows only 2 calls per day and is consumed before validation, so a single rejected or wasted POST inside the 60-minute approval window can strand the one-run authority permanently after paid dispatches.",
+        "reproduction": "Arithmetic on the shipped constants: if every case hits the 15,000 ms provider timeout, case k starts at ~(k-1)*15,000 ms; the guard at lib/promptRefinerShadowRunner.ts:171-176 pauses once elapsed > 240,000-15,000-10,000 = 215,000 ms, i.e. before case 15, so the run needs a 2nd POST. Observable in the unit test by extending tests/promptRefinerShadowRunner.test.mjs with `nowMs` advancing 15,500 ms per call: the result is `status: \"paused\"` with `attemptedThisInvocation < 16`. Meanwhile, in tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts the three invalid POSTs in \"POST accepts only the exact 4 KiB execution binding\" each reach `consumeApiRateLimit` before `readLimitedJson` (assert `world.rateLimitCalls === 3` there to see it), so wrong-body or 503 attempts burn the same 2/day quota that the resume needs, and lib/promptRefinerShadowRunStore.ts refuses once `run.approvalExpiresAt <= now` (60 min), leaving the run below 16 terminals with no legal resume."
+      },
+      {
+        "location": "tests/promptRefinerShadowRunner.test.mjs:38-49 (fixture `sweep`)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The runner fixture's sweeper fake returns `{ examined, closedUnknown, completedRuns, ... }`, a shape lib/promptRefinerShadowRunStore.ts:1095-1103 never produces (it returns `staleCandidates`/`closedUnknownAttemptIds`), so the runner's declared `sweep: typeof sweepPromptRefinerShadowUnknowns` dependency is not pinned by the test — the same class of drift that was fixed for the maintenance test this round.",
+        "reproduction": "Compare tests/promptRefinerShadowRunner.test.mjs:41-47 with the real return object at lib/promptRefinerShadowRunStore.ts:1095-1103; only `unresolvedStaleAttemptIds` and `consumedWithoutAttempt` exist in both. Replacing the fake with the real field names keeps the test green, which shows the extra keys assert nothing."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:237-243",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "On the defensive `INTENT_MISSING` path (adapter resolved without ever invoking `onDispatch`) the runner refuses without releasing the reservation it just took, leaving a `reserved` row to age out instead of being closed once like the pre-intent path does.",
+        "reproduction": "In tests/promptRefinerShadowRunner.test.mjs, add a fixture whose `adapter` resolves an outcome without calling `onDispatch`: `run()` rejects with `PROMPT_REFINER_SHADOW_INTENT_MISSING` and `events` contains `reserve:...` but no `release`."
+      }
+    ],
+    "nextAction": "All five round-0 findings are addressed (js-tiktoken is a pinned production dependency, the 240s/10s budget gates each reservation, the runner binds its corpus to PROMPT_REFINER_SHADOW_CORPUS_DIGEST at import and per invocation, the maintenance mock matches the real sweeper shape, and GET now consumes its own DB rate limit); merge as-is and, before the paid run, either raise the execute POST daily allowance above the worst-case two invocations or record that a second rejected POST forfeits the run."
+  }
+}

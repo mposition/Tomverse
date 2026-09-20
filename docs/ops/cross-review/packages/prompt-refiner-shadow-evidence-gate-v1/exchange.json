@@ -1,0 +1,380 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+  "requirement": "CHAT-01 Prompt Refiner의 동결 합성 corpus 16건에 대해 provider-independent content-free evidence gate를 추가한다. gate는 preregistered 의미 concept, exact quoted/code literal, 출력 언어, 두 prompt-injection 문자열의 quoted-data + 명시적 non-execution framing과 완전한 비용·지연 telemetry를 deterministic하게 판정한다. 결과에는 prompt·proposal·excerpt·per-item content digest·사용자 identity가 없어야 한다. 과거 v3 실행은 proposal bytes를 보존하지 않았으므로 소급 품질 통과로 바꾸지 않고, pass도 provider 실행·제품 UI·Router 결합·rollout을 승인하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 사용자 승인 --skip-preflight 예외 아래 Read/Grep/Glob only로 검토한다.",
+  "completionCriteria": [
+    "strict spec parser가 corpus identity/digest, 정확히 16개 case의 순서·언어·category, threshold와 self digest를 결속하고 extra/missing/duplicate/reordered input을 거부한다.",
+    "case evaluator가 no-change, 길이, 언어, 모든 의미 concept group, exact literal과 두 exact injection directive의 quote/non-execution framing을 각각 content-free closed evidence로 판정한다.",
+    "aggregate는 16/16·injection 2/2·failed 0·unknown 0과 완전한 cost/latency를 요구하고, missing은 insufficient_evidence, 알려진 threshold miss는 fail로 분리한다.",
+    "출력은 prompt/proposal bytes 또는 digest를 포함하지 않고 executionAdmitted/productAdapterReady/suggestionUiAuthorized/routerCouplingAuthorized/paidRunAuthorized를 모두 false로 고정한다.",
+    "문서는 fixed synthetic scope와 substring/정확 directive 방식의 한계를 명시하고, v3를 소급 upgrade하지 않으며 새 confirmatory 계약·독립 검토·별도 비용 승인이 필요함을 기록한다.",
+    "전체 unit, focused Prompt Refiner tests, TypeScript, 수정 파일 ESLint, 문서·정책 절 참조, diff whitespace 검사가 통과한다.",
+    "Claude verdict는 package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다."
+  ],
+  "baseCommit": "ab80900972673eea516c53a0fb260b70b6db893f",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:84b96e722ed3296e4b9171667479130ead4e60ce402e74aee67832afd3aed530",
+      "commit": "3b2eb6466da8a42335027d739297f7b2f7b88957",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.task.json",
+        "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerShadowEvidenceCore.ts",
+        "tests/promptRefinerShadowEvidenceCore.test.mjs"
+      ],
+      "changeSummary": "Codex added a provider-independent, content-free Prompt Refiner shadow evidence gate bound to a frozen 16-case synthetic specification, with deterministic per-case and aggregate adjudication, explicit fail-closed authority flags, regression tests, and scope/limitation documentation. No provider call, Railway mutation, product UI activation, Router coupling, paid run, or deployment is included.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2455.9442",
+          "durationMs": 764723
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowEvidenceCore.test.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowOperatorCore.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 30439.0095",
+          "durationMs": 30513
+        },
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39741
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowEvidenceCore.ts tests/promptRefinerShadowEvidenceCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2844
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 118 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+          "durationMs": 1392
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1007
+        },
+        {
+          "rule": "git diff --check ab80900972673eea516c53a0fb260b70b6db893f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 58
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowEvidenceCore.ts:742 (validatePromptRefinerShadowCorpus call) and :838 (corpusContentDigest emission)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "The evaluated corpus is never bound to the frozen corpus digest — validatePromptRefinerShadowCorpus only checks that corpus.contentDigest is self-consistent (lib/promptRefinerShadowHarness.ts:405), its return value is discarded, and the bundle then hardcodes corpusContentDigest = PROMPT_REFINER_SHADOW_CORPUS_DIGEST, so a re-signed substitute corpus is evaluated while the bundle attests the frozen digest it never verified.",
+          "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs add: `const swapped = structuredClone(corpus); swapped.cases[7].sourceText = \"표로 정리해줘. 추가 문장.\"; delete swapped.contentDigest; swapped.contentDigest = promptRefinerShadowCorpusDigest(structuredClone(swapped));` (the same re-sign helper used at tests/promptRefinerShadowHarness.test.mjs:74-79, importing promptRefinerShadowCorpusDigest from ../lib/promptRefinerShadowHarness.ts), then `const bundle = evaluatePromptRefinerShadowEvidence({ corpus: swapped, spec, cases: passingRunCases() });`. Observed: no throw, bundle.corpusContentDigest === \"bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958\" and case prsv1-ko-08 is graded against the substituted source text. Expected (matching lib/promptRefinerShadowRunner.ts:38 and :202): throw on `corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST`. The existing tamper test only covers an unsigned mutation, so it does not catch this.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowEvidenceCore.ts:828-844 (insufficient/gateOutcome precedence)",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "A conclusively failed run is relabelled `insufficient_evidence` whenever any telemetry is also missing, so a known threshold miss and missing evidence are not kept separate as completion criterion 3 requires.",
+          "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs, in the \"terminal failures fail…\" test change the failed row to `{ caseId: failed[0].caseId, terminalStatus: \"failed\", refinedPrompt: null, durationMs: 800, costMicroUsd: null }` (validateRunCase permits a null cost for a failed terminal). Observed: gateOutcome === \"insufficient_evidence\" while gateReasons contains \"terminal_failure_present\" and \"case_evidence_failed\". Expected: \"fail\", since a conclusive threshold miss is present regardless of the missing cost row.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:89-93 (and §5 lines 97-102)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The latency thresholds are justified by specific measured v3 values (p90 4,018 ms, max 4,110 ms) and by a \"completed prompt-refiner-shadow-run-v3\" whose receipts have no citation or record anywhere in the repository, so a reader cannot verify the only stated basis for the frozen thresholds.",
+          "reproduction": "Grep the repo for `4,018`, `4018`, `4,110` and `prompt-refiner-shadow-run-v3`: the only hits are this change's own docs (docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:91 and docs/ops/prompt-refiner-shadow-harness.md:208); no run record, receipt export or progress entry reports them, and docs/ops/tomverse-chat-progress.md:1408 still lists the paid 16-case shadow run as a pending next step. Expected: a citation (run id plus where the content-free receipts are recorded, or a progress-doc entry) next to the quoted p90/max values.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Bind the evaluated corpus to PROMPT_REFINER_SHADOW_CORPUS_DIGEST (and use the validator's returned corpus) with a re-signed-corpus regression test, decide and test fail-over-insufficient precedence, and cite the v3 latency source; re-submit as a new digest."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:b1b7c84dc63d80c1c48cb6b7a862e67bf83a312e6afbe6df0faedd5be780de78",
+      "commit": "49a7882f147160f41ef4a1ded89c6967cb9d7dc2",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.task.json",
+        "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerShadowEvidenceCore.ts",
+        "tests/promptRefinerShadowEvidenceCore.test.mjs"
+      ],
+      "changeSummary": "Round 1 fixes all three Claude findings: bind the validated corpus to the frozen digest and evaluate the returned snapshot, make conclusive failures take precedence over incomplete telemetry with mixed-state tests, and preserve a Korean content-free v3 run source record cited by the threshold rationale.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2441.2807",
+          "durationMs": 765351
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowEvidenceCore.test.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowOperatorCore.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 30473.0872",
+          "durationMs": 30549
+        },
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39865
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowEvidenceCore.ts tests/promptRefinerShadowEvidenceCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2868
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 118 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+          "durationMs": 1383
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1025
+        },
+        {
+          "rule": "git diff --check ab80900972673eea516c53a0fb260b70b6db893f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 58
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowEvidenceCore.ts:807-808 (injection_evidence_incomplete)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "A conclusively failed injection case is reported with the gate reason `injection_evidence_incomplete`, which names a missing-evidence condition for what the same run classifies as a conclusive failure, blurring the missing/failed separation the aggregate otherwise keeps (the same wording issue appears at :592, where an `unknown` row whose evidenceStatus is `insufficient_evidence` still carries failureReasons `[\"not_suggested\"]`).",
+          "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs, take the `unquoted` variant from the \"a dangerous directive must remain quoted\" test (cases[2] with the unquoted Korean directive) and log the bundle: gateOutcome is `fail` and gateReasons contains `case_evidence_failed` and `injection_evidence_incomplete`, although nothing about that case is incomplete — cases[2].injectionSafelyFramed is `false`. Expected: a distinct reason such as `injection_evidence_failed` for the conclusive case.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:52 vs docs/ops/prompt-refiner-shadow/evidence-spec-v1.json (all 16 minimum/maximumLengthRatioMilli)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The doc describes the length check as \"within the case's frozen range\", but all 16 cases share one global 750–16000 range, so for the short sources the upper bound admits up to a 16x expansion and the length dimension adds almost no constraint — the stated limitations section does not mention this.",
+          "reproduction": "grep -n \"LengthRatioMilli\" docs/ops/prompt-refiner-shadow/evidence-spec-v1.json → 32 lines, all 750 and 16000. For prsv1-en-08 the source \"List the risks.\" is 15 chars, so any proposal from 12 to 240 chars passes the length check; e.g. replacing the passing prompt with 200 chars of risk-listing text still yields lengthWithinBounds true.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowEvidenceCore.ts:807-808 (injection_evidence_incomplete); open finding: docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:52 vs docs/ops/prompt-refiner-shadow/evidence-spec-v1.json (all 16 minimum/maximumLengthRatioMilli)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:467dd791e14c12d7887baef4410987aaec37c7368ff2d115e60808e023e6e1d9",
+      "commit": "985d331ce102778a06adb149831cf0796786e46d",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.task.json",
+        "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerShadowEvidenceCore.ts",
+        "tests/promptRefinerShadowEvidenceCore.test.mjs"
+      ],
+      "changeSummary": "Round 2 closes both open round-1 nits: injection failures and missing injection evidence now have distinct gate reasons, unknown cases carry no failure reason, and the shared 0.75x-16x length band is explicitly exposed as a coarse anomaly check in both documentation and the content-free bundle.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2433.773",
+          "durationMs": 765212
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowEvidenceCore.test.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowOperatorCore.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 30427.1697",
+          "durationMs": 30502
+        },
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39792
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowEvidenceCore.ts tests/promptRefinerShadowEvidenceCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2807
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 118 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+          "durationMs": 1382
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 1022
+        },
+        {
+          "rule": "git diff --check ab80900972673eea516c53a0fb260b70b6db893f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 58
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowEvidenceCore.ts:815-817 (case_evidence_failed)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The round-1 missing/failed naming split was applied to the injection reasons (:818-828) but not to the general counter, so a run whose only shortfall is an unknown terminal still reports the gate reason `case_evidence_failed` while no case has evidenceStatus `fail` and the outcome is `insufficient_evidence`.",
+          "reproduction": "Run tests/promptRefinerShadowEvidenceCore.test.mjs's \"terminal failures fail while unknown or incomplete telemetry is insufficient\" case and inspect `unknownBundle`: with row 0 set to terminalStatus \"unknown\" (refinedPrompt/durationMs/costMicroUsd all null), gateOutcome is \"insufficient_evidence\" and every case evidenceStatus is \"pass\" or \"insufficient_evidence\", yet gateReasons contains \"case_evidence_failed\" alongside \"unknown_present\"/\"cost_incomplete\"/\"latency_incomplete\". A reason named `case_evidence_incomplete` for the unknown-only shortfall would match the injection split.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "tests/promptRefinerShadowEvidenceCore.test.mjs:72-78",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The assertion that docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:135 lists as duplicate-key coverage feeds syntactically invalid JSON rather than a duplicate key, so duplicate-key rejection of the spec document is never exercised.",
+          "reproduction": "specText.replace('\"schemaVersion\"', '\"schemaVersion\"\\n, \"schemaVersion\"') yields `{\\n  \"schemaVersion\"\\n, \"schemaVersion\": \"prompt-refiner-shadow-evidence-spec-v1\",` — parseBenchmarkJson (lib/routerDevelopmentBenchmark.ts:113-114) hits `text[position++] !== \":\"` and throws json_syntax, never reaching the json_duplicate_key branch at :111; the catch-all in parsePromptRefinerShadowEvidenceSpec maps both to spec_json_invalid, so the regex passes either way. A true duplicate (e.g. inserting a second `\"purpose\": \"development-only\",` line) is what exercises :111.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowEvidenceCore.ts:815-817 (case_evidence_failed); open finding: tests/promptRefinerShadowEvidenceCore.test.mjs:72-78) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:467dd791e14c12d7887baef4410987aaec37c7368ff2d115e60808e023e6e1d9",
+  "commit": "985d331ce102778a06adb149831cf0796786e46d",
+  "changeSummary": "Round 2 closes both open round-1 nits: injection failures and missing injection evidence now have distinct gate reasons, unknown cases carry no failure reason, and the shared 0.75x-16x length band is explicitly exposed as a coarse anomaly check in both documentation and the content-free bundle.",
+  "testResults": [
+    {
+      "command": "npm run test:unit",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2433.773",
+      "durationMs": 765212
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowEvidenceCore.test.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/promptRefinerShadowOperatorCore.test.mjs tests/promptRefinerShadowAdmissionCore.test.mjs",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 30427.1697",
+      "durationMs": 30502
+    },
+    {
+      "rule": "npm run typecheck -- --pretty false",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 39792
+    },
+    {
+      "rule": "npx eslint lib/promptRefinerShadowEvidenceCore.ts tests/promptRefinerShadowEvidenceCore.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2807
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 118 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+      "durationMs": 1382
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1022
+    },
+    {
+      "rule": "git diff --check ab80900972673eea516c53a0fb260b70b6db893f",
+      "passed": true,
+      "detail": "",
+      "durationMs": 58
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "lib/promptRefinerShadowEvidenceCore.ts:815-817 (case_evidence_failed)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The round-1 missing/failed naming split was applied to the injection reasons (:818-828) but not to the general counter, so a run whose only shortfall is an unknown terminal still reports the gate reason `case_evidence_failed` while no case has evidenceStatus `fail` and the outcome is `insufficient_evidence`.",
+      "reproduction": "Run tests/promptRefinerShadowEvidenceCore.test.mjs's \"terminal failures fail while unknown or incomplete telemetry is insufficient\" case and inspect `unknownBundle`: with row 0 set to terminalStatus \"unknown\" (refinedPrompt/durationMs/costMicroUsd all null), gateOutcome is \"insufficient_evidence\" and every case evidenceStatus is \"pass\" or \"insufficient_evidence\", yet gateReasons contains \"case_evidence_failed\" alongside \"unknown_present\"/\"cost_incomplete\"/\"latency_incomplete\". A reason named `case_evidence_incomplete` for the unknown-only shortfall would match the injection split.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "tests/promptRefinerShadowEvidenceCore.test.mjs:72-78",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The assertion that docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:135 lists as duplicate-key coverage feeds syntactically invalid JSON rather than a duplicate key, so duplicate-key rejection of the spec document is never exercised.",
+      "reproduction": "specText.replace('\"schemaVersion\"', '\"schemaVersion\"\\n, \"schemaVersion\"') yields `{\\n  \"schemaVersion\"\\n, \"schemaVersion\": \"prompt-refiner-shadow-evidence-spec-v1\",` — parseBenchmarkJson (lib/routerDevelopmentBenchmark.ts:113-114) hits `text[position++] !== \":\"` and throws json_syntax, never reaching the json_duplicate_key branch at :111; the catch-all in parsePromptRefinerShadowEvidenceSpec maps both to spec_json_invalid, so the regex passes either way. A true duplicate (e.g. inserting a second `\"purpose\": \"development-only\",` line) is what exercises :111.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 2 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-20T18:13:18.261Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "985d331ce102778a06adb149831cf0796786e46d",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.task.json",
+    "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
+    "docs/ops/prompt-refiner-shadow-harness.md",
+    "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerShadowEvidenceCore.ts",
+    "tests/promptRefinerShadowEvidenceCore.test.mjs"
+  ]
+}

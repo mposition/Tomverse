@@ -13,6 +13,108 @@
 
 ## 0. 개정 이력
 
+### v24 (2026-09-20) — 계정 분리의 축소(contraction)
+
+v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초안
+(docs/policy/email-product-news-redesign-draft.md) 7.4의 C56·C72입니다.
+
+**한 migration이 아니라 셋이고, 나눈 기준은 테이블입니다.**
+
+| | 파일 | 대상 |
+|---|---|---|
+| 1 | `20260920100000_email_delivery_message_id_unique` | `EmailDelivery`에 unique 생성 |
+| 2 | `20260920100100_email_webhook_account_contraction` | `ProviderWebhookEvent`의 옛 unique와 default 제거 |
+| 3 | `20260920100200_email_delivery_drop_redundant_index` | `EmailDelivery`의 중복 일반 index 제거 |
+
+1. **한 transaction은 한 테이블만 잠급니다.** 이것이 나눈 이유이고 정리가 아닙니다.
+   webhook 처리는 `ProviderWebhookEvent`를 쓰고 나서 `EmailDelivery`를 갱신합니다.
+   한 migration이 `EmailDelivery`의 SHARE를 commit까지 쥔 채
+   `ProviderWebhookEvent`의 ACCESS EXCLUSIVE를 요청하면 **반대 순서**가 되고, 처리
+   중인 webhook 하나와 정확히 교착합니다. 지는 쪽은 긴 index 빌드가 통째로 버려지거나
+   기록되지 못한 bounce입니다. `lock_timeout`은 이것의 답이 아닙니다 — 보통
+   deadlock detector가 먼저 둘 중 하나를 abort합니다.
+2. **중간 상태는 어느 것도 나쁘지 않습니다.** 1만 적용된 상태는 webhook 비계가
+   그대로인 채 delivery unique만 생긴 것이고, 2만 더해진 상태가 계약이 말하는 끝이며,
+   3은 중복 index 제거일 뿐입니다.
+3. **옛 `(provider, providerEventId)` unique를 제거합니다.** 계정이 다르면 같은
+   provider 사건 id라도 **다른 사건**이고, 그것을 말하는 것이 계정 포함 unique입니다.
+   옛 것은 marketing 사건을 transactional 사건과 충돌한다며 거절할 수 있었습니다.
+   그것은 20260821090000이 `CREATE UNIQUE INDEX`로 만든 **index**이지 constraint가
+   아니므로 `DROP INDEX`가 지우는 문장입니다. migration은 그래도 `DROP CONSTRAINT`를
+   **먼저** 두는데, 만약 어딘가에서 constraint로 존재한다면 `DROP INDEX`는 건너뛰는
+   것이 아니라 dependency 오류로 **실패**하고 `IF EXISTS`는 그것을 덮지 않습니다.
+   **이로써 아래 v20이 적은 동작이 바뀝니다.** 다른 계정에 같은 사건 id가 있을 때
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`으로 실패하고 provider가 재시도하던 경로는
+   더 이상 정상 경로가 아닙니다 — 그 사건은 이제 **자기 행으로 저장됩니다.**
+   handler의 그 분기는 남아 있지만, 이제는 "삽입되지도 않았고 읽히지도 않았다"는,
+   계정 포함 unique 아래에서는 일어날 수 없어야 하는 상태를 시끄럽게 알리는
+   역할입니다. incident 문구도 그렇게 바뀌었습니다.
+4. **`ProviderWebhookEvent.providerAccount`의 default를 제거합니다.** writer는 하나이고
+   항상 계정을 말합니다. default는 그것이 조용히 참이 아니게 되는 경로입니다.
+5. **`EmailDelivery(providerAccount, providerMessageId)`를 unique로 만듭니다.**
+   메시지 id는 **계정 안에서** delivery 하나를 가리키고, S1b-2b의 결속이 그렇게 읽습니다.
+   **부분(partial)이 아니라 일반 unique입니다.** `WHERE 둘 다 NOT NULL` 술어는 일반
+   unique가 이미 보장하는 것과 정확히 같은 것을 말합니다 — Postgres는 NULL을 비교하지
+   않으므로 provider에 닿지 못한 발송은 어차피 아무와도 충돌하지 않습니다. 그리고 그
+   술어는 이 저장소에서 비싼 것 하나를 요구합니다: Prisma는 7.4부터 `partialIndexes`
+   preview로 표현할 수 있지만 이 schema는 preview를 하나도 켜지 않으므로,
+   그대로는 `db push`가 만들지 않고 `migrate diff`가 매번 drift로 보고합니다.
+   20260801190000_plan_change_pending_slot이 같은 교훈이며, 그때는 테스트가 검증한다고
+   믿은 제약이 실제 DB에 없었습니다.
+6. **1번은 눈감고 적용할 수 없습니다.** unique index 빌드는 처음 만나는 중복에서
+   **배포 도중** 실패하고, 답은 파일이 아니라 데이터에 있습니다.
+   `npm run email:check-message-id-duplicates`가 읽기 전용으로 묻고 개수만 출력합니다
+   (주소·메시지 id 없음; `providerAccount`는 `EmailDelivery_provider_account_check`가
+   가두는 닫힌 lane 이름입니다). **그 판독은 멈출 근거이지 가도 된다는 보증이 아닙니다** —
+   읽은 시점과 migration 실행 시점 사이에 잠금이 없으므로, 필드 이름은
+   `noDuplicatesAtReadTime`입니다. 판정하는 것은 index 빌드 자신입니다.
+7. **셋 다 명시적 transaction으로 스스로를 감쌉니다**(`BEGIN`/`COMMIT`).
+   `prisma migrate deploy`는 migration 파일을 transaction으로 감싸지 않으므로, 그냥
+   두면 **절반만 적용된 상태**가 만들어지고 그 상태에서는 좋은 수가 없습니다 —
+   `resolve --rolled-back` 후 재실행은 이미 있는 객체에서 실패하고, `--applied`는
+   **실행되지 않은 문장들을 실행된 것으로** 표시합니다. 모든 문장이 transactional
+   DDL이므로 파일이 직접 말하게 합니다.
+   이 `BEGIN`은 조건을 하나 답니다 — **파일을 transaction으로 감싸지 않는 runner만
+   이것을 재생할 수 있습니다.** 감싸는 runner에서는 안쪽 `BEGIN`이 경고만 내고 안쪽
+   `COMMIT`이 **바깥 transaction을 끝내** 되돌릴 수 있다고 믿은 DDL을 commit합니다.
+   Prisma 8의 경로는 기존 DB를 baseline하지 이 이력을 재생하지 않지만, 재생하는
+   환경은 7.10 runner에 고정합니다.
+8. **실패 후 복구는 가정이 아니라 카탈로그를 보고 정합니다**, 그리고 무엇을 볼지는
+   각 migration 머리말에 SQL로 적혀 있습니다. Prisma는 실패를 `_prisma_migrations`에
+   남기고 다음 deploy가 자동으로 재시도하지 않으며, `COMMIT` 응답 전에 연결이 끊기면
+   결과는 **클라이언트가 모릅니다.**
+   **1번의 판정은 이름이 아니라 index의 모양으로 합니다** — 같은 이름의 INVALID·
+   non-unique·partial·`NULLS NOT DISTINCT`·키가 다른 index가 있는 상태도 "있다"는
+   검사는 통과하며, 그것을 `--applied`로 봉인하면 **없는 보장을 있다고 기록하는 것**
+   입니다. 그래서 `indisunique`·`indisvalid`·`indisready`·`indislive`·
+   `indimmediate`·`indnullsnotdistinct`·키 개수·expression 유무·predicate·access
+   method를 전부 확인하고, 하나라도 어긋나면 **멈춥니다.** 통합 테스트가 검사하는
+   속성과 같은 목록입니다.
+   **3번은 재생이 안전합니다** — `DROP INDEX IF EXISTS`는 멱등이므로 lock timeout으로
+   아무것도 못 지웠든 지우고 응답을 잃었든 `resolve --rolled-back` 후 재배포가 맞습니다.
+   중요하지 않아서가 아니라 문장이 멱등이어서이고, "실패할 리 없는" drop에도
+   `IF EXISTS`를 남기는 이유입니다.
+9. **모든 잠금 대기에 상한을 겁니다**(`SET LOCAL lock_timeout`; 1번 15초, 2·3번 5초).
+   상한이 없으면 잠금 요청은 무한히 기다리고, `ACCESS EXCLUSIVE` 요청은 **새 읽기보다
+   앞에 줄을 서므로** 긴 `SELECT` 하나가 그 테이블을 모두에게 막습니다. 상한은 **잠금을
+   기다리는 시간**만 제한하며 index 빌드 시간의 상한이 아닙니다.
+10. **잠금 종류는 문장마다 다릅니다.** 1번의 빌드는 `EmailDelivery`에 SHARE —
+    읽기는 계속되고 쓰기가 기다립니다. 2번의 두 문장과 3번의 drop은 ACCESS EXCLUSIVE로
+    읽기까지 막지만 카탈로그 편집이라 문장 자체는 순식간입니다. `CONCURRENTLY`는
+    잠금을 피하지만 transaction 안에서 Postgres가 거부하므로 쓸 수 없고, 7번의
+    `BEGIN`이 바로 그 transaction입니다.
+    **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index가 빌드를 건너뛰게 하고,
+    그것들을 구분하는 카탈로그 검사는 **정확히 맞아야 하는 두 번째 물건**입니다.
+    이름 충돌에서 시끄럽게 실패하는 쪽이 더 쌉니다.
+11. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+    schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지
+    않고 insert하며 2번이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
+    insert가 `NOT NULL`로 실패하고, 충돌 해소는 2번이 지운
+    `(provider, providerEventId)` unique를 지목합니다. 비용은 수신 webhook 전량 거절과
+    bounce·complaint 처리 정지입니다. 더 내려가야 하면 2번을 **먼저** 되돌리며
+    (default 복원 + 옛 unique 재생성), 그 재생성 자체가 계정이 다른 같은 사건 id에서
+    실패할 수 있습니다. 복구 절차이지 일상 경로가 아닙니다.
+
 ### v23 (2026-09-18) — 발송 진입점 allowlist와 로그인 방법 안내의 lane 이동(S1b-3b)
 
 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C41·C35·C36·C49입니다.

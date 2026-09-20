@@ -60,10 +60,17 @@ const compilerOptions = parsedConfig.options;
 // its already-reviewed data-indexing expressions are frozen as an exact
 // path/position/text snapshot.  Any new or moved non-static element access must
 // be reviewed and must update this digest before the closure gate can pass.
+//
+// 2026-09-20: repinned for moved positions only. A comment in
+// `lib/marketingAutomationAccess.ts` was rewritten and shifted the lines under
+// it; the count assertion above still held, and the inventory compared without
+// line and column -- `path + expression text` for every entry -- came back
+// byte-identical, so nothing was added, removed or changed. Only the snapshot's
+// positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "6c04c275e702bdd092ebfa7277943cc05",
-  "82ca4ce6a4f1dfe4cb67518df8d871b",
+  "895feb8cb275a0fe8ccaeccf6db3f743",
+  "c8895a459cc7fea4561e7d3f57d1b308",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -1,0 +1,369 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-shadow-operator-ui-v1",
+  "requirement": "CHAT-01 Prompt Refiner의 동결된 staging shadow 실행을 owner가 제품의 기존 관리자 인증 세션 안에서 안전하게 조작할 최소 운영 화면을 추가한다. 화면은 stage preview/승인, 정확히 16건·retry 0·US$0.398656 run preview/승인, execution preview/명시적 실행을 순서대로 제공한다. 서버가 준 deployment·commit·digest·confirmation과 고정 model/cost/runtime 사실을 client에서도 fail-closed 검증하고 승인 body는 검증된 서버 값만 재사용한다. mount와 refresh는 GET-only이며 POST는 각각 명시적 버튼 동작에서만 발생한다. 실행 POST는 전송 전에 잠그고, transport unknown·서버 거부·malformed response에서는 자동 재시도나 같은 화면의 재전송을 금지한다. 오직 명시적 paused 응답만 남은 case의 수동 continuation을 다시 연다. page와 기존 API는 owner 및 recent-auth 경계를 유지하고 재인증 복귀 링크를 제공한다. prompt·refined prompt·모델 출력·provider error·credential은 화면에 표시하지 않으며 제품 Chat 트래픽과 연결하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "관리자 detail route는 owner가 아니면 notFound하고 최근 인증이 만료된 API 응답에는 기존 admin 재인증 복귀 경로를 렌더링한다.",
+    "stage/run/execution preview parser가 정확한 환경·배포·commit·digest·model·tokenizer·timeout·retry·case 수·비용 상한·confirmation을 검증하고 drift나 malformed 응답을 fail-closed한다.",
+    "mount와 status refresh는 GET-only이며 세 POST는 각각 사용자의 버튼 동작에서만 시작되고 검증된 preview의 exact binding body만 전송한다.",
+    "execution POST는 전송 전에 잠기며 unknown/refusal/malformed 결과는 재시도를 열지 않고, retryCount=0·redispatched=0인 valid paused 응답만 수동 continuation을 다시 허용한다.",
+    "운영 화면과 응답 처리는 prompt·refined prompt·모델 출력·원시 provider 오류를 노출하지 않고 content-free status·count·고정 비용 사실만 표시한다.",
+    "focused UI/core/navigation tests, 기존 shadow live-adapter tests, owner-only API server-contract tests, TypeScript, ESLint, encoding, production build와 diff whitespace 검사가 통과한다.",
+    "Claude verdict는 package digest와 결속하고 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "51c1648f0d721d975617260342c2b7fe1ae77aa7",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:5476e2dd49534f294f20b2bb6fc5a0210211aae6f78ba54d5ae919254f340ebf",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
+        "components/admin/AdminPromptRefinerShadowPanel.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
+        "lib/adminMessages/promptRefinerShadow.ts",
+        "lib/adminNavigation.ts",
+        "lib/adminNavigationLocale.ts",
+        "lib/promptRefinerShadowOperatorCore.ts",
+        "tests/adminNavigation.test.mjs",
+        "tests/adminPromptRefinerShadowOperator.test.mjs",
+        "tests/promptRefinerShadowOperatorCore.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 7503.3323",
+          "durationMs": 7591
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 47946
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowOperatorCore.ts components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs lib/adminNavigation.ts lib/adminNavigationLocale.ts --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 4700
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1460
+        },
+        {
+          "rule": "npm run build -- --webpack",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 74441
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 68
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:310-323 (refresh)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "\"Refresh status\" never re-reads the step currently on screen: it always GETs the *next* step's endpoint, so at step 1 it calls the run preview and at step 2 it calls the execution preview, both of which the server refuses until the previous step is approved, and the stage preview can never be refreshed at all.",
+          "reproduction": "With no durable stage approved, open /admin/prompt-refiner-shadow. The stage preview renders and `run` is null, so the branch at line 316 runs `readRun(stage)` -> `GET /api/admin/prompt-refiner/shadow-run`. `promptRefinerShadowRunPreview` (lib/promptRefinerShadowRunStore.ts:521-523) refuses 409 `PROMPT_REFINER_SHADOW_RUN_STAGE_REQUIRED`, so the red alert reads \"The durable stage must be approved first.\" and the stage fields are unchanged. Expected: `readStage()` re-runs and the stage preview (including its previewBindingDigest) is refreshed. Note also that line 315 is a dead branch — it performs exactly the same call as line 314.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:232 and :448",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The run-approval kill switch (`PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED`) also gates the pure GET transition to step 3, so once the run is approved and that flag is turned back off the operator cannot reach the execution screen from the step-2 button, and is told to re-enable a flag that is no longer needed.",
+          "reproduction": "Approve the run, then unset `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED` (lib/promptRefinerShadowRunContract.ts:34-35) and set `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED=true`. `GET /api/admin/prompt-refiner/shadow-run` then returns `{status:\"already_exists\", approvalEnabled:false}` (lib/promptRefinerShadowRunStore.ts:543-548). The panel renders the \"Load execution status\" button with `disabled` (line 448) and `approveRun` returns immediately at line 232, and the amber banner at line 441 says \"Enable the exact staging flag and redeploy before approving or executing.\" Yet `GET /api/admin/prompt-refiner/shadow-run/execute` has no approval-flag gate (app/api/admin/prompt-refiner/shadow-run/execute/route.ts:93-119). Expected: the flag gates only the POST-approval branch at line 236; when `run.status === \"already_exists\"` the read-only transition stays available.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:292",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "`m.postFailureStop` (\"It is not a retry signal; inspect status before any new action.\") is unreachable, so a server refusal of the execution POST never carries the explicit do-not-retry wording.",
+          "reproduction": "`describeAdminApiFailure` always returns a non-empty `message` — `trimmed || \\`${fallback} The server answered ${status}.\\`` with `fallback = m.requestFailed` (lib/adminApiOutcome.ts:96-105). `failResponse` sets that message, and React applies the functional updater at line 292 against the queued value, so `current` is truthy and the fallback is discarded. Observe: with `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED` unset, click \"Execute approved run\"; the POST returns 403 `PROMPT_REFINER_SHADOW_EXECUTION_DISABLED` and the alert shows \"Prompt Refiner shadow execution is disabled.\" only. (The POST lock itself is correctly held, so this is messaging, not a safety gap.)",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/adminNavigation.ts:602-612",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "`/admin/prompt-refiner-shadow` is a static route registered in `ADMIN_DETAIL_ROUTES`, which only supplies a breadcrumb; it is therefore absent from the sidebar and from the command palette, so the only way to reach the screen is typing the URL.",
+          "reproduction": "`ADMIN_SEARCHABLE_PAGES` is built from `ADMIN_NAVIGATION` + `ADMIN_UNLISTED_PAGES` only (lib/adminNavigation.ts:815-832); `matchAdminPages(\"prompt refiner\")` returns no entry for `/admin/prompt-refiner-shadow`. `ADMIN_UNLISTED_PAGES` (line 569-579) is the table documented as \"routes that exist but are deliberately absent from the sidebar\" and is the one the palette reads. If the screen is meant to stay undiscoverable, say so in a comment; otherwise register it there as well.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/adminMessages/promptRefinerShadow.ts (flagDisabled) used at AdminPromptRefinerShadowPanel.tsx:441 and :499",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "One `flagDisabled` sentence stands in for two different environment flags, so an operator reading \"Enable the exact staging flag\" is not told which of `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED` and `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED` to set.",
+          "reproduction": "Render the panel with `approvalEnabled: false` (run step, line 439-442) and again with `enabled: false` on the execution preview (line 497-500); both render the identical string. Expected on an operator screen whose purpose is an unambiguous next action: two messages naming the specific flag.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Fix the refresh step-selection (findings 1) and the approval-flag gate on the read-only step-3 transition (finding 2), then resubmit; the frozen contract constants, fail-closed parsers, exact approval bodies, GET-only mount/refresh, execution POST lock and paused-only unlock, and the owner/recent-auth boundaries all check out against the server routes."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:5ebbd1e4f71f1804a8f4d97a57bd79fc9e2fc920ec36cb885c164004797ecc42",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
+        "components/admin/AdminPromptRefinerShadowPanel.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
+        "lib/adminMessages/promptRefinerShadow.ts",
+        "lib/adminNavigation.ts",
+        "lib/adminNavigationLocale.ts",
+        "lib/promptRefinerShadowOperatorCore.ts",
+        "tests/adminNavigation.test.mjs",
+        "tests/adminPromptRefinerShadowOperator.test.mjs",
+        "tests/promptRefinerShadowOperatorCore.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8941.6584",
+          "durationMs": 9031
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 51795
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowOperatorCore.ts components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs lib/adminNavigation.ts lib/adminNavigationLocale.ts --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 4052
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1709
+        },
+        {
+          "rule": "npm run build -- --webpack",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 96911
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 66
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:292-316 (execute)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The post-POST status GET (`await readExecution(run!)`, line 311) sits inside the same `try` as the execution POST, so a transport failure on that follow-up *read* is reported as `m.transportUnknown` (\"The execution request outcome is unknown. Do not resend it...\") even though the POST outcome was received and parsed, and on a `paused` result the lock was already released at line 310 — leaving an enabled \"Resume remaining cases\" button underneath a \"do not resend\" alert.",
+          "reproduction": "Stub `fetch` so the POST to `/api/admin/prompt-refiner/shadow-run/execute` resolves `{ execution: { status: \"paused\", attemptedThisInvocation: 8, dispatchCount: 8, terminalCount: 8, inFlightAttemptId: null, observedAt: \"2026-09-21T01:05:00.000Z\", retryCount: 0, redispatched: 0 }, productAdapterReady: false }`, and the immediately following GET on the same path rejects (network error). Expected: the alert names the failed status read and the button state stays coherent. Actual: the alert renders `transportUnknown` while `executionPostLocked` is false and `canExecute` is true. Fix: hoist `readExecution` out of the POST `try`, or track whether the POST itself completed before choosing the message.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowOperatorCore.ts:266-315 (promptRefinerExecutionPreviewProblems)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The execution preview is bound to the run only by `runId` and `runContractDigest` — both deployment-independent frozen constants — and `approvalExpiresAt` is accepted as any string, even though the run preview carries `stageApprovalExpiresAt` and the server guarantees `run.approvalExpiresAt === stage.approvalExpiresAt`, so an execution response describing a different authority window is not fail-closed on the client.",
+          "reproduction": "In tests/promptRefinerShadowOperatorCore.test.mjs, take `executionBody()` and set `execution.approvalExpiresAt = \"2030-01-01T00:00:00.000Z\"` while the `runBody()` fixture keeps `stageApprovalExpiresAt: \"2026-09-21T02:00:00.000Z\"`; `parsePromptRefinerExecutionPreview(execution, run)` still returns a preview. Expected under the stated fail-closed contract: `null`.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerShadowOperatorCore.test.mjs:13-95 (fixtures)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Every fixture field is derived from `PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT` itself (`timeoutMs: contract.timeoutMs`, `modelId: contract.modelId`, ...), so the suite is self-referential and cannot detect divergence between this duplicated client contract and the server constants it mirrors; a stale client constant would only surface as a fail-closed dead screen in staging.",
+          "reproduction": "Change `timeoutMs: 15_000` to `20_000` in lib/promptRefinerShadowOperatorCore.ts and re-run `node --import tsx --test tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs`: all tests still pass, while the real run preview (`PROMPT_REFINER_TIMEOUT_MS = 15_000`, lib/promptRefinerExecutionContract.ts:75) would be rejected by `parsePromptRefinerRunPreview` in production. Add one assertion comparing the operator contract field-by-field to the server constants in lib/promptRefinerShadowRunContract.ts, lib/promptRefinerExecutionContract.ts and lib/promptRefinerStageAdmissionCore.ts.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "All five findings from the previous round are addressed (refresh re-reads the visible step, the run-approval flag no longer gates the GET transition to step 3, `postFailureStop` is now reachable at line 301, the two env flags have separate named messages, and the unlisted-route choice is justified against the role-agnostic `ADMIN_SEARCHABLE_PAGES`); fix the misattributed `transportUnknown` message by moving the follow-up status GET out of the execution POST's try block, and re-submit."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:21ed48d0da73a51014390e3c86d8722e9b39189665078cd95ce08a13fdfa8eca",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
+        "components/admin/AdminPromptRefinerShadowPanel.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
+        "lib/adminMessages/promptRefinerShadow.ts",
+        "lib/adminNavigation.ts",
+        "lib/adminNavigationLocale.ts",
+        "lib/promptRefinerShadowOperatorCore.ts",
+        "tests/adminNavigation.test.mjs",
+        "tests/adminPromptRefinerShadowOperator.test.mjs",
+        "tests/promptRefinerShadowOperatorCore.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8675.6089",
+          "durationMs": 8763
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 51094
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowOperatorCore.ts components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs lib/adminNavigation.ts lib/adminNavigationLocale.ts --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3723
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1461
+        },
+        {
+          "rule": "npm run build -- --webpack",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 84984
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 57
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:414 (stage card `m.expires` field)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The same label `m.expires` (\"Expires\" / \"만료\") carries two different meanings on one screen: on the stage card it renders the frozen TTL constant `${stage.approvalTtlMinutes} min` (always \"60 min\", even for an `already_exists` stage approved 55 minutes ago), while on the execution card (:503) it renders the real absolute `approvalExpiresAt` timestamp, so the stage row can read as \"60 minutes of authority remaining\" when almost none is left.",
+          "reproduction": "With a durable stage approved 55 minutes earlier, mount /admin/prompt-refiner-shadow: the stage GET returns `approvalTtlMinutes: 60` (lib/promptRefinerStageAdmission.ts:485, a constant, not a remaining-time value) and `status: \"already_exists\"`, so the stage card shows Expires = \"60 min\"; after approving the run, the execution card shows Expires = the real ISO timestamp ~5 minutes in the future. Expected: the stage field is labelled as a TTL (e.g. m.approvalTtl \"Approval window\") or shows the stage's actual expiry, so one label does not mean two things.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: components/admin/AdminPromptRefinerShadowPanel.tsx:414 (stage card `m.expires` field)) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:21ed48d0da73a51014390e3c86d8722e9b39189665078cd95ce08a13fdfa8eca",
+  "commit": null,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowTokenizer.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunner.test.mjs tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8675.6089",
+      "durationMs": 8763
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 51094
+    },
+    {
+      "rule": "npx eslint lib/promptRefinerShadowOperatorCore.ts components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs lib/adminNavigation.ts lib/adminNavigationLocale.ts --max-warnings=0",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3723
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1461
+    },
+    {
+      "rule": "npm run build -- --webpack",
+      "passed": true,
+      "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+      "durationMs": 84984
+    },
+    {
+      "rule": "git diff --check",
+      "passed": true,
+      "detail": "",
+      "durationMs": 57
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:414 (stage card `m.expires` field)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The same label `m.expires` (\"Expires\" / \"만료\") carries two different meanings on one screen: on the stage card it renders the frozen TTL constant `${stage.approvalTtlMinutes} min` (always \"60 min\", even for an `already_exists` stage approved 55 minutes ago), while on the execution card (:503) it renders the real absolute `approvalExpiresAt` timestamp, so the stage row can read as \"60 minutes of authority remaining\" when almost none is left.",
+      "reproduction": "With a durable stage approved 55 minutes earlier, mount /admin/prompt-refiner-shadow: the stage GET returns `approvalTtlMinutes: 60` (lib/promptRefinerStageAdmission.ts:485, a constant, not a remaining-time value) and `status: \"already_exists\"`, so the stage card shows Expires = \"60 min\"; after approving the run, the execution card shows Expires = the real ISO timestamp ~5 minutes in the future. Expected: the stage field is labelled as a TTL (e.g. m.approvalTtl \"Approval window\") or shows the stage's actual expiry, so one label does not mean two things.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 1 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-20T14:59:49.626Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "51c1648f0d721d975617260342c2b7fe1ae77aa7",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "lib/adminNavigation.ts",
+    "lib/adminNavigationLocale.ts",
+    "lib/promptRefinerShadowOperatorCore.ts",
+    "tests/adminNavigation.test.mjs",
+    "tests/adminPromptRefinerShadowOperator.test.mjs",
+    "tests/promptRefinerShadowOperatorCore.test.mjs"
+  ]
+}

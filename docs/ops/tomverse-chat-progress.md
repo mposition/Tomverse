@@ -1367,3 +1367,84 @@ provider/API/model 호출·유료 실행·제품 Chat 연결·실행 flag 활성
 5. 의미 보존·행동상 주입 저항·비용·지연·제외율 gate를 통과한 경우에만 suggestion UI를
    default-off로 연결하고, 사용자 채택·거절 증거 뒤 Refiner→Router full-catalog 실험으로
    진행한다.
+
+## 2026-09-20 Prompt Refiner default-off execution runner 구현 회차
+
+앞 회차가 남긴 실행 경계만 구현했다. owner+recent-auth 전용 execute GET/POST는 고정 run id,
+v3 contract digest와 확인문, 4 KiB strict body, DB rate limit과 no-store를 요구한다. runner는
+호출 첫 동작에서 PostgreSQL clock 기반 unknown sweep을 수행하고, 고정 합성 corpus 16건을
+정확한 순서로 reservation→durable dispatch intent/consume→provider boundary→immutable terminal
+순서로 처리한다. 각 terminal 뒤 다음 case 전에 default-off kill switch를 다시 확인하며,
+provider 경계 뒤에는 terminal 기록을 생략하지 않는다. retry·redispatch·fallback·병렬 dispatch는
+없다.
+
+dispatch 직전에는 `js-tiktoken@1.0.21`의 `o200k_base`로 system/user content를 실제 계수하고
+고정 framing 32 tokens를 더해 100,000-token ceiling을 검사한다. package/version/encoding/count는
+system audit과 DB trigger에 결속된다. maintenance는 durable sweeper만 import하므로 provider
+경계에 도달할 수 없다. migration은 기존 run/attempt가 하나라도 있으면 중단하고 v3 제약만
+교체하며 stage·run·attempt를 seed하지 않는다. 실행 flag는 기본 off이고 제품 Chat caller는
+계속 없으므로 이 구현만으로 provider/API/model 호출이나 지출은 발생하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 69%** (주관적 범위 **59–79%**) — 직전 약 68%에서 검증 가능한 staging 실행 기반만 +1%p |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +10%p / 전체 계획 +1%p** — 실제 shadow와 사용자 UI는 아직 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 80%** (직전 30% / 70%) — runner 완성도를 제품 완료율로 환산하지 않음 |
+| 구현 | owner-only default-off runner, exact 16-case 순차 실행, DB-clock sweep·unknown latch, actual tokenizer admission, content-free result, maintenance recovery, no-seed v3 migration |
+| 로컬 검증 | 집중 unit **36/36**, 관리자·maintenance server contract **25/25**, 전체 server contract **695/695**, 보호 테이블 회귀 **20/20**, typecheck·대상 lint·문서·정책·encoding·DB coverage·cache·enum·data-domain·prompt-injection·security gate 통과. 전체 unit **9,869건** 최초 실행은 새 보호-table allowlist 미갱신 1건만 실패했고 exact migration/store 수치를 고정한 뒤 해당 회귀가 통과함 |
+| DB 검증 | 격리 schema에서 전체 **126 migration**, Prisma drift **0**, 새 shadow-run DB 계약 **10/10** 통과. 같은 원격 DB 합산 실행의 기존 예약 fixture 3건은 5초 transaction 지연 2건과 기존 binding을 쓰는 timezone fixture 1건으로 실패해 별도 관찰로 남김 |
+| 독립 검토·통합 | Claude Code Max 읽기 전용 검토와 Linux 통합 CI 전. `--skip-preflight` 사용자 예외를 쓰되 API key fallback은 금지 |
+| 비용·공개 상태 | stage/run 생성 0, 실행 flag 변경 0, provider/API/model/유료 호출 0, 제품 Chat 연결 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 exact diff를 Claude Code Max로 읽기 전용 독립 검토하고 Linux 통합 CI를 통과시킨다.
+2. 병합·staging 배포와 126번째 migration 적용을 확인한 뒤 owner-only GET preview만 읽는다.
+   stage/run을 만들거나 execute POST를 호출하지 않는다.
+3. preview의 pinned model, 16건, 요청당·전체 비용 ceiling, timeout·retry 0·unknown 중단 조건을
+   별도 사람 비용 승인안으로 제시한다.
+4. 승인 뒤 정확히 한 번만 16-case paid shadow를 실행하고, unknown이면 재실행하지 않고
+   durable receipt를 먼저 조사한다.
+5. 의미 보존·행동상 주입 저항·비용·지연 gate를 통과할 때만 제안형 UI를 default-off로
+   연결하고, 사용자 채택·거절 evidence 뒤 Refiner→Router full-catalog 실험으로 진행한다.
+
+## 2026-09-21 Prompt Refiner shadow v3 one-time staging result
+
+owner가 승인한 고정 합성 corpus 16건의 `prompt-refiner-shadow-run-v3`를 staging에서
+정확히 한 번 실행했다. durable content-free run/attempt receipt가 기록한 결과는
+16/16 dispatch·terminal 완료, `suggested` 16건, failed·unknown·retry 각 0건이다.
+입력 2,927 tokens, 출력 1,909 tokens, reasoning 1,334 tokens였고 총비용은
+2,887 microUSD(US$0.002887)로 동결된 398,656 microUSD ceiling 안이었다.
+지연은 최소 1,964 ms, p50 2,805 ms, p90 4,018 ms, 최대 4,110 ms였다.
+
+이 기록의 source of record는 staging의 owner-only durable run receipt이며 run id가
+위 exact contract를 식별한다. refined prompt bytes는 strict parsing 뒤 폐기됐고 prompt,
+proposal, excerpt, 사용자 identity는 이 progress 기록에도 남기지 않았다. 따라서 이 실행은
+reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-injection 저항을 소급 증명하지
+않는다. 실행 뒤 두 shadow execution flag를 제거했고 cleanup deployment
+`65dc3179-16cb-485d-b4a7-af8fbe65e5e4`가 merge SHA
+`ab80900972673eea516c53a0fb260b70b6db893f`로 SUCCESS임을 확인했다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 72%** (주관적 범위 **62–82%**) — 직전 공개 기록 약 69%에서 bounded staging 실행·운영 폐쇄를 +3%p 반영 |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +15%p / 전체 계획 +3%p** — 제안 UI와 Router 결합은 아직 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 95%** — 고정 shadow 실행과 cleanup까지 완료했지만 의미 gate는 후속 |
+| 실행 결과 | 16/16 완료, failed·unknown·retry 0, US$0.002887, p90 4,018 ms, max 4,110 ms |
+| 안전 경계 | prompt/proposal 미보존, execution flags 제거, cleanup deployment SUCCESS, 제품 Chat·Router 연결 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. provider-independent content-free evidence gate를 동결된 16건 corpus에 결속하고
+   의미 anchor·exact literal·언어·두 injection directive·비용·지연을 deterministic하게 판정한다.
+2. Claude Code Max 독립 검토와 전체 Linux CI를 통과시킨다.
+3. 새 confirmatory shadow 계약이 proposal을 메모리에서만 판정하고 content-free evidence만
+   저장하도록 설계한 뒤, exact 비용·운영 승인을 별도로 받는다.
+4. confirmatory pass 뒤에만 suggestion UI를 default-off로 연결하고 사용자 accept/keep
+   evidence를 수집한다.
+5. 그 증거 뒤 Refiner→Router 결합을 ROUTE-03 지연 계약 아래 실험하고 full-catalog
+   모델 선택 개선으로 진행한다.

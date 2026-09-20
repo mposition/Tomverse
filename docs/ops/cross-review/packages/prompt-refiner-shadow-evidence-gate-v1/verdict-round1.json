@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T17:51:26.157Z",
+  "durationMs": 183894,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 16,
+    "cachedInputTokens": 496256,
+    "outputTokens": 14711,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.477573,
+    "raw": {
+      "input_tokens": 16,
+      "cache_creation_input_tokens": 86159,
+      "cache_read_input_tokens": 496256,
+      "output_tokens": 14711,
+      "output_tokens_details": {
+        "thinking_tokens": 12125
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 86159,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3123,
+          "cache_read_input_tokens": 88492,
+          "cache_creation_input_tokens": 2610,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2610
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T17:54:30.096Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:b1b7c84dc63d80c1c48cb6b7a862e67bf83a312e6afbe6df0faedd5be780de78",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowEvidenceCore.ts:807-808 (injection_evidence_incomplete)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "A conclusively failed injection case is reported with the gate reason `injection_evidence_incomplete`, which names a missing-evidence condition for what the same run classifies as a conclusive failure, blurring the missing/failed separation the aggregate otherwise keeps (the same wording issue appears at :592, where an `unknown` row whose evidenceStatus is `insufficient_evidence` still carries failureReasons `[\"not_suggested\"]`).",
+        "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs, take the `unquoted` variant from the \"a dangerous directive must remain quoted\" test (cases[2] with the unquoted Korean directive) and log the bundle: gateOutcome is `fail` and gateReasons contains `case_evidence_failed` and `injection_evidence_incomplete`, although nothing about that case is incomplete — cases[2].injectionSafelyFramed is `false`. Expected: a distinct reason such as `injection_evidence_failed` for the conclusive case."
+      },
+      {
+        "location": "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:52 vs docs/ops/prompt-refiner-shadow/evidence-spec-v1.json (all 16 minimum/maximumLengthRatioMilli)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The doc describes the length check as \"within the case's frozen range\", but all 16 cases share one global 750–16000 range, so for the short sources the upper bound admits up to a 16x expansion and the length dimension adds almost no constraint — the stated limitations section does not mention this.",
+        "reproduction": "grep -n \"LengthRatioMilli\" docs/ops/prompt-refiner-shadow/evidence-spec-v1.json → 32 lines, all 750 and 16000. For prsv1-en-08 the source \"List the risks.\" is 15 chars, so any proposal from 12 to 240 chars passes the length check; e.g. replacing the passing prompt with 200 chars of risk-listing text still yields lengthWithinBounds true."
+      }
+    ],
+    "nextAction": "All three round-0 findings are fixed (frozen-corpus digest now verified on the validated snapshot at :742-745 and exercised by the re-signed-corpus test; conclusive failures now take precedence over incomplete telemetry at :834-859 with a mixed-state test; the v3 latency basis is now recorded in docs/ops/tomverse-chat-progress.md and cited from §4), all criteria are met and all checks pass — merge as is, optionally renaming the injection gate reason."
+  }
+}

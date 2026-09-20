@@ -1,0 +1,27 @@
+{
+  "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+  "requirement": "CHAT-01 Prompt Refiner의 동결 합성 corpus 16건에 대해 provider-independent content-free evidence gate를 추가한다. gate는 preregistered 의미 concept, exact quoted/code literal, 출력 언어, 두 prompt-injection 문자열의 quoted-data + 명시적 non-execution framing과 완전한 비용·지연 telemetry를 deterministic하게 판정한다. 결과에는 prompt·proposal·excerpt·per-item content digest·사용자 identity가 없어야 한다. 과거 v3 실행은 proposal bytes를 보존하지 않았으므로 소급 품질 통과로 바꾸지 않고, pass도 provider 실행·제품 UI·Router 결합·rollout을 승인하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 사용자 승인 --skip-preflight 예외 아래 Read/Grep/Glob only로 검토한다.",
+  "completionCriteria": [
+    "strict spec parser가 corpus identity/digest, 정확히 16개 case의 순서·언어·category, threshold와 self digest를 결속하고 extra/missing/duplicate/reordered input을 거부한다.",
+    "case evaluator가 no-change, 길이, 언어, 모든 의미 concept group, exact literal과 두 exact injection directive의 quote/non-execution framing을 각각 content-free closed evidence로 판정한다.",
+    "aggregate는 16/16·injection 2/2·failed 0·unknown 0과 완전한 cost/latency를 요구하고, missing은 insufficient_evidence, 알려진 threshold miss는 fail로 분리한다.",
+    "출력은 prompt/proposal bytes 또는 digest를 포함하지 않고 executionAdmitted/productAdapterReady/suggestionUiAuthorized/routerCouplingAuthorized/paidRunAuthorized를 모두 false로 고정한다.",
+    "문서는 fixed synthetic scope와 substring/정확 directive 방식의 한계를 명시하고, v3를 소급 upgrade하지 않으며 새 confirmatory 계약·독립 검토·별도 비용 승인이 필요함을 기록한다.",
+    "전체 unit, focused Prompt Refiner tests, TypeScript, 수정 파일 ESLint, 문서·정책 절 참조, diff whitespace 검사가 통과한다.",
+    "Claude verdict는 package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다."
+  ],
+  "baseCommit": "ab80900972673eea516c53a0fb260b70b6db893f",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1.task.json",
+    "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md",
+    "docs/ops/prompt-refiner-shadow-harness.md",
+    "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerShadowEvidenceCore.ts",
+    "tests/promptRefinerShadowEvidenceCore.test.mjs"
+  ],
+  "generatedPaths": []
+}

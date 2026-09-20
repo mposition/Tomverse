@@ -1,0 +1,81 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-shadow-operator-ui-final-v2",
+  "round": 2,
+  "baseCommit": "59c425c3e9a76c87eede685874dddb753005daa2",
+  "lineage": [
+    "prompt-refiner-shadow-operator-ui-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:414 (stage card `m.expires` field)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The same label `m.expires` (\"Expires\" / \"만료\") carries two different meanings on one screen: on the stage card it renders the frozen TTL constant `${stage.approvalTtlMinutes} min` (always \"60 min\", even for an `already_exists` stage approved 55 minutes ago), while on the execution card (:503) it renders the real absolute `approvalExpiresAt` timestamp, so the stage row can read as \"60 minutes of authority remaining\" when almost none is left.",
+      "reproduction": "With a durable stage approved 55 minutes earlier, mount /admin/prompt-refiner-shadow: the stage GET returns `approvalTtlMinutes: 60` (lib/promptRefinerStageAdmission.ts:485, a constant, not a remaining-time value) and `status: \"already_exists\"`, so the stage card shows Expires = \"60 min\"; after approving the run, the execution card shows Expires = the real ISO timestamp ~5 minutes in the future. Expected: the stage field is labelled as a TTL (e.g. m.approvalTtl \"Approval window\") or shows the stage's actual expiry, so one label does not mean two things."
+    }
+  ],
+  "changeDigest": "sha256:fb5713256b73432019b24912818b82ed26ceed67c7ae251278231d72ffe7bfe5",
+  "commit": null,
+  "headCommit": "59c425c3e9a76c87eede685874dddb753005daa2",
+  "worktreeDirty": true,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "filesChanged": [
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "tests/adminPromptRefinerShadowOperator.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "tests/adminPromptRefinerShadowOperator.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-reporter=spec tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs tests/adminNavigation.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 409.2705",
+      "durationMs": 498
+    }
+  ],
+  "guardCommands": [
+    "npm run typecheck",
+    "npx eslint components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/adminPromptRefinerShadowOperator.test.mjs --max-warnings=0",
+    "npm run check:encoding",
+    "git diff --check"
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 50426
+    },
+    {
+      "rule": "npx eslint components/admin/AdminPromptRefinerShadowPanel.tsx lib/adminMessages/promptRefinerShadow.ts tests/adminPromptRefinerShadowOperator.test.mjs --max-warnings=0",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3636
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1854
+    },
+    {
+      "rule": "git diff --check",
+      "passed": true,
+      "detail": "",
+      "durationMs": 56
+    }
+  ],
+  "producedAt": "2026-09-20T15:13:04.010Z",
+  "diff": "diff --git a/components/admin/AdminPromptRefinerShadowPanel.tsx b/components/admin/AdminPromptRefinerShadowPanel.tsx\nindex 950334d3..9f9aca08 100644\n--- a/components/admin/AdminPromptRefinerShadowPanel.tsx\n+++ b/components/admin/AdminPromptRefinerShadowPanel.tsx\n@@ -411,7 +411,10 @@ export function AdminPromptRefinerShadowPanel() {\n             <Field label={m.status} value={stage.status} />\n             <Field label={m.deployment} value={stage.deploymentId} />\n             <Field label={m.commit} value={stage.commitSha} />\n-            <Field label={m.expires} value={`${stage.approvalTtlMinutes} min`} />\n+            <Field\n+              label={m.approvalWindow}\n+              value={`${stage.approvalTtlMinutes} min`}\n+            />\n             <Field\n               label={m.perRequestCeiling}\n               value={usd(stage.perRequestCostMicroUsd)}\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md\nnew file mode 100644\nindex 00000000..262e0dcf\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md\n@@ -0,0 +1,22 @@\n+# Prompt Refiner shadow 운영 화면 최종 정리 Claude 독립 검토 제한 승인\n+\n+Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 권장 순서에 따른 자동 진행과\n+필요한 Claude 독립 검토를 요청했고, 이 작업에 `--skip-preflight` 예외를 승인했다.\n+이 문서는 전자서명, 제품 실행 승인, 배포 승인 또는 검토 통과 기록이 아니다.\n+\n+## 적용 범위\n+\n+이 승인은 round 상한으로 `on_hold`가 된\n+`prompt-refiner-shadow-operator-ui-v1`의 단일 비차단 문구 nit와 EOF whitespace를\n+닫는 [후속 task](prompt-refiner-shadow-operator-ui-final-v2.task.json)의 Claude\n+읽기 전용 독립 검토에만 적용한다.\n+\n+## 유지되는 경계\n+\n+- Claude는 저장된 Claude Code Max `claude.ai` 로그인만 사용한다. child 환경에서\n+  `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 대소문자와 무관하게 제거한다.\n+- reviewer는 Read/Grep/Glob만 사용하고 shell, write, hook, plugin, skill, MCP를\n+  사용할 수 없다. 사용자가 승인한 `--skip-preflight`만 기록한다.\n+- 실패 test/guard 우회, provider/model 호출, Railway 변경, database mutation,\n+  stage/run 승인, flag 활성화, 유료 shadow 실행, push·merge·deploy는 이 검토에\n+  포함하지 않는다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json\nnew file mode 100644\nindex 00000000..f5fe29ba\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json\n@@ -0,0 +1,23 @@\n+{\n+  \"taskId\": \"prompt-refiner-shadow-operator-ui-final-v2\",\n+  \"requirement\": \"Claude가 approve한 prompt-refiner-shadow-operator-ui-v1의 마지막 비차단 nit를 닫는다. stage card의 approvalTtlMinutes는 남은 시간이 아니라 동결된 60분 승인 window이므로 execution card의 실제 approvalExpiresAt과 같은 'Expires/만료' 라벨을 재사용하지 않고 'Approval window/승인 유효기간'으로 명확히 구분한다. 그 밖의 owner/recent-auth, exact preview binding, 비용·모델 상수, GET-only refresh, explicit POST, unknown stop, no retry·redispatch, content-free UI 계약은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.\",\n+  \"completionCriteria\": [\n+    \"stage 카드의 60 min 값은 Approval window/승인 유효기간 라벨을 쓰고 execution 카드의 절대시각만 Expires/만료 라벨을 쓴다.\",\n+    \"focused operator/navigation test, TypeScript, 수정 파일 ESLint, encoding과 diff whitespace 검사가 통과한다.\",\n+    \"제품 runtime 동작, provider/model/Railway/database/stage/run/flag/비용 경계는 변경하지 않는다.\",\n+    \"Claude verdict는 새 package digest와 결속하고 재현 가능한 finding을 기록한다.\"\n+  ],\n+  \"baseCommit\": \"59c425c3e9a76c87eede685874dddb753005daa2\",\n+  \"writableScope\": [\n+    \"components/admin/AdminPromptRefinerShadowPanel.tsx\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json\",\n+    \"lib/adminMessages/promptRefinerShadow.ts\",\n+    \"tests/adminPromptRefinerShadowOperator.test.mjs\"\n+  ],\n+  \"generatedPaths\": [],\n+  \"supersedes\": {\n+    \"taskId\": \"prompt-refiner-shadow-operator-ui-v1\",\n+    \"exchange\": \"docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1/exchange.json\"\n+  }\n+}\ndiff --git a/lib/adminMessages/promptRefinerShadow.ts b/lib/adminMessages/promptRefinerShadow.ts\nindex 93b6744e..b93d2d49 100644\n--- a/lib/adminMessages/promptRefinerShadow.ts\n+++ b/lib/adminMessages/promptRefinerShadow.ts\n@@ -31,6 +31,7 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({\n     model: \"Model\",\n     status: \"Status\",\n     expires: \"Expires\",\n+    approvalWindow: \"Approval window\",\n     perRequestCeiling: \"Per-request ceiling\",\n     stageCeiling: \"Stage authority ceiling\",\n     runCeiling: \"Run ceiling\",\n@@ -97,6 +98,7 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({\n     model: \"모델\",\n     status: \"상태\",\n     expires: \"만료\",\n+    approvalWindow: \"승인 유효기간\",\n     perRequestCeiling: \"요청당 상한\",\n     stageCeiling: \"stage 권한 상한\",\n     runCeiling: \"run 상한\",\ndiff --git a/tests/adminPromptRefinerShadowOperator.test.mjs b/tests/adminPromptRefinerShadowOperator.test.mjs\nindex 5f40dcd6..fcc8ef81 100644\n--- a/tests/adminPromptRefinerShadowOperator.test.mjs\n+++ b/tests/adminPromptRefinerShadowOperator.test.mjs\n@@ -2,6 +2,7 @@ import assert from \"node:assert/strict\";\n import test from \"node:test\";\n import { readFileSync } from \"node:fs\";\n import { join } from \"node:path\";\n+import { adminPromptRefinerShadowMessages } from \"../lib/adminMessages/promptRefinerShadow.ts\";\n \n const root = process.cwd();\n const panel = readFileSync(\n@@ -59,6 +60,25 @@ test(\"the page exposes recent-auth recovery but no prompt or model output\", () =\n   assert.match(panel, /promptRefinerExecutionBody\\(execution\\)/);\n });\n \n+test(\"the stage TTL and execution expiry keep distinct labels\", () => {\n+  assert.match(\n+    panel,\n+    /label=\\{m\\.approvalWindow\\}[\\s\\S]*?stage\\.approvalTtlMinutes/\n+  );\n+  assert.match(\n+    panel,\n+    /label=\\{m\\.expires\\}[\\s\\S]*?execution\\.approvalExpiresAt/\n+  );\n+  assert.notEqual(\n+    adminPromptRefinerShadowMessages.en.approvalWindow,\n+    adminPromptRefinerShadowMessages.en.expires\n+  );\n+  assert.notEqual(\n+    adminPromptRefinerShadowMessages.ko.approvalWindow,\n+    adminPromptRefinerShadowMessages.ko.expires\n+  );\n+});\n+\n test(\"refresh re-reads the visible step instead of advancing the workflow\", () => {\n   const refresh = panel.match(/const refresh = async \\(\\) => \\{([\\s\\S]*?)\\n  \\};/)?.[1];\n   assert.ok(refresh, \"refresh remains inspectable\");\n"
+}
