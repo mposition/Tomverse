@@ -18,13 +18,23 @@
 -- `legacy:suppression:` keys rather than the rows themselves, and nothing is
 -- reading it. An unused table is cheap; an unrecoverable one is not.
 --
--- **Order.** This must not reach an environment before the application build
--- that stops writing entries, and that build must not reach one before its
--- cutover to causes has been applied and verified there. An environment still
--- reading entries would, after this, be reading a table that the trigger no
--- longer even keeps consistent with itself -- and the build that goes with this
--- migration refuses to honour that setting for exactly that reason
--- (`EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR`).
+-- **Order.** The condition is not "the application first". It is:
+--
+--   1. the cutover to causes has been applied and verified in this
+--      environment; and
+--   2. every build that can still write here writes causes directly.
+--
+-- (2) is what actually matters, and it is not the same as "the new build has
+-- been deployed". Every build since deploy A writes the cause itself -- the
+-- trigger was for a build older than that -- so this migration is safe before
+-- or after the application that stops writing entries. What is *not* safe is a
+-- rolling deploy with one instance old enough to write only the entry: it would
+-- write a suppression that, with the trigger gone, becomes no cause at all, and
+-- the send path reads causes.
+--
+-- An environment whose setting still says `entry` is a separate problem, and
+-- the build that goes with this migration refuses to honour it rather than
+-- reading a table nothing maintains (`EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR`).
 --
 -- **If it fails and Prisma records it**, replaying is safe: both statements are
 -- `IF EXISTS` and neither depends on the other having run.
@@ -35,10 +45,18 @@
 --                AND t.tgname = 'suppression_entry_to_cause'
 --                AND NOT t.tgisinternal) AS trigger_rows,
 --            (SELECT count(*) FROM pg_proc p
---               JOIN pg_namespace n ON n.oid = p.pronamespace
 --              WHERE p.proname = 'suppression_entry_to_cause'
---                AND n.oid = to_regnamespace(split_part(
---                      to_regclass('"SuppressionEntry"')::text, '.', 1))) AS function_rows;
+--                AND p.pronargs = 0
+--                AND p.pronamespace = (SELECT c.relnamespace FROM pg_class c
+--                                       WHERE c.oid = to_regclass('"SuppressionEntry"')))
+--              AS function_rows;
+--
+-- The function's schema is read from the table's `relnamespace` rather than
+-- from the text of its `regclass`. A relation that is visible on the search
+-- path prints without a schema -- `SuppressionEntry`, not `public.…` -- so
+-- taking the part before the first dot yields the *table's own name*, and
+-- `to_regnamespace` of that is null. The count would then be 0 whatever is
+-- there, which is the reading that says "it committed".
 --
 --   * `entry_table` null -> stop. This session is not looking at the schema the
 --     migration ran in;

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { setPreference } from "@/lib/emailPreferences";
-import { recordSuppression } from "@/lib/emailSuppression";
+import { recordSuppression, suppressionCheck } from "@/lib/emailSuppression";
 import { processResendWebhook } from "@/lib/emailWebhookProcessing";
 import { prisma } from "@/lib/prisma";
 
@@ -81,6 +81,76 @@ test("a suppression writes its cause once, however often the event is replayed",
 
   // Nothing writes the mirror any more.
   assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 0);
+});
+
+test("a later transient cause does not unseat a permanent one", async () => {
+  // The claim that let deploy C delete the entry's merge rules.
+  //
+  // Those rules existed because one row had to stand for several facts: a
+  // `privacy_request` must not be overwritten, a permanent reason must not be
+  // downgraded to a soft bounce. With a row per cause there is nothing to
+  // overwrite -- but "nothing to overwrite" is only equivalent to the old rules
+  // if the verdict actually reads every active cause rather than the newest
+  // one, and that is what this pins.
+  const complained = address();
+  await recordSuppression({
+    emailAddress: complained,
+    reason: "complaint",
+    source: "provider_webhook",
+    sourceStream: "marketing",
+    sourceEventKey: `webhook:${randomUUID()}`,
+  });
+  const softExpiry = new Date(Date.now() + 60_000);
+  await recordSuppression({
+    emailAddress: complained,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: softExpiry,
+    sourceEventKey: `softbounce:${randomUUID()}`,
+  });
+
+  // Both stand. The old entry would have held one reason and had to choose.
+  assert.deepEqual(
+    (await causesFor(complained)).map((cause) => cause.reason).sort(),
+    ["complaint", "soft_bounce"]
+  );
+
+  // And the complaint still decides after the soft bounce expires, which is
+  // exactly what "a permanent reason is never downgraded" used to mean.
+  assert.equal(
+    (
+      await suppressionCheck({
+        emailAddress: complained,
+        classification: "marketing",
+        purpose: "promotions",
+        now: new Date(softExpiry.getTime() + 60_000),
+      })
+    ).allowed,
+    false
+  );
+
+  // A data-subject request outranks everything, including a must-reach class,
+  // and a transient cause arriving afterwards changes nothing about it.
+  const requested = address();
+  await recordSuppression({
+    emailAddress: requested,
+    reason: "privacy_request",
+    source: "admin",
+    sourceEventKey: `privacy:${randomUUID()}`,
+  });
+  await recordSuppression({
+    emailAddress: requested,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() + 60_000),
+    sourceEventKey: `softbounce:${randomUUID()}`,
+  });
+  const verdict = await suppressionCheck({
+    emailAddress: requested,
+    classification: "transactional",
+  });
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.allowed === false && verdict.skipReason, "suppressed_complaint");
 });
 
 test("a preference switched off and on leaves transitions and a released cause", async () => {

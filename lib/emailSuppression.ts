@@ -497,7 +497,14 @@ export async function suppressionCheck(input: {
   // Deploy D removes the setting and this read with it.
   const authority = await readSuppressionAuthority(db);
   if (authority !== "causes") {
-    await reportOperationalIncident({
+    // Not awaited, and its rejection is swallowed. This runs inside the
+    // transaction that holds the address lock during a send
+    // (`sendWithAddressLock`, §9.8), and `reportOperationalIncident` finishes by
+    // notifying an external channel and flushing Sentry -- so awaiting it would
+    // hold that lock for the length of somebody else's HTTP request, and a
+    // failure to *report* would become a failure to *send*. The report is worth
+    // making and is worth nothing at that price.
+    void reportOperationalIncident({
       code: "EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR",
       title: "The suppression read authority is set to entries",
       error:
@@ -505,7 +512,7 @@ export async function suppressionCheck(input: {
       severity: "error",
       cooldownMs: 30 * 60 * 1_000,
       context: { component: "email-suppression", authority },
-    });
+    }).catch(() => undefined);
   }
 
   const records = await db.suppressionCause.findMany({

@@ -309,7 +309,7 @@ export async function recoverPermanentBounces(input: {
           evidence: { recoveredFrom: RECOVERED_FROM },
           occurredAt: item.occurredAt,
         });
-        if (!written) return "duplicate" as const;
+        if (!written.recorded) return "duplicate" as const;
 
         // The cause is the whole record now. What used to follow here was the
         // mirrored entry -- raised when there was none or when it held a soft
