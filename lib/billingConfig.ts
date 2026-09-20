@@ -102,6 +102,79 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
   return Array.from(merged.values()).sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+/**
+ * Where each plan field's value came from.
+ *
+ * docs/policy/marketing-automation.md §7.2: a price or plan claim may only rest
+ * on a stored value. The distinction is invisible in `getBillingPlans()`, which
+ * merges three sources into one number on purpose -- that is what a caller
+ * serving a page wants. A claim needs the opposite: a number that is the
+ * compiled default is a number nobody chose for this deployment, and a derived
+ * one is arithmetic rather than a decision, so neither can back a public
+ * statement about what we charge.
+ *
+ * `derived_formula` exists because of one field. `annualPriceCents` is
+ * `monthly * 12 * 0.8` when the row leaves it NULL, and once merged the result
+ * is indistinguishable from a price somebody set.
+ */
+export type BillingPlanFieldSource =
+  | "stored"
+  | "compiled_default"
+  | "derived_formula";
+
+export type BillingPlanWithFieldSources = {
+  plan: BillingPlanConfig;
+  /** One entry per field of the merged plan. */
+  sources: Record<keyof BillingPlanConfig, BillingPlanFieldSource>;
+};
+
+/**
+ * The same plans `getBillingPlans()` returns, each with where its fields came
+ * from.
+ *
+ * A separate reader rather than a second field on the existing one: every
+ * current caller wants the merged answer, and adding a field they would all
+ * have to ignore is how a reader acquires two audiences. The test pins that the
+ * plans this returns are identical to the existing reader's, so the two cannot
+ * drift into disagreeing about the values while agreeing about their sources.
+ */
+export async function getBillingPlansWithFieldSources(): Promise<
+  BillingPlanWithFieldSources[]
+> {
+  const rows = await prisma.billingPlan.findMany({
+    select: { id: true, annualPriceCents: true },
+  });
+  const storedIds = new Map<BillingPlanId, number | null>();
+  for (const row of rows) {
+    const id = normalizePlanId(row.id);
+    if (id) storedIds.set(id, row.annualPriceCents);
+  }
+
+  const plans = await getBillingPlans();
+
+  return plans.map((plan) => {
+    const stored = storedIds.has(plan.id);
+    const annualIsDerived = stored && storedIds.get(plan.id) === null;
+
+    const sourceOf = (field: keyof BillingPlanConfig): BillingPlanFieldSource => {
+      if (!stored) return "compiled_default";
+      if (field === "annualPriceCents" && annualIsDerived) {
+        return "derived_formula";
+      }
+      return "stored";
+    };
+
+    const sources = Object.fromEntries(
+      (Object.keys(plan) as (keyof BillingPlanConfig)[]).map((field) => [
+        field,
+        sourceOf(field),
+      ]),
+    ) as Record<keyof BillingPlanConfig, BillingPlanFieldSource>;
+
+    return { plan, sources };
+  });
+}
+
 export async function syncBillingDefaultsToDatabase() {
   const existingPlans = await prisma.billingPlan.findMany({
     select: { id: true },

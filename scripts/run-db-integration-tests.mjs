@@ -347,6 +347,15 @@ run(
     // direct writes rather than through the store module: what they refuse is
     // exactly the write that did not go through it.
     "tests/integration/marketing-automation-schema.db.test.ts",
+    // Proving a template: two human audit entries that still verify against
+    // the chain, which is the only route to a post published without a person
+    // looking at it. Needs real rows, because a fixture that inserted them
+    // would prove the loader agrees with the fixture.
+    "tests/integration/marketing-templates.db.test.ts",
+    // Where a plan number came from, which decides whether a price claim may
+    // rest on it. Needs rows, because the whole question is stored versus
+    // compiled.
+    "tests/integration/marketing-fact-sources.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.

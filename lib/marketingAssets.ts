@@ -1,0 +1,238 @@
+/**
+ * The images and videos a marketing post is allowed to use, and where each one
+ * came from.
+ *
+ * Contract: docs/policy/marketing-automation.md §7.3 -- "assets use only ids
+ * from the approved asset list. The provenance (capture, operator upload, AI
+ * generated, AI modified) and the per-channel AI disclosure decision are kept
+ * with it. AI generated images and video do not imitate the product's UI."
+ *
+ * Provenance is the field everything else hangs off. A screen capture and an
+ * AI-generated picture of a screen look the same in a post and are not the
+ * same claim: one shows the product, the other shows something that resembles
+ * it, and every platform that requires an AI disclosure requires it for the
+ * second. So provenance is recorded per asset, the disclosure is recorded per
+ * channel rather than globally -- the platforms do not agree on what they
+ * require -- and an asset that is AI generated or AI modified cannot be marked
+ * as depicting the product interface.
+ *
+ * Alt text is per locale and lives here rather than in a post, because it is a
+ * property of the asset: the same picture needs the same description whichever
+ * post carries it, and a description written per post is a description written
+ * differently every time.
+ *
+ * The registry file is `docs/marketing/asset-registry.json` and it is empty.
+ * An asset is added by a person who has the file and its provenance in front of
+ * them.
+ *
+ * Pure: no server-only import, no filesystem read at module scope, no Prisma.
+ */
+
+import { z } from "zod";
+
+import {
+  MARKETING_CHANNELS,
+  MARKETING_LOCALES,
+} from "@/lib/marketingAutomationSchema";
+
+/**
+ * Where an asset came from.
+ *
+ * `capture` is a real screenshot or recording of the product. `operator_upload`
+ * is a file a person supplied that is not a capture -- a photograph, a logo, a
+ * designed graphic. `ai_generated` was produced by a model; `ai_modified` began
+ * as one of the first two and was changed by one. The last two are the ones a
+ * disclosure rule cares about.
+ */
+export const MARKETING_ASSET_PROVENANCES = [
+  "capture",
+  "operator_upload",
+  "ai_generated",
+  "ai_modified",
+] as const;
+export type MarketingAssetProvenance =
+  (typeof MARKETING_ASSET_PROVENANCES)[number];
+
+/** The provenances that carry an AI origin, whatever a platform then requires. */
+export const AI_ORIGIN_PROVENANCES = ["ai_generated", "ai_modified"] as const;
+
+/**
+ * What a channel is told about an asset's origin.
+ *
+ * `platform_label` is the platform's own switch -- the "AI generated" toggle on
+ * a post form -- and `caption_disclosure` is a sentence in our copy. They are
+ * separate because some platforms have the first and some do not, and a channel
+ * that has neither would be `none`, which is a decision somebody has to make
+ * rather than an absence.
+ */
+export const MARKETING_ASSET_DISCLOSURES = [
+  "none",
+  "platform_label",
+  "caption_disclosure",
+  "platform_label_and_caption",
+] as const;
+export type MarketingAssetDisclosure =
+  (typeof MARKETING_ASSET_DISCLOSURES)[number];
+
+const registryId = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9._:-]+$/);
+
+const isoDate = z.iso.date();
+
+export const marketingAssetSchema = z
+  .object({
+    id: registryId,
+    provenance: z.enum(MARKETING_ASSET_PROVENANCES),
+    /** Which channels may carry it at all. */
+    allowedChannels: z.array(z.enum(MARKETING_CHANNELS)).min(1),
+    /**
+     * Alt text per locale. Prose, and the one place in the marketing registries
+     * that holds any: a description of a picture cannot be a token, and it is
+     * written by a person rather than generated.
+     */
+    alt: z.partialRecord(z.enum(MARKETING_LOCALES), z.string().min(1).max(400)),
+    /** The claims this asset is evidence for, if any. */
+    claimIds: z.array(registryId).max(20),
+    validUntil: isoDate,
+    /** What each channel is told. Every allowed channel needs an entry. */
+    // `partialRecord` rather than `record`: a record keyed by an enum requires
+    // every member, and an asset that may appear on one channel has one entry.
+    // The pair of checks below is what makes the set exactly right instead.
+    disclosure: z.partialRecord(
+      z.enum(MARKETING_CHANNELS),
+      z.enum(MARKETING_ASSET_DISCLOSURES),
+    ),
+    /**
+     * Whether the asset shows the product's own interface. An AI origin cannot
+     * claim this: a generated picture of our UI is a picture of something that
+     * does not exist, and §7.3 refuses it outright rather than disclosing it.
+     */
+    depictsProductInterface: z.boolean(),
+  })
+  .strict()
+  .superRefine((asset, context) => {
+    const aiOrigin = (AI_ORIGIN_PROVENANCES as readonly string[]).includes(
+      asset.provenance,
+    );
+
+    if (aiOrigin && asset.depictsProductInterface) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "an AI generated or modified asset may not depict the product interface",
+      });
+    }
+
+    for (const channel of asset.allowedChannels) {
+      const disclosure = asset.disclosure[channel];
+      if (!disclosure) {
+        context.addIssue({
+          code: "custom",
+          message: `${channel} is allowed but has no disclosure decision`,
+        });
+        continue;
+      }
+      // A decision, not a default: an AI-origin asset going out with `none`
+      // would be the platform's rule broken silently, so it has to be written
+      // down as something else before it can be used there.
+      if (aiOrigin && disclosure === "none") {
+        context.addIssue({
+          code: "custom",
+          message: `${channel} carries an AI ${asset.provenance} asset with no disclosure`,
+        });
+      }
+    }
+
+    // A disclosure for a channel that may not carry the asset is a decision
+    // about nothing, and reads as though the channel were allowed.
+    for (const channel of Object.keys(asset.disclosure)) {
+      if (!(asset.allowedChannels as readonly string[]).includes(channel)) {
+        context.addIssue({
+          code: "custom",
+          message: `${channel} has a disclosure decision but is not an allowed channel`,
+        });
+      }
+    }
+
+    // Alt text is what a reader who cannot see the asset is given, so every
+    // locale the asset can appear in needs one. The registry does not know the
+    // locales here, so the rule is the weaker, checkable one: at least one.
+    if (Object.keys(asset.alt).length === 0) {
+      context.addIssue({ code: "custom", message: "an asset needs alt text" });
+    }
+  });
+
+export type MarketingAsset = z.infer<typeof marketingAssetSchema>;
+
+export const marketingAssetRegistrySchema = z
+  .object({
+    version: z.number().int().min(1),
+    assets: z.array(marketingAssetSchema),
+  })
+  .strict()
+  .superRefine((registry, context) => {
+    const seen = new Set<string>();
+    for (const asset of registry.assets) {
+      if (seen.has(asset.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `${asset.id} appears twice`,
+        });
+      }
+      seen.add(asset.id);
+    }
+  });
+
+export type MarketingAssetRegistry = z.infer<typeof marketingAssetRegistrySchema>;
+
+/** Where the registry lives, so the validator and its test name one path. */
+export const MARKETING_ASSET_REGISTRY_PATH = "docs/marketing/asset-registry.json";
+
+/** Why an asset cannot be used for a draft. */
+export type MarketingAssetRefusal =
+  | "unknown_asset"
+  | "channel_not_allowed"
+  | "asset_expired"
+  | "no_alt_for_locale";
+
+export type MarketingAssetResolution =
+  | { ok: true; asset: MarketingAsset; disclosure: MarketingAssetDisclosure }
+  | { ok: false; refusal: MarketingAssetRefusal };
+
+export function resolveMarketingAsset({
+  id,
+  channel,
+  locale,
+  on,
+  registry,
+}: {
+  id: string;
+  channel: string;
+  locale: string;
+  on: Date;
+  registry: MarketingAssetRegistry;
+}): MarketingAssetResolution {
+  const asset = registry.assets.find((candidate) => candidate.id === id);
+  if (!asset) return { ok: false, refusal: "unknown_asset" };
+
+  if (!(asset.allowedChannels as readonly string[]).includes(channel)) {
+    return { ok: false, refusal: "channel_not_allowed" };
+  }
+  if (on.toISOString().slice(0, 10) > asset.validUntil) {
+    return { ok: false, refusal: "asset_expired" };
+  }
+
+  const alt = (asset.alt as Record<string, string | undefined>)[locale];
+  if (!alt) return { ok: false, refusal: "no_alt_for_locale" };
+
+  return {
+    ok: true,
+    asset,
+    disclosure: asset.disclosure[
+      channel as keyof typeof asset.disclosure
+    ] as MarketingAssetDisclosure,
+  };
+}
