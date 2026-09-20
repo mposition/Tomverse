@@ -27,6 +27,7 @@
  */
 
 import type { BillingPlanFieldSource } from "@/lib/billingConfig";
+import { isPubliclySelectableModel } from "@/lib/models";
 import type { BillingPriceCatalogSource } from "@/lib/billingPriceCatalog";
 
 /** Why a fact may not back a claim. Codes, because the Guard records them. */
@@ -137,17 +138,13 @@ export function modelClaimDecision({
     return { ok: false, refusal: "model_not_in_registry" };
   }
 
-  // The same four signals `isPubliclySelectableModel()` reads, restated here
-  // rather than imported because that function's parameter is `Pick<AiModel,
-  // ...>` and this one takes the shape a caller can build from a registry row
-  // without constructing a model. The test pins the two against each other.
-  const selectable =
-    model.publiclyListed !== false &&
-    !model.catalogDeleted &&
-    model.enabled &&
-    model.status !== "disabled" &&
-    model.status !== "coming-soon";
-  if (!selectable) {
+  // `isPubliclySelectableModel()` itself, not a copy of its rule. A copy agrees
+  // today and drifts the first time somebody adds a lifecycle signal to the
+  // selector, and it would drift towards claiming a model is offered when it is
+  // not. The cast is because that function takes `Pick<AiModel, ...>` with its
+  // own string unions, and this takes the shape a caller can build from a
+  // registry row without constructing a model.
+  if (!isPubliclySelectableModel(model as Parameters<typeof isPubliclySelectableModel>[0])) {
     return {
       ok: false,
       refusal: "model_not_publicly_selectable",

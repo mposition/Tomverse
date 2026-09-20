@@ -274,6 +274,15 @@ test("an edit recorded after the marking breaks it too", async () => {
   // The digest is untouched here, so this is the other half of the pair: the
   // history says the words moved even though the digest says they did not, and
   // the two answers are not allowed to disagree.
+  //
+  // The edit names the audit row that authorised it, and that row's `createdAt`
+  // is the database's -- which is what places the edit after the marking, since
+  // the entry's own `at` is written by whoever appended it.
+  const editId = await auditRow({
+    action: "marketing_post.edit",
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true },
+  });
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
@@ -283,7 +292,7 @@ test("an edit recorded after the marking breaks it too", async () => {
         historyEntry("edit_revision", {
           envelopeDigest: DIGEST,
           previousEnvelopeDigest: OTHER_DIGEST,
-          byAuditLogId: null,
+          byAuditLogId: editId,
         }),
       ],
       historyVersion: 1,
@@ -528,7 +537,12 @@ test("a marking that overstates the version it saw cannot hide a later edit", as
   // then append an `edit_revision` at index 1 that leaves the digest alone.
   // The post's version and the marking's now both read 1, `slice(2)` looks at
   // nothing, and the digest comparison sees no change -- so every check the
-  // module had agreed the template stood. The scan is by timestamp instead.
+  // module had agreed the template stood.
+  //
+  // The entry's own `at` is written here, by this test, the way any caller
+  // writes it -- so it is set *before* the marking, which is what an attacker
+  // with access to that field would do. The audit row the edit names is the
+  // thing that cannot be backdated.
   const row = await channel();
   const post = await approvedPost(row.id);
 
@@ -542,17 +556,25 @@ test("a marking that overstates the version it saw cannot hide a later edit", as
     data: { reusableAsTemplate: true },
   });
 
+  const editId = await auditRow({
+    action: "marketing_post.edit",
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true },
+  });
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
     data: {
       history: [
         ...history,
-        historyEntry("edit_revision", {
-          envelopeDigest: DIGEST,
-          previousEnvelopeDigest: DIGEST,
-          byAuditLogId: null,
-        }),
+        {
+          ...historyEntry("edit_revision", {
+            envelopeDigest: DIGEST,
+            previousEnvelopeDigest: DIGEST,
+            byAuditLogId: editId,
+          }),
+          at: new Date(Date.now() - 86_400_000).toISOString(),
+        },
       ],
       historyVersion: 1,
     },
@@ -564,9 +586,10 @@ test("a marking that overstates the version it saw cannot hide a later edit", as
   });
 });
 
-test("an edit before the marking does not break the template", async () => {
-  // The other direction, so the timestamp scan is not simply refusing
-  // everything: a post edited, then approved, then marked, is a template.
+test("an edit that names no audit row cannot be placed at all", async () => {
+  // `byAuditLogId` is nullable, and an edit without one has no time this
+  // module can trust. "Cannot be shown to precede the marking" is the same
+  // answer as "did not": the cost is that a person approves the post.
   const row = await channel();
   const post = await approvedPost(row.id);
 
@@ -581,6 +604,73 @@ test("an edit before the marking does not break the template", async () => {
           previousEnvelopeDigest: OTHER_DIGEST,
           byAuditLogId: null,
         }),
+      ],
+      historyVersion: 1,
+    },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edit_not_datable",
+  });
+});
+
+test("an edit naming an audit row that is not there cannot be placed either", async () => {
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("edit_revision", {
+          envelopeDigest: DIGEST,
+          previousEnvelopeDigest: OTHER_DIGEST,
+          byAuditLogId: "audit-row-that-was-never-written",
+        }),
+      ],
+      historyVersion: 1,
+    },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edit_not_datable",
+  });
+});
+
+test("an edit before the marking does not break the template", async () => {
+  // The other direction, so the scan is not simply refusing everything: a post
+  // edited, then approved, then marked, is a template. The edit's audit row is
+  // written before the marking's, which is the order that makes it earlier.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  const editId = await auditRow({
+    action: "marketing_post.edit",
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true },
+  });
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      history: [
+        ...history,
+        {
+          ...historyEntry("edit_revision", {
+            envelopeDigest: DIGEST,
+            previousEnvelopeDigest: OTHER_DIGEST,
+            byAuditLogId: editId,
+          }),
+          // Written in the future by the caller, and it changes nothing: the
+          // audit row is what the decision reads.
+          at: new Date(Date.now() + 86_400_000).toISOString(),
+        },
       ],
       historyVersion: 1,
     },

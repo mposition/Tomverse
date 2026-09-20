@@ -74,7 +74,9 @@ export type MarketingTemplateRefusal =
   | "marking_not_evidence"
   | "marking_precedes_approval"
   | "marking_version_missing"
-  | "edited_since_marking";
+  | "edited_since_marking"
+  /** An edit that names no audit row, so it cannot be placed against the marking. */
+  | "edit_not_datable";
 
 export type MarketingTemplate = {
   id: string;
@@ -104,7 +106,12 @@ const metadataNumber = (metadata: unknown, key: string): number | null => {
  * the retention entries record things that happened *to* the post rather than
  * changes to what it says.
  */
-const isEdit = (entry: MarketingHistoryEntry): boolean =>
+type MarketingEditEntry = Extract<
+  MarketingHistoryEntry,
+  { type: "edit_revision" }
+>;
+
+const isEdit = (entry: MarketingHistoryEntry): entry is MarketingEditEntry =>
   entry.type === "edit_revision";
 
 /**
@@ -196,29 +203,54 @@ export async function loadApprovedTemplate(
   // refuses content that changed; this refuses a history that says it did, so
   // the row cannot answer the two questions differently.
   //
-  // **Found by time, not by index.** `historyVersion` is a compare-and-set
-  // revision that the marking's own metadata asserts, and using it as an array
-  // index trusts that assertion twice over: a marking taken at version zero
-  // can record `1`, and an `edit_revision` appended at index 1 then falls
-  // outside `slice(2)` while the post's version reads 1 as well. Retention
-  // compaction moves the indices too, since it removes elements without
-  // rewinding the version.
+  // **Ordered by the audit chain, because nothing else here is trustworthy.**
+  // Two obvious inputs both fail. `historyVersion` is a compare-and-set
+  // revision that the marking's own metadata asserts, so using it as an array
+  // index trusts that assertion twice over: a marking taken at version zero can
+  // record `1`, and an `edit_revision` appended at index 1 then falls outside
+  // `slice(2)` while the post's version reads 1 as well. And `entry.at` is
+  // supplied by whoever appended the entry (`lib/marketingStore.ts`), so a past
+  // timestamp places an edit before a marking that followed it -- and comparing
+  // a Node-written string against a database-written `createdAt` misjudges
+  // ordinary clock skew in both directions besides.
   //
-  // Every entry carries `at`, and r5 amendment 2 forbids compaction from
-  // removing an `edit_revision` at any age, so the timestamps are both present
-  // and complete. `>=` rather than `>`: two records in the same millisecond
-  // cannot be ordered, and the safe answer is that the template stops
-  // resolving until a person approves the post again.
+  // `AdminAuditLog.createdAt` is the one clock in this comparison that no
+  // caller sets: `lib/adminAudit.ts` takes it from the database and forces it
+  // strictly past the previous entry, so audit rows are totally ordered. An
+  // `edit_revision` names the audit row that authorised it, so an edit can be
+  // placed against the marking using only that ordering.
   //
-  // The index scan is kept alongside it. It is what r4 amendment 5 literally
-  // describes, the two disagree only when something is wrong, and either one
-  // refusing is the direction that costs an approval rather than a publication.
+  // An edit with no `byAuditLogId` refuses. It is an edit nobody can date, and
+  // "cannot be shown to precede the marking" is the same answer as "did not":
+  // the cost is that a person approves the post, and the alternative is a
+  // template resting on an edit whose time is whatever its writer typed.
+  //
+  // The index scan stays beside it -- it is what r4 amendment 5 literally
+  // describes, and the two disagree only when something is wrong.
   const history = marketingHistorySchema.parse(post.history);
+  const edits = history.filter(isEdit);
+
+  const undatableEdit = edits.some((entry) => !entry.byAuditLogId);
+  if (undatableEdit) return { ok: false, refusal: "edit_not_datable" };
+
+  const editAuditIds = edits
+    .map((entry) => entry.byAuditLogId)
+    .filter((id): id is string => Boolean(id));
+  const editRows = editAuditIds.length
+    ? await database.adminAuditLog.findMany({
+        where: { id: { in: editAuditIds } },
+        select: { id: true, createdAt: true },
+      })
+    : [];
+  if (editRows.length !== new Set(editAuditIds).size) {
+    // An edit naming an audit row that is not there cannot be placed either.
+    return { ok: false, refusal: "edit_not_datable" };
+  }
+
   const markedAt = marking.createdAt.getTime();
   const editedSinceMarking =
-    history.some(
-      (entry) => isEdit(entry) && Date.parse(entry.at) >= markedAt,
-    ) || history.slice(markedVersion + 1).some((entry) => isEdit(entry));
+    editRows.some((row) => row.createdAt.getTime() > markedAt) ||
+    history.slice(markedVersion + 1).some((entry) => isEdit(entry));
   if (editedSinceMarking || post.historyVersion < markedVersion) {
     return { ok: false, refusal: "edited_since_marking" };
   }

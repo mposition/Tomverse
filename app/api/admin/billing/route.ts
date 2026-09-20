@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { Prisma, type BillingPromotion } from "@prisma/client";
+import type { BillingPromotion } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -20,6 +20,7 @@ import {
 import {
   getBillingPlans,
   getBillingPromotions,
+  BILLING_PLAN_ADMIN_SAVED,
   syncBillingDefaultsToDatabase,
 } from "@/lib/billingConfig";
 import {
@@ -351,6 +352,13 @@ export async function PATCH(req: Request) {
       await prisma.billingPlan.upsert({
         where: { id: plan.id },
         create: {
+          // An administrator submitted this row, so it is a decision rather
+          // than the seeder's copy of the compiled defaults.
+          // `getBillingPlansWithFieldSources()` reads this to tell the two
+          // apart, and a public price claim may only rest on a decision
+          // (docs/policy/marketing-automation.md §7.2). On both branches: a
+          // save creates the row when the seeder has not run here yet.
+          metadata: { provenance: BILLING_PLAN_ADMIN_SAVED },
           id: plan.id,
           name: planName(plan.id),
           tier: planName(plan.id),
@@ -370,12 +378,7 @@ export async function PATCH(req: Request) {
           sortOrder: plan.id === "free" ? 10 : plan.id === "pro" ? 20 : 30,
         },
         update: {
-          // An administrator submitted this row, so it is no longer the
-          // seeder's copy of the compiled defaults.
-          // `getBillingPlansWithFieldSources()` reads this to tell the two
-          // apart, and a public price claim may only rest on the latter
-          // (docs/policy/marketing-automation.md §7.2).
-          metadata: Prisma.DbNull,
+          metadata: { provenance: BILLING_PLAN_ADMIN_SAVED },
           monthlyPriceCents: plan.monthlyPriceCents,
           annualPriceCents: plan.annualPriceCents,
           stripeProductId: plan.stripeProductId,

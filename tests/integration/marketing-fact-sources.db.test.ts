@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import {
+  BILLING_PLAN_ADMIN_SAVED,
   getBillingPlans,
   getBillingPlansWithFieldSources,
   syncBillingDefaultsToDatabase,
@@ -62,6 +63,9 @@ test("a stored row makes its fields stored, and a NULL annual price derived", as
 
   await prisma.billingPlan.create({
     data: {
+      // The marker the admin save path writes. Without it the row is a
+      // compiled default whoever wrote it, which is the point of the polarity.
+      metadata: { provenance: BILLING_PLAN_ADMIN_SAVED },
       id: first.id,
       name: first.name,
       tier: first.tier,
@@ -119,6 +123,9 @@ test("a stored annual price is stored, not derived", async () => {
 
   await prisma.billingPlan.create({
     data: {
+      // The marker the admin save path writes. Without it the row is a
+      // compiled default whoever wrote it, which is the point of the polarity.
+      metadata: { provenance: BILLING_PLAN_ADMIN_SAVED },
       id: first.id,
       name: first.name,
       tier: first.tier,
@@ -168,7 +175,7 @@ test("a row the seeder wrote is not a price anybody chose", async () => {
   for (const { plan, sources } of withSources) {
     assert.equal(
       sources.monthlyPriceCents,
-      "created_from_default",
+      "compiled_default",
       `${plan.id} was seeded, not saved`,
     );
   }
@@ -184,7 +191,10 @@ test("an administrator saving the row makes it stored", async () => {
 
   await prisma.billingPlan.update({
     where: { id: first.id },
-    data: { metadata: Prisma.DbNull, monthlyPriceCents: 2_500 },
+    data: {
+      metadata: { provenance: BILLING_PLAN_ADMIN_SAVED },
+      monthlyPriceCents: 2_500,
+    },
   });
 
   const withSources = await getBillingPlansWithFieldSources();
@@ -198,13 +208,13 @@ test("an administrator saving the row makes it stored", async () => {
     if (entry.plan.id === first.id) continue;
     assert.equal(
       entry.sources.monthlyPriceCents,
-      "created_from_default",
+      "compiled_default",
       entry.plan.id,
     );
   }
 });
 
-test("a seeded row with a NULL annual price is derived, not created_from_default", async () => {
+test("a seeded row with a NULL annual price is derived, not compiled_default", async () => {
   // Precedence: arithmetic is arithmetic whoever wrote the row, and naming the
   // seeding would be the wrong reason for refusing the claim.
   await syncBillingDefaultsToDatabase();
@@ -220,5 +230,54 @@ test("a seeded row with a NULL annual price is derived, not created_from_default
   const seeded = withSources.find((entry) => entry.plan.id === first.id);
   assert.ok(seeded);
   assert.equal(seeded.sources.annualPriceCents, "derived_formula");
-  assert.equal(seeded.sources.monthlyPriceCents, "created_from_default");
+  assert.equal(seeded.sources.monthlyPriceCents, "compiled_default");
+});
+
+test("a row from before the marker existed is a compiled default, not a decision", async () => {
+  // Every `BillingPlan` row in production today carries `metadata = NULL` and
+  // was written by the seeder. Marking the seeder's rows instead of the
+  // administrator's would answer the question only for rows written after this
+  // change, and would read every existing one as somebody's decision.
+  await syncBillingDefaultsToDatabase();
+  const [first] = await getBillingPlans();
+  assert.ok(first);
+
+  await prisma.billingPlan.update({
+    where: { id: first.id },
+    data: { metadata: Prisma.DbNull },
+  });
+
+  const withSources = await getBillingPlansWithFieldSources();
+  const legacy = withSources.find((entry) => entry.plan.id === first.id);
+  assert.ok(legacy);
+  assert.equal(legacy.sources.monthlyPriceCents, "compiled_default");
+});
+
+test("a metadata value that is not the marker does not count as one", async () => {
+  // The column is ordinary mutable JSON, so the check is on the exact value
+  // rather than on the field being present.
+  await syncBillingDefaultsToDatabase();
+  const [first] = await getBillingPlans();
+  assert.ok(first);
+
+  for (const metadata of [
+    {},
+    { provenance: null },
+    { provenance: "admin_saved_by_someone_else" },
+    { provenance: ["admin_saved"] },
+    { note: "admin_saved" },
+  ]) {
+    await prisma.billingPlan.update({
+      where: { id: first.id },
+      data: { metadata },
+    });
+    const withSources = await getBillingPlansWithFieldSources();
+    const row = withSources.find((entry) => entry.plan.id === first.id);
+    assert.ok(row);
+    assert.equal(
+      row.sources.monthlyPriceCents,
+      "compiled_default",
+      JSON.stringify(metadata),
+    );
+  }
 });

@@ -69,28 +69,30 @@ const parsePlanIds = (value: string): BillingPlanId[] => {
 };
 
 /**
- * The marker `syncBillingDefaultsToDatabase()` leaves on a row it created.
+ * The marker the admin save path leaves on a row an administrator submitted.
  *
- * A `BillingPlan` row is not evidence that anybody chose its numbers. That
- * function copies the compiled defaults into rows, and it runs whenever the
- * admin billing screen renders (`app/(site)/(application)/admin/billing/page.tsx`)
- * or its API is called -- so on a deployment where nobody has ever pressed save,
- * every plan has a row and every number in it came from the code.
+ * A `BillingPlan` row is not evidence that anybody chose its numbers.
+ * `syncBillingDefaultsToDatabase()` copies the compiled defaults into rows, and
+ * it runs whenever the admin billing screen renders
+ * (`app/(site)/(application)/admin/billing/page.tsx`) or its API is called --
+ * so on a deployment where nobody has ever pressed save, every plan has a row
+ * and every number in it came from the code.
  *
- * Without this marker a reader can only ask whether a row exists, which for
- * `getBillingPlansWithFieldSources()` means answering `stored` for numbers
- * nobody in this deployment picked. The same problem is already solved for the
- * localized catalogue, whose `created_from_default` source says exactly this;
- * `metadata` gives the plan table the same answer without a migration.
+ * **Positive, not negative.** Marking the seeder's rows instead would answer
+ * the question only for rows written after the marker existed: every row
+ * already in production carries `metadata = NULL`, was written by the seeder,
+ * and would read as an administrator's decision. The absence of evidence is not
+ * evidence, so the rule is that a row is a decision when it says so, and
+ * anything else -- a legacy row, a row written by something that did not know
+ * about this, a row whose metadata was cleared -- is a compiled default.
  */
-export const BILLING_PLAN_COMPILED_DEFAULT_SEED = "compiled_default_seed";
+export const BILLING_PLAN_ADMIN_SAVED = "admin_saved";
 
-const isCompiledDefaultSeedRow = (metadata: unknown): boolean =>
+const isAdminSavedRow = (metadata: unknown): boolean =>
   !!metadata &&
   typeof metadata === "object" &&
   !Array.isArray(metadata) &&
-  (metadata as Record<string, unknown>).provenance ===
-    BILLING_PLAN_COMPILED_DEFAULT_SEED;
+  (metadata as Record<string, unknown>).provenance === BILLING_PLAN_ADMIN_SAVED;
 
 /**
  * The compiled defaults with the stored rows laid over them.
@@ -160,23 +162,21 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
  * is indistinguishable from a price somebody set; `tier` is computed from the
  * plan id and the stored column is never read.
  *
- * `created_from_default` is a row this application wrote from the compiled
- * defaults and no person has saved over -- the same meaning the word carries
- * for the localized catalogue. It is not `stored`, and treating it as such was
- * this reader's original defect: `syncBillingDefaultsToDatabase()` creates
- * those rows on an ordinary admin page view, so on a fresh deployment it would
- * have reported every number as chosen.
+ * There are three values and no more, because docs/policy/marketing-automation.md §7.2
+ * names three. A row the seeder wrote, a row from before this marker existed,
+ * and no row at all are all `compiled_default`: they differ in how the number
+ * got there and not in the only thing the claim depends on, which is that
+ * nobody in this deployment chose it.
  *
- * What `stored` claims, precisely: this row was written by the admin save path
- * rather than by the seeder. The billing panel submits every plan on each save,
- * so it means an administrator submitted this row's values, not that they
- * altered this particular field. That is the strongest claim the table can
- * support, and a claim resting on it is `approval_required` anyway.
+ * What `stored` claims, precisely: this row was written by the admin save path.
+ * The billing panel submits every plan on each save, so it means an
+ * administrator submitted this row's values, not that they altered this
+ * particular field. That is the strongest claim the table can support, and a
+ * claim resting on it is `approval_required` anyway.
  */
 export type BillingPlanFieldSource =
   | "stored"
   | "compiled_default"
-  | "created_from_default"
   | "derived_formula";
 
 export type BillingPlanWithFieldSources = {
@@ -213,14 +213,12 @@ export async function getBillingPlansWithFieldSources(): Promise<
 
   return plans.map((plan) => {
     const row = rowById.get(plan.id);
-    const seeded = row ? isCompiledDefaultSeedRow(row.metadata) : false;
+    const adminSaved = !!row && isAdminSavedRow(row.metadata);
     const annualIsDerived = !!row && row.annualPriceCents === null;
 
     const sourceOf = (field: keyof BillingPlanConfig): BillingPlanFieldSource => {
-      if (!row) return "compiled_default";
-      // Derived before seeded: an annual price the code computed is arithmetic
-      // whoever wrote the row, and saying `created_from_default` would name the
-      // wrong reason for refusing it.
+      // Derived first: an annual price the code computed is arithmetic whoever
+      // wrote the row, and `compiled_default` would name the wrong reason.
       if (field === "annualPriceCents" && annualIsDerived) {
         return "derived_formula";
       }
@@ -228,7 +226,7 @@ export async function getBillingPlansWithFieldSources(): Promise<
       // and never reads the column, so the stored value is not what a caller
       // is looking at.
       if (field === "tier") return "derived_formula";
-      return seeded ? "created_from_default" : "stored";
+      return adminSaved ? "stored" : "compiled_default";
     };
 
     const sources = Object.fromEntries(
@@ -252,10 +250,10 @@ export async function syncBillingDefaultsToDatabase() {
     if (existingPlanIds.has(plan.id)) continue;
     await prisma.billingPlan.create({
       data: {
-        // Marked so a later reader can tell this row from one an administrator
-        // saved. Without it the row is indistinguishable from a decision, and
-        // this function runs on an ordinary admin page view.
-        metadata: { provenance: BILLING_PLAN_COMPILED_DEFAULT_SEED },
+        // No provenance marker: this row is the compiled defaults, and the
+        // reader treats an unmarked row as exactly that. The marker is written
+        // by the admin save path, which is the only thing that makes a row a
+        // decision.
         id: plan.id,
         name: plan.name,
         tier: plan.tier,
