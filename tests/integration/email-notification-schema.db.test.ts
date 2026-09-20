@@ -534,9 +534,9 @@ test("the delivery message id index is unique, and is exactly what was asked for
            i.indisready          AS is_ready,
            i.indislive           AS is_live,
            i.indimmediate        AS is_immediate,
-           am.amname             AS access_method,
+           am.amname::text       AS access_method,
            (
-             SELECT array_agg(oc.opcname || '@' || ocns.nspname ORDER BY c.ord)
+             SELECT array_agg((oc.opcname || '@' || ocns.nspname)::text ORDER BY c.ord)
                FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(oid, ord)
                JOIN pg_opclass oc ON oc.oid = c.oid
                JOIN pg_namespace ocns ON ocns.oid = oc.opcnamespace
@@ -555,7 +555,7 @@ test("the delivery message id index is unique, and is exactly what was asked for
            (i.indexprs IS NOT NULL) AS has_expressions,
            pg_get_expr(i.indpred, i.indrelid) AS predicate,
            (
-             SELECT array_agg(a.attname ORDER BY k.ord)
+             SELECT array_agg(a.attname::text ORDER BY k.ord)
                FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
                JOIN pg_attribute a
                  ON a.attrelid = i.indrelid AND a.attnum = k.attnum

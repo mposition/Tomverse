@@ -43,6 +43,12 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
    아니므로 `DROP INDEX`가 지우는 문장입니다. migration은 그래도 `DROP CONSTRAINT`를
    **먼저** 두는데, 만약 어딘가에서 constraint로 존재한다면 `DROP INDEX`는 건너뛰는
    것이 아니라 dependency 오류로 **실패**하고 `IF EXISTS`는 그것을 덮지 않습니다.
+   **이로써 아래 v20이 적은 동작이 바뀝니다.** 다른 계정에 같은 사건 id가 있을 때
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`으로 실패하고 provider가 재시도하던 경로는
+   더 이상 정상 경로가 아닙니다 — 그 사건은 이제 **자기 행으로 저장됩니다.**
+   handler의 그 분기는 남아 있지만, 이제는 "삽입되지도 않았고 읽히지도 않았다"는,
+   계정 포함 unique 아래에서는 일어날 수 없어야 하는 상태를 시끄럽게 알리는
+   역할입니다. incident 문구도 그렇게 바뀌었습니다.
 4. **`ProviderWebhookEvent.providerAccount`의 default를 제거합니다.** writer는 하나이고
    항상 계정을 말합니다. default는 그것이 조용히 참이 아니게 되는 경로입니다.
 5. **`EmailDelivery(providerAccount, providerMessageId)`를 unique로 만듭니다.**

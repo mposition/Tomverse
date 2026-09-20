@@ -337,20 +337,28 @@ export async function processResendWebhook(input: {
     },
   });
   if (!existing) {
-    // Not this account's event: the same id is on file for the other account,
-    // and the old unique refuses a second row for it. Not a duplicate to
-    // acknowledge -- the event has not been recorded -- so it fails, the
-    // provider retries, and somebody is told. Provider event ids are unique
-    // across accounts in practice; this is the case that says otherwise.
+    // The insert stored nothing and the lookup finds nothing, which after the
+    // contraction (20260920100100) should not be reachable: the only arbiter
+    // left is `(provider, providerAccount, providerEventId)`, so a conflict
+    // means this account's own event is on file and the lookup above finds it.
+    //
+    // Until that migration the old `(provider, providerEventId)` unique made
+    // this the ordinary way a marketing event carrying a transactional event's
+    // id was refused -- which is the behaviour the contraction exists to end.
+    // What is left is a row that vanished between the insert and the read, and
+    // the answer is the same as it was: not a duplicate to acknowledge, because
+    // nothing was recorded. It fails, the provider retries, and somebody is
+    // told.
     await reportOperationalIncident({
       code: "EMAIL_WEBHOOK_EVENT_ID_COLLISION",
-      title: "A provider event id arrived on both accounts",
-      error: "An event id already recorded for one provider account arrived for the other and could not be stored",
+      title: "A provider event was neither stored nor found",
+      error:
+        "A provider event conflicted on insert and was absent on the read that followed, which the account-aware unique should make impossible",
       severity: "error",
       cooldownMs: 30 * 60 * 1_000,
       context: { component: "email-webhook", account: providerAccount },
     });
-    throw new Error("Provider event id is already recorded for the other account");
+    throw new Error("Provider event was neither stored nor found");
   }
   if (existing.processedAt || existing.abandonedAt) return { handled: false, reason: "duplicate" };
   const claim = await claimStoredEvent(existing.id);
