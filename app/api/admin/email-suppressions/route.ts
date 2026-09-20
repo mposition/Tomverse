@@ -245,22 +245,55 @@ export async function POST(req: Request) {
         );
       }
 
+      // The audited thing is the selector's set of causes, not the row handle.
+      //
+      // The handle is whichever cause the listing put first, and the release
+      // matrix does not release by that: an operator lifting an address that
+      // holds a `manual` and a `privacy_request` releases the manual and keeps
+      // the privacy request, while the newest cause -- the handle -- is the
+      // privacy request. Naming it as the target writes an immutable record
+      // that reads as though the privacy request had been removed.
+      //
+      // So the target is the set, named by its digest, and the metadata says
+      // what was actually released and what stayed. Those come from inside the
+      // transaction rather than from the read above, because the decision is
+      // made there.
       const releaseAudit =
-        (evidenceKind: string) => (tx: Parameters<typeof writeAdminAuditLog>[0]["tx"]) =>
+        (evidenceKind: string) =>
+        (
+          tx: Parameters<typeof writeAdminAuditLog>[0]["tx"],
+          outcome: {
+            released: Array<{ id: string; reason: string }>;
+            remaining: Array<{ id: string; reason: string }>;
+          }
+        ) =>
           writeAdminAuditLog({
             session,
             request: req,
             action: "email_suppression.removed",
-            targetType: "SuppressionCause",
-            targetId: body.id,
-            summary: `Lifted suppression causes on ${active.selector.emailAddress}.`,
+            targetType: "SuppressionCauseSet",
+            targetId: active.digest,
+            summary:
+              outcome.remaining.length === 0
+                ? `Lifted every active suppression cause on ${active.selector.emailAddress}.`
+                : `Lifted ${outcome.released.length} of ${
+                    outcome.released.length + outcome.remaining.length
+                  } suppression causes on ${active.selector.emailAddress}; ${outcome.remaining
+                    .map((cause) => cause.reason)
+                    .join(", ")} remain.`,
             metadata: {
               reason: body.reason,
               emailAddress: active.selector.emailAddress,
               scope: active.selector.scope,
               purposeKey: active.selector.purposeKey,
-              causeIds: active.causeIds,
-              causeReasons: active.reasons,
+              // The handle is recorded as what it is -- the row the operator
+              // acted from -- rather than as the target.
+              viaCauseId: body.id,
+              causeSetDigest: active.digest,
+              releasedCauseIds: outcome.released.map((cause) => cause.id),
+              releasedReasons: outcome.released.map((cause) => cause.reason),
+              remainingCauseIds: outcome.remaining.map((cause) => cause.id),
+              remainingReasons: outcome.remaining.map((cause) => cause.reason),
               evidenceKind,
             },
             tx,
@@ -277,17 +310,17 @@ export async function POST(req: Request) {
                 session,
                 request: req,
                 action: "email_suppression.remove",
-                targetType: "SuppressionCause",
-                targetId: body.id,
+                targetType: "SuppressionCauseSet",
+                targetId: active.digest,
                 // The cause ids are part of what is approved: a cause added after
                 // the request is a different approval.
-                payload: { id: body.id, causeSetDigest: active.digest },
+                payload: { viaCauseId: body.id, causeSetDigest: body.causeSetDigest },
                 reason: body.reason,
               },
               async (context) => {
                 const outcome = await liftSuppressionCauses({
                   causeId: body.id,
-                  approvedDigest: active.digest,
+                  approvedDigest: body.causeSetDigest,
                   action: "approved_admin",
                   evidence: context.approvalId
                     ? {
@@ -304,7 +337,7 @@ export async function POST(req: Request) {
             )
           : await liftSuppressionCauses({
               causeId: body.id,
-              approvedDigest: active.digest,
+              approvedDigest: body.causeSetDigest,
               action: "admin",
               evidence: { kind: "admin" },
               writeReleaseAudit: releaseAudit("admin"),

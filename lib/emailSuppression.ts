@@ -467,10 +467,19 @@ export async function liftSuppressionCauses(input: {
     | { kind: "admin" }
     | { kind: "dual_approval"; approvalId: string; authorizationAuditLogId: string }
     | { kind: "sole_admin"; authorizationAuditLogId: string };
-  writeReleaseAudit: (tx: Prisma.TransactionClient) => Promise<string>;
+  /**
+   * Writes the audit entry inside this transaction, and is told what the
+   * release actually came to rather than what was asked for.
+   */
+  writeReleaseAudit: (
+    tx: Prisma.TransactionClient,
+    outcome: {
+      released: Array<{ id: string; reason: string }>;
+      remaining: Array<{ id: string; reason: string }>;
+    }
+  ) => Promise<string>;
   now?: Date;
 }): Promise<CauseLiftResult> {
-  const now = input.now ?? new Date();
   return prisma.$transaction(async (tx) => {
     await holdSuppressionFence(tx);
     if ((await readSuppressionAuthority(tx)) !== "causes") {
@@ -485,6 +494,13 @@ export async function liftSuppressionCauses(input: {
     // between the read and the decision.
     await lockSuppressionAddress(tx, found.emailAddress);
     const selector: SuppressionSelector = found;
+
+    // And the clock after the lock, not before it. Waiting for the lock takes
+    // as long as it takes, and a soft bounce that expired during the wait is
+    // expired at the moment of the release -- reading it as active because the
+    // request was made earlier would release a selector whose handle is no
+    // longer live, which is the thing the handle rule exists to refuse.
+    const now = input.now ?? new Date();
 
     const causes = (
       await tx.suppressionCause.findMany({
@@ -512,7 +528,16 @@ export async function liftSuppressionCauses(input: {
       return { removed: false as const, refusal: "unliftable" as const };
     }
 
-    const releaseAuditLogId = await input.writeReleaseAudit(tx);
+    // The audit entry is written with the outcome rather than before it. What
+    // the approval was asked for and what is actually released are different
+    // sets whenever the matrix keeps one back -- a `manual` lifted beside a
+    // `privacy_request` that stays -- and an immutable record naming only the
+    // set it was asked about reads as though the privacy request had been
+    // removed.
+    const releaseAuditLogId = await input.writeReleaseAudit(tx, {
+      released: releasable.map(({ id, reason }) => ({ id, reason })),
+      remaining: remaining.map(({ id, reason }) => ({ id, reason })),
+    });
     await markCauseWriter(tx);
     if (releasable.length > 0) {
       await tx.suppressionCause.updateMany({

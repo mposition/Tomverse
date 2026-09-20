@@ -67,16 +67,27 @@ trigger를 걷습니다.
    운영자에게 **suppression이 사라졌다**고 말하는 것이 됩니다.
    네 갈래는 `tests/integration/admin-suppression-lift-route.db.test.ts`가
    route에서 직접 고정하며, 거절 전후의 **원인·entry·감사·승인 행 전체를 비교**해
-   아무것도 쓰이지 않았음까지 봅니다(개수가 아니라 diff입니다 — 죽은 손잡이
-   사례는 이미 해제된 원인을 갖고 시작합니다).
-7. **주소 공개(D10)는 활성 원인에만 답합니다.** entry는 해제될 때 삭제되므로 그
+   suppression 상태가 바뀌지 않았음까지 봅니다(개수가 아니라 diff입니다 — 죽은
+   손잡이 사례는 이미 해제된 원인을 갖고 시작합니다). 거절도 rate limit은
+   소비하므로 그 bucket은 이 비교의 **범위 밖**이며, 공짜로 재시도할 수 있는
+   거절은 거절이 아니기 때문에 그렇게 둡니다.
+7. **감사의 대상은 손잡이가 아니라 원인 집합입니다**
+   (`targetType: "SuppressionCauseSet"`, `targetId`는 digest). 손잡이는 목록이
+   맨 앞에 놓은 cause일 뿐이고 해제 행렬은 그것으로 해제하지 않습니다 —
+   `manual`과 나중에 생긴 `privacy_request`를 가진 주소는 manual만 해제되고
+   privacy request는 남는데, **손잡이는 privacy request**입니다. 그것을 대상으로
+   적으면 **법적 기록이 제거된 것처럼 읽히는 불변 기록**이 남습니다.
+   그래서 metadata는 실제로 해제된 것과 남은 것을 나눠 적고, 그 값은 **결정이
+   내려지는 transaction 안에서** 넘어옵니다. 손잡이는 `viaCauseId`로, 운영자가
+   어느 줄에서 눌렀는지로만 남습니다.
+8. **주소 공개(D10)는 활성 원인에만 답합니다.** entry는 해제될 때 삭제되므로 그
    id는 suppression이 끝나는 순간 주소로 풀리지 않게 됐습니다. cause는 append-only
    라 영원히 남고, 그대로 두면 화면에 찍혔던 모든 id와 감사 기록 속 id가 **가린
    주소를 되돌리는 영구 손잡이**가 됩니다. 공개는 지금 화면에 있는 줄을 위한
    것이고, 해제·만료된 원인은 그 줄이 아니므로 모르는 id처럼 답합니다.
-8. **entry는 selector로 지웁니다**, id가 아니라. C-2 이후에는 지울 행이 없고,
+9. **entry는 selector로 지웁니다**, id가 아니라. C-2 이후에는 지울 행이 없고,
    0건 삭제는 실패가 아닙니다 — 이 경로가 그 변화를 넘어 계속 동작해야 합니다.
-9. **authority가 `entry`이면 해제를 거절합니다.** 이 build의 콘솔은 cause id를
+10. **authority가 `entry`이면 해제를 거절합니다.** 이 build의 콘솔은 cause id를
    나눠 주므로 entry 경로는 그 id를 해석하지 못하고, 404는 "그 suppression은
    사라졌다"로 읽힙니다. 실제로 일어난 일은 설정이 이 build의 바닥 아래로
    되돌아간 것이므로, 그렇게 말하고 아무것도 바꾸지 않습니다.

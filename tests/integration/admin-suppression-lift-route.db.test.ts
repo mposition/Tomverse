@@ -155,35 +155,41 @@ const liveDigest = (emailAddress: string) =>
     .then((rows) => causeSetDigest(rows.map((row) => row.id)));
 
 /**
- * Everything a refused request could have touched, for comparing before and
- * after.
+ * The suppression state a request could change, for comparing before and after.
  *
- * A count of released causes and a count of release audit entries is not the
- * claim "nothing was written" -- it leaves out the entry being deleted, a cause
- * gaining a field, an audit entry under some other action, and an approval
- * being recorded. Snapshotting the rows themselves and requiring them to be
- * identical afterwards is the claim, and it does not need updating when
- * something new becomes writable.
- *
- * Absolute counts would not do either: the dead-handle case starts with a cause
- * already released, so "zero released" is false before the request is even
- * made. The comparison is a diff.
+ * Rows rather than counts. A count of released causes and a count of release
+ * audit entries leaves out the entry being deleted, a cause gaining a field, an
+ * audit entry written under some other action, and an approval changing its
+ * status -- and it does not survive a case that starts with a cause already
+ * released, which the dead-handle test does. The comparison is a diff of the
+ * rows themselves, and it does not need updating when something new becomes
+ * writable.
  */
-const everythingWritable = async () => ({
+const suppressionState = async () => ({
   causes: await prisma.suppressionCause.findMany({ orderBy: { id: "asc" } }),
   entries: await prisma.suppressionEntry.findMany({ orderBy: { id: "asc" } }),
   audit: await prisma.adminAuditLog.findMany({
     orderBy: { id: "asc" },
     select: { id: true, action: true, targetType: true, targetId: true },
   }),
-  approvals: await prisma.adminActionApproval.count(),
+  approvals: await prisma.adminActionApproval.findMany({ orderBy: { id: "asc" } }),
 });
 
-const nothingHappened = async (before: Awaited<ReturnType<typeof everythingWritable>>) => {
+/**
+ * Named for what it checks rather than for "nothing happened", because
+ * something does: a remove request consumes its rate limit before it looks at
+ * any cause, so the usage bucket moves on a refused request as much as on an
+ * accepted one. That is deliberate -- a refusal an attacker can retry for free
+ * is not a refusal -- and it is out of this assertion's scope rather than
+ * missing from it.
+ */
+const noSuppressionMutation = async (
+  before: Awaited<ReturnType<typeof suppressionState>>
+) => {
   assert.deepEqual(
-    await everythingWritable(),
+    await suppressionState(),
     before,
-    "a refused request changed something"
+    "a refused request changed suppression state"
   );
   assert.deepEqual(unexpectedHostCalls, []);
 };
@@ -230,6 +236,77 @@ test("a lift releases what the caller listed", async () => {
   );
 });
 
+test("a partial lift is audited as what it released, not as the row it came from", async () => {
+  // The defect this shape prevents is a lie in an immutable record. The row's
+  // handle is its newest cause; the release matrix does not release by that. An
+  // address holding a `manual` and a later `privacy_request` releases the
+  // manual and keeps the privacy request -- and the handle *is* the privacy
+  // request, so naming it as the audit target writes an entry that reads as
+  // though the legal record had been removed.
+  await signInAsOwner();
+  await setAuthority("causes");
+  const emailAddress = `mixed-${randomUUID()}@example.test`;
+  await suppress(emailAddress);
+  await recordSuppression({
+    emailAddress,
+    reason: "privacy_request",
+    source: "admin",
+    sourceEventKey: `test:${randomUUID()}`,
+  });
+
+  const privacy = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress, reason: "privacy_request" },
+    select: { id: true },
+  });
+  const manual = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress, reason: "manual" },
+    select: { id: true },
+  });
+  const digest = await liveDigest(emailAddress);
+
+  const response = await post({
+    action: "remove",
+    id: privacy.id,
+    causeSetDigest: digest,
+    reason: "The manual hold was added by mistake during the migration.",
+  });
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as {
+    removed: boolean;
+    released: Array<{ reason: string }>;
+    remaining: Array<{ reason: string }>;
+  };
+  assert.equal(body.removed, false, "a cause remains, so the selector is not clear");
+  assert.deepEqual(body.released.map((cause) => cause.reason), ["manual"]);
+  assert.deepEqual(body.remaining.map((cause) => cause.reason), ["privacy_request"]);
+
+  // The privacy request is untouched, which is the fact the audit entry has to
+  // agree with.
+  assert.equal(
+    (await prisma.suppressionCause.findUniqueOrThrow({ where: { id: privacy.id } }))
+      .releasedAt,
+    null
+  );
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "email_suppression.removed" },
+  });
+  assert.equal(audit.targetType, "SuppressionCauseSet");
+  assert.equal(audit.targetId, digest);
+  const metadata = audit.metadata as {
+    viaCauseId: string;
+    releasedCauseIds: string[];
+    remainingCauseIds: string[];
+    remainingReasons: string[];
+  };
+  assert.deepEqual(metadata.releasedCauseIds, [manual.id]);
+  assert.deepEqual(metadata.remainingCauseIds, [privacy.id]);
+  assert.deepEqual(metadata.remainingReasons, ["privacy_request"]);
+  // The handle is recorded as the row the operator acted from, not as what was
+  // removed.
+  assert.equal(metadata.viaCauseId, privacy.id);
+});
+
 test("a cause added after the listing refuses the lift instead of being released with it", async () => {
   // The defect this endpoint's shape exists to prevent: an operator lifts an
   // address for the soft bounce they can see, and an unsubscribe that arrived
@@ -248,7 +325,7 @@ test("a cause added after the listing refuses the lift instead of being released
     sourceEventKey: `test:${randomUUID()}`,
   });
 
-  const before = await everythingWritable();
+  const before = await suppressionState();
   const response = await post({
     action: "remove",
     id: handle.id,
@@ -258,7 +335,7 @@ test("a cause added after the listing refuses the lift instead of being released
 
   assert.equal(response.status, 409);
   assert.equal(((await response.json()) as { code: string }).code, "approval_stale");
-  await nothingHappened(before);
+  await noSuppressionMutation(before);
 });
 
 test("a handle that is no longer active is stale, and one that never existed is not found", async () => {
@@ -278,7 +355,7 @@ test("a handle that is no longer active is stale, and one that never existed is 
 
   // A diff rather than a count: this selector already has a released cause, so
   // "nothing is released" is false before the request is made.
-  const before = await everythingWritable();
+  const before = await suppressionState();
   const stale = await post({
     action: "remove",
     id: handle.id,
@@ -287,7 +364,7 @@ test("a handle that is no longer active is stale, and one that never existed is 
   });
   assert.equal(stale.status, 409);
   assert.equal(((await stale.json()) as { code: string }).code, "approval_stale");
-  await nothingHappened(before);
+  await noSuppressionMutation(before);
 
   const missing = await post({
     action: "remove",
@@ -296,7 +373,7 @@ test("a handle that is no longer active is stale, and one that never existed is 
     reason: "The mailbox was restored and the owner asked us to resume.",
   });
   assert.equal(missing.status, 404);
-  await nothingHappened(before);
+  await noSuppressionMutation(before);
 });
 
 test("a selector with more causes than any cap can still be lifted", async () => {
@@ -348,7 +425,7 @@ test("the entry authority refuses the lift and says which of the two it is", asy
 
   await setAuthority("entry");
 
-  const before = await everythingWritable();
+  const before = await suppressionState();
   const response = await post({
     action: "remove",
     id: handle.id,
@@ -360,7 +437,7 @@ test("the entry authority refuses the lift and says which of the two it is", asy
   const body = (await response.json()) as { code: string; error: string };
   assert.equal(body.code, "authority_changed");
   assert.match(body.error, /causes/);
-  await nothingHappened(before);
+  await noSuppressionMutation(before);
 });
 
 test("the request has to carry the causes it saw", async () => {
@@ -371,7 +448,7 @@ test("the request has to carry the causes it saw", async () => {
   const emailAddress = `bare-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
 
-  const before = await everythingWritable();
+  const before = await suppressionState();
   const response = await post({
     action: "remove",
     id: handle.id,
@@ -379,5 +456,5 @@ test("the request has to carry the causes it saw", async () => {
   });
 
   assert.equal(response.status, 400);
-  await nothingHappened(before);
+  await noSuppressionMutation(before);
 });
