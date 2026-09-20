@@ -190,6 +190,79 @@ test("an approval for one cause set does not lift a set that changed since", asy
   assert.equal(await prisma.adminAuditLog.count(), 0, "no release, no release audit");
 });
 
+test("a handle that is no longer active cannot reach what replaced it", async () => {
+  // The dangerous shape, because it ends with us mailing somebody who asked us
+  // to stop: a screen shows one soft bounce, it expires while the page sits
+  // open, an unsubscribe arrives on the same address, and the operator clicks
+  // lift on what they can see. Following the dead handle to its selector would
+  // release the unsubscribe they never saw.
+  const emailAddress = address();
+  await recordSuppression({
+    emailAddress,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    sourceEventKey: `test:${randomUUID()}`,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  await setAuthority("causes");
+  const stale = await causeFor(emailAddress, "soft_bounce");
+
+  // Both the read and the lift are asked as of a moment past the expiry, so the
+  // test does not wait on a clock.
+  const later = new Date(Date.now() + 120_000);
+  assert.equal(await activeCausesForSelector(stale, later), null);
+
+  await recordSuppression({
+    emailAddress,
+    reason: "unsubscribe",
+    source: "unsubscribe_link",
+    sourceEventKey: `test:${randomUUID()}`,
+  });
+
+  const lifted = await liftSuppressionCauses({
+    causeId: stale,
+    // The set the stale screen showed, which is the only set an operator could
+    // have approved.
+    approvedCauseIds: [stale],
+    action: "admin",
+    evidence: { kind: "admin" },
+    writeReleaseAudit: auditInTx,
+    now: later,
+  });
+  assert.deepEqual(lifted, { removed: false, refusal: "approval_stale" });
+
+  const unsubscribe = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress, reason: "unsubscribe" },
+  });
+  assert.equal(unsubscribe.releasedAt, null, "the unsubscribe was released");
+  assert.equal(await prisma.adminAuditLog.count(), 0, "no release, no release audit");
+});
+
+test("a lift works with no SuppressionEntry behind it", async () => {
+  // What C-2 leaves: causes and no mirror. The entry delete goes by selector
+  // and deleting none of them is not a failure, so this path has to keep
+  // working across that change rather than start returning not_found.
+  const emailAddress = address();
+  await suppress(emailAddress, "manual");
+  await setAuthority("causes");
+  await prisma.suppressionEntry.deleteMany({ where: { emailAddress } });
+
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await activeCausesForSelector(handle);
+  assert.ok(active);
+
+  const lifted = await liftSuppressionCauses({
+    causeId: handle,
+    approvedCauseIds: active.causeIds,
+    action: "admin",
+    evidence: { kind: "admin" },
+    writeReleaseAudit: auditInTx,
+  });
+  assert.equal(lifted.removed, true);
+  assert.ok(lifted.removed && lifted.released.some((c) => c.reason === "manual"));
+  assert.equal(lifted.removed && lifted.selector.emailAddress, emailAddress);
+});
+
 test("switching a purpose back on is refused while another cause still stops it", async () => {
   const user = await prisma.user.create({ data: { email: address() } });
   await setPreference({

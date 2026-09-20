@@ -322,17 +322,31 @@ export type SuppressionSelector = {
  * its selector, because the block is their sum and lifting one of several
  * changes nothing a sender would notice.
  *
- * A released or expired cause is still a valid handle: its selector may well
- * have live causes on it, and refusing here would make a stale console row
- * unliftable rather than merely stale.
+ * **The handle has to be active itself.** A released or expired cause still
+ * names a real selector, and following it would read whatever is live there
+ * now -- which may be a different cause entirely. An operator looking at a row
+ * showing one `soft_bounce`, released and replaced by an `unsubscribe` while
+ * the page sat open, would click lift and release the unsubscribe they never
+ * saw, and we would start mailing somebody who asked us to stop. So a stale
+ * handle resolves to nothing and the caller is told to look again.
  */
 export async function activeCausesForSelector(causeId: string, now: Date = new Date()) {
   const cause = await prisma.suppressionCause.findUnique({
     where: { id: causeId },
-    select: { emailAddress: true, scope: true, purposeKey: true },
+    select: {
+      emailAddress: true,
+      scope: true,
+      purposeKey: true,
+      expiresAt: true,
+      releasedAt: true,
+    },
   });
-  if (!cause) return null;
-  const selector: SuppressionSelector = cause;
+  if (!cause || !isActiveCause(cause, now)) return null;
+  const selector: SuppressionSelector = {
+    emailAddress: cause.emailAddress,
+    scope: cause.scope,
+    purposeKey: cause.purposeKey,
+  };
   const causes = await prisma.suppressionCause.findMany({
     where: { ...selector, releasedAt: null },
     select: { id: true, reason: true, expiresAt: true, releasedAt: true },
@@ -368,6 +382,14 @@ export type CauseLiftResult =
  * approved, so the lift is refused and has to be asked for again. The audit
  * entry and the release are one transaction, so a rolled-back lift leaves no
  * record of a release that did not happen.
+ *
+ * `approvedCauseIds` has to be the set the *operator saw*, carried in from the
+ * request, and not a set the server read for itself a moment ago. Read it here
+ * and the comparison compares a value with itself: whatever is live at this
+ * instant is approved by definition, and a cause added since the screen was
+ * drawn is released without anyone having looked at it. The handle must be in
+ * that set too -- a lift is of the row that was on the screen, and a row whose
+ * own handle is no longer active is not that row.
  *
  * The mirrored entry is removed only when no cause remains active; while an
  * older build may still read entries, an entry with a live cause behind it
@@ -410,11 +432,12 @@ export async function liftSuppressionCauses(input: {
         orderBy: { id: "asc" },
       })
     ).filter((cause) => isActiveCause(cause, now));
-    if (causes.length === 0) {
-      // The handle resolved and nothing is active on its selector. That is not
-      // "not found" in the sense the caller means -- it is a console row
-      // somebody else has already lifted -- and the approval it was granted
-      // against named causes that are gone.
+    if (causes.length === 0 || !causes.some((cause) => cause.id === input.causeId)) {
+      // Either nothing is active on this selector any more, or the handle
+      // itself is not among what is. Both mean the row the operator acted on is
+      // not the row that is there now -- released by somebody else, expired on
+      // its own, or replaced by a cause they never saw -- so this is a stale
+      // approval rather than a missing record.
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 

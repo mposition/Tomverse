@@ -202,6 +202,45 @@ test("paging walks the whole list without repeating a row", async () => {
 // Suppressions (§13.7)
 // ---------------------------------------------------------------------------
 
+test("a selector's causes are never cut by the row limit", async () => {
+  // The limit belongs to selectors, and it is applied in the database. Read a
+  // multiple of it in causes and group in memory instead, and a selector at the
+  // edge of the window comes back with *some* of its causes -- so a row that
+  // cannot be lifted, because a privacy_request is on it, is drawn as one that
+  // can.
+  const crowded = "crowded@example.com";
+  const reasons = [
+    "hard_bounce",
+    "complaint",
+    "unsubscribe",
+    "manual",
+    "privacy_request",
+  ] as const;
+  for (const reason of reasons) {
+    await recordSuppression({
+      sourceEventKey: `test:${randomUUID()}`,
+      emailAddress: crowded,
+      reason,
+      source:
+        reason === "manual" || reason === "privacy_request"
+          ? "admin"
+          : reason === "unsubscribe"
+            ? "unsubscribe_link"
+            : "provider_webhook",
+    });
+  }
+
+  // One row asked for, and five causes -- more than any per-row budget a
+  // multiplied read would have used.
+  const [row] = await listSuppressions({ emailAddress: null, limit: 1 });
+  assert.ok(row);
+  assert.equal(row.causes.length, reasons.length);
+  assert.ok(
+    row.causes.some((cause) => cause.reason === "privacy_request"),
+    "the reason that makes this row unliftable was cut out of it"
+  );
+});
+
 test("a suppression created by a privacy request cannot be lifted from here", async () => {
   // It is the record of someone exercising a legal right. The process entitled
   // to lift it is the privacy process that created it, not a button on an
@@ -270,6 +309,62 @@ test("one row per suppressed selector, carrying every active cause on it", async
   assert.deepEqual(
     await revealEmailAddresses({ kind: "suppression", ids: [stacked.id] }),
     { [stacked.id]: emailAddress }
+  );
+});
+
+test("the reveal answers for an active cause and not for a dead one", async () => {
+  // An entry stopped resolving to an address the moment its suppression was
+  // lifted, because the row was deleted. Causes are append-only, so every id
+  // this screen ever printed -- and every id sitting in an audit entry -- would
+  // otherwise be a permanent handle for turning a masked address back into an
+  // address.
+  const { revealEmailAddresses } = await import("@/lib/adminEmailAddressReveal");
+  const emailAddress = "revealed@example.com";
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress,
+    reason: "hard_bounce",
+    source: "provider_webhook",
+  });
+  const live = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({ kind: "suppression", ids: [live.id] }),
+    { [live.id]: emailAddress }
+  );
+
+  // Expired: asked as of a later moment, so the clock is not part of the test.
+  const expiring = "expiring@example.com";
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress: expiring,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  const soft = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress: expiring },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({
+      kind: "suppression",
+      ids: [soft.id],
+      now: new Date(Date.now() + 120_000),
+    }),
+    {}
+  );
+
+  // Released.
+  await prisma.suppressionCause.update({
+    where: { id: live.id },
+    data: { releasedAt: new Date(), releaseKind: "admin" },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({ kind: "suppression", ids: [live.id] }),
+    {}
   );
 });
 

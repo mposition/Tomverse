@@ -104,65 +104,70 @@ export async function AdminEmailSuppressionsPanel({
                 </td>
               </tr>
             ) : null}
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                data-testid="email-suppression-row"
-                className="border-t border-zinc-900 align-top"
-              >
-                <td className="py-3 pr-4 font-mono text-xs">
-                  <AdminRevealableAddress
-                    rowId={row.id}
-                    masked={row.emailAddressMasked}
-                  />
-                </td>
-                <td className="py-3 pr-4">
-                  <span className="flex flex-wrap gap-1">
-                    {row.causes.map((cause) => (
-                      <span
-                        key={cause.id}
-                        data-testid="email-suppression-reason"
-                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                          REASON_TONE[cause.reason] ??
-                          "border-zinc-700 bg-zinc-900 text-zinc-300"
-                        }`}
-                      >
-                        {cause.reason}
+            {/* One table row per cause, with the address and scope spanning
+                them. Four parallel lists inside one cell drift apart the moment
+                one of them wraps -- and here a source with a classification
+                takes two lines while its date takes one, so the second reason
+                would sit beside the first reason's date. A reason belongs to a
+                source and a date, and the table says so. */}
+            {rows.map((row) =>
+              row.causes.map((cause, index) => (
+                <tr
+                  key={cause.id}
+                  data-testid={
+                    index === 0 ? "email-suppression-row" : "email-suppression-cause-row"
+                  }
+                  className={`align-top ${
+                    index === 0 ? "border-t border-zinc-900" : ""
+                  }`}
+                >
+                  {index === 0 ? (
+                    <td
+                      rowSpan={row.causes.length}
+                      className="py-3 pr-4 font-mono text-xs"
+                    >
+                      <AdminRevealableAddress
+                        rowId={row.id}
+                        masked={row.emailAddressMasked}
+                      />
+                    </td>
+                  ) : null}
+                  <td className="py-3 pr-4">
+                    <span
+                      data-testid="email-suppression-reason"
+                      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        REASON_TONE[cause.reason] ??
+                        "border-zinc-700 bg-zinc-900 text-zinc-300"
+                      }`}
+                    >
+                      {cause.reason}
+                    </span>
+                  </td>
+                  {index === 0 ? (
+                    <td
+                      rowSpan={row.causes.length}
+                      className="py-3 pr-4 font-mono text-xs text-zinc-400"
+                    >
+                      {row.scope === "global" ? m.allMail : row.purposeKey}
+                    </td>
+                  ) : null}
+                  <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
+                    {cause.source}
+                    {cause.sourceClassification ? (
+                      <span className="mt-1 block text-[11px] text-zinc-500">
+                        {cause.sourceClassification}
                       </span>
-                    ))}
-                  </span>
-                </td>
-                <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
-                  {row.scope === "global" ? m.allMail : row.purposeKey}
-                </td>
-                <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
-                  {row.causes.map((cause) => (
-                    <span key={cause.id} className="mt-1 block first:mt-0">
-                      {cause.source}
-                      {cause.sourceClassification ? (
-                        <span className="block text-[11px] text-zinc-500">
-                          {cause.sourceClassification}
-                        </span>
-                      ) : null}
-                    </span>
-                  ))}
-                </td>
-                <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {row.causes.map((cause) => (
-                    <span key={cause.id} className="mt-1 block first:mt-0">
-                      {when(cause.occurredAt)}
-                    </span>
-                  ))}
-                </td>
-                <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {row.causes.map((cause) => (
-                    <span key={cause.id} className="mt-1 block first:mt-0">
-                      {cause.expiresAt ? when(cause.expiresAt) : m.never}
-                    </span>
-                  ))}
-                </td>
-              </tr>
-            ))}
+                    ) : null}
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
+                    {when(cause.occurredAt)}
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
+                    {cause.expiresAt ? when(cause.expiresAt) : m.never}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

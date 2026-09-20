@@ -65,6 +65,17 @@ const addSchema = z.object({
 const removeSchema = z.object({
   action: z.literal("remove"),
   id: z.string().trim().min(1).max(60),
+  /**
+   * The active cause ids the caller was looking at, from its own GET.
+   *
+   * Required, and carried in rather than read here. A set the server reads for
+   * itself at this instant is approved by definition: a cause added between the
+   * listing and the click -- a fresh unsubscribe on an address being lifted for
+   * a stale soft bounce -- would be released with nobody having seen it, and we
+   * would resume mailing somebody who asked us to stop. Sending what was on the
+   * screen is what makes the comparison mean anything.
+   */
+  causeIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50),
   reason: z.string().trim().min(1).max(1_000),
 });
 
@@ -201,6 +212,25 @@ export async function POST(req: Request) {
       if (!active) {
         return NextResponse.json({ error: "Not found." }, { status: 404 });
       }
+
+      // What the caller saw against what is there. Everything below binds to
+      // `active.causeIds`, so this is the one place the operator's view enters
+      // the decision; without it the approval would be granted against a set
+      // the server chose for itself and a cause added since the listing would
+      // be released unseen. Order does not matter, membership does.
+      if (
+        [...body.causeIds].sort().join(",") !== [...active.causeIds].sort().join(",")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "The causes on this address changed after it was listed. Look at it again before lifting it.",
+            code: "approval_stale",
+          },
+          { status: 409 }
+        );
+      }
+
       const releaseAudit =
         (evidenceKind: string) => (tx: Parameters<typeof writeAdminAuditLog>[0]["tx"]) =>
           writeAdminAuditLog({

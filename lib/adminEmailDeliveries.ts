@@ -228,6 +228,21 @@ export type AdminSuppressionRow = {
  * Expiry is applied here rather than left to the reader. A soft bounce whose
  * `expiresAt` has passed stops mail nowhere, and a screen that still lists it
  * is a screen that asks somebody to lift something that is not there.
+ *
+ * ## Why the limit is applied to selectors, in the database
+ *
+ * The obvious shape -- read `limit * something` causes and group them in memory
+ * -- truncates the wrong thing. A selector whose causes straddle the end of
+ * that window gets a row with *some* of its causes, and the missing one is
+ * exactly what an operator needed to see: a `complaint` that does not appear
+ * beside the `unsubscribe`, or a `privacy_request` that makes the whole row
+ * unliftable. The row reads as liftable, and the lift -- which reads the causes
+ * again for itself -- acts on a set the screen never displayed.
+ *
+ * So the selectors are chosen first, with the limit applied to them, and their
+ * causes are read afterwards with no limit at all. Two reads rather than one: a
+ * cause released between them can leave a selector with nothing active, and
+ * that selector is dropped rather than drawn as an empty row.
  */
 export async function listSuppressions(input: {
   emailAddress: string | null;
@@ -235,17 +250,41 @@ export async function listSuppressions(input: {
   now?: Date;
 }): Promise<AdminSuppressionRow[]> {
   const now = input.now ?? new Date();
+  const address = input.emailAddress;
+
+  // Which selectors, newest first. `max("id")` breaks a tie on `occurredAt`, so
+  // a page boundary lands in the same place twice rather than wherever the plan
+  // happens to put it.
+  const selectors = await prisma.$queryRaw<
+    Array<{ emailAddress: string; scope: string; purposeKey: string }>
+  >`
+    SELECT "emailAddress", "scope", "purposeKey"
+      FROM "SuppressionCause"
+     WHERE "releasedAt" IS NULL
+       AND ("expiresAt" IS NULL OR "expiresAt" > ${now})
+       AND (${address}::text IS NULL OR "emailAddress" = ${address})
+     GROUP BY "emailAddress", "scope", "purposeKey"
+     ORDER BY max("occurredAt") DESC, max("id") DESC
+     LIMIT ${input.limit}
+  `;
+  if (selectors.length === 0) return [];
+
   const causes = await prisma.suppressionCause.findMany({
     where: {
-      ...(input.emailAddress ? { emailAddress: input.emailAddress } : {}),
       releasedAt: null,
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      AND: [
+        {
+          OR: selectors.map(({ emailAddress, scope, purposeKey }) => ({
+            emailAddress,
+            scope,
+            purposeKey,
+          })),
+        },
+      ],
     },
     select: SUPPRESSION_CAUSE_SELECT,
     orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-    // One selector can hold several causes, so the row limit is not the cause
-    // limit. Read enough causes to fill the rows and cut the rows below.
-    take: input.limit * SUPPRESSION_CAUSES_PER_ROW_BUDGET,
   });
 
   const rows = new Map<string, AdminSuppressionRow>();
@@ -267,16 +306,11 @@ export async function listSuppressions(input: {
     });
   }
 
-  return Array.from(rows.values()).slice(0, input.limit);
+  // Back into the order the selectors were chosen in. A selector that lost its
+  // last cause between the two reads is simply absent from the map.
+  return selectors
+    .map(({ emailAddress, scope, purposeKey }) =>
+      rows.get([emailAddress, scope, purposeKey].join(" "))
+    )
+    .filter((row): row is AdminSuppressionRow => row !== undefined);
 }
-
-/**
- * How many causes one selector is assumed to be able to hold, for sizing the
- * read behind the row limit.
- *
- * A guess, and it only ever costs rows: if a page of addresses each carried
- * more than this many active causes, the last rows would be missing rather than
- * wrong. Four is already an address that hard-bounced, complained,
- * unsubscribed and was suppressed by hand.
- */
-const SUPPRESSION_CAUSES_PER_ROW_BUDGET = 4;
