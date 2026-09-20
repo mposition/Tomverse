@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "superlative.bestow",
+      "ruleId": "rule.superlative",
+      "input": "The folder view does not bestow any special permission.",
+      "note": "contains 'best' and is not 'best'",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "superlative.asbestos",
+      "ruleId": "rule.superlative",
+      "input": "A worked example: summarising an asbestos inspection report.",
+      "note": "the plan names this one",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "superlative.koreanTemperature",
+      "ruleId": "rule.superlative",
+      "input": "어제 최고기온을 묻는 질문에 세 모델이 답했습니다.",
+      "note": "최고 inside 최고기온, a weather reading",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "superlative.negatedBetter",
+      "ruleId": "rule.superlative",
+      "input": "No model was a better fit for this message.",
+      "note": "lib/autoRoutingCopy.ts says exactly this; it denies the claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "guarantee.noGuarantee",
+      "ruleId": "rule.guarantee",
+      "input": "The number of answers is not fixed and varies by model.",
+      "note": "the shape of a disclaimer, with no guarantee in it",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "rank.ordinaryNumber",
+      "ruleId": "rule.rank-claim",
+      "input": "Step 1: choose the models you want to compare.",
+      "note": "a numbered step is not a rank claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "rank.koreanFirstTime",
+      "ruleId": "rule.rank-claim",
+      "input": "第一次使用时，可以先选择两个模型。",
+      "note": "第一次 is 'the first time', not 'number one'",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "aiReview.describesWhatItDoes",
+      "ruleId": "rule.ai-review-contract",
+      "input": "A second model reads the answer and quotes the lines it refers to.",
+      "note": "what AI Review actually does, with no accuracy claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "aiReview.koreanQuoteMatch",
+      "ruleId": "rule.ai-review-contract",
+      "input": "검토자가 인용한 문장이 답변에 실제로 있는지 표시합니다.",
+      "note": "source grounding described as what it is",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "refuted.notTheOnly",
+      "ruleId": "rule.refuted-superiority",
+      "input": "One place to put three answers next to each other.",
+      "note": "a description with no uniqueness claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "refuted.koreanOnlyFile",
+      "ruleId": "rule.refuted-superiority",
+      "input": "한 대화에서 파일을 첨부하고 세 모델에게 물어볼 수 있습니다.",
+      "note": "no 유일 claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "china.traditionalChineseCopy",
+      "ruleId": "rule.china-mainland",
+      "input": "介面支援繁體中文。",
+      "note": "a language statement, not an availability or payment claim",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "urgency.realEndDate",
+      "ruleId": "rule.australia-urgency",
+      "input": "The autumn promotion ends on 30 November.",
+      "note": "a date is a fact; urgency is a pressure tactic",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "minors.aboutNotAt",
+      "ruleId": "rule.australia-minors",
+      "input": "A teacher used it to compare three explanations of the same topic.",
+      "note": "mentions a classroom without addressing a child as the buyer",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "memory.deniesMemory",
+      "ruleId": "rule.memory-claim",
+      "input": "프로젝트는 폴더이며, 대화 간 기억을 공유하지 않습니다.",
+      "note": "mentions memory in order to deny it",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.emailShapedProse",
+      "ruleId": "hygiene.mention",
+      "input": "Three answers to one question, side by side.",
+      "note": "ordinary caption, nothing to report",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.noUrl",
+      "ruleId": "hygiene.url_like",
+      "input": "한 질문에 세 개의 답을 나란히 놓고 봅니다.",
+      "note": "no address in any of its shapes",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.ordinaryInstruction",
+      "ruleId": "hygiene.prompt_injection_marker",
+      "input": "Pick a model, then ask your question.",
+      "note": "an instruction to a reader, not to a model",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.noInvisibles",
+      "ruleId": "hygiene.zero_width",
+      "input": "Compare three answers in one conversation.",
+      "note": "nothing invisible in it",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "free.withCondition",
+      "ruleId": "rule.free-wording",
+      "input": "Start free with monthly credits included.",
+      "note": "the credit condition is in the same post, which §7.2 rule 4 requires",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.controlCharacter",
+      "ruleId": "hygiene.control_character",
+      "input": "A caption with a tab\tand a newline\nis ordinary.",
+      "note": "the three controls a caption may contain",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.bidi",
+      "ruleId": "hygiene.bidi_control",
+      "input": "Compare answers from three models.",
+      "note": "no direction override",
+      "expect": { "verdict": "approval_required" }
+    },
+    {
+      "id": "hygiene.linkMarkup",
+      "ruleId": "hygiene.link_markup",
+      "input": "The pricing page lists what each plan includes.",
+      "note": "mentions a page without linking to it",
+      "expect": { "verdict": "approval_required" }
+    }
+  ]
+}

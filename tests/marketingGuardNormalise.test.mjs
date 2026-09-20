@@ -15,6 +15,19 @@ import {
   marketingTextVariants,
 } from "../lib/marketingGuardNormalise.ts";
 
+/**
+ * Built rather than written.
+ *
+ * A literal control byte in a source file makes git treat it as binary, so a
+ * pull request touching this file would show no diff -- and the assertion
+ * nobody could read would be the one about unprintable characters.
+ * `scripts/check-text-encoding.mjs` refuses them for that reason.
+ */
+const BEL = String.fromCharCode(7);
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+const RIGHT_TO_LEFT_OVERRIDE = String.fromCharCode(0x202e);
+
+
 /** How a rule is checked: the rule folded the same way, with word boundaries. */
 const matches = (text, rule) => {
   const needle = foldMarketingRuleText(rule);
@@ -40,7 +53,7 @@ test("every way of writing a banned word is the same string", () => {
     ["b-e-s-t", "hyphens"],
     ["ｂｅｓｔ", "full width"],
     ["𝐛𝐞𝐬𝐭", "mathematical bold"],
-    ["b​est", "zero width space"],
+    [`b${ZERO_WIDTH_SPACE}est`, "zero width space"],
     ["b🅴st", "negative squared letter"],
     ["Ⓑest", "circled letter"],
     ["🅑🅔🅢🅣", "negative circled"],
@@ -126,9 +139,9 @@ test("Hangul written as separate jamo is recomposed", () => {
 // ---------------------------------------------------------------------------
 
 test("invisible and direction-changing characters are refused", () => {
-  assert.deepEqual(marketingTextHygiene("a​b"), ["zero_width"]);
-  assert.deepEqual(marketingTextHygiene("a‮b"), ["bidi_control"]);
-  assert.deepEqual(marketingTextHygiene("ab"), ["control_character"]);
+  assert.deepEqual(marketingTextHygiene(`a${ZERO_WIDTH_SPACE}b`), ["zero_width"]);
+  assert.deepEqual(marketingTextHygiene(`a${RIGHT_TO_LEFT_OVERRIDE}b`), ["bidi_control"]);
+  assert.deepEqual(marketingTextHygiene(`a${BEL}b`), ["control_character"]);
 
   // Tab, newline and carriage return are ordinary in a caption.
   assert.deepEqual(marketingTextHygiene("a\tb\r\nc"), []);
@@ -201,9 +214,9 @@ test("the hygiene code list is frozen and every code is reachable", () => {
   assert.equal(Object.isFrozen(MARKETING_HYGIENE_CODES), true);
 
   const reached = new Set([
-    ...marketingTextHygiene("ab"),
-    ...marketingTextHygiene("a‮b"),
-    ...marketingTextHygiene("a​b"),
+    ...marketingTextHygiene(`a${BEL}b`),
+    ...marketingTextHygiene(`a${RIGHT_TO_LEFT_OVERRIDE}b`),
+    ...marketingTextHygiene(`a${ZERO_WIDTH_SPACE}b`),
     ...marketingTextHygiene("@tomverse"),
     ...marketingTextHygiene("example.com"),
     ...marketingTextHygiene('<a href="#">x</a>'),
