@@ -6,8 +6,11 @@
 위한 **진행 현황표**다. 구현 완료율, 품질 판정, 출시 승인 또는 현재 production
 상태를 자동 산출하는 registry가 아니다.
 
-- 작성 기준일: 2026-09-14. 아래 선행 benchmark의 고정 기록은 2026-09-11
+- 작성 기준일: 2026-09-20. 아래 선행 benchmark의 고정 기록은 2026-09-11
   당시 관측을 보존하며, 새 Chat 사용자 흐름의 상태는 별도 갱신 구획에서 구분한다.
+- 최신 갱신은 Prompt Refiner shadow live adapter PR #1565의 `develop` 병합
+  `18ceffe5d297c14e3f06037fa0695a8db721e38a`까지 반영한다. 이는 실행 가능한 제품
+  경로나 staging/production 배포, stage 생성 또는 provider 호출을 뜻하지 않는다.
 - 이번 배포 후 기존 기능 영속 복구 연결 작업의 base는
   `ec043cf79e3a044973e5f6466483710ef4969ea2`다. 같은 commit의 Railway staging
   deployment `9f231d3b-84cd-4afe-ad2b-db80d49a513c`가 `SUCCESS`, migration 104개와
@@ -43,11 +46,12 @@
   게시된 bridge 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
   새 source, 환경, 실행 관측으로 갱신할 때는 그 근거와 범위도 함께 기록한다.
 
-## 전체 웹 Chat 계획 추정 — planning-estimate-v1
+## 전체 웹 Chat 계획 추정 — planning-estimate-v2
 
-**현재 약 65%, 주관적 계획 범위 55–75%. 이전 약 60% 대비 +5%p.**
+**현재 약 68%, 주관적 계획 범위 58–78%. 직전 약 67% 대비 +1%p.**
 사용자가 요청한 대략적인 구현 진척 설명이며, 정식 완료율·품질 인증·출시
-준비도는 아니다. 이번 로컬 사용자 흐름 연결을 반영한 잠정 계획 판단이다.
+준비도는 아니다. v2는 C19–C20의 제품 연결 진척과 검증·운영 기반 진척을 분리해,
+실행 불가능한 인프라가 사용자 기능 완료율을 과도하게 올리지 않도록 했다.
 대상은 모바일 화면을 포함한 현재 **웹 Chat**의 C01–C20과 C21의 필요한 공용
 연결부다. C21의 PWA·native·store는 별도 미래 milestone으로 계속 추적하며,
 완료로 간주하거나 이 웹 범위의 백분율을 전체 크로스플랫폼에 적용하지 않는다.
@@ -56,22 +60,22 @@
 | --- | --- | --- | --- |
 | C08–C18 기존 플랫폼 기능 | 40% | 약 80% | 재사용할 구현 기반이 다수 있으나 새 Chat 통합·mode별 회귀·기기 검증 완료율은 아님 |
 | C01–C07 + C21의 웹 공용 연결부 | 40% | 약 75% | gated entry·모델 변경 transcript에 영속 초안, 메시지 저장 확인, 부분 응답 checkpoint와 GET-only 재연결을 로컬 연결; 공개 전환·운영 복구·전체 기기 검증은 남음 |
-| C19–C20 Refiner·Planner·품질 평가 | 20% | 약 25% | 일부 plumbing과 offline 평가 기반은 있으나 정상 Planner 호출·실제 provider 관측·제품 품질 검증이 남음 |
+| C19–C20 Refiner·Planner·품질 평가의 제품 연결 | 20% | 약 30% | strict parser·제안 계약과 실행 어댑터는 있으나 제품 caller·실제 shadow·제안 UI·Router 결합은 아직 없음. 검증·운영 기반 성숙도는 별도로 약 60% |
 
-계산은 `0.40 × 80 + 0.40 × 75 + 0.20 × 25 = 67%`이며, 과도한 정밀도를
-피해 5%p 단위로 반올림하여 약 65%로 전달한다. 이전 계산은 동일한 가중치에서
-연결부 60%를 적용한 61% → 약 60%였다. 이번 연결부 15%p 증가 판단만 반영했고
-기존 플랫폼·Planner 그룹, 웹 범위·분모·산정 방법 버전은 바꾸지 않았다.
+계산은 `0.40 × 80 + 0.40 × 75 + 0.20 × 30 = 68%`다. 직전 67%에서
+Prompt Refiner의 고정 provider adapter와 실행 계약이 추가된 만큼만 1%p 올렸다.
+durable 승인·감사·source 결속·실행 어댑터를 합친 C19–C20 검증·운영 기반은 약
+60%지만, 제품 caller가 없고 유료 shadow도 실행하지 않았으므로 그 수치를 전체
+제품 완료율 계산에 직접 넣지 않는다.
 가중치와 그룹 추정은 inventory와 이번 구현 근거를 바탕으로 한 계획 판단이지
-새 전체 코드 감사나 측정값이 아니다. 55–75%는 오래된 inventory와 미확인 통합
+새 전체 코드 감사나 측정값이 아니다. 58–78%는 오래된 inventory와 미확인 통합
 작업량의 불확실성을 드러내는 주관적
 범위이며 통계적 신뢰구간이 아니다. 21행은 같은 작업량의 완료 조건이 아니므로
 행 수·테스트 수·release gate 수를 단순 비율로 바꾸지 않는다. 선행 corpus의
 48문항·8개 cell·별도 기반 산출물 8개도 전체 Chat의 분모가 아니다.
 
 구현 · 제품 연결 · 실행 검증 · 병합 · 배포/공개 · 품질/출시 승인은 구분한다.
-이전 식별자 테스트·문구 보완 회차의 증분 0%p는 그대로다. 이번 증분은 그 기록을
-다시 평가한 것이 아니라 새로운 사용자 흐름 구현 때문이다. 이후 의미 있는
+이전 회차의 역사적 추정은 아래 기록에 그대로 보존한다. 이후 의미 있는
 작업 회차마다 전체 추정·불확실성 범위, 변경 이유
 (변화가 없으면 0%p와 이유, 기준 변경이면 새 기준임을 명시), 순서가 있는 다음
 작업과 필요한 승인을 함께 보고한다. 정밀 측정이 없다는 이유로 대략적 설명을
@@ -1256,3 +1260,55 @@ seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 
    증거를 수집한다.
 5. 그 사용자 선택 증거 뒤에만 Refiner→Router 결합과 full-catalog 모델 선택 품질 최적화를
    별도 실험으로 진행한다.
+
+## 2026-09-20 Prompt Refiner shadow live adapter 통합 완료 회차
+
+durable stage writer 다음 단계 중 실제 provider SDK 경계와 고정 16건 실행 계약을
+구현했다. adapter는 `gpt-5-6-luna`, reasoning medium, 출력 4,096 tokens, timeout 15초,
+retry 0, tool 없음과 요청·응답 body 비보존을 고정한다. strict parser와 현재 사용자 턴
+텍스트만 사용하며 timeout, provider error, 불명 결과는 재시도하지 않는 terminal로
+분리한다. 사용량은 input/output/reasoning뿐 아니라 cache read/write도 별도 필드로
+보존하고, 부분 telemetry에서는 비용을 만들어내지 않는다.
+
+이 adapter를 호출하는 제품·관리자·script·cron entry point는 없다. run contract도
+`durableRunWriterReady=false`, `entryPointReady=false`, `executionAdmitted=false`,
+`productAdapterReady=false`를 유지한다. 따라서 이번 병합은 stage 생성, reservation
+소비, credential 조회, provider/API/model 호출, 유료 실행, flag 활성화나 제품 공개를
+발생시키지 않았다. actual tokenizer 요구도 아직 충족하지 않았으며 byte upper bound는
+사전 거부용 보수적 필터일 뿐 실행 승인 증거가 아니다.
+
+Claude Code Max 읽기 전용 검토는 세 라운드 모두 `approve`였고, 마지막 round가 남긴
+nit 2건을 수정 상한 밖에서 보완했다. 원래 package·verdict·`on_hold
+(revisions_exhausted)` 기록은 바꾸지 않고 사람 disposition으로 후속 수정을 결속했다.
+통합 CI 첫 실행에서 저장소 전역 캐시 과금 배선과 runtime dynamic-access snapshot
+두 경계 누락이 드러났다. cache write telemetry를 명시적으로 수집하고 검토된 snapshot을
+갱신한 뒤 관련 회귀 140/140, typecheck와 lint를 통과시켜 재푸시했다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 68%** (주관적 범위 **58–78%**) — 직전 약 67%에서 +1%p |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +5%p / 전체 계획 +1%p** — 실행 어댑터는 생겼지만 caller와 승인된 실제 실행은 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 60%** — 서로 다른 축으로 분리해 infrastructure를 제품 완료로 과장하지 않음 |
+| 구현 | 고정 model/provider 생성 경계, one-run 최대 16건·요청당/전체 비용 ceiling, strict output parsing, no-retry terminal 분류, 완전/부분 usage 처리, shipped entry-point 부재 guard |
+| 로컬 검증 | Prompt Refiner 관련 **140/140**, live adapter/run contract **23/23**, 캐시 과금 배선과 runtime source closure **18/18**, typecheck·대상 lint·diff 검사 통과 |
+| 독립 검토 | Claude Code Max 세 라운드 `approve`; 마지막 nit 2건은 종료된 exchange 밖에서 수정. 감사 기록은 `on_hold (revisions_exhausted)`로 보존 |
+| 통합 CI·병합 | PR **#1565**는 첫 전역 guard 실패 2건을 수정한 뒤 최종 **20 success·0 fail·2 intentional skip**으로 `develop`에 merge SHA `18ceffe5d297c14e3f06037fa0695a8db721e38a`로 병합. 일반 댓글·review 0 |
+| 공개 상태 | 이번 회차에서 배포·stage 생성·provider/API/model/유료 호출 0, 제품 caller·flag·성공 admission 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. durable stage의 reservation 소비 직후부터 모든 terminal을 원자적으로 남기는
+   **run/terminal receipt writer**와 `consumed-without-terminal` unknown 복구 계약을
+   먼저 구현한다. provider 호출은 여전히 연결하지 않는다.
+2. 같은 회차에서 owner-only exact preview에 source/deployment/evidence/model, 16건 상한,
+   요청당·전체 비용 ceiling, timeout·no-retry·중단 조건을 표시하고 실제 실행 endpoint는
+   default-off로 둔다.
+3. 이 새 실행 권한·비용·감사 경계는 **Claude Code Max 독립 검토가 필요**하다. 검토와
+   Linux CI가 통과한 뒤 staging 배포 상태와 preview를 읽기 전용으로 확인한다.
+4. preview 결과에 대한 별도 명시적 비용 승인을 받은 뒤에만 stage를 만들고 bounded paid
+   shadow를 정확히 1회 실행한다. unknown outcome은 확인 전 재실행하지 않는다.
+5. 실제 의미 보존·행동상 주입 저항·비용·지연 evidence가 gate를 통과할 때만 suggestion
+   UI를 default-off로 연결하고, 사용자 선택 증거 뒤 Refiner→Router full-catalog 실험으로
+   진행한다.
