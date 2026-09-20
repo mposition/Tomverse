@@ -8,6 +8,7 @@ import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { createMarketingChannel } from "@/lib/marketingStore";
 import {
   MARKETING_POST_APPROVE_ACTION,
+  MARKETING_POST_EDIT_ACTION,
   MARKETING_POST_MARK_REUSABLE_ACTION,
   loadApprovedTemplate,
 } from "@/lib/marketingTemplates";
@@ -78,6 +79,40 @@ const auditRow = ({
         summary: "Approved for publication.",
         metadata,
       });
+
+/**
+ * An edit and the audit row that authorises it, which is now what places it.
+ *
+ * The audit row carries both digests, because the loader checks that the row
+ * is evidence of *this* edit rather than merely an older row somewhere in the
+ * chain.
+ */
+async function editEntry(
+  postId: string,
+  {
+    envelopeDigest = DIGEST,
+    previousEnvelopeDigest = OTHER_DIGEST,
+    at,
+  }: { envelopeDigest?: string; previousEnvelopeDigest?: string; at?: string } = {},
+) {
+  const auditLogId = await auditRow({
+    action: MARKETING_POST_EDIT_ACTION,
+    targetId: postId,
+    metadata: {
+      actorHadMarketingWrite: true,
+      digest: envelopeDigest,
+      previousDigest: previousEnvelopeDigest,
+    },
+  });
+  return {
+    ...historyEntry("edit_revision", {
+      envelopeDigest,
+      previousEnvelopeDigest,
+      byAuditLogId: auditLogId,
+    }),
+    ...(at ? { at } : {}),
+  };
+}
 
 async function channel() {
   const row = await createMarketingChannel(prisma, {
@@ -278,25 +313,11 @@ test("an edit recorded after the marking breaks it too", async () => {
   // The edit names the audit row that authorised it, and that row's `createdAt`
   // is the database's -- which is what places the edit after the marking, since
   // the entry's own `at` is written by whoever appended it.
-  const editId = await auditRow({
-    action: "marketing_post.edit",
-    targetId: post.id,
-    metadata: { actorHadMarketingWrite: true },
-  });
+  const edit = await editEntry(post.id);
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
-    data: {
-      history: [
-        ...history,
-        historyEntry("edit_revision", {
-          envelopeDigest: DIGEST,
-          previousEnvelopeDigest: OTHER_DIGEST,
-          byAuditLogId: editId,
-        }),
-      ],
-      historyVersion: 1,
-    },
+    data: { history: [...history, edit], historyVersion: 1 },
   });
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
@@ -556,28 +577,14 @@ test("a marking that overstates the version it saw cannot hide a later edit", as
     data: { reusableAsTemplate: true },
   });
 
-  const editId = await auditRow({
-    action: "marketing_post.edit",
-    targetId: post.id,
-    metadata: { actorHadMarketingWrite: true },
+  const edit = await editEntry(post.id, {
+    previousEnvelopeDigest: DIGEST,
+    at: new Date(Date.now() - 86_400_000).toISOString(),
   });
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
-    data: {
-      history: [
-        ...history,
-        {
-          ...historyEntry("edit_revision", {
-            envelopeDigest: DIGEST,
-            previousEnvelopeDigest: DIGEST,
-            byAuditLogId: editId,
-          }),
-          at: new Date(Date.now() - 86_400_000).toISOString(),
-        },
-      ],
-      historyVersion: 1,
-    },
+    data: { history: [...history, edit], historyVersion: 1 },
   });
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
@@ -586,10 +593,15 @@ test("a marking that overstates the version it saw cannot hide a later edit", as
   });
 });
 
-test("an edit that names no audit row cannot be placed at all", async () => {
-  // `byAuditLogId` is nullable, and an edit without one has no time this
-  // module can trust. "Cannot be shown to precede the marking" is the same
-  // answer as "did not": the cost is that a person approves the post.
+test("an edit that names no audit row is not a history this module reads", async () => {
+  // `byAuditLogId` is required by the schema now, so an entry without one can
+  // only arrive by a write that went around the store. The loader refuses
+  // rather than throwing, because the Guard wants an answer it can record.
+  //
+  // It is required rather than nullable-and-refused for a reason worth stating:
+  // history is append-only, so one undatable edit would have made that post
+  // permanently unusable as a template, however many times a person approved
+  // and marked it afterwards.
   const row = await channel();
   const post = await approvedPost(row.id);
 
@@ -612,7 +624,7 @@ test("an edit that names no audit row cannot be placed at all", async () => {
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
     ok: false,
-    refusal: "edit_not_datable",
+    refusal: "history_unreadable",
   });
 });
 
@@ -650,30 +662,151 @@ test("an edit before the marking does not break the template", async () => {
   const row = await channel();
   const post = await approvedPost(row.id);
 
-  const editId = await auditRow({
-    action: "marketing_post.edit",
-    targetId: post.id,
-    metadata: { actorHadMarketingWrite: true },
+  const edit = await editEntry(post.id, {
+    // Written in the future by the caller, and it changes nothing: the audit
+    // row is what the decision reads.
+    at: new Date(Date.now() + 86_400_000).toISOString(),
   });
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { history: [...history, edit], historyVersion: 1 },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  const result = await loadApprovedTemplate(prisma, post.id);
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+test("an edit whose audit row is about another post does not date it", async () => {
+  // The hole a bare `findMany` on the id left: an edit could name any older
+  // audit row -- another post's approval, a sign-in -- and borrow its time to
+  // sit before the marking. Each edit's row now has to verify as evidence of
+  // that edit.
+  const row = await channel();
+  const other = await approvedPost(row.id);
+  const post = await approvedPost(row.id);
+
+  const borrowed = await auditRow({
+    action: MARKETING_POST_EDIT_ACTION,
+    targetId: other.id,
+    metadata: {
+      actorHadMarketingWrite: true,
+      digest: DIGEST,
+      previousDigest: OTHER_DIGEST,
+    },
+  });
+
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
     data: {
       history: [
         ...history,
-        {
-          ...historyEntry("edit_revision", {
-            envelopeDigest: DIGEST,
-            previousEnvelopeDigest: OTHER_DIGEST,
-            byAuditLogId: editId,
-          }),
-          // Written in the future by the caller, and it changes nothing: the
-          // audit row is what the decision reads.
-          at: new Date(Date.now() + 86_400_000).toISOString(),
-        },
+        historyEntry("edit_revision", {
+          envelopeDigest: DIGEST,
+          previousEnvelopeDigest: OTHER_DIGEST,
+          byAuditLogId: borrowed,
+        }),
       ],
       historyVersion: 1,
     },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edit_not_datable",
+  });
+});
+
+test("an edit whose audit row names different digests does not prove that edit", async () => {
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  const mismatched = await auditRow({
+    action: MARKETING_POST_EDIT_ACTION,
+    targetId: post.id,
+    metadata: {
+      actorHadMarketingWrite: true,
+      digest: DIGEST,
+      previousDigest: DIGEST,
+    },
+  });
+
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("edit_revision", {
+          envelopeDigest: DIGEST,
+          previousEnvelopeDigest: OTHER_DIGEST,
+          byAuditLogId: mismatched,
+        }),
+      ],
+      historyVersion: 1,
+    },
+  });
+  await markReusable(post.id, { historyVersion: 1 });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edit_not_datable",
+  });
+});
+
+test("two edits cannot share one audit row", async () => {
+  // An audit entry authorises one edit. A second entry reusing it is either a
+  // copy or a way to give a later edit an earlier time.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+
+  const edit = await editEntry(post.id);
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { history: [...history, edit, edit], historyVersion: 2 },
+  });
+  await markReusable(post.id, { historyVersion: 2 });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edit_not_datable",
+  });
+});
+
+test("an edit, a fresh approval and a fresh marking make it a template again", async () => {
+  // The refusal for an edit after the marking has to be recoverable, or the
+  // first edit to a template would retire it permanently. A person approves
+  // the new words and marks them, and it resolves.
+  const row = await channel();
+  const post = await approvedPost(row.id);
+  await markReusable(post.id, { historyVersion: 0 });
+
+  const edit = await editEntry(post.id);
+  const history = post.history as Prisma.InputJsonValue[];
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { history: [...history, edit], historyVersion: 1 },
+  });
+
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "edited_since_marking",
+  });
+
+  // The person approves again and marks again. Both rows are later in the
+  // chain than the edit's row, which is what makes the edit precede them.
+  const reapproval = await auditRow({
+    action: MARKETING_POST_APPROVE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { approvalAuditLogId: reapproval, approvedAt: new Date() },
   });
   await markReusable(post.id, { historyVersion: 1 });
 

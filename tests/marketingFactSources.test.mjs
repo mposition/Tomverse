@@ -163,9 +163,9 @@ test("a model claim is about the runtime row, and every unselectable shape refus
   }
 });
 
-test("the selectability rule agrees with isPubliclySelectableModel", () => {
-  // Restated in marketingFactSources rather than imported, so it is pinned
-  // here rather than trusted.
+test("the selectability rule is isPubliclySelectableModel", () => {
+  // It calls that function rather than restating its rule, so this pins the
+  // two together against a future signal being added to one and not the other.
   for (const overrides of [
     {},
     { enabled: false },

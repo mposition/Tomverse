@@ -182,9 +182,10 @@ test("a row the seeder wrote is not a price anybody chose", async () => {
 });
 
 test("an administrator saving the row makes it stored", async () => {
-  // The other half: the marker has to come off, or no price claim could ever
-  // be made. The admin PATCH clears `metadata`; this reproduces that write
-  // rather than calling the route, because the route is a different contract.
+  // The other half: the marker has to go on, or no price claim could ever be
+  // made. The admin PATCH writes it on both its create and its update branch;
+  // this reproduces that write rather than calling the route, because the
+  // route is a different contract.
   await syncBillingDefaultsToDatabase();
   const [first] = await getBillingPlans();
   assert.ok(first);

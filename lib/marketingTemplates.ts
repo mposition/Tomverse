@@ -51,6 +51,8 @@ export type MarketingTemplateReader = PrismaClient | Prisma.TransactionClient;
 /** The audit actions a template's proof is made of. */
 export const MARKETING_POST_APPROVE_ACTION = "marketing_post.approve";
 export const MARKETING_POST_MARK_REUSABLE_ACTION = "marketing_post.mark_reusable";
+/** The action an edit names, so an edit can be placed in the audit chain. */
+export const MARKETING_POST_EDIT_ACTION = "marketing_post.edit";
 
 /** The post states in which an approved template still stands. */
 export const MARKETING_TEMPLATE_POST_STATUSES = [
@@ -75,8 +77,10 @@ export type MarketingTemplateRefusal =
   | "marking_precedes_approval"
   | "marking_version_missing"
   | "edited_since_marking"
-  /** An edit that names no audit row, so it cannot be placed against the marking. */
-  | "edit_not_datable";
+  /** An edit whose audit row does not prove it, so it cannot be placed. */
+  | "edit_not_datable"
+  /** A history that does not parse, which the store cannot produce. */
+  | "history_unreadable";
 
 export type MarketingTemplate = {
   id: string;
@@ -220,36 +224,56 @@ export async function loadApprovedTemplate(
   // `edit_revision` names the audit row that authorised it, so an edit can be
   // placed against the marking using only that ordering.
   //
-  // An edit with no `byAuditLogId` refuses. It is an edit nobody can date, and
-  // "cannot be shown to precede the marking" is the same answer as "did not":
-  // the cost is that a person approves the post, and the alternative is a
-  // template resting on an edit whose time is whatever its writer typed.
+  // **Each edit's row is verified, not merely read.** Taking the `createdAt` of
+  // whatever row an id names would let an edit point at any older audit entry
+  // in the table -- a login, another post's approval -- and be placed before
+  // the marking by borrowing its time. So every edit's row has to verify as
+  // evidence of *that* edit: the right action, this post, a human actor with
+  // `marketing:write`, chain-valid, and carrying the digests the entry claims
+  // to have moved between.
+  //
+  // Two edits naming one row refuse as well. An audit entry authorises one
+  // edit; a second entry reusing it is either a copy or a way to give a later
+  // edit an earlier time.
   //
   // The index scan stays beside it -- it is what r4 amendment 5 literally
   // describes, and the two disagree only when something is wrong.
-  const history = marketingHistorySchema.parse(post.history);
+  // A refusal rather than a throw. `byAuditLogId` is required by the schema, so
+  // a history holding an entry without one can only have arrived by a write
+  // that went around the store -- which is exactly the case where the Guard
+  // wants an answer it can record rather than an exception.
+  const parsedHistory = marketingHistorySchema.safeParse(post.history);
+  if (!parsedHistory.success) {
+    return { ok: false, refusal: "history_unreadable" };
+  }
+  const history = parsedHistory.data;
   const edits = history.filter(isEdit);
 
-  const undatableEdit = edits.some((entry) => !entry.byAuditLogId);
-  if (undatableEdit) return { ok: false, refusal: "edit_not_datable" };
+  const seenAuditIds = new Set<string>();
+  let latestEditAt = 0;
+  for (const entry of edits) {
+    if (seenAuditIds.has(entry.byAuditLogId)) {
+      return { ok: false, refusal: "edit_not_datable" };
+    }
+    seenAuditIds.add(entry.byAuditLogId);
 
-  const editAuditIds = edits
-    .map((entry) => entry.byAuditLogId)
-    .filter((id): id is string => Boolean(id));
-  const editRows = editAuditIds.length
-    ? await database.adminAuditLog.findMany({
-        where: { id: { in: editAuditIds } },
-        select: { id: true, createdAt: true },
-      })
-    : [];
-  if (editRows.length !== new Set(editAuditIds).size) {
-    // An edit naming an audit row that is not there cannot be placed either.
-    return { ok: false, refusal: "edit_not_datable" };
+    const evidence = await verifyMarketingAuditEvidence(database, {
+      auditLogId: entry.byAuditLogId,
+      action: MARKETING_POST_EDIT_ACTION,
+      targetId: post.id,
+      metadata: {
+        digest: entry.envelopeDigest,
+        previousDigest: entry.previousEnvelopeDigest,
+      },
+    });
+    if (!evidence.ok) return { ok: false, refusal: "edit_not_datable" };
+
+    latestEditAt = Math.max(latestEditAt, evidence.createdAt.getTime());
   }
 
   const markedAt = marking.createdAt.getTime();
   const editedSinceMarking =
-    editRows.some((row) => row.createdAt.getTime() > markedAt) ||
+    latestEditAt > markedAt ||
     history.slice(markedVersion + 1).some((entry) => isEdit(entry));
   if (editedSinceMarking || post.historyVersion < markedVersion) {
     return { ok: false, refusal: "edited_since_marking" };

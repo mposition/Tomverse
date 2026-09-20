@@ -146,17 +146,22 @@ const applyCampaign = (
 };
 
 /**
- * The URL for a post on a channel that can carry one, or a refusal.
+ * The assembly, with the registry as a parameter.
+ *
+ * **Not exported.** An earlier version took the registry on the exported
+ * builder, with a comment saying it was injectable for tests -- which made it a
+ * parameter of the production API through which a caller could name any
+ * destination, including on the one channel whose posts cannot be retracted.
+ * A test's convenience is not a reason to give a publishable function a way to
+ * be told what to publish.
+ *
+ * What a test actually wants to know -- that the origin comparison would catch
+ * a bad registry -- is asked of `unsafeMarketingLinkIds()` below, which cannot
+ * publish anything.
  */
-export function buildMarketingLink(
+function assembleMarketingLink(
   request: MarketingLinkRequest,
-  /**
-   * The approved paths. Injectable only so a test can hand this function the
-   * wrong registry and watch the origin comparison below hold -- with the real
-   * one the id lookup already restricts the input to a fixed list, which makes
-   * the comparison unreachable and therefore unproven.
-   */
-  links: Readonly<Record<string, string>> = MARKETING_APPROVED_LINKS,
+  links: Readonly<Record<string, string>>,
 ): MarketingLinkResult {
   const path = Object.prototype.hasOwnProperty.call(links, request.linkId)
     ? links[request.linkId]
@@ -197,14 +202,55 @@ export function buildMarketingLink(
 }
 
 /**
- * The URL for a channel whose caption cannot carry one: the account's own
- * profile link, with the same campaign parameters.
+ * The URL for a post on a channel that can carry one, or a refusal.
  *
- * Takes the account rather than a URL. The account is what the post knows, the
- * link is what has been approved for it, and a caller who could hand in a URL
- * could hand in a competitor's profile on the right host.
+ * One argument. The approved paths are this module's, and there is no way to
+ * hand it a different set.
  */
-export function buildMarketingProfileLink(
+export function buildMarketingLink(
+  request: MarketingLinkRequest,
+): MarketingLinkResult {
+  return assembleMarketingLink(request, MARKETING_APPROVED_LINKS);
+}
+
+/**
+ * The link ids in a registry whose path does not stay on our origin.
+ *
+ * A validator rather than a builder: it answers the question a test needs to
+ * ask about a bad registry, and it returns ids rather than URLs, so nothing it
+ * produces can be published. Run against the real registry it is a build-time
+ * check, the way `unservedMarketingLinkIds()` is.
+ */
+export function unsafeMarketingLinkIds(
+  links: Readonly<Record<string, string>> = MARKETING_APPROVED_LINKS,
+): string[] {
+  const unsafe: string[] = [];
+  for (const [linkId, path] of Object.entries(links)) {
+    const result = assembleMarketingLink(
+      {
+        linkId,
+        channel: "linkedin",
+        accountSlug: "linkedin-1",
+        campaign: "registry-check",
+      },
+      links,
+    );
+    if (!result.ok && result.refusal !== "unknown_link_id") {
+      unsafe.push(linkId);
+      continue;
+    }
+    if (result.ok && new URL(result.url).origin !== MARKETING_PUBLIC_ORIGIN) {
+      // Unreachable through `assembleMarketingLink`, which is the point of
+      // asserting it: if it ever becomes reachable, this says so.
+      unsafe.push(linkId);
+    }
+    void path;
+  }
+  return unsafe;
+}
+
+/** Not exported, for the reason `assembleMarketingLink` is not. */
+function assembleMarketingProfileLink(
   {
     channel,
     accountSlug,
@@ -214,10 +260,7 @@ export function buildMarketingProfileLink(
     accountSlug: string;
     campaign: string;
   },
-  /** Injectable for tests, the way `buildMarketingLink` takes its links. */
-  registry: Readonly<
-    Record<string, { channel: string; url: string }>
-  > = MARKETING_PROFILE_LINKS,
+  registry: Readonly<Record<string, { channel: string; url: string }>>,
 ): MarketingLinkResult {
   if (
     campaign.length > MARKETING_CAMPAIGN_MAX_LENGTH ||
@@ -284,4 +327,49 @@ export function buildMarketingProfileLink(
     return { ok: false, refusal: "url_too_long" };
   }
   return { ok: true, url: assembled };
+}
+
+/**
+ * The URL for a channel whose caption cannot carry one: the account's own
+ * profile link, with the same campaign parameters.
+ *
+ * Takes the account and nothing else. The account is what the post knows, the
+ * link is what has been approved for it, and a caller who could hand in either
+ * a URL or a registry could hand in a competitor's profile on the right host.
+ */
+export function buildMarketingProfileLink(request: {
+  channel: string;
+  accountSlug: string;
+  campaign: string;
+}): MarketingLinkResult {
+  return assembleMarketingProfileLink(request, MARKETING_PROFILE_LINKS);
+}
+
+/**
+ * The account slugs in a profile registry whose entry would not be publishable.
+ *
+ * The validator twin of `unsafeMarketingLinkIds()`, and it exists for the same
+ * reason: this is the question a test needs to ask about a bad registry, and
+ * asking it of the builder would have meant giving the builder a way to be
+ * handed one.
+ */
+export function unsafeMarketingProfileAccounts(
+  registry: Readonly<
+    Record<string, { channel: string; url: string }>
+  > = MARKETING_PROFILE_LINKS,
+): Array<{ accountSlug: string; refusal: MarketingLinkRefusal }> {
+  const unsafe: Array<{ accountSlug: string; refusal: MarketingLinkRefusal }> =
+    [];
+  for (const [accountSlug, entry] of Object.entries(registry)) {
+    const result = assembleMarketingProfileLink(
+      {
+        channel: entry.channel,
+        accountSlug,
+        campaign: "registry-check",
+      },
+      registry,
+    );
+    if (!result.ok) unsafe.push({ accountSlug, refusal: result.refusal });
+  }
+  return unsafe;
 }
