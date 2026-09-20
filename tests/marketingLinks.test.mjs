@@ -17,7 +17,7 @@ import {
 } from "../lib/marketingApprovedLinks.ts";
 import {
   MARKETING_CAMPAIGN_MAX_LENGTH,
-  MARKETING_PROFILE_LINKS,
+  MARKETING_PROFILE_ACCOUNT_SLUGS,
   MARKETING_PROFILE_LINK_CHANNELS,
   MARKETING_PUBLIC_ORIGIN,
   buildMarketingLink,
@@ -193,10 +193,10 @@ test("a slug has to belong to the channel it is tagged with", () => {
   );
 
   const matching = buildMarketingLink(
-    request({ channel: "instagram", accountSlug: "instagram-1" }),
+    request({ channel: "threads", accountSlug: "threads-1" }),
   );
   assert.equal(matching.ok, true);
-  assert.equal(new URL(matching.url).searchParams.get("utm_source"), "instagram");
+  assert.equal(new URL(matching.url).searchParams.get("utm_source"), "threads");
 
   // A prefix that merely starts the same is not the channel.
   assert.deepEqual(
@@ -219,7 +219,7 @@ const profileRequest = (overrides = {}) => ({
 test("the registry ships empty, so no profile link resolves yet", () => {
   // The accounts are created in S2. An entry here is a URL somebody checked,
   // so the registry is empty for the same reason the claim registry is.
-  assert.deepEqual(Object.keys(MARKETING_PROFILE_LINKS), []);
+  assert.deepEqual(MARKETING_PROFILE_ACCOUNT_SLUGS, []);
   assert.deepEqual(buildMarketingProfileLink(profileRequest()), {
     ok: false,
     refusal: "profile_link_not_registered",
@@ -362,4 +362,50 @@ test("a URL longer than the field it is stored in is refused", () => {
     unsafeMarketingLinkIds({ "link.pricing": `/${"a".repeat(2100)}` }),
     ["link.pricing"],
   );
+});
+
+test("the channels that use a profile link get no ordinary link", () => {
+  // The other direction of the channel rule. `buildMarketingProfileLink()`
+  // refuses a channel that can carry a link in its caption; without this, the
+  // two that cannot could still be handed a per-post URL -- on exactly the
+  // channels whose posts no API can retract.
+  for (const channel of MARKETING_PROFILE_LINK_CHANNELS) {
+    assert.deepEqual(
+      buildMarketingLink(
+        request({ channel, accountSlug: `${channel}-1` }),
+      ),
+      { ok: false, refusal: "channel_uses_profile_link" },
+      channel,
+    );
+  }
+
+  // And a channel that can carry one still gets it.
+  assert.equal(buildMarketingLink(request()).ok, true);
+});
+
+test("neither registry can be edited through what is exported", () => {
+  // `as const` and `Readonly<>` are compile-time claims, and `Object.freeze` is
+  // shallow. A writable entry would have reopened the hole the profile
+  // registry closed: a competitor URL on an allowed host passes every check.
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_APPROVED_LINKS["link.pricing"] = "/evil";
+    },
+    TypeError,
+    "an approved path decides where a published post sends people",
+  );
+
+  // The profile registry is not exported at all; only its slugs are, and that
+  // list is frozen too.
+  assert.throws(
+    () => {
+      "use strict";
+      MARKETING_PROFILE_ACCOUNT_SLUGS.push("instagram-1");
+    },
+    TypeError,
+  );
+
+  assert.equal(buildMarketingLink(request()).ok, true);
+  assert.equal(new URL(buildMarketingLink(request()).url).pathname, "/pricing");
 });

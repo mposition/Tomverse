@@ -24,8 +24,14 @@ import { isStaticMarketingPathname } from "@/lib/marketingRoutes";
  * The ids are stable and the paths are not: a page can move and the posts that
  * already went out keep meaning what they meant, because what they recorded is
  * the id.
+ *
+ * Frozen. `as const` is a compile-time claim, and this table decides where a
+ * published post sends people, so an assignment to one of its entries would be
+ * a destination nobody approved. The origin comparison in `lib/marketingLinks.ts`
+ * would still catch a path pointing at another site; it would not catch one
+ * pointing at a different page of ours.
  */
-export const MARKETING_APPROVED_LINKS = {
+export const MARKETING_APPROVED_LINKS = Object.freeze({
   "link.home": "/",
   "link.pricing": "/pricing",
   "link.models": "/models",
@@ -40,7 +46,7 @@ export const MARKETING_APPROVED_LINKS = {
   "link.compare-models": "/compare-ai-models",
   "link.answer-review": "/ai-answer-review",
   "link.file-analysis": "/ai-for-file-analysis",
-} as const;
+} as const);
 
 export type MarketingLinkId = keyof typeof MARKETING_APPROVED_LINKS;
 

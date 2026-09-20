@@ -57,6 +57,8 @@ export type MarketingLinkRefusal =
   | "profile_host_not_allowed"
   /** No approved profile link for this account on this channel. */
   | "profile_link_not_registered"
+  /** An ordinary per-post link asked for on a channel that uses a profile link. */
+  | "channel_uses_profile_link"
   | "url_too_long";
 
 export type MarketingLinkResult =
@@ -105,10 +107,33 @@ const accountSlugMatchesChannel = (accountSlug: string, channel: string) =>
  *
  * **Empty**, like the other registries in this slice: the accounts are created
  * in S2, and an entry here is a URL somebody checked.
+ *
+ * Not exported, and each entry frozen rather than only the table. `Readonly<>`
+ * is a compile-time claim and `Object.freeze` is shallow, so an exported table
+ * of mutable entries would have reopened the hole this registry closed:
+ *
+ *     MARKETING_PROFILE_LINKS["instagram-1"].url =
+ *       "https://www.instagram.com/competitor/";
+ *
+ * That URL is on an allowed host, so every check below would pass it. What is
+ * exported instead is the slug list, which is what anything outside this module
+ * has a reason to read.
  */
-export const MARKETING_PROFILE_LINKS: Readonly<
+const MARKETING_PROFILE_LINKS: Readonly<
   Record<string, { channel: MarketingProfileLinkChannel; url: string }>
-> = Object.freeze({});
+> = Object.freeze(
+  Object.fromEntries(
+    Object.entries({} as Record<
+      string,
+      { channel: MarketingProfileLinkChannel; url: string }
+    >).map(([slug, entry]) => [slug, Object.freeze({ ...entry })]),
+  ),
+);
+
+/** The accounts that have an approved profile link. */
+export const MARKETING_PROFILE_ACCOUNT_SLUGS: readonly string[] = Object.freeze(
+  Object.keys(MARKETING_PROFILE_LINKS),
+);
 
 /**
  * The hosts a registered profile link may sit on.
@@ -168,6 +193,13 @@ function assembleMarketingLink(
     : undefined;
   if (path === undefined) {
     return { ok: false, refusal: "unknown_link_id" };
+  }
+  // The other half of the channel rule. `buildMarketingProfileLink()` refuses a
+  // channel that can carry a link in its caption; without this, the channels
+  // that cannot could still get an ordinary per-post URL -- which is what §7.3
+  // says they do not get, on the two channels whose posts no API can retract.
+  if (usesProfileLink(request.channel)) {
+    return { ok: false, refusal: "channel_uses_profile_link" };
   }
   if (
     request.campaign.length > MARKETING_CAMPAIGN_MAX_LENGTH ||

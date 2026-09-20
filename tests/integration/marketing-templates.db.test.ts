@@ -779,17 +779,49 @@ test("two edits cannot share one audit row", async () => {
 
 test("an edit, a fresh approval and a fresh marking make it a template again", async () => {
   // The refusal for an edit after the marking has to be recoverable, or the
-  // first edit to a template would retire it permanently. A person approves
-  // the new words and marks them, and it resolves.
+  // first edit to a template would retire it permanently. A real edit changes
+  // the words, so this moves the envelope digest rather than re-recording the
+  // same one -- which is what the digest comparison is there to notice.
+  const NEW_DIGEST = "f".repeat(64);
   const row = await channel();
   const post = await approvedPost(row.id);
   await markReusable(post.id, { historyVersion: 0 });
 
-  const edit = await editEntry(post.id);
+  const edit = await editEntry(post.id, {
+    envelopeDigest: NEW_DIGEST,
+    previousEnvelopeDigest: DIGEST,
+  });
   const history = post.history as Prisma.InputJsonValue[];
   await prisma.marketingPost.update({
     where: { id: post.id },
-    data: { history: [...history, edit], historyVersion: 1 },
+    data: {
+      history: [...history, edit],
+      historyVersion: 1,
+      envelopeDigest: NEW_DIGEST,
+    },
+  });
+
+  // The digest check catches it first, which is the earlier of the two
+  // answers this module keeps in agreement.
+  assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
+    ok: false,
+    refusal: "content_changed_since_approval",
+  });
+
+  // A person approves the new words. The edit is still recorded, so the
+  // marking has to be renewed as well.
+  const reapproval = await auditRow({
+    action: MARKETING_POST_APPROVE_ACTION,
+    targetId: post.id,
+    metadata: { actorHadMarketingWrite: true, digest: NEW_DIGEST },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      approvalAuditLogId: reapproval,
+      approvedAt: new Date(),
+      approvedDigest: NEW_DIGEST,
+    },
   });
 
   assert.deepEqual(await loadApprovedTemplate(prisma, post.id), {
@@ -797,19 +829,9 @@ test("an edit, a fresh approval and a fresh marking make it a template again", a
     refusal: "edited_since_marking",
   });
 
-  // The person approves again and marks again. Both rows are later in the
-  // chain than the edit's row, which is what makes the edit precede them.
-  const reapproval = await auditRow({
-    action: MARKETING_POST_APPROVE_ACTION,
-    targetId: post.id,
-    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
-  });
-  await prisma.marketingPost.update({
-    where: { id: post.id },
-    data: { approvalAuditLogId: reapproval, approvedAt: new Date() },
-  });
-  await markReusable(post.id, { historyVersion: 1 });
+  await markReusable(post.id, { digest: NEW_DIGEST, historyVersion: 1 });
 
   const result = await loadApprovedTemplate(prisma, post.id);
   assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.template.envelopeDigest, NEW_DIGEST);
 });
