@@ -14,6 +14,15 @@ feature activation, production activation은 서로 다른 결정이다.
    `staging-verification-records/`에 남긴다.
 7. 별도 승인 전에는 scheduler, classifier, execution을 활성화하지 않는다.
 
+## Railway 별도 검증 서비스의 SHA fence
+
+2026-09-21 별도 서비스 생성 시 source 설정은 AMUX 브랜치였지만 첫 deployment는
+저장소 기본 `main` SHA로 시작됐다. source 설정이나 create 응답을 배포 SHA의
+증거로 삼지 않는다. 새 서비스에는 공개 도메인을 만들지 않고, 처음에는 DB URL과
+인증 비밀을 비운 채 pre-deploy migration도 두지 않는다. Railway deployment의
+실제 `branch`·전체 `commitHash`를 확인한 뒤에만 staging DB 참조와 migration을
+설정한다. 잘못된 SHA의 배포는 검증 기록에 합격 증거로 넣지 않는다.
+
 ## Canonical material
 
 - 검증 항목과 blocking 기준: `staging-checklist.md`
