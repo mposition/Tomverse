@@ -852,6 +852,11 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   | **C (정리)** | 원인 — **설정 `causes`는 그대로 두고** 코드는 설정과 무관하게 원인을 읽음 | **중단** | 계속, **trigger 제거** | B. B는 설정 `causes`를 읽으므로 같은 기준 |
   | **D (설정 제거)** | 원인 | — | 계속 | C. 둘 다 설정과 무관하게 원인을 읽음 |
 
+  - **D는 실행 중에 둘로 갈렸습니다.** D-1이 설정을 읽는 **코드**를 없앴고
+    (email-notifications.md v27), 설정 **행**의 삭제는 조건부로 보류했습니다
+    (v28) — 저장된 값이 `causes`인 동안 그 행은 D-1 이전 build를 올바르게 만드는
+    것이므로 지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다. 이 표의 D
+    행은 그 구분이 생기기 전에 쓰였습니다. 지울 수 있게 되는 조건은 v28 3번입니다.
   - **A의 trigger(C83)** — A migration이 `SuppressionEntry`에 AFTER INSERT·UPDATE·
     DELETE trigger를 둡니다. 새 build는 자기 transaction에서
     `SET LOCAL app.suppression_writer = 'causes'`를 걸고, trigger는 이 값이 없는 쓰기(=
