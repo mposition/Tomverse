@@ -1051,7 +1051,8 @@ test("execution start and settle are fenced by task revision and worker generati
     });
 
     assert.equal(task.status, "review");
-    assert.equal(task.owner, worker);
+    assert.equal(task.owner, null);
+    assert.equal(task.claimedAt, null);
     assert.equal(task.revision, 3);
 
     const attempt =
