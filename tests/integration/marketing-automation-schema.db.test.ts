@@ -647,13 +647,22 @@ test("a post starts as a draft, at version zero, with one draft entry", async ()
   );
 });
 
-/** A real `approval_required` decision, sealed by the Guard that made it. */
+/**
+ * A real `approval_required` decision, sealed by the Guard that made it.
+ *
+ * The draft is read out of `envelope()` rather than written out a second time.
+ * The store recomputes the draft digest from the envelope it is handed and
+ * refuses a decision made about anything else, so two copies of this text are
+ * a test that breaks the moment either copy is edited -- which is what
+ * happened.
+ */
 function approvalDecision(channelId: string) {
+  const forDigest = envelope();
   return guardDraft({
     draft: {
-      renderedText: "Three answers to one question, side by side.",
-      locale: "en",
-      channel: "linkedin",
+      renderedText: forDigest.renderedText,
+      locale: forDigest.locale,
+      channel: forDigest.channel,
       channelId,
       claimIds: [],
       assetIds: [],
