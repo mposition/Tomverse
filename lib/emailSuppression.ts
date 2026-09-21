@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -303,41 +305,132 @@ export async function removeSuppression(input: {
   });
 }
 
+/** Address plus scope plus purpose: what a suppression is actually about. */
+export type SuppressionSelector = {
+  emailAddress: string;
+  scope: string;
+  purposeKey: string;
+};
+
 /**
- * The active causes behind one entry's selector, for deciding how an
- * administrator may lift it once causes decide.
+ * A fixed-size name for a set of active causes.
+ *
+ * The lift has to be bound to the set the operator saw, and the first attempt
+ * at that carried the ids themselves in the request. That works until a
+ * selector holds more of them than a request body can carry -- and causes are
+ * append-only with nothing bounding how many a selector accumulates, so "more
+ * than fits" is a state the system reaches on its own. At that point the
+ * selector is *visible and permanently unliftable*: send them all and the body
+ * limit refuses, send fewer and the set does not match, and there is no request
+ * in between. Raising the limit moves the wall rather than removing it.
+ *
+ * So the request carries this instead. Sorted first, because the set is what
+ * matters and neither side may depend on the other's ordering -- one comes back
+ * in PostgreSQL's order and the other in whatever order a caller sent. The
+ * separator is a character a cuid cannot contain, so no two different sets can
+ * spell the same string.
+ *
+ * Not a secret and not a signature: it names a set, and the server recomputes
+ * it from the database under the address lock before releasing anything.
  */
-export async function activeCausesForEntry(entryId: string, now: Date = new Date()) {
-  const entry = await prisma.suppressionEntry.findUnique({
-    where: { id: entryId },
-    select: { emailAddress: true, scope: true, purposeKey: true },
+export const causeSetDigest = (ids: readonly string[]): string =>
+  createHash("sha256")
+    .update([...ids].sort().join(String.fromCharCode(0)))
+    .digest("hex");
+
+/**
+ * The active causes on the selector one cause belongs to, for deciding how an
+ * administrator may lift them.
+ *
+ * **Keyed on a cause, not on an entry.** The operator console lists causes, so
+ * the handle it hands back is a cause id; an entry id would be a handle to a
+ * row that the contraction stops writing
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4). The cause is
+ * only a way in -- what is read, approved and lifted is every active cause on
+ * its selector, because the block is their sum and lifting one of several
+ * changes nothing a sender would notice.
+ *
+ * **The handle has to be active itself.** A released or expired cause still
+ * names a real selector, and following it would read whatever is live there
+ * now -- which may be a different cause entirely. An operator looking at a row
+ * showing one `soft_bounce`, released and replaced by an `unsubscribe` while
+ * the page sat open, would click lift and release the unsubscribe they never
+ * saw, and we would start mailing somebody who asked us to stop. So a stale
+ * handle does not resolve.
+ *
+ * **"No such cause" and "that cause is no longer active" are different
+ * answers**, and the caller says different things about them: the first is a
+ * handle that never existed, the second is a row somebody was looking at a
+ * moment ago. Collapsing them into `null` told an operator whose page had gone
+ * stale that their suppression had vanished.
+ */
+export type ActiveCausesForSelector =
+  | { found: false }
+  | { found: true; stale: true }
+  | {
+      found: true;
+      stale: false;
+      selector: SuppressionSelector;
+      causeIds: string[];
+      /** `causeSetDigest(causeIds)`, which is what a lift request carries. */
+      digest: string;
+      reasons: string[];
+      needsApproval: boolean;
+    };
+
+export async function activeCausesForSelector(
+  causeId: string,
+  now: Date = new Date()
+): Promise<ActiveCausesForSelector> {
+  const cause = await prisma.suppressionCause.findUnique({
+    where: { id: causeId },
+    select: {
+      emailAddress: true,
+      scope: true,
+      purposeKey: true,
+      expiresAt: true,
+      releasedAt: true,
+    },
   });
-  if (!entry) return null;
+  if (!cause) return { found: false };
+  if (!isActiveCause(cause, now)) return { found: true, stale: true };
+  const selector: SuppressionSelector = {
+    emailAddress: cause.emailAddress,
+    scope: cause.scope,
+    purposeKey: cause.purposeKey,
+  };
   const causes = await prisma.suppressionCause.findMany({
-    where: { ...entry, releasedAt: null },
+    where: { ...selector, releasedAt: null },
     select: { id: true, reason: true, expiresAt: true, releasedAt: true },
     orderBy: { id: "asc" },
   });
-  const active = causes.filter((cause) => isActiveCause(cause, now));
+  const active = causes.filter((row) => isActiveCause(row, now));
+  const causeIds = active.map((row) => row.id);
   return {
-    entry,
-    causeIds: active.map((cause) => cause.id),
-    reasons: active.map((cause) => cause.reason),
-    needsApproval: removalNeedsApproval(active.map((cause) => cause.reason)),
+    found: true,
+    stale: false,
+    selector,
+    causeIds,
+    digest: causeSetDigest(causeIds),
+    reasons: active.map((row) => row.reason),
+    needsApproval: removalNeedsApproval(active.map((row) => row.reason)),
   };
 }
 
 export type CauseLiftResult =
   | {
       removed: true;
-      entry: Prisma.SuppressionEntryGetPayload<object>;
+      selector: SuppressionSelector;
       released: Array<{ id: string; reason: string }>;
       remaining: Array<{ id: string; reason: string }>;
     }
   | { removed: false; refusal: SuppressionRemovalRefusal | "approval_stale" };
 
 /**
- * Lifts an entry's causes by the release matrix, once causes decide.
+ * Lifts a selector's causes by the release matrix, once causes decide.
+ *
+ * Reached by a cause id, for the reason `activeCausesForSelector` gives: the
+ * console's handles are causes now.
  *
  * Run inside the approved operation. Everything is re-read under the fence and
  * compared with the cause set the approval was granted for: a cause that
@@ -346,53 +439,86 @@ export type CauseLiftResult =
  * entry and the release are one transaction, so a rolled-back lift leaves no
  * record of a release that did not happen.
  *
- * The entry itself is removed only when no cause remains active; while an
+ * `approvedDigest` has to name the set the *operator saw*, carried in from the
+ * request, and not a set the server read for itself a moment ago. Read it here
+ * and the comparison compares a value with itself: whatever is live at this
+ * instant is approved by definition, and a cause added since the screen was
+ * drawn is released without anyone having looked at it. The handle must be in
+ * that set too -- a lift is of the row that was on the screen, and a row whose
+ * own handle is no longer active is not that row.
+ *
+ * A digest rather than the ids, because the ids are unbounded and a request
+ * body is not; see `causeSetDigest`. It is recomputed here, from the rows read
+ * under the address lock, so the comparison is against what is true at the
+ * moment of the release and not against what the caller said was true.
+ *
+ * The mirrored entry is removed only when no cause remains active; while an
  * older build may still read entries, an entry with a live cause behind it
- * keeps blocking there too.
+ * keeps blocking there too. It goes by selector rather than by id, and deleting
+ * none of them is not a failure -- once the contraction stops writing entries
+ * there will be nothing there to delete, and this is the path that has to keep
+ * working across that change.
  */
 export async function liftSuppressionCauses(input: {
-  entryId: string;
-  approvedCauseIds: readonly string[];
+  causeId: string;
+  approvedDigest: string;
   action: "admin" | "approved_admin";
   evidence:
     | { kind: "admin" }
     | { kind: "dual_approval"; approvalId: string; authorizationAuditLogId: string }
     | { kind: "sole_admin"; authorizationAuditLogId: string };
-  writeReleaseAudit: (tx: Prisma.TransactionClient) => Promise<string>;
+  /**
+   * Writes the audit entry inside this transaction, and is told what the
+   * release actually came to rather than what was asked for.
+   */
+  writeReleaseAudit: (
+    tx: Prisma.TransactionClient,
+    outcome: {
+      released: Array<{ id: string; reason: string }>;
+      remaining: Array<{ id: string; reason: string }>;
+    }
+  ) => Promise<string>;
   now?: Date;
 }): Promise<CauseLiftResult> {
-  const now = input.now ?? new Date();
   return prisma.$transaction(async (tx) => {
     await holdSuppressionFence(tx);
     if ((await readSuppressionAuthority(tx)) !== "causes") {
       return { removed: false as const, refusal: "authority_changed" as const };
     }
-    const found = await tx.suppressionEntry.findUnique({
-      where: { id: input.entryId },
-      select: { emailAddress: true },
+    const found = await tx.suppressionCause.findUnique({
+      where: { id: input.causeId },
+      select: { emailAddress: true, scope: true, purposeKey: true },
     });
     if (!found) return { removed: false as const, refusal: "not_found" as const };
     // The address lock before the causes are read, so no cause can appear
-    // between the read and the decision to remove the entry.
+    // between the read and the decision.
     await lockSuppressionAddress(tx, found.emailAddress);
-    const entry = await tx.suppressionEntry.findUnique({ where: { id: input.entryId } });
-    if (!entry) return { removed: false as const, refusal: "not_found" as const };
+    const selector: SuppressionSelector = found;
+
+    // And the clock after the lock, not before it. Waiting for the lock takes
+    // as long as it takes, and a soft bounce that expired during the wait is
+    // expired at the moment of the release -- reading it as active because the
+    // request was made earlier would release a selector whose handle is no
+    // longer live, which is the thing the handle rule exists to refuse.
+    const now = input.now ?? new Date();
 
     const causes = (
       await tx.suppressionCause.findMany({
-        where: {
-          emailAddress: entry.emailAddress,
-          scope: entry.scope,
-          purposeKey: entry.purposeKey,
-          releasedAt: null,
-        },
+        where: { ...selector, releasedAt: null },
         select: { id: true, reason: true, expiresAt: true, releasedAt: true },
         orderBy: { id: "asc" },
       })
     ).filter((cause) => isActiveCause(cause, now));
+    if (causes.length === 0 || !causes.some((cause) => cause.id === input.causeId)) {
+      // Either nothing is active on this selector any more, or the handle
+      // itself is not among what is. Both mean the row the operator acted on is
+      // not the row that is there now -- released by somebody else, expired on
+      // its own, or replaced by a cause they never saw -- so this is a stale
+      // approval rather than a missing record.
+      return { removed: false as const, refusal: "approval_stale" as const };
+    }
 
-    const current = causes.map((cause) => cause.id).join(",");
-    if (current !== [...input.approvedCauseIds].sort().join(",")) {
+    if (causeSetDigest(causes.map((cause) => cause.id)) !== input.approvedDigest) {
       return { removed: false as const, refusal: "approval_stale" as const };
     }
 
@@ -402,7 +528,16 @@ export async function liftSuppressionCauses(input: {
       return { removed: false as const, refusal: "unliftable" as const };
     }
 
-    const releaseAuditLogId = await input.writeReleaseAudit(tx);
+    // The audit entry is written with the outcome rather than before it. What
+    // the approval was asked for and what is actually released are different
+    // sets whenever the matrix keeps one back -- a `manual` lifted beside a
+    // `privacy_request` that stays -- and an immutable record naming only the
+    // set it was asked about reads as though the privacy request had been
+    // removed.
+    const releaseAuditLogId = await input.writeReleaseAudit(tx, {
+      released: releasable.map(({ id, reason }) => ({ id, reason })),
+      remaining: remaining.map(({ id, reason }) => ({ id, reason })),
+    });
     await markCauseWriter(tx);
     if (releasable.length > 0) {
       await tx.suppressionCause.updateMany({
@@ -415,11 +550,11 @@ export async function liftSuppressionCauses(input: {
       });
     }
     if (remaining.length === 0) {
-      await tx.suppressionEntry.delete({ where: { id: entry.id } });
+      await tx.suppressionEntry.deleteMany({ where: selector });
     }
     return {
       removed: true as const,
-      entry,
+      selector,
       released: releasable.map(({ id, reason }) => ({ id, reason })),
       remaining: remaining.map(({ id, reason }) => ({ id, reason })),
     };

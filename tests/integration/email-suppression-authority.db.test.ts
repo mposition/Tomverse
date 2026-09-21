@@ -4,7 +4,8 @@ import { after, beforeEach, test } from "node:test";
 
 import { setPreference } from "@/lib/emailPreferences";
 import {
-  activeCausesForEntry,
+  activeCausesForSelector,
+  causeSetDigest,
   liftSuppressionCauses,
   recordSuppression,
   suppressionCheck,
@@ -51,6 +52,33 @@ const suppress = (emailAddress: string, reason: "manual" | "complaint" | "hard_b
     sourceEventKey: `test:${randomUUID()}`,
     ...extra,
   });
+
+/** The live set behind a handle, or a failure naming which kind it was. */
+const liveSet = async (causeId: string, now?: Date) => {
+  const active = await activeCausesForSelector(causeId, now);
+  assert.equal(active.found, true, "the handle did not resolve");
+  assert.equal(
+    active.found && active.stale,
+    false,
+    "the handle resolved but is not active"
+  );
+  if (!active.found || active.stale) throw new Error("unreachable");
+  return active;
+};
+
+/**
+ * A cause id for an address, which is the handle the console hands out.
+ *
+ * The lift is reached by a cause and acts on its whole selector, so which cause
+ * this is does not matter -- only that it is not an entry id.
+ */
+const causeFor = async (emailAddress: string, reason: string) =>
+  (
+    await prisma.suppressionCause.findFirstOrThrow({
+      where: { emailAddress, reason },
+      select: { id: true },
+    })
+  ).id;
 
 /** An audit row written in the lift's transaction, standing in for the route's. */
 const auditInTx = async (tx: Parameters<Parameters<typeof liftSuppressionCauses>[0]["writeReleaseAudit"]>[0]) => {
@@ -126,17 +154,17 @@ test("the cutover refuses while causes would let through what an entry stops, an
 
 test("a lift releases only what its action may, and keeps the entry while a cause remains", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "manual");
+  await suppress(emailAddress, "manual");
   await suppress(emailAddress, "privacy_request");
   await setAuthority("causes");
 
-  const active = await activeCausesForEntry(entry.id!);
-  assert.ok(active);
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await liveSet(handle);
   assert.equal(active.needsApproval, false);
 
   const lifted = await liftSuppressionCauses({
-    entryId: entry.id!,
-    approvedCauseIds: active.causeIds,
+    causeId: handle,
+    approvedDigest: active.digest,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
@@ -156,22 +184,112 @@ test("a lift releases only what its action may, and keeps the entry while a caus
 
 test("an approval for one cause set does not lift a set that changed since", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
+  await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
   await setAuthority("causes");
-  const active = await activeCausesForEntry(entry.id!);
-  assert.ok(active?.needsApproval);
+  const handle = await causeFor(emailAddress, "complaint");
+  const active = await liveSet(handle);
+  assert.ok(active.needsApproval);
 
   await suppress(emailAddress, "hard_bounce");
 
   const lifted = await liftSuppressionCauses({
-    entryId: entry.id!,
-    approvedCauseIds: active!.causeIds,
+    causeId: handle,
+    approvedDigest: active.digest,
     action: "approved_admin",
     evidence: { kind: "sole_admin", authorizationAuditLogId: "audit-start" },
     writeReleaseAudit: auditInTx,
   });
   assert.deepEqual(lifted, { removed: false, refusal: "approval_stale" });
   assert.equal(await prisma.adminAuditLog.count(), 0, "no release, no release audit");
+});
+
+test("a handle that is no longer active cannot reach what replaced it", async () => {
+  // The dangerous shape, because it ends with us mailing somebody who asked us
+  // to stop: a screen shows one soft bounce, it expires while the page sits
+  // open, an unsubscribe arrives on the same address, and the operator clicks
+  // lift on what they can see. Following the dead handle to its selector would
+  // release the unsubscribe they never saw.
+  const emailAddress = address();
+  await recordSuppression({
+    emailAddress,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    sourceEventKey: `test:${randomUUID()}`,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  await setAuthority("causes");
+  const stale = await causeFor(emailAddress, "soft_bounce");
+
+  // Both the read and the lift are asked as of a moment past the expiry, so the
+  // test does not wait on a clock.
+  const later = new Date(Date.now() + 120_000);
+  // Resolved, and stale: a handle that never existed is a different answer,
+  // and the route says different things about them.
+  assert.deepEqual(await activeCausesForSelector(stale, later), {
+    found: true,
+    stale: true,
+  });
+  assert.deepEqual(await activeCausesForSelector("no-such-cause", later), {
+    found: false,
+  });
+
+  await recordSuppression({
+    emailAddress,
+    reason: "unsubscribe",
+    source: "unsubscribe_link",
+    sourceEventKey: `test:${randomUUID()}`,
+  });
+
+  const lifted = await liftSuppressionCauses({
+    causeId: stale,
+    // The set the stale screen showed, which is the only set an operator could
+    // have approved.
+    approvedDigest: causeSetDigest([stale]),
+    action: "admin",
+    evidence: { kind: "admin" },
+    writeReleaseAudit: auditInTx,
+    now: later,
+  });
+  assert.deepEqual(lifted, { removed: false, refusal: "approval_stale" });
+
+  const unsubscribe = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress, reason: "unsubscribe" },
+  });
+  assert.equal(unsubscribe.releasedAt, null, "the unsubscribe was released");
+  assert.equal(await prisma.adminAuditLog.count(), 0, "no release, no release audit");
+});
+
+test("a lift works with no SuppressionEntry behind it", async () => {
+  // What C-2 leaves: causes and no mirror. The entry delete goes by selector
+  // and deleting none of them is not a failure, so this path has to keep
+  // working across that change rather than start returning not_found.
+  const emailAddress = address();
+  await suppress(emailAddress, "manual");
+  await setAuthority("causes");
+
+  // Marked as a cause writer, because `suppression_entry_to_cause` fires on
+  // DELETE as well as on INSERT and UPDATE: an unmarked delete of the mirror
+  // releases the causes behind it. That is right for the mirror and is the
+  // opposite of the state this test is trying to reach. C-2 drops the trigger;
+  // until then this is how a database with causes and no entry is made.
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.suppression_writer', 'causes', true)`;
+    await tx.suppressionEntry.deleteMany({ where: { emailAddress } });
+  });
+
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await liveSet(handle);
+
+  const lifted = await liftSuppressionCauses({
+    causeId: handle,
+    approvedDigest: active.digest,
+    action: "admin",
+    evidence: { kind: "admin" },
+    writeReleaseAudit: auditInTx,
+  });
+  assert.equal(lifted.removed, true);
+  assert.ok(lifted.removed && lifted.released.some((c) => c.reason === "manual"));
+  assert.equal(lifted.removed && lifted.selector.emailAddress, emailAddress);
 });
 
 test("switching a purpose back on is refused while another cause still stops it", async () => {
@@ -210,9 +328,10 @@ test("an entry-path removal that finds causes deciding releases nothing", async 
 
 test("a cause written while a lift waits for the address is seen by the lift", async () => {
   const emailAddress = address();
-  const entry = await suppress(emailAddress, "manual");
+  await suppress(emailAddress, "manual");
   await setAuthority("causes");
-  const active = await activeCausesForEntry(entry.id!);
+  const handle = await causeFor(emailAddress, "manual");
+  const active = await liveSet(handle);
 
   const { lockSuppressionAddress, holdSuppressionFence } = await import(
     "@/lib/emailSuppressionAuthority"
@@ -248,8 +367,8 @@ test("a cause written while a lift waits for the address is seen by the lift", a
 
   await held;
   const lift = liftSuppressionCauses({
-    entryId: entry.id!,
-    approvedCauseIds: active!.causeIds,
+    causeId: handle,
+    approvedDigest: active.digest,
     action: "admin",
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
