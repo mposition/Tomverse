@@ -8,6 +8,7 @@ import {
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
 import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -150,7 +151,7 @@ export function AdminAmuxRoutingPanel() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch("/api/admin/amux/routing", {
+      const response = await adminFetch("/api/admin/amux/routing", {
         cache: "no-store",
       });
       if (!response.ok) {
