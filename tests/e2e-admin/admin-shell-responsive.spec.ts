@@ -124,7 +124,20 @@ test.describe("admin console on a narrow viewport", () => {
                   node.className ? ` class="${String(node.className).slice(0, 60)}"` : ""
                 }>`
               : "none";
+          const widthOf = (selector: string) => {
+            const node = element.closest(selector);
+            return node ? Math.round(node.getBoundingClientRect().width) : null;
+          };
           Object.assign(where, {
+            chain: {
+              aside: widthOf("aside"),
+              scroller: widthOf("div.overflow-y-auto"),
+              nav: widthOf("nav"),
+              row: Math.round(
+                element.parentElement?.getBoundingClientRect().width ?? 0
+              ),
+              document: document.documentElement.scrollWidth,
+            },
             href: element.getAttribute("href"),
             insideDrawer: Boolean(element.closest("aside.relative")),
             ancestor: describe(element.parentElement),
