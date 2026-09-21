@@ -41,6 +41,25 @@ const MAX_EXECUTOR_OUTPUT_BYTES: usize =
 const MAX_REASON_BYTES: usize =
     4 * 1024;
 
+const MAX_ENV_PASSTHROUGH_NAMES: usize =
+    32;
+
+/*
+ * The orchestrator's own control plane. A worker receives its work over stdin
+ * and never calls an internal route itself, so it needs none of these. A lane
+ * that could read TOMVERSE_AMUX_SYNC_SECRET could call every internal AMUX
+ * route under any worker name, which would erase the separation between lanes
+ * that the deployment's credential table declares.
+ */
+const RESERVED_EXECUTOR_ENV_NAMES:
+    [&str; 5] = [
+    "TOMVERSE_AMUX_ENABLED",
+    "TOMVERSE_AMUX_EXECUTE",
+    "TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON",
+    "TOMVERSE_AMUX_SYNC_SECRET",
+    "TOMVERSE_INTERNAL_URL",
+];
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExecutorConfigDocument {
@@ -55,6 +74,16 @@ struct WorkerCommandSpec {
 
     #[serde(default)]
     args: Vec<String>,
+
+    /*
+     * Environment variable NAMES this lane inherits from the orchestrator.
+     * Values are never written here: they stay in the deployment's own
+     * variables, so one lane's credential cannot be read out of another lane's
+     * configuration. An omitted list means the lane starts with an empty
+     * environment.
+     */
+    #[serde(default)]
+    env_passthrough: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,11 +166,54 @@ impl CommandAgentExecutor {
                 }
             }
 
+            if raw_spec.env_passthrough.len()
+                > MAX_ENV_PASSTHROUGH_NAMES
+            {
+                bail!(
+                    "AMUX executor command passes through too many environment names"
+                );
+            }
+
+            let mut env_passthrough:
+                Vec<String> = Vec::new();
+
+            for raw_name in
+                &raw_spec.env_passthrough
+            {
+                let name =
+                    raw_name.trim().to_owned();
+
+                if !valid_env_name(&name) {
+                    bail!(
+                        "invalid AMUX executor environment name"
+                    );
+                }
+
+                if RESERVED_EXECUTOR_ENV_NAMES
+                    .contains(&name.as_str())
+                {
+                    bail!(
+                        "AMUX executor may not pass the orchestrator control plane to a worker"
+                    );
+                }
+
+                if env_passthrough
+                    .contains(&name)
+                {
+                    bail!(
+                        "duplicate AMUX executor environment name"
+                    );
+                }
+
+                env_passthrough.push(name);
+            }
+
             let spec =
                 WorkerCommandSpec {
                     worker: worker.clone(),
                     program,
                     args: raw_spec.args,
+                    env_passthrough,
                 };
 
             if workers
@@ -184,6 +256,53 @@ impl CommandAgentExecutor {
                 )
             })
     }
+}
+
+/*
+ * Every lane process is built here, so the empty starting environment is a
+ * property of construction rather than a call somebody can forget to make at a
+ * new spawn site.
+ */
+fn lane_command(
+    spec: &WorkerCommandSpec,
+) -> std::process::Command {
+    let mut command =
+        std::process::Command::new(
+            &spec.program,
+        );
+
+    command.args(&spec.args);
+    command.env_clear();
+
+    for name in &spec.env_passthrough {
+        if let Ok(value) =
+            std::env::var(name)
+        {
+            command.env(name, value);
+        }
+    }
+
+    command
+}
+
+fn valid_env_name(
+    value: &str,
+) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .chars()
+            .next()
+            .is_some_and(|ch| {
+                ch.is_ascii_alphabetic()
+                    || ch == '_'
+            })
+        && value.chars().all(
+            |ch| {
+                ch.is_ascii_alphanumeric()
+                    || ch == '_'
+            },
+        )
 }
 
 fn valid_worker_name(
@@ -389,12 +508,11 @@ impl AgentExecutor for CommandAgentExecutor {
         payload.push(b'\n');
 
         let mut command =
-            Command::new(
-                &spec.program,
+            Command::from(
+                lane_command(spec),
             );
 
         command
-            .args(&spec.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             /*
@@ -489,6 +607,230 @@ mod tests {
                 "worker-a".to_string(),
                 "worker-b".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn lane_environment_is_empty_unless_declared() {
+        let executor =
+            CommandAgentExecutor::from_json(
+                r#"{
+                  "workers": [
+                    {
+                      "worker": "worker-a",
+                      "program": "/opt/tomverse/agent-a"
+                    }
+                  ]
+                }"#,
+            )
+            .unwrap();
+
+        assert!(
+            executor
+                .command_for("worker-a")
+                .unwrap()
+                .env_passthrough
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn declared_lane_environment_names_are_kept_in_order() {
+        let executor =
+            CommandAgentExecutor::from_json(
+                r#"{
+                  "workers": [
+                    {
+                      "worker": "worker-a",
+                      "program": "/opt/tomverse/agent-a",
+                      "env_passthrough": [
+                        "PATH",
+                        " ENGINEERING_RUNNER_LLM_KEY "
+                      ]
+                    }
+                  ]
+                }"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            executor
+                .command_for("worker-a")
+                .unwrap()
+                .env_passthrough,
+            vec![
+                "PATH".to_string(),
+                "ENGINEERING_RUNNER_LLM_KEY"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_plane_environment_never_reaches_a_lane() {
+        for name in
+            RESERVED_EXECUTOR_ENV_NAMES
+        {
+            let raw = format!(
+                r#"{{
+                  "workers": [
+                    {{
+                      "worker": "worker-a",
+                      "program": "/opt/tomverse/agent-a",
+                      "env_passthrough": ["{name}"]
+                    }}
+                  ]
+                }}"#,
+            );
+
+            assert!(
+                CommandAgentExecutor::from_json(
+                    &raw,
+                )
+                .is_err(),
+                "{name} must not be passable to a worker lane",
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_lane_environment_names_are_rejected() {
+        for name in [
+            "",
+            "1LEADING_DIGIT",
+            "HAS-DASH",
+            "HAS SPACE",
+        ] {
+            let raw = format!(
+                r#"{{
+                  "workers": [
+                    {{
+                      "worker": "worker-a",
+                      "program": "/opt/tomverse/agent-a",
+                      "env_passthrough": ["{name}"]
+                    }}
+                  ]
+                }}"#,
+            );
+
+            assert!(
+                CommandAgentExecutor::from_json(
+                    &raw,
+                )
+                .is_err(),
+                "{name:?} must be rejected",
+            );
+        }
+
+        assert!(
+            CommandAgentExecutor::from_json(
+                r#"{
+                  "workers": [
+                    {
+                      "worker": "worker-a",
+                      "program": "/opt/tomverse/agent-a",
+                      "env_passthrough": ["PATH", "PATH"]
+                    }
+                  ]
+                }"#,
+            )
+            .is_err()
+        );
+    }
+
+    /*
+     * The two tests above pin what the configuration accepts. This one pins
+     * what the child process actually receives, which is the property that
+     * matters: a lane must not inherit the orchestrator's environment.
+     */
+    fn environment_reporter(
+        env_passthrough: Vec<String>,
+    ) -> Option<WorkerCommandSpec> {
+        let (program, args) =
+            if cfg!(unix) {
+                (
+                    "/usr/bin/env".to_string(),
+                    Vec::new(),
+                )
+            } else {
+                let root =
+                    std::env::var(
+                        "SystemRoot",
+                    )
+                    .ok()?;
+
+                (
+                    format!(
+                        "{root}\\System32\\cmd.exe"
+                    ),
+                    vec![
+                        "/c".to_string(),
+                        "set".to_string(),
+                    ],
+                )
+            };
+
+        if !std::path::Path::new(&program)
+            .exists()
+        {
+            return None;
+        }
+
+        Some(WorkerCommandSpec {
+            worker: "worker-a"
+                .to_string(),
+            program,
+            args,
+            env_passthrough,
+        })
+    }
+
+    fn reported_environment(
+        spec: &WorkerCommandSpec,
+    ) -> String {
+        let output =
+            lane_command(spec)
+                .output()
+                .expect(
+                    "environment reporter must run",
+                );
+
+        String::from_utf8_lossy(
+            &output.stdout,
+        )
+        .to_lowercase()
+    }
+
+    #[test]
+    fn a_lane_does_not_inherit_the_orchestrator_environment() {
+        let Some(undeclared) =
+            environment_reporter(
+                Vec::new(),
+            )
+        else {
+            return;
+        };
+
+        assert!(
+            !reported_environment(
+                &undeclared,
+            )
+            .contains("path="),
+            "a lane with no declared names must start from an empty environment",
+        );
+
+        let declared =
+            environment_reporter(vec![
+                "PATH".to_string(),
+            ])
+            .expect(
+                "reporter resolved once already",
+            );
+
+        assert!(
+            reported_environment(&declared)
+                .contains("path="),
+            "a declared name must reach the lane",
         );
     }
 
