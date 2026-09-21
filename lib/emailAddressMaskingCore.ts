@@ -114,7 +114,12 @@ export type AddressRevealKind = (typeof ADDRESS_REVEAL_KINDS)[number];
  */
 export const ADDRESS_REVEAL_TARGET_TYPES: Record<AddressRevealKind, string> = {
   delivery: "EmailDelivery",
-  suppression: "SuppressionEntry",
+  // The id the suppression console hands out, and therefore the id the reveal
+  // resolves, is a `SuppressionCause`. This said `SuppressionEntry` until the
+  // console moved onto causes, which filed every disclosure under a table that
+  // holds no such row: an immutable audit entry naming an id that cannot be
+  // looked up, in the one record whose whole job is being looked up later.
+  suppression: "SuppressionCause",
   campaign_recipient: "EmailCampaignRecipient",
 };
 

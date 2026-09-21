@@ -83,7 +83,10 @@ const causeFor = async (emailAddress: string, reason: string) =>
 /** An audit row written in the lift's transaction, standing in for the route's. */
 const auditInTx = async (tx: Parameters<Parameters<typeof liftSuppressionCauses>[0]["writeReleaseAudit"]>[0]) => {
   const row = await tx.adminAuditLog.create({
-    data: { action: "email_suppression.removed", targetType: "SuppressionEntry", summary: "test" },
+    // The same target type the route writes: the set of causes, not the
+    // mirror row. A stand-in that files the audit somewhere the real one never
+    // does is a stand-in for something else.
+    data: { action: "email_suppression.removed", targetType: "SuppressionCauseSet", summary: "test" },
     select: { id: true },
   });
   return row.id;
