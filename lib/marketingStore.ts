@@ -74,7 +74,7 @@ import {
   type MarketingVerificationMethod,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
-import { marketingFactsDigest } from "@/lib/marketingFacts";
+import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
@@ -250,8 +250,14 @@ export async function updateMarketingChannel(
         : asJson(marketingGraduationSnapshotSchema.parse(patch.graduationSnapshot));
   }
 
+  let current: {
+    status: string;
+    pausedAt: Date | null;
+    lastResumeAuditLogId: string | null;
+  } | null = null;
+
   if (patch.status === "autonomous_mode") {
-    const current = await database.marketingChannel.findUnique({
+    current = await database.marketingChannel.findUnique({
       where: { id },
       select: { status: true, pausedAt: true, lastResumeAuditLogId: true },
     });
@@ -290,7 +296,33 @@ export async function updateMarketingChannel(
     }
   }
 
-  return database.marketingChannel.update({ where: { id }, data });
+  // **Compare and set, not just set.** The audit check above is an `await`,
+  // and what it verified was the row as it was before: another writer could
+  // resume the account with a newer entry and pause it again in between, and
+  // this update would then record the older entry as the evidence for the
+  // pause that is there now. The state the checks were made against is part
+  // of the condition, and nought rows is a refusal rather than a silent
+  // success.
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id,
+      ...(current
+        ? {
+            status: current.status,
+            pausedAt: current.pausedAt,
+            lastResumeAuditLogId: current.lastResumeAuditLogId,
+          }
+        : {}),
+    },
+    data,
+  });
+  if (updated.count !== 1) {
+    throw new MarketingStoreRefusedError(
+      "channel_changed_under_us",
+      "The account moved between the checks and the write",
+    );
+  }
+  return database.marketingChannel.findUniqueOrThrow({ where: { id } });
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +472,7 @@ export async function createMarketingPost(
   // says the claims, the assets, the registry versions and the fact snapshot
   // are the ones the Guard was resolved against. A decision made with one
   // registry could otherwise be recorded on a post claiming another.
-  const storedFactsDigest = marketingFactsDigest({
+  const storedFactsScopeDigest = marketingFactsScopeDigest({
     claimIds: input.claimIds,
     assetIds: input.assetIds,
     claimRegistryVersion: input.claimRegistryVersion,
@@ -449,7 +481,7 @@ export async function createMarketingPost(
       .update(JSON.stringify(canonicalJson(input.factSnapshot)), "utf8")
       .digest("hex"),
   });
-  if (storedFactsDigest !== decision.factsDigest) {
+  if (storedFactsScopeDigest !== decision.factsScopeDigest) {
     throw new MarketingStoreRefusedError(
       "guard_decision_not_about_these_facts",
       "That decision was resolved against different facts",
@@ -642,19 +674,6 @@ const postPatchData = (
         "The envelope digest is computed from the envelope, not supplied",
       );
     }
-    // And the two places a schedule can live agree. A patch that moved one and
-    // not the other left the row and its envelope saying different things
-    // about when the post goes out.
-    if (
-      patch.scheduledAt !== undefined &&
-      (patch.scheduledAt?.toISOString() ?? null) !==
-        (envelope.scheduledAt ?? null)
-    ) {
-      throw new MarketingStoreRefusedError(
-        "envelope_schedule_disagrees",
-        "The envelope and the column name different schedules",
-      );
-    }
     data.envelope = asJson(envelope);
     data.envelopeDigest = digest;
   } else if (patch.envelopeDigest !== undefined) {
@@ -763,6 +782,8 @@ export async function appendMarketingPostHistory(
       historyVersion: true,
       status: true,
       envelopeDigest: true,
+      envelope: true,
+      scheduledAt: true,
     },
   });
   if (!current || current.historyVersion !== input.expectedVersion) {
@@ -771,6 +792,29 @@ export async function appendMarketingPostHistory(
 
   const history = marketingHistorySchema.parse(current.history);
   const data = postPatchData(input.patch ?? {});
+
+  // **The two places a schedule can live agree after this append, not just
+  // inside it.** Comparing them only when both were patched let either one
+  // move on its own: an envelope carrying a date went in while the column
+  // stayed null, and the row then said two things about when the post goes
+  // out. The values compared are the ones that will be there afterwards.
+  const currentEnvelope = marketingEnvelopeSchema.safeParse(current.envelope);
+  const finalEnvelopeSchedule =
+    input.patch?.envelope !== undefined
+      ? (marketingEnvelopeSchema.parse(input.patch.envelope).scheduledAt ?? null)
+      : currentEnvelope.success
+        ? (currentEnvelope.data.scheduledAt ?? null)
+        : null;
+  const finalColumnSchedule =
+    input.patch?.scheduledAt !== undefined
+      ? (input.patch.scheduledAt?.toISOString() ?? null)
+      : (current.scheduledAt?.toISOString() ?? null);
+  if (finalEnvelopeSchedule !== finalColumnSchedule) {
+    throw new MarketingStoreRefusedError(
+      "envelope_schedule_disagrees",
+      "The envelope and the column would name different schedules",
+    );
+  }
 
   // docs/policy/marketing-automation.md §2: a confirmed failure is re-queued by
   // a person, and the decision is about this content and this failure. The

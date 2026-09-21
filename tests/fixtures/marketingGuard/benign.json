@@ -508,6 +508,24 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "memory.imperativeSecondClause",
+      "ruleId": "rule.memory-claim",
+      "input": "Clone a repository, check your memory usage.",
+      "note": "an imperative second clause has no subject, and the comma opens it",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.noticeAfterLabel",
+      "ruleId": "rule.australia-minors",
+      "input": "Notice: For under-16s, parental consent is required.",
+      "note": "a label before the notice; a colon opens a clause for both rules or for neither",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

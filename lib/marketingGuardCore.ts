@@ -41,6 +41,7 @@ import {
 } from "@/lib/marketingGuardRules";
 import {
   marketingFactsDigest,
+  marketingFactsScopeDigest,
   type MarketingGuardAssetFact,
   type MarketingGuardClaimFact,
   type MarketingGuardFacts,
@@ -151,6 +152,7 @@ export type MarketingGuardDecision =
       ruleIds: string[];
       draftDigest: string;
       factsDigest: string;
+      factsScopeDigest: string;
     }
   | {
       verdict: "approval_required";
@@ -158,6 +160,7 @@ export type MarketingGuardDecision =
       ruleIds: string[];
       draftDigest: string;
       factsDigest: string;
+      factsScopeDigest: string;
     }
   | {
       verdict: "autonomous_eligible";
@@ -178,6 +181,7 @@ export type MarketingGuardDecision =
       ruleIds: string[];
       draftDigest: string;
       factsDigest: string;
+      factsScopeDigest: string;
     };
 
 /**
@@ -791,13 +795,20 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
   // From the snapshot, which is what every check below reads too.
   const draftDigest = marketingGuardDraftDigest(draft);
-  const factsDigest = marketingFactsDigest({
+  // Two values, because they answer two questions. The scope digest is what a
+  // writer can recompute from its own columns, so it proves the decision was
+  // made about these ids and these registries. The full digest covers every
+  // answer the resolver gave, so two bundles that disagree are two different
+  // values -- which nobody can recompute, and which is exactly why it is worth
+  // recording rather than checking.
+  const factsScopeDigest = marketingFactsScopeDigest({
     claimIds: facts.claims.map((claim) => claim.claimId),
     assetIds: facts.assets.map((asset) => asset.assetId),
     claimRegistryVersion: facts.claimRegistryVersion,
     assetRegistryVersion: facts.assetRegistryVersion,
     factSnapshotDigest: facts.factSnapshotDigest,
   });
+  const factsDigest = marketingFactsDigest(facts);
 
   const rejectCodes: MarketingRejectCode[] = [];
   const approvalCodes: MarketingApprovalCode[] = [];
@@ -1002,6 +1013,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       ruleIds: uniqueInOrder(ruleIds),
       draftDigest,
       factsDigest,
+      factsScopeDigest,
     });
   }
 
@@ -1060,6 +1072,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       ruleIds: uniqueInOrder(ruleIds),
       draftDigest,
       factsDigest,
+      factsScopeDigest,
     });
   }
 
@@ -1081,6 +1094,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     ruleIds: uniqueInOrder(ruleIds),
     draftDigest,
     factsDigest,
+    factsScopeDigest,
   });
 }
 

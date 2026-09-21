@@ -34,6 +34,7 @@
 // someone reading the page. They catch the specific sentence §17 names.
 
 import {
+  MARKETING_CLAUSE_VERBS,
   MARKETING_REPLICATION_VERBS,
   marketingVerbForms,
 } from "@/lib/marketingClaimVerbs";
@@ -141,7 +142,23 @@ export type ForbiddenMemoryClaim = {
  * invented "BEST" out of a sentence listing the letters.
  */
 const REPLICATION_VERBS: readonly string[] = Object.freeze(
-  MARKETING_REPLICATION_VERBS.flatMap(marketingVerbForms),
+  MARKETING_REPLICATION_VERBS.flatMap(marketingVerbForms).sort(
+    (left, right) => right.length - left.length,
+  ),
+);
+
+/**
+ * The participles, for the passive: "Your memories were copied."
+ *
+ * The same forms, filtered to the ones a passive uses, so a lemma cannot be in
+ * the active list and missing from this one.
+ */
+const REPLICATION_PARTICIPLES: readonly string[] = Object.freeze(
+  MARKETING_REPLICATION_VERBS.flatMap((verb) =>
+    marketingVerbForms(verb).filter(
+      (form) => form.endsWith("ed") || form.endsWith("ied"),
+    ),
+  ).sort((left, right) => right.length - left.length),
 );
 
 const REPLICATION_OBJECTS: readonly string[] = Object.freeze([
@@ -200,7 +217,16 @@ const CLAUSE_SEGMENT = "[^.!?\\n。,;:\\u2014\\u2013]";
  */
 const INNER_COMMA =
   ",(?!\\s*(?:then|so|but|and|or|yet|while|because)\\b)" +
-  "(?!\\s*(?:we|it|they|you|i|he|she|the|a|an|our|its|their|this|that)\\s+[\\p{L}]+)";
+  // A subject and a *verb*, not a subject and any word. "Clone a repository,
+  // check your memory usage." has no subject at all -- it is an imperative --
+  // so the bare verb after the comma is the tell, and reading "any word" made
+  // "your curated, deeply personal memories" look like a clause too.
+  "(?!\\s*(?:we|it|they|you|i|he|she|the|a|an|our|its|their|this|that)\\s+(?:" +
+  MARKETING_CLAUSE_VERBS.join("|") +
+  "))" +
+  "(?!\\s*(?:" +
+  MARKETING_CLAUSE_VERBS.join("|") +
+  "|check|see|read|open|visit|try|use|start|keep|make|take|get)\\b)";
 
 const CLAUSE_GAP = `${CLAUSE_SEGMENT}{0,160}(?:${INNER_COMMA}${CLAUSE_SEGMENT}{0,80}){0,3}`;
 
@@ -228,7 +254,7 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
                 "\\b(?:" + REPLICATION_VERBS.join("|") + ")\\b" +
                     CLAUSE_GAP +
                     "\\b(memory|memories|personality|persona|brain|mind)\\b",
-                "i"
+                "iu"
             ),
             // The same claim with every separator tolerated inside the words,
             // built from the same vocabulary as the line above so the two
@@ -236,11 +262,14 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
             // because this is where the clause is read, and a denial is not a
             // claim.
             SPACED_REPLICATION_CLAIM,
+            // The passive, from the same generator. Writing the participles
+            // out by hand missed `copied`, `duplicated` and `transferred`,
+            // which is the drift the shared lemma list exists to stop.
             new RegExp(
-                "\\b(memory|memories|personality|persona|brain)\\b" +
+                "\\b(?:memory|memories|personality|persona|brain)\\b" +
                     CLAUSE_GAP +
-                    "\\b(cloned|replicated|recreated|reproduced)\\b",
-                "i"
+                    "\\b(?:" + REPLICATION_PARTICIPLES.join("|") + ")\\b",
+                "iu"
             ),
         ],
     },

@@ -543,6 +543,12 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'const g = await import(p);\nconst { [k]: mint } = g;\nmint({});',
     'let mint;\n({ [k]: mint } = await import(p));\nmint({});',
     'const { ...rest } = await import(p);\nrest[k]({});',
+    // The tenth review: the same bypass one name along. The computed-access
+    // rules were written for the template proof and the facts seal was added
+    // beside them rather than into them.
+    'const g = await import(p);\ng["sealMarketingFacts"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nguard["sealMarketingFacts"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, "sealMarketingFacts");',
   ];
 
   for (const text of escapes) {

@@ -83,13 +83,15 @@ export type MarketingGuardFacts = {
 };
 
 /**
- * What the decision carries, and what a writer can recompute.
+ * What a writer can recompute, and what it therefore proves.
  *
  * The ids, the registry versions and the snapshot digest -- every one of which
- * a post stores in a column, so the store can ask whether the decision it was
- * handed was made against the facts it is about to record.
+ * a post stores in a column. So a store can ask "was this decision resolved
+ * against the facts I am about to record", and the answer means the *scope*
+ * matched. It does not mean the facts were true, and it cannot: the store has
+ * no way to re-resolve a claim.
  */
-export function marketingFactsDigest(facts: {
+export function marketingFactsScopeDigest(facts: {
   readonly claimIds: readonly string[];
   readonly assetIds: readonly string[];
   readonly claimRegistryVersion: number;
@@ -99,7 +101,7 @@ export function marketingFactsDigest(facts: {
   return createHash("sha256")
     .update(
       JSON.stringify([
-        "marketing-guard-facts-v1",
+        "marketing-guard-facts-scope-v1",
         [...facts.claimIds].sort(),
         [...facts.assetIds].sort(),
         facts.claimRegistryVersion,
@@ -110,3 +112,54 @@ export function marketingFactsDigest(facts: {
     )
     .digest("hex");
 }
+
+/**
+ * Everything the decision was made on, including every answer.
+ *
+ * The scope digest above covers the ids and nothing else, so two bundles that
+ * disagree about every fact -- `featurePublic: true` and `featurePublic:
+ * false` for the same claim id, one autonomous and one refused -- hashed the
+ * same. This one distinguishes them, which is what makes the value on a
+ * decision worth recording: nobody can recompute it, and that is the point.
+ * It says *which* answers were given, so two decisions that differ are two
+ * different values in the record.
+ */
+export function marketingFactsDigest(facts: MarketingGuardFacts): string {
+  const claim = (entry: MarketingGuardClaimFact) => [
+    entry.claimId,
+    entry.type,
+    entry.known,
+    entry.priceSourcesAllStored ?? null,
+    entry.statesCreditAllowance ?? null,
+    entry.allowanceStatement ?? null,
+    entry.currency ?? null,
+    entry.targetsAustralia ?? null,
+    entry.modelMatches ?? null,
+    entry.featurePublic ?? null,
+    entry.comparisonEvidence ?? null,
+    entry.usedBefore,
+  ];
+
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        "marketing-guard-facts-v2",
+        [...facts.claims]
+          .map(claim)
+          .sort((left, right) =>
+            JSON.stringify(left) < JSON.stringify(right) ? -1 : 1,
+          ),
+        [...facts.assets]
+          .map((entry) => [entry.assetId, entry.known, entry.usedBefore])
+          .sort((left, right) =>
+            JSON.stringify(left) < JSON.stringify(right) ? -1 : 1,
+          ),
+        facts.claimRegistryVersion,
+        facts.assetRegistryVersion,
+        facts.factSnapshotDigest,
+      ]),
+      "utf8",
+    )
+    .digest("hex");
+}
+

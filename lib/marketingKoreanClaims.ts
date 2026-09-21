@@ -70,7 +70,11 @@ const NOUN_TAIL = new RegExp(
       // 서비스이지만. A uniqueness claim that runs straight on into the next
       // clause is the same claim, and a tail list holding only the
       // sentence-final forms did not see it.
-      "\uc774(?:\uba70|\uace0|\uc9c0\ub9cc|\uc790|\ub2c8|\uc5b4\uc11c|\ub77c\uc11c)",
+      // The copula joining one clause to the next, with and without the
+      // 이 that a vowel-final noun drops: 서비스이며 and 서비스며,
+      // 서비스이지만 and 서비스지만, 서비스인데. A list of three forms
+      // covered three sentences and missed the ones people write.
+      "(?:\uc774)?(?:\uba70|\uace0|\uc9c0\ub9cc|\uc778\ub370|\ub370|\uba74\uc11c|\uc790|\ub2c8|\uc5b4\uc11c|\uc5ec\uc11c|\ub77c\uc11c|\uace0\uc694|\uad6c\uc694)",
       // A particle, longest first so 으로 is not read as 로.
       NOUN_TAIL_PARTICLES.join("|"),
     ].join("|") +

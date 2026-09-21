@@ -221,15 +221,11 @@ const CLAUSE_EDGE = /[.!?\n。;:,\u2014\u2013]/u;
  */
 const OPENS_WITH_FOR = /^(?:for|to)\b/iu;
 
-const sentenceEdge = /[.!?\n。]/u;
-
-const sentenceAround = (text: string, at: number): string => {
-  let start = at;
-  while (start > 0 && !sentenceEdge.test(text[start - 1])) start -= 1;
-  let end = at;
-  while (end < text.length && !sentenceEdge.test(text[end])) end += 1;
-  return text.slice(start, end);
-};
+// The same edges the vocative rule opens on. Two definitions of "a sentence
+// starts here" meant a notice after a colon was read as a vocative by one and
+// as the middle of a sentence by the other, and "Notice: For under-16s,
+// parental consent is required." was refused.
+const sentenceEdge = /[.!?\n。:;\u2014\u2013]/u;
 
 const startsItsSentence = (text: string, at: number): boolean => {
   for (let index = at - 1; index >= 0; index -= 1) {
@@ -238,6 +234,15 @@ const startsItsSentence = (text: string, at: number): boolean => {
     return sentenceEdge.test(character);
   }
   return true;
+};
+
+/** The clause immediately after `at`, which is where a frame's notice sits. */
+const nextClause = (text: string, at: number): string => {
+  let start = at;
+  while (start < text.length && CLAUSE_EDGE.test(text[start])) start += 1;
+  let end = start;
+  while (end < text.length && !CLAUSE_EDGE.test(text[end])) end += 1;
+  return text.slice(start, end);
 };
 
 const clauseAround = (text: string, at: number): string => {
@@ -273,11 +278,15 @@ export function findMarketingMinorsTargeting(
       const isNotice =
         entry.vocative !== true &&
         (RESTRICTION.test(clauseAround(text, hit.index)) ||
-          // Or the match is the frame this sentence opens with, and the
-          // sentence is a notice.
+          // Or the match is the frame this sentence opens with and the clause
+          // straight after it is the restriction. "For under-16s, parental
+          // consent is required." is a notice; "For under-16s, create your
+          // account today; parental consent is required." is a pitch with a
+          // notice bolted on, and looking anywhere in the sentence could not
+          // tell them apart.
           (startsItsSentence(text, hit.index) &&
             OPENS_WITH_FOR.test(hit[0]) &&
-            RESTRICTION.test(sentenceAround(text, hit.index))));
+            RESTRICTION.test(nextClause(text, hit.index + hit[0].length))));
       if (
         !isNotice &&
         marketingClauseAsserts(text, hit.index, hit[0], {

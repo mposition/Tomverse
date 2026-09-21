@@ -626,6 +626,16 @@ const TEMPLATE_SEAL_NAME = "sealMarketingTemplateProof";
 const FACTS_SEAL_NAME = "sealMarketingFacts";
 const FACTS_SEAL_DECLARED_IN = "lib/marketingGuardCore.ts";
 
+/**
+ * Both seals, in one list.
+ *
+ * The computed-access rules were written for the template proof and the facts
+ * seal was added beside them, so `g["sealMarketingFacts"]({})` reached a
+ * function nothing counted -- the same bypass, one name along. A second seal
+ * added later joins this list and gets every rule at once.
+ */
+const PROTECTED_EXPORTS = Object.freeze([TEMPLATE_SEAL_NAME, FACTS_SEAL_NAME]);
+
 /** The module that declares it, matched on the specifier's last segment. */
 const TEMPLATE_SEAL_MODULE = "marketingGuardCore";
 
@@ -869,10 +879,10 @@ export const analyseSource = (path, text) => {
     // it -- and the review called the function through exactly this.
     if (ts.isElementAccessExpression(node)) {
       const key = literalTextOf(node.argumentExpression);
-      if (key === TEMPLATE_SEAL_NAME) {
+      if (PROTECTED_EXPORTS.includes(key)) {
         sealEscapes.push({
           line: lineOf(sourceFile, node),
-          detail: `${TEMPLATE_SEAL_NAME} reached by a computed key`,
+          detail: `${key} reached by a computed key`,
         });
       } else if (
         key === null &&
@@ -892,11 +902,14 @@ export const analyseSource = (path, text) => {
       }
     }
 
-    if (isReflectGet(node) && literalTextOf(node.arguments[1]) === TEMPLATE_SEAL_NAME) {
-      sealEscapes.push({
-        line: lineOf(sourceFile, node),
-        detail: `${TEMPLATE_SEAL_NAME} reached through Reflect.get`,
-      });
+    if (isReflectGet(node)) {
+      const key = literalTextOf(node.arguments[1]);
+      if (PROTECTED_EXPORTS.includes(key)) {
+        sealEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `${key} reached through Reflect.get`,
+        });
+      }
     }
 
     // The whole module bound to a name, however it is written. After this the
@@ -971,7 +984,7 @@ export const analyseSource = (path, text) => {
           if (!ts.isPropertyAssignment(element)) continue;
           if (!ts.isComputedPropertyName(element.name)) continue;
           const key = literalTextOf(element.name.expression);
-          if (key === TEMPLATE_SEAL_NAME || key === null) {
+          if (PROTECTED_EXPORTS.includes(key) || key === null) {
             sealEscapes.push({
               line: lineOf(sourceFile, element),
               detail: "a computed binding from a module loaded at run time",
@@ -990,7 +1003,7 @@ export const analyseSource = (path, text) => {
         const name = element.propertyName;
         if (!name || !ts.isComputedPropertyName(name)) continue;
         const key = literalTextOf(name.expression);
-        if (key === TEMPLATE_SEAL_NAME || key === null) {
+        if (PROTECTED_EXPORTS.includes(key) || key === null) {
           sealEscapes.push({
             line: lineOf(sourceFile, element),
             detail: "a computed binding from a module loaded at run time",
