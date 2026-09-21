@@ -1316,7 +1316,7 @@ marketing을 포함하지 않는다는 범위 결정.
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
-| 6 | 사용자가 명시적으로 구독한 기능 업데이트(`release_notes`) | **marketing** | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
+| 6 | 사용자가 명시적으로 구독한 기능 업데이트 | **marketing** | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
 | 7 | 신규 기능 소개, 뉴스레터 | marketing | 불가 | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
 | 8 | 프로모션, 할인, 재참여 | marketing | 불가 | 불가 | **필수** | P3 | 관대 | marketing |
 | 9 | 관리자 긴급 공지 | 내용에 따라 갈림 | 조건부 | 조건부 | 조건부 | P0 | 공격적 | transactional |
@@ -1373,8 +1373,15 @@ marketing을 포함하지 않는다는 범위 결정.
   marketing 거부자에게 못 보내게 되어 **법적 통지 의무를 스스로 깨뜨립니다.**
   이것이 이 문서에서 가장 강조하고 싶은 실패 모드입니다.
 
-#### 6. 사용자가 명시적으로 구독한 기능 업데이트 (`release_notes`)
+#### 6. 사용자가 명시적으로 구독한 기능 업데이트
 - **classification은 `marketing`입니다**(승인 A, 제품 소식 재설계 초안 §3).
+- **어느 purpose가 이 행인지는 아직 정해지지 않았습니다.** 오늘 있는 것은
+  `product_updates`(동의 필수)이고, 초안 §3은 `release_notes`를 **새로 만든다**고
+  적으면서 `product_updates`를 언급하지 않습니다. 둘이 같은 것인지, 하나가 다른
+  하나를 대체하는지, 나란히 서는지는 **S3의 purpose 분류표가 정합니다.** 여기서
+  정하지 않는 이유는 그것이 철회 대상을 가르는 값이기 때문입니다 —
+  `withdrawAllMarketing()`이 그 표로 대상을 고릅니다. 분류가 `marketing`이라는
+  것은 어느 쪽이 되든 바뀌지 않습니다.
   이 표는 한때 `service(동의 기반)`이라고 적었고 그것은 **우회로**였습니다:
   `classification === "marketing"` **하나**가 발송 스트림·kill switch·한국
   `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를 켜므로,
