@@ -260,8 +260,21 @@ test("raw caller context cannot choose the autonomous verdict", () => {
     },
   });
   assert.equal(decision.verdict, "approval_required");
+  assert.ok(decision.codes.includes("context_not_resolved"));
   assert.ok(decision.codes.includes("alert_path_not_ready"));
   assert.ok(decision.codes.includes("category_unreadable"));
+  assert.ok(decision.ruleIds.includes("context.not-resolved"));
+});
+
+test("a copy of resolved context reports that its provenance was lost", () => {
+  const ready = autonomousReady();
+  const decision = guardDraft({
+    ...ready,
+    context: { ...ready.context },
+  });
+  assert.equal(decision.verdict, "approval_required");
+  assert.ok(decision.codes.includes("context_not_resolved"));
+  assert.ok(decision.ruleIds.includes("context.not-resolved"));
 });
 
 test("the S1 server context is pinned closed", () => {

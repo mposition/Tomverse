@@ -62,6 +62,11 @@ const claims = [
   },
 ];
 
+const { marketingClaimRegistrySchema } = await import(
+  mod("lib/marketingClaims.ts")
+);
+marketingClaimRegistrySchema.parse(claims);
+
 const claimById = (id) => claims.find((claim) => claim.id === id);
 
 mock.module(mod("lib/marketingClaims.ts"), {

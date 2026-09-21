@@ -87,6 +87,7 @@ export const MARKETING_APPROVAL_CODES = Object.freeze([
   "undeclared_fact",
   "category_unreadable",
   "alert_path_not_ready",
+  "context_not_resolved",
 ] as const);
 export type MarketingApprovalCode = (typeof MARKETING_APPROVAL_CODES)[number];
 
@@ -806,10 +807,13 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   const facts = input.facts;
   const templates = [...input.templates];
   const rawContext = input.context;
+  const contextWasResolved = sealedContexts.has(rawContext);
   // A structural look-alike is caller input, not server-resolved context. Do
   // not read a single answer from it: the S1 fail-closed values are the only
-  // safe substitute, and they make autonomous publication unreachable.
-  const context: MarketingGuardContextValues = sealedContexts.has(rawContext)
+  // safe substitute, and they make autonomous publication unreachable. Keep
+  // the failed provenance as a decision code so this safe degradation cannot
+  // hide a broken caller.
+  const context: MarketingGuardContextValues = contextWasResolved
     ? rawContext
     : {
         priceFallbackAlertReady: false,
@@ -841,6 +845,11 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   const rejectCodes: MarketingRejectCode[] = [];
   const approvalCodes: MarketingApprovalCode[] = [];
   const ruleIds: string[] = [];
+
+  if (!contextWasResolved) {
+    approvalCodes.push("context_not_resolved");
+    ruleIds.push("context.not-resolved");
+  }
 
   // **A fact is not a boolean a caller passes.** Every check below reads
   // `known`, `featurePublic`, `priceSourcesAllStored` and the rest, and a

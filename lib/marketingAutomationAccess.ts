@@ -213,13 +213,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
  *
- * 2026-09-21, S1f: `MarketingPost.factsDigest` now preserves the complete
- * resolver answer digest beside each Guard decision. Webhook admission reads
- * none of that column and its descriptor is unchanged; the fingerprint moves
- * because `prisma/schema.prisma` is deliberately watched as a whole.
+ * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
+ * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
+ * evidence backs a separate NOT NULL transition. Webhook admission never reads
+ * this column; the fingerprint moves because the schema is watched as a whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c2f27dd11a4e1e93d6d08bcde5be2b0fdc89a364d7cc3993297e47cbdea95d62";
+  "c5b24fb28c4dff5bafecb9cf9e343d9060505b6c6be866fa1adb2ce7b24f112c";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
