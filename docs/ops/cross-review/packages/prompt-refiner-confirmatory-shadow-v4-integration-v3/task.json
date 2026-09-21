@@ -50,5 +50,8 @@
     "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
     "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
   ],
-  "generatedPaths": []
+  "generatedPaths": [
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records"
+  ]
 }
