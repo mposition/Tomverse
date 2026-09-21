@@ -39,18 +39,34 @@ import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
  * starts mail to an address that a provider, or the person, previously said to
  * stop mailing.** The reason is the only record of why we overrode that.
  *
- * Three levels, by what the entry says:
+ * **A lift acts on a selector's whole set of active causes and releases the
+ * subset its action may.** That is the shape this screen works in, and it is
+ * not the shape "three levels, by what the entry says" described. That was
+ * written when one merged row stood for the whole suppression: the row had one
+ * reason, so the lift had one answer about it.
  *
- *  - `privacy_request` is refused outright. It is the record of someone
+ * What the reasons decide now is which causes come out.
+ *
+ *  - `privacy_request` is released by nothing. It is the record of someone
  *    exercising a legal right, and the process entitled to lift it is the
- *    privacy process that created it, not a button here.
+ *    privacy process that created it, not a button here. It no longer refuses
+ *    the request, because it is no longer the request: an address holding a
+ *    `manual` hold and a `privacy_request` has the hold released and the
+ *    privacy request left standing, so the address stays suppressed. Refusing
+ *    outright would leave an operator with no way to undo their own hold.
  *  - `hard_bounce` and `complaint` need a second administrator. §13.3 calls
  *    them permanent, and complaints are what a receiver measures a sending
- *    domain by (§14.5) -- the part of this system that recovers slowest.
+ *    domain by (§14.5) -- the part of this system that recovers slowest. One
+ *    of them anywhere in the set is what makes the whole request need approval.
  *  - everything else needs a reason that says something, and an audit entry.
  *
+ * So a lift answers with `released` and `remaining` rather than removed or not,
+ * and the audit entry names the set (`SuppressionCauseSet`) rather than the
+ * handle the operator clicked. The matrix is `releasableBy()` in
+ * `lib/emailSuppressionAuthorityCore.ts` and is not restated here.
+ *
  * Our own list is not the provider's. Resend's suppression is account- and
- * region-wide (§5.3.1), so lifting an entry here does not lift one there, and
+ * region-wide (§5.3.1), so lifting a cause here does not lift one there, and
  * the response says so rather than letting an operator conclude that mail will
  * now flow.
  */
