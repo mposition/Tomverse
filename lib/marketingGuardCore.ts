@@ -136,7 +136,52 @@ export type MarketingTemplateBinding = {
   readonly approvedDigest: string;
   readonly historyVersion: number;
   readonly reusableAsTemplate: true;
+  /** When the loader proved the row, and when that stops being worth anything. */
+  readonly provenAt: number;
+  readonly expiresAt: number;
 };
+
+/**
+ * What a publish has to do with a binding, rather than a suggestion that it
+ * should.
+ *
+ * The age bound on the proof stops a *proof* being kept; it did nothing about
+ * the decision, which carried the same permission with no expiry on it at all.
+ * So the binding carries its own, and this is the only way to turn one into a
+ * write: it refuses an expired binding and otherwise returns the `where`
+ * fragment the update has to carry.
+ *
+ * `now` is an argument because the only clock worth reading here is the
+ * database's, in the transaction doing the write. A caller that passes its own
+ * is comparing against a clock nobody agreed on, which is the failure this is
+ * about; `lib/marketingStore.ts` reads it from the database when the publish
+ * route exists.
+ */
+export type MarketingTemplateWriteConditions =
+  | { ok: true; where: Record<string, unknown> }
+  | { ok: false; refusal: "binding_expired" };
+
+export function marketingTemplateWriteConditions(
+  binding: MarketingTemplateBinding,
+  now: Date,
+): MarketingTemplateWriteConditions {
+  const at = now.getTime();
+  if (!Number.isFinite(at) || at > binding.expiresAt || at < binding.provenAt) {
+    return { ok: false, refusal: "binding_expired" };
+  }
+  return {
+    ok: true,
+    where: {
+      id: binding.templateId,
+      channelId: binding.channelId,
+      locale: binding.locale,
+      approvedDigest: binding.approvedDigest,
+      envelopeDigest: binding.approvedDigest,
+      historyVersion: binding.historyVersion,
+      reusableAsTemplate: true,
+    },
+  };
+}
 
 /**
  * A claim the draft declares, already resolved against the registries.
@@ -154,6 +199,16 @@ export type MarketingGuardClaimFact = {
   readonly known: boolean;
   /** For `pricing` and `plan`: whether every field it uses is `stored`. */
   readonly priceSourcesAllStored?: boolean;
+  /**
+   * For `plan`: whether this claim is the credit allowance itself.
+   *
+   * §7.2 rule 4 wants the condition a "free" post carries, and the condition
+   * is the allowance -- not any price claim that happens to be in the same
+   * post. An earlier version accepted one, so "Start free. Credits never run
+   * out. Pro costs AUD 20 per month." passed on the strength of a claim about
+   * the Pro price. `lib/marketingClaims.ts` sets this from the registry entry.
+   */
+  readonly statesCreditAllowance?: boolean;
   /** For a price claim: the stored currency. */
   readonly currency?: string;
   readonly targetsAustralia?: boolean;
@@ -228,6 +283,15 @@ export type MarketingTemplateProof = {
   readonly templateId: string;
   /** The account the approval was given for. */
   readonly channelId: string;
+  /**
+   * The platform that account posts to, read off the account row.
+   *
+   * Sealed as well as the id, because the id alone did not stop the *kind* of
+   * channel being misreported: a real RedNote proof presented with
+   * `channel: "linkedin"` went autonomous, and RedNote is a channel §7.4 says
+   * always needs a person.
+   */
+  readonly channel: string;
   /** The language it was given in. */
   readonly locale: string;
   /** The row revision the loader read, carried into the decision's binding. */
@@ -248,6 +312,7 @@ export type MarketingTemplateProof = {
 export function sealMarketingTemplateProof(proof: {
   templateId: string;
   channelId: string;
+  channel: string;
   locale: string;
   historyVersion: number;
   approvedDigest: string;
@@ -258,6 +323,7 @@ export function sealMarketingTemplateProof(proof: {
   const sealed = Object.freeze({
     templateId: proof.templateId,
     channelId: proof.channelId,
+    channel: proof.channel,
     locale: proof.locale,
     historyVersion: proof.historyVersion,
     // Read here rather than taken as an argument. A caller that could set it
@@ -428,7 +494,12 @@ const COMPETITOR_NAMES: readonly (readonly [string, "word" | "substring"])[] =
     Object.freeze(["claude", "word"] as const),
     Object.freeze(["anthropic", "word"] as const),
     Object.freeze(["gemini", "word"] as const),
-    Object.freeze(["copilot", "word"] as const),
+    // Branded spellings only. "copilot" on its own is an ordinary noun --
+    // "Use Tomverse as your research copilot." names no competitor -- and a
+    // rule that sent that to a person would make the approval queue the only
+    // outcome for ordinary copy.
+    Object.freeze(["github copilot", "word"] as const),
+    Object.freeze(["microsoft copilot", "word"] as const),
     Object.freeze(["perplexity", "word"] as const),
     Object.freeze(["deepseek", "word"] as const),
     Object.freeze(["midjourney", "word"] as const),
@@ -439,6 +510,32 @@ const COMPETITOR_NAMES: readonly (readonly [string, "word" | "substring"])[] =
     Object.freeze(["코파일럿", "substring"] as const),
     Object.freeze(["퍼플렉시티", "substring"] as const),
   ]);
+
+/**
+ * Compounds that contain "free" and are not about a price.
+ *
+ * Removed from the forms before the free-wording check, the way a rule's
+ * exceptions are removed before its terms run. "Use free-form prompts to
+ * describe the task." was refused for stating a price it does not state.
+ */
+const FREE_COMPOUNDS: readonly string[] = Object.freeze([
+  "free form",
+  "freeform",
+  "free flowing",
+  "hands free",
+  "barrier free",
+  "free rein",
+  "carefree",
+  "free text",
+]);
+
+const withoutFreeCompounds = (forms: readonly string[]): string[] =>
+  forms.map((form) =>
+    FREE_COMPOUNDS.reduce((text, compound) => {
+      const pattern = marketingTermPattern(compound, "substring");
+      return text.replace(new RegExp(pattern.source, "gu"), " ");
+    }, form),
+  );
 
 const anyTermMatches = (
   forms: readonly string[],
@@ -520,6 +617,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
   // --- 2. what it says ----------------------------------------------------
   const forms = marketingTextForms(draft.renderedText);
+  const cleanedOfFreeCompounds = withoutFreeCompounds(forms);
   for (const rule of MARKETING_GUARD_RULES) {
     if (ruleFires(rule, forms)) {
       rejectCodes.push("banned_claim");
@@ -629,9 +727,13 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   // the second states nothing at all. What §7.2 rule 4 wants is the allowance,
   // and an allowance is a resolved pricing or plan claim.
   const freeCondition = facts.claims.some(
-    (claim) => claim.known && (claim.type === "pricing" || claim.type === "plan"),
+    (claim) =>
+      claim.known &&
+      claim.type === "plan" &&
+      claim.priceSourcesAllStored === true &&
+      claim.statesCreditAllowance === true,
   );
-  if (anyTermMatches(forms, FREE_WORDING)) {
+  if (anyTermMatches(cleanedOfFreeCompounds, FREE_WORDING)) {
     approvalCodes.push("price_or_promotion");
     if (!freeCondition || !anyTermMatches(forms, FREE_CONDITION)) {
       rejectCodes.push("free_wording_without_condition");
@@ -703,6 +805,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     named.slotsFromRegistry &&
     named.approvedDigest === sha256(draft.renderedText) &&
     named.channelId === draft.channelId &&
+    named.channel === draft.channel &&
     named.locale === draft.locale &&
     Date.now() - named.provenAt <= MARKETING_TEMPLATE_PROOF_MAX_AGE_MS &&
     Date.now() >= named.provenAt &&
@@ -750,6 +853,8 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       approvedDigest: named!.approvedDigest,
       historyVersion: named!.historyVersion,
       reusableAsTemplate: true,
+      provenAt: named!.provenAt,
+      expiresAt: named!.provenAt + MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
     },
     ruleIds: uniqueInOrder(ruleIds),
   };

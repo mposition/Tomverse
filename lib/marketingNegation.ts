@@ -1,8 +1,9 @@
 /**
  * Whether the clause a match sits in is asserting it or denying it.
  *
- * Contract: docs/policy/marketing-automation.md §7.1 and §17 of the memory
- * policy it points at. Two rules need this and both got it wrong on their own,
+ * Contract: docs/policy/marketing-automation.md §7.1, and
+ * docs/policy/external-conversation-import-and-memory.md §17, which is the
+ * memory policy the first one points at. Two rules need this and both got it wrong on their own,
  * so it lives in one place and each of them calls it.
  *
  * The problem is one sentence with two clauses. A marketing page carries the
@@ -61,6 +62,10 @@ const FOLLOWING_NEGATION =
 const HARD_BOUNDARIES: readonly string[] = Object.freeze([
   ";",
   ":",
+  // A spaced ASCII hyphen is a dash somebody typed without reaching for the
+  // dash key, and "We do not lose files - we clone your memories." read as one
+  // denial until it was here. Unspaced, it is part of a compound word.
+  " - ",
   "\u2014", // em dash
   "\u2013", // en dash
   "\uff1b", // full-width semicolon
@@ -93,28 +98,56 @@ const COMMA_SPLICE =
   /[,\uff0c]\s*(?=(?:we|it|they|you|i|he|she|this|that|these|those|our|its|their|there|here|everything|everyone|nothing)\b)/gi;
 
 /** The same, for Korean: a comma followed by a topic or subject marker. */
+/**
+ * A comma followed by a proper noun that is itself the subject of a verb.
+ *
+ * "We do not lose files, Tomverse clones your memories." is a comma splice
+ * whose second subject is a name, and a list of pronouns could not see it. The
+ * verb is what tells it apart from a predicate carrying on: in "not affiliated
+ * with, or endorsed by, OpenAI" the name is the object and no lower-case word
+ * follows it, so that sentence keeps its one negation.
+ */
+const NAMED_SUBJECT_SPLICE =
+  /[,\uff0c]\s*(?=\p{Lu}[\p{Ll}\p{N}]+\s+[\p{Ll}]+\b)/gu;
+
 const KOREAN_COMMA_SPLICE =
   /[,\uff0c]\s*(?=[\uac00-\ud7a3]{1,10}(?:\ub294|\uc740|\uc774|\uac00|\ub3c4)\s)/g;
 
-const lastBoundaryIndex = (before: string): number => {
+/**
+ * Where the clause holding `offset` begins, as an index into `sentence`.
+ *
+ * The whole sentence is scanned, not just the part before the match. A comma
+ * splice is recognised by what *follows* the comma -- "…, Tomverse clones your
+ * memories." needs the verb to tell a new subject from a name in a list -- and
+ * a scan that stopped at the match could never see it.
+ */
+const lastBoundaryIndex = (sentence: string, offset: number): number => {
   let latest = -1;
+  const consider = (at: number, length: number) => {
+    if (at === -1) return;
+    const boundary = at + length;
+    if (boundary <= offset) latest = Math.max(latest, boundary);
+  };
 
   for (const token of HARD_BOUNDARIES) {
-    const at = before.lastIndexOf(token);
-    if (at !== -1) latest = Math.max(latest, at + token.length);
+    consider(sentence.lastIndexOf(token, offset), token.length);
   }
 
+  const lower = sentence.toLowerCase();
   for (const token of CONJUNCTIONS) {
-    const at = before.toLowerCase().lastIndexOf(token);
-    if (at !== -1) latest = Math.max(latest, at + token.length);
+    consider(lower.lastIndexOf(token, offset), token.length);
   }
 
-  for (const expression of [COMMA_SPLICE, KOREAN_COMMA_SPLICE]) {
+  for (const expression of [
+    COMMA_SPLICE,
+    NAMED_SUBJECT_SPLICE,
+    KOREAN_COMMA_SPLICE,
+  ]) {
     // A fresh matcher each time: a `g` expression carries `lastIndex`, and a
     // shared one would start the next call wherever the previous one stopped.
     const scan = new RegExp(expression.source, expression.flags);
-    for (let hit = scan.exec(before); hit; hit = scan.exec(before)) {
-      latest = Math.max(latest, hit.index + hit[0].length);
+    for (let hit = scan.exec(sentence); hit; hit = scan.exec(sentence)) {
+      consider(hit.index, hit[0].length);
       if (scan.lastIndex === hit.index) scan.lastIndex += 1;
     }
   }
@@ -129,11 +162,25 @@ const lastBoundaryIndex = (before: string): number => {
  * nothing and the answer below it is scanned on its own -- and `false` when the
  * clause is negated on either side.
  */
+export type MarketingClauseOptions = {
+  /**
+   * Whether a question mark ends the matter.
+   *
+   * It does for a claim: "Is Tomverse affiliated with OpenAI?" asserts nothing,
+   * and the answer below it is scanned on its own. It does not for copy aimed
+   * at a child -- "Kids, sign up now?" is the call to action with a question
+   * mark on the end, and treating the two the same let it through.
+   */
+  readonly questionsAssertNothing?: boolean;
+};
+
 export function marketingClauseAsserts(
   text: string,
   matchIndex: number,
   match: string,
+  options: MarketingClauseOptions = {},
 ): boolean {
+  const questionsAssertNothing = options.questionsAssertNothing !== false;
   let start = matchIndex;
   while (start > 0 && !MARKETING_SENTENCE_BOUNDARY.test(text[start - 1])) {
     start -= 1;
@@ -143,12 +190,13 @@ export function marketingClauseAsserts(
     end += 1;
   }
 
-  if (text[end] === "?") return false;
+  if (questionsAssertNothing && text[end] === "?") return false;
 
-  const sentenceBefore = text.slice(start, matchIndex);
-  const boundary = lastBoundaryIndex(sentenceBefore);
+  const sentence = text.slice(start, end);
+  const offset = matchIndex - start;
+  const boundary = lastBoundaryIndex(sentence, offset);
   const before =
-    boundary > 0 ? sentenceBefore.slice(boundary) : sentenceBefore;
+    boundary > 0 ? sentence.slice(boundary, offset) : sentence.slice(0, offset);
 
   // The clause after the match ends at the next hard boundary too: a Korean
   // negator closes its own clause, and one in the *next* clause does not deny

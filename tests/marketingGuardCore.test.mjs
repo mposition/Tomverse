@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import {
   MARKETING_APPROVAL_CODES,
   MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
+  marketingTemplateWriteConditions,
   MARKETING_REJECT_CODES,
   guardDraft,
   guardTemplateForApproval,
@@ -78,8 +79,11 @@ const autonomousReady = (overrides = {}) => {
       sealMarketingTemplateProof({
         templateId: "template.compare",
         // The scope the approval was given in. A proof that carried only a
-        // digest let one account's approval publish from another.
+        // digest let one account's approval publish from another, and one
+        // carrying the id alone let a RedNote account's approval be presented
+        // as LinkedIn -- which is a channel §7.4 always sends to a person.
         channelId: CHANNEL_ID,
+        channel: "linkedin",
         locale: "en",
         historyVersion: 7,
         approvedDigest: TEMPLATE_DIGEST,
@@ -552,14 +556,57 @@ test("a proof is worth nothing once it is old", () => {
 test("an autonomous decision hands back the row state it was made against", () => {
   const decision = guardDraft(autonomousReady());
   assert.equal(decision.verdict, "autonomous_eligible", JSON.stringify(decision));
-  assert.deepEqual(decision.templateBinding, {
-    templateId: "template.compare",
+  assert.equal(decision.templateBinding.templateId, "template.compare");
+  assert.equal(decision.templateBinding.channelId, CHANNEL_ID);
+  assert.equal(decision.templateBinding.locale, "en");
+  assert.equal(decision.templateBinding.approvedDigest, TEMPLATE_DIGEST);
+  assert.equal(decision.templateBinding.historyVersion, 7);
+  assert.equal(decision.templateBinding.reusableAsTemplate, true);
+  assert.equal(
+    decision.templateBinding.expiresAt,
+    decision.templateBinding.provenAt + MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
+  );
+});
+
+test("a binding is a write condition with an expiry, not a permission", () => {
+  // The age bound stopped a *proof* being kept. The decision carried the same
+  // permission with no expiry on it, so a caller could hold a fresh decision
+  // and use it as a row predicate a minute later. Turning a binding into a
+  // write goes through here, and here refuses an expired one.
+  const decision = guardDraft(autonomousReady());
+  assert.equal(decision.verdict, "autonomous_eligible");
+  const binding = decision.templateBinding;
+
+  const inTime = marketingTemplateWriteConditions(binding, new Date(binding.provenAt));
+  assert.equal(inTime.ok, true, JSON.stringify(inTime));
+  assert.deepEqual(inTime.where, {
+    id: "template.compare",
     channelId: CHANNEL_ID,
     locale: "en",
     approvedDigest: TEMPLATE_DIGEST,
+    envelopeDigest: TEMPLATE_DIGEST,
     historyVersion: 7,
     reusableAsTemplate: true,
   });
+
+  for (const at of [
+    new Date(binding.expiresAt + 1),
+    // A clock behind the mint is a clock nobody agreed on.
+    new Date(binding.provenAt - 1),
+    new Date(Number.NaN),
+  ]) {
+    const refused = marketingTemplateWriteConditions(binding, at);
+    assert.equal(refused.ok, false, String(at));
+    assert.equal(refused.refusal, "binding_expired");
+  }
+});
+
+test("a proof for one platform does not stand for another", () => {
+  // A real RedNote proof presented with channel "linkedin" was autonomous, and
+  // RedNote is a channel §7.4 always sends to a person.
+  const decision = guardDraft(autonomousReady({ draft: { channel: "rednote" } }));
+  assert.equal(decision.verdict, "approval_required", JSON.stringify(decision));
+  assert.ok(decision.codes.includes("new_copy"));
 });
 
 test("the always-approving categories are re-read for a template rendering", () => {
@@ -626,6 +673,7 @@ test("free wording needs the allowance as a claim, not as a word", () => {
             type: "plan",
             known: true,
             priceSourcesAllStored: true,
+            statesCreditAllowance: true,
             usedBefore: true,
           },
         ],
@@ -635,4 +683,38 @@ test("free wording needs the allowance as a claim, not as a word", () => {
   );
   assert.equal(withClaim.verdict, "approval_required", JSON.stringify(withClaim));
   assert.ok(withClaim.codes.includes("price_or_promotion"));
+
+  // A price claim about something else is not the allowance. "Start free.
+  // Credits never run out. Pro costs AUD 20 per month." passed on the strength
+  // of the Pro price.
+  const wrongClaim = guardDraft(
+    input({
+      draft: {
+        renderedText: "Start free. Credits never run out.",
+        claimIds: ["claim.pro-price"],
+      },
+      facts: {
+        claims: [
+          {
+            claimId: "claim.pro-price",
+            type: "pricing",
+            known: true,
+            priceSourcesAllStored: true,
+            usedBefore: true,
+          },
+        ],
+        assets: [],
+      },
+    }),
+  );
+  assert.equal(wrongClaim.verdict, "reject", JSON.stringify(wrongClaim));
+  assert.ok(wrongClaim.codes.includes("free_wording_without_condition"));
+
+  // And "free" inside a compound that is not about a price says nothing about
+  // one. This was refused for stating a price it does not state.
+  const compound = guardDraft(
+    input({ draft: { renderedText: "Use free-form prompts to describe the task." } }),
+  );
+  assert.equal(compound.verdict, "approval_required", JSON.stringify(compound));
+  assert.ok(!compound.codes.includes("price_or_promotion"));
 });

@@ -42,18 +42,26 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
         "\\b(?:kids|children|teens|teenagers|students|schoolkids)\\b[^\\p{L}\\p{N}]{0,3}\\s*(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now|come\\s+and)\\b",
       flags: "iu",
     }),
-    // An age that is under sixteen, however it is written.
+    // An age under sixteen, *and* the phrase that aims copy at it. The age on
+    // its own is not targeting: "12-year-olds cannot sign up." is the rule
+    // being stated, and a pattern matching the bare noun phrase refused it. So
+    // the preposition or the call to action has to be there too.
     Object.freeze({
       source:
-        "\\b(?:[5-9]|1[0-5])\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?\\b",
+        "\\b(?:for|to|at|aimed at|built for|designed for|perfect for|great for|made for|suited to)\\s+(?:[5-9]|1[0-5])\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?\\b",
       flags: "iu",
     }),
     Object.freeze({
-      source: "\\bages?\\s+(?:[5-9]|1[0-5])(?:\\s*(?:[-\\u2010-\\u2015]|to|\\u2013)\\s*\\d{1,2})?\\b",
+      source:
+        "\\b(?:[5-9]|1[0-5])\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?[,\\uff0c]?\\s+(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now)\\b",
       flags: "iu",
     }),
     Object.freeze({
-      source: "\\bunder\\s*(?:13|16|18)s?\\b",
+      source: "\\b(?:for|to)\\s+ages?\\s+(?:[5-9]|1[0-5])(?:\\s*(?:[-\\u2010-\\u2015]|to|\\u2013)\\s*\\d{1,2})?\\b",
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: "\\b(?:for|to)\\s+under\\s*(?:13|16|18)s?\\b",
       flags: "iu",
     }),
     Object.freeze({
@@ -103,7 +111,14 @@ export function findMarketingMinorsTargeting(
     const flags = entry.flags.includes("g") ? entry.flags : `${entry.flags}g`;
     const scanner = new RegExp(entry.source, flags);
     for (let hit = scanner.exec(text); hit; hit = scanner.exec(text)) {
-      if (marketingClauseAsserts(text, hit.index, hit[0])) {
+      if (
+        marketingClauseAsserts(text, hit.index, hit[0], {
+          // "Kids, sign up now?" is the call to action with a question mark on
+          // the end. A question asserts nothing about a *claim*; it addresses a
+          // child exactly as a statement would.
+          questionsAssertNothing: false,
+        })
+      ) {
         findings.push({ match: hit[0] });
       }
       if (scanner.lastIndex === hit.index) scanner.lastIndex += 1;

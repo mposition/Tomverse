@@ -336,6 +336,42 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "minors.ageWithProhibition",
+      "ruleId": "rule.australia-minors",
+      "input": "12-year-olds cannot sign up.",
+      "note": "the prohibition stated; an age on its own is not a call to action",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "free.nonPriceCompound",
+      "ruleId": "rule.free-wording",
+      "input": "Use free-form prompts to describe the task.",
+      "note": "a compound containing \"free\" that says nothing about a price",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopCommonWord",
+      "ruleId": "hygiene.url_like",
+      "input": "比较答案。One more thing.",
+      "note": "an ordinary English sentence after a Chinese one; \"one\" is a word, not a suffix somebody registers",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "superlative.researchCopilot",
+      "ruleId": "rule.superlative",
+      "input": "Use Tomverse as your research copilot.",
+      "note": "\"copilot\" as an ordinary noun names no competitor",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

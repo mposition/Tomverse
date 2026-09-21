@@ -100,6 +100,8 @@ export type MarketingTemplateRefusal =
 export type MarketingTemplate = {
   id: string;
   channelId: string;
+  /** The platform the account posts to, from `MarketingChannel.channel`. */
+  channel: string;
   locale: string;
   envelopeDigest: string;
   approvedAt: Date;
@@ -184,6 +186,12 @@ export async function loadApprovedTemplate(
       historyVersion: true,
       claimIds: true,
       assetIds: true,
+      // The platform, read off the account row rather than off the envelope.
+      // The envelope is JSON the renderer wrote; this column is what the
+      // account actually is, and the Guard compares the draft's channel
+      // against it -- a real RedNote proof presented as LinkedIn went
+      // autonomous past a proof that carried only the account id.
+      channel: { select: { channel: true } },
     },
   });
 
@@ -324,6 +332,7 @@ export async function loadApprovedTemplate(
     template: {
       id: post.id,
       channelId: post.channelId,
+      channel: post.channel.channel,
       locale: post.locale,
       envelopeDigest: post.envelopeDigest,
       approvedAt: approval.createdAt,
@@ -334,6 +343,7 @@ export async function loadApprovedTemplate(
         // compared a digest and nothing else, so one account's approval
         // published from another account, in another language.
         channelId: post.channelId,
+        channel: post.channel.channel,
         locale: post.locale,
         // The revision every check above was made against. The Guard hands it
         // back in the decision's binding, and the publish makes its write

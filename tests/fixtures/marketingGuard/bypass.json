@@ -787,6 +787,72 @@
           "hygiene"
         ]
       }
+    },
+    {
+      "id": "memory.spacedLetters",
+      "ruleId": "rule.memory-claim",
+      "input": "We c l o n e your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.spacedHyphen",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files - we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.namedSubjectSplice",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files, Tomverse clones your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.questionCta",
+      "ruleId": "rule.australia-minors",
+      "input": "Kids, sign up now?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanFourModifiers",
+      "ruleId": "rule.refuted-superiority",
+      "input": "전 세계에서 유일한 사용하기 쉽고 안전하며 빠른 AI 비교 도구",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopMixedCase",
+      "ruleId": "hygiene.url_like",
+      "input": "Visit example。CoM today.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
     }
   ]
 }

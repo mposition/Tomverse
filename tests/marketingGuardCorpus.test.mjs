@@ -66,6 +66,9 @@ const claimsOf = (entry) =>
     type,
     known: true,
     priceSourcesAllStored: true,
+    // A `plan` claim in a corpus case stands for the credit allowance, which
+    // is the one claim §7.2 rule 4 accepts as a free post's condition.
+    statesCreditAllowance: type === "plan",
     usedBefore: true,
   }));
 

@@ -377,6 +377,7 @@ test("a post approved and then marked reusable is a template", async () => {
   // on and an edit landing in between goes out as approved words.
   assert.equal(result.template.proof.templateId, post.id);
   assert.equal(result.template.proof.channelId, row.id);
+  assert.equal(result.template.proof.channel, "linkedin");
   assert.equal(result.template.proof.locale, "en");
   assert.equal(result.template.proof.historyVersion, 0);
   assert.equal(result.template.proof.approvedDigest, DIGEST);

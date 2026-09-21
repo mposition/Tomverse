@@ -509,6 +509,14 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'export * from "@/lib/marketingGuardCore";',
     // A second declaration: same name, different function, same effect.
     "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
+    // A computed key, which puts the name in a string where an identifier rule
+    // never looks. The fourth review called the seal through this.
+    'import * as guard from "@/lib/marketingGuardCore";\nguard["sealMarketingTemplateProof"]({});',
+    'const guard = require("@/lib/marketingGuardCore");\nguard["sealMarketingTemplateProof"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, "sealMarketingTemplateProof");',
+    // The module bound to a name at run time rather than at parse time.
+    'const guard = await import("@/lib/marketingGuardCore");\nguard.sealMarketingTemplateProof({});',
+    'import guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
   ];
 
   for (const text of escapes) {

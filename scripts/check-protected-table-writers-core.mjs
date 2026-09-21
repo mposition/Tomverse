@@ -671,6 +671,17 @@ const classifySealReference = (node) => {
 };
 
 /**
+ * Whether a module specifier names the module that declares the seal.
+ *
+ * Any import of it other than a named one under the same name puts the
+ * function behind an object, and a rule that reads identifiers cannot follow
+ * it there: `import * as guard` then `guard["sealMarketingTemplateProof"]({})`
+ * is a call this check saw nothing of at all.
+ */
+const importsSealModule = (specifier) =>
+  specifierEndsWithSealModule(specifier);
+
+/**
  * Walks one source file once and returns what the rules need.
  */
 export const analyseSource = (path, text) => {
@@ -705,6 +716,55 @@ export const analyseSource = (path, text) => {
       if (role === "declaration" && path !== TEMPLATE_SEAL_DECLARED_IN) {
         sealEscapes.push({ line, detail: `${TEMPLATE_SEAL_NAME} declared here too` });
       }
+    }
+
+    // A computed key: `guard["sealMarketingTemplateProof"]({})`. The name is a
+    // string here, not an identifier, so the classification above never sees
+    // it -- and the review called the function through exactly this.
+    if (
+      ts.isStringLiteralLike(node) &&
+      node.text === TEMPLATE_SEAL_NAME &&
+      node.parent &&
+      (ts.isElementAccessExpression(node.parent) ||
+        (ts.isCallExpression(node.parent) && isReflectGet(node.parent)))
+    ) {
+      sealEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `${TEMPLATE_SEAL_NAME} reached by a computed key`,
+      });
+    }
+
+    // The whole module bound to a name, however it is written. After this the
+    // seal is a property of an object and no identifier rule can follow it.
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      importsSealModule(node.moduleSpecifier.text) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      (node.importClause.name ||
+        (node.importClause.namedBindings &&
+          ts.isNamespaceImport(node.importClause.namedBindings)))
+    ) {
+      sealEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `binds all of ${node.moduleSpecifier.text} to a name`,
+      });
+    }
+
+    // `require("...")` and `import("...")` do the same thing at run time.
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      importsSealModule(node.arguments[0].text) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require"))
+    ) {
+      sealEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `loads ${node.arguments[0].text} at run time`,
+      });
     }
 
     // `export * from "./marketingGuardCore"` re-exports the seal under this

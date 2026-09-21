@@ -147,25 +147,37 @@ const IDEOGRAPHIC_TLDS = [
   "遊戲", "中文网", "中文網", "在线", "在線",
 ].join("|");
 
+/**
+ * Suffixes that can follow an ideographic stop after a CJK label.
+ *
+ * Short and deliberately free of ordinary English words. The test is
+ * case-insensitive, and a list holding "one", "run", "live" or "top" would
+ * read 比较答案。One more thing. as an address. What is left is either not a
+ * word or not one a sentence starts with.
+ */
 const ASCII_TLDS = [
   "com", "net", "org", "io", "ai", "co", "app", "dev", "xyz", "info", "biz",
-  "me", "tv", "cc", "shop", "site", "online", "store", "top", "club", "live",
-  "link", "page", "blog", "cloud", "tech", "space", "icu", "pro", "asia",
-  "world", "life", "news", "one", "run", "gg", "cn", "kr", "jp", "hk", "tw",
-  "sg", "au", "nz", "uk", "us",
+  "tv", "cc", "icu", "pro", "asia", "vip", "wang", "ltd", "gg",
+  "cn", "kr", "jp", "hk", "tw", "sg", "au", "nz", "uk",
 ].join("|");
 
 const IDEOGRAPHIC_HOST = new RegExp(
   [
     `(?<![\\p{L}\\p{N}-])`,
     "(?:",
-    `[A-Za-z0-9][A-Za-z0-9-]{0,62}${codePoint(0x3002)}[a-z]{2,24}`,
+    // An ASCII label before the stop: Chinese prose does not end a sentence
+    // with a run of Latin letters, so any Latin suffix after one reads as a
+    // host. Case does not matter here -- example。CoM is the same address, and
+    // requiring lower case was how it got through.
+    `[A-Za-z0-9][A-Za-z0-9-]{0,62}${codePoint(0x3002)}[A-Za-z]{2,24}`,
     "|",
+    // A CJK label, where the stop usually *is* punctuation. The suffix has to
+    // be one somebody could register.
     `[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})`,
     ")",
     `(?![\\p{L}\\p{N}-])`,
   ].join(""),
-  "u",
+  "iu",
 );
 
 /** Markdown and HTML link syntax, whatever it points at. */
@@ -321,6 +333,25 @@ const INTERIOR_SEPARATORS =
 const collapsedForm = (value: string): string =>
   value.replace(INTERIOR_SEPARATORS, "");
 
+/**
+ * A word written one character at a time: "We c l o n e your memories."
+ *
+ * The collapsed form above leaves whitespace alone on purpose, so it does not
+ * invent words by joining "answers." to "Then" -- and that left this. A run of
+ * single characters separated by single spaces is not a sentence in any of the
+ * three languages, so the spaces inside such a run are removed and the rest of
+ * the line is untouched.
+ *
+ * At least two single characters are required before the run closes, which is
+ * what keeps "a big cat" and "I think" out of it: an ordinary line has one
+ * single-letter word at a time, never two in a row.
+ */
+const SPACED_LETTERS =
+  /(?<![\p{L}\p{N}])[\p{L}\p{N}](?:[^\S\n][\p{L}\p{N}]){2,}(?![\p{L}\p{N}])/gu;
+
+const spacedForm = (value: string): string =>
+  value.replace(SPACED_LETTERS, (run) => run.replace(/[^\S\n]/gu, ""));
+
 export type MarketingTextVariants = {
   /** NFKC, invisible characters stripped. What a person would read. */
   readable: string;
@@ -353,11 +384,13 @@ export function marketingTextVariants(raw: string): MarketingTextVariants {
 /**
  * Every form a rule should be checked against, in one array.
  *
- * Eight, not four: each variant and the same variant with its interior
- * separators removed. The twin is what a raw pattern and a sentence-reading
- * detector need, neither of which tolerates a separator the way a compiled term
- * does. A form that is identical to one already in the list is dropped, so
- * ordinary text costs four comparisons rather than eight.
+ * Each variant, the same variant with its interior separators removed, the
+ * same with a run of single characters joined up, and both together. The twins
+ * are what a raw pattern and a sentence-reading detector need, neither of
+ * which tolerates a separator the way a compiled term does: "销量第·一" went
+ * through a pattern and "We c l o n e your memories." went through a detector.
+ * A form identical to one already in the list is dropped, so ordinary text
+ * still costs the same handful of comparisons it always did.
  */
 export function marketingTextForms(raw: string): string[] {
   const variants = marketingTextVariants(raw);
@@ -367,7 +400,11 @@ export function marketingTextForms(raw: string): string[] {
     variants.leetRound,
     variants.leetStraight,
   ];
-  return [...new Set([...base, ...base.map(collapsedForm)])];
+  const spread = base.flatMap((form) => {
+    const spaced = spacedForm(form);
+    return [form, collapsedForm(form), spaced, collapsedForm(spaced)];
+  });
+  return [...new Set(spread)];
 }
 
 /** The same folds applied to a rule's own text, so needle and haystack meet. */

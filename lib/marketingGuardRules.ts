@@ -275,14 +275,17 @@ const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiorit
     pattern("\\bfirst (?:and only|ever)\\b", "en"),
     pattern("\\bonly (?:one|place|way) to compare\\b", "en"),
     pattern("\\bonly .{0,30}\\bhwp\\b", "en"),
-    // 유일한 has to be qualifying the forbidden noun, which means the words in
-    // between are still part of the same noun phrase. A word that closes one --
-    // one carrying 이, 가, 은, 는, 을 or 를 -- ends the phrase, and an earlier
-    // version that counted words instead read "각 요청에는 유일한 식별자가
-    // 있으며 이 도구가 이를 표시합니다" -- a sentence about identifiers -- as a
-    // claim about the 도구 in the next clause.
+    // 유일한 has to be qualifying the forbidden noun, which means every word in
+    // between is still part of the same noun phrase. A word that closes one --
+    // one carrying 이, 가, 은, 는, 을 or 를 -- ends the phrase, and a word
+    // cannot be matched across a comma or a full stop because the class holds
+    // neither. That is the boundary, rather than a count: counting to three
+    // read "각 요청에는 유일한 식별자가 있으며 이 도구가 이를 표시합니다" -- a
+    // sentence about identifiers -- as a claim about the 도구 two clauses
+    // later, and counting to three also let "전 세계에서 유일한 사용하기 쉽고
+    // 안전하며 빠른 AI 비교 도구" past with four modifiers.
     pattern(
-      "유일(?:한|하게)\\s*(?:[가-힣A-Za-z0-9]{1,8}(?<![이가은는을를])\\s+){0,3}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
+      "유일(?:한|하게)\\s*(?:[가-힣A-Za-z0-9]{1,10}(?<![이가은는을를])\\s+){0,10}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
       "ko",
     ),
     pattern("최초의?\\s*(?:다중|멀티|교차)", "ko"),
