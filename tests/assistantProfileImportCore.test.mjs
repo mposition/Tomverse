@@ -201,14 +201,22 @@ test("this migration does not validate anything", () => {
 });
 
 test("the isolation column exists on the file, and cascades", () => {
-    assert.match(SCHEMA, /importId String\?/);
+    const knowledgeFileModel = SCHEMA.match(
+        /model AssistantKnowledgeFile \{[\s\S]*?\n\}/
+    )?.[0];
+    assert.ok(knowledgeFileModel, "AssistantKnowledgeFile model must exist");
+    assert.match(knowledgeFileModel, /importId String\?/);
     assert.match(
-        SCHEMA,
+        knowledgeFileModel,
         /import\s+AssistantProfileImport\?\s+@relation\(fields: \[importId\], references: \[id\], onDelete: Cascade\)/
     );
     // Restrict would abort account deletion: User cascades into both the
     // import and the file with no ordering between them.
-    assert.ok(!/references: \[id\], onDelete: Restrict/.test(SCHEMA));
+    assert.ok(
+        !/import\s+AssistantProfileImport\?\s+@relation\(fields: \[importId\], references: \[id\], onDelete: Restrict\)/.test(
+            knowledgeFileModel
+        )
+    );
 });
 
 test("the provenance row outlives the version it names", () => {

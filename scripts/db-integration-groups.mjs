@@ -17,7 +17,7 @@
  *
  * ## Why a rule over the filename, not a list
  *
- * `run-db-integration-tests.mjs` names all 102 suites in order, each with a
+ * `run-db-integration-tests.mjs` names every suite in order, each with a
  * comment saying what it is there to prove. Copying them into seven arrays
  * would scatter that reasoning and put every future suite in front of a
  * question -- which array? -- that is easy to answer wrongly and silent when
@@ -64,7 +64,7 @@ const LANE_RULES = [
   // selection-mode attribution the ROUTE gates are written against.
   [
     "routing",
-    /^(routing-|conversation-auto-selection|conversation-selection-mode|conversation-product-key|conversation-writer-product|chat-route-search-settlement)/,
+    /^(amux-orchestration|routing-|conversation-auto-selection|conversation-selection-mode|conversation-product-key|conversation-writer-product|chat-route-search-settlement)/,
   ],
   // Credits, reservations, settlement, Stripe, and the admission limits that
   // decide whether a paid turn starts at all.

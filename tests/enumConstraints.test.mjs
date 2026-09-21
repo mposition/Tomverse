@@ -84,6 +84,20 @@ test("an inline CREATE TABLE constraint is read, and a later ALTER overrides it"
   assert.deepEqual(constraints[0].values, ["a", "b"]);
 });
 
+test("a nullable inline enum constraint is still read", () => {
+  const constraints = readEnumConstraints([
+    migration(
+      "0001",
+      `CREATE TABLE "Thing" (
+         "state" TEXT,
+         CONSTRAINT "Thing_state_check"
+           CHECK ("state" IS NULL OR "state" IN ('a', 'b'))
+       );`
+    ),
+  ]);
+  assert.deepEqual(constraints[0]?.values, ["a", "b"]);
+});
+
 // Range checks are not closed lists and are none of this check's business.
 test("a non-enum CHECK is ignored", () => {
   const constraints = readEnumConstraints([

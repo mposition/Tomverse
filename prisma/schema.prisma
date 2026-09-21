@@ -362,10 +362,10 @@ model Conversation {
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
   continuationBridge    ConversationContinuationBridge?
-  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project               ConversationProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
   password              String?
   importedGuestKey      String?
 
@@ -1629,81 +1629,81 @@ model Feedback {
 /// human -- it never modifies code, never pushes a branch, never opens a PR.
 /// llmConfidence is observational only and stays null in Phase 2.
 model FeedbackAutoFixCase {
-  id                  String    @id @default(cuid())
-  feedbackId          String    @unique
-  feedback            Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  traceId             String
+  id                     String    @id @default(cuid())
+  feedbackId             String    @unique
+  feedback               Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId                String
   /// Trusted occurrence identity from the verified token, when one existed.
-  occurrenceId        String?
+  occurrenceId           String?
   /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
-  fingerprint         String?
-  sourceRelease       String?
+  fingerprint            String?
+  sourceRelease          String?
   /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
   /// written with compare-and-swap conditional updates.
-  state               String    @default("received")
+  state                  String    @default("received")
   /// One of AUTOFIX_CLASSIFICATION once classified.
-  classification      String?
-  ineligibilityReason String?
+  classification         String?
+  ineligibilityReason    String?
   /// Reserved for a future LLM diagnosis pass; observational, never a gate.
-  llmConfidence       Float?
+  llmConfidence          Float?
   /// Bounded technical facts only -- no user text, no prompts, no tokens.
-  diagnosticSummary   Json?
-  attemptCount        Int       @default(0)
-  claimedAt           DateTime?
-  heartbeatAt         DateTime?
+  diagnosticSummary      Json?
+  attemptCount           Int       @default(0)
+  claimedAt              DateTime?
+  heartbeatAt            DateTime?
   /// Doubles as the not-before instant while state = evidence_delayed.
-  leaseExpiresAt      DateTime?
-  terminalReason      String?
-  closedAt            DateTime?
+  leaseExpiresAt         DateTime?
+  terminalReason         String?
+  closedAt               DateTime?
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
-  fixBranch           String?
+  fixBranch              String?
   /// The running fix attempt's server-minted id. Every heartbeat and result
   /// must present it; a claim replaces it and a reclaim or a terminal result
   /// clears it, so a late callback from an expired run matches nothing.
-  fixAttemptId        String?
-  fixPrNumber         Int?
-  fixPrUrl            String?
+  fixAttemptId           String?
+  fixPrNumber            Int?
+  fixPrUrl               String?
   /// Read back from GitHub after the human-approved merge; never inferred
   /// from enabling auto-merge.
-  mergeSha            String?
-  stagingSha          String?
+  mergeSha               String?
+  stagingSha             String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
-  redGreenProof       Json?
+  redGreenProof          Json?
   /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
   /// The develop PR head and its change manifest digest, read from GitHub by
   /// the server (lib/feedbackAutoFixChangeManifest.ts).
-  fixHeadSha          String?
-  fixManifestDigest   String?
+  fixHeadSha             String?
+  fixManifestDigest      String?
   /// The manifest itself: path, base blob and head blob per changed file.
-  fixManifest         Json?
+  fixManifest            Json?
   /// Root cause, fix and test summaries from the fix run: bounded, technical,
   /// derived only from the diagnostic summary -- never the report body.
-  fixReport           Json?
+  fixReport              Json?
   /// --- Owner approval, bound to one head and one manifest --------------------
   /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
   /// here: the case keeps no account identifier of its own.
-  approvedAt          DateTime?
-  approvedHeadSha     String?
+  approvedAt             DateTime?
+  approvedHeadSha        String?
   approvedManifestDigest String?
   /// --- Promotion: every value observed by the server itself -----------------
-  stagingDeploymentId String?
-  stagingFirstSeenAt  DateTime?
-  stagingVerifiedAt   DateTime?
-  productionBranch    String?
-  productionPrNumber  Int?
-  productionPrUrl     String?
-  productionPrHeadSha String?
-  productionMergeSha  String?
+  stagingDeploymentId    String?
+  stagingFirstSeenAt     DateTime?
+  stagingVerifiedAt      DateTime?
+  productionBranch       String?
+  productionPrNumber     Int?
+  productionPrUrl        String?
+  productionPrHeadSha    String?
+  productionMergeSha     String?
   productionDeploymentId String?
   productionFirstSeenAt  DateTime?
   productionVerifiedAt   DateTime?
   /// The last observer pass that read this case and why it did not advance:
   /// what the console shows as "observation delayed".
-  promotionObservedAt DateTime?
-  promotionObservation String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  promotionObservedAt    DateTime?
+  promotionObservation   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([state, leaseExpiresAt])
   @@index([createdAt])
@@ -4870,7 +4870,7 @@ model EmailUnsubscribeKeyAdoption {
   id          String   @id @default(cuid())
   keyVersions String[]
   adoptedAt   DateTime @default(now())
-  singleton   Boolean  @default(true) @unique
+  singleton   Boolean  @unique @default(true)
 }
 
 /// Raw provider callbacks, stored before they are acted on.
@@ -5005,4 +5005,144 @@ model ConversationContinuationBridge {
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
   @@index([externalConversationId])
+}
+
+model AmuxWorkerRuntime {
+  workerName     String   @id
+  instanceId     String
+  generation     Int      @default(1)
+  status         String   @default("starting")
+  dispatchReady  Boolean  @default(false)
+  heartbeatAt    DateTime
+  leaseExpiresAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([leaseExpiresAt])
+  @@index([status, dispatchReady, leaseExpiresAt])
+  @@index([instanceId, generation])
+}
+
+model AmuxWorkItem {
+  id             String    @id @default(cuid())
+  title          String
+  description    String?
+  status         String    @default("todo")
+  kind           String    @default("unknown")
+  priority       String    @default("p3")
+  pinned         Boolean   @default(false)
+  drag           Int       @default(0)
+  owner          String?
+  classification Json?
+  revision       Int       @default(0)
+  claimedAt      DateTime?
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
+  dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
+  routeDecisions    AmuxRouteDecision[]
+  executionAttempts AmuxExecutionAttempt[]
+
+  @@index([status, owner, archivedAt, createdAt])
+  @@index([priority, createdAt])
+  @@index([owner, status])
+}
+
+model AmuxWorkDependency {
+  taskId       String
+  dependencyId String
+  createdAt    DateTime @default(now())
+
+  task       AmuxWorkItem @relation("AmuxTaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependency AmuxWorkItem @relation("AmuxTaskDependents", fields: [dependencyId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependencyId])
+  @@index([dependencyId, taskId])
+}
+
+model AmuxExecutionAttempt {
+  /// Server-minted execution fence. A worker never chooses this id.
+  id               String @id
+  taskId           String
+  worker           String
+  workerInstanceId String
+  workerGeneration Int
+  /// Task revision after the atomic todo -> doing transition.
+  taskRevision     Int
+
+  heartbeatAt    DateTime
+  leaseExpiresAt DateTime?
+  startedAt      DateTime
+  endedAt        DateTime?
+
+  /// Null while running; succeeded | failed | blocked | expired when terminal.
+  outcome  String?
+  /// todo | review | done | blocked | cancelled when terminal.
+  toStatus String?
+  endedBy  String?
+  reason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  delivery AmuxWorkDelivery?
+
+  @@index([taskId, startedAt])
+  @@index([worker, endedAt, leaseExpiresAt])
+  @@index([workerInstanceId, workerGeneration])
+}
+
+model AmuxWorkDelivery {
+  /// Stable delivery identity: exactly the execution attempt that created it.
+  attemptId        String @id
+  taskId           String
+  worker           String
+  workerInstanceId String
+  workerGeneration Int
+  taskRevision     Int
+
+  /// Durable work payload. Delivery success means this row committed, not that
+  /// text happened to reach a terminal process.
+  prompt String
+
+  /// queued | leased | acknowledged | cancelled
+  status String @default("queued")
+
+  /// Minted on pull. Retries while the receipt lease is live reuse it; after
+  /// expiry the server rotates to a fresh receipt so stale ACKs are fenced.
+  receiptId      String?   @unique
+  leasedAt       DateTime?
+  leaseExpiresAt DateTime?
+
+  acknowledgedAt DateTime?
+  cancelledAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@index([worker, status, createdAt])
+  @@index([workerInstanceId, workerGeneration, status])
+  @@index([status, leaseExpiresAt])
+}
+
+model AmuxRouteDecision {
+  id             String   @id @default(cuid())
+  taskId         String
+  worker         String
+  schedulerScore Int
+  scoringVersion String
+  taskRevision   Int
+  signals        Json
+  createdAt      DateTime @default(now())
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([worker, createdAt])
+  @@index([scoringVersion, createdAt])
 }
