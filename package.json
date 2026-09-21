@@ -43,6 +43,7 @@
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",
+    "report:amux-staging-evidence": "node scripts/report-amux-staging-evidence.mjs",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next build",
     "typecheck": "next typegen && tsc --noEmit --incremental false",

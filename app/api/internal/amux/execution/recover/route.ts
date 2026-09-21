@@ -2,6 +2,16 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
+import {
+  AMUX_DB_BOUNDARIES,
+  amuxRouteHasBudgetFor,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
+import {
+  amuxInternalErrorResponse,
+  amuxJsonNoStore,
+  isAmuxInputError,
+} from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   reclaimExpiredAmuxClaims,
@@ -35,38 +45,46 @@ export async function POST(request: Request) {
     );
   }
 
-  try {
-    await readLimitedJson(
-      request,
-      1 * 1_024,
-      requestSchema,
-    );
+  return withAmuxRouteBudget(async () => {
+    try {
+      await readLimitedJson(request, 1 * 1_024, requestSchema);
 
-    const reclaimed =
-      await reclaimExpiredAmuxExecutions();
-
-    const reclaimedClaims =
-      await reclaimExpiredAmuxClaims();
-
-    return Response.json(
-      {
-        recovered: true,
-        reclaimed,
-        reclaimed_claims: reclaimedClaims,
-      },
-      {
-        headers: {
-          "Cache-Control": "no-store",
+      let more = false;
+      const reclaimed = await reclaimExpiredAmuxExecutions({
+        onMoreWork: () => {
+          more = true;
         },
-      },
-    );
-  } catch {
-    return Response.json(
-      { error: "Invalid request." },
-      {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
+      });
+
+      let reclaimedClaims = 0;
+      if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.ownershipRecoveryRead)) {
+        reclaimedClaims = await reclaimExpiredAmuxClaims({
+          onMoreWork: () => {
+            more = true;
+          },
+        });
+      } else {
+        more = true;
+      }
+
+      return Response.json(
+        {
+          recovered: true,
+          reclaimed,
+          reclaimed_claims: reclaimedClaims,
+          more,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      if (isAmuxInputError(error)) {
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      }
+      return amuxInternalErrorResponse("execution_recover", error);
+    }
+  });
 }

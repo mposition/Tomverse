@@ -1,9 +1,18 @@
-# AMUX Executor Wrapper Protocol v1
+# AMUX Executor Wrapper Protocol v1 — test fixture only
+
+이 문서의 wrapper는 현재 production 실행 경로가 아니다. Phase A의
+`CommandAgentExecutor::from_env()`와 `execute()`는 항상 실패하며, JSON command
+configuration parser와 child process 실행은 `cfg(test)`에서만 존재한다.
+아래 형식은 격리·fencing 테스트 fixture 설명이다. 환경변수나 flag로 production
+local executor를 활성화할 수 없다. 향후 실행은 DB 자격증명 없는 Agent별 Railway
+service와 별도 승인된 adapter/자격증명 계약이 필요하다. 아래의 부모
+`/proc/<ppid>/environ` 접근 위험과 lane 격리 미입증 사실은 계속 activation
+차단 근거다.
 
 Tomverse AMUX는 Claude, Codex, Devin 등의 CLI command line을 추측하거나
 하드코딩하지 않는다.
 
-실제 agent 실행은 운영자가 명시적으로 설정한 wrapper command가 담당한다.
+테스트에서만 운영자가 명시적으로 설정한 wrapper command를 모사한다.
 
 ## Configuration
 
@@ -19,7 +28,7 @@ Tomverse AMUX는 Claude, Codex, Devin 등의 CLI command line을 추측하거나
           "worker": "worker-a",
           "program": "/opt/tomverse/worker-a-wrapper",
           "args": ["--json"],
-          "env_passthrough": ["PATH", "WORKER_A_PROVIDER_KEY"]
+          "env_passthrough": ["PATH"]
         }
       ]
     }
@@ -27,9 +36,10 @@ Tomverse AMUX는 Claude, Codex, Devin 등의 CLI command line을 추측하거나
 Tomverse는 shell을 사용하지 않는다. `program`과 `args`를
 `tokio::process::Command`에 직접 전달한다.
 
-이 설정에는 토큰이나 비밀번호를 넣지 않는다. `env_passthrough`는 **이름만**
-담으며 값은 서비스의 기존 secret/environment mechanism에 남는다. 그래야 한
-lane의 자격증명을 다른 lane의 설정에서 읽어낼 수 없다.
+이 설정에는 토큰이나 비밀번호를 넣지 않는다. 현재 test-only executor의
+`env_passthrough`는 process bootstrap allowlist만 허용하며 provider key는
+이름만 적어도 파싱에서 거절된다. 향후 isolated worker의 provider 자격증명
+전달은 별도 승인·격리·adapter 계약이 필요하다.
 
 worker 이름은 server-side worker catalog와 같은 논리적 worker identity여야 한다.
 
@@ -84,14 +94,17 @@ container·uid·PID namespace·파일시스템·네트워크 정책을 두고, �
 
 ### lane 자격증명 표 (activation 전에 채운다)
 
-Stage 2 activation 전에 lane마다 아래 표를 채우고 날짜와 함께 기록한다.
+향후 별도 승인된 service activation 전에 lane마다 아래 표를 채우고 날짜와 함께 기록한다.
 표가 없으면 lane 분리를 증명할 방법이 없다. **표가 있어도 위 문단의 실측 기록이
 없으면 서로 다른 신뢰 수준의 역할을 같은 오케스트레이터에 두지 않는다.**
 
 | lane (worker) | program | 선언한 이름(`env_passthrough`) | 그 이름이 주는 권한 | 이 lane이 갖지 **않아야** 하는 것 |
 |---|---|---|---|---|
-| (예) engineering-runner | (wrapper 경로) | `PATH`, `ENGINEERING_RUNNER_LLM_KEY` | 모델 호출 | GitHub 쓰기 자격증명, 내부 route secret |
-| (예) engineering-publisher | (wrapper 경로) | `PATH`, `ENGINEERING_PUBLISHER_APP_KEY` | Publisher GitHub App 쓰기 | LLM key, 내부 route secret |
+| 현재 test-only wrapper | (검증용 wrapper 경로) | `PATH` | 실행 파일 탐색만 | provider key, GitHub 쓰기 자격증명, 내부 route secret |
+
+실행·게시 lane의 provider/GitHub 자격증명은 이 표에 예시 이름을 적는다고 현재
+executor에서 허용되지 않는다. future isolated service별 전달 방식과 접근 차단을
+별도 승인·실측한 뒤 그 서비스의 자격증명 표를 작성한다.
 
 두 lane이 같은 이름을 선언하면 그것은 공유 자격증명이며, 분리를 주장할 수
 없다. 공유가 의도된 것이라면 그 이유를 표에 적는다.
