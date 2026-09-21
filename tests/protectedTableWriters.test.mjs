@@ -11,6 +11,7 @@ import {
   RAW_SQL_ALLOWLIST,
   RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
+  FACTS_SEAL_ALLOWLIST,
   TEMPLATE_SEAL_ALLOWLIST,
   TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST,
   checkProtectedTableWriters,
@@ -40,6 +41,7 @@ const realAllowlistPaths = new Set([
   // is what happened when the seal rule was added: seven unrelated tests went
   // red and the rule itself had no test at all.
   ...TEMPLATE_SEAL_ALLOWLIST.map((entry) => entry.path),
+  ...FACTS_SEAL_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -536,6 +538,11 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'const p = getPath();\nconst k = getKey();\nconst { [k]: mint } = await import(p);\nmint({});',
     'const { ["sealMarketingTemplateProof"]: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
     'const { sealMarketingTemplateProof: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
+    // The ninth review's three: the module through a second variable, the
+    // assignment form, and a rest binding that hands on every export at once.
+    'const g = await import(p);\nconst { [k]: mint } = g;\nmint({});',
+    'let mint;\n({ [k]: mint } = await import(p));\nmint({});',
+    'const { ...rest } = await import(p);\nrest[k]({});',
   ];
 
   for (const text of escapes) {

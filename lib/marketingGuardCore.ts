@@ -40,6 +40,12 @@ import {
   type MarketingGuardRule,
 } from "@/lib/marketingGuardRules";
 import {
+  marketingFactsDigest,
+  type MarketingGuardAssetFact,
+  type MarketingGuardClaimFact,
+  type MarketingGuardFacts,
+} from "@/lib/marketingFacts";
+import {
   marketingTermPattern,
   marketingTextForms,
   marketingTextHygiene,
@@ -60,6 +66,7 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "claim_type_unknown",
   "claim_not_declared",
   "asset_unknown",
+  "facts_not_resolved",
 ] as const);
 export type MarketingRejectCode = (typeof MARKETING_REJECT_CODES)[number];
 
@@ -143,12 +150,14 @@ export type MarketingGuardDecision =
       codes: MarketingRejectCode[];
       ruleIds: string[];
       draftDigest: string;
+      factsDigest: string;
     }
   | {
       verdict: "approval_required";
       codes: MarketingApprovalCode[];
       ruleIds: string[];
       draftDigest: string;
+      factsDigest: string;
     }
   | {
       verdict: "autonomous_eligible";
@@ -168,6 +177,7 @@ export type MarketingGuardDecision =
       templateBinding: MarketingTemplateBinding;
       ruleIds: string[];
       draftDigest: string;
+      factsDigest: string;
     };
 
 /**
@@ -262,61 +272,6 @@ export function marketingTemplateWriteConditions(
   };
 }
 
-/**
- * A claim the draft declares, already resolved against the registries.
- *
- * The Guard does not look claims up: `lib/marketingClaims.ts` owns the registry
- * and refuses to be handed another one, so the caller resolves and passes the
- * answer. That also means the corpus can state "a pricing claim whose fields
- * are not all stored" without a billing table.
- */
-export type MarketingGuardClaimFact = {
-  readonly claimId: string;
-  /** Checked against the closed list; an unrecognised kind is refused. */
-  readonly type: string;
-  /** `false` when the claim id is not in the registry at all. */
-  readonly known: boolean;
-  /** For `pricing` and `plan`: whether every field it uses is `stored`. */
-  readonly priceSourcesAllStored?: boolean;
-  /**
-   * For `plan`: whether this claim is the credit allowance itself.
-   *
-   * §7.2 rule 4 wants the condition a "free" post carries, and the condition
-   * is the allowance -- not any price claim that happens to be in the same
-   * post. An earlier version accepted one, so "Start free. Credits never run
-   * out. Pro costs AUD 20 per month." passed on the strength of a claim about
-   * the Pro price. `lib/marketingClaims.ts` records it on the registry entry
-   * and the resolver carries it here.
-   */
-  readonly statesCreditAllowance?: boolean;
-  /**
-   * The allowance sentence itself, as the post renders it in this locale.
-   *
-   * Declaring the claim is not saying it. §7.2 rule 4 wants the condition *in
-   * the post*, and an id in a list is not in the post -- so the Guard checks
-   * that these words are, folded the same way every other comparison is. The
-   * caller resolves the claim's `statementKey` through the locale table; the
-   * Guard does no lookup of its own.
-   */
-  readonly allowanceStatement?: string;
-  /** For a price claim: the stored currency. */
-  readonly currency?: string;
-  readonly targetsAustralia?: boolean;
-  /** For `model`: the runtime row agreed with the claim. */
-  readonly modelMatches?: boolean;
-  /** For `feature` and `availability`: the gate is on and the evidence resolves. */
-  readonly featurePublic?: boolean;
-  /** For `comparison`: a URL and a scope were recorded. */
-  readonly comparisonEvidence?: boolean;
-  /** Whether this account has published this claim before. */
-  readonly usedBefore: boolean;
-};
-
-export type MarketingGuardAssetFact = {
-  readonly assetId: string;
-  readonly known: boolean;
-  readonly usedBefore: boolean;
-};
 
 export type MarketingGuardDraft = {
   /** What the post will say. The only text the Guard reads. */
@@ -365,6 +320,41 @@ export type MarketingGuardDraft = {
  * same caller supplied, which is how `"Pro costs $20 per month."` with empty
  * claim lists was reaching `autonomous_eligible` with no price check at all.
  */
+const sealedFacts = new WeakSet<object>();
+
+/**
+ * Seal a resolved facts bundle.
+ *
+ * Here rather than in `lib/marketingFacts.ts` because a `WeakSet` belongs to
+ * one module instance, and the check that reads it is in this file. Frozen
+ * before it is registered, so a bundle that could not be frozen is never in
+ * the set and an accessor installed afterwards cannot answer one thing to the
+ * check and another to a rule.
+ *
+ * Who may call it is counted by `scripts/check-protected-table-writers.mjs`:
+ * minting a bundle is saying what is true, and the registries are read by one
+ * file.
+ */
+export function sealMarketingFacts(
+  facts: MarketingGuardFacts,
+): MarketingGuardFacts {
+  const sealed: MarketingGuardFacts = {
+    claims: Object.freeze(facts.claims.map((claim) => Object.freeze({ ...claim }))),
+    assets: Object.freeze(facts.assets.map((asset) => Object.freeze({ ...asset }))),
+    claimRegistryVersion: facts.claimRegistryVersion,
+    assetRegistryVersion: facts.assetRegistryVersion,
+    factSnapshotDigest: facts.factSnapshotDigest,
+  };
+  Object.freeze(sealed);
+  sealedFacts.add(sealed);
+  return sealed;
+}
+
+/** Whether a resolver made this bundle rather than a caller. */
+export function marketingFactsAreSealed(facts: MarketingGuardFacts): boolean {
+  return sealedFacts.has(facts);
+}
+
 const sealedProofs = new WeakSet<object>();
 
 declare const TEMPLATE_PROOF_BRAND: unique symbol;
@@ -390,8 +380,24 @@ export type MarketingTemplateProof = {
   readonly status: string;
   /** When the loader proved it. Stamped here, never supplied. */
   readonly provenAt: number;
-  /** The digest the approval chain proved. */
+  /**
+   * The digest the approval chain proved, which is of the whole envelope.
+   *
+   * `lib/marketingStore.ts` computes it with sorted keys over everything the
+   * envelope holds, because that column is what says the approved post is
+   * still the approved post.
+   */
   readonly approvedDigest: string;
+  /**
+   * The digest of the rendered text alone.
+   *
+   * A separate value, and separating them is a defect this slice shipped for
+   * one round: the store began computing the envelope digest over the whole
+   * envelope while the Guard was still comparing that column against
+   * `sha256(renderedText)`, so no template could stand at all. Two questions,
+   * two digests, and the Guard asks the one about the words.
+   */
+  readonly renderedTextDigest: string;
   /** Whether every slot was filled from a registry id rather than free text. */
   readonly slotsFromRegistry: boolean;
   /** The claim ids the approved post holds. */
@@ -409,6 +415,7 @@ export function sealMarketingTemplateProof(proof: {
   historyVersion: number;
   status: string;
   approvedDigest: string;
+  renderedTextDigest: string;
   slotsFromRegistry: boolean;
   claimIds: readonly string[];
   assetIds: readonly string[];
@@ -420,6 +427,7 @@ export function sealMarketingTemplateProof(proof: {
     locale: proof.locale,
     historyVersion: proof.historyVersion,
     status: proof.status,
+    renderedTextDigest: proof.renderedTextDigest,
     // Read here rather than taken as an argument. A caller that could set it
     // could set it forward, and the age bound is the only thing between a
     // proof and a caller that kept one from last month.
@@ -467,12 +475,12 @@ export type MarketingGuardContext = {
   readonly legalOrPolicy: MarketingCategoryVerdict;
 };
 
+export type { MarketingGuardAssetFact, MarketingGuardClaimFact };
+
 export type MarketingGuardInput = {
   readonly draft: MarketingGuardDraft;
-  readonly facts: {
-    readonly claims: readonly MarketingGuardClaimFact[];
-    readonly assets: readonly MarketingGuardAssetFact[];
-  };
+  /** Sealed by `lib/marketingFactResolution.ts`. A caller cannot make one. */
+  readonly facts: MarketingGuardFacts;
   readonly templates: readonly MarketingTemplateProof[];
   readonly context: MarketingGuardContext;
 };
@@ -769,10 +777,10 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       ? {}
       : { templateId: String(input.draft.templateId) }),
   };
-  const facts = {
-    claims: [...input.facts.claims].map((claim) => ({ ...claim })),
-    assets: [...input.facts.assets].map((asset) => ({ ...asset })),
-  };
+  // Not copied, and not read field by field: a bundle is identified by being
+  // in the facts module's own `WeakSet`, so a copy would not be one -- and it
+  // is frozen there, which is what makes a second read harmless.
+  const facts = input.facts;
   const templates = [...input.templates];
   const context: MarketingGuardContext = {
     priceFallbackAlertReady: input.context.priceFallbackAlertReady,
@@ -783,10 +791,27 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
   // From the snapshot, which is what every check below reads too.
   const draftDigest = marketingGuardDraftDigest(draft);
+  const factsDigest = marketingFactsDigest({
+    claimIds: facts.claims.map((claim) => claim.claimId),
+    assetIds: facts.assets.map((asset) => asset.assetId),
+    claimRegistryVersion: facts.claimRegistryVersion,
+    assetRegistryVersion: facts.assetRegistryVersion,
+    factSnapshotDigest: facts.factSnapshotDigest,
+  });
 
   const rejectCodes: MarketingRejectCode[] = [];
   const approvalCodes: MarketingApprovalCode[] = [];
   const ruleIds: string[] = [];
+
+  // **A fact is not a boolean a caller passes.** Every check below reads
+  // `known`, `featurePublic`, `priceSourcesAllStored` and the rest, and a
+  // caller that could write those could declare a claim nobody registered to
+  // be true -- which reached `autonomous_eligible` with a valid proof. The
+  // bundle has to have come from the resolver.
+  if (!marketingFactsAreSealed(facts)) {
+    rejectCodes.push("facts_not_resolved");
+    ruleIds.push("facts.not-resolved");
+  }
 
   // --- 1. the bytes -------------------------------------------------------
   const hygiene: MarketingHygieneCode[] = marketingTextHygiene(draft.renderedText);
@@ -976,6 +1001,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       codes: uniqueInOrder(rejectCodes),
       ruleIds: uniqueInOrder(ruleIds),
       draftDigest,
+      factsDigest,
     });
   }
 
@@ -996,7 +1022,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     !!named &&
     sealedProofs.has(named) &&
     named.slotsFromRegistry &&
-    named.approvedDigest === sha256(draft.renderedText) &&
+    named.renderedTextDigest === sha256(draft.renderedText) &&
     named.channelId === draft.channelId &&
     named.channel === draft.channel &&
     named.locale === draft.locale &&
@@ -1033,6 +1059,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       codes: uniqueInOrder(approvalCodes),
       ruleIds: uniqueInOrder(ruleIds),
       draftDigest,
+      factsDigest,
     });
   }
 
@@ -1053,6 +1080,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     },
     ruleIds: uniqueInOrder(ruleIds),
     draftDigest,
+    factsDigest,
   });
 }
 

@@ -622,6 +622,10 @@ const isInlinePrismaSql = (node) =>
 /** The function whose call sites the `template-seal` rule counts. */
 const TEMPLATE_SEAL_NAME = "sealMarketingTemplateProof";
 
+/** The same question for the facts bundle, which the Guard also trusts. */
+const FACTS_SEAL_NAME = "sealMarketingFacts";
+const FACTS_SEAL_DECLARED_IN = "lib/marketingGuardCore.ts";
+
 /** The module that declares it, matched on the specifier's last segment. */
 const TEMPLATE_SEAL_MODULE = "marketingGuardCore";
 
@@ -700,6 +704,8 @@ export const analyseSource = (path, text) => {
   const runtimeSql = [];
   const sealCalls = [];
   const sealEscapes = [];
+  const factsCalls = [];
+  const factsEscapes = [];
   // `const p = "@/lib/marketingGuardCore"` and `const k = "seal..."`, so a
   // module path or a property name stored in a variable is still the thing it
   // spells. The review wrote the call as `const g = await import(p); g[k]({})`
@@ -717,6 +723,22 @@ export const analyseSource = (path, text) => {
    * A readable one is compared outright. An unreadable one is possible unless
    * its head pins a directory the seal does not live in.
    */
+  /** The call under any number of `await`s and parentheses, or null. */
+  const runtimeLoadCall = (node) => {
+    let value = node;
+    while (
+      value &&
+      (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value))
+    ) {
+      value = value.expression;
+    }
+    if (!value || !ts.isCallExpression(value)) return null;
+    const loads =
+      value.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(value.expression) && value.expression.text === "require");
+    return loads ? value : null;
+  };
+
   const couldBeSealModule = (node) => {
     const whole = literalTextOf(node);
     if (whole !== null) return specifierEndsWithSealModule(whole);
@@ -793,18 +815,21 @@ export const analyseSource = (path, text) => {
       while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
         value = value.expression;
       }
-      if (
-        ts.isCallExpression(value) &&
-        (value.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(value.expression) &&
-            value.expression.text === "require"))
-      ) {
+      const call = runtimeLoadCall(node.initializer);
+      if (call) {
         // `true` means "this could be the seal module": either the specifier
         // says so, or nothing in it says otherwise.
         runtimeModuleBindings.set(
           node.name.text,
-          couldBeSealModule(value.arguments[0]),
+          couldBeSealModule(call.arguments[0]),
         );
+      } else if (
+        ts.isIdentifier(node.initializer) &&
+        runtimeModuleBindings.get(node.initializer.text) === true
+      ) {
+        // `const other = g` passes the module on under a second name, and the
+        // review reached the seal through `const { [k]: mint } = g`.
+        runtimeModuleBindings.set(node.name.text, true);
       }
     }
     ts.forEachChild(node, collectConstants);
@@ -815,6 +840,18 @@ export const analyseSource = (path, text) => {
   collectConstants(sourceFile);
 
   const visit = (node) => {
+    if (ts.isIdentifier(node) && node.text === FACTS_SEAL_NAME) {
+      const role = classifySealReference(node);
+      const line = lineOf(sourceFile, node);
+      if (role === "call") factsCalls.push({ line });
+      if (role === "escape") {
+        factsEscapes.push({ line, detail: `${FACTS_SEAL_NAME} used as a value` });
+      }
+      if (role === "declaration" && path !== FACTS_SEAL_DECLARED_IN) {
+        factsEscapes.push({ line, detail: `${FACTS_SEAL_NAME} declared here too` });
+      }
+    }
+
     if (ts.isIdentifier(node) && node.text === TEMPLATE_SEAL_NAME) {
       const role = classifySealReference(node);
       const line = lineOf(sourceFile, node);
@@ -903,35 +940,83 @@ export const analyseSource = (path, text) => {
     // `const { [k]: mint } = await import(p)` -- the same reach as `g[k]`, one
     // syntax further along. The binding pattern is where the name is, and the
     // rule above was watching the variable a module was assigned to.
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isObjectBindingPattern(node.name) &&
-      node.initializer
-    ) {
-      let value = node.initializer;
-      while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
-        value = value.expression;
-      }
-      const loads =
-        ts.isCallExpression(value) &&
-        (value.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(value.expression) &&
-            value.expression.text === "require"));
-      if (loads && couldBeSealModule(value.arguments[0])) {
-        for (const element of node.name.elements) {
-          const name = element.propertyName;
-          if (!name || !ts.isComputedPropertyName(name)) continue;
-          const key = literalTextOf(name.expression);
-          if (
-            (key === TEMPLATE_SEAL_NAME || key === null) &&
-            !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
-          ) {
+    //
+    // Three shapes, all of which the review reached the sealer through: the
+    // declaration, the assignment form `({ [k]: mint } = await import(p))`,
+    // and a rest binding, which hands on every export at once including the
+    // one this rule exists for.
+    const bindingIsSealModule = (initializer) => {
+      const call = runtimeLoadCall(initializer);
+      if (call) return couldBeSealModule(call.arguments[0]);
+      return (
+        !!initializer &&
+        ts.isIdentifier(initializer) &&
+        runtimeModuleBindings.get(initializer.text) === true
+      );
+    };
+
+    const refuseBindingPattern = (elements, initializer, isObjectLiteral) => {
+      if (!bindingIsSealModule(initializer)) return;
+      if (TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)) return;
+
+      for (const element of elements) {
+        if (isObjectLiteral) {
+          if (ts.isSpreadAssignment(element)) {
+            sealEscapes.push({
+              line: lineOf(sourceFile, element),
+              detail: "a rest binding of a module loaded at run time",
+            });
+            continue;
+          }
+          if (!ts.isPropertyAssignment(element)) continue;
+          if (!ts.isComputedPropertyName(element.name)) continue;
+          const key = literalTextOf(element.name.expression);
+          if (key === TEMPLATE_SEAL_NAME || key === null) {
             sealEscapes.push({
               line: lineOf(sourceFile, element),
               detail: "a computed binding from a module loaded at run time",
             });
           }
+          continue;
         }
+
+        if (element.dotDotDotToken) {
+          sealEscapes.push({
+            line: lineOf(sourceFile, element),
+            detail: "a rest binding of a module loaded at run time",
+          });
+          continue;
+        }
+        const name = element.propertyName;
+        if (!name || !ts.isComputedPropertyName(name)) continue;
+        const key = literalTextOf(name.expression);
+        if (key === TEMPLATE_SEAL_NAME || key === null) {
+          sealEscapes.push({
+            line: lineOf(sourceFile, element),
+            detail: "a computed binding from a module loaded at run time",
+          });
+        }
+      }
+    };
+
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer
+    ) {
+      refuseBindingPattern(node.name.elements, node.initializer, false);
+    }
+
+    // `({ [k]: mint } = await import(p))` -- an assignment rather than a
+    // declaration, which the declaration rule never looked at.
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ) {
+      let target = node.left;
+      while (ts.isParenthesizedExpression(target)) target = target.expression;
+      if (ts.isObjectLiteralExpression(target)) {
+        refuseBindingPattern(target.properties, node.right, true);
       }
     }
 
@@ -1134,6 +1219,8 @@ export const analyseSource = (path, text) => {
     runtimeSql,
     sealCalls,
     sealEscapes,
+    factsCalls,
+    factsEscapes,
     importsDriver,
   };
 };
@@ -1301,6 +1388,22 @@ export const TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST = Object.freeze([
   "scripts/check-starter-catalog.mjs",
 ]);
 
+/**
+ * Who may say that a fact was resolved.
+ *
+ * The Guard reads `known`, `featurePublic` and the rest out of this bundle and
+ * decides on them, so minting one is deciding what is true. The registries are
+ * read by one file, and that file is the only one that may seal.
+ */
+export const FACTS_SEAL_ALLOWLIST = [
+  {
+    path: "lib/marketingFactResolution.ts",
+    count: 1,
+    reason:
+      "The resolver that asks the registries, which is the only code entitled to say what they answered.",
+  },
+];
+
 export const TEMPLATE_SEAL_ALLOWLIST = [
   {
     path: "lib/marketingTemplates.ts",
@@ -1340,6 +1443,7 @@ export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
   const retentionSettingByPath = new Map();
   const sealCallsByPath = new Map();
+  const factsCallsByPath = new Map();
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
@@ -1402,6 +1506,17 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
     if (analysis.sealCalls.length > 0) {
       sealCallsByPath.set(path, analysis.sealCalls.length);
+    }
+    if (analysis.factsCalls.length > 0) {
+      factsCallsByPath.set(path, analysis.factsCalls.length);
+    }
+    for (const escape of analysis.factsEscapes) {
+      findings.push({
+        rule: "facts-seal",
+        path,
+        line: escape.line,
+        detail: escape.detail,
+      });
     }
     for (const escape of analysis.sealEscapes) {
       findings.push({
@@ -1532,6 +1647,27 @@ export const checkProtectedTableWriters = ({ sources }) => {
       detail: `calls sealMarketingTemplateProof ${calls} time(s), allowlist says ${expected}`,
     });
   }
+  const allowedFacts = new Map(
+    FACTS_SEAL_ALLOWLIST.map((entry) => [entry.path, entry])
+  );
+  for (const [path, calls] of factsCallsByPath) {
+    const expected = allowedFacts.get(path)?.count ?? 0;
+    if (calls === expected) continue;
+    findings.push({
+      rule: "facts-seal",
+      path,
+      detail: `calls ${FACTS_SEAL_NAME} ${calls} time(s), allowlist says ${expected}`,
+    });
+  }
+  for (const entry of FACTS_SEAL_ALLOWLIST) {
+    if (factsCallsByPath.has(entry.path)) continue;
+    findings.push({
+      rule: "facts-seal",
+      path: entry.path,
+      detail: `allowlist says ${entry.count} call(s), found 0${missingNote(entry.path)}; remove the entry`,
+    });
+  }
+
   for (const entry of TEMPLATE_SEAL_ALLOWLIST) {
     if (sealCallsByPath.has(entry.path)) continue;
     findings.push({

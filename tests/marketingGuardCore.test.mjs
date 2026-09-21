@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 
 import {
   MARKETING_APPROVAL_CODES,
+  sealMarketingFacts,
   marketingGuardDraftDigest,
   MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
   marketingTemplateWriteConditions,
@@ -22,6 +23,9 @@ import {
 
 const TEMPLATE_TEXT = "Three answers to one question, side by side.";
 const CHANNEL_ID = "chn_linkedin_en";
+
+/** Stands for the envelope digest, which is not of the text alone. */
+const ENVELOPE_DIGEST = "e".repeat(64);
 
 const TEMPLATE_DIGEST = createHash("sha256")
   .update(TEMPLATE_TEXT, "utf8")
@@ -35,6 +39,23 @@ const context = (overrides = {}) => ({
   ...overrides,
 });
 
+/**
+ * A sealed facts bundle, which is the only kind the Guard takes.
+ *
+ * Tests are outside the protected-writer check's scan, which is why they may
+ * call the sealer directly: what the rule governs is the production surface,
+ * where the only file allowed to say a fact was resolved is the resolver.
+ */
+const facts = (overrides = {}) =>
+  sealMarketingFacts({
+    claims: [],
+    assets: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshotDigest: null,
+    ...overrides,
+  });
+
 const input = (overrides = {}) => ({
   draft: {
     renderedText: "Three answers to one question, side by side.",
@@ -45,14 +66,16 @@ const input = (overrides = {}) => ({
     assetIds: [],
     ...(overrides.draft ?? {}),
   },
-  facts: { claims: [], assets: [], ...(overrides.facts ?? {}) },
+  facts:
+    overrides.sealedFacts ??
+    facts({ claims: [], assets: [], ...(overrides.facts ?? {}) }),
   templates: overrides.templates ?? [],
   context: context(overrides.context),
 });
 
 /** A draft that would be autonomous if every other input allowed it. */
 const autonomousReady = (overrides = {}) => {
-  const facts = {
+  const rawFacts = {
     claims: [
       {
         claimId: "claim.compare",
@@ -65,17 +88,18 @@ const autonomousReady = (overrides = {}) => {
     assets: [{ assetId: "asset.hero", known: true, usedBefore: true }],
     ...(overrides.facts ?? {}),
   };
+  const sealed = facts(rawFacts);
   return input({
     draft: {
       templateId: "template.compare",
       renderedText: TEMPLATE_TEXT,
       // Derived, because the Guard refuses a draft whose declared ids are not
       // the facts it was given -- which is the point of that check.
-      claimIds: facts.claims.map((claim) => claim.claimId),
-      assetIds: facts.assets.map((asset) => asset.assetId),
+      claimIds: sealed.claims.map((claim) => claim.claimId),
+      assetIds: sealed.assets.map((asset) => asset.assetId),
       ...(overrides.draft ?? {}),
     },
-    facts,
+    sealedFacts: sealed,
     templates: overrides.templates ?? [
       sealMarketingTemplateProof({
         templateId: "template.compare",
@@ -88,13 +112,17 @@ const autonomousReady = (overrides = {}) => {
         locale: "en",
         historyVersion: 7,
         status: "approved",
-        approvedDigest: TEMPLATE_DIGEST,
+        // Two digests, two questions: the envelope column says the approved
+        // post is still the approved post, and this one says the words the
+        // Guard was handed are the approved words.
+        approvedDigest: ENVELOPE_DIGEST,
+        renderedTextDigest: TEMPLATE_DIGEST,
         slotsFromRegistry: true,
         // The ids the loader read off the approved post. The Guard compares
         // the draft's against these rather than against facts from the same
         // caller, which is what closes the "empty claim list" hole.
-        claimIds: facts.claims.map((claim) => claim.claimId),
-        assetIds: facts.assets.map((asset) => asset.assetId),
+        claimIds: sealed.claims.map((claim) => claim.claimId),
+        assetIds: sealed.assets.map((asset) => asset.assetId),
       }),
     ],
     context: { priceFallbackAlertReady: true, ...(overrides.context ?? {}) },
@@ -193,7 +221,7 @@ test("everything lined up reaches autonomous, so the path is not dead code", () 
   const decision = guardDraft(autonomousReady());
   assert.equal(decision.verdict, "autonomous_eligible", JSON.stringify(decision));
   assert.equal(decision.templateId, "template.compare");
-  assert.equal(decision.templateDigest, TEMPLATE_DIGEST);
+  assert.equal(decision.templateDigest, ENVELOPE_DIGEST);
 });
 
 test("without the alert path, the same draft is an approval", () => {
@@ -485,6 +513,22 @@ test("every reject code is reachable", () => {
   // A declared id with no resolved fact behind it, and the other way round.
   collect(guardDraft(input({ draft: { claimIds: ["claim.undeclared"] } })));
 
+  // A bundle the resolver never made. Every check below reads `known` and the
+  // rest out of it, so a caller that could build one could declare a claim
+  // nobody registered to be true.
+  collect(
+    guardDraft({
+      ...input(),
+      facts: {
+        claims: [],
+        assets: [],
+        claimRegistryVersion: 1,
+        assetRegistryVersion: 1,
+        factSnapshotDigest: null,
+      },
+    }),
+  );
+
   const claims = [
     { claimId: "a", type: "pricing", known: true, priceSourcesAllStored: false, usedBefore: true },
     {
@@ -561,7 +605,7 @@ test("an autonomous decision hands back the row state it was made against", () =
   assert.equal(decision.templateBinding.templateId, "template.compare");
   assert.equal(decision.templateBinding.channelId, CHANNEL_ID);
   assert.equal(decision.templateBinding.locale, "en");
-  assert.equal(decision.templateBinding.approvedDigest, TEMPLATE_DIGEST);
+  assert.equal(decision.templateBinding.approvedDigest, ENVELOPE_DIGEST);
   assert.equal(decision.templateBinding.historyVersion, 7);
   assert.equal(decision.templateBinding.reusableAsTemplate, true);
   assert.equal(
@@ -585,8 +629,8 @@ test("a binding is a write condition with an expiry, not a permission", () => {
     id: "template.compare",
     channelId: CHANNEL_ID,
     locale: "en",
-    approvedDigest: TEMPLATE_DIGEST,
-    envelopeDigest: TEMPLATE_DIGEST,
+    approvedDigest: ENVELOPE_DIGEST,
+    envelopeDigest: ENVELOPE_DIGEST,
     historyVersion: 7,
     reusableAsTemplate: true,
     status: "approved",

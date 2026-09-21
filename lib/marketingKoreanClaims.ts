@@ -66,6 +66,11 @@ const NOUN_TAIL = new RegExp(
       // 서비스라는 점" is a uniqueness claim reported as a fact about itself.
       "[\uac00-\ud7a3]{0,2}(?:\uc785\ub2c8\ub2e4|\uc774\ub2e4|\uc784)",
       "(?:\uc774)?(?:\ub77c\ub294|\ub77c\uace0|\ub77c\uba74|\ub77c\uc11c)",
+      // The copula joining one clause to the next: 서비스이며, 서비스이고,
+      // 서비스이지만. A uniqueness claim that runs straight on into the next
+      // clause is the same claim, and a tail list holding only the
+      // sentence-final forms did not see it.
+      "\uc774(?:\uba70|\uace0|\uc9c0\ub9cc|\uc790|\ub2c8|\uc5b4\uc11c|\ub77c\uc11c)",
       // A particle, longest first so 으로 is not read as 로.
       NOUN_TAIL_PARTICLES.join("|"),
     ].join("|") +

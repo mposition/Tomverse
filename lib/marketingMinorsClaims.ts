@@ -67,7 +67,10 @@ const CALL_TO_ACTION =
  * under-16s, parental consent is required." is a notice about them rather than
  * a line aimed at them, and its audience is not in that position.
  */
-const SENTENCE_START = "(?:^|[.!?\\n。]\\s*)";
+// A colon, a semicolon and a dash open a clause as surely as a full stop
+// opens a sentence: "Attention: Under-15s, create your account today." is a
+// vocative with a label in front of it.
+const SENTENCE_START = "(?:^|[.!?\\n。:;\\u2014\\u2013]\\s*)";
 const VOCATIVE = "[,\\uff0c]\\s*[\\p{L}\\p{N}]";
 
 /**
@@ -189,8 +192,8 @@ const MINORS_TARGETING_SOURCES: readonly MinorsPattern[] =
  * A rule that refused it would make the product harder to label honestly --
  * the same reason the negation is read at all.
  *
- * The sentence, not the draft: a notice in one sentence does not license a
- * pitch in the next.
+ * The clause, not the sentence and not the draft: a notice in one clause does
+ * not license a pitch in another.
  */
 const RESTRICTION = new RegExp(
   "\\b(?:consent|permission|guardian|guardians|parent|parental|prohibited|" +
@@ -199,13 +202,49 @@ const RESTRICTION = new RegExp(
   "iu",
 );
 
-const SENTENCE_EDGE = /[.!?\n。]/u;
+// The clause, not the sentence: a notice in the second half of a sentence
+// does not make the first half a notice. "Made for children; parental consent
+// is required." targets in one clause and restricts in the other, and a test
+// that read the whole sentence let the targeting through.
+const CLAUSE_EDGE = /[.!?\n。;:,\u2014\u2013]/u;
+
+/**
+ * Whether a match is the sentence's opening frame rather than its claim.
+ *
+ * "For under-16s, parental consent is required." names the audience in a
+ * prepositional frame and then states the restriction; the audience is what
+ * the sentence is *about*. "Made for children; parental consent is required."
+ * asserts that the product is for them and then adds a condition, which is
+ * two propositions and the first one stands on its own.
+ *
+ * The difference is the position: a frame opens the sentence.
+ */
+const OPENS_WITH_FOR = /^(?:for|to)\b/iu;
+
+const sentenceEdge = /[.!?\n。]/u;
 
 const sentenceAround = (text: string, at: number): string => {
   let start = at;
-  while (start > 0 && !SENTENCE_EDGE.test(text[start - 1])) start -= 1;
+  while (start > 0 && !sentenceEdge.test(text[start - 1])) start -= 1;
   let end = at;
-  while (end < text.length && !SENTENCE_EDGE.test(text[end])) end += 1;
+  while (end < text.length && !sentenceEdge.test(text[end])) end += 1;
+  return text.slice(start, end);
+};
+
+const startsItsSentence = (text: string, at: number): boolean => {
+  for (let index = at - 1; index >= 0; index -= 1) {
+    const character = text[index];
+    if (/\s/u.test(character)) continue;
+    return sentenceEdge.test(character);
+  }
+  return true;
+};
+
+const clauseAround = (text: string, at: number): string => {
+  let start = at;
+  while (start > 0 && !CLAUSE_EDGE.test(text[start - 1])) start -= 1;
+  let end = at;
+  while (end < text.length && !CLAUSE_EDGE.test(text[end])) end += 1;
   return text.slice(start, end);
 };
 
@@ -233,7 +272,12 @@ export function findMarketingMinorsTargeting(
     for (let hit = scanner.exec(text); hit; hit = scanner.exec(text)) {
       const isNotice =
         entry.vocative !== true &&
-        RESTRICTION.test(sentenceAround(text, hit.index));
+        (RESTRICTION.test(clauseAround(text, hit.index)) ||
+          // Or the match is the frame this sentence opens with, and the
+          // sentence is a notice.
+          (startsItsSentence(text, hit.index) &&
+            OPENS_WITH_FOR.test(hit[0]) &&
+            RESTRICTION.test(sentenceAround(text, hit.index))));
       if (
         !isNotice &&
         marketingClauseAsserts(text, hit.index, hit[0], {

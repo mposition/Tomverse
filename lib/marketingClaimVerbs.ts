@@ -59,6 +59,45 @@ const thirdPerson = (verb: string): string => {
   return `${verb}s`;
 };
 
+/**
+ * The past and the participle, which are the same word for all of these.
+ *
+ * "We cloned your memories." is the claim in the past tense and the verb list
+ * had only the present, so four sentences saying the thing had been done went
+ * unreported. Spelled by rule: a verb ending in `e` takes `d`, one ending in a
+ * consonant and `y` takes `ied`, and the rest take `ed`.
+ */
+const pastTense = (verb: string): string => {
+  if (verb.endsWith("e")) return `${verb}d`;
+  if (/[^aeiou]y$/u.test(verb)) return `${verb.slice(0, -1)}ied`;
+  return `${verb}ed`;
+};
+
+/** The `-ing` form. */
+const gerund = (verb: string): string =>
+  verb.endsWith("e") ? `${verb.slice(0, -1)}ing` : `${verb}ing`;
+
+/**
+ * The verbs whose spelling the rules above get wrong.
+ *
+ * English doubles a final consonant on a stressed last syllable, and no rule
+ * short of a pronouncing dictionary knows which. "We transferred your memory."
+ * went unreported because the rule spelled it with one `r`, so the ones in
+ * these lists that double are written out.
+ */
+const IRREGULAR: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  transfer: Object.freeze(["transferred", "transferring"]),
+});
+
+/** Every form of a lemma, so no list can hold one and miss another. */
+export const marketingVerbForms = (verb: string): string[] => [
+  verb,
+  thirdPerson(verb),
+  ...(Object.hasOwn(IRREGULAR, verb)
+    ? IRREGULAR[verb]
+    : [pastTense(verb), gerund(verb)]),
+];
+
 /** Everyday verbs a second clause starts with, beyond the claim vocabulary. */
 const ORDINARY_CLAUSE_VERBS: readonly string[] = Object.freeze([
   "is", "are", "was", "were", "be", "been", "being",
@@ -80,8 +119,10 @@ const ORDINARY_CLAUSE_VERBS: readonly string[] = Object.freeze([
 export const MARKETING_CLAUSE_VERBS: readonly string[] = Object.freeze([
   ...new Set([
     ...ORDINARY_CLAUSE_VERBS,
-    ...MARKETING_REPLICATION_VERBS.map(thirdPerson),
-    ...MARKETING_RECOVERY_VERBS.map(thirdPerson),
-    ...MARKETING_TRANSFER_VERBS.map(thirdPerson),
+    ...MARKETING_REPLICATION_VERBS.flatMap(marketingVerbForms),
+    ...MARKETING_RECOVERY_VERBS.flatMap(marketingVerbForms),
+    ...MARKETING_TRANSFER_VERBS.flatMap(marketingVerbForms),
   ]),
-]);
+  // Longest first, so an alternation does not match `clone` inside `cloned`
+  // and then fail the boundary that follows it.
+].sort((left, right) => right.length - left.length));

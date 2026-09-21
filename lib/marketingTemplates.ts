@@ -51,7 +51,10 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { createHash } from "node:crypto";
+
 import {
+  marketingEnvelopeSchema,
   marketingHistorySchema,
   type MarketingHistoryEntry,
 } from "@/lib/marketingAutomationSchema";
@@ -95,7 +98,9 @@ export type MarketingTemplateRefusal =
   /** An edit whose audit row does not prove it, so it cannot be placed. */
   | "edit_not_datable"
   /** A history that does not parse, which the store cannot produce. */
-  | "history_unreadable";
+  | "history_unreadable"
+  /** An envelope that does not parse, for the same reason. */
+  | "envelope_unreadable";
 
 export type MarketingTemplate = {
   id: string;
@@ -182,6 +187,7 @@ export async function loadApprovedTemplate(
       approvalAuditLogId: true,
       contentPurgedAt: true,
       deletedAt: true,
+      envelope: true,
       history: true,
       historyVersion: true,
       claimIds: true,
@@ -290,6 +296,14 @@ export async function loadApprovedTemplate(
   // a history holding an entry without one can only have arrived by a write
   // that went around the store -- which is exactly the case where the Guard
   // wants an answer it can record rather than an exception.
+  const parsedEnvelope = marketingEnvelopeSchema.safeParse(post.envelope);
+  if (!parsedEnvelope.success) {
+    return { ok: false, refusal: "envelope_unreadable" };
+  }
+  const renderedTextDigest = createHash("sha256")
+    .update(parsedEnvelope.data.renderedText, "utf8")
+    .digest("hex");
+
   const parsedHistory = marketingHistorySchema.safeParse(post.history);
   if (!parsedHistory.success) {
     return { ok: false, refusal: "history_unreadable" };
@@ -354,6 +368,12 @@ export async function loadApprovedTemplate(
         // conditional on the row still being at it.
         historyVersion: post.historyVersion,
         approvedDigest: post.envelopeDigest,
+        // The words on their own. `envelopeDigest` is of the whole envelope,
+        // and the Guard's question is whether the text it was handed is the
+        // text that was approved -- a different question with a different
+        // answer, and for one round the two were compared to each other so no
+        // template could stand at all.
+        renderedTextDigest,
         // Every check above passed, which is what "the slots are registry ids"
         // means for a post whose envelope digest equals its approved digest.
         slotsFromRegistry: true,

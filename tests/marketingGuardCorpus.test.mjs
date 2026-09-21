@@ -15,7 +15,7 @@ import {
   MARKETING_GUARD_RULES,
 } from "../lib/marketingGuardRules.ts";
 import { MARKETING_HYGIENE_CODES } from "../lib/marketingGuardNormalise.ts";
-import { guardDraft } from "../lib/marketingGuardCore.ts";
+import { guardDraft, sealMarketingFacts } from "../lib/marketingGuardCore.ts";
 
 const corpus = (name) =>
   JSON.parse(
@@ -49,7 +49,17 @@ const decide = (input, claims = []) =>
       claimIds: claims.map((claim) => claim.claimId),
       assetIds: [],
     },
-    facts: { claims, assets: [] },
+    // Sealed, because the Guard takes nothing else: a fact is what a resolver
+    // answered, not what a caller wrote down. Tests are outside the
+    // protected-writer check's scan, which is why this one may call the
+    // sealer at all.
+    facts: sealMarketingFacts({
+      claims,
+      assets: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshotDigest: null,
+    }),
     templates: [],
     context: {
       priceFallbackAlertReady: false,

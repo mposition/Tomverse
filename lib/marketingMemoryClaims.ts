@@ -33,6 +33,10 @@
 // Neither half judges translation quality, and neither is a substitute for
 // someone reading the page. They catch the specific sentence §17 names.
 
+import {
+  MARKETING_REPLICATION_VERBS,
+  marketingVerbForms,
+} from "@/lib/marketingClaimVerbs";
 import { marketingTermBody } from "@/lib/marketingGuardNormalise";
 import { marketingClauseAsserts } from "@/lib/marketingNegation";
 
@@ -136,29 +140,9 @@ export type ForbiddenMemoryClaim = {
  * across spaces fixed one spelling, missed "c  l  o  n  e" and "cl o ne", and
  * invented "BEST" out of a sentence listing the letters.
  */
-const REPLICATION_VERBS: readonly string[] = Object.freeze([
-  "clone",
-  "clones",
-  "cloning",
-  "replicate",
-  "replicates",
-  "replicating",
-  "reproduce",
-  "reproduces",
-  "reproducing",
-  "recreate",
-  "recreates",
-  "recreating",
-  "transfer",
-  "transfers",
-  "transferring",
-  "copy",
-  "copies",
-  "copying",
-  "duplicate",
-  "duplicates",
-  "duplicating",
-]);
+const REPLICATION_VERBS: readonly string[] = Object.freeze(
+  MARKETING_REPLICATION_VERBS.flatMap(marketingVerbForms),
+);
 
 const REPLICATION_OBJECTS: readonly string[] = Object.freeze([
   "memory",
@@ -197,11 +181,28 @@ const CLAUSE_SEGMENT = "[^.!?\\n。,;:\\u2014\\u2013]";
  * A comma ends a clause and an aside is two commas: "We clone, with your
  * explicit and fully informed approval, your memories." is one clause with
  * something parked in the middle, and a gap that stopped at the first comma
- * never reached the object. One aside, because two is a sentence that needs
- * rewriting whatever this rule says.
+ * never reached the object. Two commas' worth, because the object can carry a
+ * list of its own -- "all of your curated, deeply personal memories".
+ *
+ * Reaching across a clause is safe here in a way it is not elsewhere, because
+ * the scanner restarts one character after each match: a gap that spans a
+ * denial into a claim produces a match that is suppressed, and the claim's own
+ * verb is still read on the next pass.
  */
-const CLAUSE_GAP =
-  `${CLAUSE_SEGMENT}{0,160}(?:,${CLAUSE_SEGMENT}{0,80},${CLAUSE_SEGMENT}{0,80})?`;
+/**
+ * A comma the gap may cross.
+ *
+ * Not a count. A comma that separates adjectives -- "all of your curated,
+ * deeply personal memories" -- is inside the object, and one that opens a new
+ * clause -- "Clone a repository, then check your memory usage." -- is the end
+ * of this one. The word after it says which, and counting commas said neither:
+ * two was too few for the first sentence and enough to join the second.
+ */
+const INNER_COMMA =
+  ",(?!\\s*(?:then|so|but|and|or|yet|while|because)\\b)" +
+  "(?!\\s*(?:we|it|they|you|i|he|she|the|a|an|our|its|their|this|that)\\s+[\\p{L}]+)";
+
+const CLAUSE_GAP = `${CLAUSE_SEGMENT}{0,160}(?:${INNER_COMMA}${CLAUSE_SEGMENT}{0,80}){0,3}`;
 
 /** The verb, a gap that stays inside one clause, then the object. */
 const SPACED_REPLICATION_CLAIM = new RegExp(
@@ -224,7 +225,7 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
             /(기억|인격|성격|두뇌)[^.\n]{0,20}(복제|재현|그대로\s*옮)/,
             /(복제|재현)[^.\n]{0,12}(기억|인격|두뇌)/,
             new RegExp(
-                "\\b(clone|replicate|reproduce|recreate|transfer)s?\\b" +
+                "\\b(?:" + REPLICATION_VERBS.join("|") + ")\\b" +
                     CLAUSE_GAP +
                     "\\b(memory|memories|personality|persona|brain|mind)\\b",
                 "i"
@@ -350,6 +351,16 @@ const FORBIDDEN_CLAIM_SOURCES: ReadonlyArray<{
 );
 
 /** Matches of `pattern` that their own sentence actually asserts. */
+/**
+ * Whether the match a scanner returned swallowed a second start.
+ *
+ * A gap that reaches across a clause can begin at a negated verb and end at an
+ * object two clauses later, which consumes the positive claim in between: "We
+ * do not clone files, we copy chats, but we clone your memories." was one
+ * match, judged at its first character, and the real claim was never looked
+ * at. So the scanner restarts one character after each match rather than after
+ * it, which costs a few comparisons and reads every start.
+ */
 const assertedMatches = (text: string, pattern: RegExp): string[] => {
     // A fresh scanner each time: a shared lastIndex across inputs is how a
     // scanner starts skipping matches after the first file.
@@ -361,6 +372,9 @@ const assertedMatches = (text: string, pattern: RegExp): string[] => {
     let found = scanner.exec(text);
     while (found) {
         if (assertsTheClaim(text, found.index, found[0])) matches.push(found[0]);
+        // One character on, not past the match: a long match can contain the
+        // start of another, and the one it contains is often the asserted one.
+        scanner.lastIndex = found.index + 1;
         found = scanner.exec(text);
     }
     return matches;

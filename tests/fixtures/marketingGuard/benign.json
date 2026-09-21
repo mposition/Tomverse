@@ -499,6 +499,15 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "memory.cloneThenCheckMemory",
+      "ruleId": "rule.memory-claim",
+      "input": "Clone a repository, then check your memory usage.",
+      "note": "two clauses about different things; the comma opens a new one and the gap stops there",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

@@ -8,7 +8,8 @@ import { Prisma } from "@prisma/client";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
-import { guardDraft } from "@/lib/marketingGuardCore";
+import { guardDraft, sealMarketingFacts } from "@/lib/marketingGuardCore";
+import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   createMarketingChannel,
@@ -651,7 +652,7 @@ function approvalDecision() {
       claimIds: [],
       assetIds: [],
     },
-    facts: { claims: [], assets: [] },
+    facts: storeFacts(),
     templates: [],
     context: {
       priceFallbackAlertReady: false,
@@ -661,6 +662,37 @@ function approvalDecision() {
     },
   });
 }
+
+/**
+ * The facts bundle the store will check the decision against.
+ *
+ * Sealed, because the Guard takes nothing else, and carrying the digest of the
+ * exact snapshot this test stores -- the store recomputes it and refuses a
+ * decision resolved against anything else.
+ */
+function storeFacts() {
+  return sealMarketingFacts({
+    claims: [],
+    assets: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(canonical(factSnapshot)), "utf8")
+      .digest("hex"),
+  });
+}
+
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonical(inner)]),
+    );
+  }
+  return value;
+};
 
 test("the store's create writes the draft entry itself", async () => {
   const row = await approvedChannel();
@@ -737,7 +769,7 @@ test("the store refuses a decision made about a different draft", async () => {
       claimIds: [],
       assetIds: [],
     },
-    facts: { claims: [], assets: [] },
+    facts: storeFacts(),
     templates: [],
     context: {
       priceFallbackAlertReady: false,

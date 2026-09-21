@@ -1359,6 +1359,127 @@
           "banned_claim"
         ]
       }
+    },
+    {
+      "id": "memory.twoClausesOneNegated",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not clone files, we copy chats, but we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.asideAndListedObject",
+      "ruleId": "rule.memory-claim",
+      "input": "We clone, with your informed consent, all of your curated, deeply personal memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.pastTenseClone",
+      "ruleId": "rule.memory-claim",
+      "input": "We cloned your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.pastTenseCopy",
+      "ruleId": "rule.memory-claim",
+      "input": "We copied your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.pastTenseTransfer",
+      "ruleId": "rule.memory-claim",
+      "input": "We transferred your memory.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.pastTenseDuplicate",
+      "ruleId": "rule.memory-claim",
+      "input": "We duplicated your persona.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanConnectiveCopulaMyeo",
+      "ruleId": "rule.refuted-superiority",
+      "input": "Tomverse는 유일한 서비스이며 지금 시작할 수 있습니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanConnectiveCopulaGo",
+      "ruleId": "rule.refuted-superiority",
+      "input": "Tomverse는 유일한 서비스이고 모든 모델을 비교합니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.noticeInAnotherClause",
+      "ruleId": "rule.australia-minors",
+      "input": "Made for children; parental consent is required.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.noticeAfterAgeClause",
+      "ruleId": "rule.australia-minors",
+      "input": "Designed for 15-year-olds; parental consent is required.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeAfterColon",
+      "ruleId": "rule.australia-minors",
+      "input": "Attention: Under-15s, create your account today.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
     }
   ]
 }

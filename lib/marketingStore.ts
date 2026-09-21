@@ -74,6 +74,7 @@ import {
   type MarketingVerificationMethod,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import { marketingFactsDigest } from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
@@ -203,10 +204,24 @@ export type MarketingResumeEvidence = {
  */
 export async function updateMarketingChannel(
   database: MarketingDatabase,
-  id: string,
-  patch: MarketingChannelPatch,
-  resume?: MarketingResumeEvidence,
+  rawId: string,
+  rawPatch: MarketingChannelPatch,
+  rawResume?: MarketingResumeEvidence,
 ) {
+  // Read once. The audit check below is an `await`, and the object it verified
+  // was read again afterwards: a `resume` whose fields answered one pair to
+  // the verification and another to the write had the second pair recorded as
+  // the evidence for the first.
+  const id = String(rawId);
+  const patch: MarketingChannelPatch = { ...rawPatch };
+  const resume =
+    rawResume === undefined
+      ? undefined
+      : {
+          auditLogId: String(rawResume.auditLogId),
+          reasonCode: rawResume.reasonCode,
+        };
+
   const data: Prisma.MarketingChannelUpdateInput = {};
 
   if (patch.status !== undefined) data.status = patch.status;
@@ -323,20 +338,21 @@ export type CreateMarketingPostInput = {
  *
  * Keys sorted, so two objects that say the same thing hash the same.
  */
+const canonicalJson = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonicalJson(inner)]),
+    );
+  }
+  return value;
+};
+
 export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
-  const canonical = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(canonical);
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-          .map(([key, inner]) => [key, canonical(inner)]),
-      );
-    }
-    return value;
-  };
   return createHash("sha256")
-    .update(JSON.stringify(canonical(envelope)), "utf8")
+    .update(JSON.stringify(canonicalJson(envelope)), "utf8")
     .digest("hex");
 }
 
@@ -417,6 +433,26 @@ export async function createMarketingPost(
     throw new MarketingStoreRefusedError(
       "envelope_disagrees_with_columns",
       "The envelope and the columns name different locales, claims or assets",
+    );
+  }
+
+  // **And about these facts.** The draft digest says the words match; this
+  // says the claims, the assets, the registry versions and the fact snapshot
+  // are the ones the Guard was resolved against. A decision made with one
+  // registry could otherwise be recorded on a post claiming another.
+  const storedFactsDigest = marketingFactsDigest({
+    claimIds: input.claimIds,
+    assetIds: input.assetIds,
+    claimRegistryVersion: input.claimRegistryVersion,
+    assetRegistryVersion: input.assetRegistryVersion,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(canonicalJson(input.factSnapshot)), "utf8")
+      .digest("hex"),
+  });
+  if (storedFactsDigest !== decision.factsDigest) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_about_these_facts",
+      "That decision was resolved against different facts",
     );
   }
 
@@ -594,9 +630,41 @@ const postPatchData = (
     data.mode = patch.mode;
   }
   if (patch.envelope !== undefined) {
-    data.envelope = asJson(marketingEnvelopeSchema.parse(patch.envelope));
+    // The digest of an envelope is of that envelope, here as on the create
+    // path. A patch that changed the words and carried the old digest left the
+    // column saying the approved post was still the approved post, which is
+    // the question `lib/marketingTemplates.ts` asks it.
+    const envelope = marketingEnvelopeSchema.parse(patch.envelope);
+    const digest = marketingEnvelopeDigest(envelope);
+    if (patch.envelopeDigest !== undefined && patch.envelopeDigest !== digest) {
+      throw new MarketingStoreRefusedError(
+        "envelope_digest_not_of_this_envelope",
+        "The envelope digest is computed from the envelope, not supplied",
+      );
+    }
+    // And the two places a schedule can live agree. A patch that moved one and
+    // not the other left the row and its envelope saying different things
+    // about when the post goes out.
+    if (
+      patch.scheduledAt !== undefined &&
+      (patch.scheduledAt?.toISOString() ?? null) !==
+        (envelope.scheduledAt ?? null)
+    ) {
+      throw new MarketingStoreRefusedError(
+        "envelope_schedule_disagrees",
+        "The envelope and the column name different schedules",
+      );
+    }
+    data.envelope = asJson(envelope);
+    data.envelopeDigest = digest;
+  } else if (patch.envelopeDigest !== undefined) {
+    // A digest without the envelope it is of is a claim about bytes nobody
+    // supplied. The approval path re-renders and patches both together.
+    throw new MarketingStoreRefusedError(
+      "envelope_digest_without_envelope",
+      "An envelope digest is set by the change that sets the envelope",
+    );
   }
-  if (patch.envelopeDigest !== undefined) data.envelopeDigest = patch.envelopeDigest;
   if (patch.approvalAuditLogId !== undefined) {
     data.approvalAuditLogId = patch.approvalAuditLogId;
   }
@@ -668,13 +736,14 @@ export async function appendMarketingPostHistory(
   // and `status: "drafted"` to the write walked past the audit verification
   // and stored the first answer. There is one object from here on and the
   // original is not read again.
+  const rawPatch = rawInput.patch;
+  const rawRequeue = rawInput.requeue;
   const input = {
     id: String(rawInput.id),
     expectedVersion: Number(rawInput.expectedVersion),
     entry: rawInput.entry,
-    patch: rawInput.patch === undefined ? undefined : { ...rawInput.patch },
-    requeue:
-      rawInput.requeue === undefined ? undefined : { ...rawInput.requeue },
+    patch: rawPatch === undefined ? undefined : { ...rawPatch },
+    requeue: rawRequeue === undefined ? undefined : { ...rawRequeue },
   };
 
   const entry = marketingHistoryEntrySchema.parse(input.entry);
