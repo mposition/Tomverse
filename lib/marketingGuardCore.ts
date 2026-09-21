@@ -68,6 +68,7 @@ export const MARKETING_REJECT_CODES = Object.freeze([
   "claim_not_declared",
   "asset_unknown",
   "facts_not_resolved",
+  "facts_scope_mismatch",
 ] as const);
 export type MarketingRejectCode = (typeof MARKETING_REJECT_CODES)[number];
 
@@ -343,6 +344,9 @@ export function sealMarketingFacts(
   facts: MarketingGuardFacts,
 ): MarketingGuardFacts {
   const sealed: MarketingGuardFacts = {
+    channelId: String(facts.channelId),
+    channel: String(facts.channel),
+    locale: String(facts.locale),
     claims: Object.freeze(facts.claims.map((claim) => Object.freeze({ ...claim }))),
     assets: Object.freeze(facts.assets.map((asset) => Object.freeze({ ...asset }))),
     claimRegistryVersion: facts.claimRegistryVersion,
@@ -357,6 +361,41 @@ export function sealMarketingFacts(
 /** Whether a resolver made this bundle rather than a caller. */
 export function marketingFactsAreSealed(facts: MarketingGuardFacts): boolean {
   return sealedFacts.has(facts);
+}
+
+const sealedContexts = new WeakSet<object>();
+
+export type MarketingGuardContextValues = {
+  readonly priceFallbackAlertReady: boolean;
+  readonly incidentOrSecurity: MarketingCategoryVerdict;
+  readonly testimonial: MarketingCategoryVerdict;
+  readonly legalOrPolicy: MarketingCategoryVerdict;
+};
+
+declare const MARKETING_GUARD_CONTEXT_BRAND: unique symbol;
+
+export type MarketingGuardContext = MarketingGuardContextValues & {
+  readonly [MARKETING_GUARD_CONTEXT_BRAND]: true;
+};
+
+/**
+ * Mint the server-resolved context the Guard accepts.
+ *
+ * The protected-export check permits one production call site. Tests may call
+ * it directly because they are outside that scan and need to exercise the
+ * otherwise-off autonomous branch.
+ */
+export function sealMarketingGuardContext(
+  context: MarketingGuardContextValues,
+): MarketingGuardContext {
+  const sealed = Object.freeze({
+    priceFallbackAlertReady: context.priceFallbackAlertReady === true,
+    incidentOrSecurity: context.incidentOrSecurity,
+    testimonial: context.testimonial,
+    legalOrPolicy: context.legalOrPolicy,
+  }) as MarketingGuardContext;
+  sealedContexts.add(sealed);
+  return sealed;
 }
 
 const sealedProofs = new WeakSet<object>();
@@ -456,28 +495,6 @@ export function sealMarketingTemplateProof(proof: {
  * proof" is never a stored capability.
  */
 export const MARKETING_TEMPLATE_PROOF_MAX_AGE_MS = 60_000;
-
-export type MarketingGuardContext = {
-  /**
-   * Whether the operator alert path for a price-source fallback exists yet.
-   *
-   * S1 plan, B2 amendment: `draftIntake` and `approvalPublish` require it, so
-   * the Guard is not used for real drafts before somebody would hear about a
-   * refusal. Its S1 value is `false`, which is why every real draft is at best
-   * `approval_required` today.
-   */
-  readonly priceFallbackAlertReady: boolean;
-  /**
-   * The §7.4 categories that need a reader rather than a field.
-   *
-   * Three-valued, and `unreadable` sends the draft to a person. The categories
-   * that can be derived -- the channel, prices, competitors -- are derived
-   * below and are not here.
-   */
-  readonly incidentOrSecurity: MarketingCategoryVerdict;
-  readonly testimonial: MarketingCategoryVerdict;
-  readonly legalOrPolicy: MarketingCategoryVerdict;
-};
 
 export type { MarketingGuardAssetFact, MarketingGuardClaimFact };
 
@@ -770,28 +787,36 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   //
   // `templates` is not copied: a proof is identified by being in the module's
   // own `WeakSet`, so a copy would not be one.
+  const rawDraft = input.draft;
+  const rawTemplateId = rawDraft.templateId;
   const draft: MarketingGuardDraft = {
-    renderedText: String(input.draft.renderedText),
-    locale: String(input.draft.locale),
-    channel: String(input.draft.channel),
-    channelId: String(input.draft.channelId),
-    claimIds: [...input.draft.claimIds].map(String),
-    assetIds: [...input.draft.assetIds].map(String),
-    ...(input.draft.templateId === undefined
+    renderedText: String(rawDraft.renderedText),
+    locale: String(rawDraft.locale),
+    channel: String(rawDraft.channel),
+    channelId: String(rawDraft.channelId),
+    claimIds: [...rawDraft.claimIds].map(String),
+    assetIds: [...rawDraft.assetIds].map(String),
+    ...(rawTemplateId === undefined
       ? {}
-      : { templateId: String(input.draft.templateId) }),
+      : { templateId: String(rawTemplateId) }),
   };
   // Not copied, and not read field by field: a bundle is identified by being
   // in the facts module's own `WeakSet`, so a copy would not be one -- and it
   // is frozen there, which is what makes a second read harmless.
   const facts = input.facts;
   const templates = [...input.templates];
-  const context: MarketingGuardContext = {
-    priceFallbackAlertReady: input.context.priceFallbackAlertReady,
-    incidentOrSecurity: input.context.incidentOrSecurity,
-    testimonial: input.context.testimonial,
-    legalOrPolicy: input.context.legalOrPolicy,
-  };
+  const rawContext = input.context;
+  // A structural look-alike is caller input, not server-resolved context. Do
+  // not read a single answer from it: the S1 fail-closed values are the only
+  // safe substitute, and they make autonomous publication unreachable.
+  const context: MarketingGuardContextValues = sealedContexts.has(rawContext)
+    ? rawContext
+    : {
+        priceFallbackAlertReady: false,
+        incidentOrSecurity: "unreadable",
+        testimonial: "unreadable",
+        legalOrPolicy: "unreadable",
+      };
 
   // From the snapshot, which is what every check below reads too.
   const draftDigest = marketingGuardDraftDigest(draft);
@@ -802,6 +827,9 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   // values -- which nobody can recompute, and which is exactly why it is worth
   // recording rather than checking.
   const factsScopeDigest = marketingFactsScopeDigest({
+    channelId: facts.channelId,
+    channel: facts.channel,
+    locale: facts.locale,
     claimIds: facts.claims.map((claim) => claim.claimId),
     assetIds: facts.assets.map((asset) => asset.assetId),
     claimRegistryVersion: facts.claimRegistryVersion,
@@ -822,6 +850,14 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   if (!marketingFactsAreSealed(facts)) {
     rejectCodes.push("facts_not_resolved");
     ruleIds.push("facts.not-resolved");
+  }
+  if (
+    facts.channelId !== draft.channelId ||
+    facts.channel !== draft.channel ||
+    facts.locale !== draft.locale
+  ) {
+    rejectCodes.push("facts_scope_mismatch");
+    ruleIds.push("facts.scope-mismatch");
   }
 
   // --- 1. the bytes -------------------------------------------------------
@@ -902,7 +938,9 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
     if (
       (claim.type === "feature" || claim.type === "availability") &&
-      claim.featurePublic !== true
+      (claim.featurePublic !== true ||
+        typeof claim.evidenceStatement !== "string" ||
+        !draft.renderedText.includes(claim.evidenceStatement))
     ) {
       rejectCodes.push("feature_not_public");
       ruleIds.push(`claim.${claim.claimId}`);

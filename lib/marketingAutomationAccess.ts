@@ -212,9 +212,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * a comment is bytes in a watched file, and the digest asking for a look
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
+ *
+ * 2026-09-21, S1f: `MarketingPost.factsDigest` now preserves the complete
+ * resolver answer digest beside each Guard decision. Webhook admission reads
+ * none of that column and its descriptor is unchanged; the fingerprint moves
+ * because `prisma/schema.prisma` is deliberately watched as a whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5a65edee6a24294a02fc1dbe34f0c7076e2a304d32a855b50ed65955c84ce926";
+  "c2f27dd11a4e1e93d6d08bcde5be2b0fdc89a364d7cc3993297e47cbdea95d62";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -11,8 +11,7 @@ import {
   RAW_SQL_ALLOWLIST,
   RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
-  FACTS_SEAL_ALLOWLIST,
-  TEMPLATE_SEAL_ALLOWLIST,
+  PROTECTED_EXPORT_ALLOWLIST,
   TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST,
   checkProtectedTableWriters,
   selectScannedPaths,
@@ -40,8 +39,7 @@ const realAllowlistPaths = new Set([
   // out of this set puts that finding into all twenty fixtures at once. Which
   // is what happened when the seal rule was added: seven unrelated tests went
   // red and the rule itself had no test at all.
-  ...TEMPLATE_SEAL_ALLOWLIST.map((entry) => entry.path),
-  ...FACTS_SEAL_ALLOWLIST.map((entry) => entry.path),
+  ...PROTECTED_EXPORT_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -510,6 +508,7 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'import * as guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
     // The whole module re-exported, which writes the name down nowhere.
     'export * from "@/lib/marketingGuardCore";',
+    'export * as guard from "@/lib/marketingGuardCore";',
     // A second declaration: same name, different function, same effect.
     "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
     // A computed key, which puts the name in a string where an identifier rule
@@ -549,13 +548,22 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'const g = await import(p);\ng["sealMarketingFacts"]({});',
     'import * as guard from "@/lib/marketingGuardCore";\nguard["sealMarketingFacts"]({});',
     'import * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, "sealMarketingFacts");',
+    // The eleventh review: a namespace export has an exportClause, and a
+    // descriptor or enumeration reaches the value without a member access.
+    'import * as guard from "@/lib/marketingGuardCore";\nObject.getOwnPropertyDescriptor(guard, "sealMarketingFacts").value({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nObject.getOwnPropertyDescriptor(guard, "sealMarketingTemplateProof").value({});',
+    'const guard = await import(p);\nfor (const value of Object.values(guard)) use(value);',
+    'const guard = await import(p);\nfor (const key in guard) use(guard[key]);',
+    // A third protected mint joins the same list and therefore inherits every
+    // escape rule instead of growing a third checker beside the first two.
+    'const guard = await import(p);\nguard["sealMarketingGuardContext"]({});',
   ];
 
   for (const text of escapes) {
     const findings = check(sealSource(text));
     assert.ok(
-      findings.some((finding) => finding.rule === "template-seal"),
-      `should be a template-seal finding: ${JSON.stringify(text)}`
+      findings.some((finding) => finding.rule === "guard-seal"),
+      `should be a guard-seal finding: ${JSON.stringify(text)}`
     );
   }
 });
@@ -565,16 +573,21 @@ test("a direct call is counted, and an allowlisted file may make exactly its own
     sealSource(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});")
   );
   assert.equal(
-    unlisted.filter((finding) => finding.rule === "template-seal").length,
+    unlisted.filter((finding) => finding.rule === "guard-seal").length,
     1,
     JSON.stringify(unlisted)
   );
 
-  const listed = TEMPLATE_SEAL_ALLOWLIST[0];
+  const listed = PROTECTED_EXPORT_ALLOWLIST.find(
+    (entry) => entry.name === "sealMarketingTemplateProof",
+  );
   const sealFindings = (text) =>
     checkProtectedTableWriters({
       sources: [{ path: listed.path, text }],
-    }).filter((finding) => finding.rule === "template-seal");
+    }).filter(
+      (finding) =>
+        finding.rule === "guard-seal" && finding.path === listed.path,
+    );
 
   assert.deepEqual(
     sealFindings(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});"),
@@ -600,7 +613,7 @@ test("mentioning the seal without calling it is not a finding", () => {
     )
   );
   assert.deepEqual(
-    quiet.filter((finding) => finding.rule === "template-seal"),
+    quiet.filter((finding) => finding.rule === "guard-seal"),
     []
   );
 });
@@ -615,7 +628,7 @@ test("the declaring file may declare it and is not required to call it", () => {
     ],
   }).filter(
     (finding) =>
-      finding.rule === "template-seal" &&
+      finding.rule === "guard-seal" &&
       finding.path === "lib/marketingGuardCore.ts"
   );
   assert.deepEqual(declared, [], JSON.stringify(declared));
@@ -632,7 +645,7 @@ test("a computed key on an unreadable module is refused, and named files are not
 
   const findings = check(sealSource(loader));
   assert.ok(
-    findings.some((finding) => finding.rule === "template-seal"),
+    findings.some((finding) => finding.rule === "guard-seal"),
     JSON.stringify(findings)
   );
 
@@ -642,7 +655,7 @@ test("a computed key on an unreadable module is refused, and named files are not
     const quiet = checkProtectedTableWriters({
       sources: [{ path, text: loader }],
     }).filter(
-      (finding) => finding.rule === "template-seal" && finding.path === path
+      (finding) => finding.rule === "guard-seal" && finding.path === path
     );
     assert.deepEqual(quiet, [], path);
   }

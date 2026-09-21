@@ -8,7 +8,11 @@ import { Prisma } from "@prisma/client";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
-import { guardDraft, sealMarketingFacts } from "@/lib/marketingGuardCore";
+import {
+  guardDraft,
+  sealMarketingFacts,
+  sealMarketingGuardContext,
+} from "@/lib/marketingGuardCore";
 import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
@@ -158,6 +162,7 @@ async function post(channelId: string, overrides: Record<string, unknown> = {}) 
       claimRegistryVersion: 1,
       assetRegistryVersion: 1,
       factSnapshot,
+      factsDigest: DIGEST,
       guardDecision: "approval_required",
       guardCodes: [],
       guardRuleIds: [],
@@ -380,6 +385,7 @@ test("a temporary table of the same name cannot answer for the channel", async (
           claimRegistryVersion: 1,
           assetRegistryVersion: 1,
           factSnapshot,
+          factsDigest: DIGEST,
           guardDecision: "autonomous_eligible",
           guardCodes: [],
           guardRuleIds: [],
@@ -642,24 +648,24 @@ test("a post starts as a draft, at version zero, with one draft entry", async ()
 });
 
 /** A real `approval_required` decision, sealed by the Guard that made it. */
-function approvalDecision() {
+function approvalDecision(channelId: string) {
   return guardDraft({
     draft: {
       renderedText: "Three answers to one question, side by side.",
       locale: "en",
       channel: "linkedin",
-      channelId: "chn_store_test",
+      channelId,
       claimIds: [],
       assetIds: [],
     },
-    facts: storeFacts(),
+    facts: storeFacts(channelId),
     templates: [],
-    context: {
+    context: sealMarketingGuardContext({
       priceFallbackAlertReady: false,
       incidentOrSecurity: "proved_false",
       testimonial: "proved_false",
       legalOrPolicy: "proved_false",
-    },
+    }),
   });
 }
 
@@ -670,8 +676,11 @@ function approvalDecision() {
  * exact snapshot this test stores -- the store recomputes it and refuses a
  * decision resolved against anything else.
  */
-function storeFacts() {
+function storeFacts(channelId: string) {
   return sealMarketingFacts({
+    channelId,
+    channel: "linkedin",
+    locale: "en",
     claims: [],
     assets: [],
     claimRegistryVersion: 1,
@@ -716,11 +725,12 @@ test("the store's create writes the draft entry itself", async () => {
     // The Guard's own object, not a verdict typed out here. The store derives
     // the verdict, the codes, the rule ids, the status and the mode from it,
     // and refuses one it did not seal.
-    decision: approvalDecision(),
+    decision: approvalDecision(row.id),
     draftedAt: new Date(),
   });
   assert.equal(created.historyVersion, 0);
   assert.equal(created.guardDecision, "approval_required");
+  assert.equal(created.factsDigest, approvalDecision(row.id).factsDigest);
   assert.equal(created.mode, "approval");
   assert.equal((created.history as { type: string }[]).length, 1);
 });
@@ -769,14 +779,14 @@ test("the store refuses a decision made about a different draft", async () => {
       claimIds: [],
       assetIds: [],
     },
-    facts: storeFacts(),
+    facts: storeFacts(row.id),
     templates: [],
-    context: {
+    context: sealMarketingGuardContext({
       priceFallbackAlertReady: false,
       incidentOrSecurity: "proved_false",
       testimonial: "proved_false",
       legalOrPolicy: "proved_false",
-    },
+    }),
   });
 
   await assert.rejects(

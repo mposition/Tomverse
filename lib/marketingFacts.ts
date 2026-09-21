@@ -54,6 +54,8 @@ export type MarketingGuardClaimFact = {
   readonly modelMatches?: boolean;
   /** For `feature` and `availability`: the gate is on and the evidence resolves. */
   readonly featurePublic?: boolean;
+  /** The public-page sentence the feature or availability claim rests on. */
+  readonly evidenceStatement?: string;
   /** For `comparison`: a URL and a scope were recorded. */
   readonly comparisonEvidence?: boolean;
   /** Whether this account has published this claim before. */
@@ -74,6 +76,12 @@ export type MarketingGuardAssetFact = {
  * did not say which ones it read could be attached to a post claiming others.
  */
 export type MarketingGuardFacts = {
+  /** The account whose publication history was read. */
+  readonly channelId: string;
+  /** The platform whose asset rules were applied. */
+  readonly channel: string;
+  /** The locale claims and asset alt text were resolved for. */
+  readonly locale: string;
   readonly claims: readonly MarketingGuardClaimFact[];
   readonly assets: readonly MarketingGuardAssetFact[];
   readonly claimRegistryVersion: number;
@@ -92,6 +100,9 @@ export type MarketingGuardFacts = {
  * no way to re-resolve a claim.
  */
 export function marketingFactsScopeDigest(facts: {
+  readonly channelId: string;
+  readonly channel: string;
+  readonly locale: string;
   readonly claimIds: readonly string[];
   readonly assetIds: readonly string[];
   readonly claimRegistryVersion: number;
@@ -102,6 +113,9 @@ export function marketingFactsScopeDigest(facts: {
     .update(
       JSON.stringify([
         "marketing-guard-facts-scope-v1",
+        facts.channelId,
+        facts.channel,
+        facts.locale,
         [...facts.claimIds].sort(),
         [...facts.assetIds].sort(),
         facts.claimRegistryVersion,
@@ -136,6 +150,7 @@ export function marketingFactsDigest(facts: MarketingGuardFacts): string {
     entry.targetsAustralia ?? null,
     entry.modelMatches ?? null,
     entry.featurePublic ?? null,
+    entry.evidenceStatement ?? null,
     entry.comparisonEvidence ?? null,
     entry.usedBefore,
   ];
@@ -144,6 +159,9 @@ export function marketingFactsDigest(facts: MarketingGuardFacts): string {
     .update(
       JSON.stringify([
         "marketing-guard-facts-v2",
+        facts.channelId,
+        facts.channel,
+        facts.locale,
         [...facts.claims]
           .map(claim)
           .sort((left, right) =>
@@ -162,4 +180,3 @@ export function marketingFactsDigest(facts: MarketingGuardFacts): string {
     )
     .digest("hex");
 }
-

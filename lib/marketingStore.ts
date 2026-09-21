@@ -253,13 +253,19 @@ export async function updateMarketingChannel(
   let current: {
     status: string;
     pausedAt: Date | null;
+    pauseReasonCode: string | null;
     lastResumeAuditLogId: string | null;
   } | null = null;
 
   if (patch.status === "autonomous_mode") {
     current = await database.marketingChannel.findUnique({
       where: { id },
-      select: { status: true, pausedAt: true, lastResumeAuditLogId: true },
+      select: {
+        status: true,
+        pausedAt: true,
+        pauseReasonCode: true,
+        lastResumeAuditLogId: true,
+      },
     });
     if (current?.status === "paused") {
       if (!resume) {
@@ -310,6 +316,7 @@ export async function updateMarketingChannel(
         ? {
             status: current.status,
             pausedAt: current.pausedAt,
+            pauseReasonCode: current.pauseReasonCode,
             lastResumeAuditLogId: current.lastResumeAuditLogId,
           }
         : {}),
@@ -440,6 +447,7 @@ export async function createMarketingPost(
   const guardCodes = "codes" in decision ? [...decision.codes] : [];
   const guardRuleIds = [...decision.ruleIds];
   const draftDigest = decision.draftDigest;
+  const factsDigest = decision.factsDigest;
 
   // **The decision has to be about this post.** Provenance says a Guard made
   // it; it does not say what about. The Guard was shown "Three answers side by
@@ -473,6 +481,9 @@ export async function createMarketingPost(
   // are the ones the Guard was resolved against. A decision made with one
   // registry could otherwise be recorded on a post claiming another.
   const storedFactsScopeDigest = marketingFactsScopeDigest({
+    channelId: input.channelId,
+    channel: envelopeForDigest.channel,
+    locale: input.locale,
     claimIds: input.claimIds,
     assetIds: input.assetIds,
     claimRegistryVersion: input.claimRegistryVersion,
@@ -582,6 +593,7 @@ export async function createMarketingPost(
       claimRegistryVersion: input.claimRegistryVersion,
       assetRegistryVersion: input.assetRegistryVersion,
       factSnapshot: asJson(factSnapshot),
+      factsDigest,
       // Derived, every one of them. Two columns that could disagree with the
       // decision are two columns somebody can set to whatever they need.
       guardDecision: verdict,
@@ -638,9 +650,16 @@ export type MarketingPostPatch = {
   legalHold?: boolean;
 };
 
+type MaterialisedPostPatch = {
+  data: Prisma.MarketingPostUpdateManyMutationInput;
+  envelope?: MarketingEnvelope;
+  hasScheduledAt: boolean;
+  scheduledAt: string | null;
+};
+
 const postPatchData = (
   rawPatch: MarketingPostPatch,
-): Prisma.MarketingPostUpdateManyMutationInput => {
+): MaterialisedPostPatch => {
   // Read once, for the reason `createMarketingPost()` does it: a `mode`
   // accessor that answered `approval` to the refusal and `autonomous` to the
   // assignment put an autonomous row in the database through a path that had
@@ -648,6 +667,9 @@ const postPatchData = (
   // primitive, a `Date` or `null`.
   const patch: MarketingPostPatch = { ...rawPatch };
   const data: Prisma.MarketingPostUpdateManyMutationInput = {};
+  let parsedEnvelope: MarketingEnvelope | undefined;
+  const copyDate = (value: Date | null): Date | null =>
+    value === null ? null : new Date(value.getTime());
   if (patch.status !== undefined) data.status = patch.status;
   if (patch.mode !== undefined) {
     // The type says `autonomous` is not one of the values; this says it at run
@@ -667,6 +689,7 @@ const postPatchData = (
     // column saying the approved post was still the approved post, which is
     // the question `lib/marketingTemplates.ts` asks it.
     const envelope = marketingEnvelopeSchema.parse(patch.envelope);
+    parsedEnvelope = envelope;
     const digest = marketingEnvelopeDigest(envelope);
     if (patch.envelopeDigest !== undefined && patch.envelopeDigest !== digest) {
       throw new MarketingStoreRefusedError(
@@ -687,39 +710,47 @@ const postPatchData = (
   if (patch.approvalAuditLogId !== undefined) {
     data.approvalAuditLogId = patch.approvalAuditLogId;
   }
-  if (patch.approvedAt !== undefined) data.approvedAt = patch.approvedAt;
+  if (patch.approvedAt !== undefined) data.approvedAt = copyDate(patch.approvedAt);
   if (patch.approvedDigest !== undefined) data.approvedDigest = patch.approvedDigest;
   if (patch.approvalExpiresAt !== undefined) {
-    data.approvalExpiresAt = patch.approvalExpiresAt;
+    data.approvalExpiresAt = copyDate(patch.approvalExpiresAt);
   }
   if (patch.reusableAsTemplate !== undefined) {
     data.reusableAsTemplate = patch.reusableAsTemplate;
   }
-  if (patch.scheduledAt !== undefined) data.scheduledAt = patch.scheduledAt;
-  if (patch.slotDate !== undefined) data.slotDate = patch.slotDate;
+  if (patch.scheduledAt !== undefined) data.scheduledAt = copyDate(patch.scheduledAt);
+  if (patch.slotDate !== undefined) data.slotDate = copyDate(patch.slotDate);
   if (patch.claimToken !== undefined) data.claimToken = patch.claimToken;
-  if (patch.leaseUntil !== undefined) data.leaseUntil = patch.leaseUntil;
+  if (patch.leaseUntil !== undefined) data.leaseUntil = copyDate(patch.leaseUntil);
   if (patch.publishAttempt !== undefined) data.publishAttempt = patch.publishAttempt;
   if (patch.providerRequestKey !== undefined) {
     data.providerRequestKey = patch.providerRequestKey;
   }
   if (patch.externalPostId !== undefined) data.externalPostId = patch.externalPostId;
   if (patch.externalUrl !== undefined) data.externalUrl = patch.externalUrl;
-  if (patch.publishedAt !== undefined) data.publishedAt = patch.publishedAt;
+  if (patch.publishedAt !== undefined) data.publishedAt = copyDate(patch.publishedAt);
   if (patch.verifiedPublicAt !== undefined) {
-    data.verifiedPublicAt = patch.verifiedPublicAt;
+    data.verifiedPublicAt = copyDate(patch.verifiedPublicAt);
   }
   if (patch.verificationMethod !== undefined) {
     data.verificationMethod = patch.verificationMethod;
   }
   if (patch.errorCode !== undefined) data.errorCode = patch.errorCode;
   if (patch.outcomeUnknownAt !== undefined) {
-    data.outcomeUnknownAt = patch.outcomeUnknownAt;
+    data.outcomeUnknownAt = copyDate(patch.outcomeUnknownAt);
   }
-  if (patch.deletedAt !== undefined) data.deletedAt = patch.deletedAt;
+  if (patch.deletedAt !== undefined) data.deletedAt = copyDate(patch.deletedAt);
   if (patch.deletionMethod !== undefined) data.deletionMethod = patch.deletionMethod;
   if (patch.legalHold !== undefined) data.legalHold = patch.legalHold;
-  return data;
+  return {
+    data,
+    ...(parsedEnvelope === undefined ? {} : { envelope: parsedEnvelope }),
+    hasScheduledAt: patch.scheduledAt !== undefined,
+    scheduledAt:
+      patch.scheduledAt === undefined || patch.scheduledAt === null
+        ? null
+        : patch.scheduledAt.toISOString(),
+  };
 };
 
 /** What an operator supplies when re-queueing a post whose publication failed. */
@@ -766,6 +797,10 @@ export async function appendMarketingPostHistory(
   };
 
   const entry = marketingHistoryEntrySchema.parse(input.entry);
+  // Materialise the patch before the first await. `postPatchData()` parses the
+  // envelope once and returns that same value for both the write and the final
+  // schedule comparison; the original object is never parsed a second time.
+  const materialisedPatch = postPatchData(input.patch ?? {});
   if (
     !(MARKETING_APPENDABLE_HISTORY_TYPES as readonly string[]).includes(entry.type)
   ) {
@@ -791,7 +826,7 @@ export async function appendMarketingPostHistory(
   }
 
   const history = marketingHistorySchema.parse(current.history);
-  const data = postPatchData(input.patch ?? {});
+  const data = materialisedPatch.data;
 
   // **The two places a schedule can live agree after this append, not just
   // inside it.** Comparing them only when both were patched let either one
@@ -800,14 +835,14 @@ export async function appendMarketingPostHistory(
   // out. The values compared are the ones that will be there afterwards.
   const currentEnvelope = marketingEnvelopeSchema.safeParse(current.envelope);
   const finalEnvelopeSchedule =
-    input.patch?.envelope !== undefined
-      ? (marketingEnvelopeSchema.parse(input.patch.envelope).scheduledAt ?? null)
+    materialisedPatch.envelope !== undefined
+      ? (materialisedPatch.envelope.scheduledAt ?? null)
       : currentEnvelope.success
         ? (currentEnvelope.data.scheduledAt ?? null)
         : null;
   const finalColumnSchedule =
-    input.patch?.scheduledAt !== undefined
-      ? (input.patch.scheduledAt?.toISOString() ?? null)
+    materialisedPatch.hasScheduledAt
+      ? materialisedPatch.scheduledAt
       : (current.scheduledAt?.toISOString() ?? null);
   if (finalEnvelopeSchedule !== finalColumnSchedule) {
     throw new MarketingStoreRefusedError(

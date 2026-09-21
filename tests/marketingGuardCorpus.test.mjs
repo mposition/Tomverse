@@ -15,7 +15,11 @@ import {
   MARKETING_GUARD_RULES,
 } from "../lib/marketingGuardRules.ts";
 import { MARKETING_HYGIENE_CODES } from "../lib/marketingGuardNormalise.ts";
-import { guardDraft, sealMarketingFacts } from "../lib/marketingGuardCore.ts";
+import {
+  guardDraft,
+  sealMarketingFacts,
+  sealMarketingGuardContext,
+} from "../lib/marketingGuardCore.ts";
 
 const corpus = (name) =>
   JSON.parse(
@@ -54,6 +58,9 @@ const decide = (input, claims = []) =>
     // protected-writer check's scan, which is why this one may call the
     // sealer at all.
     facts: sealMarketingFacts({
+      channelId: "chn_corpus",
+      channel: "linkedin",
+      locale: "en",
       claims,
       assets: [],
       claimRegistryVersion: 1,
@@ -61,12 +68,12 @@ const decide = (input, claims = []) =>
       factSnapshotDigest: null,
     }),
     templates: [],
-    context: {
+    context: sealMarketingGuardContext({
       priceFallbackAlertReady: false,
       incidentOrSecurity: "proved_false",
       testimonial: "proved_false",
       legalOrPolicy: "proved_false",
-    },
+    }),
   });
 
 /** The claims a case declares, spelled out from its `claims` shorthand. */

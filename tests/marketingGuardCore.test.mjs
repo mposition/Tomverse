@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import {
   MARKETING_APPROVAL_CODES,
   sealMarketingFacts,
+  sealMarketingGuardContext,
   marketingGuardDraftDigest,
   MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
   marketingTemplateWriteConditions,
@@ -20,6 +21,7 @@ import {
   guardTemplateForApproval,
   sealMarketingTemplateProof,
 } from "../lib/marketingGuardCore.ts";
+import { resolveMarketingGuardContext } from "../lib/marketingGuardContext.ts";
 
 const TEMPLATE_TEXT = "Three answers to one question, side by side.";
 const CHANNEL_ID = "chn_linkedin_en";
@@ -31,13 +33,14 @@ const TEMPLATE_DIGEST = createHash("sha256")
   .update(TEMPLATE_TEXT, "utf8")
   .digest("hex");
 
-const context = (overrides = {}) => ({
-  priceFallbackAlertReady: false,
-  incidentOrSecurity: "proved_false",
-  testimonial: "proved_false",
-  legalOrPolicy: "proved_false",
-  ...overrides,
-});
+const context = (overrides = {}) =>
+  sealMarketingGuardContext({
+    priceFallbackAlertReady: false,
+    incidentOrSecurity: "proved_false",
+    testimonial: "proved_false",
+    legalOrPolicy: "proved_false",
+    ...overrides,
+  });
 
 /**
  * A sealed facts bundle, which is the only kind the Guard takes.
@@ -48,6 +51,9 @@ const context = (overrides = {}) => ({
  */
 const facts = (overrides = {}) =>
   sealMarketingFacts({
+    channelId: CHANNEL_ID,
+    channel: "linkedin",
+    locale: "en",
     claims: [],
     assets: [],
     claimRegistryVersion: 1,
@@ -56,8 +62,8 @@ const facts = (overrides = {}) =>
     ...overrides,
   });
 
-const input = (overrides = {}) => ({
-  draft: {
+const input = (overrides = {}) => {
+  const draft = {
     renderedText: "Three answers to one question, side by side.",
     locale: "en",
     channel: "linkedin",
@@ -65,23 +71,40 @@ const input = (overrides = {}) => ({
     claimIds: [],
     assetIds: [],
     ...(overrides.draft ?? {}),
-  },
-  facts:
-    overrides.sealedFacts ??
-    facts({ claims: [], assets: [], ...(overrides.facts ?? {}) }),
-  templates: overrides.templates ?? [],
-  context: context(overrides.context),
-});
+  };
+  return {
+    draft,
+    facts: overrides.sealedFacts ??
+      facts({
+        channelId: draft.channelId,
+        channel: draft.channel,
+        locale: draft.locale,
+        claims: [],
+        assets: [],
+        ...(overrides.facts ?? {}),
+      }),
+    templates: overrides.templates ?? [],
+    context: context(overrides.context),
+  };
+};
 
 /** A draft that would be autonomous if every other input allowed it. */
 const autonomousReady = (overrides = {}) => {
+  const draftOverrides = overrides.draft ?? {};
+  const draftScope = {
+    channelId: draftOverrides.channelId ?? CHANNEL_ID,
+    channel: draftOverrides.channel ?? "linkedin",
+    locale: draftOverrides.locale ?? "en",
+  };
   const rawFacts = {
+    ...draftScope,
     claims: [
       {
         claimId: "claim.compare",
         type: "feature",
         known: true,
         featurePublic: true,
+        evidenceStatement: TEMPLATE_TEXT,
         usedBefore: true,
       },
     ],
@@ -97,7 +120,7 @@ const autonomousReady = (overrides = {}) => {
       // the facts it was given -- which is the point of that check.
       claimIds: sealed.claims.map((claim) => claim.claimId),
       assetIds: sealed.assets.map((asset) => asset.assetId),
-      ...(overrides.draft ?? {}),
+      ...draftOverrides,
     },
     sealedFacts: sealed,
     templates: overrides.templates ?? [
@@ -159,7 +182,7 @@ test("a template whose digest does not match is not a template", () => {
   // The digest is computed here from the text, so "does not match" means the
   // words changed -- not that a caller supplied a different number.
   const decision = guardDraft(
-    autonomousReady({ draft: { renderedText: "Completely different words." } }),
+    autonomousReady({ draft: { renderedText: `${TEMPLATE_TEXT} Extra.` } }),
   );
   assert.equal(decision.verdict, "approval_required");
   assert.ok(decision.codes.includes("new_copy"));
@@ -203,6 +226,7 @@ test("a claim used for the first time needs a person", () => {
             type: "feature",
             known: true,
             featurePublic: true,
+            evidenceStatement: TEMPLATE_TEXT,
             usedBefore: false,
           },
         ],
@@ -222,6 +246,53 @@ test("everything lined up reaches autonomous, so the path is not dead code", () 
   assert.equal(decision.verdict, "autonomous_eligible", JSON.stringify(decision));
   assert.equal(decision.templateId, "template.compare");
   assert.equal(decision.templateDigest, ENVELOPE_DIGEST);
+});
+
+test("raw caller context cannot choose the autonomous verdict", () => {
+  const ready = autonomousReady();
+  const decision = guardDraft({
+    ...ready,
+    context: {
+      priceFallbackAlertReady: true,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    },
+  });
+  assert.equal(decision.verdict, "approval_required");
+  assert.ok(decision.codes.includes("alert_path_not_ready"));
+  assert.ok(decision.codes.includes("category_unreadable"));
+});
+
+test("the S1 server context is pinned closed", () => {
+  const resolved = resolveMarketingGuardContext();
+  assert.deepEqual(
+    {
+      priceFallbackAlertReady: resolved.priceFallbackAlertReady,
+      incidentOrSecurity: resolved.incidentOrSecurity,
+      testimonial: resolved.testimonial,
+      legalOrPolicy: resolved.legalOrPolicy,
+    },
+    {
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "unreadable",
+      testimonial: "unreadable",
+      legalOrPolicy: "unreadable",
+    },
+  );
+  const decision = guardDraft({ ...autonomousReady(), context: resolved });
+  assert.equal(decision.verdict, "approval_required");
+});
+
+test("facts resolved for channel A in en cannot judge channel B in ko", () => {
+  const decision = guardDraft(
+    input({
+      draft: { channelId: "chn_other", locale: "ko" },
+      sealedFacts: facts(),
+    }),
+  );
+  assert.equal(decision.verdict, "reject");
+  assert.ok(decision.codes.includes("facts_scope_mismatch"));
 });
 
 test("without the alert path, the same draft is an approval", () => {

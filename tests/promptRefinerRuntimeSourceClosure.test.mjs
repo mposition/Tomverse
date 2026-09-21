@@ -101,10 +101,16 @@ const compilerOptions = parsedConfig.options;
 // count is still 228 and the position-free inventory still hashes to
 // 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65, which
 // is what says nothing was added, removed or changed by either side.
+//
+// 2026-09-21, S1f: the watched-schema fingerprint comment records the new
+// `MarketingPost.factsDigest` column. That comment sits above this closure's
+// computed accesses in `lib/marketingAutomationAccess.ts`, so their positions
+// move. The count and the position-free inventory remain 228 and
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e7aca1aacd007fed506e1d437425c0ac",
-  "0f6346d00fd834a38c92c329577a8cf7",
+  "3b5090954eb21592fc5b616a299b1cdf",
+  "1d9eecf5e3ee9a2a475ad2f85ecd6c17",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

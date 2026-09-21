@@ -15,14 +15,25 @@
  * `autonomous_eligible`.
  *
  * **Usage is a database fact.** Whether an account has published a claim
- * before is not in any registry, so it is passed in -- and it is the one input
- * here that a caller states. It decides only `first_use_of_claim`, which sends
- * a post to a person rather than releasing one; getting it wrong the
- * dishonest way means asking for an approval nobody needed.
+ * before is read from `MarketingPost` for the named account. A caller names
+ * the account and locale whose question is being asked; it never supplies the
+ * answer.
  */
 
 import "server-only";
 
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
+import { getBillingPriceCatalogWithMeta } from "@/lib/billingPriceCatalog";
+import {
+  loadMarketingAssetRegistry,
+  MARKETING_ASSET_REGISTRY_PATH,
+  resolveMarketingAsset,
+  type LoadedAssetRegistry,
+} from "@/lib/marketingAssets";
+import { resolveMarketingClaimGate } from "@/lib/marketingClaimGates";
 import type { MarketingGuardFacts } from "@/lib/marketingFacts";
 import { sealMarketingFacts } from "@/lib/marketingGuardCore";
 import {
@@ -30,13 +41,17 @@ import {
   marketingClaimById,
   resolveMarketingClaim,
 } from "@/lib/marketingClaims";
+import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
+import {
+  catalogueClaimSourceDecision,
+  modelClaimDecision,
+  priceClaimSourceDecision,
+} from "@/lib/marketingFactSources";
+import { getRuntimeModel } from "@/lib/modelRegistry";
 import type { PrismaClient } from "@prisma/client";
 
-/** Only the two tables this file reads. It writes nothing. */
-export type MarketingFactDatabase = Pick<
-  PrismaClient,
-  "appSetting" | "marketingPost"
->;
+/** The usage table this file reads through the caller's transaction/client. */
+export type MarketingFactDatabase = Pick<PrismaClient, "marketingPost">;
 
 /**
  * What a caller may say: which ids, and which post they are for.
@@ -53,39 +68,38 @@ export type MarketingFactRequest = {
   readonly assetIds: readonly string[];
   /** The account the post is for, which is whose history "used before" is. */
   readonly channelId: string;
+  /** The platform whose asset allowlist and disclosure rules apply. */
+  readonly channel: string;
   readonly locale: string;
   /** The digest of the fact snapshot the post will store, or `null`. */
   readonly factSnapshotDigest: string | null;
 };
 
-/** What a claim's gate is, from the settings table rather than from a caller. */
+/** What a claim's gate is, from its production reader rather than a caller. */
 async function readGates(
-  database: MarketingFactDatabase,
   gateKeys: readonly string[],
 ): Promise<Map<string, boolean | null>> {
   const gates = new Map<string, boolean | null>();
-  if (gateKeys.length === 0) return gates;
-
-  // Unreadable is `null` rather than `false`, which is the distinction
-  // `marketingClaimUsable()` exists to keep: a flag nobody could read is not a
-  // flag that is off, and both refuse.
-  for (const key of gateKeys) gates.set(key, null);
-
-  try {
-    const rows = await database.appSetting.findMany({
-      where: { key: { in: [...gateKeys] } },
-      select: { key: true, value: true },
-    });
-    for (const row of rows) {
-      const value: unknown = row.value;
-      gates.set(row.key, value === true || value === "true");
-    }
-  } catch {
-    // Left as `null`, which refuses.
-  }
+  await Promise.all(
+    [...new Set(gateKeys)].map(async (key) => {
+      gates.set(key, await resolveMarketingClaimGate(key));
+    }),
+  );
 
   return gates;
 }
+
+const readAssetRegistry = async (): Promise<LoadedAssetRegistry | null> => {
+  try {
+    const raw = JSON.parse(
+      await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8"),
+    ) as unknown;
+    return loadMarketingAssetRegistry(raw);
+  } catch {
+    // A missing, unreadable or invalid registry makes every asset unknown.
+    return null;
+  }
+};
 
 /**
  * Which of these claims and assets this account has published before.
@@ -118,26 +132,52 @@ async function readUsage(
  * Guard refuses -- rather than being absent, which it would not notice.
  *
  * The clock is this process's, not the caller's. It is not the database's
- * either, which would be better and needs raw SQL in a file that currently
- * has none; what matters here is that the date a claim's expiry is measured
- * against is not a number the caller chose.
+ * either. The gate, usage, price, model and asset reads are also not one
+ * transactional snapshot. That is acceptable only while every S1 feature is
+ * off and `createMarketingPost()` refuses autonomous creation outright. The
+ * S2 route must move the clock and all publish-relevant reads into the write
+ * transaction before enabling a feature; this comment is the hand-off marker.
  */
 export async function resolveMarketingFacts(
   database: MarketingFactDatabase,
-  request: MarketingFactRequest,
+  rawRequest: MarketingFactRequest,
 ): Promise<MarketingGuardFacts> {
+  // The ids name the lookups and the scope names where those answers apply.
+  // Snapshot both before the first await so an accessor cannot make the
+  // resolver read channel A and then seal the answers as channel B.
+  const request: MarketingFactRequest = {
+    claimIds: [...rawRequest.claimIds].map(String),
+    assetIds: [...rawRequest.assetIds].map(String),
+    channelId: String(rawRequest.channelId),
+    channel: String(rawRequest.channel),
+    locale: String(rawRequest.locale),
+    factSnapshotDigest:
+      rawRequest.factSnapshotDigest === null
+        ? null
+        : String(rawRequest.factSnapshotDigest),
+  };
   const on = new Date();
   const registryClaims = request.claimIds.map((id) => marketingClaimById(id));
   const gateKeys = registryClaims
     .map((claim) => claim?.gate)
     .filter((gate): gate is string => typeof gate === "string");
 
-  const [gates, usage] = await Promise.all([
-    readGates(database, gateKeys),
+  const needsPlans = registryClaims.some(
+    (claim) => claim?.factSource?.kind === "billing_plan",
+  );
+  const needsCatalogue = registryClaims.some(
+    (claim) => claim?.factSource?.kind === "localized_catalogue",
+  );
+
+  const [gates, usage, plans, catalogue, assetRegistry] = await Promise.all([
+    readGates(gateKeys),
     readUsage(database, request.channelId),
+    needsPlans ? getBillingPlansWithFieldSources() : Promise.resolve([]),
+    needsCatalogue ? getBillingPriceCatalogWithMeta() : Promise.resolve(null),
+    request.assetIds.length > 0 ? readAssetRegistry() : Promise.resolve(null),
   ]);
 
-  const claims = request.claimIds.map((claimId) => {
+  const claims = await Promise.all(request.claimIds.map(async (claimId) => {
     const registryClaim = marketingClaimById(claimId);
     const resolution = resolveMarketingClaim({
       id: claimId,
@@ -158,34 +198,114 @@ export async function resolveMarketingFacts(
     }
 
     const claim = resolution.claim;
-    return {
+    const fact = {
       claimId,
       type: claim.type,
       known: true,
       statesCreditAllowance: claim.planMeaning === "credit_allowance",
       usedBefore: usage.claims.has(claimId),
     };
-  });
 
-  // Assets are resolved by their own registry, which is loaded rather than
-  // imported -- so until that loader is wired to a caller, an asset id
-  // resolves to `known: false` and the Guard refuses it. That is the right
-  // answer for S1: nothing publishes yet.
-  const assets = request.assetIds.map((assetId) => ({
-    assetId,
-    known: false,
-    usedBefore: usage.assets.has(assetId),
+    if (claim.type === "pricing" || claim.type === "plan") {
+      const factSource = claim.factSource;
+      if (factSource?.kind === "billing_plan") {
+        const plan = plans.find((entry) => entry.plan.id === factSource.planId);
+        const decision = plan
+          ? priceClaimSourceDecision(
+              factSource.fields.map((field) => ({
+                field,
+                source: plan.sources[field],
+              })),
+            )
+          : { ok: false as const };
+        return {
+          ...fact,
+          priceSourcesAllStored: decision.ok,
+          currency: plan?.plan.currency,
+          targetsAustralia: factSource.targetsAustralia,
+        };
+      }
+      if (factSource?.kind === "localized_catalogue") {
+        const decision = catalogue
+          ? catalogueClaimSourceDecision(catalogue.source)
+          : { ok: false as const };
+        return {
+          ...fact,
+          priceSourcesAllStored: decision.ok,
+          currency: factSource.currency,
+          targetsAustralia: factSource.targetsAustralia,
+        };
+      }
+      return { ...fact, priceSourcesAllStored: false };
+    }
+
+    if (claim.type === "model") {
+      const factSource = claim.factSource;
+      if (factSource?.kind !== "model_registry") {
+        return { ...fact, modelMatches: false };
+      }
+      const model = (await getRuntimeModel(factSource.modelId)) ?? null;
+      return {
+        ...fact,
+        modelMatches: modelClaimDecision({
+          model,
+          claimedMinimumPlan: factSource.minimumPlan ?? undefined,
+        }).ok,
+      };
+    }
+
+    if (claim.type === "feature" || claim.type === "availability") {
+      if (claim.evidence?.kind !== "page") {
+        return { ...fact, featurePublic: false };
+      }
+      const evidence = resolveMarketingPageEvidence({
+        pageRoute: claim.evidence.pageRoute,
+        localeKey: claim.evidence.localeKey,
+        locale: request.locale as never,
+      });
+      return evidence.ok
+        ? { ...fact, featurePublic: true, evidenceStatement: evidence.text }
+        : { ...fact, featurePublic: false };
+    }
+
+    if (claim.type === "comparison") {
+      return {
+        ...fact,
+        comparisonEvidence:
+          claim.evidence?.kind === "external" &&
+          claim.evidence.url.length > 0 &&
+          claim.evidence.scope.length > 0,
+      };
+    }
+
+    return fact;
   }));
 
+  const assets = request.assetIds.map((assetId) => {
+    const resolution = assetRegistry
+      ? resolveMarketingAsset({
+          id: assetId,
+          channel: request.channel,
+          locale: request.locale,
+          on,
+          registry: assetRegistry,
+        })
+      : { ok: false as const };
+    return {
+      assetId,
+      known: resolution.ok,
+      usedBefore: usage.assets.has(assetId),
+    };
+  });
+
   return sealMarketingFacts({
+    channelId: request.channelId,
+    channel: request.channel,
+    locale: request.locale,
     claims,
     assets,
     claimRegistryVersion: MARKETING_CLAIM_REGISTRY_VERSION,
-    // The asset registry is a file the loader reads rather than a module
-    // constant, and nothing loads it yet; until it does, every asset resolves
-    // to `known: false` and the version it would report is not knowable here.
-    // Nought rather than a guess, and the Guard refuses the assets anyway.
-    assetRegistryVersion: 0,
+    assetRegistryVersion: assetRegistry?.version ?? 0,
     factSnapshotDigest: request.factSnapshotDigest,
   });
 }
