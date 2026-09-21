@@ -1,10 +1,23 @@
 /**
- * The claims a generated marketing post may not make.
+ * Provisional language diagnostics for generated marketing copy.
  *
  * Contract: docs/policy/marketing-automation.md §7.1, item by item. Each rule
  * carries an id, because the Guard records which rule fired and the corpus
  * meta-test requires a bypass case and a benign case for every id -- a rule
  * nobody has tried to get past is a rule nobody has tested.
+ *
+ * **This judge has no authority to refuse.** A match contributes the single
+ * approval code `provisional_language_flag` and its granular rule id, so a
+ * person reads the post before anything can publish. Restoring refusal
+ * authority would mean replacing this provisional judge with a tokeniser and
+ * morphology-aware analysis, not adding more patterns. The behavioural policy
+ * test that holds that line is
+ * `tests/marketingGuardLanguageProvisional.test.mjs`.
+ *
+ * This contract is limited to language judgement. `marketingTextHygiene()`
+ * still refuses byte-level control, bidi, zero-width, mention, URL, link
+ * markup and prompt-injection facts, and registry, claim, asset and provenance
+ * checks still refuse independently in `lib/marketingGuardCore.ts`.
  *
  * **Patterns are stored as source and flags, not as `RegExp` objects.** A
  * `RegExp` carries its own mutable matcher: `.compile()` replaces the pattern
@@ -73,8 +86,8 @@ export type MarketingRuleDetector = (text: string) => boolean;
 export type MarketingGuardRule = {
   readonly id: string;
   readonly category: MarketingRuleCategory;
-  /** Every §7.1 rule refuses. The approval categories are §7.4 and live in the core. */
-  readonly verdict: "reject";
+  /** Every language rule is provisional and sends the draft to a person. */
+  readonly verdict: "approval_required";
   /** Literal terms, compiled by the Guard into separator-tolerant patterns. */
   readonly terms: readonly MarketingBannedTerm[];
   readonly patterns: readonly MarketingRulePattern[];
@@ -102,7 +115,7 @@ const rule = (
   Object.freeze({
     id,
     category,
-    verdict: "reject" as const,
+    verdict: "approval_required" as const,
     terms: Object.freeze(parts.terms ? [...parts.terms] : []),
     patterns: Object.freeze(parts.patterns ? [...parts.patterns] : []),
     detectors: Object.freeze(parts.detectors ? [...parts.detectors] : []),
@@ -112,14 +125,14 @@ const rule = (
 /**
  * §7.1, first item: the repository's ban words, superlatives and comparatives.
  *
- * `better` is refused here without exception. It is in the policy's list, and
+ * `better` is diagnosed here without exception. It is in the policy's list, and
  * an earlier version tried to allow the denials -- "no model was a better fit"
  * -- with a negative lookbehind, which then read "Nothing is better than
  * Tomverse" and "No competitor is better than Tomverse" as denials too. Those
  * are the claim stated as strongly as it can be. A generated post has no reason
- * to write the denial, so the Guard refuses the word; the repository's own copy
- * keeps saying it, which is why `MARKETING_SUPERLATIVE_TERMS` does not carry it
- * and `lib/marketingBannedClaims.ts` explains that split.
+ * to write the denial, so the provisional judge flags the word; the repository's
+ * own copy keeps saying it, which is why `MARKETING_SUPERLATIVE_TERMS` does not
+ * carry it and `lib/marketingBannedClaims.ts` explains that split.
  */
 const SUPERLATIVE = rule("rule.superlative", "superlative", {
   terms: MARKETING_SUPERLATIVE_TERMS,
@@ -239,8 +252,9 @@ const AI_REVIEW_CONTRACT = rule("rule.ai-review-contract", "ai_review_contract",
  * §7.1, third item: superiority claims with a known counter-example.
  *
  * Each is false and known to be false, which is a different thing from
- * unsupported: there is nothing an approver could check that would make "the
- * only AI that reads HWP" true, so it is refused rather than queued.
+ * unsupported. Even so, this prose matcher is provisional: it flags the line
+ * for a person and cannot refuse it. False structured model, feature and
+ * comparison claims are still refused by the registry checks in the core.
  *
  * The Chinese pattern names what the claim is unique among, for the reason the
  * rank rule does: 唯一标识符 is a unique identifier and appears in any sentence

@@ -154,15 +154,17 @@ const autonomousReady = (overrides = {}) => {
 
 test("a reject beats an approval, whatever else is true", () => {
   // Precedence is the shape of the whole function: one refused rule is
-  // enough, and the approval reasons beside it do not soften it.
+  // enough, and the approval reasons beside it do not soften it. Hygiene is a
+  // byte fact, not one of the provisional language judgements.
   const decision = guardDraft(
     input({
-      draft: { renderedText: "The best workspace, guaranteed." },
+      draft: { renderedText: "Thanks @openai -- the best workspace." },
       context: { incidentOrSecurity: "proved_true", testimonial: "proved_true" },
     }),
   );
   assert.equal(decision.verdict, "reject");
-  assert.ok(decision.codes.includes("banned_claim"));
+  assert.ok(decision.codes.includes("hygiene"));
+  assert.ok(decision.ruleIds.includes("rule.superlative"));
 });
 
 test("free copy is never autonomous, whatever the draft says about itself", () => {
@@ -559,12 +561,19 @@ test("a template is checked once, when it is approved", () => {
   // §7.2. Otherwise a rule added later would silently stop applying to the
   // posts that matter most.
   const decision = guardTemplateForApproval(
-    { renderedText: "The best model, guaranteed.", locale: "en", channel: "linkedin" },
-    { claims: [], assets: [] },
+    {
+      renderedText: "The best model, guaranteed.",
+      locale: "en",
+      channel: "linkedin",
+      channelId: CHANNEL_ID,
+    },
+    facts({ claims: [], assets: [] }),
     context({ priceFallbackAlertReady: true }),
   );
-  assert.equal(decision.verdict, "reject");
-  assert.ok(decision.codes.includes("banned_claim"));
+  assert.equal(decision.verdict, "approval_required");
+  assert.ok(decision.codes.includes("provisional_language_flag"));
+  assert.ok(decision.ruleIds.includes("rule.superlative"));
+  assert.ok(decision.ruleIds.includes("rule.guarantee"));
 });
 
 test("the code lists are closed and frozen", () => {
@@ -589,11 +598,6 @@ test("every reject code is reachable", () => {
   };
 
   collect(guardDraft(input({ draft: { renderedText: "thanks @openai" } })));
-  collect(guardDraft(input({ draft: { renderedText: "The best model." } })));
-  collect(
-    guardDraft(input({ draft: { renderedText: "Start free today with no limits." } })),
-  );
-
   // A declared id with no resolved fact behind it, and the other way round.
   collect(guardDraft(input({ draft: { claimIds: ["claim.undeclared"] } })));
 
@@ -800,8 +804,9 @@ test("free wording needs the allowance as a claim, not as a word", () => {
     "Free forever; credits power the service.",
   ]) {
     const decision = guardDraft(input({ draft: { renderedText } }));
-    assert.equal(decision.verdict, "reject", renderedText);
-    assert.ok(decision.codes.includes("free_wording_without_condition"));
+    assert.equal(decision.verdict, "approval_required", renderedText);
+    assert.ok(decision.codes.includes("provisional_language_flag"));
+    assert.ok(decision.ruleIds.includes("rule.free-wording"));
   }
 
   // The same words with the allowance declared and stated.
@@ -854,8 +859,9 @@ test("free wording needs the allowance as a claim, not as a word", () => {
       },
     }),
   );
-  assert.equal(wrongClaim.verdict, "reject", JSON.stringify(wrongClaim));
-  assert.ok(wrongClaim.codes.includes("free_wording_without_condition"));
+  assert.equal(wrongClaim.verdict, "approval_required", JSON.stringify(wrongClaim));
+  assert.ok(wrongClaim.codes.includes("provisional_language_flag"));
+  assert.ok(wrongClaim.ruleIds.includes("rule.free-wording"));
 
   // And "free" inside a compound that is not about a price says nothing about
   // one. This was refused for stating a price it does not state.
@@ -883,8 +889,9 @@ test("free wording needs the allowance as a claim, not as a word", () => {
       },
     }),
   );
-  assert.equal(notRendered.verdict, "reject", JSON.stringify(notRendered));
-  assert.ok(notRendered.codes.includes("free_wording_without_condition"));
+  assert.equal(notRendered.verdict, "approval_required", JSON.stringify(notRendered));
+  assert.ok(notRendered.codes.includes("provisional_language_flag"));
+  assert.ok(notRendered.ruleIds.includes("rule.free-wording"));
 
   // "free" in a compound that is not about a price says nothing about one.
   // The shape, not a list: "distraction-free" is not in any list and was
@@ -904,8 +911,9 @@ test("free wording needs the allowance as a claim, not as a word", () => {
   const acrossASentence = guardDraft(
     input({ draft: { renderedText: "Start free. form habits that last." } }),
   );
-  assert.equal(acrossASentence.verdict, "reject", JSON.stringify(acrossASentence));
-  assert.ok(acrossASentence.codes.includes("free_wording_without_condition"));
+  assert.equal(acrossASentence.verdict, "approval_required", JSON.stringify(acrossASentence));
+  assert.ok(acrossASentence.codes.includes("provisional_language_flag"));
+  assert.ok(acrossASentence.ruleIds.includes("rule.free-wording"));
 });
 
 // --- the decision is about this draft, and cannot be edited afterwards -----
@@ -982,14 +990,16 @@ test("the Guard reads its input once", () => {
 
   const decision = guardDraft({
     draft,
-    facts: { claims: [], assets: [] },
+    facts: facts(),
     templates: [],
     context: context(),
   });
 
   // Whatever the first read said is what was checked *and* what was bound.
-  assert.equal(decision.verdict, "reject", JSON.stringify(decision));
-  assert.ok(decision.codes.includes("banned_claim"));
+  assert.equal(decision.verdict, "approval_required", JSON.stringify(decision));
+  assert.ok(decision.codes.includes("provisional_language_flag"));
+  assert.ok(decision.ruleIds.includes("rule.superlative"));
+  assert.ok(decision.ruleIds.includes("rule.guarantee"));
   assert.equal(
     decision.draftDigest,
     marketingGuardDraftDigest({

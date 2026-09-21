@@ -56,10 +56,8 @@ import {
 /** Why a draft is refused. Closed, because a post records the code. */
 export const MARKETING_REJECT_CODES = Object.freeze([
   "hygiene",
-  "banned_claim",
   "price_source_not_stored",
   "au_price_gst_unverifiable",
-  "free_wording_without_condition",
   "model_claim_false",
   "feature_not_public",
   "comparison_without_evidence",
@@ -88,6 +86,7 @@ export const MARKETING_APPROVAL_CODES = Object.freeze([
   "category_unreadable",
   "alert_path_not_ready",
   "context_not_resolved",
+  "provisional_language_flag",
 ] as const);
 export type MarketingApprovalCode = (typeof MARKETING_APPROVAL_CODES)[number];
 
@@ -876,12 +875,12 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     ruleIds.push(...hygiene.map((code) => `hygiene.${code}`));
   }
 
-  // --- 2. what it says ----------------------------------------------------
+  // --- 2. provisional language diagnostics -------------------------------
   const forms = marketingTextForms(draft.renderedText);
   const cleanedOfFreeCompounds = withoutFreeCompounds(forms);
   for (const rule of MARKETING_GUARD_RULES) {
     if (ruleFires(rule, forms)) {
-      rejectCodes.push("banned_claim");
+      approvalCodes.push("provisional_language_flag");
       ruleIds.push(rule.id);
     }
   }
@@ -1011,7 +1010,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   if (anyTermMatches(cleanedOfFreeCompounds, FREE_WORDING)) {
     approvalCodes.push("price_or_promotion");
     if (!freeCondition || !anyTermMatches(forms, FREE_CONDITION)) {
-      rejectCodes.push("free_wording_without_condition");
+      approvalCodes.push("provisional_language_flag");
       ruleIds.push("rule.free-wording");
     }
   }
