@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/amux/staging-checklist.md
-templateRevision: 2026-09-20
+templateRevision: 2026-09-21
 environment:
 deploySha:
 startedAtUtc:
@@ -21,7 +21,7 @@ digest:
 |---|---|
 | 환경 | staging |
 | 배포 SHA (전체 40자리) | |
-| template revision | 2026-09-20 |
+| template revision | 2026-09-21 |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |

@@ -475,7 +475,7 @@ const REGISTRY = {
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
-      "The durable board lifecycle: todo, doing, review, done, blocked, cancelled. Tomverse has no generic work-item mutation input; the scheduler and execution boundary write the reachable transitions as literals inside revision-checked updates, while the database is the complete closed vocabulary.",
+      "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",
