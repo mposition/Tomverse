@@ -109,3 +109,6 @@ promotion-metadata-snapshot-*.json
 # and no result, by design -- a blank page in the tree reads as a finished run.
 # The record is committed by whoever ran it, once it has both.
 docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]__*.md
+
+# rust build output
+/target/
