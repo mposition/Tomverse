@@ -79,6 +79,10 @@ const blockedFixture = async () => {
       priority: "p2",
       revision: 3,
       dueParseState: "valid",
+      dueAt: new Date("2026-09-23T00:00:00.000Z"),
+      duePrecision: "instant",
+      dueSource: "classification",
+      dueRaw: "2026-09-23T00:00:00.000Z",
     },
   });
   fixtureTaskIds.push(task.id);
@@ -364,11 +368,23 @@ test("planning-review retry needs a recorded earlier revision, never an invented
 test("planning retry requires a valid due and cannot reset five historical attempts", async () => {
   const fixture = await blockedFixture();
   await prisma.amuxWorkItem.update({
-    where: { id: fixture.task.id }, data: { dueParseState: "invalid" },
+    where: { id: fixture.task.id }, data: {
+      dueParseState: "invalid",
+      dueAt: null,
+      duePrecision: null,
+      dueSource: "classification",
+      dueRaw: "not-a-date",
+    },
   });
   await assert.rejects(issueRetryProposal(fixture), /planning-review retry requires a newer task revision/);
   await prisma.amuxWorkItem.update({
-    where: { id: fixture.task.id }, data: { dueParseState: "valid" },
+    where: { id: fixture.task.id }, data: {
+      dueParseState: "valid",
+      dueAt: new Date("2026-09-23T00:00:00.000Z"),
+      duePrecision: "instant",
+      dueSource: "classification",
+      dueRaw: "2026-09-23T00:00:00.000Z",
+    },
   });
   const now = new Date();
   let latestAttemptId = "";
