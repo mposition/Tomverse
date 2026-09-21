@@ -24,8 +24,11 @@ import { prisma } from "@/lib/prisma";
  *
  * Spelled out rather than imported because the constant is gone: the point of
  * the one test that still writes it is that a row left behind in a database
- * this build has not been told about changes nothing. That is what lets the row
- * be deleted in a later deploy instead of this one.
+ * this build has not been told about changes nothing.
+ *
+ * That is what makes leaving the row the cheap option. It is not scheduled for
+ * deletion; the conditions that would make deleting it a tidy-up rather than a
+ * risk are in docs/policy/email-notifications.md v28.
  */
 const RETIRED_AUTHORITY_KEY = "email.suppressionReadAuthority";
 
@@ -283,17 +286,19 @@ test("switching a purpose back on is refused while another cause still stops it"
 });
 
 test("a setting row left behind by an earlier deploy changes nothing", async () => {
-  // Deploy D removes the read authority from the code; the row it used to read
-  // is deleted in a later deploy. Not because the send would be wrong without
-  // it -- the send has ignored the setting since deploy C -- but because the
-  // build serving during the migration still consults it in three other places,
-  // and an absent row reads as "entry" there: the console's lift refuses, a
-  // preference can be switched back on that a hold should have refused, and a
-  // deletion intake writes its per-purpose duplicates again.
+  // Deploy D removed the read authority from the code and left the row where
+  // it was. Not out of caution about the send -- the send has ignored the
+  // setting since deploy C -- but because a build older than D-1 still reads
+  // the row, and what an absent row does there depends on which build it is.
+  // The one on `main` today is the worst of them: it answers `entry` by
+  // sending from `SuppressionEntry`, a table frozen since deploy C. The table
+  // in docs/policy/email-notifications.md v28 item 1 has the rest. While the
+  // stored value is `causes`, the row is what keeps such a build correct, so
+  // deleting it is the risky move and keeping it is free.
   //
-  // This is the test for that order and only that order: with this build
+  // What this test pins is the other direction, and only that: with this build
   // serving, the row can be there and say the worst thing it could say, and
-  // nothing reads it. It says nothing about the reverse.
+  // nothing reads it.
   const emailAddress = address();
   // A hard bounce, because it is the one reason that stops transactional mail
   // as well: a complaint about marketing never did, so it could not tell a
