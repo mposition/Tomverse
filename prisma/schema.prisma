@@ -102,6 +102,8 @@ model User {
   emailPreferenceTransitions           EmailPreferenceTransition[]
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
+  emailPermissionEvents                EmailPermissionEvent[]
+  emailPermissionDecisions             EmailPermissionDecision[]
   campaignRecipients                   EmailCampaignRecipient[]
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
@@ -4373,6 +4375,10 @@ model EmailPolicyVersion {
   consentRecords ConsentRecord[]
   deliveries     EmailDelivery[]
 
+  permissionEvents    EmailPermissionEvent[]
+  permissionDecisions EmailPermissionDecision[]
+  sendApprovals       EmailSendApproval[]
+
   @@index([status, activatedAt])
 }
 
@@ -5953,4 +5959,280 @@ model AmuxRouteDecision {
   @@index([taskId, createdAt])
   @@index([worker, createdAt])
   @@index([scoringVersion, createdAt])
+}
+
+/// The facts that are neither consent nor a send decision, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 6.
+///
+/// ConsentRecord answers "what did they agree to". This answers everything
+/// else a basis can rest on: that a notice was shown, that somebody objected,
+/// and when a relationship began and ended. Two ledgers never compete for the
+/// same fact -- consent is said once, by ConsentRecord, and nothing here
+/// records a consent.
+///
+/// Australia's inferred consent ends on an event, not on a clock (draft
+/// section 4.4), so the relationship's start and end have to be facts with
+/// times rather than a field somebody recomputes.
+model EmailPermissionEvent {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The address as it was. Kept when the account changes address, for the
+  /// same reason ConsentRecord keeps it: the fact attached to a mailbox.
+  emailAddress String
+
+  /// notice_shown | objected | relationship_started | relationship_ended
+  ///   | basis_ended
+  kind String
+
+  /// The purpose or classification the fact is about, or "*" when it is about
+  /// the address itself. Not nullable: a null here would make "about
+  /// everything" and "nobody filled it in" the same row.
+  scopeKey String
+
+  /// When it happened, which is not when we wrote it down.
+  occurredAt DateTime
+
+  /// signup_form | preference_center | unsubscribe_page | in_product_notice
+  ///   | admin | system | provider_complaint
+  capturedVia String
+
+  /// Stable per writer so a retried write adds nothing.
+  sourceEventKey String
+
+  /// Resolved at the time and never rewritten when the account later moves
+  /// (docs/policy/email-notifications.md section 6.4).
+  jurisdiction       String?
+  jurisdictionSource String?
+
+  policyVersionId String?
+  policyVersion   EmailPolicyVersion? @relation(fields: [policyVersionId], references: [id])
+
+  /// Screen identifier, notice copy hash, relationship reason. Never the raw
+  /// request and never message content.
+  evidence Json?
+
+  createdAt DateTime @default(now())
+
+  decisionEvidence EmailPermissionDecisionEvidence[]
+
+  @@unique([kind, sourceEventKey], map: "EmailPermissionEvent_kind_source_event_key")
+  @@index([userId, kind, occurredAt])
+  @@index([emailAddress, kind, occurredAt])
+  @@index([policyVersionId])
+}
+
+/// A human decision, written once and never edited.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 5.6
+/// and 7.8.
+///
+/// Two kinds, and they are not variants of one thing. `risk_accepted` is the
+/// owner deciding to send without a basis; `obligation_waiver` is the owner
+/// deciding a display or notice duty will not be performed. Both are business
+/// decisions recorded as themselves -- neither invents a consent, and neither
+/// turns a refusal into a permission. A send verdict references this row; it
+/// never copies it.
+///
+/// The row and its whole membership are written in one transaction and closed
+/// with sealedAt, after which a trigger refuses every update, insert and
+/// delete. Withdrawal is an EmailSendApprovalRevocation beside it, because an
+/// approval that can be edited proves nothing about what was approved.
+model EmailSendApproval {
+  id String @id @default(cuid())
+
+  /// risk_accepted | obligation_waiver
+  approvalType String
+
+  /// Who decided, by account and by the address at the time. Both, because an
+  /// account can be renamed and a reader a year later needs the second.
+  approvedById    String
+  approvedByEmail String
+  approvedAt      DateTime
+
+  /// Why, in the approving person's words, and what would make us look again.
+  /// Neither is optional: an approval with no review condition is a permanent
+  /// one nobody decided to make permanent.
+  reason          String
+  reviewCondition String
+
+  /// Scope. Every member is compared exactly; a mismatch on any one of them
+  /// means the approval does not apply (section 7.8).
+  policyVersionId String?
+  policyVersion   EmailPolicyVersion? @relation(fields: [policyVersionId], references: [id])
+
+  /// The country rule and country an obligation_waiver is about.
+  ruleKey       String?
+  ruleVersion   Int?
+  country       String?
+  obligationKey String?
+
+  /// The purpose a risk_accepted approval covers, or "*" for all of them.
+  purposeKey String?
+
+  /// Closes the row and its membership. Nothing may change afterwards.
+  sealedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  members     EmailSendApprovalMember[]
+  revocations EmailSendApprovalRevocation[]
+  decisions   EmailPermissionDecision[]
+
+  @@index([approvalType, approvedAt])
+  @@index([policyVersionId])
+}
+
+/// One account inside an approval's cohort.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6.
+///
+/// "78 accounts" is the description; this list is the scope. The address is
+/// held as a digest of the normalised address rather than the address, so the
+/// membership proves what was approved without being a second copy of the
+/// mailing list.
+model EmailSendApprovalMember {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  userId String
+
+  /// SHA-256 of the normalised address at approval time. A send compares the
+  /// delivery's pinned address and the account's current address against this;
+  /// either differing means the override does not apply.
+  addressDigest String
+
+  /// The date the two-year confirmation notice counts from for this member,
+  /// and where that date came from (section 5.6 rule 5).
+  noticeAnchorAt     DateTime
+  noticeAnchorSource String
+
+  createdAt DateTime @default(now())
+
+  @@unique([approvalId, userId])
+  @@index([approvalId, addressDigest])
+}
+
+/// Withdrawal of an approval, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6
+/// rule 6. The approval row is never touched; from the first revocation
+/// onwards every verdict is taken without the override.
+model EmailSendApprovalRevocation {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  revokedById    String
+  revokedByEmail String
+  revokedAt      DateTime
+  reason         String
+
+  createdAt DateTime @default(now())
+
+  @@index([approvalId, revokedAt])
+}
+
+/// What one send decided, and on what.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 6 and
+/// 7.6.
+///
+/// Two rows per delivery, not one: the permission is decided again immediately
+/// before the message is handed to the provider, and a single policyVersionId
+/// cannot describe both moments. phase says which one this is.
+///
+/// legalAllowed stays false when an override was used. Writing true would
+/// erase the only row that can answer "why did this go out", and an admin
+/// screen showing it as allowed is how the next person reads a business
+/// decision as a consent.
+model EmailPermissionDecision {
+  id         String  @id @default(cuid())
+  deliveryId String?
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// enqueue | send
+  phase String
+
+  purpose        String
+  classification String
+
+  /// The address the verdict was taken for.
+  emailAddress String
+
+  /// Every authority applied and how each ended, as
+  /// [{ authority, basis, verdict, reason }]. Evidence ids are rows in
+  /// EmailPermissionDecisionEvidence rather than ids inside this blob, so a
+  /// deleted event cannot leave a dangling reference nobody can resolve.
+  authorities Json
+
+  /// All authorities allowed. Independent of the override.
+  legalAllowed Boolean
+
+  /// Set only when an override was applied; the approval is referenced, never
+  /// copied.
+  overrideApprovalId String?
+  overrideApproval   EmailSendApproval? @relation(fields: [overrideApprovalId], references: [id])
+  overrideType       String?
+
+  /// Reasons the send is refused regardless of the override, sorted. Empty
+  /// array when there are none -- null would not distinguish "none" from
+  /// "not computed".
+  blockers Json
+
+  /// (legalAllowed || override applied) && blockers is empty.
+  allowed Boolean
+
+  /// The display contract as pinned at enqueue and as required now.
+  pinnedDisplayContractHash   String?
+  requiredDisplayContractHash String?
+  displayContractSatisfied    Boolean?
+
+  /// Country candidates and their rule versions, as resolved for this verdict.
+  countryCandidates Json?
+  ruleVersions      Json?
+
+  policyVersionId String?
+  policyVersion   EmailPolicyVersion? @relation(fields: [policyVersionId], references: [id])
+
+  /// When suppression was last read for this verdict, and when the message was
+  /// handed to the provider. The gap between them is the race section 7.4 is
+  /// about, and it cannot be measured without both.
+  suppressionCheckedAt DateTime?
+  providerSubmittedAt  DateTime?
+
+  evaluatedAt DateTime
+  createdAt   DateTime @default(now())
+
+  evidence EmailPermissionDecisionEvidence[]
+
+  @@unique([deliveryId, phase], map: "EmailPermissionDecision_delivery_phase")
+  @@index([userId, evaluatedAt])
+  @@index([emailAddress, evaluatedAt])
+  @@index([overrideApprovalId])
+  @@index([policyVersionId])
+}
+
+/// Which permission events a verdict rested on.
+///
+/// A join table rather than an array of ids inside the verdict: the database
+/// then refuses to lose the event a verdict cites, and "what did this rest on"
+/// is a query rather than a parse.
+model EmailPermissionDecisionEvidence {
+  decisionId String
+  decision   EmailPermissionDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  eventId String
+  event   EmailPermissionEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  /// Which authority cited it.
+  authority String
+
+  @@id([decisionId, eventId, authority])
+  @@index([eventId])
 }

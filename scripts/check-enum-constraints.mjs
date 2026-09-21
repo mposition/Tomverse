@@ -800,6 +800,48 @@ const REGISTRY = {
     reason:
       "Whether the assistant could search the web for that answer. Two runs of the same prompt in the two modes answer different questions -- what a model has learned about us, and what it can find -- so the column exists to keep them from being averaged together.",
   },
+  EmailPermissionEvent_kind_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_EVENT_KINDS",
+    reason:
+      "The five facts a basis can rest on that are not a consent: a notice shown, an objection, a relationship starting and ending, and a basis ending on its own. ConsentRecord holds consent and nothing here does, so a sixth kind the application did not know would be a fact no verdict could read -- the ledger would hold it and the send gate would decide as if it were not there.",
+  },
+  EmailPermissionEvent_capturedVia_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_EVENT_CAPTURE_SOURCES",
+    reason:
+      "Where the fact was captured. Australia puts the burden of proving an inferred consent on the sender, so where the notice was shown is part of the proof rather than a label; a value the application cannot name is evidence nobody can weigh.",
+  },
+  EmailSendApproval_approvalType_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_SEND_APPROVAL_TYPES",
+    reason:
+      "risk_accepted (send without a basis) and obligation_waiver (decline a display or notice duty). They carry different scope columns, which EmailSendApproval_scope_check enforces per type, so a third value would be a row whose scope no branch compares -- an approval that applies to everything because nothing checks it.",
+  },
+  EmailPermissionDecision_phase_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_DECISION_PHASES",
+    reason:
+      "enqueue and send. The unique index is (deliveryId, phase), so a third phase would silently raise how many verdicts one delivery may have, and the send-time re-decision that the whole design rests on would stop being the last word.",
+  },
+  EmailPermissionDecision_classification_check: {
+    owner: "list",
+    module: "lib/emailPurposeClassification.ts",
+    list: "EMAIL_CLASSIFICATIONS",
+    reason:
+      "transactional, service, marketing. One value switches the sending stream, the kill switch, the Korean and Singaporean subject prefixes, forced unsubscribe and the jurisdiction fail-closed, so a class the application does not know is mail that goes out with none of them.",
+  },
+  EmailPermissionDecision_overrideType_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_DECISION_OVERRIDE_TYPES",
+    reason:
+      "One value, risk_accepted. obligation_waiver is deliberately absent: a waiver changes what a country rule requires and is consumed while obligations are resolved, so it can never be the reason a recipient was allowed. A second value here would be a way for a send to be permitted that the admin screen has no wording for.",
+  },
 };
 
 const migrations = readdirSync(migrationsDirectory)
