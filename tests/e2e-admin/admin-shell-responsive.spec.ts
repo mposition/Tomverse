@@ -118,6 +118,18 @@ test.describe("admin console on a narrow viewport", () => {
             return { topmost: null, why: "centre point hits nothing", where };
           }
           const anchor = hit.closest("a");
+          const describe = (node: Element | null) =>
+            node
+              ? `<${node.tagName.toLowerCase()}${
+                  node.className ? ` class="${String(node.className).slice(0, 60)}"` : ""
+                }>`
+              : "none";
+          Object.assign(where, {
+            href: element.getAttribute("href"),
+            insideDrawer: Boolean(element.closest("aside.relative")),
+            ancestor: describe(element.parentElement),
+            hitChain: [hit, hit.parentElement].map(describe).join(" in "),
+          });
           return {
             topmost: anchor?.textContent?.trim() ?? null,
             why: anchor
