@@ -157,7 +157,6 @@
     "check:email-provider-port": "node --import tsx scripts/check-email-provider-port.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:model-credit-weights": "node --conditions=react-server --import tsx scripts/report-model-credit-weights.mjs",
-    "email:suppression-cutover": "node --conditions=react-server --import tsx scripts/email-suppression-cutover.mjs",
     "email:check-message-id-duplicates": "node --conditions=react-server --import tsx scripts/email-check-message-id-duplicates.mjs",
     "email:recover-permanent-bounces": "node --conditions=react-server --import tsx scripts/email-recover-permanent-bounces.mjs",
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
@@ -296,8 +295,8 @@
     "server-only": "^0.0.1",
     "sharp": "^0.35.4",
     "stripe": "^22.6.2",
-    "yaml": "^2.9.0",
-    "zod": "^4.6.1"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

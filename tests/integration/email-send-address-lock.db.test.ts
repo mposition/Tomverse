@@ -5,7 +5,6 @@ import { after, beforeEach, mock, test } from "node:test";
 import { deliverNotificationNow, NOTIFICATION_KIND } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import { recordSuppression } from "@/lib/emailSuppression";
-import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
 import { sendWithAddressLock } from "@/lib/emailSendLock";
 import { SEND_COMMIT_RESERVE_MS } from "@/lib/emailSendLockCore";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
@@ -44,13 +43,6 @@ beforeEach(async () => {
   process.env.RESEND_API_KEY = "test-key";
   delete process.env.MARKETING_RESEND_API_KEY;
   delete process.env.MARKETING_EMAIL_FROM;
-  // Production reads the causes, and has since the cutover on 2026-09-17.
-  // `suppressionReadAuthorityFromValue` treats an absent row as `entry`, so a
-  // suite that truncates `AppSetting` and says nothing would exercise the
-  // legacy branch and report it as proof about the live one.
-  await prisma.appSetting.create({
-    data: { key: SUPPRESSION_READ_AUTHORITY_KEY, value: "causes" },
-  });
 });
 
 after(async () => {

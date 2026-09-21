@@ -17,10 +17,7 @@ import {
   normalizeSuppressionAddress,
   suppressionCheck,
 } from "@/lib/emailSuppression";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
 import type { ProviderSendResult } from "@/lib/emailProviderPortCore";
 import type { SenderRole, SendingStream } from "@/lib/emailSendingIdentityCore";
@@ -50,8 +47,8 @@ import type { SenderRole, SendingStream } from "@/lib/emailSendingIdentityCore";
  * account, and taking it after the address would be the one ordering that can
  * deadlock against a withdrawal.
  *
- * **This transaction writes nothing.** It reads a setting and the causes, holds
- * advisory locks, and calls the provider. That is what makes the recovery in
+ * **This transaction writes nothing.** It reads the causes, holds the address
+ * lock, and calls the provider. That is what makes the recovery in
  * the catch safe: a rollback after a successful submission loses no row, so the
  * provider's answer is kept rather than thrown away with the transaction.
  *
@@ -96,11 +93,13 @@ class SendLockBudgetSpent extends Error {
  * Sets `lock_timeout` to what is left of the budget, before each lock.
  *
  * Postgres applies `lock_timeout` to **each** lock acquisition, not to the
- * transaction: setting it once and taking three locks would allow three times
- * the wait the contract names, and a send that waited behind the cutover's
- * fence would then start a fresh full wait for the address. One deadline,
+ * transaction: setting it once and taking two locks would allow twice the wait
+ * the contract names, and a send that waited its full budget for the address
+ * would then start a fresh full wait for the purpose row. One deadline,
  * re-derived before every lock, is what makes "waits at most N" true of the
- * sequence rather than of each step.
+ * sequence rather than of each step. It was three locks until the suppression
+ * fence went with the setting it fenced; the multiplier is what this guards
+ * against, not the number.
  *
  * `set_config(..., true)` is `SET LOCAL`: it ends with this transaction, so a
  * connection this one borrowed cannot hand a two-second lock budget to whatever
@@ -248,11 +247,9 @@ export async function sendWithAddressLock(input: {
         // other query on this connection runs under.
         const restoreTo = settings[0]?.lock_timeout ?? "0";
 
-        // Shared, like every other reader of the suppression record: the
-        // cutover holds it exclusively, so this decision cannot be taken under
-        // one read authority and acted on under the other.
-        await spendBudget(tx, deadline);
-        await holdSuppressionFence(tx);
+        // The address, like every other reader and writer of the suppression
+        // record: a send may not be decided while a suppression for the same
+        // address is half written.
         await spendBudget(tx, deadline);
         await lockSuppressionAddress(tx, normalized);
         if (input.userId && input.purpose) {

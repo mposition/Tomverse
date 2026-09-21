@@ -68,15 +68,43 @@ const compilerOptions = parsedConfig.options;
 // byte-identical, so nothing was added, removed or changed. Only the snapshot's
 // positions moved.
 //
-// 2026-09-21: repinned for moved positions only, again and for the same file.
-// Two branches each raised `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` for their
-// own watched file, and resolving that merge rewrote the comment above it. The
-// count is still 228 and the position-free inventory is byte-identical against
-// `origin/develop`, so nothing was added, removed or changed here either.
+// 2026-09-21: the AMUX review adds one system-actor string literal and extends
+// the watched-schema review comment in `lib/marketingAutomationAccess.ts`.
+// The entry count and the same position-free inventory remain identical; only
+// later source positions in those two files moved.
+//
+// 2026-09-21, deploy C-2: repinned for moved positions only. Nothing writes
+// `SuppressionEntry` any more, which deletes code and rewrites comments in four
+// closure files -- `lib/emailSuppression.ts`, `lib/emailPreferences.ts`,
+// `lib/emailProviderEvents.ts`, `lib/emailPermanentBounceRecovery.ts` -- and
+// merging develop moved lines again. The count above still holds at 228, and
+// the inventory compared without line and column (`path + expression text` for
+// every entry) hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 on this
+// branch and on `origin/develop` alike, so nothing was added, removed or
+// changed. Only positions moved.
+//
+// 2026-09-21, deploy D-1: the same again, one deploy later. Removing the read
+// authority takes the fence out of eight modules and shortens
+// `lib/emailSuppression.ts`, `lib/emailSuppressionAuthority.ts` and
+// `lib/emailSuppressionAuthorityCore.ts`, so positions move once more. The
+// count is still 228 and the position-free inventory still hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 -- the same
+// value as on `origin/develop` and on the deploy below this one. Two modules
+// lost most of their contents and the set of computed accesses did not change,
+// which is the thing this snapshot exists to make somebody check.
+//
+// 2026-09-21, this merge: develop's moves and this branch's arrive
+// together. Both sides raised `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` for
+// their own watched file and the resolution rewrote the comment above it,
+// so positions move once more in `lib/marketingAutomationAccess.ts`. The
+// count is still 228 and the position-free inventory still hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65, which
+// is what says nothing was added, removed or changed by either side.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "683f4d17fa301293b685f3dfcca7f5e3",
-  "668c5f083bfd60da99e09f0f0aa89cdf",
+  "e7aca1aacd007fed506e1d437425c0ac",
+  "0f6346d00fd834a38c92c329577a8cf7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

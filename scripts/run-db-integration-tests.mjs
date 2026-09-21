@@ -199,6 +199,10 @@ run(
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
+    // AMUX scheduling ownership is a database CAS: two claimants must leave
+    // exactly one owner and one append-only route decision, and a failed
+    // decision write must roll the ownership change back.
+    "tests/integration/amux-orchestration.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -326,9 +330,10 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
-    // Deploy B: the read authority setting, the cutover under the exclusive
-    // fence, and lifting causes by the release matrix. The fence, the setting
-    // row and the audit row sharing a transaction are all database facts.
+    // Lifting causes by the release matrix, the address lock a concurrent
+    // writer contends for, and a retired setting row proving inert. The lock,
+    // the leftover row and the audit row sharing a transaction with the
+    // release are all database facts.
     "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
@@ -523,6 +528,23 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process, and for the same reason: it replaces next-auth. What
+// it pins is which requests reach the lift at all -- a stale cause set, a dead
+// handle and an unknown handle are three different refusals, and every one of
+// them used to answer "not found".
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/admin-suppression-lift-route.db.test.ts",
+  ],
+  "Running the administrator suppression lift route and its refusals"
 );
 // Also its own process: it replaces next-auth and the AI SDK's streamText to
 // drive a real searching turn end to end. What it asserts is the wiring
