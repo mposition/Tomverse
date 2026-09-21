@@ -205,9 +205,9 @@ test("paging walks the whole list without repeating a row", async () => {
 test("a selector's causes are never cut by the row limit", async () => {
   // The limit belongs to selectors, and it is applied in the database. Read a
   // multiple of it in causes and group in memory instead, and a selector at the
-  // edge of the window comes back with *some* of its causes -- so a row that
-  // cannot be lifted, because a privacy_request is on it, is drawn as one that
-  // can.
+  // edge of the window comes back with *some* of its causes -- so a row whose
+  // privacy_request will outlive the lift is drawn without it, and the operator
+  // acts expecting an address that ends up clear.
   const crowded = "crowded@example.com";
   const reasons = [
     "hard_bounce",
@@ -237,7 +237,7 @@ test("a selector's causes are never cut by the row limit", async () => {
   assert.equal(row.causes.length, reasons.length);
   assert.ok(
     row.causes.some((cause) => cause.reason === "privacy_request"),
-    "the reason that makes this row unliftable was cut out of it"
+    "the reason that will still be stopping this address afterwards was cut out of the row"
   );
 });
 

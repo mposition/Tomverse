@@ -245,9 +245,13 @@ export type AdminSuppressionRow = {
  * -- truncates the wrong thing. A selector whose causes straddle the end of
  * that window gets a row with *some* of its causes, and the missing one is
  * exactly what an operator needed to see: a `complaint` that does not appear
- * beside the `unsubscribe`, or a `privacy_request` that makes the whole row
- * unliftable. The row reads as liftable, and the lift -- which reads the causes
- * again for itself -- acts on a set the screen never displayed.
+ * beside the `unsubscribe` -- and so a row that will need a second
+ * administrator does not say so -- or a `privacy_request` that will still be
+ * there afterwards. A lift releases the causes its action may and leaves the
+ * rest, so what a missing cause costs is not a refusal the operator did not
+ * expect but an outcome they did not: they act believing the address will be
+ * clear, and the lift -- which reads the causes again for itself -- acts on a
+ * set the screen never displayed.
  *
  * So the selectors are chosen first, with the limit applied to them, and their
  * causes are read afterwards with no limit at all. Two reads rather than one: a
