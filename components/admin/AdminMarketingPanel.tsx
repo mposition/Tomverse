@@ -11,8 +11,9 @@ type Availability = { available: true } | { available: false; stage: "S4" | "S5"
 type SwitchState =
   | "on"
   | "off"
-  | "configured"
-  | "not-configured"
+  | "scope-valid"
+  | "scope-invalid"
+  | "no-scope"
   | "unreadable";
 
 type Row = Record<string, unknown>;
@@ -171,19 +172,26 @@ function MarketingSwitchStrip({
     ({
       on: m.switchOn,
       off: m.switchOff,
-      configured: m.switchConfigured,
-      "not-configured": m.switchNotConfigured,
+      "scope-valid": m.switchScopeValid,
+      "scope-invalid": m.switchScopeInvalid,
+      "no-scope": m.switchNoScope,
       unreadable: m.switchUnreadable,
     })[value];
+  // Only the five booleans go green. A stored apply scope is a document, not
+  // an active capability -- the pipeline behind it is incomplete -- so it is
+  // never drawn as though something were switched on.
   const tone = (value: SwitchState) =>
-    value === "on" || value === "configured"
+    value === "on"
       ? "text-emerald-300"
-      : value === "unreadable"
+      : value === "unreadable" || value === "scope-invalid"
         ? "text-amber-300"
         : "text-zinc-400";
 
   return (
-    <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3">
+    <div
+      data-testid="marketing-switches"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3"
+    >
       <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
         {m.switchesTitle}
       </p>
@@ -191,7 +199,10 @@ function MarketingSwitchStrip({
         {labels.map(([key, label]) => (
           <div key={key} className="flex items-baseline justify-between gap-2">
             <dt className="truncate text-xs text-zinc-400">{label}</dt>
-            <dd className={`text-xs font-bold ${tone(switches[key] ?? "unreadable")}`}>
+            <dd
+              data-state={switches[key] ?? "unreadable"}
+              className={`text-xs font-bold ${tone(switches[key] ?? "unreadable")}`}
+            >
               {word(switches[key] ?? "unreadable")}
             </dd>
           </div>

@@ -150,8 +150,8 @@ redirect for every route the old twenty-four-entry sidebar had.
 
 | Journey | Risk | Success state | Failure state |
 |---|---|---|---|
-| Sidebar lists exactly the 17 `ADMIN_NAVIGATION` entries, in their 6 groups | Med | every label maps to its declared href; each group is a real toggle button | — |
-| Each of the 17 workspaces opens (17 parameterised tests) | Med | correct `<h1>`, exactly one active nav item | — |
+| Sidebar lists exactly the 22 `ADMIN_NAVIGATION` entries, in their 6 groups | Med | every label maps to its declared href; each group is a real toggle button | — |
+| Each of the 22 workspaces opens (22 parameterised tests) | Med | correct `<h1>`, exactly one active nav item | — |
 | `/admin/search`, which has no nav entry | Med | headed **"Global search"**; no nav entry claims to be current | previously headed "Overview" — finding 2, now fixed |
 | All 8 retired routes still resolve (8 parameterised tests) | High | each lands on its declared `?tab=`, with that tab marked `aria-current` | — |
 | A retired route's own query survives the redirect | High | `/admin/feedback?status=resolved` → `/admin/support?tab=feedback&status=resolved`, opened on that filter | — |
@@ -164,7 +164,7 @@ redirect for every route the old twenty-four-entry sidebar had.
 | Current entry in view at **1280x720** without scrolling | High | the active entry's own centre point resolves to itself via `elementFromPoint` | — |
 | Action counts on the entries that need them | Med | `Refunds, N awaiting action` in the entry's accessible name; reference pages carry none | — |
 | Pin / unpin a page | Med | the pin appears in the sidebar's Quick access **and** in the palette's Pinned section, and unpinning sticks | — |
-| Empty palette reaches every page, grouped | High | all 17 entries under their own group heading, plus Global search | previously `ALL_ITEMS.slice(0, 9)` — 8 pages unreachable |
+| Empty palette reaches every page, grouped | High | all 22 entries under their own group heading, plus Global search | previously `ALL_ITEMS.slice(0, 9)` — 8 pages unreachable |
 | Palette separates Pages from Records | Med | both section headings render; "no record matched" is scoped to Records and says page results are unaffected | previously a bare "No matching records." under the page hits |
 | Palette keyboard: ↑ ↓ Enter Escape | Med | exactly one `aria-selected` option, Enter opens it | — |
 | Palette → global search | Med | "View all results" opens `/admin/search?q=…` | — |
@@ -176,7 +176,7 @@ redirect for every route the old twenty-four-entry sidebar had.
 | Journey | Risk | Success state |
 |---|---|---|
 | Drawer stays closed until asked for | Med | navigation landmark hidden; open button visible |
-| All 17 workspaces reachable in the drawer, at **390px and 320px** | High | each link's **centre point** resolves to itself via `elementFromPoint` — attachment alone is not accepted |
+| All 22 workspaces reachable in the drawer, at **390px and 320px** | High | each link's **centre point** resolves to itself via `elementFromPoint` — attachment alone is not accepted |
 | Each entry explains itself in visible text | Med | the drawer carries no `title`; the description renders as text, because a hover hint is unreachable on touch |
 | The drawer opens on the current entry | High | the active entry's centre point resolves to itself without scrolling first |
 | Groups collapse in the drawer and report their state | Med | all six start expanded; `aria-expanded` tracks the toggle |

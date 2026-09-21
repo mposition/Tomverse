@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
+import { marketingWebhookApplyScopeSchema } from "@/lib/marketingAutomationAccess";
 import {
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
@@ -28,8 +29,9 @@ import {
 export type MarketingSwitchState =
   | "on"
   | "off"
-  | "configured"
-  | "not-configured"
+  | "scope-valid"
+  | "scope-invalid"
+  | "no-scope"
   | "unreadable";
 
 export type MarketingSwitchStates = {
@@ -39,12 +41,14 @@ export type MarketingSwitchStates = {
   experiments: MarketingSwitchState;
   webhookShadow: MarketingSwitchState;
   /**
-   * Whether an apply scope is stored -- not whether the webhook is applied.
+   * The state of the stored apply-scope document -- not whether the webhook is
+   * applied to publish state.
    *
-   * The stored value is a scope document S2f defines and validates. All this
-   * read can honestly say is that something is there: calling a non-empty
-   * string "on" would report a webhook as affecting publish state when an
-   * empty or malformed scope is exactly what the schema refuses.
+   * Parsed with the same schema the access decision uses, so a stored value
+   * the resolver would refuse reads as invalid here rather than as a working
+   * configuration. Two earlier versions of this row were wrong in the same
+   * direction: a non-empty string was reported first as "on" and then as
+   * "configured", and the stored string "not json" would have satisfied both.
    */
   webhookApplyScope: MarketingSwitchState;
 };
@@ -59,8 +63,30 @@ export type MarketingConsolePayload = {
   switches: MarketingSwitchStates;
 };
 
-const state = (read: { ok: true; value: boolean } | { ok: false }) =>
-  read.ok ? (read.value ? "on" : "off") : "unreadable";
+const state = (
+  read: { ok: true; value: boolean } | { ok: false }
+): MarketingSwitchState => (read.ok ? (read.value ? "on" : "off") : "unreadable");
+
+/**
+ * What the stored apply scope is, judged by the schema that judges it for real.
+ *
+ * No scope is the ordinary state today. An invalid one is a stored document
+ * the access resolver would refuse, which is worth a screen precisely because
+ * nothing else would tell an operator it is sitting there.
+ */
+const applyScopeState = (
+  read: { ok: true; value: string | null } | { ok: false }
+): MarketingSwitchState => {
+  if (!read.ok) return "unreadable";
+  if (!read.value) return "no-scope";
+  try {
+    return marketingWebhookApplyScopeSchema.safeParse(JSON.parse(read.value)).success
+      ? "scope-valid"
+      : "scope-invalid";
+  } catch {
+    return "scope-invalid";
+  }
+};
 
 /** A draft's own words, shortened for a list row. */
 const excerpt = (envelope: unknown): string | null => {
@@ -102,11 +128,7 @@ async function readSwitches(): Promise<MarketingSwitchStates> {
       autoPublish: state(settings.autoPublishEnabled),
       experiments: state(settings.experimentsEnabled),
       webhookShadow: state(settings.webhookShadowEnabled),
-      webhookApplyScope: settings.webhookApplyScopeValue.ok
-        ? settings.webhookApplyScopeValue.value
-          ? "configured"
-          : "not-configured"
-        : "unreadable",
+      webhookApplyScope: applyScopeState(settings.webhookApplyScopeValue),
     };
   } catch {
     // A switch strip that cannot be read says so. It never says "off",

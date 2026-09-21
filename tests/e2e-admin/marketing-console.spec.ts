@@ -70,15 +70,18 @@ test.describe("marketing console", () => {
     await signInAs("owner");
     await page.goto("/admin/marketing?tab=queue");
 
-    const strip = page.getByRole("definition");
-    await expect(page.getByText("Switches")).toBeVisible();
-    // Every marketing switch is default-off, and the strip says "off" rather
-    // than leaving it to be inferred from an empty queue.
-    await expect(strip.filter({ hasText: /^off$/ })).toHaveCount(5);
-    // The apply scope is a stored document, not a boolean, so it says whether
-    // one is configured. Calling a non-empty string "on" would report a
-    // webhook as affecting publish state when the scope may be unusable.
-    await expect(strip.filter({ hasText: /^not configured$/ })).toHaveCount(1);
+    // Scoped to the strip and read from `data-state` rather than from the
+    // rendered word, so the assertion survives a locale change. The admin lane
+    // runs in English today; the values are the same in either language.
+    const strip = page.getByTestId("marketing-switches");
+    await expect(strip).toBeVisible();
+    // Every marketing switch is default-off, and the strip says so rather than
+    // leaving it to be inferred from an empty queue.
+    await expect(strip.locator("dd[data-state='off']")).toHaveCount(5);
+    // The apply scope is a stored document, not a boolean. It reports the
+    // document's state, judged by the schema that judges it for real -- a
+    // stored `"not json"` is invalid here rather than a working configuration.
+    await expect(strip.locator("dd[data-state='no-scope']")).toHaveCount(1);
   });
 
   test("moving between tabs by link replaces the rows, not just the tab strip", async ({
