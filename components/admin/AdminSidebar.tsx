@@ -146,7 +146,20 @@ export function AdminSidebar({
     return (
       <div
         key={`${keyPrefix}-${item.href}`}
-        className={`group flex items-stretch gap-1 rounded-xl ${
+        // `min-w-0` because this row is a grid item, and a grid item's
+        // `min-width: auto` resolves to its min-content size. The description
+        // below is `truncate`, which is `white-space: nowrap`, so the longest
+        // description in the drawer sized the column and every row in it --
+        // the `min-w-0` on the link lets the link shrink *within* the row and
+        // does nothing about the row widening its own track.
+        //
+        // It showed up at 320px, where the drawer is `88vw` (281.6px) rather
+        // than the 320px it gets at 390px, when an entry arrived with a longer
+        // description than any before it. The drawer pushed the document into
+        // horizontal overflow, mobile Chromium widened the layout viewport to
+        // fit, and the reachability spec failed with the drawer's own backdrop
+        // on top of a link an operator could plainly see.
+        className={`group flex min-w-0 items-stretch gap-1 rounded-xl ${
           active ? "bg-blue-600" : "hover:bg-zinc-900"
         }`}
       >

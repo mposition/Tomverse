@@ -116,12 +116,18 @@ const compilerOptions = parsedConfig.options;
 // fingerprint, and its review note moves subsequent source positions in
 // `lib/marketingAutomationAccess.ts`. The count and position-free inventory
 // still match, so no computed access was added, removed, or changed.
+//
+// 2026-09-22, S2a on top: `lib/marketingAutomationAccess.ts` gains
+// `marketingWebhookApplyScopeStatus()` partway up the file, so every computed
+// access below it moves down. The new function has no element access of its
+// own. The count is still 228 and the position-free inventory still hashes to
+// the value above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ebfe4d7a7872e50ec7f22c4f43e030ca",
-  "4ae9535e4b81c4923cfbdf5c1fea90d3",
+  "5b42438bff73ab7752ee7ccebd6ee353",
+  "676c542c7a5b74ca861482a02865e282",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

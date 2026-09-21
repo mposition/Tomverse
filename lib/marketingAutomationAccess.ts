@@ -410,6 +410,37 @@ export const marketingWebhookApplyScopeSchema = z
   })
   .strict();
 
+/**
+ * What a stored apply-scope value is, judged exactly as `readJson` judges it.
+ *
+ * Exported so a screen can report the document's state without arriving at a
+ * different answer from the decision. The Admin console's switch strip got
+ * this wrong twice by reading the raw string: an empty string is a *stored*
+ * document this module refuses, and a BOM-prefixed document is one it accepts,
+ * so "non-empty" and "parses as JSON" are both the wrong test.
+ *
+ * `absent` is the only state the decision does not distinguish -- it refuses a
+ * missing value and a malformed one alike -- and it is the distinction an
+ * operator needs, because one of the two is somebody's mistake sitting in a
+ * row that nothing else would mention.
+ */
+export type MarketingWebhookApplyScopeStatus = "absent" | "valid" | "invalid";
+
+export const marketingWebhookApplyScopeStatus = (
+  value: string | null | undefined
+): MarketingWebhookApplyScopeStatus => {
+  if (typeof value !== "string") return "absent";
+  try {
+    return marketingWebhookApplyScopeSchema.safeParse(
+      JSON.parse(canonicalMarketingWebhookFileText(value))
+    ).success
+      ? "valid"
+      : "invalid";
+  } catch {
+    return "invalid";
+  }
+};
+
 type WebhookScopeEntry = z.infer<typeof marketingWebhookScopeEntrySchema>;
 
 export type MarketingAutomationAccessInputs = {
