@@ -700,10 +700,39 @@ export const analyseSource = (path, text) => {
   const runtimeSql = [];
   const sealCalls = [];
   const sealEscapes = [];
+  // `const p = "@/lib/marketingGuardCore"` and `const k = "seal..."`, so a
+  // module path or a property name stored in a variable is still the thing it
+  // spells. The review wrote the call as `const g = await import(p); g[k]({})`
+  // and every rule below read an identifier where it wanted a literal.
+  const constantStrings = new Map();
+  const literalTextOf = (node) => {
+    if (!node) return null;
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isIdentifier(node)) return constantStrings.get(node.text) ?? null;
+    return null;
+  };
   let importsDriver = false;
 
   const addRuntimeSql = (kind, node) =>
     runtimeSql.push({ kind, line: lineOf(sourceFile, node) });
+
+  const collectConstants = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isStringLiteralLike(node.initializer)
+    ) {
+      // A name bound twice is a name whose value this pass cannot state, so it
+      // is dropped rather than guessed at.
+      constantStrings.set(
+        node.name.text,
+        constantStrings.has(node.name.text) ? null : node.initializer.text,
+      );
+    }
+    ts.forEachChild(node, collectConstants);
+  };
+  collectConstants(sourceFile);
 
   const visit = (node) => {
     if (ts.isIdentifier(node) && node.text === TEMPLATE_SEAL_NAME) {
@@ -722,15 +751,19 @@ export const analyseSource = (path, text) => {
     // string here, not an identifier, so the classification above never sees
     // it -- and the review called the function through exactly this.
     if (
-      ts.isStringLiteralLike(node) &&
-      node.text === TEMPLATE_SEAL_NAME &&
-      node.parent &&
-      (ts.isElementAccessExpression(node.parent) ||
-        (ts.isCallExpression(node.parent) && isReflectGet(node.parent)))
+      ts.isElementAccessExpression(node) &&
+      literalTextOf(node.argumentExpression) === TEMPLATE_SEAL_NAME
     ) {
       sealEscapes.push({
         line: lineOf(sourceFile, node),
         detail: `${TEMPLATE_SEAL_NAME} reached by a computed key`,
+      });
+    }
+
+    if (isReflectGet(node) && literalTextOf(node.arguments[1]) === TEMPLATE_SEAL_NAME) {
+      sealEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `${TEMPLATE_SEAL_NAME} reached through Reflect.get`,
       });
     }
 
@@ -756,15 +789,16 @@ export const analyseSource = (path, text) => {
     if (
       ts.isCallExpression(node) &&
       node.arguments.length > 0 &&
-      ts.isStringLiteralLike(node.arguments[0]) &&
-      importsSealModule(node.arguments[0].text) &&
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         (ts.isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
-      sealEscapes.push({
-        line: lineOf(sourceFile, node),
-        detail: `loads ${node.arguments[0].text} at run time`,
-      });
+      const specifier = literalTextOf(node.arguments[0]);
+      if (specifier && importsSealModule(specifier)) {
+        sealEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `loads ${specifier} at run time`,
+        });
+      }
     }
 
     // `export * from "./marketingGuardCore"` re-exports the seal under this

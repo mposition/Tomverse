@@ -107,11 +107,45 @@ const COMMA_SPLICE =
  * with, or endorsed by, OpenAI" the name is the object and no lower-case word
  * follows it, so that sentence keeps its one negation.
  */
-const NAMED_SUBJECT_SPLICE =
-  /[,\uff0c]\s*(?=\p{Lu}[\p{Ll}\p{N}]+\s+[\p{Ll}]+\b)/gu;
+const NAMED_SUBJECT_SPLICE = new RegExp(
+  "[,\\uff0c]\\s*(?=\\p{Lu}[\\p{Ll}\\p{N}]+\\s+(?:" +
+    [
+      // Auxiliaries, which are verbs wherever they appear.
+      "is|are|was|were|has|have|had|does|do|did|can|could|will|would|may",
+      "might|should|must|keeps|stores|holds",
+      // A lower-case word inflected as a verb. "Anthropic partner product" is
+      // a noun phrase and gets none of these, which is why "not an
+      // OpenAI-certified, Anthropic partner product" keeps its one negation;
+      // "Tomverse clones your memories" gets the first.
+      "[\\p{Ll}]+(?:s|ed)(?![\\p{L}\\p{N}])",
+    ].join("|") +
+    "))",
+  "gu",
+);
 
 const KOREAN_COMMA_SPLICE =
   /[,\uff0c]\s*(?=[\uac00-\ud7a3]{1,10}(?:\ub294|\uc740|\uc774|\uac00|\ub3c4)\s)/g;
+
+/**
+ * Openers that make a question a sales line rather than a question.
+ *
+ * "Is Tomverse affiliated with OpenAI?" is an FAQ entry and asserts nothing;
+ * the answer below it is scanned on its own. "Want an AI that clones your
+ * memories?" is the claim with a question mark on the end, and treating the
+ * two the same let every forbidden claim through by adding one character.
+ *
+ * Written as the promotional openers rather than as the interrogative ones,
+ * which matters for the two languages that do not have interrogative openers:
+ * a Korean question marks itself at the end of the sentence, so a list of
+ * English auxiliaries read every Korean FAQ entry as an assertion -- including
+ * the affiliation disclaimer on the ChatGPT-vs-Claude page, which then failed
+ * the repository's own copy check.
+ */
+const SELLING_OPENER =
+  /^\s*(?:want|need|looking|ready|tired|imagine|fancy|wish|curious|ever\s+wanted|why\s+not|got\s+a)\b/iu;
+
+const isAskingRatherThanSelling = (text: string, start: number): boolean =>
+  !SELLING_OPENER.test(text.slice(start));
 
 /**
  * Where the clause holding `offset` begins, as an index into `sentence`.
@@ -156,6 +190,39 @@ const lastBoundaryIndex = (sentence: string, offset: number): number => {
 };
 
 /**
+ * Where the clause holding `offset` ends, as an index into `sentence`.
+ *
+ * The mirror of the function above, and needed for the same reason from the
+ * other side: a Korean negator closes the clause it is in, and one in the
+ * *next* clause denies that clause rather than this one.
+ */
+const nextBoundaryIndex = (sentence: string, offset: number): number => {
+  let earliest = sentence.length;
+  const consider = (at: number) => {
+    if (at !== -1 && at >= offset) earliest = Math.min(earliest, at);
+  };
+
+  for (const token of HARD_BOUNDARIES) consider(sentence.indexOf(token, offset));
+
+  const lower = sentence.toLowerCase();
+  for (const token of CONJUNCTIONS) consider(lower.indexOf(token, offset));
+
+  for (const expression of [
+    COMMA_SPLICE,
+    NAMED_SUBJECT_SPLICE,
+    KOREAN_COMMA_SPLICE,
+  ]) {
+    const scan = new RegExp(expression.source, expression.flags);
+    for (let hit = scan.exec(sentence); hit; hit = scan.exec(sentence)) {
+      consider(hit.index);
+      if (scan.lastIndex === hit.index) scan.lastIndex += 1;
+    }
+  }
+
+  return earliest;
+};
+
+/**
  * Whether the clause containing `match` at `matchIndex` asserts it.
  *
  * `false` for a question -- "Is Tomverse affiliated with OpenAI?" asserts
@@ -190,25 +257,33 @@ export function marketingClauseAsserts(
     end += 1;
   }
 
-  if (questionsAssertNothing && text[end] === "?") return false;
+  if (questionsAssertNothing && text[end] === "?" && isAskingRatherThanSelling(text, start)) {
+    return false;
+  }
 
   const sentence = text.slice(start, end);
   const offset = matchIndex - start;
   const boundary = lastBoundaryIndex(sentence, offset);
-  const before =
-    boundary > 0 ? sentence.slice(boundary, offset) : sentence.slice(0, offset);
+  const before = (
+    boundary > 0 ? sentence.slice(boundary, offset) : sentence.slice(0, offset)
+  )
+    // "not only X but also Y" asserts X. Removing the phrase before the
+    // negation test is simpler than teaching the negator list about it, and
+    // "Tomverse not only clones your memories but also organises them." was
+    // reported as nothing at all.
+    .replace(/\bnot\s+(?:only|just|merely|simply)\b/giu, " ");
 
   // The clause after the match ends at the next hard boundary too: a Korean
   // negator closes its own clause, and one in the *next* clause does not deny
   // this one.
-  const sentenceAfter = text.slice(matchIndex + match.length, end);
-  const afterBoundary = HARD_BOUNDARIES.map((token) =>
-    sentenceAfter.indexOf(token),
-  ).filter((at) => at !== -1);
-  const after =
-    afterBoundary.length > 0
-      ? sentenceAfter.slice(0, Math.min(...afterBoundary))
-      : sentenceAfter;
+  // The clause *after* the match ends at the next boundary, computed the same
+  // way the one before it is. Reading to the end of the sentence let the
+  // following clause deny this one: "기억을 복제합니다, 파일은 잃지 않습니다."
+  // is a forbidden claim followed by an unrelated denial, and the 않 in the
+  // second clause was covering the first.
+  const afterStart = matchIndex + match.length - start;
+  const afterEnd = nextBoundaryIndex(sentence, afterStart);
+  const after = sentence.slice(afterStart, afterEnd);
 
   return !PRECEDING_NEGATION.test(before) && !FOLLOWING_NEGATION.test(after);
 }

@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
+import { guardDraft } from "@/lib/marketingGuardCore";
 import {
   createMarketingChannel,
   createMarketingPost,
@@ -638,6 +639,28 @@ test("a post starts as a draft, at version zero, with one draft entry", async ()
   );
 });
 
+/** A real `approval_required` decision, sealed by the Guard that made it. */
+function approvalDecision() {
+  return guardDraft({
+    draft: {
+      renderedText: "Three answers to one question, side by side.",
+      locale: "en",
+      channel: "linkedin",
+      channelId: "chn_store_test",
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: { claims: [], assets: [] },
+    templates: [],
+    context: {
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    },
+  });
+}
+
 test("the store's create writes the draft entry itself", async () => {
   const row = await approvedChannel();
   const created = await createMarketingPost(prisma, {
@@ -655,15 +678,47 @@ test("the store's create writes the draft entry itself", async () => {
     claimRegistryVersion: 1,
     assetRegistryVersion: 1,
     factSnapshot: factSnapshot as never,
-    guardDecision: "approval_required",
-    guardCodes: [],
-    guardRuleIds: [],
-    status: "drafted",
-    mode: "approval",
+    // The Guard's own object, not a verdict typed out here. The store derives
+    // the verdict, the codes, the rule ids, the status and the mode from it,
+    // and refuses one it did not seal.
+    decision: approvalDecision(),
     draftedAt: new Date(),
   });
   assert.equal(created.historyVersion, 0);
+  assert.equal(created.guardDecision, "approval_required");
+  assert.equal(created.mode, "approval");
   assert.equal((created.history as { type: string }[]).length, 1);
+});
+
+test("the store refuses a decision the Guard did not make", async () => {
+  const row = await approvedChannel();
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-unsealed",
+      envelope: envelope() as never,
+      envelopeDigest: DIGEST,
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      // A plain object of the right shape, which is what writing
+      // `guardDecision: "autonomous_eligible"` used to amount to.
+      decision: {
+        verdict: "approval_required",
+        codes: [],
+        ruleIds: [],
+      } as never,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_sealed|decision/i,
+  );
 });
 
 test("a dispatched post cannot go back to a state that says it never left", async () => {

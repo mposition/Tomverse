@@ -86,6 +86,7 @@ const autonomousReady = (overrides = {}) => {
         channel: "linkedin",
         locale: "en",
         historyVersion: 7,
+        status: "approved",
         approvedDigest: TEMPLATE_DIGEST,
         slotsFromRegistry: true,
         // The ids the loader read off the approved post. The Guard compares
@@ -587,7 +588,22 @@ test("a binding is a write condition with an expiry, not a permission", () => {
     envelopeDigest: TEMPLATE_DIGEST,
     historyVersion: 7,
     reusableAsTemplate: true,
+    status: "approved",
+    // The retention purge empties the content without moving the history
+    // version, so neither of these would have been noticed by the version.
+    contentPurgedAt: null,
+    deletedAt: null,
   });
+
+  // A binding this module did not make is not a write condition, whatever its
+  // fields say. This was the whole of it: an object with a future `expiresAt`
+  // was accepted.
+  const forged = marketingTemplateWriteConditions(
+    { ...binding },
+    new Date(binding.provenAt),
+  );
+  assert.equal(forged.ok, false);
+  assert.equal(forged.refusal, "binding_not_sealed");
 
   for (const at of [
     new Date(binding.expiresAt + 1),
@@ -660,10 +676,11 @@ test("free wording needs the allowance as a claim, not as a word", () => {
   }
 
   // The same words with the allowance declared and stated.
+  const ALLOWANCE = "monthly credits included";
   const withClaim = guardDraft(
     input({
       draft: {
-        renderedText: "Start free with monthly credits included.",
+        renderedText: `Start free with ${ALLOWANCE}.`,
         claimIds: ["claim.free-tier"],
       },
       facts: {
@@ -674,6 +691,7 @@ test("free wording needs the allowance as a claim, not as a word", () => {
             known: true,
             priceSourcesAllStored: true,
             statesCreditAllowance: true,
+            allowanceStatement: ALLOWANCE,
             usedBefore: true,
           },
         ],
@@ -712,9 +730,51 @@ test("free wording needs the allowance as a claim, not as a word", () => {
 
   // And "free" inside a compound that is not about a price says nothing about
   // one. This was refused for stating a price it does not state.
-  const compound = guardDraft(
-    input({ draft: { renderedText: "Use free-form prompts to describe the task." } }),
+  // The allowance claim declared but its sentence never rendered. An id in a
+  // list is not the condition §7.2 rule 4 asks for; the words are.
+  const notRendered = guardDraft(
+    input({
+      draft: {
+        renderedText: "Start free today.",
+        claimIds: ["claim.free-tier"],
+      },
+      facts: {
+        claims: [
+          {
+            claimId: "claim.free-tier",
+            type: "plan",
+            known: true,
+            priceSourcesAllStored: true,
+            statesCreditAllowance: true,
+            allowanceStatement: ALLOWANCE,
+            usedBefore: true,
+          },
+        ],
+        assets: [],
+      },
+    }),
   );
-  assert.equal(compound.verdict, "approval_required", JSON.stringify(compound));
-  assert.ok(!compound.codes.includes("price_or_promotion"));
+  assert.equal(notRendered.verdict, "reject", JSON.stringify(notRendered));
+  assert.ok(notRendered.codes.includes("free_wording_without_condition"));
+
+  // "free" in a compound that is not about a price says nothing about one.
+  // The shape, not a list: "distraction-free" is not in any list and was
+  // refused, while the "free form" entry matched across a full stop and let
+  // "Start free. form habits that last." out with no price check at all.
+  for (const renderedText of [
+    "Use free-form prompts to describe the task.",
+    "A distraction-free writing space.",
+    "An ad-free reading view.",
+    "Free from the usual clutter.",
+  ]) {
+    const compound = guardDraft(input({ draft: { renderedText } }));
+    assert.equal(compound.verdict, "approval_required", renderedText);
+    assert.ok(!compound.codes.includes("price_or_promotion"), renderedText);
+  }
+
+  const acrossASentence = guardDraft(
+    input({ draft: { renderedText: "Start free. form habits that last." } }),
+  );
+  assert.equal(acrossASentence.verdict, "reject", JSON.stringify(acrossASentence));
+  assert.ok(acrossASentence.codes.includes("free_wording_without_condition"));
 });

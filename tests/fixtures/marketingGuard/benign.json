@@ -173,7 +173,8 @@
       },
       "claims": [
         "plan"
-      ]
+      ],
+      "allowanceStatement": "monthly credits included"
     },
     {
       "id": "hygiene.controlCharacter",
@@ -369,6 +370,60 @@
       "ruleId": "rule.superlative",
       "input": "Use Tomverse as your research copilot.",
       "note": "\"copilot\" as an ordinary noun names no competitor",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "memory.namedObjectInList",
+      "ruleId": "rule.memory-claim",
+      "input": "Tomverse is not an OpenAI-certified, Anthropic partner product.",
+      "note": "a name inside a list is the object of the negation, not a new subject",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "memory.faqQuestion",
+      "ruleId": "rule.memory-claim",
+      "input": "Does Tomverse clone your memories?",
+      "note": "an actual question; the answer below it is scanned on its own",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "refuted.koreanInstrumentalParticle",
+      "ruleId": "rule.refuted-superiority",
+      "input": "각 요청은 유일한 식별자로 AI 도구에 연결됩니다.",
+      "note": "로 closes the noun phrase, so the AI two words later is not what 유일한 qualifies",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.universityStudents",
+      "ruleId": "rule.australia-minors",
+      "input": "University students, sign up now.",
+      "note": "an adult audience; \"students\" on its own is not an age",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopSentenceStart",
+      "ruleId": "hygiene.url_like",
+      "input": "比較答案。AI Review can help.",
+      "note": "AI is a top-level domain and also the first word of the next sentence; a sentence starts with a capital and a host label does not",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "free.hyphenatedCompound",
+      "ruleId": "rule.free-wording",
+      "input": "A distraction-free writing space.",
+      "note": "X-free is a productive form and says nothing about a price",
       "expect": {
         "verdict": "approval_required"
       }

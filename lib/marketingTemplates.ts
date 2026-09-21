@@ -345,6 +345,10 @@ export async function loadApprovedTemplate(
         channelId: post.channelId,
         channel: post.channel.channel,
         locale: post.locale,
+        // The status this walk saw. The retention purge empties the content
+        // without moving the history version, so the version alone would not
+        // notice a row that is no longer a usable template.
+        status: post.status,
         // The revision every check above was made against. The Guard hands it
         // back in the decision's binding, and the publish makes its write
         // conditional on the row still being at it.

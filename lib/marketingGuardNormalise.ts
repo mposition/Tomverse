@@ -161,23 +161,31 @@ const ASCII_TLDS = [
   "cn", "kr", "jp", "hk", "tw", "sg", "au", "nz", "uk",
 ].join("|");
 
-const IDEOGRAPHIC_HOST = new RegExp(
-  [
-    `(?<![\\p{L}\\p{N}-])`,
-    "(?:",
-    // An ASCII label before the stop: Chinese prose does not end a sentence
-    // with a run of Latin letters, so any Latin suffix after one reads as a
-    // host. Case does not matter here -- example。CoM is the same address, and
-    // requiring lower case was how it got through.
-    `[A-Za-z0-9][A-Za-z0-9-]{0,62}${codePoint(0x3002)}[A-Za-z]{2,24}`,
-    "|",
-    // A CJK label, where the stop usually *is* punctuation. The suffix has to
-    // be one somebody could register.
-    `[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})`,
-    ")",
-    `(?![\\p{L}\\p{N}-])`,
-  ].join(""),
-  "iu",
+/**
+ * An ASCII label before the stop, which Chinese prose does not produce.
+ *
+ * A sentence in Chinese does not end with a run of Latin letters, so anything
+ * Latin on both sides of an ideographic stop reads as an address whatever its
+ * case: example。CoM is the same host as example。com, and requiring lower case
+ * was how it got through.
+ */
+const IDEOGRAPHIC_HOST_ASCII_LABEL = new RegExp(
+  `(?<![\\p{L}\\p{N}-])[A-Za-z0-9][A-Za-z0-9-]{0,62}${codePoint(0x3002)}[A-Za-z]{2,24}(?![\\p{L}\\p{N}-])`,
+  "u",
+);
+
+/**
+ * A CJK label, where the stop usually *is* punctuation.
+ *
+ * Here the suffix has to be one somebody could register, **and it has to be
+ * lower case**. The case-insensitive version read 比較答案。AI Review can help.
+ * as an address, because "AI" is a top-level domain and also the first word of
+ * the next sentence -- as are "Pro" and "App". A sentence starts with a
+ * capital and a host label does not.
+ */
+const IDEOGRAPHIC_HOST_CJK_LABEL = new RegExp(
+  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])`,
+  "u",
 );
 
 /** Markdown and HTML link syntax, whatever it points at. */
@@ -333,25 +341,6 @@ const INTERIOR_SEPARATORS =
 const collapsedForm = (value: string): string =>
   value.replace(INTERIOR_SEPARATORS, "");
 
-/**
- * A word written one character at a time: "We c l o n e your memories."
- *
- * The collapsed form above leaves whitespace alone on purpose, so it does not
- * invent words by joining "answers." to "Then" -- and that left this. A run of
- * single characters separated by single spaces is not a sentence in any of the
- * three languages, so the spaces inside such a run are removed and the rest of
- * the line is untouched.
- *
- * At least two single characters are required before the run closes, which is
- * what keeps "a big cat" and "I think" out of it: an ordinary line has one
- * single-letter word at a time, never two in a row.
- */
-const SPACED_LETTERS =
-  /(?<![\p{L}\p{N}])[\p{L}\p{N}](?:[^\S\n][\p{L}\p{N}]){2,}(?![\p{L}\p{N}])/gu;
-
-const spacedForm = (value: string): string =>
-  value.replace(SPACED_LETTERS, (run) => run.replace(/[^\S\n]/gu, ""));
-
 export type MarketingTextVariants = {
   /** NFKC, invisible characters stripped. What a person would read. */
   readable: string;
@@ -384,13 +373,21 @@ export function marketingTextVariants(raw: string): MarketingTextVariants {
 /**
  * Every form a rule should be checked against, in one array.
  *
- * Each variant, the same variant with its interior separators removed, the
- * same with a run of single characters joined up, and both together. The twins
- * are what a raw pattern and a sentence-reading detector need, neither of
- * which tolerates a separator the way a compiled term does: "销量第·一" went
- * through a pattern and "We c l o n e your memories." went through a detector.
+ * Each variant and the same variant with its interior separators removed. The
+ * twin is what a raw pattern needs, which does not tolerate a separator the
+ * way a compiled term does: "销量第·一" went through a pattern untouched.
+ *
+ * **Whitespace is not a separator here, and a word spelled out letter by
+ * letter is not handled by a twin.** A twin that joined single characters
+ * across spaces fixed "We c l o n e your memories." and immediately failed on
+ * "We c  l  o  n  e" and "We cl o ne", while inventing "BEST" out of a
+ * sentence listing the letters. The answer is at the other end: a rule that
+ * needs to survive that is written as a *term*, which compiles into a pattern
+ * tolerating any separator inside itself, spaces included. See the memory
+ * rule's terms in `lib/marketingGuardRules.ts`.
+ *
  * A form identical to one already in the list is dropped, so ordinary text
- * still costs the same handful of comparisons it always did.
+ * costs the same handful of comparisons it always did.
  */
 export function marketingTextForms(raw: string): string[] {
   const variants = marketingTextVariants(raw);
@@ -400,11 +397,7 @@ export function marketingTextForms(raw: string): string[] {
     variants.leetRound,
     variants.leetStraight,
   ];
-  const spread = base.flatMap((form) => {
-    const spaced = spacedForm(form);
-    return [form, collapsedForm(form), spaced, collapsedForm(spaced)];
-  });
-  return [...new Set(spread)];
+  return [...new Set(base.flatMap((form) => [form, collapsedForm(form)]))];
 }
 
 /** The same folds applied to a rule's own text, so needle and haystack meet. */
@@ -428,6 +421,15 @@ const SEPARATOR = "[^\\p{L}\\p{N}]*";
  * `word` terms get boundary assertions written as lookarounds rather than
  * `\b`, because `\b` is defined on ASCII word characters and would be wrong at
  * both ends of a Korean term -- `\b최고\b` matches nothing at all.
+ *
+ * **Whitespace is one of the separators, and that is a decision rather than
+ * an oversight.** It is what makes "b e s t" match a term written as
+ * "best", which is the commonest way of spelling a ban word past a filter.
+ * The cost is that a sentence spelling the letters out for another reason --
+ * "Use the labels B E S T in sequence." -- is refused. That is the safe
+ * direction: a refusal is an operator rewriting one line, and the other way
+ * round is a published superlative. The trade is written down here rather
+ * than discovered.
  */
 export function marketingTermPattern(
   term: string,
@@ -475,7 +477,11 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
   // been reported above.
   const readable = readableForm(raw);
   if (MENTION.test(readable)) codes.push("mention");
-  if (URL_LIKE.test(readable) || IDEOGRAPHIC_HOST.test(readable)) {
+  if (
+    URL_LIKE.test(readable) ||
+    IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
+    IDEOGRAPHIC_HOST_CJK_LABEL.test(readable)
+  ) {
     codes.push("url_like");
   }
   if (LINK_MARKUP.test(readable)) codes.push("link_markup");

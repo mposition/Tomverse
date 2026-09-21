@@ -28,6 +28,24 @@ import { marketingClauseAsserts } from "@/lib/marketingNegation";
  * does not stop it, so an exported matcher is a decision anything sharing this
  * module could change.
  */
+/** Nought to fifteen, in numerals and in words. */
+const AGE_UNDER_SIXTEEN =
+  "(?:" +
+  [
+    "[0-9]|1[0-5]",
+    "zero|one|two|three|four|five|six|seven|eight|nine",
+    "ten|eleven|twelve|thirteen|fourteen|fifteen",
+  ].join("|") +
+  ")";
+
+/** "-year-old", however it is punctuated. */
+const YEAR_OLDS =
+  "\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?";
+
+/** The call to action that turns an audience into a sales line. */
+const CALL_TO_ACTION =
+  "[,\\uff0c]?\\s+(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now)\\b";
+
 const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
   Object.freeze([
     // "for kids", "aimed at teenagers", "designed for children".
@@ -39,29 +57,41 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
     // Direct address: "Kids, sign up", "Children — try it", "Teens: get started".
     Object.freeze({
       source:
-        "\\b(?:kids|children|teens|teenagers|students|schoolkids)\\b[^\\p{L}\\p{N}]{0,3}\\s*(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now|come\\s+and)\\b",
+        "\\b(?:kids|children|teens|teenagers|schoolkids|schoolchildren|preteens|tweens)\\b[^\\p{L}\\p{N}]{0,3}\\s*(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now|come\\s+and)\\b",
       flags: "iu",
     }),
     // An age under sixteen, *and* the phrase that aims copy at it. The age on
     // its own is not targeting: "12-year-olds cannot sign up." is the rule
     // being stated, and a pattern matching the bare noun phrase refused it. So
     // the preposition or the call to action has to be there too.
+    //
+    // The range starts at zero, not at five -- "4-year-olds, sign up now." was
+    // outside it -- and the words are here as well as the numerals, because
+    // "Fourteen-year-olds" is the same sentence typed differently.
     Object.freeze({
       source:
-        "\\b(?:for|to|at|aimed at|built for|designed for|perfect for|great for|made for|suited to)\\s+(?:[5-9]|1[0-5])\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?\\b",
+        "\\b(?:for|to|at|aimed at|built for|designed for|perfect for|great for|made for|suited to)\\s+" +
+        AGE_UNDER_SIXTEEN +
+        YEAR_OLDS,
       flags: "iu",
     }),
     Object.freeze({
       source:
-        "\\b(?:[5-9]|1[0-5])\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?[,\\uff0c]?\\s+(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now)\\b",
+        AGE_UNDER_SIXTEEN + YEAR_OLDS + CALL_TO_ACTION,
       flags: "iu",
     }),
     Object.freeze({
-      source: "\\b(?:for|to)\\s+ages?\\s+(?:[5-9]|1[0-5])(?:\\s*(?:[-\\u2010-\\u2015]|to|\\u2013)\\s*\\d{1,2})?\\b",
+      source: "\\b(?:for|to)\\s+ages?\\s+" + AGE_UNDER_SIXTEEN + "(?:\\s*(?:[-\\u2010-\\u2015]|to)\\s*\\d{1,2})?\\b",
       flags: "iu",
     }),
     Object.freeze({
-      source: "\\b(?:for|to)\\s+under\\s*(?:13|16|18)s?\\b",
+      source: "\\b(?:for|to)\\s+under[-\\u2010-\\u2015\\s]?(?:13|16|18)s?\\b",
+      flags: "iu",
+    }),
+    // "Under-16s, sign up now." addresses them directly rather than naming an
+    // audience, and the "for under 16s" shape above could not see it.
+    Object.freeze({
+      source: "\\bunder[-\\u2010-\\u2015\\s]?(?:13|16|18)s?" + CALL_TO_ACTION,
       flags: "iu",
     }),
     Object.freeze({

@@ -73,6 +73,10 @@ import {
   type MarketingVerificationMethod,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import {
+  marketingGuardDecisionIsSealed,
+  type MarketingGuardDecision as GuardDecision,
+} from "@/lib/marketingGuardCore";
 
 /**
  * Every function takes the client explicitly. A marketing write is part of a
@@ -291,11 +295,17 @@ export type CreateMarketingPostInput = {
   claimRegistryVersion: number;
   assetRegistryVersion: number;
   factSnapshot: MarketingFactSnapshot;
-  guardDecision: MarketingGuardDecision;
-  guardCodes: readonly string[];
-  guardRuleIds: readonly string[];
-  status: Extract<MarketingPostStatus, "drafted" | "guard_rejected">;
-  mode: MarketingPostMode;
+  /**
+   * The Guard's decision, as the object it returned.
+   *
+   * Not the verdict as a string, and not the codes and the mode beside it. A
+   * caller used to be able to write `guardDecision: "autonomous_eligible"` and
+   * `mode: "autonomous"` into the single-writer API without a Guard having run
+   * at all -- which made every seal above it decoration. The verdict, the
+   * codes, the rule ids, the status and the mode are all derived from this,
+   * and it has to be an object `guardDraft()` sealed.
+   */
+  decision: GuardDecision;
   draftedAt: Date;
 };
 
@@ -303,6 +313,26 @@ export async function createMarketingPost(
   database: MarketingDatabase,
   input: CreateMarketingPostInput,
 ) {
+  if (!marketingGuardDecisionIsSealed(input.decision)) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_sealed",
+      "A post records a decision `guardDraft()` made, not one the caller assembled",
+    );
+  }
+
+  // **S1 writes no autonomous post.** The decision's binding says what the
+  // template row has to still look like at the moment of the write, and making
+  // that true means reading the database's own clock and the row in the same
+  // transaction as the insert -- which is the publish path, and the publish
+  // path is S2. Until it exists, the honest answer is that this function
+  // cannot write the row, rather than writing it without the check.
+  if (input.decision.verdict === "autonomous_eligible") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_creation_not_available",
+      "Creating an autonomous post needs the transactional template check, which is S2",
+    );
+  }
+
   const envelope = marketingEnvelopeSchema.parse(input.envelope);
   const factSnapshot = marketingFactSnapshotSchema.parse(input.factSnapshot);
 
@@ -331,11 +361,13 @@ export async function createMarketingPost(
       claimRegistryVersion: input.claimRegistryVersion,
       assetRegistryVersion: input.assetRegistryVersion,
       factSnapshot: asJson(factSnapshot),
-      guardDecision: input.guardDecision,
-      guardCodes: [...input.guardCodes],
-      guardRuleIds: [...input.guardRuleIds],
-      status: input.status,
-      mode: input.mode,
+      // Derived, every one of them. Two columns that could disagree with the
+      // decision are two columns somebody can set to whatever they need.
+      guardDecision: input.decision.verdict,
+      guardCodes: [...input.decision.codes],
+      guardRuleIds: [...input.decision.ruleIds],
+      status: input.decision.verdict === "reject" ? "guard_rejected" : "drafted",
+      mode: "approval",
       history: asJson([draftEntry]),
       historyVersion: 0,
     },

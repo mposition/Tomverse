@@ -517,6 +517,12 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     // The module bound to a name at run time rather than at parse time.
     'const guard = await import("@/lib/marketingGuardCore");\nguard.sealMarketingTemplateProof({});',
     'import guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
+    // The module path and the property name held in constants, which is how
+    // the fifth review wrote it: every rule was reading an identifier where it
+    // wanted a literal, and the file came back with nothing at all.
+    'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = await import(p);\ng[k]({});',
+    'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = require(p);\ng[k]({});',
+    'const k = "sealMarketingTemplateProof";\nimport * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, k);',
   ];
 
   for (const text of escapes) {

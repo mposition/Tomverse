@@ -33,6 +33,7 @@ import {
   type MarketingBannedTerm,
 } from "@/lib/marketingBannedClaims";
 import { findForbiddenMemoryClaims } from "@/lib/marketingMemoryClaims";
+import { findKoreanUniquenessClaims } from "@/lib/marketingKoreanClaims";
 import { findMarketingMinorsTargeting } from "@/lib/marketingMinorsClaims";
 
 /** Which paragraph of §7.1 a rule comes from. */
@@ -246,6 +247,7 @@ const AI_REVIEW_CONTRACT = rule("rule.ai-review-contract", "ai_review_contract",
  * about file handling.
  */
 const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiority", {
+  detectors: [(text: string) => findKoreanUniquenessClaims(text).length > 0],
   // Same reason as the rank rule.
   terms: [
     { text: "唯一AI", language: "zh", match: "substring" },
@@ -275,19 +277,12 @@ const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiorit
     pattern("\\bfirst (?:and only|ever)\\b", "en"),
     pattern("\\bonly (?:one|place|way) to compare\\b", "en"),
     pattern("\\bonly .{0,30}\\bhwp\\b", "en"),
-    // 유일한 has to be qualifying the forbidden noun, which means every word in
-    // between is still part of the same noun phrase. A word that closes one --
-    // one carrying 이, 가, 은, 는, 을 or 를 -- ends the phrase, and a word
-    // cannot be matched across a comma or a full stop because the class holds
-    // neither. That is the boundary, rather than a count: counting to three
-    // read "각 요청에는 유일한 식별자가 있으며 이 도구가 이를 표시합니다" -- a
-    // sentence about identifiers -- as a claim about the 도구 two clauses
-    // later, and counting to three also let "전 세계에서 유일한 사용하기 쉽고
-    // 안전하며 빠른 AI 비교 도구" past with four modifiers.
-    pattern(
-      "유일(?:한|하게)\\s*(?:[가-힣A-Za-z0-9]{1,10}(?<![이가은는을를])\\s+){0,10}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
-      "ko",
-    ),
+    // 유일한 is a detector rather than a pattern: see
+    // `lib/marketingKoreanClaims.ts`. A regex had to cap the number of words
+    // between 유일한 and the noun it qualifies, and every cap was wrong in one
+    // direction or the other -- three let "각 요청에는 유일한 식별자가 있으며
+    // 이 도구가" through as a claim about the 도구, and ten let twelve
+    // adjectives past.
     pattern("최초의?\\s*(?:다중|멀티|교차)", "ko"),
     pattern("우리만", "ko"),
     pattern("唯[一1](?:的)?\\s*(?:AI|工具|平台|产品|產品|服务|服務|选择|選擇)", "zh"),
@@ -372,6 +367,11 @@ const AUSTRALIA_MINORS = rule("rule.australia-minors", "australia_minors", {
  * denies.
  */
 const MEMORY_CLAIM = rule("rule.memory-claim", "memory_claim", {
+  // A detector rather than terms. Terms would have carried the spacing
+  // problem -- "We c l o n e your memories." -- but a term knows nothing about
+  // the sentence it sits in, so adding them refused "Tomverse does not clone
+  // your memories." for making the claim it denies. The separator tolerance
+  // belongs inside `lib/marketingMemoryClaims.ts`, where the clause is read.
   detectors: [(text: string) => findForbiddenMemoryClaims(text).length > 0],
 });
 

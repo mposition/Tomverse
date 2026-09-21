@@ -122,6 +122,19 @@ export const marketingClaimEvidenceSchema = z.discriminatedUnion("kind", [
 ]);
 export type MarketingClaimEvidence = z.infer<typeof marketingClaimEvidenceSchema>;
 
+/**
+ * What a `plan` claim can be recorded as meaning.
+ *
+ * Closed, and short. A list that grows by guessing is a list that stops
+ * meaning anything; a value is added when a rule needs to ask the question.
+ */
+export const MARKETING_PLAN_CLAIM_MEANINGS = Object.freeze([
+  "credit_allowance",
+] as const);
+
+export type MarketingPlanClaimMeaning =
+  (typeof MARKETING_PLAN_CLAIM_MEANINGS)[number];
+
 export const marketingClaimSchema = z
   .object({
     id: registryId,
@@ -140,10 +153,31 @@ export const marketingClaimSchema = z
      * read resolves to not-public rather than to true.
      */
     gate: registryId.nullable(),
+    /**
+     * What a `plan` claim means, from a closed list.
+     *
+     * One value so far. §7.2 rule 4 says a post that says "free" carries the
+     * condition, and the condition is the credit allowance -- not any price
+     * claim that happens to be declared beside it. An earlier Guard took a
+     * boolean from whoever called it, which is the shape S1e spent three
+     * rounds removing; this is the registry recording it once, where a person
+     * with the evidence in front of them writes it down.
+     *
+     * `null` on every other type, and on a plan claim that is about something
+     * else.
+     */
+    planMeaning: z.enum(MARKETING_PLAN_CLAIM_MEANINGS).nullable(),
     evidence: marketingClaimEvidenceSchema.nullable(),
   })
   .strict()
   .superRefine((claim, context) => {
+    if (claim.planMeaning !== null && claim.type !== "plan") {
+      context.addIssue({
+        code: "custom",
+        message: "planMeaning belongs to a plan claim",
+      });
+    }
+
     const needsPageEvidence = (
       MARKETING_PAGE_EVIDENCE_TYPES as readonly string[]
     ).includes(claim.type);
@@ -260,6 +294,7 @@ export function generatorProjection(
       locales: claim.locales,
       validUntil: claim.validUntil,
       gate: claim.gate,
+      planMeaning: claim.planMeaning,
     };
     return projection;
   });

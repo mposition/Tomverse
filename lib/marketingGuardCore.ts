@@ -128,6 +128,27 @@ export type MarketingGuardDecision =
       ruleIds: string[];
     };
 
+/**
+ * The decisions and bindings this module made, so neither can be assembled.
+ *
+ * The proof was sealed from round 2 onwards and the decision was not, which
+ * left the whole of it forgeable one level up: a plain object carrying
+ * `verdict: "autonomous_eligible"` and a `templateBinding` with a future
+ * `expiresAt` was accepted by the write helper, and `createMarketingPost()`
+ * took the verdict as a string besides. Membership of a `WeakSet` rather than
+ * a property, for the reason S1e learned: a property is copied by a spread and
+ * a private symbol is reachable through `Object.getOwnPropertySymbols()`.
+ */
+const sealedDecisions = new WeakSet<object>();
+const sealedBindings = new WeakSet<object>();
+
+/** Whether this decision came from `guardDraft()` rather than from a caller. */
+export function marketingGuardDecisionIsSealed(
+  decision: MarketingGuardDecision,
+): boolean {
+  return sealedDecisions.has(decision);
+}
+
 /** What a publish has to re-check about the template it is rendering. */
 export type MarketingTemplateBinding = {
   readonly templateId: string;
@@ -136,6 +157,12 @@ export type MarketingTemplateBinding = {
   readonly approvedDigest: string;
   readonly historyVersion: number;
   readonly reusableAsTemplate: true;
+  /**
+   * The state the loader saw, so a row that has since been emptied fails the
+   * condition. The retention purge clears the content without touching the
+   * history or the version, so neither of those would have noticed.
+   */
+  readonly status: string;
   /** When the loader proved the row, and when that stops being worth anything. */
   readonly provenAt: number;
   readonly expiresAt: number;
@@ -159,12 +186,17 @@ export type MarketingTemplateBinding = {
  */
 export type MarketingTemplateWriteConditions =
   | { ok: true; where: Record<string, unknown> }
-  | { ok: false; refusal: "binding_expired" };
+  | { ok: false; refusal: "binding_expired" | "binding_not_sealed" };
 
 export function marketingTemplateWriteConditions(
   binding: MarketingTemplateBinding,
   now: Date,
 ): MarketingTemplateWriteConditions {
+  // The seal first. Without it any object with a future `expiresAt` was a
+  // write condition, which made the expiry a formality.
+  if (!sealedBindings.has(binding)) {
+    return { ok: false, refusal: "binding_not_sealed" };
+  }
   const at = now.getTime();
   if (!Number.isFinite(at) || at > binding.expiresAt || at < binding.provenAt) {
     return { ok: false, refusal: "binding_expired" };
@@ -179,6 +211,11 @@ export function marketingTemplateWriteConditions(
       envelopeDigest: binding.approvedDigest,
       historyVersion: binding.historyVersion,
       reusableAsTemplate: true,
+      status: binding.status,
+      // A purged or deleted row is not a template, and neither state moves the
+      // history version the condition above is written against.
+      contentPurgedAt: null,
+      deletedAt: null,
     },
   };
 }
@@ -206,9 +243,20 @@ export type MarketingGuardClaimFact = {
    * is the allowance -- not any price claim that happens to be in the same
    * post. An earlier version accepted one, so "Start free. Credits never run
    * out. Pro costs AUD 20 per month." passed on the strength of a claim about
-   * the Pro price. `lib/marketingClaims.ts` sets this from the registry entry.
+   * the Pro price. `lib/marketingClaims.ts` records it on the registry entry
+   * and the resolver carries it here.
    */
   readonly statesCreditAllowance?: boolean;
+  /**
+   * The allowance sentence itself, as the post renders it in this locale.
+   *
+   * Declaring the claim is not saying it. §7.2 rule 4 wants the condition *in
+   * the post*, and an id in a list is not in the post -- so the Guard checks
+   * that these words are, folded the same way every other comparison is. The
+   * caller resolves the claim's `statementKey` through the locale table; the
+   * Guard does no lookup of its own.
+   */
+  readonly allowanceStatement?: string;
   /** For a price claim: the stored currency. */
   readonly currency?: string;
   readonly targetsAustralia?: boolean;
@@ -296,6 +344,8 @@ export type MarketingTemplateProof = {
   readonly locale: string;
   /** The row revision the loader read, carried into the decision's binding. */
   readonly historyVersion: number;
+  /** The post status the loader saw, carried into the write condition. */
+  readonly status: string;
   /** When the loader proved it. Stamped here, never supplied. */
   readonly provenAt: number;
   /** The digest the approval chain proved. */
@@ -315,6 +365,7 @@ export function sealMarketingTemplateProof(proof: {
   channel: string;
   locale: string;
   historyVersion: number;
+  status: string;
   approvedDigest: string;
   slotsFromRegistry: boolean;
   claimIds: readonly string[];
@@ -326,6 +377,7 @@ export function sealMarketingTemplateProof(proof: {
     channel: proof.channel,
     locale: proof.locale,
     historyVersion: proof.historyVersion,
+    status: proof.status,
     // Read here rather than taken as an argument. A caller that could set it
     // could set it forward, and the age bound is the only thing between a
     // proof and a caller that kept one from last month.
@@ -512,29 +564,40 @@ const COMPETITOR_NAMES: readonly (readonly [string, "word" | "substring"])[] =
   ]);
 
 /**
- * Compounds that contain "free" and are not about a price.
+ * Uses of "free" that are not about a price.
  *
- * Removed from the forms before the free-wording check, the way a rule's
- * exceptions are removed before its terms run. "Use free-form prompts to
- * describe the task." was refused for stating a price it does not state.
+ * By shape rather than by a list of words. A list could not cover
+ * "distraction-free", "ad-free" or "friction-free" -- the form is productive,
+ * and somebody writes a new one every quarter -- and the list that was here
+ * matched across a sentence boundary besides: "Start free. form habits that
+ * last." had its "free" removed by the "free form" entry and went out with no
+ * price check at all.
+ *
+ * Three shapes, none of which may cross a sentence:
+ *
+ * - `X-free`, hyphenated or spaced, where X is a noun: ad-free, distraction
+ *   free, gluten-free;
+ * - `free of` / `free from` something;
+ * - the handful of fixed compounds where "free" is first and the sense is not
+ *   a price: free-form, free text, free rein.
  */
-const FREE_COMPOUNDS: readonly string[] = Object.freeze([
-  "free form",
-  "freeform",
-  "free flowing",
-  "hands free",
-  "barrier free",
-  "free rein",
-  "carefree",
-  "free text",
-]);
+const NON_PRICE_FREE = new RegExp(
+  [
+    // A hyphen, not whitespace: `X free` with a space is "Start free" in
+    // every sentence that begins one, and a class holding \\s removed the
+    // word from the check entirely.
+    `[\\p{L}\\p{N}]+[-\\u2010-\\u2015]free`,
+    `\\bfree[-\\u2010-\\u2015\\s]{1,2}(?:of|from)\\b`,
+    `\\bfree[-\\u2010-\\u2015\\s]{1,2}(?:form|text|rein|flowing)\\b`,
+    `\\bfreeform\\b`,
+    `\\bcarefree\\b`,
+  ].join("|"),
+  "giu",
+);
 
 const withoutFreeCompounds = (forms: readonly string[]): string[] =>
   forms.map((form) =>
-    FREE_COMPOUNDS.reduce((text, compound) => {
-      const pattern = marketingTermPattern(compound, "substring");
-      return text.replace(new RegExp(pattern.source, "gu"), " ");
-    }, form),
+    form.replace(new RegExp(NON_PRICE_FREE.source, NON_PRICE_FREE.flags), " "),
   );
 
 const anyTermMatches = (
@@ -726,13 +789,25 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   // -- the first says the opposite of the limit it was supposed to state and
   // the second states nothing at all. What §7.2 rule 4 wants is the allowance,
   // and an allowance is a resolved pricing or plan claim.
-  const freeCondition = facts.claims.some(
-    (claim) =>
-      claim.known &&
-      claim.type === "plan" &&
-      claim.priceSourcesAllStored === true &&
-      claim.statesCreditAllowance === true,
-  );
+  const freeCondition = facts.claims.some((claim) => {
+    if (
+      !claim.known ||
+      claim.type !== "plan" ||
+      claim.priceSourcesAllStored !== true ||
+      claim.statesCreditAllowance !== true
+    ) {
+      return false;
+    }
+    // And the sentence is in the post. An allowance claim whose words were
+    // never rendered is a declaration, and §7.2 rule 4 asks for the condition
+    // the reader can see.
+    const statement = claim.allowanceStatement;
+    if (typeof statement !== "string" || statement.trim().length === 0) {
+      return false;
+    }
+    const needle = marketingTextForms(statement)[1] ?? statement.toLowerCase();
+    return forms.some((form) => form.includes(needle));
+  });
   if (anyTermMatches(cleanedOfFreeCompounds, FREE_WORDING)) {
     approvalCodes.push("price_or_promotion");
     if (!freeCondition || !anyTermMatches(forms, FREE_CONDITION)) {
@@ -779,11 +854,11 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
   // --- 7. the verdict -----------------------------------------------------
   if (rejectCodes.length > 0) {
-    return {
+    return sealDecision({
       verdict: "reject",
       codes: uniqueInOrder(rejectCodes),
       ruleIds: uniqueInOrder(ruleIds),
-    };
+    });
   }
 
   const named = draft.templateId
@@ -835,14 +910,14 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   }
 
   if (approvalCodes.length > 0) {
-    return {
+    return sealDecision({
       verdict: "approval_required",
       codes: uniqueInOrder(approvalCodes),
       ruleIds: uniqueInOrder(ruleIds),
-    };
+    });
   }
 
-  return {
+  return sealDecision({
     verdict: "autonomous_eligible",
     templateId: named!.templateId,
     templateDigest: named!.approvedDigest,
@@ -853,11 +928,27 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       approvedDigest: named!.approvedDigest,
       historyVersion: named!.historyVersion,
       reusableAsTemplate: true,
+      status: named!.status,
       provenAt: named!.provenAt,
       expiresAt: named!.provenAt + MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
     },
     ruleIds: uniqueInOrder(ruleIds),
-  };
+  });
+}
+
+/**
+ * The one exit every decision leaves through.
+ *
+ * Registers the decision, and its binding when it has one, so neither can be
+ * assembled by a caller. Written as a single function rather than repeated at
+ * each `return`, because the one that gets forgotten is the one that matters.
+ */
+function sealDecision(decision: MarketingGuardDecision): MarketingGuardDecision {
+  sealedDecisions.add(decision);
+  if (decision.verdict === "autonomous_eligible") {
+    sealedBindings.add(decision.templateBinding);
+  }
+  return decision;
 }
 
 /**

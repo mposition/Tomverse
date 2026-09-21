@@ -44,6 +44,7 @@ const featureClaim = (overrides = {}) => ({
   locales: ["en"],
   validUntil: "2027-01-31",
   gate: null,
+  planMeaning: null,
   evidence: {
     kind: "page",
     pageRoute: "/compare-ai-models",
@@ -118,6 +119,7 @@ test("a comparison claim names where it was read and stores no quotation", () =>
     locales: ["en"],
     validUntil: "2027-01-31",
     gate: null,
+    planMeaning: null,
     evidence: {
       kind: "external",
       url: "https://competitor.example/pricing",

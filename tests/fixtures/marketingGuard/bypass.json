@@ -853,6 +853,127 @@
           "hygiene"
         ]
       }
+    },
+    {
+      "id": "memory.doubleSpacedLetters",
+      "ruleId": "rule.memory-claim",
+      "input": "We c  l  o  n  e your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.partiallySpaced",
+      "ruleId": "rule.memory-claim",
+      "input": "We cl o ne your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.koreanFollowingClause",
+      "ruleId": "rule.memory-claim",
+      "input": "기억을 복제합니다, 파일은 잃지 않습니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.koreanFollowingClause",
+      "ruleId": "rule.australia-minors",
+      "input": "청소년을 위한 도구입니다, 성인용이 아닙니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.notOnly",
+      "ruleId": "rule.memory-claim",
+      "input": "Tomverse not only clones your memories but also organises them.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.rhetoricalQuestion",
+      "ruleId": "rule.memory-claim",
+      "input": "Want an AI that clones your memories?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanManyModifiers",
+      "ruleId": "rule.refuted-superiority",
+      "input": "유일한 빠른 안전한 쉬운 강력한 정확한 편리한 유연한 현대적 혁신적 통합형 확장형 AI 도구",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.youngestAge",
+      "ruleId": "rule.australia-minors",
+      "input": "4-year-olds, sign up now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.ageInWords",
+      "ruleId": "rule.australia-minors",
+      "input": "Fourteen-year-olds, sign up now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.underSixteensCta",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-16s, sign up now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "free.compoundAcrossSentences",
+      "ruleId": "rule.free-wording",
+      "input": "Start free. form habits that last.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
     }
   ]
 }

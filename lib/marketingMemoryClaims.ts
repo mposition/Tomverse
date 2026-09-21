@@ -33,6 +33,7 @@
 // Neither half judges translation quality, and neither is a substitute for
 // someone reading the page. They catch the specific sentence §17 names.
 
+import { marketingTermPattern } from "@/lib/marketingGuardNormalise";
 import { marketingClauseAsserts } from "@/lib/marketingNegation";
 
 /** The languages the forbidden-claim patterns below actually cover. */
@@ -121,6 +122,21 @@ export type ForbiddenMemoryClaim = {
  * hidden prompt) next to the verb, which is what makes it the forbidden claim
  * rather than a neighbouring true one.
  */
+/**
+ * A phrase whose letters may be separated by anything that is not a letter.
+ *
+ * `marketingTermPattern()` is the Guard's own compiler, and the reason the
+ * phrases below go through it is that a normalised *form* cannot do this job:
+ * a twin that joined single letters across spaces fixed one spelling, missed
+ * two more, and invented "BEST" out of a sentence listing the letters.
+ *
+ * Phrases rather than words. "clone" on its own refuses an ordinary sentence
+ * about copying a repository; "clone your memories" is the claim §17 forbids
+ * however it is spaced.
+ */
+const spacedClaim = (phrase: string): RegExp =>
+  new RegExp(marketingTermPattern(phrase, "word").source, "iu");
+
 export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
     {
         id: "replicatesMemoryOrPersonality",
@@ -130,6 +146,19 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
             /(기억|인격|성격|두뇌)[^.\n]{0,20}(복제|재현|그대로\s*옮)/,
             /(복제|재현)[^.\n]{0,12}(기억|인격|두뇌)/,
             /\b(clone|replicate|reproduce|recreate|transfer)s?\b[^.\n]{0,30}\b(memory|memories|personality|persona|brain|mind)\b/i,
+            // The same claims with every separator tolerated inside the words,
+            // so "We c l o n e your memories." and "We clo·ne your memories."
+            // read as what they are. Built through the Guard's own term
+            // compiler, which is what a rule written as a term would get --
+            // except that these stay here, where the clause is read and a
+            // denial is not a claim.
+            spacedClaim("clone your memories"),
+            spacedClaim("clone your memory"),
+            spacedClaim("clones your memories"),
+            spacedClaim("clone your personality"),
+            spacedClaim("replicate your memories"),
+            spacedClaim("replicates your memories"),
+            spacedClaim("copy your personality"),
             /\b(memory|memories|personality|persona|brain)\b[^.\n]{0,20}\b(cloned|replicated|recreated|reproduced)\b/i,
         ],
     },

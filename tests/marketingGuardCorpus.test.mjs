@@ -69,6 +69,10 @@ const claimsOf = (entry) =>
     // A `plan` claim in a corpus case stands for the credit allowance, which
     // is the one claim §7.2 rule 4 accepts as a free post's condition.
     statesCreditAllowance: type === "plan",
+    // The sentence the claim is, as the case renders it. §7.2 rule 4 wants the
+    // condition in the post rather than in a list of ids, so a case declaring
+    // the allowance states the words it put in the text.
+    allowanceStatement: type === "plan" ? entry.allowanceStatement : undefined,
     usedBefore: true,
   }));
 
