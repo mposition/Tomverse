@@ -16,9 +16,10 @@
 ## 1. 제안이지 자동 전송이 아니다
 
 Refiner는 답을 만들지 않고 현재 composer 문장을 다시 쓰는 제안을 만든다. 결과는
-전송 전에 별도 행에 표시되며 사용자는 `이 문장 사용` 또는 `원문 유지`를 선택할
-수 있다. 어느 선택도 자체적으로 전송을 시작하지 않는다. 전송 버튼과 IME 규칙은
-기존 composer가 계속 소유한다.
+전송 전에 별도 행에 표시된다. 최종 제품 계약의 선택은 `이 문장 사용` 또는
+`원문 유지`이지만, 현재 fixture 버튼은 `제안 미리보기 확인`이다. fixture 확인은
+원문을 바꾸거나 제안문을 실행 입력으로 채택하지 않는다. 어느 선택도 자체적으로
+전송을 시작하지 않는다. 전송 버튼과 IME 규칙은 기존 composer가 계속 소유한다.
 
 `offered=false`는 비활성 teaser가 아니라 아무 UI도 렌더하지 않는다. 실제 호출을
 할 수 없는 사용자가 기능을 약속받는 상태를 만들지 않는다.
@@ -53,14 +54,30 @@ stale 제안은 적용 버튼을 남기지 않고 일반 요청 상태로 돌아
 제안 채택 버튼을 누른 순간에도 draft가 source와 다르면 fail-closed한다. 늦은
 응답이 새 입력을 덮어쓰는 복구나 last-write-wins는 허용하지 않는다.
 
+현재 fixture caller는 결정 callback에서 준비된 제안과 exact draft, 구조화된
+`identity / mounted surface / conversation` scope, 원문·실행문·decision provenance를
+순수 handoff validator로 다시 대조한다. 같은 request/suggestion의 두 번째 결정을
+거부한다. 이 검증은 브라우저 내부 fixture 경계일 뿐 server authorization이나 제품
+Message/Router 연결을 의미하지 않는다. fixture에서 채택은 **읽기 전용 미리보기**만
+남긴다. 합성 제안문을 controlled composer, `useConversationDrafts`, 제품 draft PUT에
+절대 쓰지 않으며 저작 원문은 그대로 유지한다. 미리보기 동안 새 제안 요청은
+거부하고, 원문을 편집하면 미리보기와 resolution을 폐기해 새 요청을 허용한다.
+
 제어 상태는 caller가 소유한다. `onPromptRefinerDecision`을 받은 caller는 채택과
-원문 유지 **모두**에서 `ready`를 즉시 벗어나야 한다. 특히 원문 유지는 textarea
-값을 바꾸지 않으므로 callback 외에 proposal을 닫을 경로가 없다. 채택 뒤에는
-`isPromptRefinerResolutionCurrent()`로 현재 draft가 resolution의
-`displayPrompt`와 같은 동안에만 resolution을 유지한다. 사용자가 한 글자라도 더
-편집하면 기존 resolution을 폐기하고 그 시점의 draft를 새 사용자 입력으로 다룬다.
-이 규칙 없이 예전 `persistedUserPrompt`·`executionPrompt`를 다음 전송에 재사용하면
-계약 위반이다.
+원문 유지 **모두**에서 `ready`를 즉시 벗어난다. fixture 채택은
+`accepted_preview`, 원문 유지는 `idle`이다. 미리보기의 수명은 현재 composer가
+resolution의 `displayPrompt`(fixture에서는 authored source)와 exact-string으로
+같은 동안만 유효하다. 공통 제품 decision resolver는 실제 composer에 제안문을
+넣는 제품 caller를 위해 채택 시 `displayPrompt`를 제안문으로 반환하지만,
+fixture 전용 resolver는 원문을 반환한다. 두 경우 모두 `executionPrompt`에
+채택된 제안문을 담는다. scope 전환이나
+편집은 이를 폐기한다. fixture Chat submit은 원문 유지와 채택 모두에서 전역 차단되고,
+composer→Image handoff도 차단된다. fixture cookie를 제거하거나 다시 로드해도
+제안문은 제품 draft에 없으므로 실행 입력으로 승격되지 않는다. 제품 모드의
+원문 보존/실행문 분리 전송은 별도 server handoff로 구현해야 한다.
+현재 브라우저 회귀는 cookie 제거 후 전체 reload와 재활성화 reload를 검증한다.
+동일 mounted instance의 server prop 전환은 mode를 scope epoch에 포함해 reset하지만,
+그 전환을 실제 브라우저에서 재현하는 별도 검증은 제품 모드 연결 전에 필요하다.
 
 ## 4. Refiner가 읽을 수 있는 것은 현재 턴 텍스트뿐이다
 
@@ -181,7 +198,7 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 ## 8. 검증
 
 - `tests/promptRefinerSuggestion.test.mjs`: strict 입력, 주입 형태 JSON encoding,
-  request 결속, stale 폐기, 원문/실행 분리
+  request 결속, stale 폐기, 원문/실행 분리, fixture handoff의 scope·위조·중복 거부
 - `tests/client/promptRefinerSuggestionRender.test.tsx`: 미제공 시 null, 7개 언어,
   두 결정, 44px target, disabled reason, ready live status, 실패 문구,
   내부 모델/우월성 표현 부재
@@ -190,6 +207,10 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   focus 복귀, accepted fixture의 submit 거부, 편집·새 채팅의 pending response
   폐기, invalid response 실패·retry, 16,000자 경계, IME 차단, 320px + 200% text,
   200% zoom 상당 viewport, 44px action과 가로 overflow 부재를 검사한다.
+  같은 제안의 중복 소비는 순수 validator 단위 테스트로 검증한다. 브라우저 E2E는
+  미리보기 확인 뒤 재요청 차단, 대화 전환 후 복원, Image seed 차단,
+  `/chat/workspace`의 원문 draft PUT·합성문 부재 및 fixture mode off/on 전체
+  reload를 검증한다. 실제 편집 후에만 새 요청이 보이는지도 검사한다.
 - `tests/e2e/prompt-refiner-focus.spec.ts`: E2E 전용 fixture에서 초기 mount가
   textarea focus를 빼앗지 않는지, 새 requesting·failed·ready 도착에는 한 번씩
   focus가 이동하는지, draft를 바꿨다가 같은 source로 되돌려도 같은 제안이
@@ -206,7 +227,14 @@ database bypass를 모두 확인하고 전용 cookie를 받은 경우에만 `e2e
 내린다. 실제 provider를 쓰는 product mode는 타입에도 없으며, AppSetting row만으로
 그 mode를 만들 수 없다.
 fixture에서 채택한 resolution은 synthetic 문장을 user Message로 오인하지 않도록
-submit을 fail-closed한다. 제품 caller는 원문/실행문 분리와 receipt 영속화를 먼저
+submit을 fail-closed한다. fixture mode에서는 fresh Chat submit을
+`handleGlobalSubmit`에서 차단하고, 그것을 우회하는 ChatApp의 retry·follow-up·
+payload send는 `onBeforeModelSend` 장벽에서 거부한다. 대화 전환·draft 복원·remount
+후에도 fixture mode의 Chat dispatch가 열리지 않아야 한다. 이 강한 차단은
+loopback fixture 전용이며 제품 사용자의 일반 Chat에는
+적용되지 않는다. 같은 fixture에서 Chat composer 문장을 Image workspace의 seed로
+넘기는 handoff도 차단한다. 별도 Image 화면 자체의 생성 권한을 이 계약이 통제한다고
+주장하지 않는다. 제품 caller는 원문/실행문 분리와 receipt 영속화를 먼저
 구현해야 이 guard를 제품 mode로 대체할 수 있다.
 
 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·profile과

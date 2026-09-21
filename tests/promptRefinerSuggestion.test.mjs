@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ZodError } from "zod";
 
 import {
   PROMPT_REFINER_INPUT_SCOPE,
   PROMPT_REFINER_MAX_PROMPT_BYTES,
   bindPromptRefinerSuggestion,
-  isPromptRefinerResolutionCurrent,
   promptRefinerPromptProblem,
   promptRefinerRequestSchema,
   promptRefinerResponseSchema,
   resolvePromptRefinerDecision,
+  resolvePromptRefinerFixtureDecision,
+  validatePromptRefinerFixtureHandoff,
   visiblePromptRefinerState,
 } from "../lib/promptRefinerSuggestion.ts";
 import {
@@ -181,14 +183,6 @@ test("acceptance preserves authorship while only execution receives the proposal
     inputScope: PROMPT_REFINER_INPUT_SCOPE,
     decision: "accepted",
   });
-  assert.equal(
-    isPromptRefinerResolutionCurrent(accepted, accepted.displayPrompt),
-    true
-  );
-  assert.equal(
-    isPromptRefinerResolutionCurrent(accepted, `${accepted.displayPrompt}!`),
-    false
-  );
 });
 
 test("keeping the original changes neither authorship nor execution text", () => {
@@ -232,5 +226,108 @@ test("a decision made after another edit fails closed", () => {
         decision: "unknown",
       }),
     /Invalid option/
+  );
+});
+
+const fixtureScope = {
+  identityKey: "account:one",
+  mountedSurface: "chat",
+  conversationId: "conversation:two",
+};
+
+function fixtureHandoff(decision = "accepted") {
+  const suggestion = bindPromptRefinerSuggestion({
+    request,
+    response,
+    currentPrompt: request.prompt,
+  });
+  assert.ok(suggestion);
+  return {
+    readySuggestion: suggestion,
+    resolution: resolvePromptRefinerFixtureDecision({
+      suggestion,
+      currentPrompt: request.prompt,
+      decision,
+    }),
+    readyScope: fixtureScope,
+    currentScope: fixtureScope,
+    currentDraft: request.prompt,
+    consumedKeys: new Set(),
+  };
+}
+
+test("fixture handoff preserves exact authored and execution text for both decisions", () => {
+  for (const decision of ["accepted", "kept_original"]) {
+    const input = fixtureHandoff(decision);
+    const result = validatePromptRefinerFixtureHandoff(input);
+    assert.equal(result.resolution.persistedUserPrompt, request.prompt);
+    assert.equal(result.resolution.displayPrompt, request.prompt);
+    assert.equal(
+      result.resolution.executionPrompt,
+      decision === "accepted" ? response.refinedPrompt : request.prompt
+    );
+    assert.deepEqual(result.resolution.provenance, input.resolution.provenance);
+    assert.equal(input.consumedKeys.size, 0, "validator must be pure");
+    input.consumedKeys.add(result.consumptionKey);
+    assert.throws(
+      () => validatePromptRefinerFixtureHandoff(input),
+      /prompt_refiner_handoff_duplicate/
+    );
+  }
+});
+
+test("fixture handoff rejects a stale draft and each changed scope component", () => {
+  const input = fixtureHandoff();
+  assert.throws(
+    () => validatePromptRefinerFixtureHandoff({ ...input, currentDraft: `${request.prompt}!` }),
+    /prompt_refiner_handoff_draft_stale/
+  );
+  for (const changed of [
+    { identityKey: "account" },
+    { mountedSurface: "review" },
+    { conversationId: "conversation" },
+  ]) {
+    assert.throws(
+      () => validatePromptRefinerFixtureHandoff({
+        ...input,
+        currentScope: { ...fixtureScope, ...changed },
+      }),
+      /prompt_refiner_handoff_scope_stale/
+    );
+  }
+});
+
+test("fixture handoff rejects forged text, decision, provenance and extra fields", () => {
+  const input = fixtureHandoff();
+  const changes = [
+    { executionPrompt: request.prompt },
+    { persistedUserPrompt: response.refinedPrompt },
+    { displayPrompt: response.refinedPrompt },
+    { decision: "kept_original" },
+    { provenance: { ...input.resolution.provenance, requestId: "other" } },
+    { provenance: { ...input.resolution.provenance, suggestionId: "other" } },
+    { provenance: { ...input.resolution.provenance, refinerVersion: "suggest-v2" } },
+    { provenance: { ...input.resolution.provenance, inputScope: "whole_conversation" } },
+    { provenance: { ...input.resolution.provenance, decision: "kept_original" } },
+    { provider: "forged-provider" },
+  ];
+  for (const changed of changes) {
+    assert.throws(
+      () => validatePromptRefinerFixtureHandoff({
+        ...input,
+        resolution: { ...input.resolution, ...changed },
+      }),
+      Object.hasOwn(changed, "provider") || changed.provenance?.inputScope === "whole_conversation"
+        ? ZodError
+        : /prompt_refiner_handoff_forged/,
+      `forged field ${Object.keys(changed)[0]} must fail closed`
+    );
+  }
+  assert.throws(
+    () => validatePromptRefinerFixtureHandoff({
+      ...input,
+      readySuggestion: { ...input.readySuggestion, requestId: "other" },
+    }),
+    /prompt_refiner_handoff_forged/
   );
 });
