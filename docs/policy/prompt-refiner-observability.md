@@ -300,12 +300,12 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
 실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
 검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
 새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
-추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
+추가한다. 그 writer 전까지 현재 v2 admission의 fail-closed 결과와 default-off 제품 상태를
 유지한다.
 
 ## 11. durable staging approval provenance
 
-후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
+후속 `prompt-refiner-stage-admission-v2`는 과거 proposal을 현재 staging 배포에 다시
 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
 다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 188개 source
 파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는
