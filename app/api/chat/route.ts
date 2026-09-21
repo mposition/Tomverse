@@ -122,6 +122,7 @@ import {
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
+import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
@@ -3698,6 +3699,7 @@ async function handleChatPost(
         */
         let streamController: ReadableStreamDefaultController<string> | null =
             null;
+        let artifactToolRejectionLog: ArtifactToolRejectionLog | null = null;
         const artifactCollector =
             artifactToolPlan && artifactToolPlan.registerTool
                 ? new GeneratedArtifactCollector({
@@ -3706,6 +3708,13 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
+                      noteRejection: (toolCallId, toolName, input, rejectionCode) =>
+                          artifactToolRejectionLog?.record(
+                              toolCallId,
+                              toolName,
+                              input,
+                              rejectionCode
+                          ),
                       emitProgress: (format) => {
                           if (!streamController) return;
                           enqueueSafely(
@@ -3752,6 +3761,9 @@ async function handleChatPost(
             // what keeps a truncated native search from being reported as a
             // file the user never got.
             artifactToolCallTracker = new ArtifactToolCallTracker(
+                Object.keys(artifactToolConfig.tools)
+            );
+            artifactToolRejectionLog = new ArtifactToolRejectionLog(
                 Object.keys(artifactToolConfig.tools)
             );
         }
@@ -3828,15 +3840,25 @@ async function handleChatPost(
                                   which is what keeps a second card off a file
                                   that already failed on its own terms.
                                 */
-                                onChunk: ({ chunk }: { chunk: unknown }) => {
-                                    artifactToolCallTracker?.noteChunk(chunk);
+                                onChunk: (event: { chunk: unknown }) => {
+                                    try {
+                                        const chunk = event.chunk;
+                                        artifactToolCallTracker?.noteChunk(chunk);
+                                        artifactToolRejectionLog?.noteChunk(chunk);
+                                    } catch {
+                                        // A malformed SDK callback must not abort the turn.
+                                    }
                                 },
                                 onToolExecutionStart: (event: {
                                     toolCall?: { toolCallId?: string };
                                 }) => {
-                                    artifactToolCallTracker?.noteExecutionStarted(
-                                        event.toolCall?.toolCallId
-                                    );
+                                    try {
+                                        artifactToolCallTracker?.noteExecutionStarted(
+                                            event.toolCall?.toolCallId
+                                        );
+                                    } catch {
+                                        // The tool's execute reports its own start independently.
+                                    }
                                 },
                             }
                           : {}),
