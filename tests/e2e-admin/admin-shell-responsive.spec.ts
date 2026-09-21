@@ -92,17 +92,46 @@ test.describe("admin console on a narrow viewport", () => {
         // scroll that lands between the two calls invalidate the coordinates,
         // which produces a failure about the wrong element rather than about
         // reachability.
-        const topmost = await link.evaluate((element) => {
+        //
+        // The report says what was found instead, because "covered by another
+        // element" on its own is not actionable: a zero-sized box, a centre
+        // point outside the viewport and a genuine overlay all produced the
+        // same null, and telling them apart took a trace download and a
+        // screenshot. The assertion is unchanged -- only what it can say when
+        // it fails.
+        const probe = await link.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          if (box.width === 0 || box.height === 0) return null;
-          return (
-            document
-              .elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-              ?.closest("a")
-              ?.textContent?.trim() ?? null
-          );
+          const where = {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+          };
+          if (box.width === 0 || box.height === 0) {
+            return { topmost: null, why: "zero-sized box", where };
+          }
+          const centreX = box.x + box.width / 2;
+          const centreY = box.y + box.height / 2;
+          const hit = document.elementFromPoint(centreX, centreY);
+          if (!hit) {
+            return { topmost: null, why: "centre point hits nothing", where };
+          }
+          const anchor = hit.closest("a");
+          return {
+            topmost: anchor?.textContent?.trim() ?? null,
+            why: anchor
+              ? "another link is on top"
+              : `covered by <${hit.tagName.toLowerCase()}${
+                  hit.className ? ` class="${String(hit.className).slice(0, 80)}"` : ""
+                }>`,
+            where,
+          };
         });
-        expect(topmost, `${label} is covered by another element`).toContain(label);
+        expect(
+          probe.topmost,
+          `${label} is not reachable: ${probe.why} (${JSON.stringify(probe.where)})`
+        ).toContain(label);
       }
     });
   }
