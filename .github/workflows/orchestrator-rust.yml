@@ -3,24 +3,18 @@ name: Orchestrator Rust
 # The Rust workspace (crates/amux-core, apps/tomverse-orchestrator) had no CI
 # lane, so its tests only ever ran on a developer's machine. A regression test
 # nobody runs is not a defence: this lane makes the workspace's own tests a
-# check on every change that touches it.
+# check on every change.
+#
+# It has no path filter on purpose. This job is a required check, and a
+# path-filtered workflow reports nothing at all on a pull request that does not
+# match -- the check then sits at "expected" forever and the pull request cannot
+# merge. Every pull request paying for one build keeps that failure impossible;
+# the whole workspace builds and tests in well under a minute.
 
 on:
   pull_request:
-    paths:
-      - "crates/**"
-      - "apps/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/orchestrator-rust.yml"
   push:
     branches: [main, develop]
-    paths:
-      - "crates/**"
-      - "apps/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/orchestrator-rust.yml"
   workflow_dispatch:
 
 # Read-only. This lane compiles and runs workspace code, so it must never hold
