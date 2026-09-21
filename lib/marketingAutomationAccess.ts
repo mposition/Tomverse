@@ -188,6 +188,16 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * changes a decision this module makes -- which is what the second look was
  * for.
  *
+ * 2026-09-21: the other watched file, `lib/marketingAutomationSchema.ts`,
+ * changed too -- `edit_revision.byAuditLogId` became non-null. An edit with no
+ * audit row cannot be placed in time against a template marking, and because
+ * history is append-only one such entry would have made that post permanently
+ * unusable as a template; requiring the field while nothing writes an edit yet
+ * is the moment to do it. The value below is recomputed over both changes, not
+ * either one: two branches each moved this constant for their own file, and
+ * taking one side of that merge would have left a fingerprint describing a
+ * pipeline that never existed.
+ *
  * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
  * the same watched schema. None changes a marketing model, the descriptor, or
  * an admission decision; the fingerprint moves because the closed file digest
@@ -209,7 +219,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "79c43d3d43de3ccc6c95312f7835a0d78386c7b08bf395272816968fe7491b41";
+  "6024faad222d57304bed312980918a57f6774f1462f8f939b09556f89ad80d36";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

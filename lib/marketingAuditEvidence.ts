@@ -114,8 +114,20 @@ export const marketingWebhookSignatureAuditRequirement = (
   metadata: { recordDigest: binding.recordDigest },
 });
 
+/**
+ * A value the audit row actually recorded.
+ *
+ * `Object.hasOwn`, not a bare index. Prisma hands back a plain object that
+ * inherits from `Object.prototype`, so without it a property set there would
+ * satisfy every metadata requirement an audit row did not record -- including
+ * `actorHadMarketingWrite`, which is the one saying a person had permission to
+ * do the thing this row is evidence of.
+ */
 const metadataValue = (metadata: unknown, key: string): unknown =>
-  metadata && typeof metadata === "object" && !Array.isArray(metadata)
+  metadata &&
+  typeof metadata === "object" &&
+  !Array.isArray(metadata) &&
+  Object.hasOwn(metadata, key)
     ? (metadata as Record<string, unknown>)[key]
     : undefined;
 

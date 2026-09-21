@@ -77,6 +77,14 @@ docs/*
 !docs/policy/
 !docs/ops/
 !docs/release-gates/
+# docs/marketing/ holds the approved asset registry, which is a gate rather
+# than documentation: lib/marketingAssets.ts reads it, and a marketing post may
+# only use an asset it names. The file is named rather than the directory --
+# marketing strategy lives in the private repository, and an exception for the
+# whole directory is an invitation to put some of it here.
+!docs/marketing/
+docs/marketing/*
+!docs/marketing/asset-registry.json
 .playwright-mcp
 
 # Scratch build directory for scripts/verify-package-build-matrix.mjs.

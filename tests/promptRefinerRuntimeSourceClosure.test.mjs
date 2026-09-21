@@ -93,15 +93,25 @@ const compilerOptions = parsedConfig.options;
 // value as on `origin/develop` and on the deploy below this one. Two modules
 // lost most of their contents and the set of computed accesses did not change,
 // which is the thing this snapshot exists to make somebody check.
-// Confirmatory shadow v4 also adds one reviewed runtime path and its
-// schema/comment changes; this combined branch repins source positions while
-// preserving the same 228-expression position-free inventory.
+//
+// 2026-09-21, this merge: develop's moves and this branch's arrive together,
+// and each side had already repinned for its own reason. This branch raised
+// `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// develop's confirmatory shadow v4 added a reviewed runtime path and its own
+// schema and comment changes. Neither is taken over the other -- the value
+// below is computed over the merged tree, which is the only tree that will
+// exist. What makes that a repin rather than a review is that the
+// position-free inventory (`path + expression text` for every entry) is
+// unchanged from `origin/develop`: no computed access was added, removed or
+// altered by either side, only moved. The count is 228 and that inventory
+// hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
+// on this tree and on `origin/develop` alike.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "191940267a20a5fc282fac31d212d2d5",
-  "685c13cb3ad6041331d411c9aa0f1772",
+  "e2efb71ad8589f0e934d66a38d147b1d",
+  "89e3f080943c3dcfb08116b429180271",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
