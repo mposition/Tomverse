@@ -66,10 +66,27 @@ wrapper는 작업을 stdin으로 받고 결과를 stdout으로 돌려주므로 �
 `a_lane_does_not_inherit_the_orchestrator_environment`가 실제로 자식 프로세스를
 띄워 환경을 확인한다.
 
+### 이것이 하지 않는 것
+
+**빈 환경은 lane 격리가 아니다.** 상속 경로 하나를 막을 뿐이다. lane은 여전히
+오케스트레이터의 자식 프로세스이므로 같은 uid, 같은 PID namespace, 같은
+파일시스템, 같은 네트워크 위치를 쓴다. 같은 uid의 자식은 부모의
+`/proc/<ppid>/environ`을 읽을 수 있고, 거기에 `TOMVERSE_AMUX_SYNC_SECRET`이 있다.
+
+그러므로 **lane을 신뢰 경계로 쓰지 않는다.** 서로 다른 자격증명을 가져야 하는
+역할은 서로 다른 서비스로 배포한다. 한 오케스트레이터 아래에 두려면 lane별
+container·uid·PID namespace·파일시스템·네트워크 정책을 두고, 부모 환경이 보이지
+않음을 **실측해 기록**한 뒤에야 그렇게 부를 수 있다.
+
+`env_clear()`가 하는 일은 셋이다 — 실수로 새는 것을 막고, lane이 무엇을 받는지
+설정에 적히게 하고, control plane 이름을 아예 선언할 수 없게 한다. 그 이상을
+주장하지 않는다.
+
 ### lane 자격증명 표 (activation 전에 채운다)
 
 Stage 2 activation 전에 lane마다 아래 표를 채우고 날짜와 함께 기록한다.
-표가 없으면 lane 분리를 증명할 방법이 없다.
+표가 없으면 lane 분리를 증명할 방법이 없다. **표가 있어도 위 문단의 실측 기록이
+없으면 서로 다른 신뢰 수준의 역할을 같은 오케스트레이터에 두지 않는다.**
 
 | lane (worker) | program | 선언한 이름(`env_passthrough`) | 그 이름이 주는 권한 | 이 lane이 갖지 **않아야** 하는 것 |
 |---|---|---|---|---|
