@@ -1,5 +1,15 @@
 # Development Agent Orchestration
 
+상태: **승인됨.** 작성 2026-09-21(PR #1570과 함께 병합), 승인 2026-09-21.
+approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 1
+
+| 버전 | 승인 | 변경 |
+|---|---|---|
+| 1 | 2026-09-21 mposition | 최초 승인. 병합 당시 본문에 두 가지를 더한 상태를 승인한다 — Agent 승인은 2인 승인(`AdminActionApproval`)이 아니라는 공통 기반 §0 결정(PR #1583)과, 개별 Agent 정책과의 경계(PR #1586) |
+
+승인 전까지 이 문서는 병합돼 있으면서도 `approvedBy`·`approvedAt`·버전이 없었다.
+공통 Agent 기반 원칙 1은 그 셋이 기록돼야 구현을 시작할 수 있다고 정한다.
+
 ## Scope
 
 Tomverse의 개발 Agent 팀은 `tomverse-orchestrator`를 통해 실행한다.
