@@ -23,6 +23,11 @@ feature activation, production activation은 서로 다른 결정이다.
 실제 `branch`·전체 `commitHash`를 확인한 뒤에만 staging DB 참조와 migration을
 설정한다. 잘못된 SHA의 배포는 검증 기록에 합격 증거로 넣지 않는다.
 
+같은 날 확인한 `redeploy`는 최신 source SHA를 유지했지만, 서비스 설정에서 바꾼
+pre-deploy/start 명령의 실행 로그가 없었다. 재배포 성공만으로 새 명령이 실행됐다고
+판정하지 않는다. 명령 변경을 검증할 때는 GitHub 브랜치 push로 새 source-trigger
+배포를 만들고, 실제 deployment SHA와 migration·capture 로그를 함께 확인한다.
+
 ## Canonical material
 
 - 검증 항목과 blocking 기준: `staging-checklist.md`
