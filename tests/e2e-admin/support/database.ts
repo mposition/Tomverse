@@ -1166,7 +1166,28 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     },
     {
       status: "failed",
-      data: { errorCode: FIXTURE_MARKETING.failed.errorCode },
+      data: {
+        errorCode: FIXTURE_MARKETING.failed.errorCode,
+        // The failure has to be recorded by the statement that fails the post,
+        // and the attempt number in the entry has to match the counter. The
+        // history is append-only with a version that moves by one, so the
+        // draft entry the insert wrote stays first.
+        history: [
+          {
+            at: new Date(now).toISOString(),
+            type: "draft",
+            envelopeDigest: FIXTURE_MARKETING.failed.envelopeDigest,
+          },
+          {
+            at: at(-11 * HOUR),
+            type: "attempt",
+            outcome: "failed",
+            attempt: 1,
+            errorCode: FIXTURE_MARKETING.failed.errorCode,
+          },
+        ],
+        historyVersion: 1,
+      },
     },
   ]) {
     await prisma.marketingPost.update({

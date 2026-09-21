@@ -63,17 +63,43 @@ test.describe("marketing console", () => {
     ).toBeVisible();
   });
 
-  test("the switch strip says what is on, so an empty queue has an explanation", async ({
+  test("the switch strip states each switch's value, not just its name", async ({
     page,
     signInAs,
   }) => {
     await signInAs("owner");
     await page.goto("/admin/marketing?tab=queue");
 
+    const strip = page.getByRole("definition");
     await expect(page.getByText("Switches")).toBeVisible();
-    // Default-off, and stated as off rather than left to be inferred from an
-    // empty list.
-    await expect(page.getByText("Drafts")).toBeVisible();
+    // Every marketing switch is default-off, and the strip says "off" rather
+    // than leaving it to be inferred from an empty queue.
+    await expect(strip.filter({ hasText: /^off$/ })).toHaveCount(5);
+    // The apply scope is a stored document, not a boolean, so it says whether
+    // one is configured. Calling a non-empty string "on" would report a
+    // webhook as affecting publish state when the scope may be unusable.
+    await expect(strip.filter({ hasText: /^not configured$/ })).toHaveCount(1);
+  });
+
+  test("moving between tabs by link replaces the rows, not just the tab strip", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    await page.goto("/admin/marketing?tab=queue");
+    await expect(page.getByText(FIXTURE_MARKETING.pending.renderedText)).toBeVisible();
+
+    // A client navigation, not a fresh document: the panel holds its payload
+    // in state, so without a remount the previous section's rows survive the
+    // tab change and the screen contradicts its own tab strip.
+    await page.getByRole("link", { name: "Publish state" }).click();
+    await expect(page).toHaveURL(/tab=published/);
+    await expect(
+      page.getByText(FIXTURE_MARKETING.published.externalUrl, { exact: false })
+    ).toBeVisible();
+    await expect(
+      page.getByText(FIXTURE_MARKETING.pending.renderedText)
+    ).toHaveCount(0);
   });
 
   test("accounts show the brand account and its mode", async ({ page, signInAs }) => {

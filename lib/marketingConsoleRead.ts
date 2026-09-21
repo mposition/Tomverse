@@ -25,7 +25,12 @@ import {
  * published, and "drafts are off" is that answer.
  */
 
-export type MarketingSwitchState = "on" | "off" | "unreadable";
+export type MarketingSwitchState =
+  | "on"
+  | "off"
+  | "configured"
+  | "not-configured"
+  | "unreadable";
 
 export type MarketingSwitchStates = {
   drafts: MarketingSwitchState;
@@ -33,6 +38,14 @@ export type MarketingSwitchStates = {
   autoPublish: MarketingSwitchState;
   experiments: MarketingSwitchState;
   webhookShadow: MarketingSwitchState;
+  /**
+   * Whether an apply scope is stored -- not whether the webhook is applied.
+   *
+   * The stored value is a scope document S2f defines and validates. All this
+   * read can honestly say is that something is there: calling a non-empty
+   * string "on" would report a webhook as affecting publish state when an
+   * empty or malformed scope is exactly what the schema refuses.
+   */
   webhookApplyScope: MarketingSwitchState;
 };
 
@@ -91,8 +104,8 @@ async function readSwitches(): Promise<MarketingSwitchStates> {
       webhookShadow: state(settings.webhookShadowEnabled),
       webhookApplyScope: settings.webhookApplyScopeValue.ok
         ? settings.webhookApplyScopeValue.value
-          ? "on"
-          : "off"
+          ? "configured"
+          : "not-configured"
         : "unreadable",
     };
   } catch {

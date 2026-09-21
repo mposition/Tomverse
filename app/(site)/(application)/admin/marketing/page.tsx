@@ -38,7 +38,14 @@ export default async function AdminMarketingPage({
         label="Marketing sections"
         query={query}
       />
-      <AdminMarketingPanel initial={initial} />
+      {/*
+        Keyed by section so a client navigation between tabs remounts the
+        panel with the new payload. Without it the panel's `useState(initial)`
+        keeps the previous section's rows while the tab strip says otherwise,
+        which is the section living in component state -- the thing the Admin
+        IA contract's second rule forbids.
+      */}
+      <AdminMarketingPanel key={tab.id} initial={initial} />
     </div>
   );
 }

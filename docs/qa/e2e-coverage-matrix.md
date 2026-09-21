@@ -145,7 +145,7 @@ Role column = the fixture identity the test signs in as. All rows run on the
 ### 2.2 Shell, routing and navigation — `admin-shell-navigation.spec.ts`
 
 The console's information architecture is described in
-`docs/ui-contracts/admin-console-ia.md`: six groups, seventeen entries, and a
+`docs/ui-contracts/admin-console-ia.md`: six groups, twenty-two entries, and a
 redirect for every route the old twenty-four-entry sidebar had.
 
 | Journey | Risk | Success state | Failure state |

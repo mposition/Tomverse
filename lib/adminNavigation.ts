@@ -484,8 +484,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
       {
         id: "published",
-        label: "Published",
-        description: "What went out, where it went, and whether it was seen publicly",
+        label: "Publish state",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
       },
       {
         id: "accounts",

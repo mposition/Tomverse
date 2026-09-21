@@ -8,7 +8,12 @@ import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
-type SwitchState = "on" | "off" | "unreadable";
+type SwitchState =
+  | "on"
+  | "off"
+  | "configured"
+  | "not-configured"
+  | "unreadable";
 
 type Row = Record<string, unknown>;
 
@@ -163,13 +168,19 @@ function MarketingSwitchStrip({
     ["webhookApplyScope", m.switchWebhookApply],
   ];
   const word = (value: SwitchState) =>
-    value === "on" ? m.switchOn : value === "off" ? m.switchOff : m.switchUnreadable;
+    ({
+      on: m.switchOn,
+      off: m.switchOff,
+      configured: m.switchConfigured,
+      "not-configured": m.switchNotConfigured,
+      unreadable: m.switchUnreadable,
+    })[value];
   const tone = (value: SwitchState) =>
-    value === "on"
+    value === "on" || value === "configured"
       ? "text-emerald-300"
-      : value === "off"
-        ? "text-zinc-400"
-        : "text-amber-300";
+      : value === "unreadable"
+        ? "text-amber-300"
+        : "text-zinc-400";
 
   return (
     <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3">
