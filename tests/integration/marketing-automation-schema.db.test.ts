@@ -9,6 +9,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
 import { guardDraft } from "@/lib/marketingGuardCore";
+import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   createMarketingChannel,
   createMarketingPost,
@@ -669,7 +670,9 @@ test("the store's create writes the draft entry itself", async () => {
     kind: "social",
     logicalKey: "store-created-1",
     envelope: envelope() as never,
-    envelopeDigest: DIGEST,
+    // Computed from the envelope, which is what the store now requires: a
+    // digest the caller states says nothing about the content it names.
+    envelopeDigest: marketingEnvelopeDigest(envelope() as never),
     rendererVersion: "r1",
     templateId: null,
     templateDigest: null,
@@ -699,7 +702,7 @@ test("the store refuses a decision the Guard did not make", async () => {
       kind: "social",
       logicalKey: "store-created-unsealed",
       envelope: envelope() as never,
-      envelopeDigest: DIGEST,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
       rendererVersion: "r1",
       templateId: null,
       templateDigest: null,
@@ -751,7 +754,7 @@ test("the store refuses a decision made about a different draft", async () => {
       kind: "social",
       logicalKey: "store-created-other-draft",
       envelope: envelope() as never,
-      envelopeDigest: DIGEST,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
       rendererVersion: "r1",
       templateId: null,
       templateDigest: null,

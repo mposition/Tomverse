@@ -874,3 +874,21 @@ test("the Guard reads its input once", () => {
     }),
   );
 });
+
+test("a proof is not copied, so a caller cannot hand one on", () => {
+  // `templates` is the one input the Guard does not copy. A proof is
+  // identified by being in this module's own `WeakSet`, and a copy of one --
+  // a spread, a clone, an object with the same fields -- is not in it.
+  const ready = autonomousReady();
+  const [proof] = ready.templates;
+
+  for (const impostor of [
+    { ...proof },
+    Object.freeze({ ...proof }),
+    Object.create(proof),
+  ]) {
+    const decision = guardDraft({ ...ready, templates: [impostor] });
+    assert.equal(decision.verdict, "approval_required", JSON.stringify(impostor));
+    assert.ok(decision.codes.includes("new_copy"));
+  }
+});

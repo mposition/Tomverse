@@ -411,15 +411,6 @@
       }
     },
     {
-      "id": "hygiene.ideographicStopSentenceStart",
-      "ruleId": "hygiene.url_like",
-      "input": "比較答案。AI Review can help.",
-      "note": "AI is a top-level domain and also the first word of the next sentence; a sentence starts with a capital and a host label does not",
-      "expect": {
-        "verdict": "approval_required"
-      }
-    },
-    {
       "id": "free.hyphenatedCompound",
       "ruleId": "rule.free-wording",
       "input": "A distraction-free writing space.",
@@ -492,10 +483,19 @@
       }
     },
     {
-      "id": "hygiene.ideographicStopAcronymComma",
+      "id": "hygiene.ideographicStopThenSpace",
       "ruleId": "hygiene.url_like",
-      "input": "比較答案。AI, however, can help.",
-      "note": "an acronym starting the next sentence, with a comma after it",
+      "input": "比較答案。 AI Review can help.",
+      "note": "a space after the stop is how the sentence should be typeset, and no host has one",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "memory.faqCanI",
+      "ruleId": "rule.memory-claim",
+      "input": "Can I import my chats?",
+      "note": "a first-person question is an FAQ entry, not a sales line",
       "expect": {
         "verdict": "approval_required"
       }

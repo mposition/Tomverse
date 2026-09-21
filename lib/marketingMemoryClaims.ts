@@ -189,14 +189,26 @@ const NOT_ALPHANUMERIC_AFTER = "(?![\\p{L}\\p{N}])";
  * clause it started in. The number that remains is a backstop against a
  * pathological line, not the rule.
  */
-const CLAUSE_GAP = "[^.!?\\n。,;:\\u2014\\u2013]{0,160}";
+const CLAUSE_SEGMENT = "[^.!?\\n。,;:\\u2014\\u2013]";
+
+/**
+ * The gap, with room for one aside between paired commas.
+ *
+ * A comma ends a clause and an aside is two commas: "We clone, with your
+ * explicit and fully informed approval, your memories." is one clause with
+ * something parked in the middle, and a gap that stopped at the first comma
+ * never reached the object. One aside, because two is a sentence that needs
+ * rewriting whatever this rule says.
+ */
+const CLAUSE_GAP =
+  `${CLAUSE_SEGMENT}{0,160}(?:,${CLAUSE_SEGMENT}{0,80},${CLAUSE_SEGMENT}{0,80})?`;
 
 /** The verb, a gap that stays inside one clause, then the object. */
 const SPACED_REPLICATION_CLAIM = new RegExp(
   NOT_ALPHANUMERIC_BEFORE +
     anyOf(REPLICATION_VERBS) +
     NOT_ALPHANUMERIC_AFTER +
-    "[^.\\n]{0,30}" +
+    CLAUSE_GAP +
     NOT_ALPHANUMERIC_BEFORE +
     anyOf(REPLICATION_OBJECTS) +
     NOT_ALPHANUMERIC_AFTER,

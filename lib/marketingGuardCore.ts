@@ -655,7 +655,7 @@ const PRICE_SENSE = new RegExp(
 );
 
 /** Where one clause ends: sentence punctuation, or a clause separator. */
-const CLAUSE_EDGE = /[.!?\\n。;:,]/u;
+const CLAUSE_EDGE = /[.!?\n。;:,]/u;
 
 /**
  * Whether the clause a compound sits in is talking about money.

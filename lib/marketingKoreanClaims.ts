@@ -45,16 +45,29 @@ const OPENERS: readonly string[] = Object.freeze(["유일한", "유일하게"]);
  * noun -- it is "relatively" -- so a bare `startsWith` read an ordinary
  * sentence about a small difference as a uniqueness claim.
  */
+/**
+ * The particles and copulas a target noun may carry, as whole tokens.
+ *
+ * Built from the same list `closesPhrase()` reads, because they are the same
+ * grammar: 으로 is a correct particle after a syllable with a final consonant,
+ * and a tail list that held only the single-syllable ones did not recognise
+ * 플랫폼으로 as the noun 플랫폼 at all.
+ */
+const NOUN_TAIL_PARTICLES: readonly string[] = Object.freeze([
+  "\uc73c\ub85c", "\uc5d0\uc11c", "\uc5d0\uac8c", "\ub85c", "\uc5d0",
+  "\uc640", "\uacfc", "\uac00", "\uc774", "\ub294", "\uc740", "\ub97c",
+  "\uc744", "\ub3c4", "\uc758", "\uba70", "\uace0", "\ub9cc", "\ubd80\ud130",
+]);
+
 const NOUN_TAIL = new RegExp(
   "^(?:" +
     [
       // A copula, with or without the quotative that follows it. "유일한
-      // 서비스라는 점" is a uniqueness claim reported as a fact about itself,
-      // and the 라는 was read as part of some other word.
+      // 서비스라는 점" is a uniqueness claim reported as a fact about itself.
       "[\uac00-\ud7a3]{0,2}(?:\uc785\ub2c8\ub2e4|\uc774\ub2e4|\uc784)",
       "(?:\uc774)?(?:\ub77c\ub294|\ub77c\uace0|\ub77c\uba74|\ub77c\uc11c)",
-      // A single case or topic particle.
-      "[\uac00\uc774\ub294\uc740\ub97c\uc744\ub85c\uc5d0\uc640\uacfc\ub3c4\uc758\uba70\uace0]",
+      // A particle, longest first so 으로 is not read as 로.
+      NOUN_TAIL_PARTICLES.join("|"),
     ].join("|") +
     ")?$",
   "u",

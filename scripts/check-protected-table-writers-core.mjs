@@ -900,6 +900,41 @@ export const analyseSource = (path, text) => {
       }
     }
 
+    // `const { [k]: mint } = await import(p)` -- the same reach as `g[k]`, one
+    // syntax further along. The binding pattern is where the name is, and the
+    // rule above was watching the variable a module was assigned to.
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer
+    ) {
+      let value = node.initializer;
+      while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
+        value = value.expression;
+      }
+      const loads =
+        ts.isCallExpression(value) &&
+        (value.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(value.expression) &&
+            value.expression.text === "require"));
+      if (loads && couldBeSealModule(value.arguments[0])) {
+        for (const element of node.name.elements) {
+          const name = element.propertyName;
+          if (!name || !ts.isComputedPropertyName(name)) continue;
+          const key = literalTextOf(name.expression);
+          if (
+            (key === TEMPLATE_SEAL_NAME || key === null) &&
+            !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
+          ) {
+            sealEscapes.push({
+              line: lineOf(sourceFile, element),
+              detail: "a computed binding from a module loaded at run time",
+            });
+          }
+        }
+      }
+    }
+
     // `export * from "./marketingGuardCore"` re-exports the seal under this
     // module's name without ever writing it down.
     if (

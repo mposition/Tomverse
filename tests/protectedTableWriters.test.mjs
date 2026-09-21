@@ -531,6 +531,11 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     // Neither half readable: which module and which key are both unknown, and
     // one of the pairs it could be is the seal.
     'const g = await import(`@/lib/${name}`);\ng[key]({});',
+    // The eighth review's shape: the name is in the binding pattern rather
+    // than in a property access, and the rule was watching the variable.
+    'const p = getPath();\nconst k = getKey();\nconst { [k]: mint } = await import(p);\nmint({});',
+    'const { ["sealMarketingTemplateProof"]: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
+    'const { sealMarketingTemplateProof: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
   ];
 
   for (const text of escapes) {

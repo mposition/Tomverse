@@ -70,7 +70,23 @@ const CALL_TO_ACTION =
 const SENTENCE_START = "(?:^|[.!?\\n。]\\s*)";
 const VOCATIVE = "[,\\uff0c]\\s*[\\p{L}\\p{N}]";
 
-const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
+/**
+ * A shape that addresses a minor directly, which no notice in the same
+ * sentence excuses.
+ *
+ * "Under-15s, create your account with parental consent." names the audience,
+ * tells it to act, and mentions consent -- and a restriction test that read
+ * the whole sentence let it through. A notice is *about* an audience; a
+ * vocative talks *to* one, and the two do not cancel.
+ */
+type MinorsPattern = {
+  readonly source: string;
+  readonly flags: string;
+  /** `true` when a restriction in the same sentence does not excuse it. */
+  readonly vocative?: boolean;
+};
+
+const MINORS_TARGETING_SOURCES: readonly MinorsPattern[] =
   Object.freeze([
     // "for kids", "aimed at teenagers", "designed for children".
     Object.freeze({
@@ -103,6 +119,7 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
       source:
         AGE_UNDER_SIXTEEN + YEAR_OLDS + CALL_TO_ACTION,
       flags: "iu",
+      vocative: true,
     }),
     Object.freeze({
       source: "\\b(?:for|to)\\s+ages?\\s+" + AGE_UNDER_SIXTEEN + "(?:\\s*(?:[-\\u2010-\\u2015]|to)\\s*\\d{1,2})?\\b",
@@ -117,12 +134,14 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
     Object.freeze({
       source: "\\bunder[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?" + CALL_TO_ACTION,
       flags: "iu",
+      vocative: true,
     }),
     // The same, as a vocative: whatever the sentence goes on to ask for.
     Object.freeze({
       source:
         SENTENCE_START + "under[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?" + VOCATIVE,
       flags: "iu",
+      vocative: true,
     }),
     Object.freeze({
       source:
@@ -130,10 +149,12 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
         "(?:kids|children|teens|teenagers|schoolkids|schoolchildren|preteens|tweens)" +
         VOCATIVE,
       flags: "iu",
+      vocative: true,
     }),
     Object.freeze({
       source: SENTENCE_START + AGE_UNDER_SIXTEEN + YEAR_OLDS + VOCATIVE,
       flags: "iu",
+      vocative: true,
     }),
     Object.freeze({
       source: "\\bhigh\\s?school(?:ers)?\\s*(?:can|should|get|sign|try|join)\\b",
@@ -210,7 +231,9 @@ export function findMarketingMinorsTargeting(
     const flags = entry.flags.includes("g") ? entry.flags : `${entry.flags}g`;
     const scanner = new RegExp(entry.source, flags);
     for (let hit = scanner.exec(text); hit; hit = scanner.exec(text)) {
-      const isNotice = RESTRICTION.test(sentenceAround(text, hit.index));
+      const isNotice =
+        entry.vocative !== true &&
+        RESTRICTION.test(sentenceAround(text, hit.index));
       if (
         !isNotice &&
         marketingClauseAsserts(text, hit.index, hit[0], {

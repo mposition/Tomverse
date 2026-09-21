@@ -189,48 +189,28 @@ const IDEOGRAPHIC_HOST_CJK_LABEL = new RegExp(
 );
 
 /**
- * The same, for a suffix written in a case a sentence would not use.
+ * The same, in any case at all.
  *
- * A domain is case-insensitive, so 例子。CoM is an address. The lower-case rule
- * above is what keeps "AI", "Pro" and "App" -- the first word of the next
- * sentence -- out of it, and the first attempt at this distinguished them by
- * asking whether a word followed, which was wrong in both directions:
- * "Visit 例子。CoM now." has a word after it and "比較答案。AI, however, can
- * help." has a comma.
+ * A domain is case-insensitive, so 例子。CoM and 例子。COM are both addresses.
+ * An earlier version read the case of the suffix as the tell -- irregular
+ * case is a host, an acronym or a title-case word is a sentence -- which let
+ * "Visit 例子。COM now." through. docs/policy/marketing-automation.md §7.1
+ * is fail-closed about a URL in generated
+ * text: the one link a post may carry is assembled from an approved id and
+ * attached by the publisher, so anything that reads as an address is refused
+ * whatever case it is written in.
  *
- * The case itself is the tell. A sentence starts with an acronym (`AI`, all
- * capitals) or a title-case word (`Pro`, `App`). Neither is how anybody writes
- * a domain by accident, and `CoM` is neither: it has both cases and is not
- * title case.
- *
- * All-capital and title-case suffixes are therefore *not* matched here, which
- * leaves 例子。COM uncaught. That is the side to be wrong on: refusing every
- * Chinese sentence that runs into an English one would be a rule somebody
- * turns off, and the ASCII-label expression above still catches example。COM.
+ * The cost is "比較答案。AI Review can help." -- a Chinese sentence running
+ * straight into an English one, where the first word is also a top-level
+ * domain. That is refused now, and the way to write it is with a space after
+ * the stop, which is also how it should be typeset. A refusal an operator
+ * fixes by adding a space is the right side of this to be wrong on; letting a
+ * real host through is not.
  */
-const IRREGULAR_CASE = (suffix: string): boolean => {
-  const hasUpper = /\p{Lu}/u.test(suffix);
-  const hasLower = /\p{Ll}/u.test(suffix);
-  const titleCase = /^\p{Lu}\p{Ll}*$/u.test(suffix);
-  return hasUpper && hasLower && !titleCase;
-};
-
 const IDEOGRAPHIC_HOST_ANY_CASE = new RegExp(
-  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])`,
-  "giu",
+  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])`,
+  "iu",
 );
-
-const hasIrregularCaseHost = (text: string): boolean => {
-  const scan = new RegExp(
-    IDEOGRAPHIC_HOST_ANY_CASE.source,
-    IDEOGRAPHIC_HOST_ANY_CASE.flags,
-  );
-  for (let hit = scan.exec(text); hit; hit = scan.exec(text)) {
-    if (IRREGULAR_CASE(hit[1])) return true;
-    if (scan.lastIndex === hit.index) scan.lastIndex += 1;
-  }
-  return false;
-};
 
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
@@ -537,7 +517,7 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
     URL_LIKE.test(readable) ||
     IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
     IDEOGRAPHIC_HOST_CJK_LABEL.test(readable) ||
-    hasIrregularCaseHost(readable)
+    IDEOGRAPHIC_HOST_ANY_CASE.test(readable)
   ) {
     codes.push("url_like");
   }

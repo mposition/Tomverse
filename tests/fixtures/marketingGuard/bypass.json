@@ -1216,6 +1216,149 @@
           "banned_claim"
         ]
       }
+    },
+    {
+      "id": "hygiene.ideographicStopAcronym",
+      "ruleId": "hygiene.url_like",
+      "input": "比較答案。AI Review can help.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopAcronymComma",
+      "ruleId": "hygiene.url_like",
+      "input": "比較答案。AI, however, can help.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopUpperCase",
+      "ruleId": "hygiene.url_like",
+      "input": "Visit 例子。COM now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "free.priceWordFurtherOn",
+      "ruleId": "rule.free-wording",
+      "input": "Free from surprises with monthly fees.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "memory.spacedAcrossQuestion",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not c l o n e files? We c l o n e your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.spacedLongObject",
+      "ruleId": "rule.memory-claim",
+      "input": "We c l o n e all of your carefully curated and deeply personal memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.pairedAside",
+      "ruleId": "rule.memory-claim",
+      "input": "We clone, with your explicit and fully informed approval, your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.acronymSubject",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not store your chats, ACME clones your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.spliceThenConjunction",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not store your chats, Tomverse clones your memories, and you stay in control.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.canYouUse",
+      "ruleId": "rule.memory-claim",
+      "input": "Can you use an AI that clones your memories?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanEuroParticle",
+      "ruleId": "rule.refuted-superiority",
+      "input": "유일한 플랫폼으로 모든 모델을 비교하세요.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeWithConsent",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, create your account with parental consent.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeThenNotice",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, create your account today; parental consent is required.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
     }
   ]
 }

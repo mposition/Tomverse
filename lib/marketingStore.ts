@@ -40,6 +40,8 @@
 
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
@@ -309,6 +311,35 @@ export type CreateMarketingPostInput = {
   draftedAt: Date;
 };
 
+/**
+ * The digest of an envelope, computed here so nobody can state it.
+ *
+ * `envelopeDigest` used to be a caller's 64 hex characters, and the same
+ * envelope with the same sealed decision went to the database under any value
+ * the caller liked. The template loader compares that column against
+ * `approvedDigest` to decide whether the words are still the approved ones, so
+ * a digest that says nothing about the content is the check answering a
+ * question it was never asked.
+ *
+ * Keys sorted, so two objects that say the same thing hash the same.
+ */
+export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .map(([key, inner]) => [key, canonical(inner)]),
+      );
+    }
+    return value;
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(canonical(envelope)), "utf8")
+    .digest("hex");
+}
+
 export async function createMarketingPost(
   database: MarketingDatabase,
   rawInput: CreateMarketingPostInput,
@@ -335,7 +366,12 @@ export async function createMarketingPost(
     assetIds: [...rawInput.assetIds].map(String),
     claimRegistryVersion: Number(rawInput.claimRegistryVersion),
     assetRegistryVersion: Number(rawInput.assetRegistryVersion),
-    factSnapshot: rawInput.factSnapshot,
+    // Parsed here rather than after the first `await`. The reference used to
+    // be kept and parsed later, and a caller that mutated the object while the
+    // channel lookup was in flight changed what was stored.
+    factSnapshot: marketingFactSnapshotSchema.parse(
+      rawInput.factSnapshot,
+    ) as MarketingFactSnapshot,
     decision,
     draftedAt: new Date(rawInput.draftedAt.getTime()),
   };
@@ -400,6 +436,25 @@ export async function createMarketingPost(
     );
   }
 
+  // The digest is of these bytes, not of whatever the caller said.
+  const computedDigest = marketingEnvelopeDigest(envelopeForDigest);
+  if (input.envelopeDigest !== computedDigest) {
+    throw new MarketingStoreRefusedError(
+      "envelope_digest_not_of_this_envelope",
+      "The envelope digest is computed from the envelope, not supplied",
+    );
+  }
+
+  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
+  // has a column for one, and a create that set the first and not the second
+  // left two answers to the same question.
+  if (envelopeForDigest.scheduledAt !== null) {
+    throw new MarketingStoreRefusedError(
+      "envelope_scheduled_at_create",
+      "A post is scheduled by an append, not by the envelope it is created with",
+    );
+  }
+
   // The account the envelope names has to be the account being written to.
   // `accountSlug` is what a publisher posts from, and the Guard checked the
   // channel this row belongs to.
@@ -432,7 +487,7 @@ export async function createMarketingPost(
   }
 
   const envelope = envelopeForDigest;
-  const factSnapshot = marketingFactSnapshotSchema.parse(input.factSnapshot);
+  const factSnapshot = input.factSnapshot;
 
   // The first history entry is written here, not by the caller: the insert
   // trigger requires exactly one entry of type `draft`, and a caller that could
@@ -600,7 +655,7 @@ export type MarketingRequeueEvidence = { auditLogId: string };
  */
 export async function appendMarketingPostHistory(
   database: MarketingDatabase,
-  input: {
+  rawInput: {
     id: string;
     expectedVersion: number;
     entry: MarketingHistoryEntry;
@@ -608,6 +663,20 @@ export async function appendMarketingPostHistory(
     requeue?: MarketingRequeueEvidence;
   },
 ): Promise<{ appended: boolean }> {
+  // Read once, for the reason the two functions above do it. A `patch` getter
+  // that answered `status: "scheduled"` with a forged approval to the check
+  // and `status: "drafted"` to the write walked past the audit verification
+  // and stored the first answer. There is one object from here on and the
+  // original is not read again.
+  const input = {
+    id: String(rawInput.id),
+    expectedVersion: Number(rawInput.expectedVersion),
+    entry: rawInput.entry,
+    patch: rawInput.patch === undefined ? undefined : { ...rawInput.patch },
+    requeue:
+      rawInput.requeue === undefined ? undefined : { ...rawInput.requeue },
+  };
+
   const entry = marketingHistoryEntrySchema.parse(input.entry);
   if (
     !(MARKETING_APPENDABLE_HISTORY_TYPES as readonly string[]).includes(entry.type)

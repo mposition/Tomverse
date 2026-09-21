@@ -132,7 +132,10 @@ const CLAUSE_VERB =
  * so that sentence keeps its one negation.
  */
 const NAMED_SUBJECT_SPLICE = new RegExp(
-  "[,\\uff0c]\\s*(?=\\p{Lu}[\\p{Ll}\\p{N}]+\\s+" + CLAUSE_VERB + ")",
+  // The subject may be an acronym (`ACME`), a CamelCase name or an ordinary
+  // one. Requiring a lower-case letter after the first capital meant a
+  // company written in capitals was not a subject at all.
+  "[,\\uff0c]\\s*(?=\\p{Lu}[\\p{L}\\p{N}]*[\\p{L}\\p{N}]\\s+" + CLAUSE_VERB + ")",
   "gu",
 );
 
@@ -178,7 +181,7 @@ const SELLING_OPENER = new RegExp(
       // like", "Wouldn't you like", "Would you love" and "Could you use" are
       // one form, and an FAQ entry is "Is Tomverse …?" or "How do I …?" --
       // a third or first person subject, never a second.
-      "(?:would|wouldn't|could|couldn't|can't|don't|do|did|didn't|will|won't|" +
+      "(?:would|wouldn't|could|couldn't|can|can't|don't|do|did|didn't|will|won't|" +
         "should|shouldn't|have|haven't|are|aren't|ready)\\s+(?:you|your)\\b",
       "how\\s+about|what\\s+if|who\\s+wants|why\\s+not|ever\\s+wanted|got\\s+a",
     ].join("|") +
@@ -200,12 +203,19 @@ const isAskingRatherThanSelling = (text: string, start: number): boolean =>
  */
 const isParenthetical = (sentence: string, at: number): boolean => {
   const rest = sentence.slice(at + 1);
-  const closing = rest.search(/[,\uff0c]/u);
+  const closing = rest.search(/[,，]/u);
   if (closing === -1) return false;
   const inside = rest.slice(0, closing).trim();
   const after = rest.slice(closing + 1).trim();
+
   // An aside is short and is not the end of the sentence.
-  return inside.split(/\s+/u).length <= 5 && after.length > 0;
+  if (inside.split(/\s+/u).length > 8 || after.length === 0) return false;
+
+  // And what follows it resumes the first clause rather than beginning another
+  // one. "…, Tomverse clones your memories, and you stay in control." is two
+  // clauses joined by a comma and a conjunction, not one clause with an aside
+  // in it, and reading it as an aside threw away a splice already proved.
+  return !/^(?:and|but|or|nor|so|yet|then|while)\b/iu.test(after);
 };
 
 /**
