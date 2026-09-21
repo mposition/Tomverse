@@ -22,7 +22,8 @@ ALTER TABLE "AmuxHumanEscalation"
     CHECK ("openedTaskRevision" IS NULL OR "openedTaskRevision" >= 0),
   ADD CONSTRAINT "AmuxHumanEscalation_resolution_outcome_check"
     CHECK (
-      ("status" = 'resolved' AND "resolutionOutcome" IN ('approve', 'retry', 'block'))
+      ("status" = 'resolved' AND "resolutionOutcome" IS NOT NULL
+        AND "resolutionOutcome" IN ('approve', 'retry', 'block'))
       OR ("status" <> 'resolved' AND "resolutionOutcome" IS NULL)
     ) NOT VALID;
 
