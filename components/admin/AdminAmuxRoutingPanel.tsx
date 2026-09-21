@@ -345,9 +345,9 @@ export function AdminAmuxRoutingPanel() {
     setDecisionStatusUnknown(false);
     setDecisionStatusChecking(false);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review?escalation_id=${encodeURIComponent(escalationId)}`,
-        { cache: "no-store" },
+        { cache: "no-store", timeoutMs: 35_000 },
       );
       if (requestId !== reviewRequestId.current) return;
       if (!response.ok) {
@@ -387,9 +387,10 @@ export function AdminAmuxRoutingPanel() {
     setProposal(null);
     setDecisionStatusUnknown(false);
     try {
-      const response = await fetch("/api/admin/amux/escalations/proposals", {
+      const response = await adminFetch("/api/admin/amux/escalations/proposals", {
         method: "POST",
         cache: "no-store",
+        timeoutMs: 35_000,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           escalation_id: review.escalation.id,
@@ -458,9 +459,10 @@ export function AdminAmuxRoutingPanel() {
       return;
     }
     try {
-      const response = await fetch("/api/admin/amux/escalations", {
+      const response = await adminFetch("/api/admin/amux/escalations", {
         method: "PATCH",
         cache: "no-store",
+        timeoutMs: 35_000,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "resolve",
@@ -528,9 +530,9 @@ export function AdminAmuxRoutingPanel() {
         decision_id: identity.decision_id,
         subject_digest: identity.subject_digest,
       });
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review/decision-status?${query}`,
-        { cache: "no-store" },
+        { cache: "no-store", timeoutMs: 35_000 },
       );
       if (!response.ok) {
         const code = await responseCode(response);

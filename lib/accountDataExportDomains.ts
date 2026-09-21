@@ -311,7 +311,9 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxReviewDecision",
     publicName: "amux_review_decisions",
     prismaModel: "AmuxReviewDecision",
-    state: "unverified",
+    state: "excluded",
+    exclusionReason:
+      "A content-free, immutable administrator decision ledger linked to the tamper-evident administrator audit record. It stores actor and proposal identifiers, digests and outcome but no review prose. Operator access requests are reviewed through the manual PrivacyRequest path under the approved Admin audit retention policy; automatic unified export could expose other operators or tasks.",
   },
   {
     domain: "adminNote",

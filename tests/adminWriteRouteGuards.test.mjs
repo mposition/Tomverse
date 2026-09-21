@@ -56,6 +56,15 @@ const withoutComments = (source) =>
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 const LIB_DIR = fileURLToPath(new URL("../lib/", import.meta.url));
+const amuxReviewProxy = withoutComments(readFileSync(join(LIB_DIR, "amux/reviewAdminProxy.ts"), "utf8"));
+const amuxReviewInternalRoute = withoutComments(readFileSync(
+  fileURLToPath(new URL("../app/api/internal/amux/review/route.ts", import.meta.url)),
+  "utf8",
+));
+const amuxReviewWriter = withoutComments(readFileSync(join(LIB_DIR, "amux/reviewApproval.ts"), "utf8"));
+const amuxProposalWriter = amuxReviewWriter.match(
+  /export async function createAmuxReviewProposal\b[\s\S]*?(?=\nexport (?:async )?function |$)/
+)?.[0] ?? "";
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -106,6 +115,16 @@ const writeRoutes = routes.filter((route) =>
     new RegExp(`^export async function ${method}\\b`, "m").test(route.source)
   )
 );
+
+/** The proposal route delegates its one audit to the canonical internal transaction. */
+const reachesCanonicalAmuxReviewAudit = (route) =>
+  route.name === "amux/escalations/proposals/route.ts" &&
+  /forwardAmuxAdminReviewCommand\s*\(\s*request,\s*\{\s*action:\s*"proposal"/.test(route.source) &&
+  amuxReviewProxy.includes('new URL("/api/internal/amux/review"') &&
+  amuxReviewInternalRoute.includes('action.action === "proposal"') &&
+  amuxReviewInternalRoute.includes("createAmuxReviewProposal({") &&
+  amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
+  performs(amuxProposalWriter, "writeAdminAuditLog");
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
@@ -159,7 +178,7 @@ test("every admin write route writes an audit entry", () => {
   // and a write that leaves no row is invisible to `verifyAdminAuditIntegrity`
   // as well -- the chain stays valid because the entry was never in it.
   const unaudited = writeRoutes
-    .filter((route) => !route.reaches("writeAdminAuditLog"))
+    .filter((route) => !route.reaches("writeAdminAuditLog") && !reachesCanonicalAmuxReviewAudit(route))
     .map((route) => route.name);
 
   assert.deepEqual(
@@ -173,15 +192,17 @@ test("every admin write route writes an audit entry", () => {
 test("a route that can queue an approval can also answer the step-up refusal", () => {
   // `runWithAdminApproval` asserts a recent sign-in before it does anything
   // else and throws `AdminReauthenticationRequiredError`. Only
-  // `adminApprovalErrorResponse()` maps that to 428; without it in the catch,
-  // the refusal falls through to a generic 500 and the operator is told the
-  // server broke rather than that they need to sign in again.
+  // `adminApprovalErrorResponse()` also maps two-person approval outcomes.
+  // Routes using only assertRecentAdminAuthentication may map its 428 directly.
   const missing = writeRoutes
     .filter(
       (route) =>
         (route.source.includes("runWithAdminApproval") ||
           route.source.includes("assertRecentAdminAuthentication")) &&
-        !route.source.includes("adminApprovalErrorResponse")
+        !route.source.includes("adminApprovalErrorResponse") &&
+        !( !route.source.includes("runWithAdminApproval") &&
+          /if\s*\(\s*isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)/.test(route.source) &&
+          /return\s+[^;]*status:\s*428/.test(route.source))
     )
     .map((route) => route.name);
 
@@ -189,7 +210,7 @@ test("a route that can queue an approval can also answer the step-up refusal", (
     missing,
     [],
     `${missing.join(", ")} can raise a step-up or approval requirement and do not map it. ` +
-      `Call adminApprovalErrorResponse(error) first in the catch.`
+      `Use adminApprovalErrorResponse for two-person approval routes, or map a step-up-only refusal to HTTP 428.`
   );
   assert.ok(
     writeRoutes.some((route) => route.source.includes("runWithAdminApproval")),

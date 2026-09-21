@@ -1,25 +1,25 @@
 # AMUX Agent 승인 계약
 
-상태: **원안과 §7 운영 결정 승인됨; Claude 검토 보강안 재확인 대기.**
-구현·활성화는 별도입니다. 작성·원안 승인 2026-09-21.
-approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 1 (원안)
+상태: **v1.3 정책 승인됨; 구현·staging 검증·활성화는 별도.**
+작성·원안 승인 2026-09-21.
+approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 1.3
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-21 mposition | 작업 검토 원안과 §7의 여섯 운영 결정 승인. 외부 행위 승인은 제외. |
-| 1.1 제안 | 재확인 대기 | Claude 독립 검토의 escalation lifecycle·감사·노출·CAS 보강. 아래 본문에는 이 제안이 포함돼 있으며 재확인 전에는 활성화 근거로 쓰지 않는다. |
-| 1.2 제안 | 결과물 출처 결정 승인, 상세 계약 재확인 대기 | GitHub PR base SHA·head SHA·diff를 `review → done` 검토 원문으로 결속. |
-| 1.3 요구 | 2026-09-21 mposition, 구현·검증 대기 | 모호한 결정 응답은 ID·대상 digest 조회 전 재시도 금지, 복구 가능한 block 후 명시적 후속 escalation, PR base SHA 추가 결속. |
+| 1.1 | 2026-09-21 mposition (v1.3에 포함) | Claude 독립 검토의 escalation lifecycle·감사·노출·CAS 보강. |
+| 1.2 | 2026-09-21 mposition (v1.3에 포함) | GitHub PR base SHA·head SHA·diff를 `review → done` 검토 원문으로 결속. |
+| 1.3 | 2026-09-21 mposition | 모호한 결정 응답은 ID·대상 digest 조회 전 재시도 금지, 복구 가능한 block 후 명시적 후속 escalation, PR base SHA 추가 결속. |
 
-이 문서는 `docs/policy/development-agent-orchestration.md` §Approval의 미정
-계약과 검토 보강안을 정의한다. **정책 승인만으로 실행 승인이 생기지 않는다.**
-보강안 재확인·구현·staging 검증을 마칠 때까지 `/api/admin/amux/escalations`의 `resolve`는
+이 문서는 `docs/policy/development-agent-orchestration.md` §Approval의 작업 검토
+계약과 검토 보강안을 확정한다. **정책 승인만으로 실행 승인이 생기지 않는다.**
+구현·staging 검증을 마칠 때까지 `/api/admin/amux/escalations`의 `resolve`는
 `AMUX_AGENT_APPROVAL_UNAVAILABLE`을 반환해야 한다. `AdminActionApproval`이나
 sole-approver 예외 목록을 대용하지 않는다.
 
 ## 1. 서로 다른 두 승인
 
-| 종류 | 이 계약이 제안하는 효과 | 허용하지 않는 해석 |
+| 종류 | 이 계약의 효과 | 허용하지 않는 해석 |
 |---|---|---|
 | 작업 검토 | 이미 끝난 시도의 `review`를 `done`으로 확정하거나 `blocked`를 유지·조건부 재큐한다. 승인 트랜잭션 안에서 새 실행을 시작하지 않는다. | 외부 변경·배포의 승인 또는 다음 claim의 hard gate 면제 |
 | 외부 행위 | 별도 유형의 정확한 행위 제안과 일회성 승인 증거를 그 행위 경계에서 소비한다. | 작업 검토 버튼 하나로 모든 후속 행위를 포괄 승인 |
@@ -47,7 +47,8 @@ Admin Console은 결정 전에 task·escalation ID, 상태·revision, specialty,
 routing 근거 응답에 넣지 않는다. 사람이 검토해야 하는 원문은 별도 인증된 검토
 표면에서만 읽고, 화면이 실제로 보여 준 대상의 digest를 승인 요청에 결속한다.
 원문은 이 승인 경로에 저장하지 않는다. 승인 원장은 ID·digest·결정만 보관하고
-보유기간은 기존 Admin 감사 정책을 따른다.
+보유기간은 기존 Admin 감사 정책을 따른다. 승인 원장은 계정 통합 내보내기에서
+제외하고, 관리자 본인의 열람 요청은 수동 `PrivacyRequest` 심사로 제공한다.
 보호된 검토 원문 **조회 자체**도 actor·task/escalation ID·대상 digest만 감사하고,
 본문은 감사하지 않는다. task 자유 텍스트와 PR의 base/head/diff 식별자는 화면에서
 서로 다른 구획에 표시해 자유 텍스트가 출처 필드를 가장하지 못하게 한다.
@@ -227,3 +228,5 @@ rate limit·본문 상한도 반례로 검증한다.
    별도 계약·승인을 받는다.
 6. 시도 상한 5회를 소진한 `blocked` 작업은 그 task에서 종결한다. 계속할 작업은
    새 task를 발행하고, 기존 task의 시도 기록·상한·revision을 리셋하지 않는다.
+7. 승인 원장은 계정 통합 내보내기에서 제외한다. 관리자 본인의 열람 요청은
+   수동 `PrivacyRequest` 심사로 처리한다(2026-09-21 승인).
