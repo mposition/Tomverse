@@ -1041,20 +1041,34 @@ domains:
     prismaModel: AmuxReviewDecision
     userLinkageRole: actor
     owner: security-privacy
-    deletionAction: unverified
-    retentionPolicy: unverified
+    deletionAction: retain
+    retentionPolicy: statutory
     implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Content-free, append-only evidence of a privileged AMUX task-review
+        decision, linked to the tamper-evident AdminAuditLog entry. Keeping the
+        decision attributable protects the integrity of security investigation
+        and access-control evidence under the same basis as AdminAuditLog.
+      retentionStartsFrom: "decidedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
     subjectReference:
       kind: none
     inUnifiedExport: unverified
     note: >-
       The immutable decision stores the approving operator's actorUserId and
       refers to a proposal bound to an AMUX task and a GitHub PR digest; it
-      has no typed customer identifier or review prose. The
-      operator-deletion, retention and access-request treatment has not yet
-      been approved by security-privacy. Do not imply that omitting it from the
-      unified export resolves the operator's access rights. The linked
-      AdminAuditLog is separately retained under its own policy.
+      has no typed customer identifier or review prose. The operator approved
+      the existing Admin audit retention policy for this ledger on 2026-09-21;
+      its non-null actorUserId remains attributable after account deletion.
+      Whether operator access requests belong in unified export or the manual
+      PrivacyRequest path awaits an explicit decision; do not infer it from
+      the approved retention period.
+      The linked AdminAuditLog is separately retained under the same schedule.
 
   - domain: promptRefinerReservationStage
     prismaModel: PromptRefinerReservationStage
