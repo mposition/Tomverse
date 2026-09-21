@@ -1081,7 +1081,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
   await prisma.marketingPost.create({
     data: marketingDraft(
       FIXTURE_MARKETING.pending.id,
-      FIXTURE_MARKETING.pending.logicalKey,
+      FIXTURE_MARKETING.pending.logical,
       FIXTURE_MARKETING.pending.renderedText,
       FIXTURE_MARKETING.pending.envelopeDigest
     ),
@@ -1094,7 +1094,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
   await prisma.marketingPost.create({
     data: marketingDraft(
       FIXTURE_MARKETING.published.id,
-      FIXTURE_MARKETING.published.logicalKey,
+      FIXTURE_MARKETING.published.logical,
       "Answers from three models, in one place.",
       FIXTURE_MARKETING.published.envelopeDigest
     ),
@@ -1114,7 +1114,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     {
       status: "publishing",
       data: {
-        providerRequestKey: FIXTURE_MARKETING.published.logicalKey,
+        providerRequestKey: FIXTURE_MARKETING.published.logical,
         // Dispatch moves the attempt counter by exactly one (S1 trigger).
         publishAttempt: 1,
       },
@@ -1140,7 +1140,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
   await prisma.marketingPost.create({
     data: marketingDraft(
       FIXTURE_MARKETING.failed.id,
-      FIXTURE_MARKETING.failed.logicalKey,
+      FIXTURE_MARKETING.failed.logical,
       "A post the provider refused.",
       FIXTURE_MARKETING.failed.envelopeDigest
     ),
@@ -1160,7 +1160,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     {
       status: "publishing",
       data: {
-        providerRequestKey: FIXTURE_MARKETING.failed.logicalKey,
+        providerRequestKey: FIXTURE_MARKETING.failed.logical,
         publishAttempt: 1,
       },
     },

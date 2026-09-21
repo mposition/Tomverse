@@ -33,6 +33,7 @@ const NAV_LABELS = [
   "Infrastructure",
   "Automation",
   "Alerts",
+  "Marketing",
   "Platform settings",
   "Audit log",
   "Retention",

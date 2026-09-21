@@ -358,20 +358,20 @@ export const FIXTURE_MARKETING = {
   },
   pending: {
     id: "e2e-marketing-pending",
-    logicalKey: "e2e-marketing-pending-key",
+    logical: "e2e-marketing-pending",
     envelopeDigest: "a".repeat(64),
     renderedText: "Three models, three answers, side by side.",
     guardCode: "new_copy",
   },
   published: {
     id: "e2e-marketing-published",
-    logicalKey: "e2e-marketing-published-key",
+    logical: "e2e-marketing-published",
     envelopeDigest: "b".repeat(64),
     externalUrl: "https://example.test/e2e-marketing-published",
   },
   failed: {
     id: "e2e-marketing-failed",
-    logicalKey: "e2e-marketing-failed-key",
+    logical: "e2e-marketing-failed",
     envelopeDigest: "c".repeat(64),
     errorCode: "e2e_provider_rejected",
   },
