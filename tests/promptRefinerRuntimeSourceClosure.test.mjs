@@ -82,13 +82,26 @@ const compilerOptions = parsedConfig.options;
 // every entry) hashes to
 // 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 on this
 // branch and on `origin/develop` alike, so nothing was added, removed or
-// changed. Confirmatory shadow v4 then adds one reviewed runtime path and its
-// schema/comment changes; the combined branch therefore repins positions once
-// more while preserving the same 228-expression position-free inventory.
+// changed. Only positions moved.
+//
+// 2026-09-21, deploy D-1: the same again, one deploy later. Removing the read
+// authority takes the fence out of eight modules and shortens
+// `lib/emailSuppression.ts`, `lib/emailSuppressionAuthority.ts` and
+// `lib/emailSuppressionAuthorityCore.ts`, so positions move once more. The
+// count is still 228 and the position-free inventory still hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 -- the same
+// value as on `origin/develop` and on the deploy below this one. Two modules
+// lost most of their contents and the set of computed accesses did not change,
+// which is the thing this snapshot exists to make somebody check.
+// Confirmatory shadow v4 also adds one reviewed runtime path and its
+// schema/comment changes; this combined branch repins source positions while
+// preserving the same 228-expression position-free inventory.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
+const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
+  "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "614df2686c49f80bc43e977faa4c0e66",
-  "f1cd64515e55b89fe7a69eaa68c6c70e",
+  "191940267a20a5fc282fac31d212d2d5",
+  "685c13cb3ad6041331d411c9aa0f1772",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -1056,6 +1069,13 @@ test("runtime source allowlist is exactly the deterministic local runtime import
     dynamicAccesses.entries.length,
     REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT,
     "non-static element access inventory changed; review every new or moved access"
+  );
+  assert.equal(
+    createHash("sha256")
+      .update(dynamicAccesses.entries.map((entry) => entry.replace(/:\d+:\d+:/, ":")).sort().join("\n"))
+      .digest("hex"),
+    REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256,
+    "non-static element access inventory changed beyond source positions"
   );
   assert.equal(
     dynamicAccesses.digest,

@@ -10,14 +10,24 @@ import {
   recordSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
-import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
-import { runSuppressionCutover } from "@/lib/emailSuppressionCutover";
 import { prisma } from "@/lib/prisma";
 
-// Deploy B: the read authority, the cutover under the fence, and lifting by
-// the release matrix.
+// Lifting by the release matrix, and the locking that makes a lift safe.
+//
+// Deploy B put the read authority and its cutover here too. Deploy D removed
+// both; what is left is the part that was never about which record decides.
 //
 // Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
+
+/**
+ * The setting that used to choose the record, written by its literal key.
+ *
+ * Spelled out rather than imported because the constant is gone: the point of
+ * the one test that still writes it is that a row left behind in a database
+ * this build has not been told about changes nothing. That is what lets the row
+ * be deleted in a later deploy instead of this one.
+ */
+const RETIRED_AUTHORITY_KEY = "email.suppressionReadAuthority";
 
 const reset = () =>
   prisma.$executeRawUnsafe(`
@@ -36,13 +46,6 @@ after(async () => {
 });
 
 const address = () => `${randomUUID()}@example.com`;
-
-const setAuthority = (value: "entry" | "causes") =>
-  prisma.appSetting.upsert({
-    where: { key: SUPPRESSION_READ_AUTHORITY_KEY },
-    create: { key: SUPPRESSION_READ_AUTHORITY_KEY, value },
-    update: { value },
-  });
 
 const suppress = (emailAddress: string, reason: "manual" | "complaint" | "hard_bounce" | "privacy_request", extra: Record<string, unknown> = {}) =>
   recordSuppression({
@@ -104,7 +107,7 @@ test("a hold the entry's merge would have overwritten still decides", async () =
   assert.equal(verdict.allowed, false, "the manual hold is still a cause");
 });
 
-test("a classification cause stops marketing only, once causes decide", async () => {
+test("a classification cause stops marketing only", async () => {
   const emailAddress = address();
   await prisma.suppressionCause.create({
     data: {
@@ -117,7 +120,6 @@ test("a classification cause stops marketing only, once causes decide", async ()
       occurredAt: new Date(),
     },
   });
-  await setAuthority("causes");
   assert.equal(
     (await suppressionCheck({ emailAddress, classification: "marketing", purpose: "newsletter" })).allowed,
     false
@@ -128,36 +130,10 @@ test("a classification cause stops marketing only, once causes decide", async ()
   );
 });
 
-test("the cutover refuses while causes would let through what an entry stops, and repair fixes it", async () => {
-  const emailAddress = address();
-  // An entry with no cause behind it: written in a transaction marked as a
-  // cause writer, so the trigger does not carry it.
-  await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT set_config('app.suppression_writer', 'causes', true)`;
-    await tx.suppressionEntry.create({
-      data: { emailAddress, scope: "global", purposeKey: "*", reason: "hard_bounce", source: "provider_webhook" },
-    });
-  });
-
-  const dry = await runSuppressionCutover({ apply: false, repair: false });
-  assert.equal(dry.unsafe.length > 0, true);
-  assert.equal(dry.switched, false);
-
-  const refused = await runSuppressionCutover({ apply: true, repair: false });
-  assert.equal(refused.refusal, "unsafe_mismatches");
-  assert.equal(await prisma.appSetting.count({ where: { key: SUPPRESSION_READ_AUTHORITY_KEY } }), 0);
-
-  const applied = await runSuppressionCutover({ apply: true, repair: true });
-  assert.equal(applied.repairedCauses, 1);
-  assert.equal(applied.switched, true);
-  assert.equal(applied.authorityAfter, "causes");
-});
-
 test("a lift releases only what its action may", async () => {
   const emailAddress = address();
   await suppress(emailAddress, "manual");
   await suppress(emailAddress, "privacy_request");
-  await setAuthority("causes");
 
   const handle = await causeFor(emailAddress, "manual");
   const active = await liveSet(handle);
@@ -185,7 +161,6 @@ test("a lift releases only what its action may", async () => {
 test("an approval for one cause set does not lift a set that changed since", async () => {
   const emailAddress = address();
   await suppress(emailAddress, "complaint", { sourceStream: "marketing" });
-  await setAuthority("causes");
   const handle = await causeFor(emailAddress, "complaint");
   const active = await liveSet(handle);
   assert.ok(active.needsApproval);
@@ -217,7 +192,6 @@ test("a handle that is no longer active cannot reach what replaced it", async ()
     sourceEventKey: `test:${randomUUID()}`,
     expiresAt: new Date(Date.now() + 60_000),
   });
-  await setAuthority("causes");
   const stale = await causeFor(emailAddress, "soft_bounce");
 
   // Both the read and the lift are asked as of a moment past the expiry, so the
@@ -265,7 +239,6 @@ test("a lift works with no SuppressionEntry behind it", async () => {
   // working across that change rather than start returning not_found.
   const emailAddress = address();
   await suppress(emailAddress, "manual");
-  await setAuthority("causes");
 
   // No fixture work is needed any more: with the mirroring trigger dropped and
   // nothing writing the entry, causes-and-no-entry is simply what a suppression
@@ -298,7 +271,6 @@ test("switching a purpose back on is refused while another cause still stops it"
     source: "preference_center",
   });
   await suppress(user.email!, "manual", { purposeKey: "service_status" });
-  await setAuthority("causes");
 
   const result = await setPreference({
     userId: user.id,
@@ -310,19 +282,24 @@ test("switching a purpose back on is refused while another cause still stops it"
   assert.deepEqual(result, { changed: false, reason: "suppressed" });
 });
 
-test("the setting cannot make a send read entries", async () => {
-  // The deploy C hazard, and the reason this build ignores the setting rather
-  // than honouring it. Nothing writes `SuppressionEntry` any more, so a
-  // rollback of the authority would have sends consult a table frozen at the
-  // moment those writes stopped -- and every suppression recorded since would
-  // be invisible. The address below is suppressed by a cause and has no entry
-  // at all, which is what every new suppression looks like now.
+test("a setting row left behind by an earlier deploy changes nothing", async () => {
+  // Deploy D removes the read authority from the code; the row it used to read
+  // is deleted in a later deploy. Not because the send would be wrong without
+  // it -- the send has ignored the setting since deploy C -- but because the
+  // build serving during the migration still consults it in three other places,
+  // and an absent row reads as "entry" there: the console's lift refuses, a
+  // preference can be switched back on that a hold should have refused, and a
+  // deletion intake writes its per-purpose duplicates again.
+  //
+  // This is the test for that order and only that order: with this build
+  // serving, the row can be there and say the worst thing it could say, and
+  // nothing reads it. It says nothing about the reverse.
   const emailAddress = address();
   // A hard bounce, because it is the one reason that stops transactional mail
   // as well: a complaint about marketing never did, so it could not tell a
   // build reading the wrong table from one reading the right one.
   await suppress(emailAddress, "hard_bounce");
-  await setAuthority("entry");
+  await prisma.appSetting.create({ data: { key: RETIRED_AUTHORITY_KEY, value: "entry" } });
 
   assert.equal(
     await prisma.suppressionEntry.count({ where: { emailAddress } }),
@@ -330,19 +307,16 @@ test("the setting cannot make a send read entries", async () => {
     "the fixture is only meaningful if nothing mirrored the cause"
   );
   const verdict = await suppressionCheck({ emailAddress, classification: "transactional" });
-  assert.equal(verdict.allowed, false, "the setting was honoured and the hard bounce was missed");
+  assert.equal(verdict.allowed, false, "the retired setting was read and the hard bounce was missed");
 });
 
 test("a cause written while a lift waits for the address is seen by the lift", async () => {
   const emailAddress = address();
   await suppress(emailAddress, "manual");
-  await setAuthority("causes");
   const handle = await causeFor(emailAddress, "manual");
   const active = await liveSet(handle);
 
-  const { lockSuppressionAddress, holdSuppressionFence } = await import(
-    "@/lib/emailSuppressionAuthority"
-  );
+  const { lockSuppressionAddress } = await import("@/lib/emailSuppressionAuthority");
 
   let holding!: () => void;
   const held = new Promise<void>((resolve) => (holding = resolve));
@@ -352,7 +326,6 @@ test("a cause written while a lift waits for the address is seen by the lift", a
   // A writer that holds the address, then adds a hard bounce and commits.
   const writer = prisma.$transaction(
     async (tx) => {
-      await holdSuppressionFence(tx);
       await lockSuppressionAddress(tx, emailAddress);
       holding();
       await release;

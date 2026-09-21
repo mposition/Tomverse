@@ -10,11 +10,7 @@ import {
   markCauseWriter,
   recordSuppressionCause,
 } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-  readSuppressionAuthority,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import {
   isActiveCause,
   releasableBy,
@@ -138,9 +134,9 @@ export async function recordSuppression(
   }
   const occurredAt = input.occurredAt ?? new Date();
 
-  // Shared fence first: no suppression write may straddle the read-authority
-  // cutover (docs/policy/email-product-news-redesign-draft.md, section 7.4).
-  await holdSuppressionFence(client);
+  // The address first: every write, release and blocker check for one address
+  // is serialised here (docs/policy/email-product-news-redesign-draft.md,
+  // section 7.4).
   await lockSuppressionAddress(client, emailAddress);
 
   // Every event is its own fact. Still marked as a cause writer while the
@@ -202,10 +198,13 @@ export const APPROVAL_REQUIRED_SUPPRESSION_REASONS = [
 ] as const;
 
 /**
- * `authority_changed`: the read authority moved between choosing a lift path
- * and taking the fence. Nothing was released; asking again takes the other path.
+ * Why a lift did not happen.
+ *
+ * `authority_changed` was the third of these: the read authority moved between
+ * choosing a lift path and taking the fence, so asking again took the other
+ * path. Deploy D removed the setting, and with it the other path.
  */
-export type SuppressionRemovalRefusal = "not_found" | "unliftable" | "authority_changed";
+export type SuppressionRemovalRefusal = "not_found" | "unliftable";
 
 /** Address plus scope plus purpose: what a suppression is actually about. */
 export type SuppressionSelector = {
@@ -329,13 +328,13 @@ export type CauseLiftResult =
   | { removed: false; refusal: SuppressionRemovalRefusal | "approval_stale" };
 
 /**
- * Lifts a selector's causes by the release matrix, once causes decide.
+ * Lifts a selector's causes by the release matrix.
  *
  * Reached by a cause id, for the reason `activeCausesForSelector` gives: the
- * console's handles are causes now.
+ * console's handles are causes.
  *
- * Run inside the approved operation. Everything is re-read under the fence and
- * compared with the cause set the approval was granted for: a cause that
+ * Run inside the approved operation. Everything is re-read under the address
+ * lock and compared with the cause set the approval was granted for: a cause that
  * appeared since -- a soft bounce strengthened to a hard bounce -- was not
  * approved, so the lift is refused and has to be asked for again. The audit
  * entry and the release are one transaction, so a rolled-back lift leaves no
@@ -354,12 +353,9 @@ export type CauseLiftResult =
  * under the address lock, so the comparison is against what is true at the
  * moment of the release and not against what the caller said was true.
  *
- * The mirrored entry is removed only when no cause remains active; while an
- * older build may still read entries, an entry with a live cause behind it
- * keeps blocking there too. It goes by selector rather than by id, and deleting
- * none of them is not a failure -- once the contraction stops writing entries
- * there will be nothing there to delete, and this is the path that has to keep
- * working across that change.
+ * Causes are all this releases. It used to also delete the mirrored entry when
+ * no cause remained active, so that a build still reading entries saw the lift;
+ * deploy C left no such build and no such row to delete.
  */
 export async function liftSuppressionCauses(input: {
   causeId: string;
@@ -383,10 +379,6 @@ export async function liftSuppressionCauses(input: {
   now?: Date;
 }): Promise<CauseLiftResult> {
   return prisma.$transaction(async (tx) => {
-    await holdSuppressionFence(tx);
-    if ((await readSuppressionAuthority(tx)) !== "causes") {
-      return { removed: false as const, refusal: "authority_changed" as const };
-    }
     const found = await tx.suppressionCause.findUnique({
       where: { id: input.causeId },
       select: { emailAddress: true, scope: true, purposeKey: true },
@@ -485,47 +477,13 @@ export async function suppressionCheck(input: {
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const db = input.client ?? prisma;
 
-  // Causes, whatever the setting says.
+  // Causes. There is nothing else, and no setting that says otherwise.
   //
-  // This is the change deploy C makes to the send path, and it is not a
-  // simplification. Nothing writes `SuppressionEntry` any more, so that table
-  // is a snapshot of the moment entry writes stopped: reading it would miss
-  // every hard bounce, complaint and privacy request recorded since, and the
-  // messages it would let through are messages to people who have told us to
-  // stop. Honouring a setting that selects it would mean honouring a request to
-  // be wrong.
-  //
-  // The setting is read anyway, so that finding it set to `entry` is loud
-  // rather than silent -- it means somebody rolled the authority back below
-  // this build's floor and is expecting a behaviour that no longer exists.
-  // Deploy D removes the setting and this read with it.
-  const authority = await readSuppressionAuthority(db);
-  if (authority !== "causes") {
-    // Not awaited, and its rejection is swallowed. This runs inside the
-    // transaction that holds the address lock during a send
-    // (`sendWithAddressLock`, §9.8), and `reportOperationalIncident` finishes by
-    // notifying an external channel and flushing Sentry -- so awaiting it would
-    // hold that lock for the length of somebody else's HTTP request, and a
-    // failure to *report* would become a failure to *send*. The report is worth
-    // making and is worth nothing at that price.
-    //
-    // Not awaiting it does not lose the record. `reportOperationalIncident`
-    // writes its structured `console.error` before its first `await`, and the
-    // body of an async function runs synchronously up to that point -- so the
-    // line is emitted before this returns. What is left to the microtask queue
-    // is the external notification and the Sentry flush, which are the parts
-    // worth losing rather than holding a lock for.
-    void reportOperationalIncident({
-      code: "EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR",
-      title: "The suppression read authority is set to entries",
-      error:
-        "This build does not write SuppressionEntry, so entries are a stale snapshot; causes decided this send regardless. Put the setting back to causes.",
-      severity: "error",
-      cooldownMs: 30 * 60 * 1_000,
-      context: { component: "email-suppression", authority },
-    }).catch(() => undefined);
-  }
-
+  // Deploy C stopped writing `SuppressionEntry`, and deploy D removed the
+  // read-authority setting that used to choose between the two. What stood
+  // here was that removal half-done: the send already read causes regardless,
+  // and the setting was still read so that finding it on `entry` raised an
+  // incident. With the setting gone there is no state to raise one about.
   const records = await db.suppressionCause.findMany({
     where: {
       emailAddress,

@@ -12,7 +12,6 @@ import {
   recordPrivacyIntake,
 } from "@/lib/emailPrivacySuppression";
 import { recordSuppression, suppressionCheck } from "@/lib/emailSuppression";
-import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { prisma } from "@/lib/prisma";
 
@@ -38,13 +37,6 @@ after(async () => {
 });
 
 const address = () => `${randomUUID()}@example.com`;
-
-const setAuthority = (value: "entry" | "causes") =>
-  prisma.appSetting.upsert({
-    where: { key: SUPPRESSION_READ_AUTHORITY_KEY },
-    create: { key: SUPPRESSION_READ_AUTHORITY_KEY, value },
-    update: { value },
-  });
 
 /** An account with a confirmed newsletter subscription. */
 const subscriber = async (email = address()) => {
@@ -84,7 +76,7 @@ const intake = async (input: { userId: string | null; email: string }) => {
   );
 };
 
-test("a deletion intake stops marketing under either authority and withdraws the subscription", async () => {
+test("a deletion intake writes one classification stop and withdraws the subscription", async () => {
   const user = await subscriber();
   const request = await intake({ userId: user.id, email: user.email! });
 
@@ -95,21 +87,51 @@ test("a deletion intake stops marketing under either authority and withdraws the
   assert.equal(classification[0].sourceEventKey, `privacy:${request.id}:intake`);
   assert.equal(classification[0].sourceRequestId, request.id);
 
-  // Entries decide by default here: the purpose entries are what stop the mail.
+  // One row is the whole stop. Deploy D removed a loop that wrote the same
+  // refusal again for every marketing purpose, so this has to show both halves:
+  // that the loop is gone, and that its absence costs nothing.
+  assert.equal(
+    await prisma.suppressionCause.count({
+      where: { emailAddress: user.email!, reason: "privacy_request" },
+    }),
+    1,
+    "the per-purpose copies of the classification stop are gone"
+  );
+  assert.equal(
+    await prisma.suppressionCause.count({
+      where: { emailAddress: user.email!, reason: "privacy_request", scope: "purpose" },
+    }),
+    0
+  );
+
   for (const purpose of ["newsletter", "promotions", "product_updates"]) {
     const verdict = await suppressionCheck({
       emailAddress: user.email!,
       classification: "marketing",
       purpose,
     });
-    assert.equal(verdict.allowed, false, `${purpose} under entries`);
+    assert.equal(verdict.allowed, false, purpose);
   }
+
+  // And a marketing purpose this build has never heard of, which is the case
+  // the per-purpose loop could not have covered however long it ran: the stop
+  // is scoped to the classification, so it does not enumerate purposes.
+  assert.equal(
+    (
+      await suppressionCheck({
+        emailAddress: user.email!,
+        classification: "marketing",
+        purpose: `purpose-invented-after-the-intake-${randomUUID()}`,
+      })
+    ).allowed,
+    false,
+    "a purpose added later is stopped by the same row"
+  );
   assert.equal(
     (await suppressionCheck({ emailAddress: user.email!, classification: "transactional" })).allowed,
     true
   );
 
-  await setAuthority("causes");
   assert.equal(
     (await suppressionCheck({ emailAddress: user.email!, classification: "marketing", purpose: "newsletter" })).allowed,
     false
@@ -133,7 +155,6 @@ test("a deletion intake stops marketing under either authority and withdraws the
 
 test("a deletion intake for an address with no account still stops marketing", async () => {
   const emailAddress = address();
-  await setAuthority("causes");
   await intake({ userId: null, email: emailAddress });
   assert.equal(
     (await suppressionCheck({ emailAddress, classification: "marketing", purpose: "promotions" })).allowed,
@@ -335,7 +356,7 @@ test("a complaint about mail that cannot be switched off records only the compla
   assert.deepEqual(causes.map((cause) => [cause.scope, cause.reason]), [["global", "complaint"]]);
 });
 
-test("while entries decide, confirming a subscription again does not lift a deletion request", async () => {
+test("confirming a subscription again does not lift a deletion request", async () => {
   const user = await subscriber();
   const policyVersionId = await ensureBootstrapPolicyVersion();
   await intake({ userId: user.id, email: user.email! });

@@ -10,10 +10,7 @@ import {
 } from "@/lib/emailProviderEventOrderCore";
 import { normalizeSuppressionAddress, recordSuppression } from "@/lib/emailSuppression";
 import { markCauseWriter } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
 import {
   SOFT_BOUNCE_SUPPRESSION_MS,
@@ -38,7 +35,7 @@ type Tx = Prisma.TransactionClient;
 const TRANSACTION_TIMEOUT_MS = 20_000;
 
 /**
- * Opens the fence and the address lock, in the order every writer takes them.
+ * Opens the address lock, which is the one every writer takes.
  * `budgetMs` covers both waiting for a connection and running: the wait gets at
  * most a quarter of it and the run the rest.
  */
@@ -50,7 +47,6 @@ const underAddress = <T>(
   const maxWait = Math.max(250, Math.floor(budgetMs / 4));
   return prisma.$transaction(
     async (tx) => {
-      await holdSuppressionFence(tx);
       await lockSuppressionAddress(tx, normalizeSuppressionAddress(emailAddress));
       return work(tx);
     },
@@ -310,7 +306,7 @@ export async function recordSoftBounceEvent(input: {
  * The send check already ignores an expired cause, so nothing waits on this;
  * it keeps an address that is never mailed again from holding causes that read
  * as active. At most `limit` causes a pass, oldest expiry first, each address
- * under the fence and its lock, and no transaction outliving the time budget.
+ * under its own lock, and no transaction outliving the time budget.
  *
  * Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
  * (recording expiry, C66).
