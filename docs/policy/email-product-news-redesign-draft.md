@@ -855,8 +855,11 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   - **D는 실행 중에 둘로 갈렸습니다.** D-1이 설정을 읽는 **코드**를 없앴고
     (email-notifications.md v27), 설정 **행**의 삭제는 조건부로 보류했습니다
     (v28) — 저장된 값이 `causes`인 동안 그 행은 D-1 이전 build를 올바르게 만드는
-    것이므로 지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다. 이 표의 D
-    행은 그 구분이 생기기 전에 쓰였습니다. 지울 수 있게 되는 조건은 v28 3번입니다.
+    것이므로 지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다. **행이 없을
+    때의 동작은 어느 build인가에 따라 다르고**, 그 표가 v28 1번입니다 — 이 표의
+    D 행은 그 구분이 생기기 전에 쓰였습니다. 지울 수 있게 되는 조건은 v28
+    3번이고, 그 전까지는 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가
+    활성 migration에 그 key가 들어오는 것을 막습니다.
   - **A의 trigger(C83)** — A migration이 `SuppressionEntry`에 AFTER INSERT·UPDATE·
     DELETE trigger를 둡니다. 새 build는 자기 transaction에서
     `SET LOCAL app.suppression_writer = 'causes'`를 걸고, trigger는 이 값이 없는 쓰기(=

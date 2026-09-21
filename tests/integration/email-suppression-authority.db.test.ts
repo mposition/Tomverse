@@ -288,13 +288,13 @@ test("switching a purpose back on is refused while another cause still stops it"
 test("a setting row left behind by an earlier deploy changes nothing", async () => {
   // Deploy D removed the read authority from the code and left the row where
   // it was. Not out of caution about the send -- the send has ignored the
-  // setting since deploy C -- but because a build older than D-1 still consults
-  // it in three other places, and an absent row reads as "entry" there: the
-  // console's lift refuses, a preference can be switched back on that a hold
-  // should have refused, and a deletion intake writes its per-purpose
-  // duplicates again. While the stored value is `causes`, the row is what
-  // keeps such a build correct, so deleting it is the risky move and keeping it
-  // is free (docs/policy/email-notifications.md v28).
+  // setting since deploy C -- but because a build older than D-1 still reads
+  // the row, and what an absent row does there depends on which build it is.
+  // The one on `main` today is the worst of them: it answers `entry` by
+  // sending from `SuppressionEntry`, a table frozen since deploy C. The table
+  // in docs/policy/email-notifications.md v28 item 1 has the rest. While the
+  // stored value is `causes`, the row is what keeps such a build correct, so
+  // deleting it is the risky move and keeping it is free.
   //
   // What this test pins is the other direction, and only that: with this build
   // serving, the row can be there and say the worst thing it could say, and

@@ -20,14 +20,28 @@ v27 2번은 판정 기준 설정의 `AppSetting` 행을 "그 다음 배포(D-2)"
 입니다. 다만 그보다 앞선 질문에는 답하지 않았습니다: **지울 필요가 있는가.**
 지금은 아니오입니다.
 
-1. **저장된 값이 `causes`이므로 그 행은 지금 안전장치입니다.** 읽는 쪽으로
-   정리하면 이렇습니다.
+1. **저장된 값이 `causes`이므로 그 행은 지금 안전장치입니다.** 행이 없을 때
+   무슨 일이 일어나는지는 **어느 build가 서비스 중인가에 따라 다르고**, 초안은
+   그것을 "D-1 이전 build"로 뭉뚱그렸습니다. 독립 검토가 갈라서 보라고 했고,
+   갈라 보니 **지금 production이 가장 나쁜 칸에 있습니다.**
 
-   | | 행을 남길 때 | 행을 지울 때 |
-   |---|---|---|
-   | D-1 이후 build | 읽지 않음 | 읽지 않음 |
-   | **D-1 이전 build** | `causes`를 읽고 **정상 동작** | 없음 = `entry`로 읽고 v27 2번의 세 경로가 퇴행 |
-   | 얻는 것 | — | 아무도 읽지 않는 행 하나의 정리 |
+   | 서비스 중인 build | 행이 없을 때 |
+   |---|---|
+   | A·B 이전 | key를 모르므로 읽지 않음. cutover 이후 롤백 금지 대상인 것은 그대로 |
+   | **B ~ 현재 main(`9e4fd0c5`)** | send가 **entry로 복귀**. 콘솔은 거절하지 않고 **legacy entry 해제 경로를 실행**. preference 켜기가 purpose 원인을 **전부** 해제할 수 있음. 삭제 접수가 purpose별 사본 생성 |
+   | C-1 | send가 entry로 복귀. 콘솔은 `authority_changed`로 거절. preference의 넓은 해제, privacy 중복 |
+   | C-2 | send는 계속 원인을 읽되 incident. 콘솔 거절, 좁은 preference blocker, privacy 중복 |
+   | D-1 이후 | reader 없음 |
+
+   **초안은 "콘솔이 거절한다"고 적었는데 그것은 C-1·C-2의 이야기이고 현재
+   main에는 틀립니다.** main은 거절하는 대신 legacy 해제 경로를 타므로 더
+   위험합니다.
+
+   **그리고 reader가 셋이 아니라 넷입니다.** B부터 C-2까지는 **cutover 도구**도
+   이 행을 읽습니다. 행이 없으면 `entry`로 판단해 얼어붙은 entry와 원인을
+   대조하고, `--repair`가 **그 사이 해제된 억제를 "빠진 원인"으로 읽어
+   `reconcile:entry:` 출처로 되살립니다**(v26 5번). 누군가 의도적으로 푼
+   주소가 다시 막힙니다.
 
    **지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다.** 값이 `causes`인
    것은 cutover가 적용된 환경이라는 뜻이고, v26 6번이 **이 build는 cutover가
@@ -39,21 +53,42 @@ v27 2번은 판정 기준 설정의 `AppSetting` 행을 "그 다음 배포(D-2)"
    이 행은 **"원인을 보라"고 말해 주는 유일한 것**입니다. 지금 지우는 것은
    production을 *아직 오지도 않은 배포의 롤백 상태*로 만드는 일입니다.
 
-3. **지울 수 있게 되는 조건은 둘이고, 둘 다 참이어야 합니다.**
+3. **지울 수 있게 되는 조건은 둘이고, 둘 다 관측으로 확인합니다.** 초안은
+   "rollback floor가 올라가 있다"로만 적었는데, v24 12번의 rollback floor는
+   **정책 문장이지 관측값이 아닙니다.** 저장소에 이미 있는 관측 가능한 선례로
+   바꿔 적습니다.
 
-   - main이 D-1을 담고 **배포되어** 있다.
-   - 배포 rollback floor가 D-1을 들여온 commit **위로** 올라가 있다. 즉 그
-     아래로 되돌릴 계획이 없다.
+   - `GET /api/build-info`가 보고하는 **production의 실제 SHA**가 설정 reader가
+     제거된 build이다.
+   - 그 release 기록(`.github/RELEASE_CHECKLIST.md`)의 **`Rollback SHA`** 역시
+     reader가 제거된 build이다. 즉 되돌릴 대상 자체가 D-1 이후다.
 
-   그때 이 행은 **어떤 build도 읽지 않는 행**이 되고, 삭제는 비로소 정리가
-   됩니다. 그 전까지는 남깁니다.
+   **develop의 D-1 commit에 대한 ancestry만으로 판단하지 않습니다.** selective
+   release나 cherry-pick이면 계보가 달라지고, 그때 ancestry는 참인데 서비스
+   중인 코드는 아닐 수 있습니다. 묻는 것은 계보가 아니라 **지금 무엇이 돌고
+   무엇으로 되돌아가는가**입니다.
 
-4. **강제할 기계는 두지 않습니다.** 이 행을 읽는 코드도, 지우는 코드도 없습니다
-   — 지우는 것은 누군가 migration을 **일부러 써야** 일어나는 일이고, 그 사람이
-   읽을 문장이 이 항목입니다. 행이 남아 있어도 이 build에 아무 효과가 없다는
-   사실은 `tests/integration/email-suppression-authority.db.test.ts`의
+   둘 다 참이면 이 행은 **어떤 build도 읽지 않는 행**이 되고, 삭제는 비로소
+   정리가 됩니다. 그 전까지는 남깁니다.
+
+4. **정적 gate를 둡니다.** 초안은 "읽는 코드도 지우는 코드도 없으니 막을 기계가
+   없다"고 적었는데, 그것은 **지금 상태**에 대한 말이고 위험은 미래에
+   있습니다 — 원래 계획을 기억한 사람이 D-2 migration을 쓰고, 그것이 D-1과
+   **같은 production release에 실리는 것**입니다. migration은 새 build보다 먼저
+   돌므로 그 순간 서비스 중인 것은 B 시대 build이고, 위 표의 두 번째 줄이
+   그대로 일어납니다 — **send가 entry로 복귀하고, 그만 보내라고 한 사람에게
+   메일이 나갑니다. 그것은 되돌릴 수 없습니다.**
+
+   그래서 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가 **활성
+   migration 전체에 `email.suppressionReadAuthority`가 등장하지 않는다**는 것을
+   고정합니다. 3번의 조건이 실제로 충족되면 증거와 함께 이 테스트를 지우는 것이
+   D-2의 첫 단계입니다 — 테스트를 지우는 행위가 곧 "조건을 확인했다"는 선언이
+   되도록.
+
+   행이 남아 있어도 이 build에 아무 효과가 없다는 사실은
+   `tests/integration/email-suppression-authority.db.test.ts`의
    `a setting row left behind by an earlier deploy changes nothing`이 계속
-   고정합니다. 없는 기계를 지키는 gate를 만드는 것은 여기서 얻을 것이 없습니다.
+   고정합니다.
 
 5. **7.4 설계표와의 차이가 하나 더 늘었습니다.** 표의 D 행은 설정 제거를 한
    배포로 적었고, v27이 그것을 D-1·D-2로 나눴으며, v28은 D-2를 조건부로
