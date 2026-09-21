@@ -375,7 +375,7 @@ test("re-enabling clears its own hold", async () => {
     capturedVia: "preference_center",
     source: "preference_center",
   });
-  assert.deepEqual(result, { changed: true });
+  assert.deepEqual(result, { changed: true, purpose: "newsletter", enabled: true });
 
   assert.deepEqual(
     await prisma.suppressionCause.findMany({
