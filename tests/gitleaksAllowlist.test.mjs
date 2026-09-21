@@ -19,6 +19,10 @@ import test from "node:test";
  */
 
 const config = readFileSync(new URL("../.gitleaks.toml", import.meta.url), "utf8");
+const fingerprintIgnore = readFileSync(
+  new URL("../.gitleaksignore", import.meta.url),
+  "utf8"
+);
 
 /**
  * Every multi-line-literal pattern in the allowlist, read from the `regexes`
@@ -138,6 +142,28 @@ test("no allowlist pattern accepts an unconstrained value class", () => {
     assert.ok(
       !tooBroad.test(pattern.source),
       `allowlist pattern is credential-shaped and must be narrowed: ${pattern.source}`
+    );
+  }
+});
+
+test("every gitleaks ignore is one exact, unique finding fingerprint", () => {
+  const entries = fingerprintIgnore
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+  const fingerprint = /^[0-9a-f]{40}:[^:]+:[A-Za-z0-9._-]+:\d+$/u;
+
+  assert.ok(entries.length > 0, "expected at least one pinned false positive");
+  assert.equal(
+    new Set(entries).size,
+    entries.length,
+    ".gitleaksignore must not repeat a fingerprint"
+  );
+  for (const entry of entries) {
+    assert.match(
+      entry,
+      fingerprint,
+      `.gitleaksignore entries must bind commit, path, rule and line: ${entry}`
     );
   }
 });
