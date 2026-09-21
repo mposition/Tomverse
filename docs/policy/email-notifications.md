@@ -55,13 +55,29 @@ v27 2번은 판정 기준 설정의 `AppSetting` 행을 "그 다음 배포(D-2)"
 
 3. **지울 수 있게 되는 조건은 둘이고, 둘 다 관측으로 확인합니다.** 초안은
    "rollback floor가 올라가 있다"로만 적었는데, v24 12번의 rollback floor는
-   **정책 문장이지 관측값이 아닙니다.** 저장소에 이미 있는 관측 가능한 선례로
-   바꿔 적습니다.
+   **정책 문장이지 관측값이 아닙니다.** 두 번째 초안은 그것을
+   `.github/RELEASE_CHECKLIST.md`의 `Rollback SHA` 칸으로 바꿨는데 **그것도
+   증거가 아닙니다** — 그 파일은 빈 템플릿이고, 그 칸은 selective release와
+   hotfix 구획에만 있습니다. 평범한 `develop → main` 릴리스는 그 칸을 요구하지
+   않습니다. **템플릿에 칸이 있다는 것은 어떤 릴리스의 rollback 대상을 관측한
+   것이 아닙니다.** 독립 검토가 두 번 짚었고, 두 번 다 제가 "적을 자리"를
+   "적힌 값"으로 착각한 것입니다.
 
-   - `GET /api/build-info`가 보고하는 **production의 실제 SHA**가 설정 reader가
-     제거된 build이다.
-   - 그 release 기록(`.github/RELEASE_CHECKLIST.md`)의 **`Rollback SHA`** 역시
-     reader가 제거된 build이다. 즉 되돌릴 대상 자체가 D-1 이후다.
+   실제로 물어야 하는 것은 둘입니다.
+
+   - **지금 무엇이 도는가** — `GET /api/build-info`가 보고하는 production의
+     실제 SHA가 설정 reader 없는 트리이다. 관측 시각·deployment id와 함께
+     적습니다.
+   - **되돌리면 무엇이 도는가** — D-1을 production에 넣은 릴리스의 기록
+     (`.github/audits/release-<날짜>__<sha>.md`, 7.9.1이 정한 이름)이 그 답을
+     **채워진 값으로** 갖고 있고, 그 대상 역시 reader 없는 트리이다. 그 기록의
+     rollback 칸이 SHA가 아니라 결정문인 경우도 있습니다(2026-08-16 기록이
+     그렇습니다 — "이 릴리스의 rollback은 SHA가 아니다"). 그때는 **그 결정이
+     D-1보다 오래된 대상을 가리키지 않는다**는 것이 조건입니다.
+
+   그 릴리스 기록에 되돌릴 대상이 아예 적혀 있지 않다면, **D-2를 하기 전에
+   그것부터 적습니다** — 공통 릴리스 머리글에 칸을 더하든 D-2 전용 증거 기록을
+   남기든, 없는 값을 추론으로 메우지는 않습니다.
 
    **develop의 D-1 commit에 대한 ancestry만으로 판단하지 않습니다.** selective
    release나 cherry-pick이면 계보가 달라지고, 그때 ancestry는 참인데 서비스
@@ -81,9 +97,14 @@ v27 2번은 판정 기준 설정의 `AppSetting` 행을 "그 다음 배포(D-2)"
 
    그래서 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가 **활성
    migration 전체에 `email.suppressionReadAuthority`가 등장하지 않는다**는 것을
-   고정합니다. 3번의 조건이 실제로 충족되면 증거와 함께 이 테스트를 지우는 것이
-   D-2의 첫 단계입니다 — 테스트를 지우는 행위가 곧 "조건을 확인했다"는 선언이
-   되도록.
+   고정합니다. 주석에 적힌 key도 거절합니다 — fail-safe 쪽이 맞고, 주석을 골라
+   내는 parser는 이 gate가 막으려는 것보다 큰 물건입니다.
+
+   3번의 조건이 충족되면 **이 테스트를 지우는 것이 D-2의 첫 단계**이고, 그
+   commit이 두 가지를 인용합니다: D-1 릴리스 기록의 경로와 그 안의 되돌릴 대상,
+   그리고 `/api/build-info` 관측값(SHA·deployment id·관측 시각). 테스트를 지우는
+   행위가 곧 "조건을 확인했다"는 선언이 되도록, 그리고 그 선언이 무엇에
+   기대는지가 같은 commit에 남도록.
 
    행이 남아 있어도 이 build에 아무 효과가 없다는 사실은
    `tests/integration/email-suppression-authority.db.test.ts`의
