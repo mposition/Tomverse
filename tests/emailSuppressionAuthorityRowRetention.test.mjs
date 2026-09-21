@@ -23,10 +23,21 @@ import test from "node:test";
 // a table frozen since deploy C. That is mail to people who asked us to stop,
 // and it is the one outcome in this series that cannot be undone.
 //
-// So: no active migration may mention the key. When the two conditions in v28
-// item 3 are actually met -- production running a build with no reader, and the
-// release's own `Rollback SHA` likewise -- deleting this test is the first step
-// of D-2, and deleting it is what says the conditions were checked.
+// So: no active migration may mention the key, in SQL or in a comment. The
+// fail-safe side is the right one here, and a parser that picks comments out of
+// SQL would be a larger thing than the gate it serves.
+//
+// Deleting this test is the first step of D-2, and deleting it is what says the
+// two conditions in v28 item 3 were checked. Those are: `GET /api/build-info`
+// reporting a production SHA whose tree has no reader, and the release record
+// for the release that put D-1 into production
+// (`.github/audits/release-<date>__<sha>.md`) naming a rollback target that is
+// also reader-free -- as a SHA, or as a decision that points at nothing older
+// than D-1, which is how some of those records answer it. If the record does
+// not answer it at all, writing that answer comes before D-2 rather than being
+// inferred. The commit that deletes this file cites both: the record's path and
+// its rollback target, and the `/api/build-info` reading with its SHA,
+// deployment id and the time it was taken.
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const migrationsRoot = join(repositoryRoot, "prisma", "migrations");
