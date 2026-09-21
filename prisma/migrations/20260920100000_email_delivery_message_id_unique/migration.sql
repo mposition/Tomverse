@@ -41,8 +41,10 @@
 -- at the index rather than by assuming. Its name is not enough -- that is the
 -- same reason `IF NOT EXISTS` is refused below -- so ask what it is:
 --
---     SELECT i.indisunique, i.indisvalid, i.indisready, i.indislive,
---            i.indimmediate, i.indnullsnotdistinct, i.indnkeyatts, i.indnatts,
+--     SELECT to_regclass('"EmailDelivery"') AS delivery_table,
+--            i.indisunique, i.indisvalid, i.indisready, i.indislive,
+--            i.indimmediate, i.indisprimary, i.indnullsnotdistinct,
+--            i.indnkeyatts, i.indnatts,
 --            i.indexprs IS NOT NULL AS has_expressions,
 --            pg_get_expr(i.indpred, i.indrelid) AS predicate,
 --            am.amname,
@@ -62,11 +64,12 @@
 --               JOIN pg_attribute a
 --                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum)
 --              AS collations_are_the_columns_own
---       FROM pg_index i
---       JOIN pg_class ix ON ix.oid = i.indexrelid
---       JOIN pg_am am ON am.oid = ix.relam
---      WHERE ix.relname = 'EmailDelivery_providerAccount_providerMessageId_key'
---        AND i.indrelid = to_regclass('"EmailDelivery"');
+--       FROM (SELECT 1) AS always_one_row
+--       LEFT JOIN pg_index i
+--              ON i.indexrelid = to_regclass('"EmailDelivery_providerAccount_providerMessageId_key"')
+--             AND i.indrelid = to_regclass('"EmailDelivery"')
+--       LEFT JOIN pg_class ix ON ix.oid = i.indexrelid
+--       LEFT JOIN pg_am am ON am.oid = ix.relam;
 --
 -- The table is named by `to_regclass`, not by `relname` plus
 -- `current_schema()`. `current_schema()` is the first schema on the search
@@ -75,13 +78,23 @@
 -- same way the statement does, so the query is asking about the table the
 -- migration actually touched.
 --
---   * no row -> it rolled back: `prisma migrate resolve --rolled-back
+-- It is written to return exactly one row, whatever the state, because
+-- returning none would collapse two different answers into one: an index that
+-- is absent, and a table this session cannot see at all. The first means the
+-- migration rolled back; the second means the query is pointed at the wrong
+-- database or search path and says nothing about the migration. `to_regclass`
+-- resolves against *this* session's path, not the deploy's.
+--
+--   * `delivery_table` null -> stop. Whatever this session is looking at, it is
+--     not the schema the migration ran in;
+--   * `delivery_table` present and `indisunique` null -> the index is not
+--     there: it rolled back. `prisma migrate resolve --rolled-back
 --     20260920100000_email_delivery_message_id_unique`, then deploy again;
---   * a row that is unique, valid, ready, live, immediate, NOT nulls-not-
---     distinct, two key attributes and two total, no expressions, no predicate,
---     btree, with columns {providerAccount,providerMessageId} in that order,
---     operator classes {text_ops@pg_catalog,text_ops@pg_catalog}, and
---     `collations_are_the_columns_own` true -> it committed:
+--   * a row that is unique, valid, ready, live, immediate, NOT primary, NOT
+--     nulls-not-distinct, two key attributes and two total, no expressions, no
+--     predicate, btree, with columns {providerAccount,providerMessageId} in
+--     that order, operator classes {text_ops@pg_catalog,text_ops@pg_catalog},
+--     and `collations_are_the_columns_own` true -> it committed:
 --     `prisma migrate resolve --applied ...`;
 --   * a row that is anything else -> stop. This file cannot have created it, so
 --     something else did, and marking the migration applied would seal a
@@ -102,14 +115,17 @@
 --   * the collation: an index built `COLLATE` something other than the
 --     column's own sorts by a different rule, so a lookup using the column's
 --     collation cannot use it. `indcollation` holding each column's own
---     `attcollation` is what says it was not built that way.
+--     `attcollation` is what says it was not built that way;
+--   * `indisprimary`: a primary key's index would pass every line above and is
+--     not this index. Sealing one as this migration's work would also mean the
+--     columns carry a `NOT NULL` nothing here asked for.
 
--- A note on the `DROP INDEX` in 20260920100100, which is the same class of
--- problem in executable SQL rather than in a comment: `DROP INDEX` takes a
--- name and resolves it through the search path, with no way to say which table
--- it must belong to. There is nothing to add to that statement; what there is
--- to do is check, in that file's own recovery, that the name belongs to the
--- table it is supposed to.
+-- The same class of problem reaches executable SQL in the two files that drop
+-- an index: `DROP INDEX` takes a name and resolves it in the relation
+-- namespace, with no way to say which table the index must belong to. Each of
+-- those files checks the ownership before it drops, and raises if the name has
+-- been taken by an index on some other table -- see 20260920100100 for why a
+-- recovery branch is not enough on its own.
 
 BEGIN;
 

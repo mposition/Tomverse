@@ -232,7 +232,17 @@ v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초�
     **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index가 빌드를 건너뛰게 하고,
     그것들을 구분하는 카탈로그 검사는 **정확히 맞아야 하는 두 번째 물건**입니다.
     이름 충돌에서 시끄럽게 실패하는 쪽이 더 쌉니다.
-11. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+11. **index를 지우기 전에 소유 테이블을 확인합니다**(2·3번의 `DO` 블록).
+    `DROP INDEX`는 이름을 relation namespace에서 해석할 뿐 **어느 테이블의 것이어야
+    하는지 말할 방법이 없습니다.** 그리고 이것은 multi-schema 문제가 아닙니다 —
+    한 schema 안에서도 의도한 index가 사라지고 **다른 테이블의 index가 그 이름을
+    가져가면** 충분합니다. 그러면 drop은 그 index를 지우고 **성공하며**, migration은
+    applied로 기록되고, 옛 unique는 남아 있으며, 이상을 알아챌 복구 쿼리를 실행할
+    계기가 아무에게도 생기지 않습니다. **실패한 뒤에만 도는 분기는 실패하지 않는
+    경로를 막지 못합니다.** 그래서 삭제 전에 `pg_index.indrelid`를
+    `to_regclass(대상 테이블)`과 대조하고, 다른 테이블이면 `RAISE EXCEPTION`으로
+    transaction을 중단합니다.
+12. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
     schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지
     않고 insert하며 2번이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
     insert가 `NOT NULL`로 실패하고, 충돌 해소는 2번이 지운
