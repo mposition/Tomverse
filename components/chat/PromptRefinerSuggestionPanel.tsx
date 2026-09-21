@@ -204,6 +204,31 @@ export function PromptRefinerSuggestionPanel({
     );
   }
 
+  if (visible.status === "accepted_preview") {
+    return (
+      <section
+        data-testid="prompt-refiner-accepted-preview"
+        role="status"
+        aria-live="polite"
+        aria-label={copy.proposalLabel}
+        className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+      >
+        <p className="mb-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+          {copy.proposalLabel}
+        </p>
+        <p
+          data-testid="prompt-refiner-accepted-preview-proposal"
+          className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+        >
+          {visible.suggestion.refinedPrompt}
+        </p>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          {copy.previewOnly}
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section
       ref={readyRef}
@@ -250,13 +275,13 @@ export function PromptRefinerSuggestionPanel({
           disabled={interactionBlocked}
           aria-label={
             interactionProblemCopy
-              ? `${copy.useProposal}. ${interactionProblemCopy}`
-              : copy.useProposal
+              ? `${copy.previewAction}. ${interactionProblemCopy}`
+              : copy.previewAction
           }
           onClick={() => onUseSuggestion(visible.suggestion)}
           className="min-h-11 rounded-full bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
-          {copy.useProposal}
+          {copy.previewAction}
         </button>
       </div>
     </section>
