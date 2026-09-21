@@ -1,10 +1,10 @@
 # AMUX Advanced Planning and Evidence
 
-상태: `planning/routing implementation complete; agent resolution implemented behind disabled flag; independent review, CI, policy reconfirmation and staging evidence pending`
+상태: `planning/routing implementation complete; agent resolution implemented behind disabled flag; independent review and v1.3 policy approval complete; CI and staging evidence pending`
 
 이 문서는 AMUX 고도화 10개 항목의 개발 분모와 순서를 고정한다. 구현 완료와
-staging activation은 별개이며, Agent escalation resolve는 정책 보강안의
-재확인·DB/CI·staging 검증 전까지 구현 완료로 보고하지 않는다. 코드와 자동 검증이 완료돼도 실제 비용 한도,
+staging activation은 별개이며, Agent escalation resolve는 DB/CI·staging 검증
+전까지 구현 완료로 보고하지 않는다. 코드와 자동 검증이 완료돼도 실제 비용 한도,
 프로젝트 용량, incident 선언은 운영자가 설정하기 전까지 비활성 상태다.
 
 ## 권장 순서
@@ -66,7 +66,8 @@ scheduler 입력을 서버 권위로 만든다. Incident brake와 기존 증거 
 `docs/policy/amux-agent-approval-contract.md`에 있으며, 기본 꺼짐인
 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` 뒤에 구현돼 있다. flag가 꺼져 있으면
 `approve`·`retry`·`block` resolve 요청은 `AMUX_AGENT_APPROVAL_UNAVAILABLE`로
-fail-closed 거절한다. 보강안 재확인과 staging 판정 전에는 flag를 켜지 않으며,
+fail-closed 거절한다. v1.3 정책은 2026-09-21 승인됐지만 staging 판정과 별도
+flag 활성화 승인 전에는 flag를 켜지 않으며,
 외부 행위·PR 병합·배포 승인을 이 결정으로 대신하지 않는다.
 
 ## 점수와 hard gate
