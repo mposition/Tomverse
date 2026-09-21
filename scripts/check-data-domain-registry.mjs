@@ -133,6 +133,33 @@ const errors = [];
 const fail = (message) => errors.push(message);
 
 /** parent_row references, checked once every row has been read. */
+/**
+ * The scalar columns a child model uses to point at a given parent.
+ *
+ * Read from the relation attribute rather than from a naming convention:
+ * `@relation(fields: [approvalId], references: [id])` on a field typed
+ * `EmailSendApproval` is what makes `approvalId` a foreign key to it, and
+ * nothing about the column's name says so.
+ */
+const childForeignKeys = (childModel, parentModel) => {
+  const keys = new Set();
+  const body = modelBodies.get(childModel);
+  if (!body) return keys;
+  const pattern = new RegExp(
+    String.raw`^\s{2}\w+\s+${parentModel}(\[\])?\??\s+@relation\(([^)]*)\)`,
+    "gm"
+  );
+  for (const [, , attributes] of body.matchAll(pattern)) {
+    const fields = /fields:\s*\[([^\]]*)\]/.exec(attributes);
+    if (!fields) continue;
+    for (const field of fields[1].split(",")) {
+      const name = field.trim();
+      if (name) keys.add(name);
+    }
+  }
+  return keys;
+};
+
 const parentReferences = [];
 const childReferences = [];
 
@@ -143,6 +170,8 @@ const models = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)].map(([, na
   name,
   body,
 }));
+
+const modelBodies = new Map(models.map(({ name, body }) => [name, body]));
 
 // A model holds user data when it names a user column or relates to User.
 //
@@ -375,16 +404,24 @@ for (const row of registry.domains) {
         fail(
           `${model}: subjectReference.childModel names "${childModel}", which is not a model.`
         );
+      } else if (!isFilledString(childColumn)) {
+        fail(`${model}: subjectReference.childColumn is missing.`);
+      } else if (!(columnsByModel.get(childModel) ?? new Map()).has(childColumn)) {
+        fail(
+          `${model}: subjectReference.childColumn names "${childColumn}", which is not a ` +
+            `column of ${childModel}.`
+        );
+      } else if (!childForeignKeys(childModel, model).has(childColumn)) {
+        // Existing is not the same as pointing here. A column named
+        // `userId` exists on plenty of children and points at User, and a
+        // reference through it would claim a path back to this row that the
+        // database does not have. The column has to be the scalar a
+        // `@relation(fields: [...])` on the child uses to reach this model.
+        fail(
+          `${model}: subjectReference.childColumn "${childColumn}" is not a foreign key ` +
+            `from ${childModel} to ${model}, so it does not reach the subject it claims to.`
+        );
       } else {
-        const childColumns = columnsByModel.get(childModel) ?? new Map();
-        if (!isFilledString(childColumn)) {
-          fail(`${model}: subjectReference.childColumn is missing.`);
-        } else if (!childColumns.has(childColumn)) {
-          fail(
-            `${model}: subjectReference.childColumn names "${childColumn}", which is not a ` +
-              `column of ${childModel}.`
-          );
-        }
         childReferences.push({ model, childModel });
       }
     } else if (reference.kind === "untyped_target") {

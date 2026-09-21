@@ -604,13 +604,15 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         noticeAnchorSource: true,
         createdAt: true,
         approval: {
+          // A cohort belongs to a `risk_accepted` override and to nothing
+          // else -- a trigger holds that -- so the scope returned here is an
+          // override's: which purpose it covered, under which policy version.
+          // A waiver's rule, country and obligation are deliberately absent
+          // because no membership can reach one.
           select: {
             approvalType: true,
             purposeKey: true,
-            ruleKey: true,
-            ruleVersion: true,
-            country: true,
-            obligationKey: true,
+            policyVersionId: true,
             approvedAt: true,
             sealedAt: true,
             revocations: {

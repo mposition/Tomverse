@@ -828,6 +828,13 @@ const REGISTRY = {
     reason:
       "enqueue and send. The unique index is (deliveryId, phase), so a third phase would silently raise how many verdicts one delivery may have, and the send-time re-decision that the whole design rests on would stop being the last word.",
   },
+  EmailPermissionEvent_scopeKey_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_EVENT_SCOPE_KEYS",
+    reason:
+      "What a permission fact is about: one purpose, one classification, or a star for the address itself. It was length > 0 until 2026-09-21, which is not a closed set -- and this table is append-only, so a fact scoped to a misspelling is one no verdict will ever find and no later write can correct.",
+  },
   EmailPermissionDecision_purpose_check: {
     owner: "list",
     module: "lib/emailPreferenceCore.ts",

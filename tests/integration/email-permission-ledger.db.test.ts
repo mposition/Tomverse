@@ -114,9 +114,20 @@ const seal = (id: string) =>
     data: { sealedAt: new Date() },
   });
 
-const seedDecision = (data: Record<string, unknown> = {}) =>
+/**
+ * A verdict. Every one needs its own delivery -- a verdict is taken for a
+ * message, the INSERT trigger says so, and `(deliveryId, phase)` is unique --
+ * so the helper makes one unless the caller supplies it.
+ *
+ * Times are taken from now rather than from a fixed instant. `createdAt`
+ * defaults to the clock, and the constraints require `sealedAt` and the rest
+ * to sit at or after it, so a fixture pinned to a date in the past fails on
+ * every run for a reason that has nothing to do with what it is testing.
+ */
+const seedDecision = async (data: Record<string, unknown> = {}) =>
   prisma.emailPermissionDecision.create({
     data: {
+      deliveryId: "deliveryId" in data ? undefined : (await seedDelivery()).id,
       phase: "enqueue",
       purpose: "product_updates",
       classification: "marketing",
@@ -213,7 +224,7 @@ test("a retried writer adds nothing", async () => {
 test("the event's closed lists are closed", async () => {
   await assert.rejects(seedEvent({ kind: "consent_granted" }), /kind_check/);
   await assert.rejects(seedEvent({ capturedVia: "somewhere" }), /capturedVia_check/);
-  await assert.rejects(seedEvent({ scopeKey: "" }), /scopeKey_not_empty_check/);
+
 });
 
 test("deleting an account leaves the ledger and detaches it", async () => {
@@ -284,6 +295,52 @@ test("each approval type needs its own scope and no other", async () => {
     obligationKey: "subject_prefix",
     purposeKey: null,
   });
+});
+
+test("a cohort belongs to an override, never to a waiver", async () => {
+  // risk_accepted is scoped by who; obligation_waiver by which rule, country
+  // and obligation. A waiver with members would be a second way to scope one
+  // that nothing reads -- a list that looks like it narrows a decision and
+  // does not.
+  const user = await createUser();
+  const waiver = await seedApproval({
+    approvalType: "obligation_waiver",
+    ruleKey: "kr",
+    ruleVersion: 3,
+    country: "KR",
+    obligationKey: "subject_prefix",
+    purposeKey: null,
+  });
+
+  await assert.rejects(
+    prisma.emailSendApprovalMember.create({
+      data: {
+        approvalId: waiver.id,
+        userId: user.id,
+        addressDigest: "a".repeat(64),
+        addressNormalizationVersion: "v1",
+        noticeAnchorAt: new Date(),
+        noticeAnchorSource: "signup",
+      },
+    }),
+    /scoped by rule rather than by cohort/
+  );
+
+  const override = await seedApproval();
+  await prisma.emailSendApprovalMember.create({
+    data: {
+      approvalId: override.id,
+      userId: user.id,
+      addressDigest: "a".repeat(64),
+      addressNormalizationVersion: "v1",
+      noticeAnchorAt: new Date(),
+      noticeAnchorSource: "signup",
+    },
+  });
+  assert.equal(
+    await prisma.emailSendApprovalMember.count({ where: { approvalId: override.id } }),
+    1
+  );
 });
 
 test("an approval cannot be closed before it was given", async () => {
@@ -562,12 +619,20 @@ test("purging a delivery leaves the verdict that permitted it", async () => {
   assert.equal(kept?.allowed, true);
 });
 
-test("a verdict's delivery has to exist", async () => {
+test("a verdict's delivery has to exist, and it has to have one", async () => {
   await assert.rejects(
     seedDecision({ deliveryId: `missing-${randomUUID()}` }),
     /foreign key|Foreign key/
   );
   await assert.rejects(seedDecision({ phase: "sending" }), /phase_check/);
+
+  // Nullable is for the purge. At INSERT it would be a verdict about no
+  // particular message, and `(deliveryId, phase)` would stop constraining --
+  // Postgres does not compare nulls, so every such row would be distinct.
+  await assert.rejects(
+    seedDecision({ deliveryId: null }),
+    /must name one/
+  );
 });
 
 test("a verdict takes exactly one transition, each once", async () => {
@@ -641,7 +706,9 @@ test("a provider submission has to describe a send that could have happened", as
   // A row saying otherwise is a record of a send that did not occur, sitting
   // in the ledger a regulator reads.
   const delivery = await seedDelivery();
-  const evaluatedAt = new Date("2026-09-21T00:00:00.000Z");
+  // Relative to now, because `createdAt` is the clock and the constraints
+  // order everything at or after it.
+  const evaluatedAt = new Date();
   const later = (ms: number) => new Date(evaluatedAt.getTime() + ms);
 
   const complete = {
@@ -663,13 +730,22 @@ test("a provider submission has to describe a send that could have happened", as
     { ...complete, deliveryId: null },
     { ...complete, sealedAt: null },
     { ...complete, suppressionCheckedAt: null },
-    // And each ordering, reversed.
+    // And each ordering, reversed, one at a time.
     { ...complete, suppressionCheckedAt: later(-1000) },
     { ...complete, sealedAt: later(-1000) },
+    // Handed over before the evidence closed.
     { ...complete, providerSubmittedAt: later(1500) },
+    // Handed over before suppression was read. Separate from the one above:
+    // the two orderings are different requirements and a single case that
+    // breaks both would pass while only one of them was enforced.
+    { ...complete, suppressionCheckedAt: later(2500), sealedAt: later(1000) },
   ];
-  for (const row of broken) {
-    await assert.rejects(seedDecision(row), /submission_check|sealedAt_order_check/);
+  for (const [index, row] of broken.entries()) {
+    await assert.rejects(
+      seedDecision(row),
+      /submission_check/,
+      `case ${index} must be refused by the submission constraint, not another one`
+    );
   }
 
   const written = await seedDecision(complete);
@@ -835,6 +911,23 @@ test("the classification list is closed", async () => {
     seedDecision({ classification: "release_notes" }),
     /classification_check/
   );
+});
+
+test("a fact's scope and an override's purpose are closed sets", async () => {
+  // Both tables are immutable, so a typo is stored once and readable by
+  // nothing afterwards.
+  await assert.rejects(seedEvent({ scopeKey: "product_udpates" }), /scopeKey_check/);
+  await assert.rejects(seedEvent({ scopeKey: "" }), /scopeKey_check/);
+  await assert.rejects(seedEvent({ scopeKey: "anything" }), /scopeKey_check/);
+  await seedEvent({ scopeKey: "*" });
+  await seedEvent({ scopeKey: "marketing" });
+  await seedEvent({ scopeKey: "promotions" });
+
+  await assert.rejects(seedApproval({ purposeKey: "prmotions" }), /scope_check/);
+  await assert.rejects(seedApproval({ purposeKey: "" }), /scope_check/);
+  await assert.rejects(seedApproval({ purposeKey: "marketing" }), /scope_check/);
+  await seedApproval({ purposeKey: "*" });
+  await seedApproval({ purposeKey: "newsletter" });
 });
 
 test("the purpose list is closed too", async () => {

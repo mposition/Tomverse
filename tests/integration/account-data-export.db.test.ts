@@ -587,6 +587,12 @@ const seedUser = async () => {
   // them was or was not permitted, and what an approval that covered them
   // said. What is not theirs is the operator behind it -- who approved, their
   // reasoning, and what would make them look again.
+  // Everything below is dated from one instant taken now. `createdAt`
+  // defaults to the clock and the ledger's constraints order the rest at or
+  // after it, so a fixture pinned to a past date fails on every run for a
+  // reason that has nothing to do with what it is testing.
+  const now = new Date();
+
   const policy = await prisma.emailPolicyVersion.create({
     data: {
       version: `export-${randomUUID()}`,
@@ -600,7 +606,7 @@ const seedUser = async () => {
       approvalType: "risk_accepted",
       approvedById: sentinel("emailSendApproval-approvedById"),
       approvedByEmail: sentinel("emailSendApproval-approvedByEmail"),
-      approvedAt: new Date("2026-09-16T00:00:00.000Z"),
+      approvedAt: now,
       reason: sentinel("emailSendApproval-reason"),
       reviewCondition: sentinel("emailSendApproval-reviewCondition"),
       policyVersionId: policy.id,
@@ -613,20 +619,20 @@ const seedUser = async () => {
       userId,
       addressDigest: sentinel("emailSendApprovalMember-addressDigest"),
       addressNormalizationVersion: "v1",
-      noticeAnchorAt: new Date("2026-09-16T00:00:00.000Z"),
+      noticeAnchorAt: now,
       noticeAnchorSource: "signup",
     },
   });
   await prisma.emailSendApproval.update({
     where: { id: approval.id },
-    data: { sealedAt: new Date("2026-09-16T01:00:00.000Z") },
+    data: { sealedAt: new Date(now.getTime() + 1000) },
   });
   await prisma.emailSendApprovalRevocation.create({
     data: {
       approvalId: approval.id,
       revokedById: sentinel("emailSendApprovalRevocation-revokedById"),
       revokedByEmail: sentinel("emailSendApprovalRevocation-revokedByEmail"),
-      revokedAt: new Date("2026-09-18T00:00:00.000Z"),
+      revokedAt: new Date(now.getTime() + 2000),
       reason: sentinel("emailSendApprovalRevocation-reason"),
     },
   });
@@ -638,7 +644,7 @@ const seedUser = async () => {
       addressNormalizationVersion: "v1",
       kind: "notice_shown",
       scopeKey: "product_updates",
-      occurredAt: new Date("2026-09-17T00:00:00.000Z"),
+      occurredAt: now,
       capturedVia: "in_product_notice",
       sourceEventKey: sentinel("emailPermissionEvent-sourceEventKey"),
       policyVersionId: policy.id,
@@ -662,7 +668,7 @@ const seedUser = async () => {
       requiredDisplayContractHash: sentinel("emailPermissionDecision-requiredHash"),
       ruleVersions: { AU: 1 },
       policyVersionId: policy.id,
-      evaluatedAt: new Date("2026-09-17T01:00:00.000Z"),
+      evaluatedAt: new Date(now.getTime() + 1000),
     },
   });
   await prisma.emailPermissionDecisionEvidence.create({
@@ -763,10 +769,12 @@ test("the permission ledger exports what it decided and what it rested on", asyn
   assert.notEqual(approval.sealedAt, null);
   assert.equal(approval.revocations?.length, 1);
   assert.notEqual(approval.revocations[0].revokedAt, null);
-  // An obligation waiver's scope travels whole, or the person is told which
-  // country a duty was waived in and not which rule said so.
-  assert.ok("ruleKey" in approval);
-  assert.ok("ruleVersion" in approval);
+  // The override's scope travels whole: which purpose, under which policy
+  // version. A waiver's rule and country are not here because a cohort belongs
+  // to an override and a trigger holds that, so no membership can reach one.
+  assert.notEqual(approval.policyVersionId, null);
+  assert.ok(!("ruleKey" in approval));
+  assert.ok(!("country" in approval));
   assert.ok(!("reason" in approval), "the approver's reasoning is not theirs");
   assert.ok(!("approvedByEmail" in approval), "the approver's address is not theirs");
 

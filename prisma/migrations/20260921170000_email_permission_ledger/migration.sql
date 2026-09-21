@@ -174,10 +174,20 @@ ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_kind_che
 ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_capturedVia_check"
     CHECK ("capturedVia" IN ('signup_form', 'preference_center', 'unsubscribe_page', 'in_product_notice', 'admin', 'system', 'provider_complaint'));
 
--- "*" means the address itself; an empty string would be a writer that left
--- the column out rather than a scope anybody chose.
-ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_scopeKey_not_empty_check"
-    CHECK (length("scopeKey") > 0);
+-- What a fact can be about: one purpose, one classification, or the address
+-- itself.
+--
+-- "not empty" was not a closed set, and this table is append-only: a typo goes
+-- in once and stays forever, readable by nothing. A fact scoped to
+-- 'product_udpates' is a fact no verdict will ever find, and no later write can
+-- correct it.
+ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_scopeKey_check"
+    CHECK ("scopeKey" IN (
+        '*',
+        'transactional', 'service', 'marketing',
+        'security', 'billing', 'service_status',
+        'product_updates', 'newsletter', 'promotions'
+    ));
 
 ALTER TABLE "EmailSendApproval" ADD CONSTRAINT "EmailSendApproval_approvalType_check"
     CHECK ("approvalType" IN ('risk_accepted', 'obligation_waiver'));
@@ -194,7 +204,10 @@ ALTER TABLE "EmailSendApproval" ADD CONSTRAINT "EmailSendApproval_scope_check"
             AND "purposeKey" IS NULL)
         OR
         ("approvalType" = 'risk_accepted'
-            AND "purposeKey" IS NOT NULL
+            AND "purposeKey" IN (
+                '*', 'security', 'billing', 'service_status',
+                'product_updates', 'newsletter', 'promotions'
+            )
             AND "ruleKey" IS NULL AND "ruleVersion" IS NULL
             AND "country" IS NULL AND "obligationKey" IS NULL)
     );
@@ -494,6 +507,40 @@ CREATE TRIGGER "email_send_approval_member_seal"
     BEFORE INSERT OR UPDATE OR DELETE ON "EmailSendApprovalMember"
     FOR EACH ROW EXECUTE FUNCTION "email_send_approval_member_seal"();
 
+-- Only an override has a cohort.
+--
+-- A `risk_accepted` approval is scoped by *who*: the accounts named in this
+-- table, compared digest by digest (section 5.6). An `obligation_waiver` is
+-- scoped by *what*: a rule version, a country and an obligation key (section
+-- 7.8). Letting a waiver carry members would be a second way to scope one that
+-- nothing reads and no verdict would honour -- a list that looks like it
+-- narrows a decision and does not.
+
+CREATE FUNCTION "email_send_approval_member_is_override"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    approval_type TEXT;
+BEGIN
+    SELECT a."approvalType" INTO approval_type
+        FROM "EmailSendApproval" a
+        WHERE a."id" = NEW."approvalId";
+
+    IF approval_type <> 'risk_accepted' THEN
+        RAISE EXCEPTION 'EmailSendApproval % is a % and is scoped by rule rather than by cohort.',
+            NEW."approvalId", approval_type
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_send_approval_member_is_override"
+    BEFORE INSERT OR UPDATE ON "EmailSendApprovalMember"
+    FOR EACH ROW EXECUTE FUNCTION "email_send_approval_member_is_override"();
+
 CREATE FUNCTION "email_send_approval_member_seal_final"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -606,6 +653,32 @@ $$;
 CREATE TRIGGER "email_permission_decision_immutable"
     BEFORE UPDATE OR DELETE ON "EmailPermissionDecision"
     FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_immutable"();
+
+-- A verdict is taken for a delivery, so it has one when it is written.
+--
+-- The column is nullable for one reason only: a delivery is purged on its own
+-- schedule and the foreign key detaches the verdict rather than taking it with
+-- it. Nullable at INSERT is a different thing -- it would let a verdict exist
+-- about no particular message, and it would let the (deliveryId, phase) unique
+-- index stop constraining, because Postgres does not compare nulls. A refusal
+-- that produces no delivery is EmailCampaignRecipient's row, not this one.
+
+CREATE FUNCTION "email_permission_decision_needs_delivery"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW."deliveryId" IS NULL THEN
+        RAISE EXCEPTION 'EmailPermissionDecision is taken for a delivery and must name one.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_permission_decision_needs_delivery"
+    BEFORE INSERT ON "EmailPermissionDecision"
+    FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_needs_delivery"();
 
 -- Evidence is append-only and closes with its verdict. The same statement-end
 -- check as the cohort, for the same reason: a data-modifying CTE that seals

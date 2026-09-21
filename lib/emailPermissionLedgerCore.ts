@@ -13,6 +13,7 @@
 
 import {
   EMAIL_CLASSIFICATIONS,
+  EMAIL_PURPOSES,
   type EmailClassification,
 } from "./emailPreferenceCore";
 
@@ -55,6 +56,30 @@ export const EMAIL_PERMISSION_EVENT_CAPTURE_SOURCES = [
 
 export type EmailPermissionEventCapture =
   (typeof EMAIL_PERMISSION_EVENT_CAPTURE_SOURCES)[number];
+
+/**
+ * What a permission fact can be about.
+ *
+ * One purpose, one classification, or the address itself. Closed rather than
+ * "any non-empty string" because this table is append-only: a typo goes in
+ * once and stays forever, and a fact scoped to `product_udpates` is a fact no
+ * verdict will ever find with no later write able to correct it.
+ */
+export const EMAIL_PERMISSION_EVENT_SCOPE_KEYS = [
+  "*",
+  ...EMAIL_CLASSIFICATIONS,
+  ...EMAIL_PURPOSES,
+] as const;
+
+export type EmailPermissionEventScopeKey =
+  (typeof EMAIL_PERMISSION_EVENT_SCOPE_KEYS)[number];
+
+/**
+ * What a `risk_accepted` override can cover: one purpose, or all of them.
+ * Closed for the same reason -- the approval is sealed, so a typo in its scope
+ * is an approval that matches nothing and can never be corrected.
+ */
+export const EMAIL_SEND_APPROVAL_PURPOSE_KEYS = ["*", ...EMAIL_PURPOSES] as const;
 
 /**
  * The two kinds of human decision, which are not variants of one thing.
