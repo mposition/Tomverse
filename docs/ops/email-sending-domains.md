@@ -748,7 +748,7 @@ npm run check:sending-identity -- --env
 
 계속 따라오는 것: §5.3.1 **결정 4** — **hard bounce 억제는 계속 공유합니다.**
 주소가 없다는 사실은 스트림과 무관하며, 이제 provider가 그것을 대신 해 주지
-않으므로 **우리 `SuppressionEntry`가 유일한 공유 지점**입니다
+않으므로 **우리 억제 기록(`SuppressionCause`)이 유일한 공유 지점**입니다
 (`lib/emailSuppression.ts`, `GLOBAL_PURPOSE_KEY`). 어느 계정에서 난 bounce든
 우리 테이블에 기록돼야 양쪽이 같이 멈춥니다.
 
@@ -1037,7 +1037,8 @@ dependencies` 바로 뒤(step 5)로 옮겨 두었으므로, 잘못 설정돼 있
 유지할 때의 조건이므로 적용되지 않습니다(§5.3.1 결정 3).
 
 계속 따라오는 것: **hard bounce 억제 공유**(§5.3.1 결정 4). 계정이 나뉘었으므로
-provider가 대신 해 주지 않으며, 우리 `SuppressionEntry`가 유일한 공유 지점입니다.
+provider가 대신 해 주지 않으며, 우리 억제 기록(`SuppressionCause`)이 유일한 공유
+지점입니다.
 
 marketing이 여전히 production 비활성인 것은 이제 A18도 Q8도 아닙니다. Q8의 값은
 2026-09-14에 배포됐고(§1.3), 남은 것은 **Q1·Q2**와 DMARC 관측·warm-up입니다

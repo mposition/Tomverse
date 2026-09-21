@@ -91,8 +91,8 @@ const nextSendOutcome = () =>
 /** A tiny in-memory stand-in for the two tables this contract touches. */
 const fakePrisma = {
   // Every attempt asks whether the address is suppressed first
-  // (docs/policy/email-notifications.md §13.3).
-  suppressionEntry: { findMany: async () => [] },
+  // (docs/policy/email-notifications.md §13.3), and asks the causes.
+  suppressionCause: { findMany: async () => [] },
   // The suppression read authority: absent, so entries decide.
   appSetting: { findUnique: async () => null },
   // The fence and the address lock the send takes before it submits.

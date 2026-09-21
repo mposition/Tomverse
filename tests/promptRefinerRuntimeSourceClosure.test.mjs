@@ -72,10 +72,21 @@ const compilerOptions = parsedConfig.options;
 // the watched-schema review comment in `lib/marketingAutomationAccess.ts`.
 // The entry count and the same position-free inventory remain identical; only
 // later source positions in those two files moved.
+//
+// 2026-09-21, deploy C-2: repinned for moved positions only. Nothing writes
+// `SuppressionEntry` any more, which deletes code and rewrites comments in four
+// closure files -- `lib/emailSuppression.ts`, `lib/emailPreferences.ts`,
+// `lib/emailProviderEvents.ts`, `lib/emailPermanentBounceRecovery.ts` -- and
+// merging develop moved lines again. The count above still holds at 228, and
+// the inventory compared without line and column (`path + expression text` for
+// every entry) hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 on this
+// branch and on `origin/develop` alike, so nothing was added, removed or
+// changed. Only positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "71782e39a60c912f9559d68930f76b53",
-  "ca573dac9b1b411e521e96922b91d66b",
+  "d0d59c25abe9ea2e08e20f6953d13d83",
+  "982fa70cfe65996fbf98a83a82f4e943",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

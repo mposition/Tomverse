@@ -29,7 +29,8 @@ import { SOFT_BOUNCE_SUPPRESSION_THRESHOLD } from "@/lib/emailSuppressionCore";
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ProviderWebhookEvent", "SuppressionEntry", "EmailDelivery", "EmailEvent",
+      "ProviderWebhookEvent", "SuppressionCause", "SuppressionEntry",
+      "EmailDelivery", "EmailEvent",
       "TemplateVersion", "EmailTemplate", "EmailPolicyVersion", "User"
     RESTART IDENTITY CASCADE
   `);
@@ -124,7 +125,7 @@ test("a redelivered webhook changes nothing the second time", async () => {
   assert.deepEqual(second, { handled: false, reason: "duplicate" });
 
   assert.equal(await prisma.providerWebhookEvent.count(), 1);
-  assert.equal(await prisma.suppressionEntry.count(), 1);
+  assert.equal(await prisma.suppressionCause.count(), 1);
 });
 
 test("a hard bounce suppresses the address permanently", async () => {
@@ -138,7 +139,7 @@ test("a hard bounce suppresses the address permanently", async () => {
     bounce: { type: "Permanent" },
   });
 
-  const entry = await prisma.suppressionEntry.findFirstOrThrow();
+  const entry = await prisma.suppressionCause.findFirstOrThrow();
   assert.equal(entry.reason, "hard_bounce");
   assert.equal(entry.scope, "global");
   assert.equal(entry.purposeKey, "*");
@@ -162,7 +163,7 @@ test("a soft bounce does not suppress on its own", async () => {
     bounce: { type: "Transient" },
   });
 
-  assert.equal(await prisma.suppressionEntry.count(), 0);
+  assert.equal(await prisma.suppressionCause.count(), 0);
   const row = await prisma.emailDelivery.findFirstOrThrow();
   assert.equal(row.status, "bounced");
   assert.equal(row.lastErrorKind, "soft_bounce");
@@ -183,7 +184,7 @@ test("a run of soft bounces does suppress, and the hold expires", async () => {
   }
 
   assert.ok(last);
-  const entry = await prisma.suppressionEntry.findFirstOrThrow();
+  const entry = await prisma.suppressionCause.findFirstOrThrow();
   assert.equal(entry.reason, "soft_bounce");
   // The one reason that expires: the address may start accepting mail again,
   // and only a bounce or a complaint that is permanent should be permanent.
@@ -278,7 +279,7 @@ test("suppression is checked at send time, not at enqueue time", async () => {
   assert.equal(fetches.count(), 0);
 });
 
-test("a permanent entry is not downgraded by a later transient one", async () => {
+test("a later transient bounce sits beside the permanent one rather than replacing it", async () => {
   const address = `${randomUUID()}@example.com`;
 
   await recordSuppression({
@@ -287,7 +288,7 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
     reason: "hard_bounce",
     source: "provider_webhook",
   });
-  const downgrade = await recordSuppression({
+  const later = await recordSuppression({
     sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "soft_bounce",
@@ -295,12 +296,25 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
     expiresAt: new Date(Date.now() + 60_000),
   });
 
-  // A permanent suppression a transient event can replace is not a permanent
-  // suppression.
-  assert.equal(downgrade.changed, false);
-  const entry = await prisma.suppressionEntry.findFirstOrThrow();
-  assert.equal(entry.reason, "hard_bounce");
-  assert.equal(entry.expiresAt, null);
+  // Deploy A merged both facts into one row, so "not downgraded" was a rule the
+  // merge had to be told. Causes are one row per event: the soft bounce is
+  // recorded -- it did happen -- and the hard bounce it cannot replace is still
+  // there beside it, which is why the verdict does not move.
+  assert.equal(later.changed, true);
+  const hard = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress: address, reason: "hard_bounce" },
+  });
+  assert.equal(hard.expiresAt, null);
+  assert.equal(hard.releasedAt, null, "a transient event does not release a permanent cause");
+  assert.equal(
+    await prisma.suppressionCause.count({ where: { emailAddress: address } }),
+    2,
+    "both events are kept"
+  );
+  assert.deepEqual(
+    await suppressionCheck({ emailAddress: address, classification: "transactional" }),
+    { allowed: false, skipReason: "hard_bounce" }
+  );
 });
 
 test("addresses are matched case-insensitively", async () => {
@@ -331,7 +345,7 @@ test("an event we do not collect is recorded and does nothing", async () => {
   // Open and click tracking is deliberately not collected (section 8.4). An
   // event we choose not to act on is not an error.
   assert.deepEqual(result, { handled: true, effect: "ignored", deliveryId: null });
-  assert.equal(await prisma.suppressionEntry.count(), 0);
+  assert.equal(await prisma.suppressionCause.count(), 0);
   const row = await prisma.emailDelivery.findFirstOrThrow();
   assert.equal(row.status, "sent");
 });
@@ -362,7 +376,7 @@ test("the raw event is kept so an operator can see what arrived", async () => {
   assert.equal(stored.eventType, "email.complained");
   assert.ok(stored.processedAt);
 
-  const entry = await prisma.suppressionEntry.findFirstOrThrow();
+  const entry = await prisma.suppressionCause.findFirstOrThrow();
   assert.equal(entry.reason, "complaint");
   // Which stream drew it is what section 13.3 decides on, so it is recorded
   // from the message rather than guessed at later.

@@ -192,9 +192,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * the same watched schema. None changes a marketing model, the descriptor, or
  * an admission decision; the fingerprint moves because the closed file digest
  * deliberately requires this review whenever any schema bytes move.
+ *
+ * 2026-09-21, again: the same watched file, and this time the declared change
+ * is a documentation comment. `SuppressionCause`'s model comment said the rows
+ * were written beside `SuppressionEntry` and read by no send decision, which
+ * stopped being true when the send moved onto them
+ * (docs/policy/email-notifications.md v26). No column, index, constraint or
+ * model changed, so nothing this pipeline stores or reads is different -- but
+ * a comment is bytes in a watched file, and the digest asking for a look
+ * rather than deciding for itself what is material is the behaviour, not a
+ * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "138fc152de2bd631e63892cb1e64e5209a75f920b7083c41ca32f8b87c8aba04";
+  "2e91a2bfe987ecd4c5dfed650523f3c3018e1908b5610b2214b29e4dea945570";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
