@@ -14,8 +14,10 @@ flag·credential·receipt writer를 연결하지 않는다.
 
 - 기존 `PromptRefinerReservationStage`의 additive migration
 - 승인 시점의 DB-owned 시각과 고정 60분 TTL
-- staging 환경, runtime commit, Railway deployment id, 187-file/16 MiB bounded exact-byte
+- staging 환경, runtime commit, Railway deployment id, 188-file/16 MiB bounded exact-byte
   runtime import-closure source manifest
+- 완료된 v1 proposal은 역사적 byte identity로 보존하고 현행 v2 reservation authority는
+  v2 execution manifest에 별도로 결속
 - 과거 proposal/evidence/corpus/source identity와 현재 execution manifest의 immutable 결속
 - owner 전용 관리자 GET preview와 POST create-only writer
 - advisory lock, DB rate limit, fixed confirmation, 최근 인증, 전역 CSRF

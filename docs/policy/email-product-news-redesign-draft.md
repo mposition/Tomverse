@@ -852,6 +852,14 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   | **C (정리)** | 원인 — **설정 `causes`는 그대로 두고** 코드는 설정과 무관하게 원인을 읽음 | **중단** | 계속, **trigger 제거** | B. B는 설정 `causes`를 읽으므로 같은 기준 |
   | **D (설정 제거)** | 원인 | — | 계속 | C. 둘 다 설정과 무관하게 원인을 읽음 |
 
+  - **D는 실행 중에 둘로 갈렸습니다.** D-1이 설정을 읽는 **코드**를 없앴고
+    (email-notifications.md v27), 설정 **행**의 삭제는 조건부로 보류했습니다
+    (v28) — 저장된 값이 `causes`인 동안 그 행은 D-1 이전 build를 올바르게 만드는
+    것이므로 지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다. **행이 없을
+    때의 동작은 어느 build인가에 따라 다르고**, 그 표가 v28 1번입니다 — 이 표의
+    D 행은 그 구분이 생기기 전에 쓰였습니다. 지울 수 있게 되는 조건은 v28
+    3번이고, 그 전까지는 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가
+    활성 migration에 그 key가 들어오는 것을 막습니다.
   - **A의 trigger(C83)** — A migration이 `SuppressionEntry`에 AFTER INSERT·UPDATE·
     DELETE trigger를 둡니다. 새 build는 자기 transaction에서
     `SET LOCAL app.suppression_writer = 'causes'`를 걸고, trigger는 이 값이 없는 쓰기(=
@@ -885,12 +893,28 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   - **C로 넘어가는 gate** — 설정이 `causes`이고 B가 모두 배포되었을 때. C는 entry 쓰기와
     trigger를 제거하고 **설정은 `causes`로 남겨 둡니다**(C90) — 공존하는 B가 매 판정마다
     설정을 읽기 때문입니다.
-  - **D로 넘어가는 gate** — C가 모두 배포되었을 때. D는 설정 행과 그 읽기 코드를 지웁니다.
+  - ~~**D로 넘어가는 gate** — C가 모두 배포되었을 때. D는 설정 행과 그 읽기 코드를
+    지웁니다.~~ **email-notifications.md v27·v28이 대신합니다.** D는 둘로 갈렸고,
+    행을 지우는 쪽(D-2)의 gate는 "C가 모두 배포됨"이 아닙니다 — **production이
+    D-1 이후 build를 돌리고 있고, 되돌릴 대상도 설정 reader가 없는 트리일 때**
+    입니다(v28 3번). 아래 rollback 하한이 그 이유를 이미 담고 있는데, 이 줄이
+    그것을 C로 잘못 적었습니다.
   - **rollback 하한** — A 배포 중에는 지금 build까지. B 배포 중·설정 `entry`인 동안은
     A까지. 설정을 `causes`로 바꾼 뒤에는 **B까지**(A는 설정을 읽지 않으므로 금지). C 배포
-    중·후에는 B까지(설정 `causes` 유지). D 배포 중·후에는 C까지(B는 설정 부재 시 `entry`로
-    되돌아가므로 금지). 설정을 다시 `entry`로 돌리는 것은 C 이후 금지입니다 — entry 쓰기가
-    없습니다.
+    중·후에는 B까지(설정 `causes` 유지).
+
+    **행이 있는 동안은 D-1 배포 중·후에도 B까지입니다** — 행이 있으면 B도, 지금
+    main도, C-1도, C-2도 `causes`를 얻기 때문입니다.
+
+    **행을 지운 뒤에는 하한이 C가 아니라 D-1 이후입니다.** 이 줄은 한때 C라고
+    적었고 그것은 틀렸습니다 — 행이 없으면 C-1은 send가 `entry`로 되돌아가고,
+    C-2는 send만 원인을 읽을 뿐 console·preference·privacy intake·cutover 네
+    reader가 그대로 잘못 동작합니다. 되돌릴 수 있는 것은 **설정 reader가 하나도
+    없는 build**, 즉 D-1 이후뿐이며, 그것이 v28 3번의 "되돌릴 대상도 reader-free"
+    와 같은 말입니다. 원문은 행 삭제와 코드 삭제가 한 배포라는 전제 위에
+    있었습니다.
+
+    설정을 다시 `entry`로 돌리는 것은 C 이후 금지입니다 — entry 쓰기가 없습니다.
 
 
 - **만료의 기록(C66)** — 판정은 위 활성 정의로 만료를 즉시 제외하므로 기다리지

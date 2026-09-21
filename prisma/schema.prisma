@@ -5536,7 +5536,7 @@ model PromptRefinerReservationStage {
   corpusDigest                   String
   runtimeCommitSha               String
   runtimeSourceIdentityDigest    String
-  /// Content-free v2 manifest for the exact 187-file runtime import closure;
+  /// Content-free v3 manifest for the exact 188-file runtime import closure;
   /// the database validates ordered paths plus 8 MiB/file and 16 MiB total.
   runtimeSourceManifest          Json
   runtimeSourceManifestDigest    String
@@ -5586,6 +5586,9 @@ model PromptRefinerShadowRun {
   runContractVersion          String
   runContractDigest           String    @unique
   corpusDigest                String
+  /// Null only for the immutable historical v3 run. Every v4 run is bound to
+  /// the reviewed evidence specification before approval.
+  evidenceSpecDigest          String?
   adapterVersion              String
   status                      String    @default("approved")
   perRequestCostMicroUsd      BigInt
@@ -5645,6 +5648,9 @@ model PromptRefinerShadowAttempt {
   outputTokens              Int?
   reasoningTokens           Int?
   actualCostMicroUsd        BigInt?
+  /// Closed, content-free case evidence. Historical v3 attempts remain null;
+  /// v4 writes this atomically with the terminal receipt.
+  evidence                  Json?
   dispatchAuditLogId        String    @unique
   terminalAuditLogId        String?   @unique
   createdAt                 DateTime  @default(now())
