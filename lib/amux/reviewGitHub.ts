@@ -200,7 +200,7 @@ export async function readAmuxReviewPullRequest(
     // The operator must see the exact bytes whose digest is approved. Reject
     // controls that can visually reorder or hide the diff instead of silently
     // normalising the displayed content away from its authoritative digest.
-    if (/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(diffText)) {
+    if (/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(diffText)) {
       throw new AmuxReviewGitHubError("unsafe_display");
     }
     if (!diffText.startsWith("diff --git ") ||
