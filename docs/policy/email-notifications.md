@@ -1327,7 +1327,7 @@ marketing을 포함하지 않는다는 범위 결정.
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
-| 6 | 사용자가 명시적으로 구독한 기능 업데이트 | **marketing** | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
+| 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
 | 7 | 신규 기능 소개, 뉴스레터 | marketing | 불가 | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
 | 8 | 프로모션, 할인, 재참여 | marketing | 불가 | 불가 | **필수** | P3 | 관대 | marketing |
 | 9 | 관리자 긴급 공지 | 내용에 따라 갈림 | 조건부 | 조건부 | 조건부 | P0 | 공격적 | transactional |
@@ -1384,9 +1384,17 @@ marketing을 포함하지 않는다는 범위 결정.
   marketing 거부자에게 못 보내게 되어 **법적 통지 의무를 스스로 깨뜨립니다.**
   이것이 이 문서에서 가장 강조하고 싶은 실패 모드입니다.
 
-#### 6. 사용자가 명시적으로 구독한 기능 업데이트
+#### 6. 기능 업데이트 / 릴리스 노트
+
+이 행은 한때 "사용자가 **명시적으로 구독한** 기능 업데이트"였습니다. 그 이름은
+권한 근거를 유형 이름에 박아 넣은 것이고, 2026-09-16 개정 이후로는 **승인된 수신
+경로를 배제합니다** — 호주의 추론 동의로 받는 사람, 미국의 `opt_out`으로 받는
+사람, 승인 F의 `risk_accepted`로 받는 사람은 어느 쪽도 "명시적으로 구독"하지
+않았습니다. 유형은 **무엇을 보내는가**이고, 누구에게 보내도 되는가는 5.1.1이
+정합니다.
+
 - **classification은 `marketing`입니다**(승인 A, 제품 소식 재설계 초안 §3).
-- **어느 purpose가 이 행인지는 아직 정해지지 않았습니다.** 오늘 있는 것은
+- **어느 purpose identifier가 이 행인지는 아직 정해지지 않았습니다.** 오늘 있는 것은
   `product_updates`(동의 필수)이고, 초안 §3은 `release_notes`를 **새로 만든다**고
   적으면서 `product_updates`를 언급하지 않습니다. 둘이 같은 것인지, 하나가 다른
   하나를 대체하는지, 나란히 서는지는 **S3의 purpose 분류표가 정합니다.** 여기서
@@ -1706,7 +1714,7 @@ C1~C14를 적용하고 나면 **표시·운영의** 국가별 분기는 일곱 �
 | E3 | **footer에 표시할 사업자 정보 집합** (호주: ABN / 기타: 법인명+주소) | AU, 기타 | `JurisdictionProfile.footerBlocks[]`. **한국의 사업자등록번호·통신판매업 신고번호는 2026-09-14에 KR profile에서 제거했습니다** — 시행령 별표 6이 요구하는 것은 명칭·연락처·수신거부 방법이고, 두 번호는 전자상거래법상 통신판매업자의 표시 의무입니다. 발송 주체가 호주 법인이며 한국 통신판매업 신고 대상이 아님을 확인했으므로(2026-09-14) 그 번호가 존재하지 않고, 값을 가질 수 없는 block을 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. renderer는 block을 그대로 들고 있으므로 신고 번호가 생기면 seed 한 줄과 새 policy version으로 되살립니다 |
 | E4 | **수신거부 처리 SLA 표기** (5/10 영업일) | AU=5, US/CA/SG=10 | `JurisdictionProfile.unsubscribeSlaBusinessDays` — 표기용. 실제 처리는 항상 즉시 |
 | E5 | **야간 발송 억제 창** (21:00~08:00 현지) | ~~KR~~ **해당 국가 없음**(Q4 해소 2026-09-16: 시행령 제61조제2항이 전자우편을 야간 제한 대상 매체에서 제외) | `JurisdictionProfile.quietHours`. 창을 읽고 지연시키는 기계는 lane에 그대로 있고, 창은 정책 버전 데이터입니다 — 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version이며 코드 변경이 아닙니다. **이메일 밖 채널(SMS·푸시)은 별개 판정이고 이 표가 답하지 않습니다** |
-| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | C8로 인해 **미사용**. profile에 필드만 남기고 비활성 |
+| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | **미사용.** 근거는 C8이 아니라 **5.1.1이 캐나다를 `express_consent`로 두고 해제 조건을 주지 않는 것**입니다(2026-09-16 개정 이후). profile에 필드만 남기고 비활성 |
 | E7 | **동의 확인 고지 주기** | KR=24개월 | `JurisdictionProfile.consentNoticeIntervalMonths`. 만료가 아니라 고지. 5.5 |
 
 **나머지는 전부 공통입니다.** 템플릿 본문, 레이아웃, 버튼, 언어, 브랜딩은 국가로
@@ -1804,8 +1812,11 @@ Azure AD, 그리고 `login-methods` 경로가 마지막 로그인 수단 제거�
 아무도 끄지 못합니다. 목록 위생 목적으로 채택할 수 있으나 그것은 **별도 결정**
 입니다(22절 A14).
 
-캐나다의 묵시적 동의 만료는 진짜 만료지만, C8로 묵시적 동의를 쓰지 않으므로
-충돌하지 않습니다.
+캐나다의 묵시적 동의 만료는 진짜 만료지만, **5.1.1이 캐나다를
+`express_consent`로 두고 해제 조건을 주지 않으므로** 충돌하지 않습니다.
+(2026-09-16 개정 전에는 C8이 그 근거였습니다. 개정된 C8이 허용하는 묵시적 동의는
+호주의 추론 동의 하나이고, 그것은 시간이 아니라 **관계 종료 사건**으로 끝납니다 —
+초안 §4.4.)
 
 ### 5.6 soft opt-in을 쓰지 않기로 하는 이유
 
@@ -1897,9 +1908,20 @@ marketing을 **보내지 않고 보류**합니다.
 
 **규칙 2 — 그래서 marketing opt-in 시점에 국가를 필수로 수집합니다.**
 이것이 규칙 1을 실무적으로 감당 가능하게 만드는 짝입니다. 수신 동의를 받을 때
-국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록하면, **marketing 수신자는
-정의상 항상 확정된 관할권을 가집니다.** 보류는 예외 상황(청구 국가가 나중에
-바뀌어 충돌이 생긴 경우)에만 발생합니다.
+국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록합니다.
+
+**다만 "그래서 marketing 수신자는 정의상 항상 확정된 관할권을 가진다"는 2026-09-16
+개정 이후 참이 아닙니다.** 동의를 받는 경로가 유일한 경로가 아니게 됐기
+때문입니다 — 미국의 `opt_out`, 호주의 추론 동의, 승인 F의 `risk_accepted`로
+받는 사람은 동의 화면을 지나지 않았고, 따라서 그 화면이 묻는 국가도 없습니다.
+
+**그 경로들은 지금 고신뢰 국가 신호가 없으면 fail-closed입니다.** 6.1의 신호
+우선순위에서 확정되지 않으면 marketing은 보류이고(`ZZ`는 발송 안 함), IP 추정
+국가를 근거로 쓰는 계약은 **아직 이 문서에 없습니다** — 초안 §12 S0의 남은 항목
+이며 6.1·6.2와 `AGENTS.md`를 함께 고칠 때 들어옵니다. 그 전까지 동의 없는
+경로의 수신자는 **국가가 확정될 때까지 받지 못합니다.**
+
+보류는 그래서 예외 상황이 아니라 **그 경로들의 기본 상태**입니다.
 
 | confidence | marketing | service | legal | transactional |
 |---|---|---|---|---|
@@ -2742,7 +2764,8 @@ footerBlocks       Json     // ["legal_name","postal_address","business_registra
 unsubscribeSlaBusinessDays Int
 consentNoticeIntervalMonths Int?  // E7. KR=24. 고지 주기이지 만료 기한이 아님
 quietHours         Json?    // { start:"21:00", end:"08:00", tz:"local" }
-impliedConsentDays Json?    // CASL. C8로 비활성
+impliedConsentDays Json?    // CASL. 비활성 — 5.1.1이 CA를 express_consent로 두고
+                            // 해제 조건을 주지 않습니다. 기록만 남깁니다
 notes              String   // 근거 출처와 확인일
 @@unique([profileKey, policyVersionId])
 ```
@@ -3189,7 +3212,9 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    ( ) transactional   ( ) service   ( ) legal   ( ) marketing
 
    -> 선택 즉시 화면 전체가 바뀝니다:
-      marketing:  수신자 = opt-in 사용자만. unsubscribe 강제. 승인 필수.
+      marketing:  수신자 = 5.1.1의 국가 rule과 호주 발신자 authority를 모두
+                  통과한 사용자(동의·추론 동의·opt_out·승인된 override).
+                  unsubscribe 강제. 승인 필수.
       legal:      수신자 = 전원(hard bounce 제외). unsubscribe 없음. 승인 필수.
       service:    수신자 = service_status ON. 승인 필요(단일 승인).
 
@@ -3785,8 +3810,18 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - **모든 지원 언어에 대해 published `TemplateVersion`이 존재.** 없으면 빌드 실패
   (현재 `normalizeLanguage`가 조용히 `en`으로 떨어지는 문제의 근본 해결).
 
-**gating (단위)**
-- marketing + opt-in 없음 -> `skipped:no_consent`
+**gating (단위)** — 판정은 5.1.1의 국가 rule과 호주 발신자 authority가 함께
+합니다. basis별로 갈립니다.
+
+- marketing + `express_consent` 국가(KR·EEA·GB·CH·CA·SG) + opt-in 없음 ->
+  `skipped:no_consent`
+- marketing + `opt_out` 국가(US) + 거부 없음 -> 수신자 authority 통과.
+  **발송 여부는 호주 발신자 authority가 정합니다**
+- marketing + `inferred_consent`(AU) + 관계 활성 -> 통과. 관계 종료 사건이
+  기록돼 있으면 -> `skipped:no_consent`
+- marketing + 국가 미확정(`ZZ`) -> 발송 안 함
+- marketing + 근거 없음 + 유효한 `risk_accepted` 승인의 cohort -> 발송하되
+  판정에는 `legalAllowed: false`와 `overrideApplied`가 남습니다(5.1.1)
 - marketing + `nextConfirmationNoticeAt` 경과 -> **발송됨**(동의는 유지). 별도로
   확인 고지가 큐에 들어감
 - marketing + `feature.emailConsentLapseAutoOptOut` ON + 고지 후 무응답 ->
