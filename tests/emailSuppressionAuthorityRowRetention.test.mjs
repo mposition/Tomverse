@@ -81,10 +81,14 @@ test("no migration touches the retired suppression read authority row", () => {
     offenders,
     [],
     `${offenders.join(", ")} names ${RETIRED_AUTHORITY_KEY}. ` +
-      "That row is kept deliberately while a build older than D-1 could serve: " +
-      "such a build reads an absent row as `entry` and sends from a table frozen " +
-      "since deploy C. See docs/policy/email-notifications.md v28 for the two " +
-      "conditions that release it, and delete this test as the first step of D-2 " +
-      "once they hold."
+      "That row is kept deliberately while a build older than D-1 could serve, " +
+      "and what an absent row costs depends on which build that is. Up to and " +
+      "including C-1 the send itself returns to `SuppressionEntry`, a table " +
+      "frozen since deploy C -- mail to people who asked us to stop. On C-2 the " +
+      "send still reads causes, but the console, the preference toggle, the " +
+      "privacy intake and the cutover tool all answer an absent row as `entry`. " +
+      "See docs/policy/email-notifications.md v28 for the table and for the two " +
+      "conditions that release the row, and delete this test as the first step " +
+      "of D-2 once they hold."
   );
 });
