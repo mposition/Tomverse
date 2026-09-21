@@ -17,6 +17,8 @@ CREATE FUNCTION "prompt_refiner_runtime_manifest_valid"(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 IMMUTABLE
+STRICT
+PARALLEL SAFE
 AS $$
 DECLARE
     files JSONB;

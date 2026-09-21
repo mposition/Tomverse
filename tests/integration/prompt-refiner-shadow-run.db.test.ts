@@ -463,6 +463,35 @@ test("v4 terminal duration is bounded before an immutable receipt can be stored"
     );
 });
 
+test("v4 runtime manifest wrapper preserves strict and parallel-safe validator metadata", async () => {
+    const functions = await prisma.$queryRawUnsafe<
+        Array<{ name: string; parallel: string; strict: boolean }>
+    >(`
+        SELECT
+          proname AS name,
+          proparallel::TEXT AS parallel,
+          proisstrict AS strict
+        FROM pg_proc
+        WHERE proname IN (
+          'prompt_refiner_runtime_manifest_valid',
+          'prompt_refiner_runtime_manifest_v2_valid'
+        )
+        ORDER BY proname
+    `);
+    assert.deepEqual(functions, [
+        {
+            name: "prompt_refiner_runtime_manifest_v2_valid",
+            parallel: "s",
+            strict: true,
+        },
+        {
+            name: "prompt_refiner_runtime_manifest_valid",
+            parallel: "s",
+            strict: true,
+        },
+    ]);
+});
+
 test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {
     await approveStage();
     await approveRun();
