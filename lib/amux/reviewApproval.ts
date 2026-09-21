@@ -39,7 +39,7 @@ const refuse = (code: string, status = 409): never => {
 const safeReviewDisplayText = (value: string | null) => {
   if (value === null) return null;
   const cleaned = value.normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
     .replace(/\r\n?/gu, "\n");
   let text = "";
   let bytes = 0;

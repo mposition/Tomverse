@@ -17,7 +17,7 @@ export function normalizeAmuxUntrustedReason(value: string | null | undefined) {
   const normalized = value
     .normalize("NFC")
     .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "")
-    .replace(/[\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
+    .replace(/[\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
     .replace(/[\r\n\t]+/gu, " ")
     .replace(/ +/gu, " ")
     .trim();
