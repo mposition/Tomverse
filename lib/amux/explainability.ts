@@ -6,6 +6,7 @@ import {
   parseAmuxIncidentSetting,
   AMUX_INCIDENT_SETTING_KEY,
 } from "@/lib/amux/incidentCore";
+import { publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { prisma } from "@/lib/prisma";
 
 const asRecord = (value: Prisma.JsonValue | null | undefined) =>
@@ -219,7 +220,6 @@ export async function getAmuxExplainabilityReport() {
       select: {
         id: true,
         specialty: true,
-        reason: true,
         status: true,
         createdAt: true,
         task: {
@@ -285,6 +285,7 @@ export async function getAmuxExplainabilityReport() {
     })),
     escalations: escalations.map((escalation) => ({
       ...escalation,
+      reason_code: publicAmuxEscalationReasonCode(escalation.task.status),
       createdAt: escalation.createdAt.toISOString(),
     })),
     workers: runtimes.map((runtime) => {

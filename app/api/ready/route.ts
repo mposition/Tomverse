@@ -20,6 +20,7 @@ import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { amuxReviewApprovalReadiness } from "@/lib/amux/reviewApprovalCore";
 import {
   getActiveProviders,
   getProviderBudgetReadiness,
@@ -243,6 +244,8 @@ const readinessResponse = async (head = false) => {
   // yes -- the exact state EM-10 describes for the keyring.
   const businessIdentity = businessIdentityReadiness();
   const emailBusinessIdentity = businessIdentity.ready;
+  const amuxReviewStatus = amuxReviewApprovalReadiness(process.env);
+  const amuxReviewApproval = amuxReviewStatus.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -250,7 +253,7 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity;
+    emailBusinessIdentity && amuxReviewApproval;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -623,6 +626,7 @@ const readinessResponse = async (head = false) => {
         emailUnsubscribeKeyRetention,
         emailConsentKeyring,
         emailBusinessIdentity,
+        amuxReviewApproval,
       },
       traceId,
     },

@@ -390,6 +390,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The execution-runner migration fails closed on existing attempts, then replaces the exact v3 binding and insert guard for tokenizer facts. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no attempt.",
   },
   {
+    path: "prisma/migrations/20260921160000_amux_agent_review_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 24,
+    reason:
+      "The AMUX approval migration creates only its proposal/decision ledger and reads AdminAuditLog through a restrictive foreign key and SELECT FOR KEY SHARE. It never writes AdminAuditLog; lib/adminAudit.ts remains its sole writer. Exact counts fail closed if this SQL changes.",
+  },
+  {
     path: "scripts/report-unswept-tables-core.mjs",
     table: "MarketingReport",
     tableMentions: 1,

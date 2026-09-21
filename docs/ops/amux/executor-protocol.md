@@ -35,6 +35,14 @@ worker 이름은 server-side worker catalog와 같은 논리적 worker identity�
 
 ## Lane environment
 
+Agent 작업 검토 승인은 executor lane이 아니라 **app server** 기능이다. 별도 승인
+계약과 staging 기록에 서명하기 전에는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED`를
+off로 유지한다. 켜기 전에 app server에 `mposition/Tomverse` 한정 Metadata·Pull
+requests·Contents 읽기 전용 `AMUX_REVIEW_GITHUB_READ_TOKEN`, 기존
+`TOMVERSE_AMUX_SYNC_SECRET`, Admin-to-internal proxy의 `NEXTAUTH_URL`을
+설정한다. 이 GitHub token은 orchestrator나 executor lane에 설치하지 않고,
+값 자체를 증거에도 기록하지 않는다.
+
 **lane은 빈 환경에서 시작한다.** orchestrator는 `env_clear()` 뒤 그 lane이
 `env_passthrough`로 선언한 이름만 주입한다. 선언하지 않으면 아무것도 받지
 않으므로, `PATH`로 찾는 program 이름을 쓰려면 `PATH`를 선언하거나 절대 경로를

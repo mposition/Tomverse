@@ -541,6 +541,16 @@ const REGISTRY = {
     reason:
       "A human escalation is open, acknowledged or resolved. Lifecycle columns and the partial unique index make unresolved ownership visible and singular per task.",
   },
+  AmuxReviewProposal_outcome_check: {
+    owner: "type_only",
+    reason:
+      "The server creates only approve, retry or block task-review proposals through AmuxReviewOutcome in lib/amux/reviewApprovalCore.ts. The database also binds each value to an exact source and target status; no client-supplied outcome can widen that transition set.",
+  },
+  AmuxReviewDecision_outcome_check: {
+    owner: "type_only",
+    reason:
+      "A decision copies the proposal's closed AmuxReviewOutcome union and the database verifies that match before appending the immutable ledger row. This is a one-person task-review record, not AdminActionApproval or permission for an external action.",
+  },
   AmuxExecutionAttempt_outcome_check: {
     owner: "type_only",
     reason:

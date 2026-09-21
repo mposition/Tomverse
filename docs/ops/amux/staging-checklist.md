@@ -20,6 +20,9 @@ canonical checklist다.
 - deploy SHA는 현재 로컬 `HEAD`를 추측해서 쓰지 않는다.
 - 배포 artifact의 source identity를 다시 확인할 수 있어야 한다.
 - staging verification 시작 시 AMUX activation은 off다.
+- Agent 작업 검토는 별도 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` flag가 off다.
+  flag를 켜는 회차에만 전용 GitHub read-only token, AMUX sync secret,
+  `NEXTAUTH_URL`을 먼저 주입한다. 비밀값은 기록에 남기지 않는다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
 - secret/token 값은 기록에 복사하지 않는다.
 - execution(Stage 2)으로 갈 회차라면 `docs/ops/amux/executor-protocol.md`의
@@ -95,10 +98,9 @@ turn의 비용·판별 목적을 실행 기록에 먼저 적는다. 캡처 자�
       worker hard gate가 된다.
 - [ ] retry budget 소진, worker blocked, required review는 열린 human escalation을
       하나만 만든다.
-- [ ] 현행 정책에 별도 Agent 승인 계약이 없으므로 escalation resolve 요청은
-      `AMUX_AGENT_APPROVAL_UNAVAILABLE`로 거절된다. `blocked` task의 자동
-      `todo` 복귀를 기대하지 않으며, 승인 계약이 생길 때까지 해당 작업은 수동
-      판정 대기로 기록한다.
+- [ ] 별도 Agent 승인 flag가 off이면 escalation resolve 요청은
+      `AMUX_AGENT_APPROVAL_UNAVAILABLE`로 거절된다. flag on 검증은 아래 G 구획을
+      별도 회차에서 수행하며, 이 구획만으로 승인 경로를 활성화하지 않는다.
 - [ ] task sync는 `doing`과 상태에 관계없이 이미 owner가 지정된 작업의
       project/team identity를 바꾸지 않아 WIP slot을 우회하지 않는다.
 - [ ] Admin Routing 화면과 capture 어디에도 delivery prompt가 노출되지 않는다.
@@ -107,7 +109,33 @@ turn의 비용·판별 목적을 실행 기록에 먼저 적는다. 캡처 자�
 - [ ] 관측 artifact digest와 stable state digest를 실행 기록에 옮겨 적고 파일을
       immutable artifact로 보관한다.
 
-## G. Rollback
+## G. Agent 작업 검토 승인 (별도 flag-on 회차)
+
+이 구획은 승인 계약·migration·CI DB 검증이 끝난 staging deploy에서만 수행한다.
+검토·차단·재큐 자체는 유료 model turn 0회다. 실제 다음 claim/worker 실행은
+별도 비용과 목적을 기록하고 사람이 승인한다. PR 병합·배포 승인은 이 구획에 없다.
+
+- [ ] `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=true`일 때만 보호 검토를 열 수 있고,
+      `ops:write`·최근 재인증 없는 호출은 거절된다.
+- [ ] `AMUX_REVIEW_GITHUB_READ_TOKEN`은 `mposition/Tomverse`의 Pull requests와
+      Contents 읽기 전용이며, 값 자체는 화면·로그·기록에 나오지 않는다.
+- [ ] flag on에서 token·sync secret·`NEXTAUTH_URL` 중 하나가 빠지면 `/api/ready`의
+      `amuxReviewApproval`이 false이고, 모두 준비된 뒤에만 true다.
+- [ ] settle된 `review` 작업은 owner/claim이 해제되고, 이후 snapshot sync로
+      `review_pr_number`를 부여해도 해당 terminal attempt가 승인 대상이다.
+- [ ] `approve` 화면은 PR base SHA·head SHA·전체 diff와 그 SHA-256을 보이며,
+      base/head/diff가 바뀐 이전 제안은 거절된다.
+- [ ] timeout·전송 실패 시 화면은 결과 미확인으로 잠기고, 발급된 결정 ID와
+      대상 digest로 조회해 commit 확인 전에는 다시 제출하지 않는다.
+- [ ] 이미 blocked인 task의 `block`은 불변 결정을 남기고 후속 escalation을 연다.
+      5회 소진은 기존 task를 재큐하지 않고 새 task 발행 계약을 따른다.
+- [ ] `retry`는 교정된 canonical due, 이전 attempt/delivery fence, 5회 상한,
+      현재 project/team 비용 상한을 확인한다. 다음 claim도 admission을 다시 한다.
+- [ ] 설명이 표시 한도를 넘으면 잘림을 보이고 `approve`·`retry`를 숨긴다.
+- [ ] 원문 조회·결정·거절의 Admin 감사 해시 체인을 확인하고, 원문·token이
+      원장·일반 GET·증거 파일에 저장되지 않았음을 확인한다.
+
+## H. Rollback
 
 - [ ] `TOMVERSE_AMUX_EXECUTE`를 off로 되돌리면 새 execution이 시작되지 않는다.
 - [ ] `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 off로 되돌리면 execution mutation

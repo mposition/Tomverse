@@ -342,6 +342,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
   },
   {
+    domain: "amuxReviewDecision",
+    publicName: "amux_review_decisions",
+    prismaModel: "AmuxReviewDecision",
+    state: "unverified",
+  },
+  {
     domain: "promptRefinerReservationStage",
     publicName: "prompt_refiner_stage_approvals",
     prismaModel: "PromptRefinerReservationStage",
