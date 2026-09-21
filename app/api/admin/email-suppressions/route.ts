@@ -26,7 +26,6 @@ import {
   normalizeSuppressionAddress,
   recordSuppression,
 } from "@/lib/emailSuppression";
-import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
 
 /**
  * Adding and lifting suppressions, both audited.
@@ -111,7 +110,7 @@ const requestSchema = z.discriminatedUnion("action", [addSchema, removeSchema]);
 /** A lift refused inside an approved operation; see the causes-mode branch. */
 class SuppressionLiftRefused extends Error {
   constructor(
-    readonly refusal: "not_found" | "unliftable" | "authority_changed" | "approval_stale"
+    readonly refusal: "not_found" | "unliftable" | "approval_stale"
   ) {
     super(`Suppression lift refused: ${refusal}`);
     this.name = "SuppressionLiftRefused";
@@ -237,195 +236,173 @@ export async function POST(req: Request) {
       { minute: 5, day: 50 }
     );
 
-    // Once causes decide, a lift releases causes by the release matrix and the
-    // approval is bound to the exact set of active causes it was asked for
+    // A lift releases causes by the release matrix, and the approval is bound
+    // to the exact set of active causes it was asked for
     // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
-    if ((await readSuppressionAuthority()) === "causes") {
-      const active = await activeCausesForSelector(body.id);
-      if (!active.found) {
-        return NextResponse.json({ error: "Not found." }, { status: 404 });
-      }
-
-      // A handle that resolved but is no longer active, and a caller naming a
-      // set that is not the live one, are the same situation: the screen this
-      // came from is describing a suppression that has changed. Saying "not
-      // found" for the first would tell an operator whose page went stale that
-      // the suppression they were looking at has vanished.
-      //
-      // This is the early refusal, and it is not the one that matters: the set
-      // is checked again inside the lift's transaction, under the address lock,
-      // against the rows that are there at the moment of the release. What this
-      // buys is refusing before an approval is asked for.
-      if (active.stale || active.digest !== body.causeSetDigest) {
-        return NextResponse.json(
-          {
-            error:
-              "The causes on this address changed after it was listed. Look at it again before lifting it.",
-            code: "approval_stale",
-          },
-          { status: 409 }
-        );
-      }
-
-      // The audited thing is the selector's set of causes, not the row handle.
-      //
-      // The handle is whichever cause the listing put first, and the release
-      // matrix does not release by that: an operator lifting an address that
-      // holds a `manual` and a `privacy_request` releases the manual and keeps
-      // the privacy request, while the newest cause -- the handle -- is the
-      // privacy request. Naming it as the target writes an immutable record
-      // that reads as though the privacy request had been removed.
-      //
-      // So the target is the set, named by its digest, and the metadata says
-      // what was actually released and what stayed. Those come from inside the
-      // transaction rather than from the read above, because the decision is
-      // made there.
-      const releaseAudit =
-        (evidence: {
-          kind: string;
-          approvalId?: string;
-          authorizationAuditLogId?: string;
-        }) =>
-        (
-          tx: Parameters<typeof writeAdminAuditLog>[0]["tx"],
-          outcome: {
-            released: Array<{ id: string; reason: string }>;
-            remaining: Array<{ id: string; reason: string }>;
-          }
-        ) =>
-          writeAdminAuditLog({
-            session,
-            request: req,
-            action: "email_suppression.removed",
-            targetType: "SuppressionCauseSet",
-            targetId: active.digest,
-            summary:
-              outcome.remaining.length === 0
-                ? `Lifted every active suppression cause on ${active.selector.emailAddress}.`
-                : `Lifted ${outcome.released.length} of ${
-                    outcome.released.length + outcome.remaining.length
-                  } suppression causes on ${active.selector.emailAddress}; ${outcome.remaining
-                    .map((cause) => cause.reason)
-                    .join(", ")} remain.`,
-            metadata: {
-              reason: body.reason,
-              emailAddress: active.selector.emailAddress,
-              scope: active.selector.scope,
-              purposeKey: active.selector.purposeKey,
-              // The handle is recorded as what it is -- the row the operator
-              // acted from -- rather than as the target.
-              viaCauseId: body.id,
-              causeSetDigest: active.digest,
-              releasedCauseIds: outcome.released.map((cause) => cause.id),
-              releasedReasons: outcome.released.map((cause) => cause.reason),
-              remainingCauseIds: outcome.remaining.map((cause) => cause.id),
-              remainingReasons: outcome.remaining.map((cause) => cause.reason),
-              // Which authorisation this was, and which one specifically. The
-              // kind alone says a second administrator approved it somewhere;
-              // the ids say which approval and which authorisation entry, so
-              // the release can be followed from this row rather than from the
-              // cause's own evidence.
-              evidenceKind: evidence.kind,
-              approvalId: evidence.approvalId ?? null,
-              authorizationAuditLogId: evidence.authorizationAuditLogId ?? null,
-            },
-            tx,
-          });
-
-      // A refused lift inside an approved operation is thrown, not returned, so
-      // the approval path records it as a failed execution rather than as one
-      // that ran; outside that path the result is handled directly.
-      let lifted: Awaited<ReturnType<typeof liftSuppressionCauses>>;
-      try {
-        lifted = active.needsApproval
-          ? await runWithAdminApproval(
-              {
-                session,
-                request: req,
-                action: "email_suppression.remove",
-                targetType: "SuppressionCauseSet",
-                targetId: active.digest,
-                // The cause ids are part of what is approved: a cause added after
-                // the request is a different approval.
-                payload: { viaCauseId: body.id, causeSetDigest: body.causeSetDigest },
-                reason: body.reason,
-              },
-              async (context) => {
-                const outcome = await liftSuppressionCauses({
-                  causeId: body.id,
-                  approvedDigest: body.causeSetDigest,
-                  action: "approved_admin",
-                  evidence: context.approvalId
-                    ? {
-                        kind: "dual_approval",
-                        approvalId: context.approvalId,
-                        authorizationAuditLogId: context.authorizationAuditLogId,
-                      }
-                    : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
-                  writeReleaseAudit: releaseAudit({
-                    kind: context.approvalId ? "dual_approval" : "sole_admin",
-                    ...(context.approvalId ? { approvalId: context.approvalId } : {}),
-                    authorizationAuditLogId: context.authorizationAuditLogId,
-                  }),
-                });
-                if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
-                return outcome;
-              }
-            )
-          : await liftSuppressionCauses({
-              causeId: body.id,
-              approvedDigest: body.causeSetDigest,
-              action: "admin",
-              evidence: { kind: "admin" },
-              writeReleaseAudit: releaseAudit({ kind: "admin" }),
-            });
-      } catch (error) {
-        if (!(error instanceof SuppressionLiftRefused)) throw error;
-        lifted = { removed: false, refusal: error.refusal };
-      }
-
-      if (!lifted.removed) {
-        const status =
-          lifted.refusal === "not_found" ? 404 : 409;
-        const error =
-          lifted.refusal === "authority_changed"
-            ? "Suppression decisions changed over while this was in progress. Try again."
-            : lifted.refusal === "approval_stale"
-            ? "The suppression changed after this was asked for. Review it again."
-            : lifted.refusal === "unliftable"
-              ? "Nothing here can be lifted from this screen; a privacy request is lifted by the privacy process that created it."
-              : "Not found.";
-        return NextResponse.json({ error, code: lifted.refusal }, { status });
-      }
-      return NextResponse.json({
-        removed: lifted.remaining.length === 0,
-        released: lifted.released,
-        remaining: lifted.remaining,
-        providerListUnchanged: true,
-      });
+    //
+    // There is no other path. This used to be one branch of two, with the other
+    // refusing when the read-authority setting said entries; deploy D removed
+    // the setting, and with it the question of which record decides.
+    const active = await activeCausesForSelector(body.id);
+    if (!active.found) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
 
-    // Entry authority, and the console no longer speaks it.
+    // A handle that resolved but is no longer active, and a caller naming a
+    // set that is not the live one, are the same situation: the screen this
+    // came from is describing a suppression that has changed. Saying "not
+    // found" for the first would tell an operator whose page went stale that
+    // the suppression they were looking at has vanished.
     //
-    // The lift above is reached by a cause id, because that is what the list
-    // hands out now (docs/policy/email-product-news-redesign-draft.md, section
-    // 7.4). An entry-authority lift would have to resolve the same id as a
-    // `SuppressionEntry` row, find nothing, and answer 404 -- which reads as
-    // "that suppression is gone" when what happened is that the setting was
-    // moved back below this build's floor.
+    // This is the early refusal, and it is not the one that matters: the set
+    // is checked again inside the lift's transaction, under the address lock,
+    // against the rows that are there at the moment of the release. What this
+    // buys is refusing before an approval is asked for.
+    if (active.stale || active.digest !== body.causeSetDigest) {
+      return NextResponse.json(
+        {
+          error:
+            "The causes on this address changed after it was listed. Look at it again before lifting it.",
+          code: "approval_stale",
+        },
+        { status: 409 }
+      );
+    }
+
+    // The audited thing is the selector's set of causes, not the row handle.
     //
-    // So it says which of those it is. Production has read causes since
-    // 2026-09-17 and the rollback floor for this deploy is the causes cutover;
-    // an environment that finds itself here is one whose setting went backwards
-    // and needs it put back, not an operator who should try again.
-    return NextResponse.json(
-      {
-        error:
-          "This build's suppression console lists causes, and the suppression setting is back on entries. Nothing was changed. Put the setting back to causes before lifting anything here.",
-        code: "authority_changed",
-      },
-      { status: 409 }
-    );
+    // The handle is whichever cause the listing put first, and the release
+    // matrix does not release by that: an operator lifting an address that
+    // holds a `manual` and a `privacy_request` releases the manual and keeps
+    // the privacy request, while the newest cause -- the handle -- is the
+    // privacy request. Naming it as the target writes an immutable record
+    // that reads as though the privacy request had been removed.
+    //
+    // So the target is the set, named by its digest, and the metadata says
+    // what was actually released and what stayed. Those come from inside the
+    // transaction rather than from the read above, because the decision is
+    // made there.
+    const releaseAudit =
+      (evidence: {
+        kind: string;
+        approvalId?: string;
+        authorizationAuditLogId?: string;
+      }) =>
+      (
+        tx: Parameters<typeof writeAdminAuditLog>[0]["tx"],
+        outcome: {
+          released: Array<{ id: string; reason: string }>;
+          remaining: Array<{ id: string; reason: string }>;
+        }
+      ) =>
+        writeAdminAuditLog({
+          session,
+          request: req,
+          action: "email_suppression.removed",
+          targetType: "SuppressionCauseSet",
+          targetId: active.digest,
+          summary:
+            outcome.remaining.length === 0
+              ? `Lifted every active suppression cause on ${active.selector.emailAddress}.`
+              : `Lifted ${outcome.released.length} of ${
+                  outcome.released.length + outcome.remaining.length
+                } suppression causes on ${active.selector.emailAddress}; ${outcome.remaining
+                  .map((cause) => cause.reason)
+                  .join(", ")} remain.`,
+          metadata: {
+            reason: body.reason,
+            emailAddress: active.selector.emailAddress,
+            scope: active.selector.scope,
+            purposeKey: active.selector.purposeKey,
+            // The handle is recorded as what it is -- the row the operator
+            // acted from -- rather than as the target.
+            viaCauseId: body.id,
+            causeSetDigest: active.digest,
+            releasedCauseIds: outcome.released.map((cause) => cause.id),
+            releasedReasons: outcome.released.map((cause) => cause.reason),
+            remainingCauseIds: outcome.remaining.map((cause) => cause.id),
+            remainingReasons: outcome.remaining.map((cause) => cause.reason),
+            // Which authorisation this was, and which one specifically. The
+            // kind alone says a second administrator approved it somewhere;
+            // the ids say which approval and which authorisation entry, so
+            // the release can be followed from this row rather than from the
+            // cause's own evidence.
+            evidenceKind: evidence.kind,
+            approvalId: evidence.approvalId ?? null,
+            authorizationAuditLogId: evidence.authorizationAuditLogId ?? null,
+          },
+          tx,
+        });
+
+    // A refused lift inside an approved operation is thrown, not returned, so
+    // the approval path records it as a failed execution rather than as one
+    // that ran; outside that path the result is handled directly.
+    let lifted: Awaited<ReturnType<typeof liftSuppressionCauses>>;
+    try {
+      lifted = active.needsApproval
+        ? await runWithAdminApproval(
+            {
+              session,
+              request: req,
+              action: "email_suppression.remove",
+              targetType: "SuppressionCauseSet",
+              targetId: active.digest,
+              // The cause ids are part of what is approved: a cause added after
+              // the request is a different approval.
+              payload: { viaCauseId: body.id, causeSetDigest: body.causeSetDigest },
+              reason: body.reason,
+            },
+            async (context) => {
+              const outcome = await liftSuppressionCauses({
+                causeId: body.id,
+                approvedDigest: body.causeSetDigest,
+                action: "approved_admin",
+                evidence: context.approvalId
+                  ? {
+                      kind: "dual_approval",
+                      approvalId: context.approvalId,
+                      authorizationAuditLogId: context.authorizationAuditLogId,
+                    }
+                  : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
+                writeReleaseAudit: releaseAudit({
+                  kind: context.approvalId ? "dual_approval" : "sole_admin",
+                  ...(context.approvalId ? { approvalId: context.approvalId } : {}),
+                  authorizationAuditLogId: context.authorizationAuditLogId,
+                }),
+              });
+              if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
+              return outcome;
+            }
+          )
+        : await liftSuppressionCauses({
+            causeId: body.id,
+            approvedDigest: body.causeSetDigest,
+            action: "admin",
+            evidence: { kind: "admin" },
+            writeReleaseAudit: releaseAudit({ kind: "admin" }),
+          });
+    } catch (error) {
+      if (!(error instanceof SuppressionLiftRefused)) throw error;
+      lifted = { removed: false, refusal: error.refusal };
+    }
+
+    if (!lifted.removed) {
+      const status =
+        lifted.refusal === "not_found" ? 404 : 409;
+      const error =
+        lifted.refusal === "approval_stale"
+          ? "The suppression changed after this was asked for. Review it again."
+          : lifted.refusal === "unliftable"
+            ? "Nothing here can be lifted from this screen; a privacy request is lifted by the privacy process that created it."
+            : "Not found.";
+      return NextResponse.json({ error, code: lifted.refusal }, { status });
+    }
+    return NextResponse.json({
+      removed: lifted.remaining.length === 0,
+      released: lifted.released,
+      remaining: lifted.remaining,
+      providerListUnchanged: true,
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

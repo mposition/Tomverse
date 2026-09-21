@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
-import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityCore";
 
 // The suppression lift endpoint, driven end to end against a real PostgreSQL.
 //
@@ -17,13 +16,15 @@ import { SUPPRESSION_READ_AUTHORITY_KEY } from "@/lib/emailSuppressionAuthorityC
 // writes anything, and a refusal that only exists inside the library is a
 // refusal an operator never meets.
 //
-// Four answers are pinned here, because each is a different thing going wrong
+// Three answers are pinned here, because each is a different thing going wrong
 // and each used to be indistinguishable from "not found":
 //
 //   - the caller's set no longer matches -> 409, nothing written;
 //   - the handle resolved but is no longer active -> 409, nothing written;
-//   - the handle never existed -> 404;
-//   - the read authority went back to entries -> 409, nothing written.
+//   - the handle never existed -> 404.
+//
+// A fourth stood here -- the read authority going back to entries -- until
+// deploy D removed the setting that could go back.
 //
 // Runs in its own process under scripts/run-db-integration-tests.mjs, because
 // mock.module is process-global and this file replaces next-auth for every
@@ -93,13 +94,6 @@ after(async () => {
   await reset();
   await prisma.$disconnect();
 });
-
-const setAuthority = (value: "entry" | "causes") =>
-  prisma.appSetting.upsert({
-    where: { key: SUPPRESSION_READ_AUTHORITY_KEY },
-    create: { key: SUPPRESSION_READ_AUTHORITY_KEY, value },
-    update: { value },
-  });
 
 const signInAsOwner = async () => {
   const user = await prisma.user.create({
@@ -196,7 +190,6 @@ const noSuppressionMutation = async (
 
 test("a lift releases what the caller listed", async () => {
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `lift-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
   const digest = await liveDigest(emailAddress);
@@ -255,7 +248,6 @@ test("a partial lift is audited as what it released, not as the row it came from
   // request, so naming it as the audit target writes an entry that reads as
   // though the legal record had been removed.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `mixed-${randomUUID()}@example.test`;
   await suppress(emailAddress);
   await recordSuppression({
@@ -331,7 +323,6 @@ test("a hard bounce lift is authorised, and the entry names the authorisation", 
   // entry has to name *which* authorisation allowed it -- "a second
   // administrator approved it somewhere" is not a record anybody can follow.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `bounced-${randomUUID()}@example.test`;
   await recordSuppression({
     emailAddress,
@@ -401,8 +392,7 @@ test("with two administrators the first request approves nothing and releases no
   try {
     await signInAsOwner();
     await prisma.user.create({ data: { email: second, lastLoginAt: new Date() } });
-    await setAuthority("causes");
-    const emailAddress = `two-admin-${randomUUID()}@example.test`;
+      const emailAddress = `two-admin-${randomUUID()}@example.test`;
     await recordSuppression({
       emailAddress,
       reason: "hard_bounce",
@@ -462,7 +452,6 @@ test("a cause added after the listing refuses the lift instead of being released
   // while the page sat open goes with it -- so we resume mailing somebody who
   // asked us to stop.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `stale-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
   const seen = await liveDigest(emailAddress);
@@ -492,7 +481,6 @@ test("a handle that is no longer active is stale, and one that never existed is 
   // this they were both "not found", which told an operator whose page had gone
   // stale that their suppression had vanished.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `dead-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
   const seen = await liveDigest(emailAddress);
@@ -532,7 +520,6 @@ test("a selector with more causes than any cap can still be lifted", async () =>
   // unliftable: send them all and the schema refuses, send fewer and the set
   // does not match.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `crowded-${randomUUID()}@example.test`;
   let handle = { id: "" };
   for (let index = 0; index < 51; index += 1) {
@@ -562,38 +549,10 @@ test("a selector with more causes than any cap can still be lifted", async () =>
   );
 });
 
-test("the entry authority refuses the lift and says which of the two it is", async () => {
-  // This build's console hands out cause ids, which the entry path cannot
-  // resolve. Answering 404 would read as "that suppression is gone" when what
-  // happened is that the setting went back below this deploy's rollback floor.
-  await signInAsOwner();
-  await setAuthority("causes");
-  const emailAddress = `authority-${randomUUID()}@example.test`;
-  const handle = await suppress(emailAddress);
-  const seen = await liveDigest(emailAddress);
-
-  await setAuthority("entry");
-
-  const before = await suppressionState();
-  const response = await post({
-    action: "remove",
-    id: handle.id,
-    causeSetDigest: seen,
-    reason: "The mailbox was restored and the owner asked us to resume.",
-  });
-
-  assert.equal(response.status, 409);
-  const body = (await response.json()) as { code: string; error: string };
-  assert.equal(body.code, "authority_changed");
-  assert.match(body.error, /causes/);
-  await noSuppressionMutation(before);
-});
-
 test("the request has to carry the causes it saw", async () => {
   // Without them the approval is granted against a set the server read for
   // itself, which is approved by definition.
   await signInAsOwner();
-  await setAuthority("causes");
   const emailAddress = `bare-${randomUUID()}@example.test`;
   const handle = await suppress(emailAddress);
 

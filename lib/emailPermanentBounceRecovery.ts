@@ -2,10 +2,7 @@ import "server-only";
 
 import { normalizeSuppressionAddress } from "@/lib/emailSuppression";
 import { markCauseWriter, recordSuppressionCause } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -30,9 +27,9 @@ import { prisma } from "@/lib/prisma";
  *  - an address with any delivery reported at or after five minutes before the
  *    bounce is not written: older delivery times are receipt times, so the
  *    margin keeps a delivery that really came after from reading as before;
- *  - that check is repeated at write time, under the fence and the address lock
- *    every delivered-event writer also takes, so a delivery recorded during
- *    the run is seen;
+ *  - that check is repeated at write time, under the address lock every
+ *    delivered-event writer also takes, so a delivery recorded during the run
+ *    is seen;
  *  - what it writes is a cause, and only a cause. It used to also raise the
  *    mirrored entry when that entry was missing or held a soft bounce, and
  *    leave it alone when it held something permanent -- a ranking a single row
@@ -266,14 +263,22 @@ export async function recoverPermanentBounces(input: {
 
   if (!input.apply) return report;
 
-  // Newest bounce first: the first write for an address raises its entry, and
-  // later (older) ones find a hard bounce there and leave it -- so the entry
-  // describes the most recent bounce.
+  // Newest bounce first.
+  //
+  // It decided something when this also raised the mirrored entry: the first
+  // write for an address set that single row, and the older ones found a hard
+  // bounce there and left it, so the order chose which bounce the row
+  // described. Causes are one row per event and none of them describes the
+  // address, so the suppression itself no longer depends on the order -- the
+  // address is suppressed from the first cause written either way.
+  //
+  // What is left is that an interrupted run has recorded the recent evidence
+  // rather than the stale evidence. Small, and the reason to keep the sort
+  // rather than the reason it was written.
   planned.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   for (const item of planned) {
     const outcome = await prisma.$transaction(
       async (tx) => {
-        await holdSuppressionFence(tx);
         await lockSuppressionAddress(tx, item.emailAddress);
         // Again, under the lock a delivered-event writer takes.
         if (await hasDeliverySince(tx, item.emailAddress, item.occurredAt)) {

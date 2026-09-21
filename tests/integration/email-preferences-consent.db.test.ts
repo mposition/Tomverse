@@ -345,7 +345,8 @@ test("a withdrawal suppresses by address, so it survives the account", async () 
   );
 });
 
-test("re-enabling clears its own hold and never a global one", async () => {
+/** Somebody who subscribed, then unsubscribed. */
+const withdrawn = async () => {
   const user = await someone();
   await agree({
     userId: user.id,
@@ -361,6 +362,49 @@ test("re-enabling clears its own hold and never a global one", async () => {
     capturedVia: "preference_center",
     source: "preference_center",
   });
+  return user;
+};
+
+test("re-enabling clears its own hold", async () => {
+  const user = await withdrawn();
+
+  const result = await agree({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  assert.deepEqual(result, { changed: true, purpose: "newsletter", enabled: true });
+
+  assert.deepEqual(
+    await prisma.suppressionCause.findMany({
+      where: { releasedAt: null },
+      select: { scope: true, reason: true },
+    }),
+    [],
+    "the only thing stopping this mail was their own unsubscribe"
+  );
+  // Released, not deleted: the withdrawal happened, and the record of it is
+  // what an unsubscribe complaint is answered from.
+  const lifted = await prisma.suppressionCause.findFirstOrThrow({
+    where: { reason: "unsubscribe" },
+  });
+  assert.ok(lifted.releasedAt);
+  assert.equal(lifted.releaseKind, "preference_enabled");
+});
+
+test("re-enabling is refused while a complaint stops the address, and releases nothing", async () => {
+  // A toggle lifts the person's own unsubscribe and nothing else. §12.4 needs
+  // two administrators to lift a complaint, so the switch cannot be the thing
+  // that does it -- and since the complaint would still stop the mail
+  // afterwards, the switch is refused rather than shown as on.
+  //
+  // It used to succeed here, because until deploy D this ran on the entry-era
+  // blocking list, which recognised only a privacy request. The global
+  // complaint was invisible to it, the unsubscribe was released, and the
+  // preference read as on for mail that was never going to be sent.
+  const user = await withdrawn();
   await prisma.suppressionCause.create({
     data: {
       emailAddress: user.email!.toLowerCase(),
@@ -373,27 +417,31 @@ test("re-enabling clears its own hold and never a global one", async () => {
     },
   });
 
-  await agree({
+  const result = await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
     capturedVia: "preference_center",
     source: "preference_center",
   });
+  assert.deepEqual(result, { changed: false, reason: "suppressed" });
 
-  const remaining = await prisma.suppressionCause.findMany({
-    where: { releasedAt: null },
-    select: { scope: true, reason: true },
+  assert.deepEqual(
+    await prisma.suppressionCause.findMany({
+      where: { releasedAt: null },
+      orderBy: { reason: "asc" },
+      select: { scope: true, reason: true },
+    }),
+    [
+      { scope: "global", reason: "complaint" },
+      { scope: "purpose", reason: "unsubscribe" },
+    ],
+    "a refused switch releases nothing, including the cause it would have been allowed to release"
+  );
+  const preference = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
   });
-  // A toggle may lift its own preference hold. It may not lift a complaint --
-  // §12.4 requires dual approval to remove one of those.
-  assert.deepEqual(remaining, [{ scope: "global", reason: "complaint" }]);
-  // Released, not deleted: the withdrawal happened, and the record of it is
-  // what an unsubscribe complaint is answered from.
-  const lifted = await prisma.suppressionCause.findFirstOrThrow({
-    where: { reason: "unsubscribe" },
-  });
-  assert.ok(lifted.releasedAt);
+  assert.equal(preference.enabled, false, "the switch is refused, not shown as on");
 });
 
 test("repeating an unsubscribe is a no-op, not a second withdrawal", async () => {
