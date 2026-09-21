@@ -267,23 +267,24 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:94
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md:generic-api-key:168
 
-# Commit 9662e94b (S2a, 2026-09-21) added marketing E2E fixture constants
-# spelled `logicalKey: "e2e-marketing-pending-key"` and
-# `logicalKey: "e2e-marketing-published-key"`. `MarketingPost.logicalKey` is
-# the idempotency key a draft is deduplicated by -- a business identifier, not
-# a credential -- but `key: "<hyphenated token>"` is a key assignment to a
-# scanner, and reading it that way is correct behaviour rather than a bug in
-# the rule.
+# Commit 9662e94b (S2a, 2026-09-21) added two marketing E2E fixture constants
+# that assigned a hyphenated token to a property whose name ends in "Key" --
+# MarketingPost's idempotency identifier, which is a business key a draft is
+# deduplicated by and not a credential. To a scanner that is a key assignment,
+# and reading it that way is correct behaviour rather than a bug in the rule.
+#
+# The shape is described rather than quoted here. The first attempt at this
+# note reproduced the offending line verbatim, and gitleaks scans this file
+# too, so the explanation became a finding of its own.
 #
 # Pinned rather than allowlisted for the same reason as the block above: an
-# allowlist pattern wide enough to cover `logicalKey:` would also cover a line
-# that really did assign a secret to something named `*Key`. The introducing
-# commit is immutable history and stays here.
+# allowlist pattern wide enough to cover that property name would also cover a
+# line that really did assign a secret to something similarly named. The
+# introducing commit is immutable history and stays here.
 #
 # The follow-up commit stopped writing the shape -- the fixture property is now
-# `logical` and the seed passes it as an identifier, so `logicalKey:` is never
-# followed by a quoted literal -- and no later edit recreates the finding under
-# a new commit.
+# named `logical` and the seed passes it as an identifier rather than as a
+# quoted literal -- so no later edit recreates the finding under a new commit.
 #
 # Scope: exactly these two findings in that one commit -- nothing wider.
 9662e94bcfe3557df2df6e43cca689e2887114b4:tests/e2e-admin/support/fixture-data.ts:generic-api-key:361
