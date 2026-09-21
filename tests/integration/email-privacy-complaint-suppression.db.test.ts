@@ -194,8 +194,11 @@ test("a later hard bounce neither releases nor replaces a privacy request", asyn
   });
   // Deploy A had one row per selector, so "does not overwrite" was a merge rule
   // the entry had to be told and could be told wrongly. Causes are one row per
-  // event: the privacy request is still its own record, still active, and still
-  // the reason this selector cannot be lifted from the console.
+  // event: the privacy request is still its own record and still active, so an
+  // operator lifting this address releases the hard bounce -- with a second
+  // administrator, which that reason needs -- and the privacy request stays.
+  // The address is suppressed afterwards, by the cause that was never theirs
+  // to release.
   assert.deepEqual(
     await prisma.suppressionCause.findMany({
       where: { emailAddress },

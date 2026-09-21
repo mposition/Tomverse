@@ -72,7 +72,7 @@ export type RecordSuppressionInput = {
    * It is a scope the entry table never had, which knows only global and
    * purpose. That is why a deletion intake used to write the same stop again
    * once per marketing purpose: it was the only way to be visible to an entry
-   * read. Nothing reads entries
+   * read. No send decision reads entries
    * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
    */
   scope?: "classification";
