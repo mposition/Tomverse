@@ -2842,12 +2842,8 @@ test("claim API persists authoritative routing when consistent client evidence d
         .TOMVERSE_AMUX_WORKER_CATALOG_JSON =
         previousCatalog;
     }
-
-    await prisma.amuxWorkItem.deleteMany({
-      where: {
-        id: taskId,
-      },
-    });
+    // The successful claim created an append-only route decision. Keep its
+    // task in this disposable test database rather than deleting evidence.
   }
 });
 
