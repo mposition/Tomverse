@@ -22,6 +22,9 @@ canonical checklist다.
 - staging verification 시작 시 AMUX activation은 off다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
 - secret/token 값은 기록에 복사하지 않는다.
+- execution(Stage 2)으로 갈 회차라면 `docs/ops/amux/executor-protocol.md`의
+  **lane 자격증명 표**가 채워져 있다. 표 없이 lane을 켜지 않는다 — 표가 없으면
+  어느 lane이 무엇을 들고 도는지 확인할 방법이 없다.
 
 ## A. Source identity와 feature-off
 

@@ -1,0 +1,58 @@
+name: Orchestrator Rust
+
+# The Rust workspace (crates/amux-core, apps/tomverse-orchestrator) had no CI
+# lane, so its tests only ever ran on a developer's machine. A regression test
+# nobody runs is not a defence: this lane makes the workspace's own tests a
+# check on every change that touches it.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "apps/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/orchestrator-rust.yml"
+  push:
+    branches: [main, develop]
+    paths:
+      - "crates/**"
+      - "apps/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/orchestrator-rust.yml"
+  workflow_dispatch:
+
+# Read-only. This lane compiles and runs workspace code, so it must never hold
+# a credential that outlives the run.
+permissions:
+  contents: read
+
+concurrency:
+  group: orchestrator-rust-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    name: Build and test the Rust workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Report the toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      # No fmt or clippy step: the workspace has no rustfmt.toml and its source
+      # is hand-formatted, so adding either here would fail on code this change
+      # does not touch. Formatting is its own decision.
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
