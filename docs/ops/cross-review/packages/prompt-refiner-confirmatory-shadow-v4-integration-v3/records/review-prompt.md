@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-confirmatory-shadow-v4-integration-v3, round 0
+# Independent review — task prompt-refiner-confirmatory-shadow-v4-integration-v3, round 1
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -16,7 +16,7 @@ Do not take the author's summary as a description of what the change does; the d
 - fresh migration DB, Prompt Refiner DB integration, unit, TypeScript, ESLint, enum·protected-writer·문서·정책 검사가 통과한다.
 - Claude verdict는 최종 PR diff의 exact digest에 결속하고 open finding 없이 approve해야 한다.
 
-## Change under review — digest sha256:232c59fbf7e81dcb3414211fe31acc97e022ee38aaf91b9adad140bef9b630e2
+## Change under review — digest sha256:18b0ea908ef84e896ac5fcd83bcd3b55bbd6fdbf2e8bb0715cd0c6b26f128d24, commit 29ccfbd25a4726860eccd297ee5167f1969c2931
 
 ```diff
 diff --git a/app/api/admin/prompt-refiner/shadow-run/execute/route.ts b/app/api/admin/prompt-refiner/shadow-run/execute/route.ts
@@ -574,7 +574,7 @@ index ae79e1cc..6f256fbb 100644
  | prompt/credential/provider error가 provenance에 유입 | manifest schema는 path/size/hash와 고정 실행 숫자만 허용; audit reason은 request가 아니라 서버 내부 상수 |
  | 승인 endpoint 탐색·CSRF·탈취 session | 비관리자 404, owner-only, recent authentication, global origin guard, DB atomic rate limit |
 diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
-index ff01f15c..dd85238b 100644
+index ff01f15c..c02399be 100644
 --- a/docs/policy/prompt-refiner-observability.md
 +++ b/docs/policy/prompt-refiner-observability.md
 @@ -1,5 +1,9 @@
@@ -599,9 +599,18 @@ index ff01f15c..dd85238b 100644
  - reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
    검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
    counter를 결속한다. stage 최초 counter는 0/0이어야 하고 direct stage counter UPDATE는
-@@ -302,10 +307,10 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
+@@ -295,17 +300,17 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
+ 실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
+ 검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
+ 새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
+-추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
++추가한다. 그 writer 전까지 현재 v2 admission의 fail-closed 결과와 default-off 제품 상태를
+ 유지한다.
  
- 후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
+ ## 11. durable staging approval provenance
+ 
+-후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
++후속 `prompt-refiner-stage-admission-v2`는 과거 proposal을 현재 staging 배포에 다시
  결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
 -다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 187개 source
 +다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 188개 source
@@ -3828,47 +3837,51 @@ index d854063b..6a572c18 100644
 
 ## Test results (run by the control program)
 
-- PASS `npm run test:unit` (944232ms)
+- PASS `npm run test:unit` (1182161ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 11605.9992
+  ℹ duration_ms 12012.5195
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck` (72274ms)
+- PASS `npm run typecheck` (64323ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npm run lint` (85453ms)
+- PASS `npm run lint` (102622ms)
   > ai-chat-hub@0.1.0 lint
   > eslint
-- PASS `npm run check:enum-constraints` (1868ms)
+- PASS `npm run check:enum-constraints` (2427ms)
   > ai-chat-hub@0.1.0 check:enum-constraints
   > node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs
   
   Enum constraint check passed: 125 closed list(s) in the schema — 62 compared against an application list, 25 held only as a TypeScript union, 38 written down only in the database.
-- PASS `npm run check:protected-table-writers` (3890ms)
+- PASS `npm run check:protected-table-writers` (3304ms)
   tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.
-- PASS `npm run check:doc-references` (1836ms)
+- PASS `npm run check:doc-references` (1672ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 903 referenced path(s) across 120 instruction document(s), and 1014 path(s) named by comments across 3084 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1594ms)
+- PASS `npm run check:policy-section-references` (1753ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4545 citation(s) against 39 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).
-- PASS `NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts` (83870ms)
+- PASS `NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts` (86729ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 83779.4782
+  # duration_ms 86646.2677
+
+## Findings from the previous round (check each was addressed)
+
+- [nit/judgement] docs/policy/prompt-refiner-observability.md:308: Section 11 still names the superseded `prompt-refiner-stage-admission-v1` as the create-only admission writer while the same paragraph was updated to the 188-file/10-metadata closure that only the current v2 admission uses.
 
 ## Author's account (read last; a claim, not a finding)
 
@@ -3881,8 +3894,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-confirmatory-shadow-v4-integration-v3",
-  "round": 0,
-  "reviewedDigest": "sha256:232c59fbf7e81dcb3414211fe31acc97e022ee38aaf91b9adad140bef9b630e2",
+  "round": 1,
+  "reviewedDigest": "sha256:18b0ea908ef84e896ac5fcd83bcd3b55bbd6fdbf2e8bb0715cd0c6b26f128d24",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
