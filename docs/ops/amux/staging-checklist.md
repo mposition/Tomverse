@@ -5,7 +5,7 @@ canonical checklist다.
 
 이 문서는 template이며 실행 결과를 직접 기록하지 않는다.
 
-- **template revision**: `2026-09-20`
+- **template revision**: `2026-09-21`
 - 실행 기록:
   `docs/ops/amux/staging-verification-records/`
 - 기록 template:
@@ -79,7 +79,32 @@ AMUX orchestrator가 완전히 꺼진 상태를 먼저 검증한다.
 - [ ] expired owner reservation recovery가 기존 routing evidence를 삭제하지 않는다.
 - [ ] audit integrity verification이 staging evidence 범위에서 정상이다.
 
-## F. Rollback
+## F. Advanced planning guard와 자동 증거
+
+자동 캡처는 1회, 유료 model turn은 0회다. 실제 worker 실행을 별도로 검증하면 그
+turn의 비용·판별 목적을 실행 기록에 먼저 적는다. 캡처 자체는 DB를 변경하지 않는다.
+
+- [ ] incident freeze 중 새 claim/start는 거절되고, freeze 전에 만들어진 durable
+      delivery와 heartbeat/settle/recovery는 계속 동작한다.
+- [ ] invalid 또는 ambiguous due는 `invalid`로 저장되며 dispatch되지 않는다.
+- [ ] project/team WIP와 cost guard는 같은 resource lock 아래 admission을 거절한다.
+- [ ] stale/unknown quota는 0으로 바뀌지 않고, fresh high-confidence exhaustion만
+      worker hard gate가 된다.
+- [ ] retry budget 소진, worker blocked, required review는 열린 human escalation을
+      하나만 만든다.
+- [ ] 현행 정책에 별도 Agent 승인 계약이 없으므로 escalation resolve 요청은
+      `AMUX_AGENT_APPROVAL_UNAVAILABLE`로 거절된다. `blocked` task의 자동
+      `todo` 복귀를 기대하지 않으며, 승인 계약이 생길 때까지 해당 작업은 수동
+      판정 대기로 기록한다.
+- [ ] task sync는 `doing`과 상태에 관계없이 이미 owner가 지정된 작업의
+      project/team identity를 바꾸지 않아 WIP slot을 우회하지 않는다.
+- [ ] Admin Routing 화면과 capture 어디에도 delivery prompt가 노출되지 않는다.
+- [ ] 캡처 프로세스의 deploy SHA 대조값이 true이고 기대한 전체 40자리 SHA와 같다.
+- [ ] 자동 캡처의 `human_judgement.result`와 `signature`가 null이다.
+- [ ] 관측 artifact digest와 stable state digest를 실행 기록에 옮겨 적고 파일을
+      immutable artifact로 보관한다.
+
+## G. Rollback
 
 - [ ] `TOMVERSE_AMUX_EXECUTE`를 off로 되돌리면 새 execution이 시작되지 않는다.
 - [ ] `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 off로 되돌리면 execution mutation

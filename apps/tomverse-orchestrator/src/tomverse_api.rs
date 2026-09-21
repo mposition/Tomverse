@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::scheduler::ScoreBreakdown;
 use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
 
 #[derive(Clone)]
@@ -26,6 +27,12 @@ pub struct QueueTask {
     pub created_at: String,
     pub dependencies: Vec<String>,
     pub dependent_count: i64,
+    #[serde(default)]
+    pub scheduler_score: i64,
+    #[serde(default)]
+    pub scoring_version: String,
+    #[serde(default)]
+    pub scheduler_signals: ScoreBreakdown,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,7 +64,7 @@ struct ClaimRequest<'a> {
 #[derive(Debug, Serialize)]
 struct ClaimDecision {
     scheduler_score: i64,
-    scoring_version: &'static str,
+    scoring_version: String,
     signals: Value,
 }
 
@@ -66,6 +73,7 @@ pub struct ClaimResponse {
     pub claimed: bool,
     pub revision: Option<i64>,
     pub decision_id: Option<String>,
+    pub reason: Option<String>,
 }
 
 impl TomverseApi {
@@ -134,9 +142,10 @@ impl TomverseApi {
         worker: &str,
         expected_revision: i64,
         scheduler_score: i64,
+        scoring_version: &str,
         signals: Value,
     ) -> Result<ClaimResponse> {
-        self.client
+        let response = self.client
             .post(format!(
                 "{}/api/internal/amux/claim",
                 self.base_url
@@ -148,15 +157,19 @@ impl TomverseApi {
                 expected_revision,
                 decision: ClaimDecision {
                     scheduler_score,
-                    scoring_version:
-                        "amux-global-priority-v1",
+                    scoring_version: scoring_version.to_owned(),
                     signals,
                 },
             })
             .send()
-            .await?
-            .error_for_status()?
-            .json()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
+            response.error_for_status_ref()?;
+        }
+
+        response.json()
             .await
             .context(
                 "invalid Tomverse AMUX claim response",
@@ -293,6 +306,8 @@ struct ExecutionSettleRequest<'a> {
     outcome: &'a str,
     to_status: &'a str,
     reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cost_microusd: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -300,6 +315,15 @@ pub struct ExecutionSettleResponse {
     pub settled: bool,
     #[serde(rename = "taskRevision")]
     pub task_revision: Option<i64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExecutionRecoveryResponse {
+    pub recovered: bool,
+    pub reclaimed: Option<i64>,
+    pub reclaimed_claims: Option<i64>,
+    pub quota_observations_deleted: Option<i64>,
     pub reason: Option<String>,
 }
 
@@ -583,6 +607,7 @@ impl TomverseApi {
                 outcome,
                 to_status,
                 reason,
+                cost_microusd: None,
             })
             .send()
             .await?;
@@ -599,5 +624,31 @@ impl TomverseApi {
             .json()
             .await
             .context("invalid Tomverse AMUX execution-settle response")
+    }
+
+    pub async fn execution_recover(&self) -> Result<ExecutionRecoveryResponse> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/execution/recover",
+                self.base_url
+            ))
+            .bearer_auth(&self.secret)
+            .json(&QueueRequest {})
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success()
+            && status != reqwest::StatusCode::CONFLICT
+        {
+            response.error_for_status_ref()?;
+        }
+
+        response
+            .json()
+            .await
+            .context("invalid Tomverse AMUX execution-recover response")
     }
 }

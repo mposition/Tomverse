@@ -182,6 +182,157 @@ test("two concurrent claimants produce exactly one owner and one route decision"
   });
 });
 
+test("project WIP admission serializes claims for different tasks", async () => {
+  const projectKey = `amux-wip-${randomUUID()}`;
+  const firstTaskId = await createTodo("amux-wip-first");
+  const secondTaskId = await createTodo("amux-wip-second");
+
+  await Promise.all([
+    prisma.amuxWorkItem.update({
+      where: { id: firstTaskId },
+      data: { projectKey },
+    }),
+    prisma.amuxWorkItem.update({
+      where: { id: secondTaskId },
+      data: { projectKey },
+    }),
+    prisma.amuxResourcePolicy.create({
+      data: {
+        scope: "project",
+        key: projectKey,
+        displayName: projectKey,
+        wipLimit: 1,
+      },
+    }),
+  ]);
+
+  try {
+    const [first, second] = await Promise.all([
+      claimUnownedTodo({
+        taskId: firstTaskId,
+        worker: "amux-wip-worker-a",
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      }),
+      claimUnownedTodo({
+        taskId: secondTaskId,
+        worker: "amux-wip-worker-b",
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      }),
+    ]);
+
+    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.equal(
+      await prisma.amuxWorkItem.count({
+        where: {
+          projectKey,
+          status: "todo",
+          owner: { not: null },
+        },
+      }),
+      1,
+    );
+  } finally {
+    await prisma.amuxWorkItem.updateMany({
+      where: { id: { in: [firstTaskId, secondTaskId] } },
+      data: { status: "done" },
+    });
+    await prisma.amuxResourcePolicy.delete({
+      where: { scope_key: { scope: "project", key: projectKey } },
+    });
+  }
+});
+
+test("cost settlement stays attributed to its reservation budget window", async () => {
+  const projectKey = `amux-cost-${randomUUID()}`;
+  const taskId = await createTodo("amux-cost-window");
+  const worker = `amux-cost-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+  const windowStartsAt = new Date(base.getTime() - 60_000);
+  const windowEndsAt = new Date(base.getTime() + 60_000);
+
+  await prisma.amuxResourcePolicy.create({
+    data: {
+      scope: "project",
+      key: projectKey,
+      displayName: projectKey,
+      costBudgetMicrousd: BigInt(100),
+      budgetWindowStartsAt: windowStartsAt,
+      budgetWindowEndsAt: windowEndsAt,
+    },
+  });
+  await prisma.amuxWorkItem.update({
+    where: { id: taskId },
+    data: {
+      projectKey,
+      estimatedCostMicrousd: BigInt(60),
+      owner: worker,
+      claimedAt: base,
+      revision: 1,
+    },
+  });
+
+  try {
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 100),
+    });
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 200),
+    });
+    if (!started.started) {
+      assert.fail(`execution did not start: ${started.reason}`);
+    }
+    const settled = await settleAmuxExecution({
+      attemptId: started.attemptId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      taskRevision: started.taskRevision,
+      outcome: "succeeded",
+      toStatus: "done",
+      actualCostMicrousd: BigInt(40),
+      now: new Date(base.getTime() + 300),
+    });
+    assert.equal(settled.settled, true);
+
+    const ledger = await prisma.amuxCostLedgerEntry.findMany({
+      where: { attemptId: started.attemptId },
+      orderBy: { kind: "asc" },
+    });
+    assert.equal(ledger.length, 2);
+    assert.equal(
+      ledger.reduce((sum, entry) => sum + entry.amountMicrousd, BigInt(0)),
+      BigInt(40),
+    );
+    for (const entry of ledger) {
+      assert.equal(entry.budgetWindowStartsAt.getTime(), windowStartsAt.getTime());
+      assert.equal(entry.budgetWindowEndsAt.getTime(), windowEndsAt.getTime());
+    }
+  } finally {
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: worker } });
+    await prisma.amuxResourcePolicy.delete({
+      where: { scope_key: { scope: "project", key: projectKey } },
+    });
+  }
+});
+
 test("a failed route-decision insert rolls the owner claim back", async () => {
   const taskId = await createTodo("amux-rollback");
 
@@ -343,6 +494,7 @@ test("routing snapshot fails closed without an explicit worker catalog", async (
       reason: "worker_catalog_unavailable",
       task: null,
       candidates: [],
+      telemetry: {},
     });
   } finally {
     if (previousCatalog === undefined) {
@@ -530,7 +682,13 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
   });
 
   assert.equal(decision.worker, worker);
-  assert.deepEqual(decision.signals, evidence);
+  assert.deepEqual(decision.signals, {
+    ...evidence,
+    admission: {
+      incident: { state: "normal", transition_id: null, valid: true },
+      wip: [],
+    },
+  });
 
   await prisma.amuxWorkItem.update({
     where: { id: taskId },
@@ -538,7 +696,7 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
   });
 });
 
-test("claim API refuses ownership before execution lifecycle is ready", async () => {
+test("claim API refuses ownership when no worker is execution-ready", async () => {
   const taskId = await createTodo("amux-api-lifecycle-gate");
   const worker = "codex-evidence";
   const secret = makeAmuxSyncSecret();
@@ -572,9 +730,8 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
   try {
     /*
-     * This test targets the execution lifecycle gate, not routing evidence.
-     * Build the exact server-owned routing evidence first so authoritative
-     * routing validation succeeds and the request reaches execution_ready.
+     * An unavailable runtime remains a demand preference, not a selected
+     * owner; the claim must refuse before creating any ownership evidence.
      */
     const snapshot =
       await buildAmuxRoutingSnapshot(
@@ -597,9 +754,11 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
       );
 
     assert.equal(
-      routing.selected_worker,
+      routing.preferred_worker,
       worker,
     );
+    assert.equal(routing.selected_worker, null);
+    assert.equal(snapshot.execution_ready, false);
 
     const evidence = {
       scheduler: signals(),
@@ -643,7 +802,7 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     assert.deepEqual(body, {
       claimed: false,
-      reason: "execution_lifecycle_unavailable",
+      reason: "no_authoritative_worker",
     });
 
     const task = await prisma.amuxWorkItem.findUniqueOrThrow({
@@ -2486,7 +2645,7 @@ test("server worker scorer independently reproduces routing weights and determin
   );
 });
 
-test("claim API rejects internally consistent client routing evidence when it differs from authoritative server scoring", async () => {
+test("claim API persists authoritative routing when consistent client evidence drifts", async () => {
   const taskId =
     await createTodo("amux-authoritative-routing");
 
@@ -2499,13 +2658,15 @@ test("claim API rejects internally consistent client routing evidence when it di
   const previousCatalog =
     process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
 
+  const worker = `a-codex-${randomUUID()}`;
+
   process.env.TOMVERSE_AMUX_SYNC_SECRET =
     secret;
 
   process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON =
     JSON.stringify([
       {
-        worker_name: "a-codex",
+        worker_name: worker,
         provider: "codex",
         routing_roles: [
           "feature",
@@ -2536,6 +2697,19 @@ test("claim API rejects internally consistent client routing evidence when it di
       },
     });
 
+    const instanceId = randomUUID();
+    const base = new Date();
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 100),
+    });
+    assert.equal(ready.accepted, true);
+
     const snapshot =
       await buildAmuxRoutingSnapshot(
         taskId,
@@ -2558,7 +2732,7 @@ test("claim API rejects internally consistent client routing evidence when it di
 
     assert.equal(
       authoritative.selected_worker,
-      "a-codex",
+      worker,
     );
 
     const tampered = structuredClone(
@@ -2581,8 +2755,8 @@ test("claim API rejects internally consistent client routing evidence when it di
     assert.ok(selectedCandidate);
 
     /*
-     * Keep client evidence internally self-consistent.
-     * The old validator alone would accept this pair.
+     * Keep client evidence internally self-consistent while changing a
+     * time-dependent score. The server persists its own claim-time result.
      */
     selectedCandidate.breakdown.selected_score =
       0.99;
@@ -2629,15 +2803,9 @@ test("claim API rejects internally consistent client routing evidence when it di
       ),
     );
 
-    assert.equal(response.status, 400);
-
-    assert.deepEqual(
-      await response.json(),
-      {
-        error:
-          "Routing evidence does not match authoritative server scoring.",
-      },
-    );
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.claimed, true);
 
     const task =
       await prisma.amuxWorkItem.findUniqueOrThrow({
@@ -2646,17 +2814,16 @@ test("claim API rejects internally consistent client routing evidence when it di
         },
       });
 
-    assert.equal(task.owner, null);
-    assert.equal(task.revision, 0);
-    assert.equal(task.claimedAt, null);
-
+    assert.equal(task.owner, worker);
+    assert.equal(task.revision, 1);
+    const decision = await prisma.amuxRouteDecision.findFirstOrThrow({
+      where: { taskId },
+    });
+    assert.equal(decision.worker, worker);
     assert.equal(
-      await prisma.amuxRouteDecision.count({
-        where: {
-          taskId,
-        },
-      }),
-      0,
+      (decision.signals as { routing: { selected_score: number } }).routing
+        .selected_score,
+      authoritative.selected_score,
     );
   } finally {
     if (previousSecret === undefined) {
