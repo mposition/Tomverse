@@ -337,3 +337,39 @@ export const FIXTURE_PROVIDER_USAGE = {
   provider: "openai",
   estimatedCostMicroUsd: 4_250_000,
 } as const;
+
+/**
+ * The marketing automation's rows, for the read-only console
+ * (docs/policy/marketing-automation.md §6.1).
+ *
+ * Seeded through the status whitelist rather than written straight into a
+ * final state: S1's insert trigger accepts only `drafted` and `guard_rejected`,
+ * and every later status is reached by a transition the trigger allows. A
+ * fixture that inserted `published` directly would be testing a row shape the
+ * application cannot produce.
+ */
+export const FIXTURE_MARKETING = {
+  channel: {
+    id: "e2e-marketing-channel",
+    channel: "linkedin",
+    provider: "zernio",
+    accountSlug: "linkedin-e2e",
+    defaultLocale: "en",
+  },
+  pending: {
+    id: "e2e-marketing-pending",
+    logicalKey: "e2e-marketing-pending-key",
+    renderedText: "Three models, three answers, side by side.",
+    guardCode: "new_copy",
+  },
+  published: {
+    id: "e2e-marketing-published",
+    logicalKey: "e2e-marketing-published-key",
+    externalUrl: "https://example.test/e2e-marketing-published",
+  },
+  report: {
+    id: "e2e-marketing-report",
+    kind: "weekly",
+    sourceVersion: "e2e-1",
+  },
+} as const;

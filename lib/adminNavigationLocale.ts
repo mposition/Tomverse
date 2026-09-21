@@ -172,6 +172,19 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       deliveries: { label: "전송 로그", description: "무엇을 어디로 보냈고 도착했는지" },
     },
   },
+  marketing: {
+    label: "마케팅",
+    description: "초안 대기열, 게시된 글, 브랜드 계정, 자동화가 남긴 보고",
+    aliases: ["소셜", "게시물", "링크드인", "제르니오", "캠페인", "브랜드 계정", "초안 대기열", "가드"],
+    tabs: {
+      queue: { label: "대기열", description: "사람을 기다리는 초안과 Guard가 각각에 대해 말한 것" },
+      published: { label: "게시됨", description: "무엇이 어디로 나갔고 공개로 확인됐는지" },
+      accounts: { label: "계정", description: "브랜드 계정과 모드, 정지된 계정이 왜 정지됐는지" },
+      experiments: { label: "실험", description: "랜딩 문구 실험과 결과" },
+      reports: { label: "보고서", description: "주간 요약, 경쟁사 사실, 보존 실행 기록" },
+      comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
+    },
+  },
   "email-campaigns": {
     label: "이메일 캠페인",
     description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",

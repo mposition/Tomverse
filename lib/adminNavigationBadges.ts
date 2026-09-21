@@ -37,6 +37,16 @@ export type AdminNavigationCounts = {
    * received it.
    */
   overdueCampaignWaves: number | null;
+  /**
+   * Marketing drafts the Guard sent to a person
+   * (docs/policy/marketing-automation.md §6).
+   *
+   * The Guard's second verdict is "a person decides", and a draft that reaches
+   * it waits until someone does. Without this count the queue is a page nobody
+   * opens, and the automation's output stays invisible until an approval
+   * expires.
+   */
+  pendingMarketingApprovals: number | null;
   openFeedback: number | null;
   /** Auto-fix cases waiting on an operator: a PR to approve, a verified fix
    * to reply about, or a stopped promotion (AUTOFIX_OPERATOR_ACTION_STATES). */
@@ -54,6 +64,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   abandonedLegalEmail: null,
   openModelLifecycle: null,
   overdueCampaignWaves: null,
+  pendingMarketingApprovals: null,
   openFeedback: null,
   autoFixActionCases: null,
   openPrivacyRequests: null,
@@ -112,6 +123,8 @@ export const adminNavigationBadge = (
       return counts.openModelLifecycle;
     case "emailCampaigns":
       return counts.overdueCampaignWaves;
+    case "marketing":
+      return counts.pendingMarketingApprovals;
     default:
       return null;
   }

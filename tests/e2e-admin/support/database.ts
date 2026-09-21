@@ -24,6 +24,7 @@ import {
   FIXTURE_HEALTH_CHECK,
   FIXTURE_INCIDENT,
   FIXTURE_JOB_RUN,
+  FIXTURE_MARKETING,
   FIXTURE_MODEL,
   FIXTURE_NOTIFICATION,
   FIXTURE_PRIVACY_REQUEST,
@@ -1011,6 +1012,128 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
       plan: "Pro",
       occurredAt: at(-(index + 1) * HOUR),
     })),
+  });
+
+  // Marketing rows, walked through the status whitelist S1 installed. The
+  // insert trigger accepts `drafted` only, so every later status here is a
+  // transition the trigger allows -- which also means this fixture breaks if
+  // somebody widens or narrows that whitelist without meaning to.
+  await prisma.marketingChannel.create({
+    data: {
+      id: FIXTURE_MARKETING.channel.id,
+      channel: FIXTURE_MARKETING.channel.channel,
+      provider: FIXTURE_MARKETING.channel.provider,
+      externalAccountRef: "e2e-external-ref",
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      defaultLocale: FIXTURE_MARKETING.channel.defaultLocale,
+      allowedLocales: ["en", "ko"],
+      scopesDigest: "e2e-scopes-digest",
+      status: "connect_pending",
+    },
+  });
+  await prisma.marketingChannel.update({
+    where: { id: FIXTURE_MARKETING.channel.id },
+    data: { status: "approval_mode", approvalStartedAt: at(-6 * DAY) },
+  });
+
+  const marketingDraft = (
+    id: string,
+    logicalKey: string,
+    renderedText: string,
+    digest: string
+  ) => ({
+    id,
+    channelId: FIXTURE_MARKETING.channel.id,
+    locale: "en",
+    kind: "social",
+    logicalKey,
+    envelope: {
+      channel: FIXTURE_MARKETING.channel.channel,
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      locale: "en",
+      renderedText,
+      claimIds: [],
+      assets: [],
+      finalUrl: null,
+      scheduledAt: null,
+      disclosureFlags: ["advertising"],
+    },
+    envelopeDigest: digest,
+    rendererVersion: "e2e-r1",
+    claimIds: [],
+    assetIds: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshot: {},
+    guardDecision: "approval_required",
+    guardCodes: [FIXTURE_MARKETING.pending.guardCode],
+    guardRuleIds: [],
+    status: "drafted",
+    mode: "approval",
+    history: [],
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.pending.id,
+      FIXTURE_MARKETING.pending.logicalKey,
+      FIXTURE_MARKETING.pending.renderedText,
+      "e2e-digest-pending"
+    ),
+  });
+  await prisma.marketingPost.update({
+    where: { id: FIXTURE_MARKETING.pending.id },
+    data: { status: "pending_approval", approvalExpiresAt: at(2 * DAY) },
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.published.id,
+      FIXTURE_MARKETING.published.logicalKey,
+      "Answers from three models, in one place.",
+      "e2e-digest-published"
+    ),
+  });
+  for (const step of [
+    { status: "pending_approval", data: {} },
+    {
+      status: "approved",
+      data: {
+        approvalAuditLogId: "e2e-marketing-approval-audit",
+        approvedAt: at(-3 * DAY),
+        approvedDigest: "e2e-digest-published",
+        approvalExpiresAt: at(4 * DAY),
+      },
+    },
+    { status: "scheduled", data: { scheduledAt: at(-2 * DAY) } },
+    {
+      status: "publishing",
+      data: { providerRequestKey: FIXTURE_MARKETING.published.logicalKey },
+    },
+    {
+      status: "published",
+      data: {
+        publishedAt: at(-2 * DAY),
+        externalPostId: "e2e-external-post",
+        externalUrl: FIXTURE_MARKETING.published.externalUrl,
+      },
+    },
+  ]) {
+    await prisma.marketingPost.update({
+      where: { id: FIXTURE_MARKETING.published.id },
+      data: { status: step.status, ...step.data },
+    });
+  }
+
+  await prisma.marketingReport.create({
+    data: {
+      id: FIXTURE_MARKETING.report.id,
+      kind: FIXTURE_MARKETING.report.kind,
+      periodStart: at(-7 * DAY),
+      periodEnd: at(0),
+      payload: { posts: 1 },
+      sourceVersion: FIXTURE_MARKETING.report.sourceVersion,
+    },
   });
 
   return { seededAt: new Date(now) };
