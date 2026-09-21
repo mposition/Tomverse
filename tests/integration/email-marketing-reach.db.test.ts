@@ -78,7 +78,18 @@ const suppress = (input: {
       sourceEventKey: `test:${randomUUID()}`,
       occurredAt: new Date(),
       ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
-      ...(input.releasedAt ? { releasedAt: input.releasedAt } : {}),
+      // `SuppressionCause_release_check`: a released cause carries what
+      // released it. A row with a `releasedAt` and nothing beside it is a
+      // release with no author, which is what the constraint refuses -- and a
+      // fixture able to write one would be testing the report against a row
+      // the application cannot produce.
+      ...(input.releasedAt
+        ? {
+            releasedAt: input.releasedAt,
+            releaseKind: "admin",
+            releaseEvidence: { kind: "admin" },
+          }
+        : {}),
     },
   });
 
