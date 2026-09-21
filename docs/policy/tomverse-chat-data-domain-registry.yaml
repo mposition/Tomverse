@@ -1058,16 +1058,17 @@ domains:
       nextReviewAt: "2026-11-05"
     subjectReference:
       kind: none
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     note: >-
       The immutable decision stores the approving operator's actorUserId and
       refers to a proposal bound to an AMUX task and a GitHub PR digest; it
       has no typed customer identifier or review prose. The operator approved
       the existing Admin audit retention policy for this ledger on 2026-09-21;
       its non-null actorUserId remains attributable after account deletion.
-      Whether operator access requests belong in unified export or the manual
-      PrivacyRequest path awaits an explicit decision; do not infer it from
-      the approved retention period.
+      The operator approved exclusion from unified export and manual
+      PrivacyRequest review for access requests on 2026-09-21. This prevents
+      automatic disclosure of other operators or tasks while preserving access
+      review; it is distinct from the approved retention period.
       The linked AdminAuditLog is separately retained under the same schedule.
 
   - domain: promptRefinerReservationStage
