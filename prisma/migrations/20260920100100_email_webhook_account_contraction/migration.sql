@@ -116,6 +116,37 @@ SET LOCAL lock_timeout = '5s';
 -- `IF EXISTS` does not cover that.
 ALTER TABLE "ProviderWebhookEvent"
     DROP CONSTRAINT IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
+
+-- Before the drop: this name, if it is anything, has to be an index on
+-- `ProviderWebhookEvent`.
+--
+-- `DROP INDEX` takes a name and resolves it in the relation namespace. It has
+-- no way to say which table the index must belong to, and that is not only a
+-- multi-schema problem -- in one schema it is enough for the intended index to
+-- be gone and for some other table's index to have taken the name. The drop
+-- then removes that index and **succeeds**, the migration is recorded as
+-- applied, the old unique is still there, and nothing ever runs the recovery
+-- query that would have noticed. A branch that only runs after a failure is no
+-- help when the failure does not happen.
+--
+-- So the ownership is checked here, before anything is removed, and a name
+-- that belongs to another table aborts the transaction.
+DO $ownership$
+DECLARE
+    owner oid;
+BEGIN
+    SELECT i.indrelid INTO owner
+      FROM pg_index i
+     WHERE i.indexrelid = to_regclass('"ProviderWebhookEvent_provider_providerEventId_key"');
+
+    IF owner IS NOT NULL AND owner IS DISTINCT FROM to_regclass('"ProviderWebhookEvent"') THEN
+        RAISE EXCEPTION
+            'ProviderWebhookEvent_provider_providerEventId_key belongs to %, not to ProviderWebhookEvent; refusing to drop it',
+            owner::regclass;
+    END IF;
+END
+$ownership$;
+
 DROP INDEX IF EXISTS "ProviderWebhookEvent_provider_providerEventId_key";
 
 -- One writer, and it names the account. A default here would let the next one

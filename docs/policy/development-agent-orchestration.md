@@ -48,7 +48,16 @@ Scheduler의 task 선택은 실행 시작과 분리한다.
 ## Approval
 
 외부 시스템 변경, 배포, 이메일 발송 등 irreversible/high-risk action은
-Tomverse approval policy를 통과해야 한다.
+사람의 승인을 통과해야 한다.
+
+Agent 승인은 2인 승인(`AdminActionApproval`)을 쓰지 않는다.
+2인 승인은 "관리자 두 사람이 한 action에 동의한다"를 표현하며,
+"사람 한 명이 시스템이 만든 초안을 승인한다"를 표현하지 못한다.
+Agent 승인은 별도 계약이고, sole-approver 예외 목록은 건드리지 않는다.
+
+그 별도 계약은 아직 없다.
+계약이 승인되고 구현되기 전까지 AMUX의 어떤 경로도
+승인을 받았다고 기록하지 않으며, 승인이 필요한 action을 수행하지 않는다.
 
 ## Audit
 
