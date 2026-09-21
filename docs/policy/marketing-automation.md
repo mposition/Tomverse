@@ -1,15 +1,13 @@
 # 마케팅 자동화 에이전트 정책
 
 상태: **승인됨 — 구현 없음.** 작성 2026-09-16, 승인 2026-09-17.
-approvedBy: mposition · approvedAt: 2026-09-17 · 정책 버전: 2
-
-개정 초안(미승인): 정책 버전 3 · approvedBy: · approvedAt:
+approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 3
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
-| 3 (초안) | approvedBy: · approvedAt: | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). **이 행은 운영자 서명 전까지 승인된 정책 버전이 아니다.** |
+| 3 | 2026-09-21 mposition | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). 열세 번의 독립 검토가 이 판정기를 양방향으로 틀린 것으로 확인했고, 답은 패턴을 더하는 것이 아니라 tokeniser·형태소로 교체하는 것이다. 그 교체 전까지 거절 권한은 돌아오지 않는다. |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
 Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-changes, 요구 변경 반영)를 옮긴 것이다.
