@@ -244,7 +244,17 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
         chatPosts += 1;
       }
     });
-    await enterChat(page, { offered: true });
+    await enterChat(page, { offered: true, modeRefresh: true });
+    await expect(page.getByTestId("prompt-refiner-fixture-refresh")).toHaveCount(1);
+    await page.evaluate(() => {
+      document.cookie = "__tomverse_e2e_prompt_refiner_mode_refresh=; Max-Age=0; Path=/";
+    });
+    await page.getByTestId("prompt-refiner-fixture-refresh").evaluate((button) => {
+      if (!(button instanceof HTMLButtonElement)) throw new Error("not a button");
+      button.click();
+    });
+    await expect(page.getByTestId("prompt-refiner-fixture-refresh")).toHaveCount(0);
+    await expect(page.getByTestId("prompt-refiner-request")).toBeVisible();
     const responseGate = await holdRefinerResponse(page);
     const textarea = page.getByTestId("chat-textarea");
     await textarea.fill(SOURCE_PROMPT);
@@ -517,7 +527,7 @@ async function blockAndCountChatPosts(page: Page, durable: Awaited<ReturnType<ty
   await page.route("**/api/products/chat/conversations", async (route) => {
     if (route.request().method() !== "POST") {
       unexpectedCreateMethods.push(route.request().method());
-      await route.abort("aborted");
+      await route.fallback();
       return;
     }
     const conversation = {
