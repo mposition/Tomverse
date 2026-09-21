@@ -16,7 +16,7 @@ import {
   listSuppressions,
 } from "@/lib/adminEmailDeliveries";
 import { parseDeliveryFilters } from "@/lib/adminEmailDeliveryFilters";
-import { recordSuppression, removeSuppression } from "@/lib/emailSuppression";
+import { recordSuppression } from "@/lib/emailSuppression";
 import { enqueuedRow } from "../support/enqueuedEmail";
 
 // Reading the outbox back, against a real database.
@@ -32,7 +32,7 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
-      "EmailPolicyVersion", "SuppressionEntry", "User"
+      "EmailPolicyVersion", "SuppressionEntry", "SuppressionCause", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -202,6 +202,45 @@ test("paging walks the whole list without repeating a row", async () => {
 // Suppressions (§13.7)
 // ---------------------------------------------------------------------------
 
+test("a selector's causes are never cut by the row limit", async () => {
+  // The limit belongs to selectors, and it is applied in the database. Read a
+  // multiple of it in causes and group in memory instead, and a selector at the
+  // edge of the window comes back with *some* of its causes -- so a row whose
+  // privacy_request will outlive the lift is drawn without it, and the operator
+  // acts expecting an address that ends up clear.
+  const crowded = "crowded@example.com";
+  const reasons = [
+    "hard_bounce",
+    "complaint",
+    "unsubscribe",
+    "manual",
+    "privacy_request",
+  ] as const;
+  for (const reason of reasons) {
+    await recordSuppression({
+      sourceEventKey: `test:${randomUUID()}`,
+      emailAddress: crowded,
+      reason,
+      source:
+        reason === "manual" || reason === "privacy_request"
+          ? "admin"
+          : reason === "unsubscribe"
+            ? "unsubscribe_link"
+            : "provider_webhook",
+    });
+  }
+
+  // One row asked for, and five causes -- more than any per-row budget a
+  // multiplied read would have used.
+  const [row] = await listSuppressions({ emailAddress: null, limit: 1 });
+  assert.ok(row);
+  assert.equal(row.causes.length, reasons.length);
+  assert.ok(
+    row.causes.some((cause) => cause.reason === "privacy_request"),
+    "the reason that will still be stopping this address afterwards was cut out of the row"
+  );
+});
+
 test("a suppression created by a privacy request cannot be lifted from here", async () => {
   // It is the record of someone exercising a legal right. The process entitled
   // to lift it is the privacy process that created it, not a button on an
@@ -213,18 +252,171 @@ test("a suppression created by a privacy request cannot be lifted from here", as
     source: "admin",
   });
 
-  const result = await removeSuppression({ id: created.id! });
-  assert.equal(result.removed, false);
-  if (!result.removed) assert.equal(result.refusal, "unliftable");
-
+  // The refusal itself is the cause lift's, and
+  // tests/integration/admin-suppression-lift-route.db.test.ts drives it through
+  // the route. What this file is responsible for is the listing: the row is
+  // there, and it says what makes it unliftable.
   const rows = await listSuppressions({ emailAddress: null, limit: 10 });
-  assert.equal(rows.length, 1, "the entry was removed anyway");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    rows[0].causes.map((cause) => cause.reason),
+    ["privacy_request"]
+  );
+  assert.equal(rows[0].id, created.id);
 });
 
-test("lifting returns what it removed, so the audit entry can hold it", async () => {
-  // The row is read and deleted in one transaction. An audit entry describing
-  // a row a concurrent lift already removed would be a record of something
-  // that did not happen.
+test("one row per suppressed selector, carrying every active cause on it", async () => {
+  // The console reads causes now (docs/policy/email-notifications.md v25). A
+  // selector can hold several at once and the block is their sum, so a row per
+  // cause would show the same address three times and invite an operator to
+  // lift a third of a block.
+  const emailAddress = "stacked@example.com";
+  for (const reason of ["hard_bounce", "complaint", "unsubscribe"] as const) {
+    await recordSuppression({
+      sourceEventKey: `test:${randomUUID()}`,
+      emailAddress,
+      reason,
+      source: reason === "unsubscribe" ? "unsubscribe_link" : "provider_webhook",
+    });
+  }
+  // A second selector, so grouping is proved rather than assumed from a table
+  // that happens to hold one address.
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress: "other@example.com",
+    reason: "hard_bounce",
+    source: "provider_webhook",
+  });
+
+  const rows = await listSuppressions({ emailAddress: null, limit: 10 });
+  assert.equal(rows.length, 2);
+
+  const stacked = rows.find(
+    (row) => row.emailAddressMasked === maskEmailAddress(emailAddress)
+  );
+  assert.ok(stacked, "the stacked selector is missing");
+  assert.deepEqual(
+    [...stacked.causes.map((cause) => cause.reason)].sort(),
+    ["complaint", "hard_bounce", "unsubscribe"]
+  );
+
+  // The row's handle is one of its own causes -- an entry id would be a handle
+  // to the row the contraction stops writing.
+  const causeIds = stacked.causes.map((cause) => cause.id);
+  assert.ok(causeIds.includes(stacked.id));
+  assert.equal(
+    await prisma.suppressionCause.count({ where: { id: stacked.id } }),
+    1
+  );
+
+  // And the same id is what the audited reveal resolves an address by.
+  const { revealEmailAddresses } = await import("@/lib/adminEmailAddressReveal");
+  assert.deepEqual(
+    await revealEmailAddresses({ kind: "suppression", ids: [stacked.id] }),
+    { [stacked.id]: emailAddress }
+  );
+});
+
+test("the reveal answers for an active cause and not for a dead one", async () => {
+  // An entry stopped resolving to an address the moment its suppression was
+  // lifted, because the row was deleted. Causes are append-only, so every id
+  // this screen ever printed -- and every id sitting in an audit entry -- would
+  // otherwise be a permanent handle for turning a masked address back into an
+  // address.
+  const { revealEmailAddresses } = await import("@/lib/adminEmailAddressReveal");
+  const emailAddress = "revealed@example.com";
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress,
+    reason: "hard_bounce",
+    source: "provider_webhook",
+  });
+  const live = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({ kind: "suppression", ids: [live.id] }),
+    { [live.id]: emailAddress }
+  );
+
+  // Expired: asked as of a later moment, so the clock is not part of the test.
+  const expiring = "expiring@example.com";
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress: expiring,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  const soft = await prisma.suppressionCause.findFirstOrThrow({
+    where: { emailAddress: expiring },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({
+      kind: "suppression",
+      ids: [soft.id],
+      now: new Date(Date.now() + 120_000),
+    }),
+    {}
+  );
+
+  // Released.
+  await prisma.suppressionCause.update({
+    where: { id: live.id },
+    data: { releasedAt: new Date(), releaseKind: "admin" },
+  });
+  assert.deepEqual(
+    await revealEmailAddresses({ kind: "suppression", ids: [live.id] }),
+    {}
+  );
+});
+
+test("a cause that has expired, or been released, stops being listed", async () => {
+  // A soft bounce whose window has passed stops mail nowhere, and a screen that
+  // still lists it asks somebody to lift something that is not there.
+  const emailAddress = "expired@example.com";
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+
+  assert.equal(
+    (await listSuppressions({ emailAddress: null, limit: 10 })).length,
+    1
+  );
+
+  // Asked as of a later moment rather than by waiting: the expiry is applied by
+  // the reader, and this proves which reader.
+  assert.equal(
+    (
+      await listSuppressions({
+        emailAddress: null,
+        limit: 10,
+        now: new Date(Date.now() + 120_000),
+      })
+    ).length,
+    0
+  );
+
+  await prisma.suppressionCause.updateMany({
+    where: { emailAddress },
+    data: { releasedAt: new Date(), releaseKind: "admin" },
+  });
+  assert.equal(
+    (await listSuppressions({ emailAddress: null, limit: 10 })).length,
+    0
+  );
+});
+
+test("a released cause leaves the listing", async () => {
+  // What the console shows after a lift. The lift itself is the cause path's
+  // and is driven through the route elsewhere; here the release is written
+  // directly, because the claim under test is what the *listing* does with it.
   const created = await recordSuppression({
     sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "bounced@example.com",
@@ -232,19 +424,11 @@ test("lifting returns what it removed, so the audit entry can hold it", async ()
     source: "provider_webhook",
     sourceClassification: "transactional",
   });
+  assert.equal((await listSuppressions({ emailAddress: null, limit: 10 })).length, 1);
 
-  const result = await removeSuppression({ id: created.id! });
-  assert.equal(result.removed, true);
-  if (result.removed) {
-    assert.equal(result.entry.emailAddress, "bounced@example.com");
-    assert.equal(result.entry.reason, "hard_bounce");
-    assert.equal(result.entry.source, "provider_webhook");
-  }
+  await prisma.suppressionCause.update({
+    where: { id: created.id },
+    data: { releasedAt: new Date(), releaseKind: "admin" },
+  });
   assert.equal((await listSuppressions({ emailAddress: null, limit: 10 })).length, 0);
-
-  // A second lift of the same id is not found, rather than a second audit
-  // entry for one removal.
-  const again = await removeSuppression({ id: created.id! });
-  assert.equal(again.removed, false);
-  if (!again.removed) assert.equal(again.refusal, "not_found");
 });

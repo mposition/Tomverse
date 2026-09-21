@@ -36,9 +36,11 @@ import {
 export async function revealEmailAddresses(input: {
   kind: AddressRevealKind;
   ids: readonly string[];
+  now?: Date;
 }): Promise<Record<string, string | null>> {
   const ids = Array.from(new Set(input.ids)).slice(0, ADDRESS_REVEAL_MAX_IDS);
   if (ids.length === 0) return {};
+  const now = input.now ?? new Date();
 
   const where = { id: { in: [...ids] } };
   const select = { id: true, emailAddress: true } as const;
@@ -46,7 +48,27 @@ export async function revealEmailAddresses(input: {
     input.kind === "delivery"
       ? await prisma.emailDelivery.findMany({ where, select })
       : input.kind === "suppression"
-        ? await prisma.suppressionEntry.findMany({ where, select })
+        ? // A cause id, not an entry id: the console lists causes, so these are
+          // the ids it handed out (docs/policy/email-product-news-redesign-draft.md,
+          // section 7.4).
+          //
+          // **Active causes only.** Causes are append-only, and an entry used
+          // to be deleted when its suppression was lifted -- so an entry id
+          // stopped resolving to an address the moment the suppression ended,
+          // and a cause id would never stop. Every id ever printed on this
+          // screen, and every id sitting in an audit entry, would be a
+          // permanent handle for turning a masked address back into an address.
+          // The reveal exists for the rows on the screen now; a released or
+          // expired cause is not one of them, and a request for one comes back
+          // as if the id were unknown.
+          await prisma.suppressionCause.findMany({
+            where: {
+              ...where,
+              releasedAt: null,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            },
+            select,
+          })
         : await prisma.emailCampaignRecipient.findMany({ where, select });
 
   return Object.fromEntries(rows.map((row) => [row.id, row.emailAddress]));

@@ -92,14 +92,9 @@ test("an apply records each missing hard bounce once, and a second run records n
 
   const first = await recoverPermanentBounces({ apply: true });
   assert.equal(first.recorded, 1);
-  assert.equal(first.entriesRaised, 1);
   const cause = await prisma.suppressionCause.findFirstOrThrow({ where: { emailAddress: dead } });
   assert.equal(cause.reason, "hard_bounce");
   assert.equal(cause.sourceEventKey, `webhook:${event.id}`);
-  assert.equal(
-    (await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress: dead } })).reason,
-    "hard_bounce"
-  );
   assert.equal(
     (await suppressionCheck({ emailAddress: dead, classification: "transactional" })).allowed,
     false
@@ -128,7 +123,7 @@ test("a hard bounce already recorded for the message under another key is not re
   assert.equal(report.recorded, 0);
 });
 
-test("an existing permanent entry keeps its reason; the cause is still added", async () => {
+test("an existing permanent cause keeps its reason; the hard bounce is still added", async () => {
   const address = `${randomUUID()}@example.com`;
   await recordSuppression({
     emailAddress: address,
@@ -141,10 +136,15 @@ test("an existing permanent entry keeps its reason; the cause is still added", a
 
   const report = await recoverPermanentBounces({ apply: true });
   assert.equal(report.recorded, 1);
-  assert.equal(report.entriesRaised, 0);
+  // The complaint is untouched. It used to matter that the mirrored entry kept
+  // saying "complaint" rather than being downgraded; with causes there is
+  // nothing to downgrade -- the hard bounce is written beside it and both are
+  // active.
   assert.equal(
-    (await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress: address } })).reason,
-    "complaint"
+    await prisma.suppressionCause.count({
+      where: { emailAddress: address, reason: "complaint", releasedAt: null },
+    }),
+    1
   );
   assert.equal(
     await prisma.suppressionCause.count({ where: { emailAddress: address, reason: "hard_bounce" } }),
@@ -183,17 +183,27 @@ test("an address that has taken a delivery since the bounce is left alone", asyn
   assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: revived } }), 0);
 });
 
-test("two bounces for one address leave two causes and the newest on the entry", async () => {
+test("two bounces for one address leave two causes, and neither replaces the other", async () => {
+  // This used to also assert which of them the mirrored entry ended up holding
+  // -- the newest -- because one row had to choose. Nothing chooses now: both
+  // causes are active, and the verdict reads both.
   const dead = `${randomUUID()}@example.com`;
-  await storeBounce({ address: dead, type: "Permanent", daysAgo: 8 });
+  const older = await storeBounce({ address: dead, type: "Permanent", daysAgo: 8 });
   const newest = await storeBounce({ address: dead, type: "Permanent", daysAgo: 2 });
   const report = await recoverPermanentBounces({ apply: true });
   assert.equal(report.recorded, 2);
-  assert.equal(report.entriesRaised, 1);
-  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: dead, reason: "hard_bounce" } }), 2);
-  const entry = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress: dead } });
-  const newestMessage = (newest.payload as { data: { email_id: string } }).data.email_id;
-  assert.equal(entry.sourceMessageId, newestMessage);
+
+  const causes = await prisma.suppressionCause.findMany({
+    where: { emailAddress: dead, reason: "hard_bounce", releasedAt: null },
+    select: { sourceMessageId: true },
+  });
+  assert.equal(causes.length, 2);
+  const messageOf = (event: { payload: unknown }) =>
+    (event.payload as { data: { email_id: string } }).data.email_id;
+  assert.deepEqual(
+    causes.map((cause) => cause.sourceMessageId).sort(),
+    [messageOf(older), messageOf(newest)].sort()
+  );
 });
 
 test("two events naming one message in a run record one cause", async () => {

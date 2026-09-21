@@ -177,7 +177,23 @@ test("authority source stores no prompt/content identity and calls no provider",
     }
 
     const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
-    const tables = schema.slice(schema.indexOf("model PromptRefinerReservationStage"));
+    // Keep this content-free authority check scoped to the two reservation
+    // models. Later, unrelated models may legitimately store their own payloads.
+    const reservationModelNames = [
+        "PromptRefinerReservationStage",
+        "PromptRefinerReservation",
+    ];
+    const tables = reservationModelNames
+        .map((modelName) => {
+            const start = schema.indexOf(`model ${modelName} {`);
+            assert.notEqual(start, -1, `${modelName} must exist`);
+
+            const end = schema.indexOf("\n}", start);
+            assert.notEqual(end, -1, `${modelName} must close`);
+
+            return schema.slice(start, end + 2);
+        })
+        .join("\n");
     for (const forbiddenColumn of [
         "prompt ",
         "content ",

@@ -255,13 +255,13 @@ async function loadRoute(): Promise<{
         },
       },
       // The send path asks whether the address is suppressed before every
-      // attempt (docs/policy/email-notifications.md §13.3).
-      suppressionEntry: {
+      // attempt (docs/policy/email-notifications.md §13.3). It asks the causes:
+      // nothing writes `SuppressionEntry` after deploy C-2, so a stub offering
+      // that table answers a question the send no longer puts.
+      suppressionCause: {
         findMany: async () => world.suppressions,
       },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
-      // The fence and the address lock the send takes before it submits.
+      // The address lock the send takes before it submits.
       ...sendLockPrismaStubs(),
       feedbackAutoFixCase: {
         updateMany: async ({

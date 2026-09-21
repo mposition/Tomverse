@@ -25,11 +25,7 @@ import {
   type SuppressionSource,
 } from "@/lib/emailSuppression";
 import { markCauseWriter, releaseSelectorCauses } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-  readSuppressionAuthority,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
 
 /**
@@ -80,8 +76,8 @@ export type PreferenceChangeResult =
   /** The account's address is not the one the confirmation link was sent to. */
   | { changed: false; reason: "address_changed" }
   /**
-   * Once causes decide: switching on would lift only this purpose's own
-   * unsubscribe, and another active cause still stops this mail
+   * Switching on lifts only this purpose's own unsubscribe, and another active
+   * cause still stops this mail
    * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
    */
   | { changed: false; reason: "suppressed" };
@@ -341,11 +337,11 @@ export type PreferenceChangeOutcome =
  * the entry point for requests; the privacy intake and the complaint handler
  * call this directly because the change has to commit with the suppression that
  * caused it. The caller has checked the purpose may change, created the
- * default rows, and resolved the policy version -- none of which can run inside
- * a transaction that already holds the fence.
+ * default rows, and resolved the policy version -- none of which belongs
+ * inside a transaction already holding the address.
  *
- * Takes the fence, the User row, the address and the preference row in that
- * order; a caller that already holds some of them takes them again harmlessly.
+ * Takes the User row, the address and the preference row in that order; a
+ * caller that already holds some of them takes them again harmlessly.
  */
 export async function applyPreferenceChange(
   tx: Prisma.TransactionClient,
@@ -362,9 +358,6 @@ export async function applyPreferenceChange(
   const { purpose, now, policyVersionId, confirmedCountry } = input;
   const consentBased = recordsConsent(purpose);
 
-  // The shared fence before any row lock: a withdrawal writes a suppression,
-  // and no suppression write may straddle the read-authority cutover.
-  await holdSuppressionFence(tx);
   // The address is read under the user row lock and everything below uses
   // that value, so a confirmation cannot be recorded against an address that
   // changed after the link was checked, and a withdrawal suppresses the
@@ -417,35 +410,29 @@ export async function applyPreferenceChange(
     return "already_set" as const;
   }
 
-  // Once causes decide, switching on lifts only this purpose's own
-  // unsubscribe. Any other active cause for this purpose, for marketing as a
-  // whole, or for the address (a soft bounce aside, which expires) still stops
-  // the mail, so the switch is refused rather than shown as on.
+  // Switching on lifts only this purpose's own unsubscribe. Any other active
+  // cause for this purpose, for marketing as a whole, or for the address (a
+  // soft bounce aside, which expires) still stops the mail, so the switch is
+  // refused rather than shown as on.
   //
-  // While entries still decide, the older rule stands -- the toggle lifts its
-  // purpose row -- except for a privacy request. That is never liftable, and
-  // the classification stop a deletion intake writes is invisible to the
-  // entry read, so lifting the purpose row would restart the mail
-  // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  // Turning a purpose on is refused while something other than this person's
+  // own unsubscribe is stopping that mail: a hold or a privacy request on the
+  // purpose, the marketing classification stop a deletion intake writes, or
+  // anything global that is not a soft bounce.
+  //
+  // This used to have a second list for the entry era, which recognised only
+  // privacy requests -- an entry read could not see a classification cause, so
+  // the narrower list was all it could honour. Nothing reads entries now.
   if (input.enabled) {
-    const causesDecide = (await readSuppressionAuthority(tx)) === "causes";
     const blocking = await tx.suppressionCause.findMany({
       where: {
         emailAddress: normalizeSuppressionAddress(email),
         releasedAt: null,
-        OR: causesDecide
-          ? [
-              { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
-              ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
-              { scope: "global", reason: { not: "soft_bounce" } },
-            ]
-          : [
-              { scope: "purpose", purposeKey: purpose, reason: "privacy_request" },
-              ...(consentBased
-                ? [{ scope: "classification", purposeKey: "marketing", reason: "privacy_request" }]
-                : []),
-              { scope: "global", reason: "privacy_request" },
-            ],
+        OR: [
+          { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
+          ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
+          { scope: "global", reason: { not: "soft_bounce" } },
+        ],
       },
       select: { id: true, expiresAt: true, releasedAt: true },
     });
@@ -598,20 +585,18 @@ export async function applyPreferenceChange(
       emailAddress: normalizeSuppressionAddress(email),
       scope: "purpose",
       purposeKey: purpose,
-      // Entries still decide in an older build, where lifting the row lifts
-      // everything behind it; once causes decide, only the unsubscribe the
-      // person asked for is theirs to lift.
-      onlyReason: (await readSuppressionAuthority(tx)) === "causes" ? "unsubscribe" : null,
+      // Only the unsubscribe the person asked for is theirs to lift. Turning a
+      // purpose back on says nothing about a hard bounce or a complaint on the
+      // same address, and releasing those because somebody flipped a switch is
+      // how a suppression stops meaning anything.
+      //
+      // This used to depend on the read authority: entries decided in an older
+      // build, where lifting the row lifted everything behind it. That build is
+      // below this deploy's floor and the mirror is no longer written.
+      onlyReason: "unsubscribe",
       releaseKind: "preference_enabled",
       releaseEvidence: { kind: "preference", transitionId: transition?.id ?? null },
       releasedAt: now,
-    });
-    await tx.suppressionEntry.deleteMany({
-      where: {
-        emailAddress: normalizeSuppressionAddress(email),
-        scope: "purpose",
-        purposeKey: purpose,
-      },
     });
   }
   return "changed" as const;

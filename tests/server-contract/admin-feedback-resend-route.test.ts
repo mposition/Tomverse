@@ -159,10 +159,8 @@ async function loadRoute() {
           return row;
         },
       },
-      suppressionEntry: { findMany: async () => [] },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
-      // The fence and the address lock the send takes before it submits.
+      suppressionCause: { findMany: async () => [] },
+      // The address lock the send takes before it submits.
       ...sendLockPrismaStubs(),
     };
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: fakePrisma } });

@@ -197,9 +197,24 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * either one: two branches each moved this constant for their own file, and
  * taking one side of that merge would have left a fingerprint describing a
  * pipeline that never existed.
+ *
+ * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
+ * the same watched schema. None changes a marketing model, the descriptor, or
+ * an admission decision; the fingerprint moves because the closed file digest
+ * deliberately requires this review whenever any schema bytes move.
+ *
+ * 2026-09-21, again: the same watched file, and this time the declared change
+ * is a documentation comment. `SuppressionCause`'s model comment said the rows
+ * were written beside `SuppressionEntry` and read by no send decision, which
+ * stopped being true when the send moved onto them
+ * (docs/policy/email-notifications.md v26). No column, index, constraint or
+ * model changed, so nothing this pipeline stores or reads is different -- but
+ * a comment is bytes in a watched file, and the digest asking for a look
+ * rather than deciding for itself what is material is the behaviour, not a
+ * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "722babd0d23333823127ac229131db33cd5c14b1f37172e39836ba3469c40299";
+  "5a65edee6a24294a02fc1dbe34f0c7076e2a304d32a855b50ed65955c84ce926";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
