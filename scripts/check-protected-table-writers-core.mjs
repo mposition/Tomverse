@@ -398,6 +398,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The AMUX approval migration creates only its proposal/decision ledger and reads AdminAuditLog through a restrictive foreign key and SELECT FOR KEY SHARE. It never writes AdminAuditLog; lib/adminAudit.ts remains its sole writer. Exact counts fail closed if this SQL changes.",
   },
   {
+    path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 26,
+    reason:
+      "The confirmatory-shadow migration reads exact human/system audit rows from replacement guards and changes DDL only. It seeds no stage, reservation, run, attempt or audit row.",
+  },
+  {
+    path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 18,
+    writeVerbs: 26,
+    reason:
+      "The migration adds an evidence-spec binding and replaces fail-closed v4 constraints/triggers while preserving historical v3 rows. It contains no run DML and seeds no authority.",
+  },
+  {
+    path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 14,
+    writeVerbs: 26,
+    reason:
+      "The migration adds the content-free evidence column and binds terminal evidence to the existing audit transaction. It contains no attempt DML and seeds no evidence.",
+  },
+  {
     path: "scripts/report-unswept-tables-core.mjs",
     table: "MarketingReport",
     tableMentions: 1,

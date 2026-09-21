@@ -1,0 +1,300 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4-integration-v3",
+  "requirement": "최신 origin/develop 1c5266aacfd53fbd8fa3e16b58b54bbbd7d6b131 위의 최종 PR diff로 Prompt Refiner confirmatory shadow v4를 다시 검토한다. 원 v4 구현과 content-free evidence writer, duration coupling 수정, PostgreSQL STRICT/PARALLEL SAFE 후속 수정은 이미 digest-bound Claude 검토를 거쳤다. 이번 통합 검토는 develop의 AMUX/email schema 변경을 병합하며 해결한 marketing pipeline fingerprint와 runtime source closure snapshot이 양쪽 의미를 보존하는지, 그리고 최종 PR diff의 v4 계약·migration·writer·API·UI·테스트가 여전히 원 요구를 충족하는지 확인한다. audit package output만 reviewed diff에서 제외하며 task/authorization과 모든 구현·테스트·운영 문서는 포함한다. provider 호출, 유료 실행, stage/run 승인, flag 변경, 제품 노출, Router 결합 또는 rollout은 하지 않는다. author는 Codex, reviewer는 Claude Code Max다.",
+  "completionCriteria": [
+    "최신 develop의 AMUX/email schema와 Prompt Refiner v4 schema/migration 변경을 모두 보존하고 unresolved merge marker가 없다.",
+    "marketing webhook watched-schema fingerprint가 최종 schema bytes와 일치하고 AMUX 및 Prompt Refiner 변경의 비영향 판단이 기록된다.",
+    "runtime source closure의 228개 reviewed computed access snapshot과 188-file v4 closure가 최종 병합 bytes에 결속한다.",
+    "v4 terminal evidence는 content-free, strict, atomic, exactly replayable이고 DB에서 aggregate를 재구성할 수 있으며 제품·Router 권한은 false다.",
+    "fresh migration DB, Prompt Refiner DB integration, unit, TypeScript, ESLint, enum·protected-writer·문서·정책 검사가 통과한다.",
+    "Claude verdict는 최종 PR diff의 exact digest에 결속하고 open finding 없이 approve해야 한다."
+  ],
+  "baseCommit": "1c5266aacfd53fbd8fa3e16b58b54bbbd7d6b131",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:232c59fbf7e81dcb3414211fe31acc97e022ee38aaf91b9adad140bef9b630e2",
+      "commit": "47cbbf7f71012e9e50472bfeac497568ff0f7db1",
+      "filesChanged": [
+        "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+        "app/api/admin/prompt-refiner/shadow-run/route.ts",
+        "components/admin/AdminPromptRefinerShadowPanel.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round2.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2-attempt1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2-attempt1.failure.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2.failure.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round2.json",
+        "docs/ops/prompt-refiner-confirmatory-shadow-v4.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+        "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/adminMessages/promptRefinerShadow.ts",
+        "lib/marketingAutomationAccess.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "lib/promptRefinerShadowAdmissionCore.ts",
+        "lib/promptRefinerShadowEvidenceCore.ts",
+        "lib/promptRefinerShadowOperatorCore.ts",
+        "lib/promptRefinerShadowRunContract.ts",
+        "lib/promptRefinerShadowRunStore.ts",
+        "lib/promptRefinerShadowRunner.ts",
+        "lib/promptRefinerShadowSystemAudit.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-enum-constraints.mjs",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs",
+        "tests/promptRefinerShadowEvidenceCore.test.mjs",
+        "tests/promptRefinerShadowOperatorCore.test.mjs",
+        "tests/promptRefinerShadowRunContract.test.mjs",
+        "tests/promptRefinerShadowRunner.test.mjs",
+        "tests/promptRefinerStageAdmissionReader.test.mjs",
+        "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+        "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13040.1545",
+          "durationMs": 1005509
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": false,
+          "detail": "rismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2927,18): error TS2339: Property 'amuxWorkerRuntime' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2933,18): error TS2339: Property 'amuxWorkItem' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.",
+          "durationMs": 88900
+        },
+        {
+          "rule": "npm run lint",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+          "durationMs": 106254
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 125 closed list(s) in the schema — 62 compared against an application list, 25 held only as a TypeScript union, 38 written down only in the database.",
+          "durationMs": 3499
+        },
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+          "durationMs": 3992
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 120 instruction document(s), and 1014 path(s) named by comments across 3084 source file(s), all present.",
+          "durationMs": 2409
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 39 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+          "durationMs": 2624
+        },
+        {
+          "rule": "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 84294.2587",
+          "durationMs": 84375
+        }
+      ],
+      "guardViolations": [
+        "npm run typecheck: rismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2927,18): error TS2339: Property 'amuxWorkerRuntime' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2933,18): error TS2339: Property 'amuxWorkItem' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'."
+      ],
+      "checkFailures": [
+        "guard failed: npm run typecheck"
+      ],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
+    }
+  ],
+  "changeDigest": "sha256:232c59fbf7e81dcb3414211fe31acc97e022ee38aaf91b9adad140bef9b630e2",
+  "commit": "47cbbf7f71012e9e50472bfeac497568ff0f7db1",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "npm run test:unit",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13040.1545",
+      "durationMs": 1005509
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": false,
+      "detail": "rismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2927,18): error TS2339: Property 'amuxWorkerRuntime' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2933,18): error TS2339: Property 'amuxWorkItem' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.",
+      "durationMs": 88900
+    },
+    {
+      "rule": "npm run lint",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+      "durationMs": 106254
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 125 closed list(s) in the schema — 62 compared against an application list, 25 held only as a TypeScript union, 38 written down only in the database.",
+      "durationMs": 3499
+    },
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+      "durationMs": 3992
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 120 instruction document(s), and 1014 path(s) named by comments across 3084 source file(s), all present.",
+      "durationMs": 2409
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 39 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 2624
+    },
+    {
+      "rule": "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4h?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 84294.2587",
+      "durationMs": 84375
+    }
+  ],
+  "guardViolations": [
+    "npm run typecheck: rismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2927,18): error TS2339: Property 'amuxWorkerRuntime' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'.\r\ntests/integration/amux-orchestration.db.test.ts(2933,18): error TS2339: Property 'amuxWorkItem' does not exist on type 'PrismaClient<PrismaClientOptions, never, DefaultArgs>'."
+  ],
+  "checkFailures": [
+    "guard failed: npm run typecheck"
+  ],
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 0) to the claude reviewer; its verdict must name digest sha256:232c59fbf7e81dcb3414211fe31acc97e022ee38aaf91b9adad140bef9b630e2",
+  "status": "awaiting_review",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-21T00:59:38.788Z",
+  "packagedRounds": 1,
+  "concludedAtRound": null,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "47cbbf7f71012e9e50472bfeac497568ff0f7db1",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+    "app/api/admin/prompt-refiner/shadow-run/route.ts",
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round1.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round2.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round1.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2-attempt1.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2-attempt1.failure.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-round2.failure.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round1.json",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/verdict-round2.json",
+    "docs/ops/prompt-refiner-confirmatory-shadow-v4.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "lib/marketingAutomationAccess.ts",
+    "lib/promptRefinerReservationCore.ts",
+    "lib/promptRefinerShadowAdmissionCore.ts",
+    "lib/promptRefinerShadowEvidenceCore.ts",
+    "lib/promptRefinerShadowOperatorCore.ts",
+    "lib/promptRefinerShadowRunContract.ts",
+    "lib/promptRefinerShadowRunStore.ts",
+    "lib/promptRefinerShadowRunner.ts",
+    "lib/promptRefinerShadowSystemAudit.ts",
+    "lib/promptRefinerStageAdmissionCore.ts",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "prisma/schema.prisma",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/promptRefinerReservationCore.test.mjs",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "tests/promptRefinerShadowAdmissionCore.test.mjs",
+    "tests/promptRefinerShadowEvidenceCore.test.mjs",
+    "tests/promptRefinerShadowOperatorCore.test.mjs",
+    "tests/promptRefinerShadowRunContract.test.mjs",
+    "tests/promptRefinerShadowRunner.test.mjs",
+    "tests/promptRefinerStageAdmissionReader.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
+  ]
+}

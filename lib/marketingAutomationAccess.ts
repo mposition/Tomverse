@@ -188,10 +188,25 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * changes a decision this module makes -- which is what the second look was
  * for.
  *
+ * 2026-09-21: the other watched file, `lib/marketingAutomationSchema.ts`,
+ * changed too -- `edit_revision.byAuditLogId` became non-null. An edit with no
+ * audit row cannot be placed in time against a template marking, and because
+ * history is append-only one such entry would have made that post permanently
+ * unusable as a template; requiring the field while nothing writes an edit yet
+ * is the moment to do it. The value below is recomputed over both changes, not
+ * either one: two branches each moved this constant for their own file, and
+ * taking one side of that merge would have left a fingerprint describing a
+ * pipeline that never existed.
+ *
  * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
  * the same watched schema. None changes a marketing model, the descriptor, or
  * an admission decision; the fingerprint moves because the closed file digest
  * deliberately requires this review whenever any schema bytes move.
+ *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
  *
  * 2026-09-21, again: the same watched file, and this time the declared change
  * is a documentation comment. `SuppressionCause`'s model comment said the rows
@@ -204,7 +219,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "199f8a4121f5a81dd1e1b90ced0944c67b3ad261d902277699d24d5213d89629";
+  "56bd4e4915361d076e50f295ad81cd437ed65c17c6d591cae8f796879c26a3b1";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

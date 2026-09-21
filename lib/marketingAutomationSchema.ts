@@ -537,7 +537,23 @@ export const marketingHistoryEntrySchema = z.discriminatedUnion("type", [
       type: z.literal("edit_revision"),
       envelopeDigest: sha256,
       previousEnvelopeDigest: sha256,
-      byAuditLogId: registryId.nullable(),
+      /**
+       * The audit row that authorised this edit. **Not nullable**, and that is
+       * load-bearing rather than tidy.
+       *
+       * `lib/marketingTemplates.ts` places an edit against a marking by this
+       * row's `createdAt`, because it is the only timestamp here that no caller
+       * sets -- the `at` above is written by whoever appended the entry. An
+       * edit with no audit row cannot be placed, so the loader has to refuse
+       * it; and since history is append-only, one such entry would make that
+       * post permanently unusable as a template however many times a person
+       * approved and marked it afterwards.
+       *
+       * So it is required where the entry is written, while nothing writes one
+       * yet -- the edit route is S2 -- rather than nullable with a loader that
+       * turns it into a dead end.
+       */
+      byAuditLogId: registryId,
     })
     .strict(),
   z

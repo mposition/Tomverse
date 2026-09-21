@@ -452,6 +452,13 @@ const REGISTRY = {
     reason:
       "The reservation lifecycle, written by the credit paths as literals inside the transactions that move it.",
   },
+  PromptRefinerReservationStage_id_check: {
+    owner: "list",
+    module: "lib/promptRefinerReservationCore.ts",
+    list: "PROMPT_REFINER_RESERVATION_STAGE_IDS",
+    reason:
+      "The append-only stage identities preserve the completed v1 authority while admitting the separately approved v2 contract. The active writer still selects only PROMPT_REFINER_RESERVATION_STAGE_ID.",
+  },
   PromptRefinerReservationStage_status_check: {
     owner: "list",
     module: "lib/promptRefinerReservationCore.ts",

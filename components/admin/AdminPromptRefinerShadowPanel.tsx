@@ -508,6 +508,30 @@ export function AdminPromptRefinerShadowPanel() {
               label={m.executionFlag}
               value={execution.enabled ? m.enabled : m.disabled}
             />
+            {execution.evidence ? (
+              <>
+                <Field
+                  label={m.evidenceGate}
+                  value={execution.evidence.gateOutcome}
+                />
+                <Field
+                  label={m.evidenceCases}
+                  value={`${execution.evidence.summary.passedCases}/${execution.evidence.summary.attemptedCases}`}
+                />
+                <Field
+                  label={m.evidenceCost}
+                  value={
+                    execution.evidence.summary.totalCostMicroUsd === null
+                      ? m.none
+                      : usd(execution.evidence.summary.totalCostMicroUsd)
+                  }
+                />
+                <Field
+                  label={m.evidenceLatency}
+                  value={`${execution.evidence.summary.latencyP90Ms ?? m.none} / ${execution.evidence.summary.latencyMaxMs ?? m.none} ms`}
+                />
+              </>
+            ) : null}
           </dl>
 
           {execution.status === "completed" ? (

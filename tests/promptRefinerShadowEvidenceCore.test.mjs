@@ -5,6 +5,8 @@ import test from "node:test";
 import {
   PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES,
   PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
+  aggregatePromptRefinerShadowStoredEvidence,
+  evaluatePromptRefinerShadowCaseEvidence,
   evaluatePromptRefinerShadowEvidence,
   parsePromptRefinerShadowEvidenceSpec,
   validatePromptRefinerShadowEvidenceSpec,
@@ -154,6 +156,69 @@ test("the returned evidence is content-free", () => {
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
+});
+
+test("transient case evaluation rebuilds the same durable aggregate without prompt bytes", () => {
+  const runCases = passingRunCases();
+  const storedCases = runCases.map((item, caseIndex) => ({
+    caseId: item.caseId,
+    terminalStatus: item.terminalStatus,
+    evidence: evaluatePromptRefinerShadowCaseEvidence({
+      corpus,
+      spec,
+      caseIndex,
+      terminalStatus: item.terminalStatus,
+      refinedPrompt: item.refinedPrompt,
+    }),
+    durationMs: item.durationMs,
+    costMicroUsd: item.costMicroUsd,
+  }));
+  const rebuilt = aggregatePromptRefinerShadowStoredEvidence({
+    corpus,
+    spec,
+    cases: storedCases,
+  });
+  assert.deepEqual(rebuilt, evaluate(runCases));
+  const serialized = JSON.stringify(storedCases);
+  for (const prompt of passingPrompts.values()) {
+    assert.equal(serialized.includes(prompt), false);
+  }
+  assert.equal(serialized.includes('"refinedPrompt"'), false);
+});
+
+test("durable aggregation rejects reordered, forged, or internally inconsistent evidence", () => {
+  const runCases = passingRunCases();
+  const storedCases = runCases.map((item, caseIndex) => ({
+    caseId: item.caseId,
+    terminalStatus: item.terminalStatus,
+    evidence: evaluatePromptRefinerShadowCaseEvidence({
+      corpus,
+      spec,
+      caseIndex,
+      terminalStatus: item.terminalStatus,
+      refinedPrompt: item.refinedPrompt,
+    }),
+    durationMs: item.durationMs,
+    costMicroUsd: item.costMicroUsd,
+  }));
+  const reordered = structuredClone(storedCases);
+  [reordered[0], reordered[1]] = [reordered[1], reordered[0]];
+  assert.throws(
+    () => aggregatePromptRefinerShadowStoredEvidence({ corpus, spec, cases: reordered }),
+    /stored_run_case_id_or_order_mismatch/
+  );
+  const leaked = structuredClone(storedCases);
+  leaked[0].evidence.refinedPrompt = passingPrompts.get(leaked[0].caseId);
+  assert.throws(
+    () => aggregatePromptRefinerShadowStoredEvidence({ corpus, spec, cases: leaked }),
+    /unexpected_or_missing_fields/
+  );
+  const inconsistent = structuredClone(storedCases);
+  inconsistent[0].evidence.evidenceStatus = "fail";
+  assert.throws(
+    () => aggregatePromptRefinerShadowStoredEvidence({ corpus, spec, cases: inconsistent }),
+    /stored_suggested_evidence_inconsistent/
+  );
 });
 
 test("literal loss, concept loss, language drift and no-change fail independently", () => {
