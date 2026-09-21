@@ -598,20 +598,18 @@ export async function applyPreferenceChange(
       emailAddress: normalizeSuppressionAddress(email),
       scope: "purpose",
       purposeKey: purpose,
-      // Entries still decide in an older build, where lifting the row lifts
-      // everything behind it; once causes decide, only the unsubscribe the
-      // person asked for is theirs to lift.
-      onlyReason: (await readSuppressionAuthority(tx)) === "causes" ? "unsubscribe" : null,
+      // Only the unsubscribe the person asked for is theirs to lift. Turning a
+      // purpose back on says nothing about a hard bounce or a complaint on the
+      // same address, and releasing those because somebody flipped a switch is
+      // how a suppression stops meaning anything.
+      //
+      // This used to depend on the read authority: entries decided in an older
+      // build, where lifting the row lifted everything behind it. That build is
+      // below this deploy's floor and the mirror is no longer written.
+      onlyReason: "unsubscribe",
       releaseKind: "preference_enabled",
       releaseEvidence: { kind: "preference", transitionId: transition?.id ?? null },
       releasedAt: now,
-    });
-    await tx.suppressionEntry.deleteMany({
-      where: {
-        emailAddress: normalizeSuppressionAddress(email),
-        scope: "purpose",
-        purposeKey: purpose,
-      },
     });
   }
   return "changed" as const;

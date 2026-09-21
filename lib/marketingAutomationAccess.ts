@@ -197,9 +197,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * columns and a new attempt check to the same schema. Those additions do not
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
+ *
+ * 2026-09-21, again: the same watched file, and this time the declared change
+ * is a documentation comment. `SuppressionCause`'s model comment said the rows
+ * were written beside `SuppressionEntry` and read by no send decision, which
+ * stopped being true when the send moved onto them
+ * (docs/policy/email-notifications.md v26). No column, index, constraint or
+ * model changed, so nothing this pipeline stores or reads is different -- but
+ * a comment is bytes in a watched file, and the digest asking for a look
+ * rather than deciding for itself what is material is the behaviour, not a
+ * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "d7c2379fd4b7ed494614ed1ade0375921fb3341f584fe4cc0ac24f2cda723640";
+  "79c43d3d43de3ccc6c95312f7835a0d78386c7b08bf395272816968fe7491b41";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

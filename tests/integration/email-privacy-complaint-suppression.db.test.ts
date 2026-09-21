@@ -139,7 +139,14 @@ test("a deletion intake for an address with no account still stops marketing", a
     (await suppressionCheck({ emailAddress, classification: "marketing", purpose: "promotions" })).allowed,
     false
   );
-  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 0);
+  // The stop is written against the marketing classification rather than each
+  // marketing purpose, which is what lets it cover a purpose added later.
+  assert.equal(
+    await prisma.suppressionCause.count({
+      where: { emailAddress, scope: "classification", purposeKey: "marketing" },
+    }),
+    1
+  );
 });
 
 test("completion suppresses everything only once no legal hold stands, and only once", async () => {
@@ -171,7 +178,7 @@ test("completion suppresses everything only once no legal hold stands, and only 
   );
 });
 
-test("a later hard bounce does not overwrite a privacy request on the entry", async () => {
+test("a later hard bounce neither releases nor replaces a privacy request", async () => {
   const emailAddress = address();
   await recordSuppression({
     emailAddress,
@@ -185,9 +192,24 @@ test("a later hard bounce does not overwrite a privacy request on the entry", as
     source: "provider_webhook",
     sourceEventKey: `webhook:${randomUUID()}`,
   });
-  const entry = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
-  assert.equal(entry.reason, "privacy_request");
-  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress } }), 2);
+  // Deploy A had one row per selector, so "does not overwrite" was a merge rule
+  // the entry had to be told and could be told wrongly. Causes are one row per
+  // event: the privacy request is still its own record and still active, so an
+  // operator lifting this address releases the hard bounce -- with a second
+  // administrator, which that reason needs -- and the privacy request stays.
+  // The address is suppressed afterwards, by the cause that was never theirs
+  // to release.
+  assert.deepEqual(
+    await prisma.suppressionCause.findMany({
+      where: { emailAddress },
+      orderBy: { reason: "asc" },
+      select: { reason: true, releasedAt: true },
+    }),
+    [
+      { reason: "hard_bounce", releasedAt: null },
+      { reason: "privacy_request", releasedAt: null },
+    ]
+  );
 });
 
 const complaint = (input: {
@@ -343,7 +365,7 @@ test("while entries decide, confirming a subscription again does not lift a dele
   );
 });
 
-test("a later privacy request does not restamp the entry of an earlier one", async () => {
+test("a later privacy request is its own cause and does not restamp the earlier one", async () => {
   const emailAddress = address();
   const first = await recordSuppression({
     emailAddress,
@@ -360,11 +382,21 @@ test("a later privacy request does not restamp the entry of an earlier one", asy
     sourceEventKey: "privacy:second:completed",
     sourceRequestId: "second",
   });
-  assert.equal(second.changed, false);
-  assert.equal(second.id, first.id);
-  const entry = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
-  assert.equal(entry.occurredAt.toISOString(), "2026-01-01T00:00:00.000Z");
-  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress } }), 2);
+  // Two requests are two events. The entry merged them into one row and had to
+  // be told to keep the earlier timestamp; here the earlier cause simply still
+  // says what it said, and answering "when did they ask" does not depend on a
+  // merge rule having been written correctly.
+  assert.equal(second.changed, true);
+  assert.notEqual(second.id, first.id);
+  const causes = await prisma.suppressionCause.findMany({
+    where: { emailAddress },
+    orderBy: { occurredAt: "asc" },
+    select: { occurredAt: true, sourceRequestId: true },
+  });
+  assert.equal(causes.length, 2);
+  assert.equal(causes[0].occurredAt.toISOString(), "2026-01-01T00:00:00.000Z");
+  assert.equal(causes[0].sourceRequestId, "first");
+  assert.equal(causes[1].sourceRequestId, "second");
 });
 
 test("a replayed complaint does not switch off a preference turned back on since", async () => {

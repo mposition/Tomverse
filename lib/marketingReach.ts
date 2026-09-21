@@ -74,15 +74,35 @@ export async function marketingReachReport(): Promise<MarketingReachReport> {
     provableRows.map((row) => [row.purpose, Number(row.count)])
   );
 
-  // Switched on and suppressed at the same time. A global suppression ('*')
-  // counts for every purpose; a purpose-scoped one counts for its own.
+  // Switched on and suppressed at the same time.
+  //
+  // Read from `SuppressionCause`, because that is what the send gate reads
+  // (`suppressionCheck()`) and nothing has written `SuppressionEntry` since
+  // deploy C. Counting entries here would report as `sendable` everybody
+  // suppressed since those writes stopped -- a report whose entire purpose is
+  // answering "how many can we actually reach" quietly overstating it.
+  //
+  // Three scopes count, and they are the gate's own three: `global`, the
+  // `marketing` classification stop a deletion intake writes, and a cause
+  // scoped to this purpose. The reason is not filtered because every reason
+  // blocks a marketing send -- a hard bounce, a complaint, a hold, a privacy
+  // request, an unsubscribe, and a soft bounce, marketing not being must-reach.
+  // What is filtered is whether the cause is still in force: causes are
+  // append-only, so a lifted one is released rather than deleted, and a soft
+  // bounce expires.
   const suppressedRows = await prisma.$queryRaw<{ purpose: string; count: number }[]>`
     SELECT p.purpose, COUNT(DISTINCT p."userId")::int AS count
     FROM "EmailPreference" p
     JOIN "User" u ON u.id = p."userId"
-    JOIN "SuppressionEntry" s
-      ON lower(s."emailAddress") = lower(u.email)
-     AND (s."purposeKey" = '*' OR s."purposeKey" = p.purpose)
+    JOIN "SuppressionCause" c
+      ON lower(c."emailAddress") = lower(u.email)
+     AND c."releasedAt" IS NULL
+     AND (c."expiresAt" IS NULL OR c."expiresAt" > now())
+     AND (
+       c.scope = 'global'
+       OR (c.scope = 'classification' AND c."purposeKey" = 'marketing')
+       OR (c.scope = 'purpose' AND c."purposeKey" = p.purpose)
+     )
     WHERE p.enabled = true
       AND p.purpose = ANY(${[...MARKETING_PURPOSES]}::text[])
     GROUP BY p.purpose

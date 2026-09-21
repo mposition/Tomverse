@@ -4884,10 +4884,13 @@ model ConsentRecord {
 /// code mean opposite things -- the first is ordinary, the second is either an
 /// account takeover in progress or proof we are misclassifying mail
 /// (docs/policy/email-notifications.md §13.3).
-/// One cause of a suppression, append-only. Written beside SuppressionEntry in
-/// the shadow deploy and not yet read by any send decision. Identity and
-/// provenance never change; a release is written once. A trigger carries entry
-/// writes from a build that does not write causes itself.
+/// One cause of a suppression, append-only, and the record every send decision
+/// reads. Identity and provenance never change; a release is written once.
+/// It began beside SuppressionEntry in a shadow deploy, unread, with a trigger
+/// carrying entry writes from builds that did not write causes themselves.
+/// Deploy C stopped writing entries and dropped that trigger (20260921090000);
+/// the entry table is kept as the record of what the suppression list looked
+/// like before causes existed, and nothing writes it.
 /// Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
 model SuppressionCause {
   id           String @id @default(cuid())

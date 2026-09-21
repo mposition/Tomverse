@@ -201,14 +201,20 @@ export async function POST(req: Request) {
         session,
         request: req,
         action: "email_suppression.added",
-        targetType: "SuppressionEntry",
-        targetId: result.id ?? emailAddress,
+        // The cause is the record now; `SuppressionEntry` is no longer written
+        // (docs/policy/email-notifications.md v26).
+        targetType: "SuppressionCause",
+        targetId: result.id,
         summary: `Suppressed ${emailAddress} for ${purposeKey === GLOBAL_PURPOSE_KEY ? "all mail" : purposeKey}.`,
         metadata: {
           emailAddress,
           purposeKey,
           reason: "manual",
-          strengthened: result.changed,
+          // Whether this request is the one that wrote the cause. It used to
+          // mean "the entry's merge rule accepted this reason", which is a
+          // question that no longer exists; a retried request with the same
+          // Idempotency-Key reports false and names the cause already there.
+          recorded: result.changed,
           ...(body.note ? { note: body.note } : {}),
         },
       });

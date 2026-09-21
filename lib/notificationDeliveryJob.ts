@@ -214,7 +214,7 @@ export async function runNotificationDeliveryDrain(options?: {
     // holding causes that read as active. Counts only, never an address.
     try {
       const expired = await releaseExpiredSuppressionCauses();
-      if (expired.released > 0 || expired.entriesRemoved > 0) {
+      if (expired.released > 0) {
         console.info(
           JSON.stringify({
             event: "email_suppression_causes_expired",

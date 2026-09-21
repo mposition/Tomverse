@@ -211,7 +211,7 @@ async function loadRoute(): Promise<{
         findUnique: async ({ where }: { where: { id: string } }) =>
           world.stored.find((row) => row.id === where.id) ?? null,
       },
-      suppressionEntry: {
+      suppressionCause: {
         findMany: async () => [],
       },
       // The suppression read authority: absent, so entries decide.

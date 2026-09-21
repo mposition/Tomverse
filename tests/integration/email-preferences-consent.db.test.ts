@@ -48,7 +48,8 @@ import {
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ConsentRecord", "EmailPreference", "SuppressionEntry", "EmailDelivery",
+      "ConsentRecord", "EmailPreference", "SuppressionCause", "SuppressionEntry",
+      "EmailDelivery",
       "EmailEvent", "TemplateVersion", "EmailTemplate", "EmailPolicyVersion",
       "User"
     RESTART IDENTITY CASCADE
@@ -320,11 +321,11 @@ test("a withdrawal suppresses by address, so it survives the account", async () 
   // Somebody who unsubscribes, deletes their account and signs up again must
   // not quietly start receiving newsletters because a fresh preference row
   // defaulted them back on.
-  const entry = await prisma.suppressionEntry.findFirstOrThrow();
-  assert.equal(entry.scope, "purpose");
-  assert.equal(entry.purposeKey, "newsletter");
-  assert.equal(entry.reason, "unsubscribe");
-  assert.equal(entry.source, "unsubscribe_link");
+  const cause = await prisma.suppressionCause.findFirstOrThrow();
+  assert.equal(cause.scope, "purpose");
+  assert.equal(cause.purposeKey, "newsletter");
+  assert.equal(cause.reason, "unsubscribe");
+  assert.equal(cause.source, "unsubscribe_link");
 
   assert.deepEqual(
     await suppressionCheck({
@@ -360,13 +361,15 @@ test("re-enabling clears its own hold and never a global one", async () => {
     capturedVia: "preference_center",
     source: "preference_center",
   });
-  await prisma.suppressionEntry.create({
+  await prisma.suppressionCause.create({
     data: {
       emailAddress: user.email!.toLowerCase(),
       scope: "global",
       purposeKey: "*",
       reason: "complaint",
       source: "provider_webhook",
+      sourceEventKey: `test:${randomUUID()}`,
+      occurredAt: new Date(),
     },
   });
 
@@ -378,12 +381,19 @@ test("re-enabling clears its own hold and never a global one", async () => {
     source: "preference_center",
   });
 
-  const remaining = await prisma.suppressionEntry.findMany({
+  const remaining = await prisma.suppressionCause.findMany({
+    where: { releasedAt: null },
     select: { scope: true, reason: true },
   });
   // A toggle may lift its own preference hold. It may not lift a complaint --
   // §12.4 requires dual approval to remove one of those.
   assert.deepEqual(remaining, [{ scope: "global", reason: "complaint" }]);
+  // Released, not deleted: the withdrawal happened, and the record of it is
+  // what an unsubscribe complaint is answered from.
+  const lifted = await prisma.suppressionCause.findFirstOrThrow({
+    where: { reason: "unsubscribe" },
+  });
+  assert.ok(lifted.releasedAt);
 });
 
 test("repeating an unsubscribe is a no-op, not a second withdrawal", async () => {

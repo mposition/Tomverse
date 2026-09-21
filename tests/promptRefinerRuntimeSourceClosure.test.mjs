@@ -73,13 +73,22 @@ const compilerOptions = parsedConfig.options;
 // The entry count and the same position-free inventory remain identical; only
 // later source positions in those two files moved.
 //
-// 2026-09-21: merging confirmatory shadow v4 with that AMUX baseline preserves
-// all 228 reviewed expressions. The combined marketing review comment and
-// Prompt Refiner source positions move the position-bound snapshot once more.
+// 2026-09-21, deploy C-2: repinned for moved positions only. Nothing writes
+// `SuppressionEntry` any more, which deletes code and rewrites comments in four
+// closure files -- `lib/emailSuppression.ts`, `lib/emailPreferences.ts`,
+// `lib/emailProviderEvents.ts`, `lib/emailPermanentBounceRecovery.ts` -- and
+// merging develop moved lines again. The count above still holds at 228, and
+// the inventory compared without line and column (`path + expression text` for
+// every entry) hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 on this
+// branch and on `origin/develop` alike, so nothing was added, removed or
+// changed. Confirmatory shadow v4 then adds one reviewed runtime path and its
+// schema/comment changes; the combined branch therefore repins positions once
+// more while preserving the same 228-expression position-free inventory.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "aef84a56d3987369ba874236dc340de6",
-  "3338c274ebc34afb36a24616ba0a7c47",
+  "614df2686c49f80bc43e977faa4c0e66",
+  "f1cd64515e55b89fe7a69eaa68c6c70e",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
