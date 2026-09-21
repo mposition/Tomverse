@@ -217,9 +217,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * a comment is bytes in a watched file, and the digest asking for a look
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
+ *
+ * 2026-09-21, a third time: the permission ledger (S3) adds six tables to the
+ * same watched schema -- EmailPermissionEvent, EmailSendApproval with its
+ * cohort and revocations, EmailPermissionDecision and its evidence. None is a
+ * marketing model, none changes the descriptor, the config snapshot or an
+ * admission decision, and nothing this pipeline stores or reads is different.
+ * The one shared edge is ConsentRecord, which gains a back-relation and no
+ * column. The digest moves because schema bytes moved, which is the behaviour
+ * this constant exists for: it asks for a look rather than deciding for itself
+ * what is material. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6024faad222d57304bed312980918a57f6774f1462f8f939b09556f89ad80d36";
+  "53b1ea89ed2e84669cda3c41c919952dd5296c227b38df7f379ba8dff0109f9c";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
