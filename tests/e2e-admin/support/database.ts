@@ -24,6 +24,7 @@ import {
   FIXTURE_HEALTH_CHECK,
   FIXTURE_INCIDENT,
   FIXTURE_JOB_RUN,
+  FIXTURE_MARKETING,
   FIXTURE_MODEL,
   FIXTURE_NOTIFICATION,
   FIXTURE_PRIVACY_REQUEST,
@@ -1011,6 +1012,199 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
       plan: "Pro",
       occurredAt: at(-(index + 1) * HOUR),
     })),
+  });
+
+  // Marketing rows, written the way the migration allows: a slug of the
+  // shape the CHECK requires, one draft history entry, the status whitelist
+  // walked in order, and the attempt counter moved by one on dispatch.
+  //
+  // The harness builds this database with `prisma db push`, which installs the
+  // Prisma schema and none of the migration SQL, so none of those rules is
+  // enforced here. They are honoured anyway: a fixture that could not exist in
+  // production is a fixture whose passing test proves nothing about it.
+  await prisma.marketingChannel.create({
+    data: {
+      id: FIXTURE_MARKETING.channel.id,
+      channel: FIXTURE_MARKETING.channel.channel,
+      provider: FIXTURE_MARKETING.channel.provider,
+      externalAccountRef: "e2e-external-ref",
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      defaultLocale: FIXTURE_MARKETING.channel.defaultLocale,
+      allowedLocales: ["en", "ko"],
+      scopesDigest: "e2e-scopes-digest",
+      status: "connect_pending",
+    },
+  });
+  await prisma.marketingChannel.update({
+    where: { id: FIXTURE_MARKETING.channel.id },
+    data: { status: "approval_mode", approvalStartedAt: at(-6 * DAY) },
+  });
+
+  const marketingDraft = (
+    id: string,
+    logicalKey: string,
+    renderedText: string,
+    digest: string
+  ) => ({
+    id,
+    channelId: FIXTURE_MARKETING.channel.id,
+    locale: "en",
+    kind: "social",
+    logicalKey,
+    envelope: {
+      channel: FIXTURE_MARKETING.channel.channel,
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      locale: "en",
+      renderedText,
+      claimIds: [],
+      assets: [],
+      finalUrl: null,
+      scheduledAt: null,
+      disclosureFlags: ["advertising"],
+    },
+    envelopeDigest: digest,
+    rendererVersion: "e2e-r1",
+    claimIds: [],
+    assetIds: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshot: {},
+    guardDecision: "approval_required",
+    guardCodes: [FIXTURE_MARKETING.pending.guardCode],
+    guardRuleIds: [],
+    status: "drafted",
+    mode: "approval",
+    // The insert trigger requires exactly one entry and it must be the draft.
+    history: [{ at: new Date(now).toISOString(), type: "draft", envelopeDigest: digest }],
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.pending.id,
+      FIXTURE_MARKETING.pending.logical,
+      FIXTURE_MARKETING.pending.renderedText,
+      FIXTURE_MARKETING.pending.envelopeDigest
+    ),
+  });
+  await prisma.marketingPost.update({
+    where: { id: FIXTURE_MARKETING.pending.id },
+    data: { status: "pending_approval", approvalExpiresAt: at(2 * DAY) },
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.published.id,
+      FIXTURE_MARKETING.published.logical,
+      "Answers from three models, in one place.",
+      FIXTURE_MARKETING.published.envelopeDigest
+    ),
+  });
+  for (const step of [
+    { status: "pending_approval", data: {} },
+    {
+      status: "approved",
+      data: {
+        approvalAuditLogId: "e2e-marketing-approval-audit",
+        approvedAt: at(-3 * DAY),
+        approvedDigest: FIXTURE_MARKETING.published.envelopeDigest,
+        approvalExpiresAt: at(4 * DAY),
+      },
+    },
+    { status: "scheduled", data: { scheduledAt: at(-2 * DAY) } },
+    {
+      status: "publishing",
+      data: {
+        providerRequestKey: FIXTURE_MARKETING.published.logical,
+        // Dispatch moves the attempt counter by exactly one (S1 trigger).
+        publishAttempt: 1,
+      },
+    },
+    {
+      status: "published",
+      data: {
+        publishedAt: at(-2 * DAY),
+        externalPostId: "e2e-external-post",
+        externalUrl: FIXTURE_MARKETING.published.externalUrl,
+      },
+    },
+  ]) {
+    await prisma.marketingPost.update({
+      where: { id: FIXTURE_MARKETING.published.id },
+      data: { status: step.status, ...step.data },
+    });
+  }
+
+  // A post that failed, so the publish-state section is exercised on the row
+  // an operator most needs to see. Listing only the terminal successes would
+  // leave a stuck post invisible on the screen built to surface it.
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.failed.id,
+      FIXTURE_MARKETING.failed.logical,
+      "A post the provider refused.",
+      FIXTURE_MARKETING.failed.envelopeDigest
+    ),
+  });
+  for (const step of [
+    { status: "pending_approval", data: {} },
+    {
+      status: "approved",
+      data: {
+        approvalAuditLogId: "e2e-marketing-failed-audit",
+        approvedAt: at(-1 * DAY),
+        approvedDigest: FIXTURE_MARKETING.failed.envelopeDigest,
+        approvalExpiresAt: at(5 * DAY),
+      },
+    },
+    { status: "scheduled", data: { scheduledAt: at(-12 * HOUR) } },
+    {
+      status: "publishing",
+      data: {
+        providerRequestKey: FIXTURE_MARKETING.failed.logical,
+        publishAttempt: 1,
+      },
+    },
+    {
+      status: "failed",
+      data: {
+        errorCode: FIXTURE_MARKETING.failed.errorCode,
+        // The failure has to be recorded by the statement that fails the post,
+        // and the attempt number in the entry has to match the counter. The
+        // history is append-only with a version that moves by one, so the
+        // draft entry the insert wrote stays first.
+        history: [
+          {
+            at: new Date(now).toISOString(),
+            type: "draft",
+            envelopeDigest: FIXTURE_MARKETING.failed.envelopeDigest,
+          },
+          {
+            at: at(-11 * HOUR),
+            type: "attempt",
+            outcome: "failed",
+            attempt: 1,
+            errorCode: FIXTURE_MARKETING.failed.errorCode,
+          },
+        ],
+        historyVersion: 1,
+      },
+    },
+  ]) {
+    await prisma.marketingPost.update({
+      where: { id: FIXTURE_MARKETING.failed.id },
+      data: { status: step.status, ...step.data },
+    });
+  }
+
+  await prisma.marketingReport.create({
+    data: {
+      id: FIXTURE_MARKETING.report.id,
+      kind: FIXTURE_MARKETING.report.kind,
+      periodStart: at(-7 * DAY),
+      periodEnd: at(0),
+      payload: { posts: 1 },
+      sourceVersion: FIXTURE_MARKETING.report.sourceVersion,
+    },
   });
 
   return { seededAt: new Date(now) };

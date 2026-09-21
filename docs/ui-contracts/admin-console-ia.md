@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-09-22
 
 ## Scope
 
@@ -28,27 +28,44 @@
 
 ## The navigation
 
-Six groups, seventeen entries. One page, one job.
+Six groups, twenty-two entries. One page, one job.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
 | Command Center | Overview | `/admin/overview` | — |
 | Command Center | Work queue | `/admin/work-queue` | `queue`, `approvals` |
-| Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports`, `ai-review` |
+| Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
 | Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `privacy` |
+| Customers | Support | `/admin/support` | `feedback`, `fixes`, `privacy` |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
 | Revenue | Refunds | `/admin/refunds` | — |
 | Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | — |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery` |
+| AI Platform | Routing | `/admin/routing` | — |
 | Operations | Infrastructure | `/admin/infrastructure` | — |
 | Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
+| Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
+| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
+| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Platform settings | `/admin/platform` | — |
+| Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
 | Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
+
+**Marketing** is the marketing automation's record: what the Guard sent to a
+person, what went out, which brand accounts exist and what the automation
+reported (`docs/policy/marketing-automation.md` §6.1, §8). Its badge counts
+drafts in `pending_approval`, because the Guard's second verdict is "a person
+decides" and without the count the queue is a page nobody opens. Its
+`experiments` and `comments` sections are labelled as belonging to later
+stages rather than drawn as queues that happen to be empty: "nothing is
+waiting" and "nothing writes this yet" are different answers, and only one of
+them is true. Reading any of it takes ordinary admin authentication; the
+`writeRoles` on this entry drive the sidebar marker and the mutations a later
+slice adds, not these screens.
 
 Plus three routes with no sidebar entry: `/admin/search` ("Global search",
 reachable from the header control, `Ctrl/Cmd+K` and the palette's "View all
