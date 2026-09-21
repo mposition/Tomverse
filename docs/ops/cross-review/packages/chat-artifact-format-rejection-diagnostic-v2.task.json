@@ -1,0 +1,32 @@
+{
+  "taskId": "chat-artifact-format-rejection-diagnostic-v2",
+  "requirement": "on_hold로 종결된 chat-artifact-format-rejection-diagnostic-v1의 마지막 Claude 지적을 닫는다. 생성 파일 도구가 요청 형식을 거절할 때 진단 sink가 예외를 던져도 원래의 failed report와 실패 카드가 유지되도록 진단 호출을 best-effort로 만든다. v1의 내용 비포함 로그, 턴당 16건 상한, 안전한 SDK 청크 처리, 원래 파일 형식 정책을 그대로 유지한다. 원인 미확인인 .txt→.docx 사례에 관해 출력 정책을 추정하여 바꾸지 않는다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
+  "completionCriteria": [
+    "일반 생성 파일과 문서 일괄 생성 모두에서 noteRejection sink 예외가 기존 failed report, 이유, 실패 카드와 Chat 응답을 바꾸지 않는다.",
+    "거절 로그는 등록된 도구명·허용 형식·정적 코드만 담고 원문·파일명·식별자·예외를 기록하지 않는다.",
+    "v1의 세 verdict와 on_hold 기록을 수정하지 않고 supersedes 계보를 명시한다.",
+    "관련 단위·Chat 라우트 계약 테스트, 타입 검사, 변경 파일 lint 및 diff 검사가 통과한다.",
+    "Claude 검토는 구독 CLI의 Read·Grep·Glob만 사용하고 승인된 skip-preflight 예외만 기록한다. Provider 유료 호출, stage/run 승인, flag 전환, PR 병합·배포는 범위 밖이다."
+  ],
+  "baseCommit": "847c0222189550277d07d7e37ec8d2b49292bfa6",
+  "writableScope": [
+    "app/api/chat/route.ts",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v1.authorization.md",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v1.task.json",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v2.authorization.md",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v2.task.json",
+    "lib/generatedArtifactRejectionLog.ts",
+    "lib/generatedArtifactTool.ts",
+    "lib/generatedArtifactTurnTracker.ts",
+    "tests/generatedArtifactBatchTool.test.mjs",
+    "tests/generatedArtifactRejectionLog.test.mjs",
+    "tests/generatedArtifactTool.test.mjs",
+    "tests/generatedArtifactTurnTracker.test.mjs",
+    "tests/server-contract/chat-route-incomplete-artifact.test.ts"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat-artifact-format-rejection-diagnostic-v1",
+    "exchange": "artifacts/cross-review/chat-artifact-format-rejection-diagnostic-v1-codex-author/exchange.json"
+  }
+}
