@@ -170,9 +170,36 @@ export const computeMarketingWebhookPipelineFingerprint = (
   return hash.digest("hex");
 };
 
-/** Updated only by the fingerprint test after reviewing a declared file change. */
+/**
+ * Updated only by the fingerprint test after reviewing a declared file change.
+ *
+ * 2026-09-20: `prisma/schema.prisma` is one of the watched files, and the
+ * webhook account contraction changed it -- the old
+ * `(provider, providerEventId)` unique and the `providerAccount` default are
+ * gone, and `EmailDelivery(providerAccount, providerMessageId)` became unique
+ * (docs/policy/email-notifications.md v24).
+ *
+ * This is not a change the marketing pipeline merely happens to sit beside: it
+ * changes the storage rules the pipeline depends on. A marketing webhook event
+ * carrying the same provider event id as a transactional one is now stored
+ * rather than refused, and a marketing delivery's message id is now unique
+ * within the marketing account rather than merely indexed. Both make the
+ * per-account matching S1b-2b built true instead of assumed, and neither
+ * changes a decision this module makes -- which is what the second look was
+ * for.
+ *
+ * 2026-09-21: the AMUX integration adds an isolated set of `Amux*` models to
+ * the same watched schema. None changes a marketing model, the descriptor, or
+ * an admission decision; the fingerprint moves because the closed file digest
+ * deliberately requires this review whenever any schema bytes move.
+ *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "d242b30a4d54dd6551a7a75d358dcb7346705fcd10480ef0d34fa1e7d5695f90";
+  "d7c2379fd4b7ed494614ed1ade0375921fb3341f584fe4cc0ac24f2cda723640";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

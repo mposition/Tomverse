@@ -471,6 +471,42 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  // --- AMUX development-agent orchestration ------------------------------
+  AmuxWorkItem_status_check: {
+    owner: "database",
+    reason:
+      "The durable board lifecycle: todo, doing, review, done, blocked, cancelled. Tomverse has no generic work-item mutation input; the scheduler and execution boundary write the reachable transitions as literals inside revision-checked updates, while the database is the complete closed vocabulary.",
+  },
+  AmuxWorkItem_kind_check: {
+    owner: "database",
+    reason:
+      "The ten imported board categories. No Tomverse route creates or edits an AMUX work item yet, and task classification used for worker routing is a separate JSON contract, so the database is currently the only complete closed list for this stored field.",
+  },
+  AmuxWorkItem_priority_check: {
+    owner: "database",
+    reason:
+      "The persisted p0 through p3 board priority. It is read by the deterministic scheduler but has no Tomverse mutation surface or shared runtime list; the database remains the authority until that surface is introduced.",
+  },
+  AmuxWorkerRuntime_status_check: {
+    owner: "type_only",
+    reason:
+      "AmuxWorkerRuntimeStatus in lib/amux/workerRuntime.ts carries starting, idle, busy, error and stopped. The authenticated heartbeat route validates the same five values with zod, but neither copy is an exported runtime array the audit can compare mechanically.",
+  },
+  AmuxExecutionAttempt_outcome_check: {
+    owner: "type_only",
+    reason:
+      "AmuxExecutionOutcome in lib/amux/execution.ts types the worker-supplied succeeded, failed and blocked outcomes. The fourth database value, expired, is deliberately excluded from that input union and is written only by the lease-expiry recovery path.",
+  },
+  AmuxExecutionAttempt_to_status_check: {
+    owner: "type_only",
+    reason:
+      "AmuxExecutionToStatus in lib/amux/execution.ts types the four worker settlement destinations. Cancelled is a board lifecycle state rather than a worker-supplied settlement result, so it remains in the durable constraint but outside the route's union and zod input.",
+  },
+  AmuxWorkDelivery_status_check: {
+    owner: "database",
+    reason:
+      "The queued, leased, acknowledged and cancelled delivery lifecycle. Each transition is an internal literal paired with AmuxWorkDelivery_lifecycle_check; no request supplies a status and there is no independent runtime list to compare.",
+  },
   AccountDataExportRequest_status_check: {
     owner: "database",
     reason:

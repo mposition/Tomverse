@@ -60,10 +60,26 @@ const compilerOptions = parsedConfig.options;
 // its already-reviewed data-indexing expressions are frozen as an exact
 // path/position/text snapshot.  Any new or moved non-static element access must
 // be reviewed and must update this digest before the closure gate can pass.
+//
+// 2026-09-20: repinned for moved positions only. A comment in
+// `lib/marketingAutomationAccess.ts` was rewritten and shifted the lines under
+// it; the count assertion above still held, and the inventory compared without
+// line and column -- `path + expression text` for every entry -- came back
+// byte-identical, so nothing was added, removed or changed. Only the snapshot's
+// positions moved.
+//
+// 2026-09-21: the AMUX review adds one system-actor string literal and extends
+// the watched-schema review comment in `lib/marketingAutomationAccess.ts`.
+// The entry count and the same position-free inventory remain identical; only
+// later source positions in those two files moved.
+//
+// 2026-09-21: merging confirmatory shadow v4 with that AMUX baseline preserves
+// all 228 reviewed expressions. The combined marketing review comment and
+// Prompt Refiner source positions move the position-bound snapshot once more.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "2d9db67900d0c542d6d1091626f6a461",
-  "b75d9999dc8b4b3076e917f9f4efd1e7",
+  "aef84a56d3987369ba874236dc340de6",
+  "3338c274ebc34afb36a24616ba0a7c47",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
