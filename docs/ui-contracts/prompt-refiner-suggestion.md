@@ -75,9 +75,13 @@ fixture 전용 resolver는 원문을 반환한다. 두 경우 모두 `executionP
 composer→Image handoff도 차단된다. fixture cookie를 제거하거나 다시 로드해도
 제안문은 제품 draft에 없으므로 실행 입력으로 승격되지 않는다. 제품 모드의
 원문 보존/실행문 분리 전송은 별도 server handoff로 구현해야 한다.
-현재 브라우저 회귀는 cookie 제거 후 전체 reload와 재활성화 reload를 검증한다.
-동일 mounted instance의 server prop 전환은 mode를 scope epoch에 포함해 reset하지만,
-그 전환을 실제 브라우저에서 재현하는 별도 검증은 제품 모드 연결 전에 필요하다.
+브라우저 회귀는 cookie 제거 후 전체 reload와 재활성화 reload뿐 아니라,
+loopback E2E 전용 `router.refresh()`로 동일 mounted `ChatPageClient`에 새 server prop을
+적용하는 off→on→off/on 전환도 검증한다. 동일 document와 textarea DOM node를
+유지하면서 ready·accepted preview를 폐기하고, 늦게 도착한 pending 응답도
+scope epoch로 거부한다. desktop Chromium은 1366×768의 `desktop-chat-shell`,
+mobile Chromium은 390×680의 `mobile-chat-shell`을 각각 확인한다. 이 검증은
+fixture 경계이며 제품 모드를 켜지 않는다.
 
 ## 4. Refiner가 읽을 수 있는 것은 현재 턴 텍스트뿐이다
 
@@ -210,7 +214,13 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   같은 제안의 중복 소비는 순수 validator 단위 테스트로 검증한다. 브라우저 E2E는
   미리보기 확인 뒤 재요청 차단, 대화 전환 후 복원, Image seed 차단,
   `/chat/workspace`의 원문 draft PUT·합성문 부재 및 fixture mode off/on 전체
-  reload를 검증한다. 실제 편집 후에만 새 요청이 보이는지도 검사한다.
+  reload를 검증한다. 별도 desktop·mobile shell 회귀는 같은 mounted 인스턴스에서
+  서버 prop off→on→off/on 전환 후 ready·accepted·pending 결과의 폐기,
+  원문 draft 보존과 fixture on 상태의 Chat POST 0건을 검증한다. 같은
+  browser-mocked 인증·durable 환경에서 fixture off로 전환한 뒤에는 Chat POST
+  1건이 실제로 시작되는 positive control을 확인하고, 그 요청은 Playwright가
+  즉시 중단해 서버·provider에는 전달하지 않는다. 실제 편집 후에만 새 요청이
+  보이는지도 검사한다.
 - `tests/e2e/prompt-refiner-focus.spec.ts`: E2E 전용 fixture에서 초기 mount가
   textarea focus를 빼앗지 않는지, 새 requesting·failed·ready 도착에는 한 번씩
   focus가 이동하는지, draft를 바꿨다가 같은 source로 되돌려도 같은 제안이
