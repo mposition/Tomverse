@@ -74,6 +74,7 @@ export type PromptRefinerUiState =
   | { status: "idle" }
   | { status: "requesting"; request: PromptRefinerRequest }
   | { status: "ready"; suggestion: BoundPromptRefinerSuggestion }
+  | { status: "accepted_preview"; suggestion: BoundPromptRefinerSuggestion }
   | { status: "failed"; request: PromptRefinerRequest; failureCode: string };
 
 const promptRefinerDecisionSchema = z.enum(["accepted", "kept_original"]);
@@ -96,21 +97,95 @@ export type PromptRefinerResolution = {
   };
 };
 
+/** Browser-local fixture identity; never a provider/model input or receipt. */
+export type PromptRefinerDraftScope = Readonly<{
+  identityKey: string | null;
+  mountedSurface: string;
+  conversationId: string | null;
+}>;
+
+const promptRefinerResolutionSchema = z
+  .object({
+    decision: promptRefinerDecisionSchema,
+    displayPrompt: promptText,
+    persistedUserPrompt: promptText,
+    executionPrompt: promptText,
+    provenance: z
+      .object({
+        requestId: opaqueId,
+        suggestionId: opaqueId,
+        refinerVersion: version,
+        inputScope: z.literal(PROMPT_REFINER_INPUT_SCOPE),
+        decision: promptRefinerDecisionSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
 /**
- * An accepted resolution is valid only while the composer still holds the
- * exact display bytes produced by that decision. Any later edit makes the
- * caller discard it and treat the edited draft as newly authored input.
+ * Fixture-only, pure handoff check. This is not server authorization: it
+ * validates one UI decision against the still-ready suggestion, exact draft
+ * and structured browser scope before the fixture owner records it. The
+ * caller owns the consumed-key set and must add the returned key synchronously
+ * before any other action, so a second event cannot reuse the same decision.
  */
-export function isPromptRefinerResolutionCurrent(
-  resolution: PromptRefinerResolution,
-  currentPrompt: string
-): boolean {
-  return resolution.displayPrompt === currentPrompt;
+export function validatePromptRefinerFixtureHandoff(input: {
+  readySuggestion: BoundPromptRefinerSuggestion;
+  resolution: PromptRefinerResolution;
+  readyScope: PromptRefinerDraftScope;
+  currentScope: PromptRefinerDraftScope;
+  currentDraft: string;
+  consumedKeys: ReadonlySet<string>;
+}): { resolution: PromptRefinerResolution; consumptionKey: string } {
+  const { readyScope, currentScope } = input;
+  if (
+    readyScope.identityKey !== currentScope.identityKey ||
+    readyScope.mountedSurface !== currentScope.mountedSurface ||
+    readyScope.conversationId !== currentScope.conversationId
+  ) {
+    throw new Error("prompt_refiner_handoff_scope_stale");
+  }
+  const { sourcePrompt, ...response } = input.readySuggestion;
+  const suggestion = {
+    ...promptRefinerResponseSchema.parse(response),
+    sourcePrompt: promptText.parse(sourcePrompt),
+  };
+  if (input.currentDraft !== suggestion.sourcePrompt) {
+    throw new Error("prompt_refiner_handoff_draft_stale");
+  }
+  const consumptionKey = JSON.stringify([
+    readyScope.identityKey,
+    readyScope.mountedSurface,
+    readyScope.conversationId,
+    suggestion.requestId,
+    suggestion.suggestionId,
+  ]);
+  if (input.consumedKeys.has(consumptionKey)) {
+    throw new Error("prompt_refiner_handoff_duplicate");
+  }
+  const supplied = promptRefinerResolutionSchema.parse(input.resolution);
+  const expected = resolvePromptRefinerFixtureDecision({
+    suggestion,
+    currentPrompt: input.currentDraft,
+    decision: supplied.decision,
+  });
+  if (
+    supplied.displayPrompt !== expected.displayPrompt ||
+    supplied.persistedUserPrompt !== expected.persistedUserPrompt ||
+    supplied.executionPrompt !== expected.executionPrompt ||
+    supplied.provenance.requestId !== expected.provenance.requestId ||
+    supplied.provenance.suggestionId !== expected.provenance.suggestionId ||
+    supplied.provenance.refinerVersion !== expected.provenance.refinerVersion ||
+    supplied.provenance.decision !== expected.provenance.decision
+  ) {
+    throw new Error("prompt_refiner_handoff_forged");
+  }
+  return { resolution: expected, consumptionKey };
 }
 
 const sourceOf = (state: PromptRefinerUiState): string | null => {
   if (state.status === "idle") return null;
-  return state.status === "ready"
+  return state.status === "ready" || state.status === "accepted_preview"
     ? state.suggestion.sourcePrompt
     : state.request.prompt;
 };
@@ -147,9 +222,9 @@ export function bindPromptRefinerSuggestion(input: {
 }
 
 /**
- * Resolves the pre-send choice without overwriting authorship. Even when the
- * proposal is accepted, the durable user Message remains the original text;
- * only downstream execution receives the refined form.
+ * Resolves the product pre-send choice without overwriting authorship. The
+ * accepted wording is visible in the composer, while the durable user Message
+ * keeps the original and downstream execution receives the refined form.
  */
 export function resolvePromptRefinerDecision(input: {
   suggestion: BoundPromptRefinerSuggestion;
@@ -182,4 +257,16 @@ export function resolvePromptRefinerDecision(input: {
       decision,
     },
   };
+}
+
+/**
+ * The fixture has no product handoff: accepted text is a read-only preview,
+ * never a composer/durable-draft update. Keep this separate from the product
+ * resolution so a later product caller can obey displayPrompt staleness.
+ */
+export function resolvePromptRefinerFixtureDecision(
+  input: Parameters<typeof resolvePromptRefinerDecision>[0]
+): PromptRefinerResolution {
+  const resolution = resolvePromptRefinerDecision(input);
+  return { ...resolution, displayPrompt: resolution.persistedUserPrompt };
 }

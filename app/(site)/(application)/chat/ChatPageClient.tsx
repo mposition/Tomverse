@@ -67,8 +67,10 @@ import {
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import {
   bindPromptRefinerSuggestion,
-  isPromptRefinerResolutionCurrent,
   promptRefinerResponseSchema,
+  validatePromptRefinerFixtureHandoff,
+  type BoundPromptRefinerSuggestion,
+  type PromptRefinerDraftScope,
   type PromptRefinerRequest,
   type PromptRefinerResolution,
   type PromptRefinerUiState,
@@ -924,15 +926,21 @@ export function ChatPageClient({
     useState<PromptRefinerUiState>({ status: "idle" });
   const [promptRefinerFixtureSettledSequence, setPromptRefinerFixtureSettledSequence] =
     useState<number | null>(null);
-  const promptRefinerOffered = promptRefinerMode === "e2e_fixture";
   const promptRefinerRequestSequenceRef = useRef(0);
   const promptRefinerAbortControllerRef = useRef<AbortController | null>(null);
   const promptRefinerDraftRef = useRef(inputValue);
   const promptRefinerBoundDraftRef = useRef<string | null>(null);
   const promptRefinerResolutionRef = useRef<PromptRefinerResolution | null>(null);
-  const promptRefinerScopeKey = `${identityKey ?? "unresolved"}:${mountedSurface}:${
-    currentChatId ?? "new"
-  }`;
+  const promptRefinerReadySuggestionRef = useRef<BoundPromptRefinerSuggestion | null>(null);
+  const promptRefinerReadyScopeRef = useRef<PromptRefinerDraftScope | null>(null);
+  const promptRefinerConsumedKeysRef = useRef(new Set<string>());
+  const promptRefinerOffered = promptRefinerMode === "e2e_fixture";
+  const promptRefinerScopeKey = JSON.stringify([
+    identityKey ?? null,
+    mountedSurface,
+    currentChatId ?? null,
+    promptRefinerMode,
+  ]);
   const promptRefinerScopeKeyRef = useRef(promptRefinerScopeKey);
 
   const resetPromptRefinerFixture = useCallback(() => {
@@ -941,6 +949,8 @@ export function ChatPageClient({
     promptRefinerAbortControllerRef.current = null;
     promptRefinerBoundDraftRef.current = null;
     promptRefinerResolutionRef.current = null;
+    promptRefinerReadySuggestionRef.current = null;
+    promptRefinerReadyScopeRef.current = null;
     setPromptRefinerState({ status: "idle" });
   }, []);
 
@@ -951,8 +961,10 @@ export function ChatPageClient({
       resetPromptRefinerFixture();
     }
     const resolution = promptRefinerResolutionRef.current;
-    if (resolution && !isPromptRefinerResolutionCurrent(resolution, inputValue)) {
-      promptRefinerResolutionRef.current = null;
+    if (resolution && resolution.displayPrompt !== inputValue) {
+      // The preview belongs only to the exact authored source bytes. An edit
+      // starts a new draft; no old execution prompt may follow it.
+      resetPromptRefinerFixture();
     }
   }, [inputValue, resetPromptRefinerFixture]);
 
@@ -981,15 +993,18 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     if (promptRefinerScopeKeyRef.current === promptRefinerScopeKey) return;
     promptRefinerScopeKeyRef.current = promptRefinerScopeKey;
-    // Conversation and identity are browser-local binding facts, not model
-    // input. A same-text draft in another conversation must not inherit a
-    // late or already-ready proposal from the one that was left.
+    // Conversation, identity and the server-owned offer mode bind this
+    // fixture epoch. A same-text draft or late response cannot survive a
+    // scope change or an off/on transition.
     resetPromptRefinerFixture();
   }, [promptRefinerScopeKey, resetPromptRefinerFixture]);
 
   const handlePromptRefinerRequest = useCallback(
     (sourcePrompt: string) => {
       if (promptRefinerMode !== "e2e_fixture") return;
+      // A validated acceptance is a read-only preview until the authored
+      // draft changes. Do not clear its provenance for a second request.
+      if (promptRefinerResolutionRef.current?.decision === "accepted") return;
       promptRefinerAbortControllerRef.current?.abort();
       const requestSequence = ++promptRefinerRequestSequenceRef.current;
       const request: PromptRefinerRequest = {
@@ -997,10 +1012,17 @@ export function ChatPageClient({
         prompt: sourcePrompt,
       };
       const requestScopeKey = promptRefinerScopeKeyRef.current;
+      const requestScope: PromptRefinerDraftScope = {
+        identityKey: identityKey ?? null,
+        mountedSurface,
+        conversationId: currentChatId ?? null,
+      };
       const controller = new AbortController();
       promptRefinerAbortControllerRef.current = controller;
       promptRefinerBoundDraftRef.current = request.prompt;
       promptRefinerResolutionRef.current = null;
+      promptRefinerReadySuggestionRef.current = null;
+      promptRefinerReadyScopeRef.current = null;
       setPromptRefinerState({ status: "requesting", request });
       void fetch("/e2e/prompt-refiner-adapter", {
         method: "POST",
@@ -1023,6 +1045,8 @@ export function ChatPageClient({
             currentPrompt: promptRefinerDraftRef.current,
             response: payload,
           });
+          promptRefinerReadySuggestionRef.current = suggestion;
+          promptRefinerReadyScopeRef.current = suggestion ? requestScope : null;
           setPromptRefinerState(
             suggestion ? { status: "ready", suggestion } : { status: "idle" }
           );
@@ -1035,6 +1059,8 @@ export function ChatPageClient({
           ) {
             return;
           }
+          promptRefinerReadySuggestionRef.current = null;
+          promptRefinerReadyScopeRef.current = null;
           setPromptRefinerState(
             promptRefinerDraftRef.current === request.prompt
               ? { status: "failed", request, failureCode: "fixture_response_invalid" }
@@ -1047,18 +1073,53 @@ export function ChatPageClient({
           }
           setPromptRefinerFixtureSettledSequence(requestSequence);
         });
-    }, [promptRefinerMode]
+    }, [promptRefinerMode, identityKey, mountedSurface, currentChatId]
   );
 
   const handlePromptRefinerDecision = useCallback((resolution: PromptRefinerResolution) => {
-    // The fixture keeps an accepted resolution only to fail closed if a test
-    // tries to submit it. It has no product execution path and persists no
-    // receipt; a model-facing caller must do both before enabling submit.
-    promptRefinerBoundDraftRef.current = null;
-    promptRefinerResolutionRef.current =
-      resolution.decision === "accepted" ? resolution : null;
-    setPromptRefinerState({ status: "idle" });
-  }, []);
+    if (promptRefinerMode !== "e2e_fixture") return;
+    const readySuggestion = promptRefinerReadySuggestionRef.current;
+    const readyScope = promptRefinerReadyScopeRef.current;
+    if (!readySuggestion || !readyScope) {
+      // A second click cannot consume the same fixture suggestion twice.
+      return;
+    }
+    try {
+      const handoff = validatePromptRefinerFixtureHandoff({
+        readySuggestion,
+        resolution,
+        readyScope,
+        currentScope: {
+          identityKey: identityKey ?? null,
+          mountedSurface,
+          conversationId: currentChatId ?? null,
+        },
+        currentDraft: inputValue,
+        consumedKeys: promptRefinerConsumedKeysRef.current,
+      });
+      // Consume before changing React state: two callbacks from the same
+      // rendered button cannot both hand off this suggestion.
+      promptRefinerConsumedKeysRef.current.add(handoff.consumptionKey);
+      promptRefinerBoundDraftRef.current = null;
+      // Retain this consumed pair until the next request or scope reset.
+      // A second callback from the same render then reaches the duplicate
+      // guard instead of consuming the suggestion again.
+      // The accepted proposal stays outside the controlled composer and its
+      // durable draft writer. Product execution needs a separate server handoff.
+      promptRefinerResolutionRef.current =
+        handoff.resolution.decision === "accepted" ? handoff.resolution : null;
+      setPromptRefinerState(handoff.resolution.decision === "accepted"
+        ? { status: "accepted_preview", suggestion: readySuggestion }
+        : { status: "idle" });
+      return;
+    } catch (error) {
+      if (error instanceof Error && error.message === "prompt_refiner_handoff_duplicate") {
+        return;
+      }
+      resetPromptRefinerFixture();
+      return;
+    }
+  }, [promptRefinerMode, identityKey, mountedSurface, currentChatId, inputValue, resetPromptRefinerFixture]);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -3249,6 +3310,11 @@ export function ChatPageClient({
         modelId?: string,
         options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
     ) => {
+        if (promptRefinerMode === "e2e_fixture") {
+            // The no-cost Refiner fixture cannot hand an accepted synthetic
+            // Chat draft to a second provider-facing workspace either.
+            return;
+        }
         resetPromptRefinerFixture();
         conversationSelectionTicketRef.current += 1;
         setChatDraftBeforeImage({
@@ -4174,6 +4240,14 @@ export function ChatPageClient({
     return false;
   };
 
+  // ChatApp retries, follow-ups and payload sends bypass handleGlobalSubmit,
+  // but each crosses onBeforeModelSend. A fixture must refuse that barrier
+  // before any Message write or provider-facing request can start.
+  const ensureModelSettingsReadyForChatApp = async (targetChatId: string) =>
+    promptRefinerMode === "e2e_fixture"
+      ? false
+      : ensureModelSettingsReady(targetChatId);
+
   useEffect(() => {
     if (
       comparisonPresetAppliedRef.current ||
@@ -4281,14 +4355,12 @@ export function ChatPageClient({
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
   const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
-    if (promptRefinerMode === "e2e_fixture" && !options?.overrideText) {
-      const resolution = promptRefinerResolutionRef.current;
-      if (resolution && isPromptRefinerResolutionCurrent(resolution, inputValue)) {
-        // The fixture may prove the pre-send decision but cannot turn its
-        // synthetic text into an authored Message or provider instruction.
-        return;
-      }
-      promptRefinerResolutionRef.current = null;
+    if (promptRefinerMode === "e2e_fixture") {
+      // This mode only exercises a no-cost pre-send proposal. It cannot
+      // authorize any Chat dispatch, including after conversation switches,
+      // draft restoration or an overrideText caller. A browser-local accepted
+      // marker would not survive every restore/remount path safely.
+      return;
     }
     const submitFence = submitIdentityFenceRef.current;
     const ownerKey = identityKey ?? "unresolved";
@@ -7534,7 +7606,7 @@ export function ChatPageClient({
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
           onSubmit={handleGlobalSubmit}
-          onBeforeModelSend={ensureModelSettingsReady}
+          onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
@@ -7666,7 +7738,7 @@ export function ChatPageClient({
           onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onSubmit={handleGlobalSubmit}
-          onBeforeModelSend={ensureModelSettingsReady}
+          onBeforeModelSend={ensureModelSettingsReadyForChatApp}
           onChangePanelModel={changePanelModel}
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
