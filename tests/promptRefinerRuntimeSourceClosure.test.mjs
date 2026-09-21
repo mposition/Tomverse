@@ -83,10 +83,20 @@ const compilerOptions = parsedConfig.options;
 // 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 on this
 // branch and on `origin/develop` alike, so nothing was added, removed or
 // changed. Only positions moved.
+//
+// 2026-09-21, deploy D-1: the same again, one deploy later. Removing the read
+// authority takes the fence out of eight modules and shortens
+// `lib/emailSuppression.ts`, `lib/emailSuppressionAuthority.ts` and
+// `lib/emailSuppressionAuthorityCore.ts`, so positions move once more. The
+// count is still 228 and the position-free inventory still hashes to
+// 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65 -- the same
+// value as on `origin/develop` and on the deploy below this one. Two modules
+// lost most of their contents and the set of computed accesses did not change,
+// which is the thing this snapshot exists to make somebody check.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "d0d59c25abe9ea2e08e20f6953d13d83",
-  "982fa70cfe65996fbf98a83a82f4e943",
+  "d0e238d4b6671103a787f64fbc57f334",
+  "e07ba5b426a98b5aa0a8674060307bf8",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

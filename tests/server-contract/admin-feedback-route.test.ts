@@ -261,9 +261,7 @@ async function loadRoute(): Promise<{
       suppressionCause: {
         findMany: async () => world.suppressions,
       },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
-      // The fence and the address lock the send takes before it submits.
+      // The address lock the send takes before it submits.
       ...sendLockPrismaStubs(),
       feedbackAutoFixCase: {
         updateMany: async ({

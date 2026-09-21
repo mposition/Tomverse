@@ -4,13 +4,101 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v26 (2026-09-21).** `SuppressionEntry` 쓰기를 멈추고 발송 판정이 원인만 읽습니다. 0절 참조.
+- 개정: **v27 (2026-09-21).** suppression 판정 기준 설정과 그 전환 도구, 그리고
+  전환을 지키던 fence를 없앴습니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v27 (2026-09-21) — 판정 기준 설정을 없앱니다(deploy D-1)
+
+deploy D의 앞쪽입니다. v26이 send 경로를 설정과 무관하게 만들었고, 이 배포는
+**설정을 읽는 코드를 없앱니다.** 행 자체는 다음 배포(D-2)가 지웁니다.
+
+1. **설정을 읽는 곳이 없어집니다.** `readSuppressionAuthority`,
+   `SUPPRESSION_READ_AUTHORITY_KEY`, `suppressionReadAuthorityFromValue`,
+   `SuppressionReadAuthority`가 사라집니다. v26이 읽기를 남긴 이유는 `entry`로
+   되어 있는 것이 **조용하지 않고 시끄럽도록** 하는 것이었고, 그 경고
+   (`EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR`)가 가리킨 것은 **되돌릴 수 있는
+   상태**였습니다. v26이 배포된 순간 되돌리는 길은 이미 없어졌으므로, 지금 그
+   경고가 하는 일은 **고칠 것이 없는 설정을 고치라고 말하는 것**입니다. 경고도
+   함께 사라집니다.
+2. **행 삭제는 이 배포가 아닙니다.** migration은 새 코드보다 **먼저** 돌므로,
+   D-1의 migration이 행을 지우면 그 사이 서비스 중인 build는 v26입니다.
+
+   **발송은 그 창에서도 안전합니다.** v26의 `suppressionCheck`는 설정과 무관하게
+   원인을 읽습니다. 이 항목의 초안은 그 몇 분을 "그만 보내라고 한 사람에게 메일이
+   나가는 시간"이라고 적었는데 **그것은 틀렸습니다** — 그렇게 되려면 C-1 이전
+   build가 살아 있어야 하고, 배포 순서가 그것을 막습니다. 독립 검토가 잡았고,
+   틀린 근거로 옳은 순서를 지키는 것은 그 순서를 다음에 아무나 바꿀 수 있게
+   두는 일이라 여기 적습니다.
+
+   **실제로 걸리는 것은 v26이 아직 설정을 보는 세 경로**이고, 셋 다 메일이 아니라
+   상태입니다.
+
+   - 콘솔의 해제가 `authority_changed`로 거절합니다. 운영자에게는 화면이 고장 난
+     것으로 보이고, 그동안 어떤 suppression도 해제할 수 없습니다.
+   - `applyPreferenceChange`가 좁은 목록으로 떨어집니다. 그 목록은
+     `privacy_request`만 알아보므로, 전역 complaint나 purpose의 manual hold가
+     있는 사람이 marketing purpose를 **다시 켤 수 있게** 됩니다. 메일은 나가지
+     않지만(발송 판정은 원인을 봅니다) preference 행과 동의 기록이 잘못 쓰입니다.
+   - 삭제 접수가 purpose마다 분류 정지의 사본을 다시 씁니다.
+
+   셋 다 되돌릴 수 있지만 셋 다 **사용자 상태에 대한 잘못된 쓰기이거나 운영자
+   화면의 중단**이고, 창을 만들지 않으면 전부 일어나지 않습니다. 그래서 순서는
+   **코드 먼저, 행은 그 다음 배포(D-2)**입니다.
+
+   **이것은 7.4 설계표와의 차이이므로 여기 적어 둡니다.** 그 표의 D 행은 설정
+   제거를 한 배포로 적었고, C가 C-1·C-2로 나뉘기 전에 쓰였으므로 위의 세 경로가
+   앞 build에 남는다는 것을 전제하지 않았습니다. 나누는 쪽이 창을 없앱니다.
+
+   행이 남아 있어도 — 그리고 `entry`라고 적혀 있어도 — 이 build에는 아무 효과가
+   없다는 것은 `tests/integration/email-suppression-authority.db.test.ts`가 그
+   키를 문자열로 직접 써 넣고 고정합니다. **그 테스트가 고정하는 것은 한 방향
+   뿐입니다** — 이 build가 서비스 중이면 행이 남아 있어도 무해하다는 것이고,
+   반대 순서를 안전하게 만들어 주지는 않습니다.
+3. **cutover 도구를 지웁니다.** `npm run email:suppression-cutover`와 그것이
+   부르던 module·script, 그리고 그 게이트였던 `suppressionParity`입니다(경로는
+   commit에 있고 여기 적지 않습니다 — 없는 파일을 가리키는 문장은 안내가 아니라
+   오안내입니다). 그 도구가 하던 일은 설정을
+   바꾸는 것 하나였고, 바꿀 설정이 없습니다. parity는 entry와 원인을 비교하는
+   것인데 entry는 2026-09-21 이후로 갱신되지 않으므로, **비교할 두 번째 답이
+   없습니다** — 남겨 두면 그 사이에 해제된 억제를 "빠진 원인"으로 읽는 보고서가
+   됩니다(v26 5번).
+4. **fence도 사라집니다.** `holdSuppressionFence`는 **cutover만이 배타로 잡는**
+   키를 공유 모드로 잡는 것이었습니다. 배타로 잡는 쪽이 없어지면
+   `pg_advisory_xact_lock_shared`는 아무것도 막지 않고 매 획득이 즉시 성공합니다.
+   **없는 보호를 여덟 곳이 주장하는 것은 보호가 없는 것보다 나쁩니다** — 다음에
+   읽는 사람이 suppression 쓰기가 무언가에 대해 직렬화된다고 믿게 됩니다. 실제로
+   직렬화하던 것은 `lockSuppressionAddress`이고, 이제 그것이 첫 번째입니다.
+   잠금이 하나가 되면서 **두 잠금 사이의 순서 계약과 그 순서를 어겨서 생기는
+   교착도 같이 없어집니다.** §9의 "cutover는 in-flight 발송만큼 fence를
+   기다립니다"는 해당 없음이 됩니다.
+5. **해제 거절은 네 상황에서 세 상황이 됩니다.** `authority_changed`가
+   사라집니다 — 판정 기준이 바뀔 수 없으면 "진행 중에 바뀌었다"는 답이 나올 수
+   없습니다. 남는 것은 digest가 달라졌거나 손잡이가 더 이상 활성이 아니면
+   `approval_stale`, 그런 id가 아예 없으면 404, 그리고 `unliftable`입니다
+   (v25 6번).
+6. **preference 켜기의 entry 시대 목록이 사라집니다.** v16 7번은 판정 기준이
+   `entry`일 때도 `privacy_request`면 거절하라는 **좁은 목록**이었고, 그 좁음의
+   이유는 entry 판정이 분류 원인을 볼 수 없다는 것뿐이었습니다. 이제 목록은
+   하나이고 그것이 넓은 쪽입니다 — purpose의 unsubscribe가 아닌 모든 원인,
+   marketing 분류 정지, soft bounce가 아닌 전역 원인.
+7. **삭제 접수가 purpose마다 쓰던 분류 원인의 사본이 사라집니다.** 같은 이유로
+   있던 것이고(entry 판정에 분류 원인이 보이지 않음), 분류 원인 하나가 marketing
+   전부를 막습니다. purpose마다 복제된 privacy request는 보증이 아니라 **나중에
+   질문에 답하기 어려운 기록**입니다.
+8. **모듈 이름은 그대로 둡니다.** `lib/emailSuppressionAuthority.ts`와
+   `lib/emailSuppressionAuthorityCore.ts`에는 더 이상 권위가 없지만, 두 경로는
+   `PROMPT_REFINER_RUNTIME_SOURCE_PATHS`와 20260918130000의 CHECK 제약이 고정하고
+   있습니다 — 이름을 바꾸는 것은 durable approval contract를 바꾸는 일이고, 더 나은
+   이름이 값할 만한 결정이 아닙니다. 두 파일의 머리말이 그 사실을 적습니다.
+9. **되돌리기.** 이 배포의 rollback은 이전 코드를 다시 배포하는 것이고 데이터는
+   건드리지 않으므로 되돌릴 수 있습니다. 원인으로 돌아갈 수 없게 된 것은 v26이며
+   (entry 쓰기가 멈춘 시점), D-1이 새로 만드는 비가역성은 없습니다.
 
 ### v26 (2026-09-21) — entry 쓰기가 멈춥니다(deploy C-2)
 
@@ -1704,8 +1792,11 @@ EmailProviderPort {
    `EmailEvent` -> `EmailDelivery` 큐로 옮기되, 로그인 코드는 standard lane이 아니라
    **credential synchronous lane**(9.4a)으로 보냅니다. **규제와 무관하게 지금 가장 큰 사용자 피해가
    여기 있습니다.**
-2. **`SuppressionEntry` + Resend webhook 수신** (bounce/complaint). 서명 검증과
-   `svix-id` 기반 replay 방지 포함.
+2. **억제 기록 + Resend webhook 수신** (bounce/complaint). 서명 검증과
+   `svix-id` 기반 replay 방지 포함. 이 항목이 `SuppressionEntry`라고 적혀 있던
+   것은 v1의 한 행짜리 기록을 뜻했습니다. 지금 쓰는 것은 append-only
+   `SuppressionCause`이며(7.4 배포 A~D), 아래 본문에서 억제 기록을 가리키는
+   이름도 전부 그쪽입니다.
 3. **`EmailPreference` + `ConsentRecord`** 스키마와 목적별 opt-in/opt-out.
 4. **로그인 없는 unsubscribe token** + 최소 preference center.
 5. **`JurisdictionProfile` + footer renderer.** transactional footer부터 적용하고
@@ -1790,7 +1881,7 @@ EmailProviderPort {
 
 | 대안 | 기각 사유 |
 |---|---|
-| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 `SuppressionEntry`가 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. Phase 2 착수 시 재평가(A18) |
+| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 억제 기록(`SuppressionCause`)이 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. Phase 2 착수 시 재평가(A18) |
 | **customer engagement platform 중심** | 7.3의 네 가지 이유. 특히 감사 스냅샷과 정책 이중화 문제 |
 | **자체 abstraction을 둔 multi-provider** | 구현체가 하나인 추상화는 추상화가 아닙니다. 그리고 **중복 발송 없는 provider 전환은 abstraction이 아니라 outbox의 idempotency key가 보장**합니다 — 우리는 그것을 먼저 만듭니다 |
 | **AWS SES로 즉시 이전** | 비용 절감액(월 $15 수준)이 운영 부담을 정당화하지 못합니다. 데이터 위치가 요구사항이 되면 그때 |
@@ -1828,7 +1919,7 @@ EmailProviderPort {
         v
   [6] ProviderWebhookEvent  <- bounce / complaint / delivered / unsubscribe
         |
-        +--> SuppressionEntry 갱신
+        +--> SuppressionCause 추가 (append-only: 사건마다 한 행)
         +--> EmailDelivery 상태 갱신
 ```
 
@@ -2098,7 +2189,7 @@ POST /api/webhooks/email/resend
  1. raw body 보존 (서명은 포맷에 민감)
  2. Svix 서명 검증 -> 실패 시 400, 본문 로그 금지
  3. svix-id 로 ProviderWebhookEvent upsert -> 이미 있으면 200 즉시 반환 (replay 방지)
- 4. 트랜잭션: 이벤트 저장 + EmailDelivery 갱신 + SuppressionEntry 갱신
+ 4. 트랜잭션: 이벤트 저장 + EmailDelivery 갱신 + SuppressionCause 추가
  5. 200
 ```
 
@@ -2138,8 +2229,10 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 - **잠금 순서는 주소 → purpose 행**이며, writer가 잡는 순서의 뒷부분과 같습니다
   (`lib/emailPreferences.ts`). writer가 먼저 잡는 **`User` 행 잠금은 sender가 잡지
   않습니다** — 발송은 계정을 바꾸지 않고, 주소 뒤에 그것을 잡는 것이 유일하게 교착이
-  되는 순서입니다. 잠금 앞에는 suppression fence를 공유 모드로 잡으므로, 판정이 한
-  권위에서 시작해 다른 권위에서 실행되는 일이 없습니다(v16).
+  되는 순서입니다. v16은 이 앞에 suppression fence를 공유 모드로 한 번 더 잡아
+  판정이 한 권위에서 시작해 다른 권위에서 실행되지 않게 했습니다. **v27이 그
+  fence를 없앴습니다** — 권위가 하나뿐이면 건널 경계가 없고, 배타로 잡는 쪽이
+  사라진 공유 잠금은 아무도 막지 않습니다.
 - **provider 호출은 transaction이 열린 채로 일어납니다.** 제출 전에 푼 잠금은 아무것도
   지키지 못하기 때문이고, 그래서 예산을 명시합니다. 제출이 성공한 뒤 커밋이 실패하면
   발송은 유효하고 행은 재시도되며, provider idempotency key가 두 번째 메일을 막습니다.
@@ -2150,7 +2243,7 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 
 | 항목 | standard lane·알림 큐 | credential lane |
 |---|---|---|
-| 잠금 대기 — **세 잠금 전체** | 2초 | 300ms |
+| 잠금 대기 — **잠금 전체**(주소, purpose 행) | 2초 | 300ms |
 | provider 호출 timeout | 10초, **transaction 잔여 − 250ms**를 넘지 않음 | 남은 요청 예산 − 100ms, 상한 2.5초, 같은 제한 적용 |
 | transaction timeout | 15초 | 잠금 대기 + 그 시도의 timeout + 여유 (둘 다 요청 예산 안) |
 | 잠금을 못 얻으면 | claim 해제, 기존 backoff로 복귀, **시도 횟수는 올리지 않음** | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
@@ -2169,8 +2262,8 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
   매 회차 막히는 것은 증상이므로 `email_send_lock_unavailable` 구조화 로그를 남깁니다
   (수신자는 싣지 않습니다).
 - **잠금 대기는 잠금마다가 아니라 전체에 걸립니다.** Postgres의 `lock_timeout`은
-  **획득 시도마다** 적용되므로 한 번 설정하고 세 잠금을 잡으면 계약이 약속한 대기의
-  세 배가 됩니다. 그래서 절대 deadline 하나를 두고 **잠금 직전마다 남은 시간으로
+  **획득 시도마다** 적용되므로 한 번 설정하고 잠금을 여러 개 잡으면 계약이 약속한
+  대기의 그 배수가 됩니다(v27 전까지는 fence를 포함해 셋이었고, 지금은 둘입니다). 그래서 절대 deadline 하나를 두고 **잠금 직전마다 남은 시간으로
   다시 설정**하며, 남은 시간이 없으면 잡지 않고 `lock_unavailable`입니다. **마지막
   잠금 뒤에도 한 번 더 검사합니다** — `lock_timeout`은 한 번의 대기만 묶고 그 앞뒤
   statement는 묶지 않으므로, deadline 직후에 승인된 잠금으로 계속 진행하면 안 됩니다.
@@ -2205,17 +2298,18 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
   `lock_timeout` 아래에서 일반 relation 잠금이 끊긴 것이므로 실패로 다룹니다. 판정은
   잠금 단계인지 여부로 하고, 오류 문구로 하지 않습니다.
 - **제출이 성공한 뒤 transaction이 실패하면 그 답을 버리지 않습니다.** 이 transaction은
-  아무것도 쓰지 않으므로(설정과 원인을 읽고 잠금을 잡을 뿐) rollback이 잃는 것이
+  아무것도 쓰지 않으므로(원인을 읽고 잠금을 잡을 뿐) rollback이 잃는 것이
   없고, 답을 버리면 이미 나간 메일을 다시 보내게 됩니다. 이 경우
   `email_send_lock_lost_after_submit`을 남깁니다 — 일어났다면 예산이 틀린 것입니다.
 - **잠금 때문에 미뤄진 행은 backlog에 셉니다.** 야간 대기와 다릅니다 — 야간 대기는
   예정대로이고, 이것은 늦은 것입니다. 되돌아오는 대기는 그 행이 실패했다면 기다렸을
   곡선의 값이고, 곡선이 끝났으면 1분입니다.
-- **cutover는 in-flight 발송만큼 fence를 기다립니다.** 발송이 fence를 공유 모드로
-  provider 호출 동안(최대 10초) 잡으므로, `email:suppression-cutover`의 배타 획득이
-  그만큼 늦어질 수 있습니다. 배타 대기가 줄을 서면 그 뒤의 발송은 2초 안에 잠금을 얻지
-  못하고 `send_not_submitted`으로 미뤄졌다가 cutover가 끝난 뒤 돌아옵니다 — 발송이 사라지는
-  것이 아니라 미뤄지는 것입니다.
+- ~~**cutover는 in-flight 발송만큼 fence를 기다립니다.**~~ **v27에서 해당 없음.**
+  발송이 fence를 공유 모드로 provider 호출 동안(최대 10초) 잡았으므로
+  `email:suppression-cutover`의 배타 획득이 그만큼 늦어졌고, 그 뒤의 발송은
+  `send_not_submitted`으로 미뤄졌다가 cutover가 끝난 뒤 돌아왔습니다. v27이 설정과
+  cutover와 fence를 함께 없앴으므로 이 지연도 없습니다. **발송이 기다리는 advisory
+  잠금은 이제 주소 하나뿐입니다.**
 - **purpose 철회는 그 purpose scope suppression으로 관측합니다.** 철회는 preference
   행과 purpose scope suppression을 한 transaction에서 쓰므로(7.4의 총잠금 순서),
   잠금 안의 suppression 재조회가 그것을 봅니다. 그래서 preference 행을 다시 읽지
@@ -2285,11 +2379,14 @@ provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습�
 | `TemplateVersion` | **필요** | 불변 버전 |
 | `EmailEvent` | **필요** | outbox |
 | `EmailDelivery` | **필요** | 수신자별 발송 |
-| `SuppressionEntry` | **필요** | 전역 + 목적별 억제 |
+| `SuppressionCause` | **필요** | 억제를 만든 사건. 전역·분류·목적 scope, append-only |
+| `SuppressionEntry` | 보존만 | v1의 한 행짜리 억제 기록. **2026-09-21 이후 아무도 쓰지 않습니다**(7.4 배포 C-2). 원인이 생기기 전의 목록을 담은 유일한 기록이라 남겨 둡니다 |
 | `ProviderWebhookEvent` | **필요** | replay 방지 + 원본 보존 |
 | `EmailPolicyVersion` | **필요** | profile 묶음의 버전. 아래 10.4 |
 
-**10개 모두 필요합니다.** 다만 MVP에서 전부 만들지는 않습니다(15절).
+**열 가지 역할이 모두 필요합니다.** 다만 MVP에서 전부 만들지는 않습니다(15절).
+표가 열한 줄인 것은 억제 기록이 이전된 흔적입니다 — 역할은 하나이고, 쓰는 표가
+바뀌었으며, 예전 표는 지우지 않았습니다.
 
 ### 10.2 핵심 엔터티
 
@@ -2494,7 +2591,16 @@ PostgreSQL의 unique 제약은 **`NULL`을 서로 다른 값으로 취급**하�
 - `emailAddress`와 중복되어 보이지만 별개입니다: `emailAddress`는 발송 시점
   스냅샷(나중에 주소가 바뀌어도 보존), `recipientKey`는 중복 방지 키입니다.
 
-**`SuppressionEntry`**
+**`SuppressionEntry`** — **v1의 형태이고, 지금 쓰는 것이 아닙니다.**
+
+지금의 억제 기록은 `SuppressionCause`이며, 아래 컬럼을 거의 그대로 가져가면서
+셋이 다릅니다: selector(`emailAddress`+`scope`+`purposeKey`)마다 **한 행이 아니라
+사건마다 한 행**이고, `scope`에 `classification`이 있으며(삭제 접수가 marketing
+전체를 한 행으로 막습니다), 해제는 삭제가 아니라 `releasedAt`입니다. 그래서 아래
+블록이 설명하는 **병합 규칙은 더 이상 존재하지 않습니다** — 판정이 활성 원인을
+전부 읽으므로 어느 사건이 어느 사건을 덮을지 정할 일이 없습니다(0절 v26 3번).
+아래는 그 이전이 무엇을 옮긴 것인지 읽을 수 있도록 남깁니다.
+
 ```
 id
 emailAddress       String   // 정규화(소문자)
@@ -2903,14 +3009,14 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 | 데이터 | 보관 | 근거 |
 |---|---|---|
 | `ConsentRecord` | **동의 철회 후 최소 3년** (잠정) | 입증책임(CASL/호주). **정확한 기간은 21절 Q6** |
-| `SuppressionEntry` (complaint/unsubscribe) | **영구** | 삭제하면 다시 보내게 됨. GDPR 제17조(3)(b) 법적 의무 이행 근거 |
+| `SuppressionCause` (complaint/unsubscribe) | **영구** | 삭제하면 다시 보내게 됨. GDPR 제17조(3)(b) 법적 의무 이행 근거. 해제된 원인도 지우지 않습니다 — 해제는 `releasedAt`이고, "언제 풀렸나"에 답할 수 있는 것이 그 행뿐입니다 |
 | `EmailDelivery` | 13개월 | 분쟁 대응 + deliverability 분석 |
 | `EmailDelivery` (legal 분류, 본문 포함) | **7년** (잠정) | 법정 통지 증명. 21절 Q6 |
 | `ProviderWebhookEvent` | 90일 | replay 방지에 필요한 기간 + 여유 |
 | `EmailEvent` | 13개월 | |
 
 - 기존 `AdminRetentionRun` 배치에 규칙을 추가합니다.
-- **계정 삭제와의 상호작용:** 사용자 계정을 지워도 `SuppressionEntry`는
+- **계정 삭제와의 상호작용:** 사용자 계정을 지워도 `SuppressionCause`는
   **주소 기준으로 남습니다.** 이것은 GDPR 삭제권의 예외(법적 의무 준수)에
   해당한다고 보지만, **21절 Q6에서 확인이 필요합니다.** 개인정보처리방침에
   명시해야 합니다.
@@ -2920,7 +3026,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 **가장 어려운 설계 지점입니다.**
 
 **v1은 complaint를 하나로 뭉뚱그렸습니다.** 어느 스트림에서 신고가 들어왔는지에
-따라 의미가 전혀 다릅니다. 그래서 `SuppressionEntry`에 `sourceStream`,
+따라 의미가 전혀 다릅니다. 그래서 `SuppressionCause`에 `sourceStream`,
 `sourceDomain`, `sourceClassification`, `sourceMessageId`를 기록하고(10.2)
 아래 표는 그것을 읽습니다.
 
@@ -2982,7 +3088,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    IP 풀을 쓸 수 있습니다.
 3. **제공자 계정 수준의 억제와 제재는 분리되지 않습니다** — 이제 추정이 아니라
    확인된 사실입니다(5.3.1).
-4. **우리 `SuppressionEntry`가 gating 판정의 유일한 근거**이고, 제공자 억제는
+4. **우리 `SuppressionCause`가 gating 판정의 유일한 근거**이고, 제공자 억제는
    우리가 통제하지 못하는 **상위 필터**입니다. 2차 방어선이라는 v2의 표현은
    부정확했습니다 — 제공자 억제는 우리 뒤가 아니라 **우리 앞**에 있습니다.
 5. 같은 주소에서 transactional complaint가 반복되면 **critical incident**.
@@ -3233,7 +3339,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **M1b** | **Resend 계정 범위 제약 반영** (5.3.1) | Resend는 transactional 전용. marketing 도메인·API 키를 **만들지 않음**. 계정 suppression에 오른 주소를 탐지해 운영 보고에 올리고, 이메일 외 로그인 수단이 없는 사용자를 식별할 수 있음 |
 | M2 | `EmailTemplate` + `TemplateVersion`, 이메일 카피 통합 | 3개 모듈의 중복 `EmailLanguage`/`normalizeLanguage`/`escapeHtml` 제거. 언어 추가가 한 곳에서 끝남 |
 | M3 | Resend 웹훅 수신 + `ProviderWebhookEvent` | Svix 서명 검증, `svix-id` replay 방지, 중복 전달이 상태를 두 번 바꾸지 않음 |
-| M4 | `SuppressionEntry` + hard bounce/complaint 자동 억제 | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
+| M4 | 억제 기록 + hard bounce/complaint 자동 억제 (당시 `SuppressionEntry`, 지금 `SuppressionCause` — 7.4) | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
 | M5 | `EmailPreference` (6개 목적) + 잠금 규칙 | security/billing은 API로도 끌 수 없음 |
 | M6 | `ConsentRecord` append-only | 모든 preference 변경이 이력을 남김. 원시 IP 미저장 |
 | M7 | `JurisdictionProfile` + `JurisdictionCountryMap` + `EmailPolicyVersion` + footer renderer | **profile 9개**(`KR`/`US`/`CA`/`AU`/`GB`/`SG`/`EU`/`CH`/`ZZ`, `ZZ` 포함) + 국가->profile 매핑(EEA 30개국 -> `EU`, CH는 자체 profile). 6.3의 보류 동작. v5(2026-09-14)에서 8개에서 늘었습니다 |
@@ -3482,8 +3588,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [ ] marketing 도메인·API 키가 MVP 산출물에 존재하지 않음 (M1b, 5.3.1)
 - [ ] `userId`가 `NULL`인 수신자에 대해 fan-out을 두 번 돌려도 `EmailDelivery`가
       한 건만 생김 (`recipientKey`)
-- [ ] `scope="global"` 억제를 두 번 기록해도 `SuppressionEntry`가 한 건만 생김
-      (`purposeKey`)
+- [ ] **같은 사건**을 두 번 기록해도 `SuppressionCause`가 한 건만 생김
+      (`sourceEventKey` — 재전달된 webhook, 재시도된 관리자 요청)
+- [ ] **서로 다른 두 사건**은 같은 selector에서도 두 건이 생기고, 나중 것이 앞선
+      것을 덮지 않음. 한 행짜리 기록이었을 때는 이것이 반대였고, 그 병합이
+      영구 억제를 조용히 낮추던 자리입니다(0절 v26 3번)
 - [ ] 고신뢰 관할권 신호가 충돌하면 marketing이 `skipped:jurisdiction_conflict`로
       **보류**되고 transactional/legal은 정상 발송됨
 - [ ] `nextConfirmationNoticeAt`이 지나도 `EmailPreference.enabled`가 바뀌지 않음
@@ -3584,7 +3693,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | Q3 | 약관/개인정보처리방침/가격 변경 시 **사전 통지 기간**이 관할권별로 얼마인가? | 5번 유형의 발송 시점을 정함 | 정책 변경 프로세스 |
 | ~~Q4~~ | **해소 (2026-09-16). 예 — 전자우편은 예외 매체입니다.** 제50조제3항 단서의 "대통령령으로 정하는 매체"를 **시행령 제61조제2항이 전자우편으로 정합니다.** 근거는 방송미디어통신위원회·KISA 「불법스팸 방지를 위한 정보통신망법 안내서」(KISA-GD-2025-0037, 2025.12)이며, 전자우편은 수신 확인의 즉시성이 낮아 이용자 통제가 쉽다는 이유를 적고 있습니다. **따라서 E5는 어느 profile에도 적용되지 않고, KR profile의 `quietHours`를 비웠습니다**(seed 버전 `2026-09-16.jurisdictions.2`). 지연 기계는 lane에 남습니다 — 창은 정책 버전 데이터이고, 필요해지면 seed 한 줄입니다 | 4.3 한국 항목, 5.2 E5 | 해소. **남는 것 둘:** ① 시행령 원문 관보 대조(안내서 재수록과 2차 출처 일치로만 확인) ② **이메일 밖 채널** — 같은 내용을 SMS·푸시·알림톡으로 보내면 그쪽은 여전히 야간 별도 동의 대상이며 이 결론이 덮지 않습니다 |
 | Q5 | 일본 특정전자메일법의 **동의 증명 기록 보존 기간**이 우리 사례에 정확히 어떻게 적용되는가? | 13.2 보관 정책 | 일본 진출 시 |
-| Q6 | `ConsentRecord`와 `SuppressionEntry`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
+| Q6 | `ConsentRecord`와 `SuppressionCause`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
 | Q7 | 영수증에 관할권별 **세무 정보 표시 의무**가 있는가? (한국 부가세, EU VAT) | 3.2의 #3. 이 문서 범위 밖 | 영수증 템플릿 |
 | ~~Q8~~ | **해소 (2026-09-14).** 발송 주체는 **호주 법인 하나**이고, 한국 수신자도 같은 신원을 받습니다. `EMAIL_BUSINESS_*` 값이 ABN 포함 설정됐습니다. **한국의 사업자등록번호·통신판매업 신고번호는 존재하지 않습니다** — 통신판매업 신고 대상이 아님을 확인했고, KR profile에서 두 블록을 제거했습니다(5.2 E3) | — | 해소 |
 | Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
@@ -3622,7 +3731,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | ~~A13~~ | **확인 완료(2026-08-21).** Route Handler는 기본 비캐시(`GET`만 opt-in), `after()`는 응답 이후 실행이라 credential lane 발송에는 부적합. 9.7에 기록 | `node_modules/next/dist/docs/` | 해소 |
 | **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
 | ~~A15~~ | **폐기(v3).** 가정이 아니라 확인된 사실이며 반대 방향으로 판명. 5.3.1 참조 | — | — |
-| ~~A18~~ | **결정됨 (2026-09-14).** marketing은 **별도 Resend 계정**을 쓰고 transactional과 suppression 목록을 공유하지 않습니다 | 5.3.1. 결정 시점 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKETING_RESEND_API_KEY`를 별도로 요구합니다 | 가정이 아니라 결정입니다. **§5.3.1 결정 3(비이메일 복구 수단 의무화)은 따라오지 않습니다.** 결정 4(hard bounce 공유)는 계속 유효하며, 이제 `SuppressionEntry`가 유일한 공유 지점입니다 |
+| ~~A18~~ | **결정됨 (2026-09-14).** marketing은 **별도 Resend 계정**을 쓰고 transactional과 suppression 목록을 공유하지 않습니다 | 5.3.1. 결정 시점 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKETING_RESEND_API_KEY`를 별도로 요구합니다 | 가정이 아니라 결정입니다. **§5.3.1 결정 3(비이메일 복구 수단 의무화)은 따라오지 않습니다.** 결정 4(hard bounce 공유)는 계속 유효하며, 이제 `SuppressionCause`가 유일한 공유 지점입니다 |
 | ~~A19~~ | **결정됨(v4).** 방식 B 승인. 자격증명은 저장하지 않습니다 | 검토 승인 2026-08-21 | 가정이 아니라 결정입니다 |
 | ~~A16~~ | **완화(v3).** 방식 B에서는 worker가 재발송하지 않고 정리·관측만 하므로 **상시 프로세스가 필요 없습니다.** 1분 주기 cron으로 충분 | 9.4a-3 | 방식 A를 택하면 다시 제약이 됩니다 |
 | **A17 (갱신 2026-09-14)** | ~~8개로 충분~~ **9개가 필요합니다.** Q1 검토에서 스위스를 `EU`에서 분리하기로 했습니다 | EEA가 아니고 UWG art. 3(1)(o)·revFADP·감독기관·이전 근거가 모두 별개(검토 기록 §4.5) | **구현 완료 (2026-09-14)**: `CH` profile 신설 + resolver·country map 분리 + `EU`·`CH` footer에 `abn` 추가. 값이 같아도 근거가 다르면 행을 나눕니다. `privacy_link` block만 보류(검토 기록 §9-3) |

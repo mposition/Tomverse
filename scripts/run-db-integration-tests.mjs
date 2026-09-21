@@ -330,9 +330,10 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
-    // Deploy B: the read authority setting, the cutover under the exclusive
-    // fence, and lifting causes by the release matrix. The fence, the setting
-    // row and the audit row sharing a transaction are all database facts.
+    // Lifting causes by the release matrix, the address lock a concurrent
+    // writer contends for, and a retired setting row proving inert. The lock,
+    // the leftover row and the audit row sharing a transaction with the
+    // release are all database facts.
     "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
@@ -521,8 +522,8 @@ run(
 );
 // Also its own process, and for the same reason: it replaces next-auth. What
 // it pins is which requests reach the lift at all -- a stale cause set, a dead
-// handle, an unknown handle and the entry authority are four different
-// refusals, and every one of them used to answer "not found".
+// handle and an unknown handle are three different refusals, and every one of
+// them used to answer "not found".
 run(
   [
     "--conditions=react-server",
