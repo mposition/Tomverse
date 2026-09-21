@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
-import { marketingWebhookApplyScopeSchema } from "@/lib/marketingAutomationAccess";
+import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
 import {
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
@@ -44,11 +44,12 @@ export type MarketingSwitchStates = {
    * The state of the stored apply-scope document -- not whether the webhook is
    * applied to publish state.
    *
-   * Parsed with the same schema the access decision uses, so a stored value
-   * the resolver would refuse reads as invalid here rather than as a working
-   * configuration. Two earlier versions of this row were wrong in the same
-   * direction: a non-empty string was reported first as "on" and then as
-   * "configured", and the stored string "not json" would have satisfied both.
+   * Judged by the access module's own `marketingWebhookApplyScopeStatus()`,
+   * so the screen and the decision cannot disagree about a stored value.
+   * Three earlier versions of this row were wrong in the same direction --
+   * "on", then "configured", then a local parse that differed from the
+   * resolver on an empty string and on a BOM -- each of them reporting the
+   * presence of a value as though it were a working configuration.
    */
   webhookApplyScope: MarketingSwitchState;
 };
@@ -68,24 +69,25 @@ const state = (
 ): MarketingSwitchState => (read.ok ? (read.value ? "on" : "off") : "unreadable");
 
 /**
- * What the stored apply scope is, judged by the schema that judges it for real.
+ * What the stored apply scope is, judged by the module that judges it for real.
  *
- * No scope is the ordinary state today. An invalid one is a stored document
- * the access resolver would refuse, which is worth a screen precisely because
- * nothing else would tell an operator it is sitting there.
+ * The judgement is not made here: `marketingWebhookApplyScopeStatus()` is the
+ * access module's own, so the screen and the decision cannot disagree. Two
+ * earlier versions of this made it locally and did disagree -- an empty string
+ * read as "no scope" where the resolver refuses a stored document, and a
+ * BOM-prefixed scope read as invalid where the resolver canonicalises the BOM
+ * away and accepts it.
+ *
+ * No scope is the ordinary state today. An invalid one is worth a screen
+ * precisely because nothing else would tell an operator it is sitting there.
  */
 const applyScopeState = (
   read: { ok: true; value: string | null } | { ok: false }
 ): MarketingSwitchState => {
   if (!read.ok) return "unreadable";
-  if (!read.value) return "no-scope";
-  try {
-    return marketingWebhookApplyScopeSchema.safeParse(JSON.parse(read.value)).success
-      ? "scope-valid"
-      : "scope-invalid";
-  } catch {
-    return "scope-invalid";
-  }
+  const status = marketingWebhookApplyScopeStatus(read.value);
+  if (status === "absent") return "no-scope";
+  return status === "valid" ? "scope-valid" : "scope-invalid";
 };
 
 /** A draft's own words, shortened for a list row. */
