@@ -353,23 +353,31 @@ export const FIXTURE_MARKETING = {
     id: "e2e-marketing-channel",
     channel: "linkedin",
     provider: "zernio",
-    accountSlug: "linkedin-e2e",
+    accountSlug: "linkedin-1",
     defaultLocale: "en",
   },
   pending: {
     id: "e2e-marketing-pending",
     logicalKey: "e2e-marketing-pending-key",
+    envelopeDigest: "a".repeat(64),
     renderedText: "Three models, three answers, side by side.",
     guardCode: "new_copy",
   },
   published: {
     id: "e2e-marketing-published",
     logicalKey: "e2e-marketing-published-key",
+    envelopeDigest: "b".repeat(64),
     externalUrl: "https://example.test/e2e-marketing-published",
+  },
+  failed: {
+    id: "e2e-marketing-failed",
+    logicalKey: "e2e-marketing-failed-key",
+    envelopeDigest: "c".repeat(64),
+    errorCode: "e2e_provider_rejected",
   },
   report: {
     id: "e2e-marketing-report",
-    kind: "weekly",
+    kind: "weekly_kpi",
     sourceVersion: "e2e-1",
   },
 } as const;

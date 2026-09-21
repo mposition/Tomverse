@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { AdminMarketingPanel } from "@/components/admin/AdminMarketingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { readMarketingConsole } from "@/lib/marketingConsoleRead";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
 const TABS = adminNavItemTabs("marketing");
@@ -11,17 +12,22 @@ const TABS = adminNavItemTabs("marketing");
  * The marketing automation's record, read only
  * (docs/policy/marketing-automation.md §6.1, §8).
  *
+ * The rows are loaded here and rendered into the HTML rather than fetched
+ * after hydration, so the page an operator opens is the page they can read.
+ * The panel's refresh control calls `GET /api/admin/marketing`, which runs the
+ * same loader.
+ *
  * This slice adds no control that changes marketing state. Approving a draft,
  * pausing an account and marking a template reusable arrive in S2b1 with their
- * own permission and step-up; the queue below is what an operator reads to find
- * out what the automation did and what it is waiting for, and reading it takes
- * ordinary admin authentication.
+ * own permission and step-up; reading this page takes ordinary admin
+ * authentication, which the console layout has already established.
  */
 export default async function AdminMarketingPage({
   searchParams,
 }: PageProps<"/admin/marketing">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
+  const initial = await readMarketingConsole(tab.id as MarketingConsoleSection);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -32,7 +38,7 @@ export default async function AdminMarketingPage({
         label="Marketing sections"
         query={query}
       />
-      <AdminMarketingPanel section={tab.id as MarketingConsoleSection} />
+      <AdminMarketingPanel initial={initial} />
     </div>
   );
 }

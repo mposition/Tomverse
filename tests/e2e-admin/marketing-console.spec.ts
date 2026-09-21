@@ -46,13 +46,34 @@ test.describe("marketing console", () => {
     await expect(page.getByText(/Newest 20 of this section/)).toBeVisible();
   });
 
-  test("published posts carry where they went", async ({ page, signInAs }) => {
+  test("the publish-state section carries both what went out and what got stuck", async ({
+    page,
+    signInAs,
+  }) => {
     await signInAs("owner");
     await page.goto("/admin/marketing?tab=published");
 
     await expect(
       page.getByText(FIXTURE_MARKETING.published.externalUrl, { exact: false })
     ).toBeVisible();
+    // The row that matters most: a post a person approved and that never went
+    // out. Listing only the terminal successes would hide it.
+    await expect(
+      page.getByText(FIXTURE_MARKETING.failed.errorCode, { exact: false })
+    ).toBeVisible();
+  });
+
+  test("the switch strip says what is on, so an empty queue has an explanation", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    await page.goto("/admin/marketing?tab=queue");
+
+    await expect(page.getByText("Switches")).toBeVisible();
+    // Default-off, and stated as off rather than left to be inferred from an
+    // empty list.
+    await expect(page.getByText("Drafts")).toBeVisible();
   });
 
   test("accounts show the brand account and its mode", async ({ page, signInAs }) => {
@@ -110,13 +131,35 @@ test.describe("marketing console", () => {
     ).toBeVisible();
   });
 
-  test("someone who is not an administrator gets nothing", async ({
+  test("an administrator whose step-up has aged out still reads the page and the API", async ({
+    page,
+    signInAs,
+  }) => {
+    // 45 minutes is past the 30-minute step-up window and inside the 8-hour
+    // console window: the state S2b1's mutations will refuse and this screen
+    // must not, because being told to sign in again reads as a broken console
+    // rather than as a gated control.
+    await signInAs("ops", { authenticatedMinutesAgo: 45 });
+
+    await page.goto("/admin/marketing?tab=queue");
+    await expect(consoleHeading(page)).toHaveText("Marketing");
+    await expect(page.getByText(FIXTURE_MARKETING.pending.renderedText)).toBeVisible();
+
+    const api = await page.request.get("/api/admin/marketing?section=queue");
+    expect(api.status()).toBe(200);
+  });
+
+  test("someone who is not an administrator gets nothing, from the page or the API", async ({
     page,
     signInAs,
   }) => {
     await signInAs("member");
-    const response = await page.goto("/admin/marketing?tab=queue");
 
+    const response = await page.goto("/admin/marketing?tab=queue");
     expect(response?.status()).toBeGreaterThanOrEqual(400);
+
+    // The route answers for itself: a page guard is not the API's guard.
+    const api = await page.request.get("/api/admin/marketing?section=queue");
+    expect(api.status()).toBe(404);
   });
 });

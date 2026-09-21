@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-09-22
 
 ## Scope
 
@@ -28,25 +28,29 @@
 
 ## The navigation
 
-Six groups, eighteen entries. One page, one job.
+Six groups, twenty-two entries. One page, one job.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
 | Command Center | Overview | `/admin/overview` | — |
 | Command Center | Work queue | `/admin/work-queue` | `queue`, `approvals` |
-| Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports`, `ai-review` |
+| Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
 | Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `privacy` |
+| Customers | Support | `/admin/support` | `feedback`, `fixes`, `privacy` |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
 | Revenue | Refunds | `/admin/refunds` | — |
 | Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | — |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery` |
+| AI Platform | Routing | `/admin/routing` | — |
 | Operations | Infrastructure | `/admin/infrastructure` | — |
 | Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
+| Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
+| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Platform settings | `/admin/platform` | — |
+| Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
 | Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
