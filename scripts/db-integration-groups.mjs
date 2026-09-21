@@ -64,7 +64,7 @@ const LANE_RULES = [
   // selection-mode attribution the ROUTE gates are written against.
   [
     "routing",
-    /^(amux-orchestration|routing-|conversation-auto-selection|conversation-selection-mode|conversation-product-key|conversation-writer-product|chat-route-search-settlement)/,
+    /^(amux-orchestration|amux-agent-review-approval|routing-|conversation-auto-selection|conversation-selection-mode|conversation-product-key|conversation-writer-product|chat-route-search-settlement)/,
   ],
   // Credits, reservations, settlement, Stripe, and the admission limits that
   // decide whether a paid turn starts at all.

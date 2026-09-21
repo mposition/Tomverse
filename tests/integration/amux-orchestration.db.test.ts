@@ -1371,6 +1371,13 @@ test("execution API is fail-closed by default and preserves the execution fences
       settled: true,
       taskRevision: 3,
     });
+    const settledReviewTask = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+      select: { status: true, owner: true, claimedAt: true },
+    });
+    assert.equal(settledReviewTask.status, "review");
+    assert.equal(settledReviewTask.owner, null);
+    assert.equal(settledReviewTask.claimedAt, null);
 
     const actions = await prisma.adminAuditLog.findMany({
       where: {

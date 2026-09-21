@@ -31,6 +31,16 @@ Tomverse는 shell을 사용하지 않는다. `program`과 `args`를
 
 worker 이름은 server-side worker catalog와 같은 논리적 worker identity여야 한다.
 
+## Agent 검토 app server 설정
+
+Agent 작업 검토 승인은 executor lane이 아니라 app server 기능이다. 별도 승인
+계약과 staging 기록에 서명하기 전에는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED`를
+off로 유지한다. 켜기 전에 app server에 `mposition/Tomverse` 한정 Metadata·Pull
+requests·Contents 읽기 전용 `AMUX_REVIEW_GITHUB_READ_TOKEN`, 기존
+`TOMVERSE_AMUX_SYNC_SECRET`, Admin-to-internal proxy의 `NEXTAUTH_URL`을
+설정한다. 이 GitHub token은 executor에 주입하지 않고, 값 자체를 증거에도
+기록하지 않는다.
+
 ## stdin
 
 wrapper는 stdin에서 JSON document 하나를 받는다.

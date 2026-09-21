@@ -947,6 +947,24 @@ domains:
       operator and can name third parties, so it is routed to the manual
       PrivacyRequest path rather than the unified export.
 
+  - domain: amuxReviewDecision
+    prismaModel: AmuxReviewDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The immutable decision stores the approving operator's actorUserId and
+      refers to a proposal bound to an AMUX task and a GitHub PR digest; it
+      has no typed customer identifier or review prose. Operator deletion,
+      retention and access-request treatment remain unverified until
+      security-privacy approves them. The linked AdminAuditLog is separately
+      retained under its own policy.
+
   - domain: adminNote
     prismaModel: AdminNote
     userLinkageRole: actor

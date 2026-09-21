@@ -10,7 +10,9 @@ import {
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
-import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
+import {
+  openAmuxHumanEscalation,
+} from "@/lib/amux/escalation";
 import {
   evaluateLockedAmuxCostAdmission,
   lockAmuxResourcePolicies,
@@ -175,10 +177,27 @@ const buildAmuxDeliveryPrompt = (input: {
   taskRevision: number;
   previousAttempt: {
     outcome: string | null;
-    reason: string | null;
+    toStatus: string | null;
   } | null;
 }) => {
   const description = input.description?.trim() || "(no description)";
+  const reportedOutcome = input.previousAttempt?.outcome;
+  const previousOutcome =
+    reportedOutcome === "succeeded" ||
+    reportedOutcome === "failed" ||
+    reportedOutcome === "blocked" ||
+    reportedOutcome === "expired"
+    ? reportedOutcome
+    : "unknown";
+  const reportedStatus = input.previousAttempt?.toStatus;
+  const previousStatus =
+    reportedStatus === "todo" ||
+    reportedStatus === "review" ||
+    reportedStatus === "done" ||
+    reportedStatus === "blocked" ||
+    reportedStatus === "cancelled"
+      ? reportedStatus
+      : "unknown";
 
   return [
     "[Tomverse AMUX work]",
@@ -192,8 +211,8 @@ const buildAmuxDeliveryPrompt = (input: {
     `Task revision: ${input.taskRevision}`,
     ...(input.previousAttempt
       ? [
-          `Previous outcome: ${input.previousAttempt.outcome ?? "unknown"}`,
-          `Previous reason: ${input.previousAttempt.reason?.trim() || "(none recorded)"}`,
+          `Previous outcome: ${previousOutcome}`,
+          `Previous status: ${previousStatus}`,
         ]
       : []),
     "",
@@ -319,7 +338,7 @@ export async function startAmuxExecution(input: {
       await openAmuxHumanEscalation(tx, {
         taskId: input.taskId,
         specialty: "cost-operations",
-        reason: `${costAdmission.reason}:${costAdmission.blocked_resource.scope}:${costAdmission.blocked_resource.key}`,
+        reason: "operational_cost_blocked",
         openedBy: AMUX_EXECUTION_SYSTEM_ACTOR,
       });
       await writeSystemAuditLog({
@@ -378,7 +397,7 @@ export async function startAmuxExecution(input: {
       await openAmuxHumanEscalation(tx, {
         taskId: input.taskId,
         specialty: "execution-recovery",
-        reason: `Execution attempt budget exhausted after ${budget.attempts_used} attempts.`,
+        reason: "attempt_budget_exhausted",
         openedBy: AMUX_EXECUTION_SYSTEM_ACTOR,
       });
       await writeSystemAuditLog({
@@ -506,7 +525,7 @@ export async function startAmuxExecution(input: {
           { startedAt: "desc" },
           { id: "desc" },
         ],
-        select: { outcome: true, reason: true },
+        select: { outcome: true, toStatus: true },
       }),
     ]);
 
@@ -789,9 +808,9 @@ export async function settleAmuxExecution(input: {
         revision: input.taskRevision,
       },
       data:
-        effectiveToStatus === "todo"
+        effectiveToStatus === "todo" || effectiveToStatus === "review"
           ? {
-              status: "todo",
+              status: effectiveToStatus,
               owner: null,
               claimedAt: null,
               revision: {
@@ -829,7 +848,15 @@ export async function settleAmuxExecution(input: {
         outcome: input.outcome,
         toStatus: effectiveToStatus,
         endedBy: input.worker,
-        reason: input.reason ?? null,
+        reason: budgetDestination.exhausted_limit
+          ? "attempt_budget_exhausted"
+          : effectiveToStatus === "review"
+            ? "human_review_required"
+            : input.outcome === "succeeded"
+              ? "execution_succeeded"
+              : input.outcome === "failed"
+                ? "execution_failed"
+                : "execution_blocked",
         settledCostMicrousd: input.actualCostMicrousd ?? null,
         costConfirmed:
           input.actualCostMicrousd !== null &&
@@ -876,20 +903,16 @@ export async function settleAmuxExecution(input: {
       await openAmuxHumanEscalation(tx, {
         taskId: attempt.taskId,
         specialty: task.reviewSpecialty,
-        reason:
-          input.reason?.trim() ||
-          "Task policy requires human review before completion.",
+        reason: "human_review_required",
         openedBy: input.worker,
       });
     } else if (effectiveToStatus === "blocked") {
       await openAmuxHumanEscalation(tx, {
         taskId: attempt.taskId,
         specialty: "execution-recovery",
-        reason:
-          input.reason?.trim() ||
-          (budgetDestination.exhausted_limit
-            ? "Execution attempt budget exhausted."
-            : "Worker reported that execution is blocked."),
+        reason: budgetDestination.exhausted_limit
+          ? "attempt_budget_exhausted"
+          : "execution_blocked",
         openedBy: input.worker,
       });
     }
@@ -1070,7 +1093,7 @@ export async function reclaimExpiredAmuxExecutions(
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
           specialty: "execution-recovery",
-          reason: "Execution lease expired and the retry budget was exhausted.",
+          reason: "execution_lease_expired",
           openedBy: "system:amux-execution-reaper",
         });
       }

@@ -77,6 +77,7 @@ const taskSchema = z
     required_routing_role: safeRole.nullable().optional(),
     requires_human_review: z.boolean().default(false),
     review_specialty: safeRole.nullable().optional(),
+    review_pr_number: z.number().int().min(1).max(1_000_000_000).nullable().optional(),
     dependencies: z
       .array(z.string().trim().min(1).max(120))
       .max(1_000)
@@ -89,6 +90,13 @@ const taskSchema = z
         code: "custom",
         path: ["review_specialty"],
         message: "Human review tasks require an explicit specialty.",
+      });
+    }
+    if (task.review_pr_number && !task.requires_human_review) {
+      context.addIssue({
+        code: "custom",
+        path: ["review_pr_number"],
+        message: "A review PR requires human review to be enabled.",
       });
     }
     if (!task.requires_human_review && task.review_specialty) {
@@ -228,6 +236,7 @@ export async function PUT(request: Request) {
           requiredRoutingRole: task.required_routing_role ?? null,
           requiresHumanReview: task.requires_human_review,
           reviewSpecialty: task.review_specialty ?? null,
+          reviewPrNumber: task.review_pr_number ?? null,
           ...(blocksDispatchForDeadline
             ? { status: "blocked", owner: null, claimedAt: null }
             : {}),

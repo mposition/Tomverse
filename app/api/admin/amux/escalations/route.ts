@@ -4,14 +4,18 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
+import { forwardAmuxAdminReviewCommand } from "@/lib/amux/reviewAdminProxy";
+import { isAmuxAgentApprovalEnabled } from "@/lib/amux/reviewApprovalCore";
 import { prisma } from "@/lib/prisma";
 
 const mutationSchema = z.discriminatedUnion("action", [
@@ -25,7 +29,8 @@ const mutationSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("resolve"),
       escalation_id: z.string().cuid(),
-      outcome: z.enum(["approve", "block", "retry"]),
+      proposal_id: z.string().cuid(),
+      idempotency_key: z.string().min(16).max(128).regex(/^[A-Za-z0-9._:-]+$/),
       resolution: z.string().trim().min(3).max(1_000),
     })
     .strict(),
@@ -35,6 +40,9 @@ const sessionFor = async () => {
   const session = await getServerSession(authOptions);
   return session?.user?.id && isAdminSession(session) ? session : null;
 };
+
+const safeTitle = (value: string) =>
+  value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim().slice(0, 200);
 
 export async function GET(request: Request) {
   try {
@@ -51,17 +59,16 @@ export async function GET(request: Request) {
       },
     );
     const escalations = await prisma.amuxHumanEscalation.findMany({
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      where: { status: { in: ["open", "acknowledged"] } },
+      orderBy: [{ createdAt: "desc" }],
       take: 200,
       select: {
         id: true,
         specialty: true,
-        reason: true,
         status: true,
         openedBy: true,
         acknowledgedAt: true,
         resolvedAt: true,
-        resolution: true,
         createdAt: true,
         task: {
           select: {
@@ -75,7 +82,13 @@ export async function GET(request: Request) {
       },
     });
     return NextResponse.json(
-      { escalations },
+      {
+        escalations: escalations.map((escalation) => ({
+          ...escalation,
+          task: { ...escalation.task, title: safeTitle(escalation.task.title) },
+          reason_code: publicAmuxEscalationReasonCode(escalation.task.status),
+        })),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -106,17 +119,15 @@ export async function PATCH(request: Request) {
       },
     );
     const body = await readLimitedJson(request, 8 * 1_024, mutationSchema);
-    const escalation = await prisma.amuxHumanEscalation.findUnique({
-      where: { id: body.escalation_id },
-      select: { id: true, taskId: true, status: true },
-    });
-    if (!escalation)
-      return NextResponse.json({ error: "Not found." }, { status: 404 });
-
-    if (body.action === "acknowledge") {
+    if (body.action === "acknowledge" &&
+        !isAmuxAgentApprovalEnabled(process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED)) {
+      // Preserve the pre-existing acknowledgement path while the new approval
+      // feature is off; rollout must not require a new internal secret merely
+      // to acknowledge an escalation. The enabled path uses the canonical
+      // internal review boundary instead.
       const updated = await prisma.$transaction(async (tx) => {
-        const result = await tx.amuxHumanEscalation.updateMany({
-          where: { id: escalation.id, status: "open" },
+        const changed = await tx.amuxHumanEscalation.updateMany({
+          where: { id: body.escalation_id, status: "open" },
           data: {
             status: "acknowledged",
             acknowledgedById: session.user.id,
@@ -124,39 +135,38 @@ export async function PATCH(request: Request) {
             acknowledgedAt: new Date(),
           },
         });
-        if (result.count !== 1) return false;
+        if (changed.count !== 1) return false;
+        const escalation = await tx.amuxHumanEscalation.findUniqueOrThrow({
+          where: { id: body.escalation_id }, select: { taskId: true },
+        });
         await writeAdminAuditLog({
           session,
           request,
           action: "amux.human_escalation.acknowledged",
           targetType: "AmuxWorkItem",
           targetId: escalation.taskId,
-          summary: `Acknowledged AMUX human escalation ${escalation.id}.`,
-          metadata: { escalation_id: escalation.id },
+          summary: "Acknowledged an AMUX human escalation.",
+          metadata: { escalation_id: body.escalation_id },
           tx,
         });
         return true;
       });
       return NextResponse.json(
         { success: updated },
-        { status: updated ? 200 : 409 },
+        { status: updated ? 200 : 409, headers: { "Cache-Control": "no-store" } },
       );
     }
-
-    // The existing two-person AdminActionApproval does not define an AMUX
-    // agent approval; the main branch has no approved agent-specific contract.
-    // Keep the durable escalation and acknowledgement path available, but do
-    // not manufacture an approval authority for resolve/retry/block outcomes.
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "AMUX escalation resolution is unavailable until the separate agent-approval contract is approved and implemented.",
-        code: "AMUX_AGENT_APPROVAL_UNAVAILABLE",
-      },
-      { status: 409, headers: { "Cache-Control": "no-store" } },
-    );
+    if (body.action === "resolve") {
+      await assertRecentAdminAuthentication(session);
+    }
+    return forwardAmuxAdminReviewCommand(request, body);
   } catch (error) {
+    if (isAdminReauthenticationError(error)) {
+      return NextResponse.json(
+        { code: "ADMIN_REAUTHENTICATION_REQUIRED", error: "Sign in again." },
+        { status: 428 },
+      );
+    }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Failed to update AMUX escalation:", error);
