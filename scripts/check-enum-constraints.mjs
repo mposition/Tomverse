@@ -830,7 +830,7 @@ const REGISTRY = {
   },
   EmailPermissionDecision_classification_check: {
     owner: "list",
-    module: "lib/emailPurposeClassification.ts",
+    module: "lib/emailPreferenceCore.ts",
     list: "EMAIL_CLASSIFICATIONS",
     reason:
       "transactional, service, marketing. One value switches the sending stream, the kill switch, the Korean and Singaporean subject prefixes, forced unsubscribe and the jurisdiction fail-closed, so a class the application does not know is mail that goes out with none of them.",

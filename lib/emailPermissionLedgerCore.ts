@@ -14,7 +14,7 @@
 import {
   EMAIL_CLASSIFICATIONS,
   type EmailClassification,
-} from "./emailPurposeClassification";
+} from "./emailPreferenceCore";
 
 /**
  * The facts a basis can rest on, other than a consent.
@@ -98,7 +98,11 @@ export const EMAIL_PERMISSION_DECISION_OVERRIDE_TYPES = [
 export type EmailPermissionDecisionOverrideType =
   (typeof EMAIL_PERMISSION_DECISION_OVERRIDE_TYPES)[number];
 
-/** Re-exported so the constraint registry has one module to name. */
+/**
+ * Re-exported for callers that read a verdict and its classification
+ * together. lib/emailPreferenceCore.ts owns the list, and the constraint
+ * registry names that module rather than this one.
+ */
 export { EMAIL_CLASSIFICATIONS };
 export type { EmailClassification };
 

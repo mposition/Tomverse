@@ -564,6 +564,68 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  emailPermissionEvent: (userId) =>
+    prisma.emailPermissionEvent.findMany({
+      where: { userId },
+      // The facts other than consent that a sending basis rests on. evidence
+      // holds a hash of the notice wording and a screen identifier -- ours,
+      // not theirs -- and sourceEventKey is the handle that makes a retried
+      // write idempotent, so neither is returned.
+      select: {
+        id: true,
+        emailAddress: true,
+        kind: true,
+        scopeKey: true,
+        occurredAt: true,
+        capturedVia: true,
+        jurisdiction: true,
+        jurisdictionSource: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  emailSendApprovalMember: (userId) =>
+    prisma.emailSendApprovalMember.findMany({
+      where: { userId },
+      // That an approved send covered them, and the date their two-year
+      // confirmation notice counts from. addressDigest is withheld: it exists
+      // so a send can be refused to a mailbox the approval was not about, and
+      // it tells them nothing they do not know while giving anyone else a
+      // value to test guesses against. approvalId is a handle onto a decision
+      // whose subject is the person who approved it.
+      select: {
+        id: true,
+        noticeAnchorAt: true,
+        noticeAnchorSource: true,
+        createdAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  emailPermissionDecision: (userId) =>
+    prisma.emailPermissionDecision.findMany({
+      where: { userId },
+      // Why each message to them was or was not permitted. The delivery and
+      // approval ids and the display contract hashes are internal handles --
+      // one onto a send, one onto somebody else's decision. The normalisation
+      // version describes how we compared their address rather than anything
+      // about them.
+      select: {
+        id: true,
+        phase: true,
+        purpose: true,
+        classification: true,
+        emailAddress: true,
+        authorities: true,
+        legalAllowed: true,
+        overrideType: true,
+        blockers: true,
+        allowed: true,
+        countryCandidates: true,
+        evaluatedAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
   emailCampaignRecipient: (userId) =>
     prisma.emailCampaignRecipient.findMany({
       where: { userId },

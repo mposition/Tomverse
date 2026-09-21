@@ -1324,6 +1324,108 @@ domains:
       holds the consent wording's hash and a screen identifier, never the
       request.
 
+  - domain: emailPermissionEvent
+    prismaModel: EmailPermissionEvent
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        The facts a sending basis rests on that are not a consent: a notice
+        shown, an objection, a relationship starting and ending. Australia puts
+        the burden of proving an inferred consent on the sender, so these carry
+        the same burden ConsentRecord carries for express consent -- and for the
+        same reason they cannot leave with the account, because the addresses
+        most likely to be complained about are the ones most likely to have
+        closed first. Establishing this against GDPR Article 17(3) and PIPA
+        Article 21 is contract question Q6, the same one consentRecord waits on.
+      retentionStartsFrom: "occurredAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Append-only, and the database enforces it: the one update the row accepts
+      is the foreign key's own SET NULL when the account goes, which is the
+      anonymisation recorded here. Everything else raises. emailAddress stays
+      because the fact attaches to a mailbox rather than to an account, exactly
+      as it does in consentRecord; evidence holds a screen identifier and the
+      notice copy's hash, never the request and never message content.
+
+  - domain: emailSendApprovalMember
+    prismaModel: EmailSendApprovalMember
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - addressDigest
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Which accounts an approval covered. "78 accounts" is the description and
+        this list is the scope, so removing a row would silently widen or narrow
+        a decision that was already made -- and the question the row answers,
+        "was this send within what was approved", is asked after the fact and
+        often about an account that has since closed.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Deliberately has no foreign key to User, which is why deletion is retain
+      rather than a cascade or a SET NULL: the cohort is what an approval
+      covered at the moment it was sealed, and a membership that changed when an
+      account closed would no longer be that. The address is held only as a
+      SHA-256 of its normalised form -- enough to refuse a send to a mailbox the
+      approval was not about, not enough to be a second copy of the mailing
+      list. addressNormalizationVersion records which rule produced it.
+
+  - domain: emailPermissionDecision
+    prismaModel: EmailPermissionDecision
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - authorities
+      - blockers
+      - countryCandidates
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Why one message was or was not permitted. It is the answer to a
+        regulator's question and to a complaint, both of which arrive after the
+        send and often after the account has closed. It holds no message content
+        -- only which authorities were applied, how each ended, and which rows it
+        rested on.
+      retentionStartsFrom: "evaluatedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Effectively immutable: after insert the row accepts exactly one of three
+      transitions, each once -- the account detaching (the SET NULL recorded
+      here), the evidence set sealing, and the provider submission being
+      recorded. Anything else raises. The delivery link is SET NULL rather than
+      RESTRICT because a delivery is purged on its own schedule and the verdict
+      is what outlives it: losing the message must not take the reason it was
+      permitted with it.
+
   - domain: emailCampaignRecipient
     prismaModel: EmailCampaignRecipient
     userLinkageRole: subject

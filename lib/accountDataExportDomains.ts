@@ -133,6 +133,30 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "When they agreed to what, on which policy version, and how it was captured -- returned in full. Held back: ipHash and userAgentHash, which are salted digests kept to prove a consent event happened and are not readable by the person they describe, and the evidence blob, which holds the consent wording's hash and an internal screen identifier rather than anything they wrote.",
   },
   {
+    domain: "emailPermissionEvent",
+    publicName: "email_permission_events",
+    prismaModel: "EmailPermissionEvent",
+    state: "included_filtered",
+    withheldReason:
+      "The facts other than consent that a sending basis rests on: when a notice was shown to them, when they objected, and when a relationship of ours with them began or ended -- returned with what kind of fact it was, what it was about, when it happened and where it was captured. Held back: the evidence blob, which holds a hash of the notice wording and an internal screen identifier rather than anything they wrote, and the writer key that makes a retried write idempotent, which is an internal handle.",
+  },
+  {
+    domain: "emailSendApprovalMember",
+    publicName: "email_send_approval_membership",
+    prismaModel: "EmailSendApprovalMember",
+    state: "included_filtered",
+    withheldReason:
+      "That an approved send covered their account, and the date the two-year confirmation notice counts from for them. Held back: the digest of their address at approval time, which is a salted-free SHA-256 kept so a send can be refused to a mailbox the approval was not about and is not readable by them, and the approval id, which is a handle onto a decision whose subject is the person who approved it rather than them.",
+  },
+  {
+    domain: "emailPermissionDecision",
+    publicName: "email_permission_decisions",
+    prismaModel: "EmailPermissionDecision",
+    state: "included_filtered",
+    withheldReason:
+      "Why each message to them was or was not permitted: which authorities were applied, how each ended, what refused it, and whether an override was used. Held back: the delivery and approval ids and the display contract hashes, which are internal handles onto a send and onto somebody else's decision, and the normalisation version, which describes how we compared their address rather than anything about them.",
+  },
+  {
     domain: "emailCampaignRecipient",
     publicName: "email_campaign_audience",
     prismaModel: "EmailCampaignRecipient",

@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import {
+  BULK_UNSUBSCRIBE_PURPOSES,
   EMAIL_PURPOSES,
   LOCKED_EMAIL_PURPOSES,
   consentActionFor,
@@ -17,7 +18,6 @@ import {
   type EmailPurpose,
   type PreferenceChangeRefusal,
 } from "@/lib/emailPreferenceCore";
-import { BULK_UNSUBSCRIBE_PURPOSES } from "@/lib/emailPurposeClassification";
 import { normalizeCountry } from "@/lib/emailJurisdictionCore";
 import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {

@@ -2755,6 +2755,17 @@ processingError    String?
 **S0의 남은 항목 중 "기록 세 층과 승인 원장"이 이것이고, S3 구현의 선행
 조건이었습니다.**
 
+**초안 §3의 `release_notes`는 새 purpose가 아니라 `product_updates`입니다.**
+초안은 "`release_notes` purpose를 만들라"고 적었지만, 그 purpose는 이미
+`product_updates`라는 이름으로 존재합니다 — 같은 메일, 같은 스위치, 7개 언어의
+문구, DB CHECK, 그리고 사용자들이 이미 설정해 둔 행. 두 번째 purpose를 만들면
+**한 종류의 메일에 스위치가 둘**이 되고, 더 나쁘게는 **기존 선택이 따라오지
+않습니다** — 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되며, 그것이 바로
+불변식 5가 막으려는 실패입니다. 그래서 초안의 이름은 이미 그 일을 하는 purpose로
+해석하고, 그 대응을 `lib/emailPreferenceCore.ts`의 `draftPurposeName`과
+`purposeForDraftName()`에 적어 둡니다. 다음 읽는 사람이 이름이 다르다는 이유로
+행을 하나 더 만들지 않도록.
+
 **층이 셋인 이유는 같은 사실을 두 장부가 말하지 않게 하기 위해서입니다.**
 동의는 `ConsentRecord` 하나가 말하고, 고지·거부·관계 같은 나머지 사실은
 `EmailPermissionEvent`가 말하며, 그 둘을 읽어 내린 결론은
@@ -2773,7 +2784,9 @@ capturedVia        "signup_form" | "preference_center" | "unsubscribe_page"
                    | "in_product_notice" | "admin" | "system"
                    | "provider_complaint"
 sourceEventKey     String   // writer별 안정 key. 재시도가 행을 늘리지 않음
-jurisdiction, jurisdictionSource, policyVersionId
+addressNormalizationVersion String  // 위 주소를 만든 정규화 rule
+jurisdiction, jurisdictionSource
+policyVersionId    String   // NOT NULL
 evidence           Json?    // 화면 id, 고지 문안 hash. 원본 요청·본문은 금지
 @@unique([kind, sourceEventKey])
 ```
@@ -2782,6 +2795,14 @@ evidence           Json?    // 화면 id, 고지 문안 hash. 원본 요청·본
   멈췄는가"를 나중에 되짚으려면 둘을 구분해야 합니다.
 - **update·delete는 DB trigger가 거부합니다.** 응용 계층에만 있는 append-only는
   한 번의 실수로 덮이고, 덮이는 그 행이 발송이 허용됐다는 증거입니다.
+- **예외는 딱 하나, 계정이 떨어져 나가는 전이입니다.** FK의 `ON DELETE SET NULL`은
+  referencing 행의 **UPDATE로 수행**되므로, 통째로 막으면 장부 행이 하나라도
+  있는 계정은 삭제가 실패합니다. `userId`가 값에서 `NULL`로 가고 **다른 컬럼은
+  움직이지 않는** 그 전이만 허용하며, 그것이 data domain registry가 적은
+  anonymisation입니다. 되붙이는 것은 거부합니다.
+- **정규화 rule을 저장합니다.** rule이 바뀌면 어느 행이 일치하는지가 바뀌고,
+  자기가 어느 rule을 썼는지 말하지 못하는 장부는 rule이 움직인 뒤 다시 유도할 수
+  없습니다.
 
 **`EmailSendApproval`** — 사람의 결정(봉인 후 불변)
 ```
@@ -2789,7 +2810,7 @@ id
 approvalType       "risk_accepted" | "obligation_waiver"
 approvedById, approvedByEmail, approvedAt
 reason, reviewCondition            // 둘 다 필수
-policyVersionId
+policyVersionId    String   // NOT NULL. 어느 policy version 아래 내려진 결정인지
 ruleKey, ruleVersion, country, obligationKey   // obligation_waiver의 범위
 purposeKey                                      // risk_accepted의 범위. "*" 가능
 sealedAt           DateTime?   // 닫히는 시각. 이후 아무것도 바뀌지 않음
@@ -2802,6 +2823,19 @@ sealedAt           DateTime?   // 닫히는 시각. 이후 아무것도 바뀌�
   봉인 뒤의 update·delete, 그리고 member의 insert·update·delete를 trigger가
   거부합니다. 봉인하는 그 update도 **다른 컬럼을 함께 바꾸지 못합니다** —
   그러지 않으면 "닫는다"가 곧 "고치고 닫는다"가 됩니다.
+- **row 수준 BEFORE trigger만으로는 부족합니다.** data-modifying CTE는
+  sub-statement와 main query가 **같은 snapshot**을 보므로,
+  `WITH s AS (UPDATE ... SET sealedAt ... RETURNING id) INSERT member ... FROM s`
+  에서 trigger는 봉인 **전** 값을 읽고 insert를 통과시킵니다. 그래서 statement가
+  끝날 때 부모의 최종 상태를 보는 **constraint trigger**를 함께 겁니다. BEFORE
+  trigger는 평범한 경우를 정확한 메시지와 잠금으로 막고, constraint trigger는
+  snapshot이 가린 것을 막습니다.
+- **`sealedAt`은 `approvedAt`·`createdAt`보다 뒤여야 합니다.** 과거 시각으로
+  봉인하면 봉인이 승인의 일부처럼 보이고, 한 번 잘못 쓴 행을 올바른 행과 구분할
+  수 없게 됩니다.
+- **`policyVersionId`는 NOT NULL입니다.** 어느 policy version 아래 내려진
+  결정인지 말하지 않는 승인은 이후의 모든 version에 적용되며, 그것은 범위의
+  반대입니다.
 - **철회는 `EmailSendApprovalRevocation` 행 추가**입니다. 승인 행은 건드리지
   않습니다. 고칠 수 있는 승인은 무엇이 승인됐는지 증명하지 못합니다.
 
@@ -2810,6 +2844,7 @@ sealedAt           DateTime?   // 닫히는 시각. 이후 아무것도 바뀌�
 id, approvalId -> EmailSendApproval (Restrict)
 userId
 addressDigest      String    // 승인 시점 정규화 주소의 SHA-256
+addressNormalizationVersion String
 noticeAnchorAt, noticeAnchorSource
 @@unique([approvalId, userId])
 ```
@@ -2818,17 +2853,22 @@ noticeAnchorAt, noticeAnchorSource
 
 **`EmailPermissionDecision`** — 발송별 판정(생성 후 사실상 불변)
 ```
-id, deliveryId?, userId?
+id
+deliveryId?        -> EmailDelivery (SetNull)
+userId?            -> User (SetNull)
 phase              "enqueue" | "send"
 purpose, classification, emailAddress
+addressNormalizationVersion String
 authorities        Json      // [{ authority, basis, verdict, reason }]
 legalAllowed       Boolean
 overrideApprovalId?, overrideType?   // 참조. 승인 내용을 복사하지 않음
 blockers           Json      // 정렬된 배열. 없으면 [] 이며 NULL이 아님
 allowed            Boolean
 pinnedDisplayContractHash?, requiredDisplayContractHash?, displayContractSatisfied?
-countryCandidates?, ruleVersions?, policyVersionId?
+countryCandidates?, ruleVersions?
+policyVersionId    String   // NOT NULL
 suppressionCheckedAt?, providerSubmittedAt?
+sealedAt?          // evidence 집합을 닫는 시각
 evaluatedAt
 @@unique([deliveryId, phase])
 ```
@@ -2841,19 +2881,43 @@ evaluatedAt
   `(legalAllowed OR override) AND blockers가 비어 있음`. 두 곳에 있는 것이
   요점입니다: 하나는 caller가 그 행을 만드는 것을 막고, 하나는 그래도 만들어진
   행을 막습니다.
-- **`providerSubmittedAt`만 나중에 채울 수 있고 한 번뿐입니다.** 그 값은 메일을
-  넘기기 전에는 존재하지 않기 때문이고, 나머지 컬럼은 trigger가 옛 행의 값으로
-  되돌립니다.
+- **override는 `(id, approvalType)` 복합 FK로 결속합니다.** id만 가리키면
+  `overrideType: "risk_accepted"`라고 적힌 판정이 실제로는 의무 면제를 가리킬 수
+  있고, `overrideType`의 CHECK는 그것을 알아채지 못합니다.
+- **insert 뒤에 허용되는 전이는 넷이고 각각 한 번뿐입니다** — 계정이 떨어지는
+  것, delivery가 떨어지는 것, evidence가 닫히는 것(`sealedAt`), provider 제출이
+  기록되는 것. **그 밖의 변경은 조용히 되돌리지 않고 예외를 냅니다** — 아무 일도
+  안 한 쓰기는 성공처럼 보이고, caller는 행이 말하지 않는 것을 말한다고 믿은 채
+  계속 갑니다.
+- **delivery는 Restrict가 아니라 SetNull입니다.** delivery는 자기 보존 주기에
+  따라 지워지고 **판정이 그보다 오래 남습니다.** 메일을 잃는 것이 그것을 허용한
+  이유까지 가져가서는 안 됩니다.
+- **`sealedAt` 전에는 provider에 넘길 수 없습니다.** CHECK가 강제합니다 —
+  evidence가 닫히기 전에 나간 메일은 나중에 근거가 붙을 수 있고, 그것은 고칠 수
+  있는 승인과 같은 결함입니다.
 
 **`EmailPermissionDecisionEvidence`** — 판정이 딛고 선 사건
 ```
-@@id([decisionId, eventId, authority])
-decisionId -> EmailPermissionDecision (Cascade)
-eventId    -> EmailPermissionEvent (Restrict)
+id
+decisionId       -> EmailPermissionDecision (Cascade)
+eventId?         -> EmailPermissionEvent (Restrict)
+consentRecordId? -> ConsentRecord (Restrict)
+authority        String
+@@unique([decisionId, authority, eventId])
+@@unique([decisionId, authority, consentRecordId])
 ```
-- 판정 안의 id 배열이 아니라 join 표입니다. 그래야 DB가 **판정이 인용한 사건을
+- 판정 안의 id 배열이 아니라 join 표입니다. 그래야 DB가 **판정이 인용한 행을
   잃지 않고**, "이 판정은 무엇에 근거했나"가 파싱이 아니라 질의가 됩니다.
-  한 사건이 두 authority를 받칠 수 있어 PK는 세 컬럼입니다.
+  한 사건이 두 authority를 받칠 수 있습니다.
+- **출처는 둘이고 한 행에 정확히 하나입니다.** 동의는 `ConsentRecord` 하나가
+  말하므로 express-consent 판정은 그 장부를 **직접** 인용할 수 있어야 하고, 둘
+  다 가리키는 행은 한 사실이 두 장부에 있는 것이라 이 세 층 구조가 막으려는
+  바로 그것입니다. 둘 다 비면 근거 없는 주장입니다. CHECK가 양쪽을 막습니다.
+- **evidence는 판정과 함께 닫힙니다.** 판정과 그것이 딛고 선 행을 한
+  transaction에서 쓰고 `sealedAt`을 찍으면, 이후 evidence는 더해지지 않습니다.
+  없으면 판정이 **사후에 근거를 얻을 수** 있습니다. 여기에도 cohort와 같은
+  constraint trigger를 걸어 CTE 한 statement가 봉인과 insert를 함께 하는 경우를
+  막습니다.
 
 ### 10.3 발송 내용의 audit snapshot
 

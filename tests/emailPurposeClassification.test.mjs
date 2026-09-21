@@ -9,18 +9,17 @@ import test from "node:test";
 
 import {
   BULK_UNSUBSCRIBE_PURPOSES,
+  CONSENT_REQUIRED_PURPOSES,
   EMAIL_CLASSIFICATIONS,
+  EMAIL_PURPOSES,
   EMAIL_PURPOSE_CLASSIFICATION,
+  LOCKED_EMAIL_PURPOSES,
   MARKETING_PURPOSES,
   classificationDisagreements,
   emailPurposeClassification,
   emailPurposeEntry,
   isMarketingPurpose,
-} from "../lib/emailPurposeClassification.ts";
-import {
-  CONSENT_REQUIRED_PURPOSES,
-  EMAIL_PURPOSES,
-  LOCKED_EMAIL_PURPOSES,
+  purposeForDraftName,
 } from "../lib/emailPreferenceCore.ts";
 
 test("the table and the two sets that predate it agree", () => {
@@ -49,9 +48,10 @@ test("classification is a separate axis from consent", () => {
 });
 
 test("an unknown purpose has no classification rather than a default", () => {
-  assert.equal(emailPurposeClassification("release_notes"), null);
-  assert.equal(emailPurposeEntry("release_notes"), null);
+  assert.equal(emailPurposeClassification("whatever"), null);
+  assert.equal(emailPurposeEntry("whatever"), null);
   assert.equal(isMarketingPurpose(""), false);
+  assert.equal(purposeForDraftName("whatever"), null);
 });
 
 test("invariant 5: bulk unsubscribe covers exactly the marketing purposes", () => {
@@ -98,7 +98,7 @@ test("invariant 7: no purpose solicits re-subscription", () => {
 
 test("invariant 7: the field is typed false, so adding one is a type change", () => {
   const source = readFileSync(
-    new URL("../lib/emailPurposeClassification.ts", import.meta.url),
+    new URL("../lib/emailPreferenceCore.ts", import.meta.url),
     "utf8"
   );
   assert.ok(
@@ -113,4 +113,35 @@ test("the classifications are the three the draft names, in its order", () => {
     "service",
     "marketing",
   ]);
+});
+
+test("the draft's release_notes is the purpose that already exists", () => {
+  // Draft section 3 asks for a release_notes purpose classified marketing.
+  // product_updates is that purpose: same mail, same switch, live rows and
+  // locale strings in seven languages. A second purpose would give one kind of
+  // mail two switches and would not carry anybody's existing choice across --
+  // somebody who had turned product news off would start receiving it again
+  // under the new name.
+  assert.equal(purposeForDraftName("release_notes"), "product_updates");
+  assert.equal(emailPurposeClassification("product_updates"), "marketing");
+  assert.ok(BULK_UNSUBSCRIBE_PURPOSES.includes("product_updates"));
+  assert.equal(
+    emailPurposeEntry("product_updates")?.draftPurposeName,
+    "release_notes"
+  );
+});
+
+test("a draft name resolves to exactly one purpose", () => {
+  const names = EMAIL_PURPOSE_CLASSIFICATION.map((e) => e.draftPurposeName).filter(
+    (name) => name !== undefined
+  );
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) {
+    assert.ok(!EMAIL_PURPOSES.includes(name), `${name} is both a draft alias and a purpose`);
+    assert.notEqual(purposeForDraftName(name), null);
+  }
+  // A purpose's own name still resolves to itself.
+  for (const purpose of EMAIL_PURPOSES) {
+    assert.equal(purposeForDraftName(purpose), purpose);
+  }
 });
