@@ -189,18 +189,48 @@ const IDEOGRAPHIC_HOST_CJK_LABEL = new RegExp(
 );
 
 /**
- * The same, for a suffix that is not in lower case.
+ * The same, for a suffix written in a case a sentence would not use.
  *
- * A domain is case-insensitive, so 例子。CoM is an address; the lower-case rule
- * above was what kept "AI", "Pro" and "App" starting the next sentence out of
- * it. The difference is what follows -- a sentence goes on, "。AI Review can
- * help.", and a host at the end of one does not -- so a mixed-case suffix
- * counts unless a word follows it.
+ * A domain is case-insensitive, so 例子。CoM is an address. The lower-case rule
+ * above is what keeps "AI", "Pro" and "App" -- the first word of the next
+ * sentence -- out of it, and the first attempt at this distinguished them by
+ * asking whether a word followed, which was wrong in both directions:
+ * "Visit 例子。CoM now." has a word after it and "比較答案。AI, however, can
+ * help." has a comma.
+ *
+ * The case itself is the tell. A sentence starts with an acronym (`AI`, all
+ * capitals) or a title-case word (`Pro`, `App`). Neither is how anybody writes
+ * a domain by accident, and `CoM` is neither: it has both cases and is not
+ * title case.
+ *
+ * All-capital and title-case suffixes are therefore *not* matched here, which
+ * leaves 例子。COM uncaught. That is the side to be wrong on: refusing every
+ * Chinese sentence that runs into an English one would be a rule somebody
+ * turns off, and the ASCII-label expression above still catches example。COM.
  */
-const IDEOGRAPHIC_HOST_CJK_MIXED_CASE = new RegExp(
-  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])(?!\\s+\\p{L})`,
-  "iu",
+const IRREGULAR_CASE = (suffix: string): boolean => {
+  const hasUpper = /\p{Lu}/u.test(suffix);
+  const hasLower = /\p{Ll}/u.test(suffix);
+  const titleCase = /^\p{Lu}\p{Ll}*$/u.test(suffix);
+  return hasUpper && hasLower && !titleCase;
+};
+
+const IDEOGRAPHIC_HOST_ANY_CASE = new RegExp(
+  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])`,
+  "giu",
 );
+
+const hasIrregularCaseHost = (text: string): boolean => {
+  const scan = new RegExp(
+    IDEOGRAPHIC_HOST_ANY_CASE.source,
+    IDEOGRAPHIC_HOST_ANY_CASE.flags,
+  );
+  for (let hit = scan.exec(text); hit; hit = scan.exec(text)) {
+    if (IRREGULAR_CASE(hit[1])) return true;
+    if (scan.lastIndex === hit.index) scan.lastIndex += 1;
+  }
+  return false;
+};
 
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
@@ -507,7 +537,7 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
     URL_LIKE.test(readable) ||
     IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
     IDEOGRAPHIC_HOST_CJK_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_CJK_MIXED_CASE.test(readable)
+    hasIrregularCaseHost(readable)
   ) {
     codes.push("url_like");
   }

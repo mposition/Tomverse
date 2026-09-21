@@ -712,31 +712,6 @@ export const analyseSource = (path, text) => {
   const runtimeModuleBindings = new Map();
 
   /**
-   * The literal text a specifier starts with, before its first hole.
-   *
-   * `` `../locales/${locale}.ts` `` starts with `../locales/`, which fixes the
-   * directory: whatever the hole turns out to be, the module is not
-   * `@/lib/marketingGuardCore`. That is how the two locale loaders in
-   * `scripts/` stay out of a rule that otherwise refuses every unreadable
-   * specifier -- and refusing every one of them is what makes a rule get
-   * switched off.
-   */
-  const staticHeadOf = (node) => {
-    if (!node) return "";
-    const whole = literalTextOf(node);
-    if (whole !== null) return whole;
-    if (ts.isParenthesizedExpression(node)) return staticHeadOf(node.expression);
-    if (ts.isTemplateExpression(node)) return node.head.text;
-    if (
-      ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.PlusToken
-    ) {
-      return staticHeadOf(node.left);
-    }
-    return "";
-  };
-
-  /**
    * Whether a specifier could name the module that declares the seal.
    *
    * A readable one is compared outright. An unreadable one is possible unless
@@ -745,11 +720,15 @@ export const analyseSource = (path, text) => {
   const couldBeSealModule = (node) => {
     const whole = literalTextOf(node);
     if (whole !== null) return specifierEndsWithSealModule(whole);
-    const head = staticHeadOf(node);
-    const lastSlash = head.lastIndexOf("/");
-    if (lastSlash <= 0) return true;
-    const directory = head.slice(0, lastSlash);
-    return directory.endsWith("lib");
+    // A hole can contain anything, including `../lib/marketingGuardCore`, so
+    // the text in front of it fixes nothing: `@/locales/${segment}` reaches
+    // this module when `segment` climbs out of the directory. The previous
+    // version read the prefix as a fence and it is not one.
+    //
+    // So every unreadable specifier is possible, and the two files that
+    // legitimately load a module by name are named below instead. A guess
+    // about a path is not a permission.
+    return true;
   };
 
   /**
@@ -861,7 +840,8 @@ export const analyseSource = (path, text) => {
       } else if (
         key === null &&
         ts.isIdentifier(node.expression) &&
-        runtimeModuleBindings.get(node.expression.text) === true
+        runtimeModuleBindings.get(node.expression.text) === true &&
+        !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
       ) {
         // A key this pass cannot work out, on a module whose specifier it
         // cannot work out either. Both halves unknown is the shape the seal is
@@ -1271,6 +1251,21 @@ export const RETENTION_SETTING_TOKENS = [
  * is a finding whatever the allowlist says, because after it the value is
  * somewhere this rule cannot see.
  */
+/**
+ * Files that may read a property of a module they loaded by a computed name.
+ *
+ * The rule above refuses that shape, because both halves being unknown is how
+ * the seal is reached. These two build a locale table: they import
+ * `../locales/<name>.ts` and read the bundle out of it by the same name. They
+ * are in `scripts/`, they are not the product, and neither has a line that
+ * could reach a database. Named here rather than inferred from the shape of
+ * their specifier, which is what a reviewer showed is not a fence.
+ */
+export const TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST = Object.freeze([
+  "scripts/check-locale-translation.mjs",
+  "scripts/check-starter-catalog.mjs",
+]);
+
 export const TEMPLATE_SEAL_ALLOWLIST = [
   {
     path: "lib/marketingTemplates.ts",

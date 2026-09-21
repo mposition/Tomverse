@@ -1084,6 +1084,138 @@
           "banned_claim"
         ]
       }
+    },
+    {
+      "id": "free.ofHiddenCharges",
+      "ruleId": "rule.free-wording",
+      "input": "Free of any hidden charges.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "free.fromMonthlyFees",
+      "ruleId": "rule.free-wording",
+      "input": "Free from all monthly fees.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "memory.acrossAQuestionMark",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not clone files? We clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.longObjectPhrase",
+      "ruleId": "rule.memory-claim",
+      "input": "We clone all of your carefully curated and deeply personal memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.recoverVerb",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not store your chats, Tomverse recovers hidden prompts.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.wouldntYouLike",
+      "ruleId": "rule.memory-claim",
+      "input": "Wouldn't you like an AI that clones your memories?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.couldYouUse",
+      "ruleId": "rule.memory-claim",
+      "input": "Could you use an AI that clones your memories?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanQuotativeCopula",
+      "ruleId": "rule.refuted-superiority",
+      "input": "Tomverse는 이 기능을 제공하는 유일한 서비스라는 점을 기억하세요.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopIrregularCase",
+      "ruleId": "hygiene.url_like",
+      "input": "Visit 例子。CoM now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeCreateAccount",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, create your account today.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeSubscribe",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, subscribe today.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.vocativeBuy",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, buy now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
     }
   ]
 }

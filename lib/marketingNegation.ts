@@ -30,6 +30,8 @@
  * Pure: no server-only import, no network, no Prisma.
  */
 
+import { MARKETING_CLAUSE_VERBS } from "@/lib/marketingClaimVerbs";
+
 /** Where one sentence ends and the next begins. */
 export const MARKETING_SENTENCE_BOUNDARY = /[.!?\n。]/;
 
@@ -117,14 +119,7 @@ const COMMA_SPLICE =
  */
 const CLAUSE_VERB =
   "(?:" +
-  [
-    "is|are|was|were|be|been|being|has|have|had",
-    "does|do|did|can|could|will|would|may|might|shall|should|must",
-    "clones|replicates|reproduces|recreates|transfers|copies|duplicates",
-    "keeps|stores|holds|remembers|learns|reads|writes|saves|deletes",
-    "offers|provides|gives|makes|lets|helps|works|runs|shares|sends",
-    "shows|uses|supports|includes|costs|starts|comes|brings|turns|builds",
-  ].join("|") +
+  MARKETING_CLAUSE_VERBS.join("|") +
   ")(?![\\p{L}\\p{N}])";
 
 /**
@@ -173,21 +168,45 @@ const KOREAN_COMMA_SPLICE =
  * the affiliation disclaimer on the ChatGPT-vs-Claude page, which then failed
  * the repository's own copy check.
  */
-const SELLING_OPENER =
-  new RegExp(
-    "^\\s*(?:" +
-      [
-        "want|need|looking|ready|tired|imagine|fancy|wish|curious",
-        "would\\s+you\\s+(?:like|rather|prefer)",
-        "do\\s+you\\s+want|how\\s+about|what\\s+if|who\\s+wants",
-        "ever\\s+wanted|why\\s+not|got\\s+a|ready\\s+to|tired\\s+of",
-      ].join("|") +
-      ")\\b",
-    "iu",
-  );
+const SELLING_OPENER = new RegExp(
+  "^\\s*(?:" +
+    [
+      // A verb of desire, which only a sales line opens with.
+      "want|need|needs|looking|ready|tired|imagine|fancy|wish|curious|love",
+      // A modal or auxiliary addressed to the reader. This is the shape,
+      // rather than the handful of phrases a list could hold: "Would you
+      // like", "Wouldn't you like", "Would you love" and "Could you use" are
+      // one form, and an FAQ entry is "Is Tomverse …?" or "How do I …?" --
+      // a third or first person subject, never a second.
+      "(?:would|wouldn't|could|couldn't|can't|don't|do|did|didn't|will|won't|" +
+        "should|shouldn't|have|haven't|are|aren't|ready)\\s+(?:you|your)\\b",
+      "how\\s+about|what\\s+if|who\\s+wants|why\\s+not|ever\\s+wanted|got\\s+a",
+    ].join("|") +
+    ")\\b",
+  "iu",
+);
 
 const isAskingRatherThanSelling = (text: string, start: number): boolean =>
   !SELLING_OPENER.test(text.slice(start));
+
+/**
+ * Whether the comma at `at` opens an aside rather than a clause.
+ *
+ * "Tomverse does not, the benchmark runs aside, clone your memories." is one
+ * sentence with one negation and something parked in the middle of it. A comma
+ * that has a closing comma a few words later, with the sentence carrying on
+ * afterwards, is that shape -- and reading it as a clause boundary threw the
+ * negation away and reported the denial as the claim.
+ */
+const isParenthetical = (sentence: string, at: number): boolean => {
+  const rest = sentence.slice(at + 1);
+  const closing = rest.search(/[,\uff0c]/u);
+  if (closing === -1) return false;
+  const inside = rest.slice(0, closing).trim();
+  const after = rest.slice(closing + 1).trim();
+  // An aside is short and is not the end of the sentence.
+  return inside.split(/\s+/u).length <= 5 && after.length > 0;
+};
 
 /**
  * Where the clause holding `offset` begins, as an index into `sentence`.
@@ -224,7 +243,9 @@ const lastBoundaryIndex = (sentence: string, offset: number): number => {
     // shared one would start the next call wherever the previous one stopped.
     const scan = new RegExp(expression.source, expression.flags);
     for (let hit = scan.exec(sentence); hit; hit = scan.exec(sentence)) {
-      consider(hit.index, hit[0].length);
+      if (!isParenthetical(sentence, hit.index)) {
+        consider(hit.index, hit[0].length);
+      }
       if (scan.lastIndex === hit.index) scan.lastIndex += 1;
     }
   }

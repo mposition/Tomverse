@@ -55,6 +55,21 @@ const YEAR_OLDS =
 const CALL_TO_ACTION =
   "[,\\uff0c]?\\s+(?:sign\\s*up|join|try|get\\s+started|download|start\\s+now)\\b";
 
+/**
+ * A sentence that opens by naming who it is talking to.
+ *
+ * "Under-15s, create your account today.", "Under-15s, subscribe today.",
+ * "Under-15s, buy now." -- three sales lines and three verbs, and a list of
+ * six verbs had none of them. The vocative is the signal: a sentence that
+ * begins with an audience and a comma is addressing it, whatever comes next.
+ *
+ * Only at the start of a sentence, which is where a vocative goes. "For
+ * under-16s, parental consent is required." is a notice about them rather than
+ * a line aimed at them, and its audience is not in that position.
+ */
+const SENTENCE_START = "(?:^|[.!?\\n。]\\s*)";
+const VOCATIVE = "[,\\uff0c]\\s*[\\p{L}\\p{N}]";
+
 const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
   Object.freeze([
     // "for kids", "aimed at teenagers", "designed for children".
@@ -103,6 +118,23 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
       source: "\\bunder[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?" + CALL_TO_ACTION,
       flags: "iu",
     }),
+    // The same, as a vocative: whatever the sentence goes on to ask for.
+    Object.freeze({
+      source:
+        SENTENCE_START + "under[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?" + VOCATIVE,
+      flags: "iu",
+    }),
+    Object.freeze({
+      source:
+        SENTENCE_START +
+        "(?:kids|children|teens|teenagers|schoolkids|schoolchildren|preteens|tweens)" +
+        VOCATIVE,
+      flags: "iu",
+    }),
+    Object.freeze({
+      source: SENTENCE_START + AGE_UNDER_SIXTEEN + YEAR_OLDS + VOCATIVE,
+      flags: "iu",
+    }),
     Object.freeze({
       source: "\\bhigh\\s?school(?:ers)?\\s*(?:can|should|get|sign|try|join)\\b",
       flags: "iu",
@@ -128,6 +160,34 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
     }),
   ]);
 
+/**
+ * Words that make a sentence about minors a restriction rather than a pitch.
+ *
+ * "For under-16s, parental consent is required." names the audience in the
+ * same shape a sales line does, and it is the notice the policy wants written.
+ * A rule that refused it would make the product harder to label honestly --
+ * the same reason the negation is read at all.
+ *
+ * The sentence, not the draft: a notice in one sentence does not license a
+ * pitch in the next.
+ */
+const RESTRICTION = new RegExp(
+  "\\b(?:consent|permission|guardian|guardians|parent|parental|prohibited|" +
+    "restricted|required|verification|verify|eligible|ineligible|minimum age|" +
+    "age limit|not available|cannot|can't|may not|must not)\\b",
+  "iu",
+);
+
+const SENTENCE_EDGE = /[.!?\n。]/u;
+
+const sentenceAround = (text: string, at: number): string => {
+  let start = at;
+  while (start > 0 && !SENTENCE_EDGE.test(text[start - 1])) start -= 1;
+  let end = at;
+  while (end < text.length && !SENTENCE_EDGE.test(text[end])) end += 1;
+  return text.slice(start, end);
+};
+
 export type MarketingMinorsFinding = {
   /** The matched text, so a failure points at the sentence rather than here. */
   readonly match: string;
@@ -150,7 +210,9 @@ export function findMarketingMinorsTargeting(
     const flags = entry.flags.includes("g") ? entry.flags : `${entry.flags}g`;
     const scanner = new RegExp(entry.source, flags);
     for (let hit = scanner.exec(text); hit; hit = scanner.exec(text)) {
+      const isNotice = RESTRICTION.test(sentenceAround(text, hit.index));
       if (
+        !isNotice &&
         marketingClauseAsserts(text, hit.index, hit[0], {
           // "Kids, sign up now?" is the call to action with a question mark on
           // the end. A question asserts nothing about a *claim*; it addresses a

@@ -654,11 +654,31 @@ const PRICE_SENSE = new RegExp(
   "iu",
 );
 
+/** Where one clause ends: sentence punctuation, or a clause separator. */
+const CLAUSE_EDGE = /[.!?\\n。;:,]/u;
+
+/**
+ * Whether the clause a compound sits in is talking about money.
+ *
+ * The clause rather than the compound. "Free of any hidden charges." puts the
+ * price word three words away and "Free from all monthly fees." four, and a
+ * test that read only the compound and the two words after it removed the
+ * "free" from both.
+ */
+const clauseMentionsPrice = (form: string, at: number, length: number): boolean => {
+  let start = at;
+  while (start > 0 && !CLAUSE_EDGE.test(form[start - 1])) start -= 1;
+  let end = at + length;
+  while (end < form.length && !CLAUSE_EDGE.test(form[end])) end += 1;
+  return PRICE_SENSE.test(form.slice(start, end));
+};
+
 const withoutFreeCompounds = (forms: readonly string[]): string[] =>
   forms.map((form) =>
     form.replace(
       new RegExp(NON_PRICE_FREE.source, NON_PRICE_FREE.flags),
-      (compound) => (PRICE_SENSE.test(compound) ? compound : " "),
+      (compound, at: number) =>
+        clauseMentionsPrice(form, at, compound.length) ? compound : " ",
     ),
   );
 
@@ -727,9 +747,41 @@ const sha256 = (value: string): string =>
  * list.
  */
 export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
-  const { draft, facts, templates, context } = input;
+  // **Everything is read once, here, into plain values.**
+  //
+  // A field is a property, and a property can be an accessor: one that
+  // answered "The best AI, guaranteed." to the digest and "Three answers side
+  // by side." to the rules produced a decision that was bound to the first and
+  // made about the second. Freezing what this function *returns* was the
+  // answer to the same trick one level down; this is the same answer one level
+  // up, and there is no third place for it to hide.
+  //
+  // `templates` is not copied: a proof is identified by being in the module's
+  // own `WeakSet`, so a copy would not be one.
+  const draft: MarketingGuardDraft = {
+    renderedText: String(input.draft.renderedText),
+    locale: String(input.draft.locale),
+    channel: String(input.draft.channel),
+    channelId: String(input.draft.channelId),
+    claimIds: [...input.draft.claimIds].map(String),
+    assetIds: [...input.draft.assetIds].map(String),
+    ...(input.draft.templateId === undefined
+      ? {}
+      : { templateId: String(input.draft.templateId) }),
+  };
+  const facts = {
+    claims: [...input.facts.claims].map((claim) => ({ ...claim })),
+    assets: [...input.facts.assets].map((asset) => ({ ...asset })),
+  };
+  const templates = [...input.templates];
+  const context: MarketingGuardContext = {
+    priceFallbackAlertReady: input.context.priceFallbackAlertReady,
+    incidentOrSecurity: input.context.incidentOrSecurity,
+    testimonial: input.context.testimonial,
+    legalOrPolicy: input.context.legalOrPolicy,
+  };
 
-  // Computed before anything else reads the draft, and from the same object.
+  // From the snapshot, which is what every check below reads too.
   const draftDigest = marketingGuardDraftDigest(draft);
 
   const rejectCodes: MarketingRejectCode[] = [];

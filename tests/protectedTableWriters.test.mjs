@@ -12,6 +12,7 @@ import {
   RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
   TEMPLATE_SEAL_ALLOWLIST,
+  TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST,
   checkProtectedTableWriters,
   selectScannedPaths,
   sourceFingerprint,
@@ -602,19 +603,29 @@ test("the declaring file may declare it and is not required to call it", () => {
   assert.deepEqual(declared, [], JSON.stringify(declared));
 });
 
-test("a run-time load whose directory is not the seal's is left alone", () => {
-  // The fail-closed rule above refuses a computed key on a module nothing can
-  // identify. It must not refuse the locale loaders in `scripts/`, whose
-  // specifier has a hole in it but whose directory is fixed by the text
-  // before it -- a rule that fires on those is a rule somebody switches off.
-  const quiet = check(
-    sealSource(
-      "const bundle = await import(`../locales/${locale}.ts`);\n" +
-        "export const strings = bundle[locale];"
-    )
+test("a computed key on an unreadable module is refused, and named files are not", () => {
+  // The text in front of a hole fixes nothing: `@/locales/${segment}` reaches
+  // this module when `segment` is `../lib/marketingGuardCore`, and the first
+  // version of this rule read the prefix as a fence. So every unreadable
+  // specifier is possible...
+  const loader =
+    "const bundle = await import(`../locales/${locale}.ts`);\n" +
+    "export const strings = bundle[locale];";
+
+  const findings = check(sealSource(loader));
+  assert.ok(
+    findings.some((finding) => finding.rule === "template-seal"),
+    JSON.stringify(findings)
   );
-  assert.deepEqual(
-    quiet.filter((finding) => finding.rule === "template-seal"),
-    []
-  );
+
+  // ...and the two files that legitimately do this are named, which is a
+  // decision somebody wrote down rather than a shape somebody guessed.
+  for (const path of TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST) {
+    const quiet = checkProtectedTableWriters({
+      sources: [{ path, text: loader }],
+    }).filter(
+      (finding) => finding.rule === "template-seal" && finding.path === path
+    );
+    assert.deepEqual(quiet, [], path);
+  }
 });

@@ -454,6 +454,51 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "memory.parentheticalAside",
+      "ruleId": "rule.memory-claim",
+      "input": "Tomverse does not, the benchmark runs aside, clone your memories.",
+      "note": "an aside between two commas is not a new clause, and the negation still governs",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "memory.faqHowDoI",
+      "ruleId": "rule.memory-claim",
+      "input": "How do I import my chats?",
+      "note": "a question with a first-person subject is an FAQ entry, not a sales line",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "refuted.koreanOneSyllableStem",
+      "ruleId": "rule.refuted-superiority",
+      "input": "유일한 길을 찾는 AI 도구입니다.",
+      "note": "길을 closes the noun phrase: 을 agrees with the final consonant of 길",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.consentNotice",
+      "ruleId": "rule.australia-minors",
+      "input": "For under-16s, parental consent is required.",
+      "note": "the restriction the policy wants written, in the shape a sales line uses",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopAcronymComma",
+      "ruleId": "hygiene.url_like",
+      "input": "比較答案。AI, however, can help.",
+      "note": "an acronym starting the next sentence, with a comma after it",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

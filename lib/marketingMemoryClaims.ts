@@ -175,7 +175,23 @@ const anyOf = (words: readonly string[]): string =>
 const NOT_ALPHANUMERIC_BEFORE = "(?<![\\p{L}\\p{N}])";
 const NOT_ALPHANUMERIC_AFTER = "(?![\\p{L}\\p{N}])";
 
-/** The verb, a short gap that does not cross a sentence, then the object. */
+/**
+ * What may sit between the verb and the object.
+ *
+ * Bounded by the clause rather than by a number. `{0,30}` was two mistakes at
+ * once: it let a match reach across a question mark, so "We do not clone
+ * files? We clone your memories." was one match whose first half sat in the
+ * negated sentence and swallowed the second; and it was too short for "all of
+ * your carefully curated and deeply personal memories", which is a sentence
+ * somebody would write.
+ *
+ * The class holds every sentence and clause edge, so a match cannot leave the
+ * clause it started in. The number that remains is a backstop against a
+ * pathological line, not the rule.
+ */
+const CLAUSE_GAP = "[^.!?\\n。,;:\\u2014\\u2013]{0,160}";
+
+/** The verb, a gap that stays inside one clause, then the object. */
 const SPACED_REPLICATION_CLAIM = new RegExp(
   NOT_ALPHANUMERIC_BEFORE +
     anyOf(REPLICATION_VERBS) +
@@ -195,14 +211,24 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
         patterns: [
             /(기억|인격|성격|두뇌)[^.\n]{0,20}(복제|재현|그대로\s*옮)/,
             /(복제|재현)[^.\n]{0,12}(기억|인격|두뇌)/,
-            /\b(clone|replicate|reproduce|recreate|transfer)s?\b[^.\n]{0,30}\b(memory|memories|personality|persona|brain|mind)\b/i,
+            new RegExp(
+                "\\b(clone|replicate|reproduce|recreate|transfer)s?\\b" +
+                    CLAUSE_GAP +
+                    "\\b(memory|memories|personality|persona|brain|mind)\\b",
+                "i"
+            ),
             // The same claim with every separator tolerated inside the words,
             // built from the same vocabulary as the line above so the two
             // cannot drift. It stays here rather than becoming a Guard term
             // because this is where the clause is read, and a denial is not a
             // claim.
             SPACED_REPLICATION_CLAIM,
-            /\b(memory|memories|personality|persona|brain)\b[^.\n]{0,20}\b(cloned|replicated|recreated|reproduced)\b/i,
+            new RegExp(
+                "\\b(memory|memories|personality|persona|brain)\\b" +
+                    CLAUSE_GAP +
+                    "\\b(cloned|replicated|recreated|reproduced)\\b",
+                "i"
+            ),
         ],
     },
     {

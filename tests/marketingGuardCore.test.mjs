@@ -832,3 +832,45 @@ test("a sealed decision cannot be given a different answer afterwards", () => {
     });
   });
 });
+
+test("the Guard reads its input once", () => {
+  // A field is a property and a property can be an accessor. One that answered
+  // "The best AI, guaranteed." to the digest and something harmless to the
+  // rules produced a decision bound to the first and made about the second.
+  let reads = 0;
+  const draft = {
+    locale: "en",
+    channel: "linkedin",
+    channelId: CHANNEL_ID,
+    claimIds: [],
+    assetIds: [],
+    get renderedText() {
+      reads += 1;
+      return reads === 1
+        ? "The best AI, guaranteed."
+        : "Three answers to one question, side by side.";
+    },
+  };
+
+  const decision = guardDraft({
+    draft,
+    facts: { claims: [], assets: [] },
+    templates: [],
+    context: context(),
+  });
+
+  // Whatever the first read said is what was checked *and* what was bound.
+  assert.equal(decision.verdict, "reject", JSON.stringify(decision));
+  assert.ok(decision.codes.includes("banned_claim"));
+  assert.equal(
+    decision.draftDigest,
+    marketingGuardDraftDigest({
+      renderedText: "The best AI, guaranteed.",
+      locale: "en",
+      channel: "linkedin",
+      channelId: CHANNEL_ID,
+      claimIds: [],
+      assetIds: [],
+    }),
+  );
+});

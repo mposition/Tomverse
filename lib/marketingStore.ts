@@ -311,9 +311,36 @@ export type CreateMarketingPostInput = {
 
 export async function createMarketingPost(
   database: MarketingDatabase,
-  input: CreateMarketingPostInput,
+  rawInput: CreateMarketingPostInput,
 ) {
-  if (!marketingGuardDecisionIsSealed(input.decision)) {
+  // **Read once, into plain values.** Every field below is a property, and a
+  // property can be an accessor: one that returned a sealed decision to the
+  // check and a forged one to the write passed both, and one that returned
+  // `chn_safe` to the digest and `chn_other` to the insert wrote a post for an
+  // account the Guard never saw. The snapshot is what is checked and what is
+  // written, and there is nothing in between for a second read to happen in.
+  const decision = rawInput.decision;
+  const input: CreateMarketingPostInput = {
+    channelId: String(rawInput.channelId),
+    locale: rawInput.locale,
+    kind: rawInput.kind,
+    logicalKey: String(rawInput.logicalKey),
+    envelope: rawInput.envelope,
+    envelopeDigest: String(rawInput.envelopeDigest),
+    rendererVersion: String(rawInput.rendererVersion),
+    templateId: rawInput.templateId === null ? null : String(rawInput.templateId),
+    templateDigest:
+      rawInput.templateDigest === null ? null : String(rawInput.templateDigest),
+    claimIds: [...rawInput.claimIds].map(String),
+    assetIds: [...rawInput.assetIds].map(String),
+    claimRegistryVersion: Number(rawInput.claimRegistryVersion),
+    assetRegistryVersion: Number(rawInput.assetRegistryVersion),
+    factSnapshot: rawInput.factSnapshot,
+    decision,
+    draftedAt: new Date(rawInput.draftedAt.getTime()),
+  };
+
+  if (!marketingGuardDecisionIsSealed(decision)) {
     throw new MarketingStoreRefusedError(
       "guard_decision_not_sealed",
       "A post records a decision `guardDraft()` made, not one the caller assembled",
@@ -325,17 +352,38 @@ export async function createMarketingPost(
   // pass the checks with one answer and be written with another. The freeze in
   // `sealDecision()` is what stops the accessor being installed at all; this
   // is the second lock on the same door.
-  const verdict = input.decision.verdict;
-  const guardCodes =
-    "codes" in input.decision ? [...input.decision.codes] : [];
-  const guardRuleIds = [...input.decision.ruleIds];
-  const draftDigest = input.decision.draftDigest;
+  const verdict = decision.verdict;
+  const guardCodes = "codes" in decision ? [...decision.codes] : [];
+  const guardRuleIds = [...decision.ruleIds];
+  const draftDigest = decision.draftDigest;
 
   // **The decision has to be about this post.** Provenance says a Guard made
   // it; it does not say what about. The Guard was shown "Three answers side by
   // side." and the row written said "The best AI, guaranteed.", with the first
   // decision attached to the second body.
   const envelopeForDigest = marketingEnvelopeSchema.parse(input.envelope);
+
+  // **The envelope and the columns say the same thing, or neither is stored.**
+  // The digest was computed from the columns, and the envelope is what a
+  // publisher renders. With the two free to disagree, a post whose columns
+  // said `en` with no claims went to the database carrying an envelope in `ko`
+  // naming a claim and an asset nothing had checked.
+  const envelopeAssetIds = envelopeForDigest.assets.map((asset) => asset.assetId);
+  const sameSet = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((value) => right.includes(value));
+  if (
+    envelopeForDigest.locale !== input.locale ||
+    !sameSet([...envelopeForDigest.claimIds], [...input.claimIds]) ||
+    !sameSet(envelopeAssetIds, [...input.assetIds])
+  ) {
+    throw new MarketingStoreRefusedError(
+      "envelope_disagrees_with_columns",
+      "The envelope and the columns name different locales, claims or assets",
+    );
+  }
+
   const recomputed = marketingGuardDraftDigest({
     renderedText: envelopeForDigest.renderedText,
     locale: input.locale,
@@ -349,6 +397,24 @@ export async function createMarketingPost(
     throw new MarketingStoreRefusedError(
       "guard_decision_not_about_this_post",
       "That decision was made about a different draft",
+    );
+  }
+
+  // The account the envelope names has to be the account being written to.
+  // `accountSlug` is what a publisher posts from, and the Guard checked the
+  // channel this row belongs to.
+  const account = await database.marketingChannel.findUnique({
+    where: { id: input.channelId },
+    select: { accountSlug: true, channel: true },
+  });
+  if (
+    !account ||
+    account.accountSlug !== envelopeForDigest.accountSlug ||
+    account.channel !== envelopeForDigest.channel
+  ) {
+    throw new MarketingStoreRefusedError(
+      "envelope_account_not_this_channel",
+      "The envelope names an account other than the one this post belongs to",
     );
   }
 
@@ -450,8 +516,14 @@ export type MarketingPostPatch = {
 };
 
 const postPatchData = (
-  patch: MarketingPostPatch,
+  rawPatch: MarketingPostPatch,
 ): Prisma.MarketingPostUpdateManyMutationInput => {
+  // Read once, for the reason `createMarketingPost()` does it: a `mode`
+  // accessor that answered `approval` to the refusal and `autonomous` to the
+  // assignment put an autonomous row in the database through a path that had
+  // just refused one. A shallow copy is enough -- every value here is a
+  // primitive, a `Date` or `null`.
+  const patch: MarketingPostPatch = { ...rawPatch };
   const data: Prisma.MarketingPostUpdateManyMutationInput = {};
   if (patch.status !== undefined) data.status = patch.status;
   if (patch.mode !== undefined) {
