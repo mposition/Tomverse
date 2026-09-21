@@ -66,9 +66,13 @@ export type RecordSuppressionInput = {
   purposeKey?: string;
   /**
    * `classification` records a cause that stops every message of that
-   * classification (only `marketing`, named by `purposeKey`). It has no entry:
-   * the entry table knows only global and purpose scopes, so the cause is the
-   * whole record and it decides once causes are the read authority
+   * classification (only `marketing`, named by `purposeKey`) -- including a
+   * purpose introduced after it was written, because it names no purpose.
+   *
+   * It is a scope the entry table never had, which knows only global and
+   * purpose. That is why a deletion intake used to write the same stop again
+   * once per marketing purpose: it was the only way to be visible to an entry
+   * read. Nothing reads entries
    * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
    */
   scope?: "classification";
