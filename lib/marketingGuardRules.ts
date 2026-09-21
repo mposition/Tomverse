@@ -33,6 +33,7 @@ import {
   type MarketingBannedTerm,
 } from "@/lib/marketingBannedClaims";
 import { findForbiddenMemoryClaims } from "@/lib/marketingMemoryClaims";
+import { findMarketingMinorsTargeting } from "@/lib/marketingMinorsClaims";
 
 /** Which paragraph of §7.1 a rule comes from. */
 export const MARKETING_RULE_CATEGORIES = Object.freeze([
@@ -177,16 +178,21 @@ const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
     { text: "第1選擇", language: "zh", match: "substring" },
     { text: "第1品牌", language: "zh", match: "substring" },
     { text: "第1名", language: "zh", match: "substring" },
+    // Terms rather than patterns for the same reason the Chinese claims are:
+    // a term tolerates a separator inside itself, and "top--rated" did not
+    // match a pattern whose separator class held one hyphen or one space.
+    { text: "number one", language: "en", match: "word" },
+    { text: "top rated", language: "en", match: "word" },
   ],
   patterns: [
-    pattern("#\\s*1\\b", "en"),
-    pattern("\\bno\\.?\\s*1\\b", "en"),
-    pattern("\\bnumber one\\b", "en"),
-    pattern("\\btop[- ]rated\\b", "en"),
-    pattern("1\\s*위", "ko"),
-    pattern("업계\\s*1", "ko"),
+    // A separator class rather than a whitespace one: "#·1" is the same claim, and a
+    // pattern that tolerates only whitespace does not say so.
+    pattern("#[^\\p{L}\\p{N}]{0,4}1(?![\\p{L}\\p{N}])", "en"),
+    pattern("\\bno[^\\p{L}\\p{N}]{0,4}1(?![\\p{L}\\p{N}])", "en"),
+    pattern("1[^\\p{L}\\p{N}]{0,4}위", "ko"),
+    pattern("업계[^\\p{L}\\p{N}]{0,4}1", "ko"),
     pattern("第[一1](?:的)?\\s*(?:AI|平台|产品|工具|选择|產品|選擇|品牌|名)", "zh"),
-    pattern("(?:排名|销量|市场)\\s*第一", "zh"),
+    pattern("(?:排名|[销銷]量|市[场場])\\s*第[一1]", "zh"),
   ],
 });
 
@@ -201,18 +207,30 @@ const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
  * accuracy. And nothing here verifies a fact.
  */
 const AI_REVIEW_CONTRACT = rule("rule.ai-review-contract", "ai_review_contract", {
+  // "fact-checked" written with an em dash went through a pattern whose only
+  // separators were a hyphen and a space. A term tolerates whatever is in there.
+  terms: [
+    { text: "fact check", language: "en", match: "word" },
+    { text: "fact checked", language: "en", match: "word" },
+    { text: "fact checking", language: "en", match: "word" },
+    { text: "fact checks", language: "en", match: "word" },
+    { text: "consensus", language: "en", match: "word" },
+    { text: "different providers", language: "en", match: "word" },
+    { text: "different provider", language: "en", match: "word" },
+    { text: "事实核查", language: "zh", match: "substring" },
+    { text: "事實核查", language: "zh-Hant", match: "substring" },
+    { text: "模型达成一致", language: "zh", match: "substring" },
+    { text: "模型達成一致", language: "zh-Hant", match: "substring" },
+  ],
   patterns: [
-    pattern("\\bfact[- ]check(?:ed|ing|s)?\\b", "en"),
     pattern("\\bverif(?:ies|ied|y) (?:the )?(?:facts?|accuracy)\\b", "en"),
     pattern("\\b(?:models?|reviewers?) agree(?:d|ment)?\\b", "en"),
-    pattern("\\bconsensus\\b", "en"),
-    pattern("\\bdifferent providers?\\b", "en"),
     pattern("\\baccuracy (?:score|rating|rate)\\b", "en"),
     pattern("사실\\s*(?:검증|확인)", "ko"),
     pattern("(?:모델|검토자)(?:들)?\\s*(?:가|이)?\\s*합의", "ko"),
     pattern("서로\\s*다른\\s*(?:provider|공급자|제공자)", "ko"),
     pattern("정확도\\s*(?:점수|평가)", "ko"),
-    pattern("事实核查|模型达成一致|不同的?(?:提供商|供应商)", "zh"),
+    pattern("不同的?(?:提供商|供应商|供應商)", "zh"),
   ],
 });
 
@@ -257,8 +275,14 @@ const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiorit
     pattern("\\bfirst (?:and only|ever)\\b", "en"),
     pattern("\\bonly (?:one|place|way) to compare\\b", "en"),
     pattern("\\bonly .{0,30}\\bhwp\\b", "en"),
+    // 유일한 has to be qualifying the forbidden noun, which means the words in
+    // between are still part of the same noun phrase. A word that closes one --
+    // one carrying 이, 가, 은, 는, 을 or 를 -- ends the phrase, and an earlier
+    // version that counted words instead read "각 요청에는 유일한 식별자가
+    // 있으며 이 도구가 이를 표시합니다" -- a sentence about identifiers -- as a
+    // claim about the 도구 in the next clause.
     pattern(
-      "유일(?:한|하게)\\s*(?:[^\\s]{1,8}\\s*){0,3}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
+      "유일(?:한|하게)\\s*(?:[가-힣A-Za-z0-9]{1,8}(?<![이가은는을를])\\s+){0,3}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
       "ko",
     ),
     pattern("최초의?\\s*(?:다중|멀티|교차)", "ko"),
@@ -279,9 +303,13 @@ const CHINA_MAINLAND = rule("rule.china-mainland", "china_mainland", {
   patterns: [
     pattern("\\bavailable in (?:mainland )?china\\b", "en"),
     pattern("\\bchina (?:launch|available|now live)\\b", "en"),
-    pattern("中国大陆(?:可用|上线|开放)", "zh"),
-    pattern("(?:支付宝|微信支付|银联)", "zh"),
-    pattern("大陆(?:用户)?(?:可|能)(?:注册|订阅|付款)", "zh"),
+    // Simplified and Traditional in one pattern. RedNote writes Simplified for
+    // overseas readers and the zh-Hant accounts write 中國大陸, so a rule that
+    // knew one spelling knew one of the channels.
+    pattern("中[国國]大[陆陸]\\s*(?:可用|上[线線]|[开開]放|使用|推出)", "zh"),
+    pattern("在中[国國]大[陆陸]", "zh"),
+    pattern("(?:支付[宝寶]|微信支付|[银銀][联聯])", "zh"),
+    pattern("大[陆陸](?:用[户戶])?(?:可|能)(?:注[册冊]|[订訂][阅閱]|付款)", "zh"),
     pattern("중국\\s*본토(?:에서)?\\s*(?:이용|사용|결제)", "ko"),
   ],
 });
@@ -306,7 +334,9 @@ const AUSTRALIA_URGENCY = rule("rule.australia-urgency", "australia_urgency", {
     pattern("마지막\\s*기회", "ko"),
     pattern("서두르", "ko"),
     pattern("마감\\s*임박", "ko"),
-    pattern("仅限今(?:天|日)|最后机会|抓紧时间", "zh"),
+    pattern("[仅僅]限今[天日]", "zh"),
+    pattern("最[后後][机機][会會]", "zh"),
+    pattern("抓[紧緊][时時][间間]", "zh"),
   ],
 });
 
@@ -314,22 +344,18 @@ const AUSTRALIA_URGENCY = rule("rule.australia-urgency", "australia_urgency", {
  * §7.1, fifth item, second half: copy aimed at people under sixteen.
  *
  * Not a rule about mentioning young people -- a post about a classroom is
- * ordinary -- but about addressing them as the buyer. The negative lookbehind
- * is why "Tomverse is not for under 16s" survives: that is a safety notice, and
- * refusing it would make the rule refuse the thing it wants said.
+ * ordinary -- but about addressing them as the buyer.
+ *
+ * A detector, for the reason the memory rule is one. The first version used a
+ * fixed-length negative lookbehind and was wrong in both directions at once:
+ * "Children, sign up and try it." went through because the comma was not in
+ * the pattern, and "Tomverse is not intended for children." was refused
+ * because the negator sat further away than the lookbehind could reach.
+ * `lib/marketingMinorsClaims.ts` reads the clause instead, through the same
+ * parser the memory rule uses.
  */
 const AUSTRALIA_MINORS = rule("rule.australia-minors", "australia_minors", {
-  patterns: [
-    pattern("(?<!\\b(?:not|isn't|aren't|never)\\s)\\bfor (?:kids|children|teens|teenagers)\\b", "en"),
-    pattern("\\b(?:kids|teens),? (?:sign up|try it|get started)\\b", "en"),
-    pattern("(?<!\\b(?:not|isn't|aren't|never)\\s)\\bfor under (?:13|16|18)s?\\b", "en"),
-    pattern("\\bhigh ?school(?:ers)? ?(?:can|should|get)\\b", "en"),
-    pattern(
-      "(?:어린이|청소년|중학생|초등학생)(?:들)?(?:을|를|도)?\\s*(?:위한|대상)(?![^.\n]{0,12}아[닙니])",
-      "ko",
-    ),
-    pattern("(?:青少年|中学生|小学生)(?:专用|适用|快来)", "zh"),
-  ],
+  detectors: [(text: string) => findMarketingMinorsTargeting(text).length > 0],
 });
 
 /**

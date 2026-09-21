@@ -26,8 +26,11 @@
  * the few categories that need a reader are three-valued, where "not checked"
  * means approval rather than permission.
  *
- * Pure: no server-only import, no network, no Prisma. Every fact it needs is an
- * input, which is what lets the corpus state a case without a database.
+ * Pure but for one clock read. No server-only import, no network, no Prisma:
+ * every fact it needs is an input, which is what lets the corpus state a case
+ * without a database. The exception is `Date.now()`, which bounds how old a
+ * template proof may be -- taken here rather than as an argument, because a
+ * caller that could set the time could set it forward.
  */
 
 import { createHash } from "node:crypto";
@@ -110,8 +113,30 @@ export type MarketingGuardDecision =
       verdict: "autonomous_eligible";
       templateId: string;
       templateDigest: string;
+      /**
+       * The row state this decision was made against.
+       *
+       * A decision is about a template as it stood when the loader read it, and
+       * the publish that follows happens later. Whoever writes the post has to
+       * make its own write conditional on every field here -- the same id, the
+       * same channel, the same approved digest, the same `historyVersion`, and
+       * still `reusableAsTemplate` -- so an edit or an un-marking that landed
+       * in between turns the write into nought rows rather than into a post
+       * nobody approved.
+       */
+      templateBinding: MarketingTemplateBinding;
       ruleIds: string[];
     };
+
+/** What a publish has to re-check about the template it is rendering. */
+export type MarketingTemplateBinding = {
+  readonly templateId: string;
+  readonly channelId: string;
+  readonly locale: string;
+  readonly approvedDigest: string;
+  readonly historyVersion: number;
+  readonly reusableAsTemplate: true;
+};
 
 /**
  * A claim the draft declares, already resolved against the registries.
@@ -153,6 +178,16 @@ export type MarketingGuardDraft = {
   readonly renderedText: string;
   readonly locale: string;
   readonly channel: string;
+  /**
+   * The connected account this post is for: `MarketingChannel.id`.
+   *
+   * A template is approved for one account, in one language. Without this the
+   * Guard compared a digest and nothing else, so an approval given for the
+   * LinkedIn English account published the same words from the zh-Hant
+   * Instagram one -- a different audience, a different jurisdiction and a
+   * different graduation record.
+   */
+  readonly channelId: string;
   /** The ids the draft declares. Checked against the resolved facts. */
   readonly claimIds: readonly string[];
   readonly assetIds: readonly string[];
@@ -191,6 +226,14 @@ declare const TEMPLATE_PROOF_BRAND: unique symbol;
 
 export type MarketingTemplateProof = {
   readonly templateId: string;
+  /** The account the approval was given for. */
+  readonly channelId: string;
+  /** The language it was given in. */
+  readonly locale: string;
+  /** The row revision the loader read, carried into the decision's binding. */
+  readonly historyVersion: number;
+  /** When the loader proved it. Stamped here, never supplied. */
+  readonly provenAt: number;
   /** The digest the approval chain proved. */
   readonly approvedDigest: string;
   /** Whether every slot was filled from a registry id rather than free text. */
@@ -204,6 +247,9 @@ export type MarketingTemplateProof = {
 
 export function sealMarketingTemplateProof(proof: {
   templateId: string;
+  channelId: string;
+  locale: string;
+  historyVersion: number;
   approvedDigest: string;
   slotsFromRegistry: boolean;
   claimIds: readonly string[];
@@ -211,6 +257,13 @@ export function sealMarketingTemplateProof(proof: {
 }): MarketingTemplateProof {
   const sealed = Object.freeze({
     templateId: proof.templateId,
+    channelId: proof.channelId,
+    locale: proof.locale,
+    historyVersion: proof.historyVersion,
+    // Read here rather than taken as an argument. A caller that could set it
+    // could set it forward, and the age bound is the only thing between a
+    // proof and a caller that kept one from last month.
+    provenAt: Date.now(),
     approvedDigest: proof.approvedDigest,
     slotsFromRegistry: proof.slotsFromRegistry,
     claimIds: Object.freeze([...proof.claimIds]),
@@ -219,6 +272,18 @@ export function sealMarketingTemplateProof(proof: {
   sealedProofs.add(sealed);
   return sealed;
 }
+
+/**
+ * How long a proof is worth anything.
+ *
+ * A proof is evidence about a database row at the moment it was read, and the
+ * row can be edited or un-marked a second later. The binding on the decision is
+ * what makes the publish conditional on the row *not* having moved; this is
+ * what stops a proof being kept. A minute is long enough for a draft to be
+ * rendered and decided in the same request and short enough that "I have a
+ * proof" is never a stored capability.
+ */
+export const MARKETING_TEMPLATE_PROOF_MAX_AGE_MS = 60_000;
 
 export type MarketingGuardContext = {
   /**
@@ -267,7 +332,14 @@ const FACT_PATTERNS: readonly { source: string; flags: string }[] = Object.freez
   [
     Object.freeze({ source: "[$₩¥€£]\\s?\\d", flags: "u" }),
     Object.freeze({
-      source: "\\b\\d+(?:[.,]\\d+)?\\s?(?:usd|aud|krw|cny|%)\\b",
+      source: "\\b\\d+(?:[.,]\\d+)?\\s?(?:usd|aud|krw|cny)\\b",
+      flags: "iu",
+    }),
+    // A percentage on its own, without the trailing boundary. `\\b` after `%`
+    // needs a word character next to it, so "Save 20% today." was not a stated
+    // figure and "20%off" was.
+    Object.freeze({
+      source: "\\b\\d+(?:[.,]\\d+)?\\s?%",
       flags: "iu",
     }),
     Object.freeze({
@@ -302,6 +374,70 @@ const FREE_WORDING: readonly (readonly [string, "word" | "substring"])[] =
     Object.freeze(["free", "word"] as const),
     Object.freeze(["무료", "substring"] as const),
     Object.freeze(["免费", "substring"] as const),
+    // Traditional. The zh-Hant accounts write 免費, and a list holding only the
+    // Simplified spelling read 免費使用，每月包含積分 as copy with no price in
+    // it at all.
+    Object.freeze(["免費", "substring"] as const),
+  ]);
+
+/**
+ * §7.4: a price or a promotion, read off the words rather than off a claim.
+ *
+ * The claim types say what the draft *declared*. They say nothing about a
+ * sentence that states a discount and declares nothing, which is how "Save 20%
+ * with our September discount." and "Our September promotion is live." reached
+ * `autonomous_eligible` with empty id lists: the category was derived from the
+ * declarations, and there were none.
+ */
+const PROMOTION_WORDING: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["discount", "word"] as const),
+    Object.freeze(["discounts", "word"] as const),
+    Object.freeze(["discounted", "word"] as const),
+    Object.freeze(["promo", "word"] as const),
+    Object.freeze(["promotion", "word"] as const),
+    Object.freeze(["promotional", "word"] as const),
+    Object.freeze(["coupon", "word"] as const),
+    Object.freeze(["voucher", "word"] as const),
+    Object.freeze(["sale", "word"] as const),
+    Object.freeze(["price drop", "word"] as const),
+    Object.freeze(["할인", "substring"] as const),
+    Object.freeze(["프로모션", "substring"] as const),
+    Object.freeze(["특가", "substring"] as const),
+    Object.freeze(["쿠폰", "substring"] as const),
+    Object.freeze(["优惠", "substring"] as const),
+    Object.freeze(["優惠", "substring"] as const),
+    Object.freeze(["折扣", "substring"] as const),
+    Object.freeze(["促销", "substring"] as const),
+    Object.freeze(["促銷", "substring"] as const),
+    Object.freeze(["特价", "substring"] as const),
+    Object.freeze(["特價", "substring"] as const),
+  ]);
+
+/**
+ * §7.4: another product named, read off the words for the same reason.
+ *
+ * "Compare ChatGPT and Claude side by side." names two competitors and
+ * declares no comparison claim. The comparison *claim* check is about evidence;
+ * this is about the category, and they are different questions.
+ */
+const COMPETITOR_NAMES: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["chatgpt", "word"] as const),
+    Object.freeze(["openai", "word"] as const),
+    Object.freeze(["claude", "word"] as const),
+    Object.freeze(["anthropic", "word"] as const),
+    Object.freeze(["gemini", "word"] as const),
+    Object.freeze(["copilot", "word"] as const),
+    Object.freeze(["perplexity", "word"] as const),
+    Object.freeze(["deepseek", "word"] as const),
+    Object.freeze(["midjourney", "word"] as const),
+    Object.freeze(["mistral", "word"] as const),
+    Object.freeze(["챗지피티", "substring"] as const),
+    Object.freeze(["제미나이", "substring"] as const),
+    Object.freeze(["클로드", "substring"] as const),
+    Object.freeze(["코파일럿", "substring"] as const),
+    Object.freeze(["퍼플렉시티", "substring"] as const),
   ]);
 
 const anyTermMatches = (
@@ -485,12 +621,31 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   // word is an approval whether or not its condition is there. An earlier
   // version only refused the unconditional case, which made
   // "Start free with monthly credits included." autonomous.
+  //
+  // The condition has to be a *claim*, not a word. An earlier version accepted
+  // the token "credits" appearing anywhere in the post, so "Start free. Credits
+  // never run out." and "Free forever; credits power the service." both passed
+  // -- the first says the opposite of the limit it was supposed to state and
+  // the second states nothing at all. What §7.2 rule 4 wants is the allowance,
+  // and an allowance is a resolved pricing or plan claim.
+  const freeCondition = facts.claims.some(
+    (claim) => claim.known && (claim.type === "pricing" || claim.type === "plan"),
+  );
   if (anyTermMatches(forms, FREE_WORDING)) {
     approvalCodes.push("price_or_promotion");
-    if (!anyTermMatches(forms, FREE_CONDITION)) {
+    if (!freeCondition || !anyTermMatches(forms, FREE_CONDITION)) {
       rejectCodes.push("free_wording_without_condition");
       ruleIds.push("rule.free-wording");
     }
+  }
+
+  // §7.4, derived from the words. A template approval does not exempt these:
+  // see the verdict below.
+  if (anyTermMatches(forms, PROMOTION_WORDING)) {
+    approvalCodes.push("price_or_promotion");
+  }
+  if (anyTermMatches(forms, COMPETITOR_NAMES)) {
+    approvalCodes.push("competitor_named");
   }
 
   // --- 6. §7.4 ------------------------------------------------------------
@@ -534,23 +689,39 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     : undefined;
 
   // The seal, the slots, a digest this function computed from the text it was
-  // given, and the ids the loader read off the approved post. An earlier
-  // version compared two values the caller supplied, and the version after
-  // that compared the draft's ids against facts from the same caller.
+  // given, the ids the loader read off the approved post, and the scope the
+  // approval was actually given in. An earlier version compared two values the
+  // caller supplied; the version after that compared the draft's ids against
+  // facts from the same caller; the version after *that* compared a digest and
+  // nothing else, so one approval covered every account and every language.
+  //
+  // The age bound is the fifth part. A proof is evidence about a row as it was
+  // read, and a proof that could be kept would be a standing permission.
   const templateStands =
     !!named &&
     sealedProofs.has(named) &&
     named.slotsFromRegistry &&
     named.approvedDigest === sha256(draft.renderedText) &&
+    named.channelId === draft.channelId &&
+    named.locale === draft.locale &&
+    Date.now() - named.provenAt <= MARKETING_TEMPLATE_PROOF_MAX_AGE_MS &&
+    Date.now() >= named.provenAt &&
     sameSet([...draft.claimIds], [...named.claimIds]) &&
     sameSet([...draft.assetIds], [...named.assetIds]);
 
   if (!templateStands) approvalCodes.push("new_copy");
 
-  // A fact stated in free copy goes to a person. For a proved template the
-  // same check ran when the template was approved, which is §7.2's "템플릿은
-  // 템플릿 승인 시".
-  if (!templateStands && anyPatternMatches(forms, FACT_PATTERNS)) {
+  // A stated fact goes to a person, template or not.
+  //
+  // An earlier version skipped this for a proved template, reasoning that the
+  // same check ran at approval. It does -- but the check that ran at approval
+  // is this one, and skipping it here meant the *only* reading of the words
+  // was the one that happened before the rules were last changed. Worse, the
+  // §7.4 categories above are derived from the words too, and a template
+  // rendering that skipped them published a discount with nobody looking.
+  // §7.4 says these categories always need a person; "always" includes a
+  // template.
+  if (anyPatternMatches(forms, FACT_PATTERNS)) {
     approvalCodes.push("undeclared_fact");
   }
 
@@ -572,6 +743,14 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     verdict: "autonomous_eligible",
     templateId: named!.templateId,
     templateDigest: named!.approvedDigest,
+    templateBinding: {
+      templateId: named!.templateId,
+      channelId: named!.channelId,
+      locale: named!.locale,
+      approvedDigest: named!.approvedDigest,
+      historyVersion: named!.historyVersion,
+      reusableAsTemplate: true,
+    },
     ruleIds: uniqueInOrder(ruleIds),
   };
 }
@@ -589,6 +768,7 @@ export function guardTemplateForApproval(
     readonly renderedText: string;
     readonly locale: string;
     readonly channel: string;
+    readonly channelId: string;
   },
   facts: MarketingGuardInput["facts"],
   context: MarketingGuardContext,
@@ -598,6 +778,7 @@ export function guardTemplateForApproval(
       renderedText: template.renderedText,
       locale: template.locale,
       channel: template.channel,
+      channelId: template.channelId,
       claimIds: facts.claims.map((claim) => claim.claimId),
       assetIds: facts.assets.map((asset) => asset.assetId),
     },

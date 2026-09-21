@@ -125,6 +125,49 @@ const URL_LIKE = new RegExp(
   "iu",
 );
 
+/**
+ * A host written with the ideographic full stop.
+ *
+ * Its own expression, and case-sensitive, which `URL_LIKE` cannot be. U+3002 is
+ * sentence punctuation in Chinese, so treating it as a separator the way the
+ * ASCII and full-width stops are treated read an ordinary pair of sentences as
+ * an address: 比较答案。然后决定。 is "compare the answers, then decide". The
+ * first version listed it; the second removed it, and 例子。中国 -- a real
+ * internationalised domain -- went through with nothing said.
+ *
+ * So the suffix has to look like a top-level domain rather than like a word.
+ * An ASCII label takes any lower-case suffix, because example。com is not a
+ * sentence; a CJK label needs a suffix from the list, because 然后决定 is.
+ * Lower-case matters: 比较答案。Then decide. is two sentences and 。then is not,
+ * which is why this cannot be folded into the case-insensitive expression above.
+ */
+const IDEOGRAPHIC_TLDS = [
+  "中国", "中國", "台湾", "台灣", "香港", "公司", "网络", "網絡", "网址", "網址",
+  "商店", "我爱你", "新加坡", "机构", "機構", "政务", "集团", "集團", "游戏",
+  "遊戲", "中文网", "中文網", "在线", "在線",
+].join("|");
+
+const ASCII_TLDS = [
+  "com", "net", "org", "io", "ai", "co", "app", "dev", "xyz", "info", "biz",
+  "me", "tv", "cc", "shop", "site", "online", "store", "top", "club", "live",
+  "link", "page", "blog", "cloud", "tech", "space", "icu", "pro", "asia",
+  "world", "life", "news", "one", "run", "gg", "cn", "kr", "jp", "hk", "tw",
+  "sg", "au", "nz", "uk", "us",
+].join("|");
+
+const IDEOGRAPHIC_HOST = new RegExp(
+  [
+    `(?<![\\p{L}\\p{N}-])`,
+    "(?:",
+    `[A-Za-z0-9][A-Za-z0-9-]{0,62}${codePoint(0x3002)}[a-z]{2,24}`,
+    "|",
+    `[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})`,
+    ")",
+    `(?![\\p{L}\\p{N}-])`,
+  ].join(""),
+  "u",
+);
+
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
 
@@ -258,6 +301,26 @@ const readableForm = (raw: string): string =>
     .replace(new RegExp(BIDI_SOURCE, "gu"), "")
     .replace(new RegExp(CONTROL_SOURCE, "gu"), "");
 
+/**
+ * Separators between two characters of a word, for the forms that drop them.
+ *
+ * Whitespace is deliberately not in the class. A term compiles into something
+ * that tolerates separators inside itself, which covers a term; it does not
+ * cover a *pattern* -- 销量第·一 went through `(?:排名|销量|市场)\s*第一` untouched,
+ * and "We clo·ne your memories." went past a detector that reads a sentence.
+ * So every form gets a twin with these runs removed, and the rules are checked
+ * against both.
+ *
+ * Leaving whitespace out is what keeps the twin safe. Joining "answers." to
+ * "Then" would invent words that are not in the text; joining across a run of
+ * punctuation that a person would not type is exactly the trick being undone.
+ */
+const INTERIOR_SEPARATORS =
+  /(?<=[\p{L}\p{N}])[^\p{L}\p{N}\s]+(?=[\p{L}\p{N}])/gu;
+
+const collapsedForm = (value: string): string =>
+  value.replace(INTERIOR_SEPARATORS, "");
+
 export type MarketingTextVariants = {
   /** NFKC, invisible characters stripped. What a person would read. */
   readable: string;
@@ -287,15 +350,24 @@ export function marketingTextVariants(raw: string): MarketingTextVariants {
   };
 }
 
-/** Every form a rule should be checked against, in one array. */
+/**
+ * Every form a rule should be checked against, in one array.
+ *
+ * Eight, not four: each variant and the same variant with its interior
+ * separators removed. The twin is what a raw pattern and a sentence-reading
+ * detector need, neither of which tolerates a separator the way a compiled term
+ * does. A form that is identical to one already in the list is dropped, so
+ * ordinary text costs four comparisons rather than eight.
+ */
 export function marketingTextForms(raw: string): string[] {
   const variants = marketingTextVariants(raw);
-  return [
+  const base = [
     variants.readable,
     variants.folded,
     variants.leetRound,
     variants.leetStraight,
   ];
+  return [...new Set([...base, ...base.map(collapsedForm)])];
 }
 
 /** The same folds applied to a rule's own text, so needle and haystack meet. */
@@ -366,7 +438,9 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
   // been reported above.
   const readable = readableForm(raw);
   if (MENTION.test(readable)) codes.push("mention");
-  if (URL_LIKE.test(readable)) codes.push("url_like");
+  if (URL_LIKE.test(readable) || IDEOGRAPHIC_HOST.test(readable)) {
+    codes.push("url_like");
+  }
   if (LINK_MARKUP.test(readable)) codes.push("link_markup");
   if (PROMPT_INJECTION.test(readable)) codes.push("prompt_injection_marker");
 

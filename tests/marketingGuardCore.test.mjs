@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 
 import {
   MARKETING_APPROVAL_CODES,
+  MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
   MARKETING_REJECT_CODES,
   guardDraft,
   guardTemplateForApproval,
@@ -18,6 +19,8 @@ import {
 } from "../lib/marketingGuardCore.ts";
 
 const TEMPLATE_TEXT = "Three answers to one question, side by side.";
+const CHANNEL_ID = "chn_linkedin_en";
+
 const TEMPLATE_DIGEST = createHash("sha256")
   .update(TEMPLATE_TEXT, "utf8")
   .digest("hex");
@@ -35,6 +38,7 @@ const input = (overrides = {}) => ({
     renderedText: "Three answers to one question, side by side.",
     locale: "en",
     channel: "linkedin",
+    channelId: CHANNEL_ID,
     claimIds: [],
     assetIds: [],
     ...(overrides.draft ?? {}),
@@ -73,6 +77,11 @@ const autonomousReady = (overrides = {}) => {
     templates: overrides.templates ?? [
       sealMarketingTemplateProof({
         templateId: "template.compare",
+        // The scope the approval was given in. A proof that carried only a
+        // digest let one account's approval publish from another.
+        channelId: CHANNEL_ID,
+        locale: "en",
+        historyVersion: 7,
         approvedDigest: TEMPLATE_DIGEST,
         slotsFromRegistry: true,
         // The ids the loader read off the approved post. The Guard compares
@@ -504,4 +513,126 @@ test("every reject code is reachable", () => {
   );
 
   assert.deepEqual([...reached].sort(), [...MARKETING_REJECT_CODES].sort());
+});
+
+// --- the proof's scope, its age, and what a template does not exempt --------
+
+test("a proof carries the account and the language it was approved for", () => {
+  // One approval, one account, one language. Without this the Guard compared a
+  // digest and nothing else, so the same words approved for the LinkedIn
+  // English account published from the zh-Hant Instagram one -- a different
+  // audience, a different jurisdiction and a different graduation record.
+  for (const draft of [
+    { channelId: "chn_instagram_zh" },
+    { locale: "zh-Hant" },
+  ]) {
+    const decision = guardDraft(autonomousReady({ draft }));
+    assert.equal(decision.verdict, "approval_required", JSON.stringify(draft));
+    assert.ok(decision.codes.includes("new_copy"), JSON.stringify(decision));
+  }
+});
+
+test("a proof is worth nothing once it is old", () => {
+  // A proof is evidence about a row as it was read, and the row can be edited
+  // or un-marked a second later. The binding below makes the write conditional
+  // on the row not having moved; this is what stops the proof itself being
+  // kept and presented later as a standing permission.
+  const ready = autonomousReady();
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + MARKETING_TEMPLATE_PROOF_MAX_AGE_MS + 1;
+    const decision = guardDraft(ready);
+    assert.equal(decision.verdict, "approval_required", JSON.stringify(decision));
+    assert.ok(decision.codes.includes("new_copy"));
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("an autonomous decision hands back the row state it was made against", () => {
+  const decision = guardDraft(autonomousReady());
+  assert.equal(decision.verdict, "autonomous_eligible", JSON.stringify(decision));
+  assert.deepEqual(decision.templateBinding, {
+    templateId: "template.compare",
+    channelId: CHANNEL_ID,
+    locale: "en",
+    approvedDigest: TEMPLATE_DIGEST,
+    historyVersion: 7,
+    reusableAsTemplate: true,
+  });
+});
+
+test("the always-approving categories are re-read for a template rendering", () => {
+  // §7.4 says a price, a promotion or a named competitor always needs a
+  // person. An earlier version derived those from the *declared* claim types
+  // and skipped the fact scan whenever a template stood, so a template
+  // rendering that stated a discount and declared nothing at all was
+  // autonomous -- with a valid seal and empty id lists.
+  const cases = [
+    ["Save 20% with our September discount.", "price_or_promotion"],
+    ["Our September promotion is live.", "price_or_promotion"],
+    ["Compare ChatGPT and Claude side by side.", "competitor_named"],
+  ];
+
+  for (const [renderedText, code] of cases) {
+    const digest = createHash("sha256").update(renderedText, "utf8").digest("hex");
+    const decision = guardDraft(
+      autonomousReady({
+        draft: { renderedText, claimIds: [], assetIds: [] },
+        facts: { claims: [], assets: [] },
+        templates: [
+          sealMarketingTemplateProof({
+            templateId: "template.compare",
+            channelId: CHANNEL_ID,
+            locale: "en",
+            historyVersion: 7,
+            approvedDigest: digest,
+            slotsFromRegistry: true,
+            claimIds: [],
+            assetIds: [],
+          }),
+        ],
+      }),
+    );
+    assert.equal(decision.verdict, "approval_required", renderedText);
+    assert.ok(decision.codes.includes(code), `${renderedText}: ${JSON.stringify(decision)}`);
+  }
+});
+
+test("free wording needs the allowance as a claim, not as a word", () => {
+  // §7.2 rule 4 wants the condition in the post. The condition is the credit
+  // allowance, and "credits" appearing in a sentence that says the opposite of
+  // a limit is not it.
+  for (const renderedText of [
+    "Start free. Credits never run out.",
+    "Free forever; credits power the service.",
+  ]) {
+    const decision = guardDraft(input({ draft: { renderedText } }));
+    assert.equal(decision.verdict, "reject", renderedText);
+    assert.ok(decision.codes.includes("free_wording_without_condition"));
+  }
+
+  // The same words with the allowance declared and stated.
+  const withClaim = guardDraft(
+    input({
+      draft: {
+        renderedText: "Start free with monthly credits included.",
+        claimIds: ["claim.free-tier"],
+      },
+      facts: {
+        claims: [
+          {
+            claimId: "claim.free-tier",
+            type: "plan",
+            known: true,
+            priceSourcesAllStored: true,
+            usedBefore: true,
+          },
+        ],
+        assets: [],
+      },
+    }),
+  );
+  assert.equal(withClaim.verdict, "approval_required", JSON.stringify(withClaim));
+  assert.ok(withClaim.codes.includes("price_or_promotion"));
 });

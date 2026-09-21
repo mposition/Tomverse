@@ -26,24 +26,30 @@ const bypass = corpus("bypass.json");
 const benign = corpus("benign.json");
 
 /**
- * A draft carrying nothing but its text.
+ * A draft carrying its text, and the claims the case says it declares.
  *
- * No claims, no assets, no template: the corpus is about what the words say,
- * and every other input is exercised by `tests/marketingGuardCore.test.mjs`.
+ * Almost every case declares none: the corpus is about what the words say, and
+ * every other input is exercised by `tests/marketingGuardCore.test.mjs`. The
+ * exception is a post that says "free", because
+ * docs/policy/marketing-automation.md §7.2 rule 4 wants the credit
+ * allowance *as a claim* rather than as a word somebody typed -- so a case
+ * about free wording has to be able to state that the allowance is there.
+ *
  * `priceFallbackAlertReady` is false, which is its S1 value, so free copy that
  * passes every rule still lands on `approval_required` — which is what the
  * benign cases assert.
  */
-const decide = (input) =>
+const decide = (input, claims = []) =>
   guardDraft({
     draft: {
       renderedText: input,
       locale: "en",
       channel: "linkedin",
-      claimIds: [],
+      channelId: "chn_corpus",
+      claimIds: claims.map((claim) => claim.claimId),
       assetIds: [],
     },
-    facts: { claims: [], assets: [] },
+    facts: { claims, assets: [] },
     templates: [],
     context: {
       priceFallbackAlertReady: false,
@@ -53,9 +59,19 @@ const decide = (input) =>
     },
   });
 
+/** The claims a case declares, spelled out from its `claims` shorthand. */
+const claimsOf = (entry) =>
+  (entry.claims ?? []).map((type, index) => ({
+    claimId: `${entry.id}.${index}`,
+    type,
+    known: true,
+    priceSourcesAllStored: true,
+    usedBefore: true,
+  }));
+
 test("every bypass case is refused, with the codes it states", () => {
   for (const entry of bypass.cases) {
-    const decision = decide(entry.input);
+    const decision = decide(entry.input, claimsOf(entry));
     assert.equal(
       decision.verdict,
       entry.expect.verdict,
@@ -73,7 +89,7 @@ test("a bypass case names the rule that catches it", () => {
   // Otherwise a case can pass because a different rule fired, and the rule it
   // was written for is untested while looking tested.
   for (const entry of bypass.cases) {
-    const decision = decide(entry.input);
+    const decision = decide(entry.input, claimsOf(entry));
     assert.ok(
       decision.ruleIds.includes(entry.ruleId),
       `${entry.id} expected ${entry.ruleId}, got ${JSON.stringify(decision.ruleIds)}`,
@@ -83,7 +99,7 @@ test("a bypass case names the rule that catches it", () => {
 
 test("every benign case survives, and none is refused for a ban word", () => {
   for (const entry of benign.cases) {
-    const decision = decide(entry.input);
+    const decision = decide(entry.input, claimsOf(entry));
     assert.equal(
       decision.verdict,
       entry.expect.verdict,

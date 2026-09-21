@@ -229,3 +229,50 @@ test("the hygiene code list is frozen and every code is reachable", () => {
   ]);
   assert.deepEqual([...reached].sort(), [...MARKETING_HYGIENE_CODES].sort());
 });
+
+test("every form has a twin with its interior separators removed", () => {
+  // A term compiles into something that tolerates separators inside itself; a
+  // raw pattern and a sentence-reading detector do not. So each form gets a
+  // twin, and 销量第·一 and "clo·ne" -- both of which went past a rule that was
+  // not a term -- are readable in it.
+  const forms = marketingTextForms("We clo·ne your memories.");
+  assert.ok(forms.some((form) => form.includes("clone")), JSON.stringify(forms));
+
+  // Whitespace is not a separator here. Joining "answers." to "Then" would
+  // invent a word that is not in the text.
+  const sentences = marketingTextForms("Compare answers. Then decide.");
+  assert.ok(
+    sentences.every((form) => !form.includes("answersThen")),
+    JSON.stringify(sentences),
+  );
+
+  // Text with nothing to collapse adds no forms at all: the twins are
+  // identical to their originals and the set drops them.
+  const plain = "Three answers, side by side.";
+  const variants = marketingTextVariants(plain);
+  assert.deepEqual(
+    marketingTextForms(plain),
+    [...new Set(Object.values(variants))],
+  );
+});
+
+test("the ideographic stop is a host separator only in front of a suffix", () => {
+  // Removed wholesale after it read two Chinese sentences as an address, which
+  // then let a real internationalised domain through with nothing said.
+  const addresses = ["访问例子。中国", "Visit example。com", "例子。com"];
+  for (const text of addresses) {
+    assert.ok(
+      marketingTextHygiene(text).includes("url_like"),
+      `${text} should read as an address`,
+    );
+  }
+
+  const prose = [
+    "比较答案。然后决定。",
+    "比较答案。Then decide.",
+    "比较答案。then decide.",
+  ];
+  for (const text of prose) {
+    assert.deepEqual(marketingTextHygiene(text), [], text);
+  }
+});

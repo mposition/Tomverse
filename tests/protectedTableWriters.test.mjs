@@ -11,6 +11,7 @@ import {
   RAW_SQL_ALLOWLIST,
   RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
+  TEMPLATE_SEAL_ALLOWLIST,
   checkProtectedTableWriters,
   selectScannedPaths,
   sourceFingerprint,
@@ -32,6 +33,12 @@ const realAllowlistPaths = new Set([
   ...RAW_SQL_ALLOWLIST.map((entry) => entry.path),
   ...RUNTIME_SQL_ALLOWLIST.map((entry) => entry.path),
   ...RETENTION_SETTING_ALLOWLIST.map((entry) => entry.path),
+  // Every allowlist, every time. A fixture run holds none of the real files,
+  // so each one reports "allowlist says N, found 0" -- and an allowlist left
+  // out of this set puts that finding into all twenty fixtures at once. Which
+  // is what happened when the seal rule was added: seven unrelated tests went
+  // red and the rule itself had no test at all.
+  ...TEMPLATE_SEAL_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -469,4 +476,107 @@ test("the repository passes the check as it stands", () => {
     { cwd: ROOT, encoding: "utf8" }
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+// The seal rule, in both directions.
+//
+// `sealMarketingTemplateProof()` mints the Guard's only evidence that a human
+// approved these exact words, so who may call it is the difference between a
+// post a person approved and a post nobody saw. The first version counted the
+// name as a string; every case below is one the review got past it.
+
+const sealSource = (body) => [{ path: "lib/attacker.ts", text: body }];
+
+const SEAL_IMPORT =
+  'import { sealMarketingTemplateProof } from "@/lib/marketingGuardCore";\n';
+
+test("the seal rule counts calls, and refuses every way of moving the value", () => {
+  const escapes = [
+    // The review's own bypass: an alias exported from a file allowed to call
+    // it, so the mention count in both files stayed exactly right.
+    SEAL_IMPORT + "export const mint = sealMarketingTemplateProof;",
+    // The same idea without the export.
+    SEAL_IMPORT + "const mint = sealMarketingTemplateProof;\nmint({});",
+    // Renamed on the way in, so the call is written under another name.
+    'import { sealMarketingTemplateProof as mint } from "@/lib/marketingGuardCore";\nmint({});',
+    // Handed on rather than used.
+    SEAL_IMPORT + "export { sealMarketingTemplateProof };",
+    // Passed as an argument, which puts it wherever the callee keeps it.
+    SEAL_IMPORT + "register(sealMarketingTemplateProof);",
+    // Through a namespace, which the name-counting rule never saw at all.
+    'import * as guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
+    // The whole module re-exported, which writes the name down nowhere.
+    'export * from "@/lib/marketingGuardCore";',
+    // A second declaration: same name, different function, same effect.
+    "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
+  ];
+
+  for (const text of escapes) {
+    const findings = check(sealSource(text));
+    assert.ok(
+      findings.some((finding) => finding.rule === "template-seal"),
+      `should be a template-seal finding: ${JSON.stringify(text)}`
+    );
+  }
+});
+
+test("a direct call is counted, and an allowlisted file may make exactly its own", () => {
+  const unlisted = check(
+    sealSource(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});")
+  );
+  assert.equal(
+    unlisted.filter((finding) => finding.rule === "template-seal").length,
+    1,
+    JSON.stringify(unlisted)
+  );
+
+  const listed = TEMPLATE_SEAL_ALLOWLIST[0];
+  const sealFindings = (text) =>
+    checkProtectedTableWriters({
+      sources: [{ path: listed.path, text }],
+    }).filter((finding) => finding.rule === "template-seal");
+
+  assert.deepEqual(
+    sealFindings(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});"),
+    []
+  );
+
+  const overTheLimit = sealFindings(
+    SEAL_IMPORT +
+      "export const a = sealMarketingTemplateProof({});\n" +
+      "export const b = sealMarketingTemplateProof({});"
+  );
+  assert.equal(overTheLimit.length, 1, JSON.stringify(overTheLimit));
+});
+
+test("mentioning the seal without calling it is not a finding", () => {
+  // A comment and a string are not calls, and a rule that fired on them would
+  // be switched off by whoever wrote the next comment.
+  const quiet = check(
+    sealSource(
+      "// sealMarketingTemplateProof is documented here.\n" +
+        'const name = "sealMarketingTemplateProof";\n' +
+        "export const note = name;"
+    )
+  );
+  assert.deepEqual(
+    quiet.filter((finding) => finding.rule === "template-seal"),
+    []
+  );
+});
+
+test("the declaring file may declare it and is not required to call it", () => {
+  const declared = checkProtectedTableWriters({
+    sources: [
+      {
+        path: "lib/marketingGuardCore.ts",
+        text: "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
+      },
+    ],
+  }).filter(
+    (finding) =>
+      finding.rule === "template-seal" &&
+      finding.path === "lib/marketingGuardCore.ts"
+  );
+  assert.deepEqual(declared, [], JSON.stringify(declared));
 });

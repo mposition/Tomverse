@@ -29,6 +29,17 @@
  *   digest check already catches an edit that changed the words; this catches
  *   the record of one, so the two answers cannot disagree.
  *
+ * **A proof is about the row as it was read, and only for about a minute.**
+ * Nothing here can stop the row moving afterwards: an edit, or the reusable
+ * marking being withdrawn, lands in another transaction. So the proof carries
+ * the `historyVersion` this walk saw, the Guard returns it in the decision's
+ * binding, and whoever writes the post makes that write conditional on the row
+ * still being at that version and still marked -- nought rows rather than a
+ * post nobody approved. The age bound in `lib/marketingGuardCore.ts` is the
+ * other half: it stops a proof being kept and used later. Neither replaces the
+ * other, and a caller that reads a template and publishes much later has to
+ * read it again.
+ *
  * **In S1 no template resolves.** Nothing writes `marketing_post.approve` or
  * `marketing_post.mark_reusable` -- those routes are S2 -- so every call
  * returns a refusal and `autonomous_eligible` is unreachable in production.
@@ -319,6 +330,15 @@ export async function loadApprovedTemplate(
       markedReusableAt: marking.createdAt,
       proof: sealMarketingTemplateProof({
         templateId: post.id,
+        // The scope the approval was given in. Without these the Guard
+        // compared a digest and nothing else, so one account's approval
+        // published from another account, in another language.
+        channelId: post.channelId,
+        locale: post.locale,
+        // The revision every check above was made against. The Guard hands it
+        // back in the decision's binding, and the publish makes its write
+        // conditional on the row still being at it.
+        historyVersion: post.historyVersion,
         approvedDigest: post.envelopeDigest,
         // Every check above passed, which is what "the slots are registry ids"
         // means for a post whose envelope digest equals its approved digest.

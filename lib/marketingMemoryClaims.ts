@@ -33,6 +33,8 @@
 // Neither half judges translation quality, and neither is a substitute for
 // someone reading the page. They catch the specific sentence §17 names.
 
+import { marketingClauseAsserts } from "@/lib/marketingNegation";
+
 /** The languages the forbidden-claim patterns below actually cover. */
 export const MEMORY_CLAIM_PATTERN_LANGUAGES = ["ko", "en"] as const;
 
@@ -194,57 +196,17 @@ export type ForbiddenClaimFinding = {
     match: string;
 };
 
-const SENTENCE_BOUNDARY = /[.!?\n。]/;
-
-/** English negators, which precede what they deny. */
-const PRECEDING_NEGATION =
-    /\b(not|never|isn't|aren't|wasn't|doesn't|don't|didn't|cannot|can't|won't)\b/i;
-
-/** Korean negators, which close the clause they deny. */
-const FOLLOWING_NEGATION = /(않|아닙니다|아니라|아니며|아닌|없습니다|없으며|못합니다)/;
-
 /**
  * The sentence a match sits in, plus whether that sentence asserts anything.
  *
- * Marketing pages carry the denial of every claim §17 forbids — "not
- * affiliated with or endorsed by OpenAI or Anthropic" is on the
- * ChatGPT-vs-Claude page today, and it is there precisely to avoid the claim.
- * A guard that reads a disclaimer as the thing it disclaims would force the
- * disclaimers off the page, which is the opposite of what §17 wants. An FAQ
- * question is treated the same way: "Is Tomverse affiliated with OpenAI?"
- * asserts nothing, and the answer below it is scanned on its own.
+ * `lib/marketingNegation.ts` owns this question now. It used to live here, and
+ * the Guard's minors rule wrote a second version of it as a fixed-length
+ * lookbehind -- so "청소년을 위한 도구가 아닙니다" was refused for saying the
+ * thing it denies, while "We do not lose files: we clone your memories." was
+ * read as one denial and reported nothing. One parser, two callers, and the
+ * clause boundaries written down once.
  */
-const assertsTheClaim = (text: string, matchIndex: number, match: string) => {
-    let start = matchIndex;
-    while (start > 0 && !SENTENCE_BOUNDARY.test(text[start - 1])) start -= 1;
-    let end = matchIndex + match.length;
-    while (end < text.length && !SENTENCE_BOUNDARY.test(text[end])) end += 1;
-
-    if (text[end] === "?") return false;
-
-    // The negation has to govern *this* clause. Scoped to the whole sentence,
-    // an unrelated denial earlier in it covered a claim made later:
-    // "We do not lose files, and we clone your memories." and
-    // "We never drop a message; we clone your memories." both read as denials
-    // and were not reported at all.
-    //
-    // Clause boundaries are the semicolon and the coordinating conjunctions --
-    // not the bare comma, which usually continues the predicate being denied:
-    // "not affiliated with, or endorsed by, OpenAI" is one denial and is on a
-    // public page today.
-    const sentenceBefore = text.slice(start, matchIndex);
-    const lastBoundary = Math.max(
-        sentenceBefore.lastIndexOf(";"),
-        ...[" and ", " but ", " while ", "그리고 ", "하지만 ", "，"].map((token) => {
-            const at = sentenceBefore.lastIndexOf(token);
-            return at === -1 ? -1 : at + token.length;
-        })
-    );
-    const before =
-        lastBoundary > 0 ? sentenceBefore.slice(lastBoundary) : sentenceBefore;
-    const after = text.slice(matchIndex + match.length, end);
-    return !PRECEDING_NEGATION.test(before) && !FOLLOWING_NEGATION.test(after);
-};
+const assertsTheClaim = marketingClauseAsserts;
 
 /**
  * The rule sources, copied at module load and never read from the export again.

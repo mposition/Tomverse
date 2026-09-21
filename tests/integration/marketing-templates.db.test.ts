@@ -369,6 +369,21 @@ test("a post approved and then marked reusable is a template", async () => {
       result.template.approvedAt.getTime(),
     "the marking is the later of the two decisions",
   );
+
+  // The proof carries the scope the approval was actually given in, and the
+  // revision every check above was made against. Without the first, one
+  // account's approval published from another account in another language;
+  // without the second, the publish has nothing to make its write conditional
+  // on and an edit landing in between goes out as approved words.
+  assert.equal(result.template.proof.templateId, post.id);
+  assert.equal(result.template.proof.channelId, row.id);
+  assert.equal(result.template.proof.locale, "en");
+  assert.equal(result.template.proof.historyVersion, 0);
+  assert.equal(result.template.proof.approvedDigest, DIGEST);
+  assert.ok(
+    result.template.proof.provenAt <= Date.now(),
+    "the proof is stamped when it is minted, not by whoever asked for it",
+  );
 });
 
 test("an approved post that nobody marked reusable is not a template", async () => {

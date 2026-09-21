@@ -167,10 +167,13 @@
       "id": "free.withCondition",
       "ruleId": "rule.free-wording",
       "input": "Start free with monthly credits included.",
-      "note": "the credit condition is in the same post, which §7.2 rule 4 requires",
+      "note": "the credit allowance is declared as a plan claim and said in the post, which §7.2 rule 4 requires",
       "expect": {
         "verdict": "approval_required"
-      }
+      },
+      "claims": [
+        "plan"
+      ]
     },
     {
       "id": "hygiene.controlCharacter",
@@ -294,6 +297,42 @@
       "ruleId": "rule.free-wording",
       "input": "Enjoy freedom to compare answers.",
       "note": "freedom is not free; the English terms need boundaries",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "uniqueness.koreanIdentifier",
+      "ruleId": "rule.refuted-superiority",
+      "input": "각 요청에는 유일한 식별자가 있으며 이 도구가 이를 표시합니다.",
+      "note": "a sentence about request identifiers, whose 도구 sits two clauses away",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.notIntendedFor",
+      "ruleId": "rule.australia-minors",
+      "input": "Tomverse is not intended for children.",
+      "note": "the safety notice, with the negator further away than a lookbehind reaches",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.twoChineseSentences",
+      "ruleId": "hygiene.url_like",
+      "input": "比较答案。然后决定。",
+      "note": "an ideographic stop between two sentences is punctuation, not a host separator",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.chineseThenEnglish",
+      "ruleId": "hygiene.url_like",
+      "input": "比较答案。Then decide.",
+      "note": "the same, where the next sentence happens to start with Latin letters",
       "expect": {
         "verdict": "approval_required"
       }

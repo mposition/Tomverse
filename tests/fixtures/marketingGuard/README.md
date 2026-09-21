@@ -15,6 +15,14 @@ benign case is a rule nobody has checked for false positives, and a filter that
 has only ever been tested on what it should catch is a filter that catches
 everything.
 
+A case may carry a `claims` array of claim kinds -- `["plan"]`, say. The
+harness turns each one into a resolved claim the draft declares, which is what
+a case about free wording needs: docs/policy/marketing-automation.md §7.2
+rule 4 wants the credit allowance as a
+claim rather than as a word somebody typed, so "Start free. Credits never run
+out." is a bypass case and the same sentence with a plan claim behind it is
+not. Almost every case leaves it out, because the corpus is about the words.
+
 `tests/marketingGuardCorpus.test.mjs` asserts both files against
 `guardDraft()`, and fails if any rule id in `lib/marketingGuardRules.ts` is
 missing from either file.

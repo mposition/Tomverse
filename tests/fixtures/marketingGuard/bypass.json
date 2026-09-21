@@ -611,6 +611,182 @@
           "hygiene"
         ]
       }
+    },
+    {
+      "id": "rank.middleDotChinese",
+      "ruleId": "rule.rank-claim",
+      "input": "销量第·一。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "rank.middleDotHash",
+      "ruleId": "rule.rank-claim",
+      "input": "#·1 multi-model workspace.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "aiReview.emDashFactCheck",
+      "ruleId": "rule.ai-review-contract",
+      "input": "Every answer is fact—checked.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.middleDotClone",
+      "ruleId": "rule.memory-claim",
+      "input": "We clo·ne your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.colonSplice",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files: we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.commaSplice",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files, we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "china.traditional",
+      "ruleId": "rule.china-mainland",
+      "input": "Tomverse 在中國大陸可用。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "urgency.traditional",
+      "ruleId": "rule.australia-urgency",
+      "input": "僅限今天，立即開始。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.traditional",
+      "ruleId": "rule.australia-minors",
+      "input": "青少年專用學習工具。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.directAddress",
+      "ruleId": "rule.australia-minors",
+      "input": "Children, sign up and try it.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "minors.byAge",
+      "ruleId": "rule.australia-minors",
+      "input": "Built for 12-year-olds.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "free.creditsNeverRunOut",
+      "ruleId": "rule.free-wording",
+      "input": "Start free. Credits never run out.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "free.creditsPowerTheService",
+      "ruleId": "rule.free-wording",
+      "input": "Free forever; credits power the service.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "free.traditional",
+      "ruleId": "rule.free-wording",
+      "input": "免費使用，每月包含積分。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopDomain",
+      "ruleId": "hygiene.url_like",
+      "input": "访问例子。中国",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopAscii",
+      "ruleId": "hygiene.url_like",
+      "input": "Visit example。com",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
     }
   ]
 }

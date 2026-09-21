@@ -619,6 +619,57 @@ const isInlinePrismaSql = (node) =>
   node.tag.expression.text === "Prisma" &&
   node.tag.name.text === "sql";
 
+/** The function whose call sites the `template-seal` rule counts. */
+const TEMPLATE_SEAL_NAME = "sealMarketingTemplateProof";
+
+/** The module that declares it, matched on the specifier's last segment. */
+const TEMPLATE_SEAL_MODULE = "marketingGuardCore";
+
+/** The one file entitled to declare it. A second declaration is a second seal. */
+const TEMPLATE_SEAL_DECLARED_IN = "lib/marketingGuardCore.ts";
+
+const specifierEndsWithSealModule = (specifier) =>
+  specifier.replace(/[.][cm]?[jt]sx?$/, "").split("/").pop() ===
+  TEMPLATE_SEAL_MODULE;
+
+/**
+ * What a reference to the seal function is doing.
+ *
+ * Counting the name is not counting the call. The review put an alias in an
+ * allowed file -- `export const mint = sealMarketingTemplateProof` -- and
+ * called `mint()` from somewhere else, and the count rule saw two mentions in
+ * the file it expected two mentions in and nothing anywhere else. So each
+ * reference is classified, and everything that is not a declaration, an import
+ * under the same name, or a direct call is an escape: the value has left,
+ * and where it goes is no longer visible to a rule that reads one file.
+ */
+const classifySealReference = (node) => {
+  const parent = node.parent;
+  if (!parent) return "escape";
+
+  if (
+    (ts.isFunctionDeclaration(parent) || ts.isVariableDeclaration(parent)) &&
+    parent.name === node
+  ) {
+    return "declaration";
+  }
+
+  if (ts.isImportSpecifier(parent)) {
+    // `import { seal as mint }` renames it, and the rest of the file then
+    // calls a name this check is not looking for.
+    const renamed =
+      parent.propertyName !== undefined && parent.name.text !== node.text;
+    return renamed ? "escape" : "import";
+  }
+
+  // `export { seal }` and `export { seal as mint }` both hand it on.
+  if (ts.isExportSpecifier(parent)) return "escape";
+
+  if (ts.isCallExpression(parent) && parent.expression === node) return "call";
+
+  return "escape";
+};
+
 /**
  * Walks one source file once and returns what the rules need.
  */
@@ -636,12 +687,41 @@ export const analyseSource = (path, text) => {
   const dynamicDelegateUses = [];
   const literals = [];
   const runtimeSql = [];
+  const sealCalls = [];
+  const sealEscapes = [];
   let importsDriver = false;
 
   const addRuntimeSql = (kind, node) =>
     runtimeSql.push({ kind, line: lineOf(sourceFile, node) });
 
   const visit = (node) => {
+    if (ts.isIdentifier(node) && node.text === TEMPLATE_SEAL_NAME) {
+      const role = classifySealReference(node);
+      const line = lineOf(sourceFile, node);
+      if (role === "call") sealCalls.push({ line });
+      if (role === "escape") {
+        sealEscapes.push({ line, detail: `${TEMPLATE_SEAL_NAME} used as a value` });
+      }
+      if (role === "declaration" && path !== TEMPLATE_SEAL_DECLARED_IN) {
+        sealEscapes.push({ line, detail: `${TEMPLATE_SEAL_NAME} declared here too` });
+      }
+    }
+
+    // `export * from "./marketingGuardCore"` re-exports the seal under this
+    // module's name without ever writing it down.
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.exportClause &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      specifierEndsWithSealModule(node.moduleSpecifier.text)
+    ) {
+      sealEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `re-exports everything from ${node.moduleSpecifier.text}`,
+      });
+    }
+
     if (
       ts.isStringLiteral(node) ||
       ts.isNoSubstitutionTemplateLiteral(node) ||
@@ -824,6 +904,8 @@ export const analyseSource = (path, text) => {
     dynamicDelegateUses,
     literalText: literals.join("\n"),
     runtimeSql,
+    sealCalls,
+    sealEscapes,
     importsDriver,
   };
 };
@@ -964,19 +1046,24 @@ export const RETENTION_SETTING_TOKENS = [
  * it, and the function is exported. So the call sites are counted here, which
  * is the same answer this file already gives for an audit row: the question is
  * not what the code does but who is allowed to do it.
+ *
+ * **Calls, classified from the syntax tree -- not mentions.** The first
+ * version counted the name as a string, and the review walked through it: put
+ * `export const mint = sealMarketingTemplateProof` in an allowed file, call
+ * `mint()` from anywhere, and every count still matched. So each reference is
+ * one of four things. A declaration, in the one file entitled to declare it.
+ * An import under the same name. A direct call, which is what the allowlist
+ * counts. And anything else -- an alias, a re-export, a namespace call, a
+ * renamed import, `export *` from the declaring module -- is an escape, which
+ * is a finding whatever the allowlist says, because after it the value is
+ * somewhere this rule cannot see.
  */
 export const TEMPLATE_SEAL_ALLOWLIST = [
   {
-    path: "lib/marketingGuardCore.ts",
+    path: "lib/marketingTemplates.ts",
     count: 1,
     reason:
-      "Where the function is declared. Declaring it is not calling it.",
-  },
-  {
-    path: "lib/marketingTemplates.ts",
-    count: 2,
-    reason:
-      "The loader that walks the approval chain, which is the only code entitled to say a template stood: the import and the one call.",
+      "The loader that walks the approval chain, which is the only code entitled to say a template stood.",
   },
 ];
 
@@ -1009,7 +1096,7 @@ const retentionSettingMentions = (text) =>
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
   const retentionSettingByPath = new Map();
-  const templateSealByPath = new Map();
+  const sealCallsByPath = new Map();
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
@@ -1020,9 +1107,6 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
     const retentionMentions = retentionSettingMentions(text);
     if (retentionMentions > 0) retentionSettingByPath.set(path, retentionMentions);
-
-    const sealMentions = (text.match(/sealMarketingTemplateProof/g) ?? []).length;
-    if (sealMentions > 0) templateSealByPath.set(path, sealMentions);
 
     if (path.endsWith(".sql")) {
       const sql = sqlWithoutComments(text);
@@ -1071,6 +1155,18 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
     for (const hit of rawSqlTableHits(analysis.literalText)) {
       rawSqlHits.set(keyOf(path, hit.table), { path, ...hit });
+    }
+
+    if (analysis.sealCalls.length > 0) {
+      sealCallsByPath.set(path, analysis.sealCalls.length);
+    }
+    for (const escape of analysis.sealEscapes) {
+      findings.push({
+        rule: "template-seal",
+        path,
+        line: escape.line,
+        detail: escape.detail,
+      });
     }
 
     if (analysis.runtimeSql.length > 0) runtimeSqlByPath.set(path, analysis.runtimeSql);
@@ -1184,21 +1280,21 @@ export const checkProtectedTableWriters = ({ sources }) => {
   const allowedSeal = new Map(
     TEMPLATE_SEAL_ALLOWLIST.map((entry) => [entry.path, entry])
   );
-  for (const [path, mentions] of templateSealByPath) {
+  for (const [path, calls] of sealCallsByPath) {
     const expected = allowedSeal.get(path)?.count ?? 0;
-    if (mentions === expected) continue;
+    if (calls === expected) continue;
     findings.push({
       rule: "template-seal",
       path,
-      detail: `names sealMarketingTemplateProof ${mentions} time(s), allowlist says ${expected}`,
+      detail: `calls sealMarketingTemplateProof ${calls} time(s), allowlist says ${expected}`,
     });
   }
   for (const entry of TEMPLATE_SEAL_ALLOWLIST) {
-    if (templateSealByPath.has(entry.path)) continue;
+    if (sealCallsByPath.has(entry.path)) continue;
     findings.push({
       rule: "template-seal",
       path: entry.path,
-      detail: `allowlist says ${entry.count} mention(s), found 0${missingNote(entry.path)}; remove the entry`,
+      detail: `allowlist says ${entry.count} call(s), found 0${missingNote(entry.path)}; remove the entry`,
     });
   }
 
