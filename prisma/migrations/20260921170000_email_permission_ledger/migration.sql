@@ -260,9 +260,32 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_al
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_sealedAt_order_check"
     CHECK ("sealedAt" IS NULL OR "sealedAt" >= "createdAt");
 
--- A verdict may not be handed to a provider before its evidence is closed.
-ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_submitted_after_sealed_check"
-    CHECK ("providerSubmittedAt" IS NULL OR ("sealedAt" IS NOT NULL AND "providerSubmittedAt" >= "sealedAt"));
+-- What a provider submission means, written down.
+--
+-- "After the evidence closed" was not enough on its own: it let an enqueue
+-- verdict record a submission, and it let a refused one. Neither can happen --
+-- the message is handed over once, at send, only when the verdict allowed it
+-- and only after suppression was read -- so a row saying otherwise is a row
+-- about a send that did not occur, sitting in the ledger a regulator reads.
+--
+-- The timestamps are ordered for the same reason. `suppressionCheckedAt` is
+-- the gap section 7.4 is about; if it could sit after the handover the gap
+-- would be unmeasurable, which is the one thing this column exists for.
+ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_submission_check"
+    CHECK (
+        "providerSubmittedAt" IS NULL
+        OR (
+            "phase" = 'send'
+            AND "allowed" = TRUE
+            AND "deliveryId" IS NOT NULL
+            AND "sealedAt" IS NOT NULL
+            AND "suppressionCheckedAt" IS NOT NULL
+            AND "suppressionCheckedAt" >= "evaluatedAt"
+            AND "sealedAt" >= "evaluatedAt"
+            AND "providerSubmittedAt" >= "sealedAt"
+            AND "providerSubmittedAt" >= "suppressionCheckedAt"
+        )
+    );
 
 -- Exactly one source per evidence row. A row citing both would be one fact in
 -- two ledgers, which is the thing the three-layer split exists to prevent; a
@@ -327,18 +350,49 @@ CREATE TRIGGER "email_permission_event_append_only"
     BEFORE UPDATE OR DELETE ON "EmailPermissionEvent"
     FOR EACH ROW EXECUTE FUNCTION "email_permission_event_append_only"();
 
+-- A withdrawal is append-only, and it can only withdraw something that was
+-- given. An approval is not given until it is sealed -- before that it is a
+-- draft being assembled inside one transaction -- so a revocation of an
+-- unsealed row, or one dated before the seal, describes an act that could not
+-- have happened. The ordering matters beyond tidiness: "was this approval live
+-- when that message went out" is answered by comparing the send against
+-- `revokedAt`, and a timestamp that precedes the approval makes every such
+-- comparison wrong in the same direction.
 CREATE FUNCTION "email_send_approval_revocation_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    sealed TIMESTAMP(3);
 BEGIN
-    RAISE EXCEPTION 'EmailSendApprovalRevocation is append-only (%).', TG_OP
-        USING ERRCODE = 'check_violation';
+    IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'EmailSendApprovalRevocation is append-only (%).', TG_OP
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT a."sealedAt" INTO sealed
+        FROM "EmailSendApproval" a
+        WHERE a."id" = NEW."approvalId"
+        FOR SHARE;
+
+    IF sealed IS NULL THEN
+        RAISE EXCEPTION 'EmailSendApproval % is not sealed, so there is nothing to withdraw.',
+            NEW."approvalId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW."revokedAt" < sealed THEN
+        RAISE EXCEPTION 'EmailSendApprovalRevocation cannot precede the seal of approval %.',
+            NEW."approvalId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
 END;
 $$;
 
 CREATE TRIGGER "email_send_approval_revocation_append_only"
-    BEFORE UPDATE OR DELETE ON "EmailSendApprovalRevocation"
+    BEFORE INSERT OR UPDATE OR DELETE ON "EmailSendApprovalRevocation"
     FOR EACH ROW EXECUTE FUNCTION "email_send_approval_revocation_append_only"();
 
 -- Sealing. Before sealedAt is set the row is a draft being assembled inside one

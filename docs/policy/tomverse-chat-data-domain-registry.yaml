@@ -1324,6 +1324,338 @@ domains:
       holds the consent wording's hash and a screen identifier, never the
       request.
 
+# Twenty-one tables the actor rule named on 2026-09-21.
+  #
+  # None of them is new. What was new is the rule: it had been reading one
+  # exact column name, `approvedBy`, and everything that spelled its operator
+  # column differently -- `approvedByEmail`, `reviewerEmail`, `actorEmail` --
+  # was invisible to it. The rule now reads any address column, the same
+  # pattern `isDirectIdentifier` already used for minimisation, so a column
+  # this file calls a direct identifier in one place cannot be invisible in
+  # the other.
+  #
+  # They are registered `unverified` on every axis. That is not a placeholder
+  # and not an exemption: it is what this registry says when nobody has
+  # established what happens yet, it keeps each table inside every count and
+  # workflow, and it holds PRIVACY-01/02 blocked -- which they already were.
+  # The alternative was twenty-one invented owners, legal bases and retention
+  # periods, and a registry whose whole value is that it holds no claims
+  # cannot be filled with plausible ones.
+  #
+  # Each row comes off `unverified` when somebody decides it.
+  - domain: adminActionApproval
+    prismaModel: AdminActionApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The administrator who requested a second-person approval and the one who granted it, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminAlertPolicy
+    prismaModel: AdminAlertPolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed an alerting policy, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminNotificationLog
+    prismaModel: AdminNotificationLog
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who an operational notification was sent to or about, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminOperationReport
+    prismaModel: AdminOperationReport
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who ran an operational report, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminOperationalCheckpoint
+    prismaModel: AdminOperationalCheckpoint
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who recorded an operational checkpoint, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminProviderIncident
+    prismaModel: AdminProviderIncident
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who opened, updated or closed a provider incident, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminRetentionRun
+    prismaModel: AdminRetentionRun
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who started a retention run, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminSlackTemplate
+    prismaModel: AdminSlackTemplate
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a Slack notification template, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailCampaign
+    prismaModel: EmailCampaign
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who created and who approved a campaign, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailCampaignAttestation
+    prismaModel: EmailCampaignAttestation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who attested to a campaign's audience or copy, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailLoginAttempt
+    prismaModel: EmailLoginAttempt
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+    note: >-
+      The address a login code was requested for, which is the person themselves rather than an operator -- and which is why this one is not an actor row but is undecided in the same way. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailPolicyVersion
+    prismaModel: EmailPolicyVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who approved an email policy version, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: infrastructureCreditConfig
+    prismaModel: InfrastructureCreditConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed the infrastructure credit configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelLifecycleWorkItem
+    prismaModel: ModelLifecycleWorkItem
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The reviewer and the owner of a model lifecycle item, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelLifecycleWorkItemEvent
+    prismaModel: ModelLifecycleWorkItemEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who moved a model lifecycle item between states, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelRegistryEntry
+    prismaModel: ModelRegistryEntry
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a model's registry row, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerBillingConfig
+    prismaModel: ProviderBillingConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed a provider's billing configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerCreditConfig
+    prismaModel: ProviderCreditConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed a provider's credit configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerHealthCheck
+    prismaModel: ProviderHealthCheck
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who ran or acknowledged a provider health check, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: stripeWebhookEventLog
+    prismaModel: StripeWebhookEventLog
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who replayed a Stripe webhook event, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: templateVersion
+    prismaModel: TemplateVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who published an email template version, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
   - domain: emailPermissionEvent
     prismaModel: EmailPermissionEvent
     userLinkageRole: subject
@@ -1367,7 +1699,9 @@ domains:
     retentionPolicy: legal_hold
     implementationStatus: implemented
     subjectReference:
-      kind: none
+      kind: child_rows
+      childModel: EmailSendApprovalMember
+      childColumn: approvalId
     minimisationFields:
       - approvedByEmail
     retention:
@@ -1496,10 +1830,11 @@ domains:
       nextReviewAt: "2026-11-21"
     inUnifiedExport: included_filtered
     note: >-
-      Effectively immutable: after insert the row accepts exactly one of three
+      Effectively immutable: after insert the row accepts exactly one of four
       transitions, each once -- the account detaching (the SET NULL recorded
-      here), the evidence set sealing, and the provider submission being
-      recorded. Anything else raises. The delivery link is SET NULL rather than
+      here), the delivery detaching when it is purged, the evidence set
+      sealing, and the provider submission being recorded. Anything else
+      raises. The delivery link is SET NULL rather than
       RESTRICT because a delivery is purged on its own schedule and the verdict
       is what outlives it: losing the message must not take the reason it was
       permitted with it.

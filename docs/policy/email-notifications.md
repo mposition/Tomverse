@@ -1442,13 +1442,16 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
 정합니다.
 
 - **classification은 `marketing`입니다**(승인 A, 제품 소식 재설계 초안 §3).
-- **어느 purpose identifier가 이 행인지는 아직 정해지지 않았습니다.** 오늘 있는 것은
-  `product_updates`(동의 필수)이고, 초안 §3은 `release_notes`를 **새로 만든다**고
-  적으면서 `product_updates`를 언급하지 않습니다. 둘이 같은 것인지, 하나가 다른
-  하나를 대체하는지, 나란히 서는지는 **S3의 purpose 분류표가 정합니다.** 여기서
-  정하지 않는 이유는 그것이 철회 대상을 가르는 값이기 때문입니다 —
-  `withdrawAllMarketing()`이 그 표로 대상을 고릅니다. 분류가 `marketing`이라는
-  것은 어느 쪽이 되든 바뀌지 않습니다.
+- **이 행의 purpose identifier는 `product_updates`입니다.** v29를 쓸 때는
+  열려 있었고 — 초안 §3이 `release_notes`를 **새로 만든다**고 적으면서
+  `product_updates`를 언급하지 않았습니다 — **S3의 purpose 분류표가 닫았습니다**
+  (10.2.1). 새 purpose를 만들지 않은 이유는 그쪽이 기존 선택을 데려오지 못하기
+  때문입니다: 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되고, 그것이
+  불변식 5가 막으려는 실패입니다. 초안의 이름은
+  `lib/emailPreferenceCore.ts`의 `draftPurposeName`과 `purposeForDraftName()`이
+  해석합니다. 이 값이 철회 대상을 가르므로 — `withdrawAllMarketing()`이 그 표로
+  대상을 고릅니다 — 정해진 것이 중요하고, 분류가 `marketing`이라는 것은 그와
+  무관하게 참이었습니다.
   이 표는 한때 `service(동의 기반)`이라고 적었고 그것은 **우회로**였습니다:
   `classification === "marketing"` **하나**가 발송 스트림·kill switch·한국
   `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를 켜므로,

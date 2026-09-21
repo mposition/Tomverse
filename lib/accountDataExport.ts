@@ -607,6 +607,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
           select: {
             approvalType: true,
             purposeKey: true,
+            ruleKey: true,
+            ruleVersion: true,
             country: true,
             obligationKey: true,
             approvedAt: true,

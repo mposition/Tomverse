@@ -73,10 +73,25 @@ const ALLOWED_LINKAGE_ROLES = new Set(["subject", "actor"]);
 // here, so the reference cannot point at a table nothing grades. Saying `none`
 // for them would have been false, and `untyped_target` describes a pair of
 // columns they do not have.
+//
+// `child_rows` is the mirror of `parent_row` and is checkable the same way:
+// EmailSendApproval is about the accounts in its cohort, and the cohort is a
+// real table with a real foreign key back to it, so the reference names both
+// and the child must be registered here. `none` would have been false --
+// "this row is about nobody" -- and `parent_row` points the wrong way.
+//
+// `unverified` is the honest state when nobody has established the path yet.
+// It is not an exemption: the row is still counted, still blocks PRIVACY-01/02
+// through its own unverified axes, and still appears in the undecided list. It
+// exists because the alternative on 2026-09-21 was twenty-one invented
+// reference paths, and a registry whose value is that it holds no claims
+// cannot be filled with plausible ones.
 const ALLOWED_SUBJECT_REFERENCE_KINDS = new Set([
   "untyped_target",
   "parent_row",
+  "child_rows",
   "none",
+  "unverified",
 ]);
 const ALLOWED_SUBJECT_ACTIONS = new Set(["delete", "retain"]);
 
@@ -119,6 +134,7 @@ const fail = (message) => errors.push(message);
 
 /** parent_row references, checked once every row has been read. */
 const parentReferences = [];
+const childReferences = [];
 
 const isFilledString = (value) => typeof value === "string" && value.trim() !== "";
 
@@ -174,18 +190,28 @@ const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map
 // both immutable, both deliberately without a User relation for the reason
 // above -- passed the sweep as if they held nothing.
 //
-// What replaces the one spelling is a pair, not a wider name match. A bare
-// `<verb>ById` is ambiguous: `MobileRefreshRotation.supersededById` points at
-// another token row and `AmuxExecutionAttempt.endedBy` names a worker, and
-// reading either as a person would put rows in this registry that hold none.
-// An address is not ambiguous -- `<verb>ByEmail` is a person, always -- so a
-// model counts when it carries one, and its matching `<verb>ById` is then the
-// same person's id rather than a pointer. Naming the actor column something
-// else no longer helps, because the address beside it is what the rule reads.
-const ACTOR_EMAIL_COLUMN = /^\s{2}(\w+)ByEmail\s+String\b/gm;
+// What replaces the one spelling is the address, not a wider name match on the
+// id. A bare `<verb>ById` is ambiguous: `MobileRefreshRotation.supersededById`
+// points at another token row and `AmuxExecutionAttempt.endedBy` names a
+// worker, and reading either as a person would put rows in this registry that
+// hold none. An address is never ambiguous, so that is what the rule reads --
+// and it reads *every* address column, not only `<verb>ByEmail`. Scoping it to
+// that one shape was the same mistake one size larger: it would have left
+// `ModelLifecycleWorkItem.reviewerEmail`, `ownerEmail` and
+// `ModelLifecycleWorkItemEvent.actorEmail` outside the registry while looking
+// like it had closed the hole.
+//
+// The pattern is the one `isDirectIdentifier` already uses for minimisation,
+// so a column this file calls a direct identifier in one place cannot be
+// invisible in the other.
+const ADDRESS_COLUMN = /^\s{2}(\w+)\s+String\b/gm;
 const holdsActorIdentity = (body) => {
-  ACTOR_EMAIL_COLUMN.lastIndex = 0;
-  return ACTOR_EMAIL_COLUMN.test(body);
+  ADDRESS_COLUMN.lastIndex = 0;
+  let match;
+  while ((match = ADDRESS_COLUMN.exec(body)) !== null) {
+    if (DIRECT_IDENTIFIER_PATTERN.test(match[1])) return true;
+  }
+  return false;
 };
 const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
 const holdsUserData = new Set(
@@ -339,6 +365,27 @@ for (const row of registry.domains) {
         fail(`${model}: subjectReference.parentModel is missing.`);
       } else {
         parentReferences.push({ model, parentModel: reference.parentModel });
+      }
+    } else if (reference.kind === "child_rows") {
+      const childModel = reference.childModel;
+      const childColumn = reference.childColumn;
+      if (!isFilledString(childModel)) {
+        fail(`${model}: subjectReference.childModel is missing.`);
+      } else if (!columnsByModel.has(childModel)) {
+        fail(
+          `${model}: subjectReference.childModel names "${childModel}", which is not a model.`
+        );
+      } else {
+        const childColumns = columnsByModel.get(childModel) ?? new Map();
+        if (!isFilledString(childColumn)) {
+          fail(`${model}: subjectReference.childColumn is missing.`);
+        } else if (!childColumns.has(childColumn)) {
+          fail(
+            `${model}: subjectReference.childColumn names "${childColumn}", which is not a ` +
+              `column of ${childModel}.`
+          );
+        }
+        childReferences.push({ model, childModel });
       }
     } else if (reference.kind === "untyped_target") {
       const columns = columnsByModel.get(model) ?? new Map();
@@ -641,6 +688,15 @@ for (const { model, parentModel } of parentReferences) {
   }
 }
 
+for (const { model, childModel } of childReferences) {
+  if (!registered.has(childModel)) {
+    fail(
+      `${model}: subjectReference.childModel "${childModel}" is not in the registry, so the ` +
+        "subject is reached through a table whose own deletion path is unrecorded."
+    );
+  }
+}
+
 // The promise itself: a new table cannot escape the privacy workflows.
 //
 // Widened on 2026-08-27 from the relation rule to the column rule, which is the
@@ -652,71 +708,16 @@ for (const { model, parentModel } of parentReferences) {
 // letting the table escape. With those two in, the delta between the two rules
 // is empty, so the narrower rule was protecting nothing except the next table
 // to drop a relation while keeping the column.
-// What the widened actor rule found beside the two tables it was widened for.
-//
-// On 2026-09-21 the rule stopped reading one column name and started reading
-// the pair `<verb>ById` + `<verb>ByEmail`. It immediately named eighteen
-// tables that have been holding an operator's address outside this registry --
-// admin approvals and alerts, provider configuration and incidents, Stripe
-// replays, campaign attestations, template publication. None of them is new;
-// the rule that would have caught them is.
-//
-// They are listed rather than registered because a registry row is a decision:
-// an owner, a legal basis, a retention period, a review date, and for an actor
-// row the path to the person it is *about*. Eighteen of those are not a
-// reviewer's to invent, and writing eighteen plausible rows would put claims in
-// a file whose value is that it holds none.
-//
-// So the list is the finding, and it is a ratchet: **it may not grow.** A new
-// table holding an operator's address fails the build, which is the behaviour
-// the widening was for. Each line comes off this list when its row is written.
-//
-// Follow-up: register these eighteen, or record for each one why an operator's
-// address in it is not a data domain. Until then PRIVACY-01/02 stay blocked,
-// which they already are.
-const ACTOR_IDENTITY_BACKLOG = new Set([
-  "AdminActionApproval",
-  "AdminAlertPolicy",
-  "AdminNotificationLog",
-  "AdminOperationReport",
-  "AdminOperationalCheckpoint",
-  "AdminProviderIncident",
-  "AdminRetentionRun",
-  "AdminSlackTemplate",
-  "EmailCampaign",
-  "EmailCampaignAttestation",
-  "EmailPolicyVersion",
-  "InfrastructureCreditConfig",
-  "ModelRegistryEntry",
-  "ProviderBillingConfig",
-  "ProviderCreditConfig",
-  "ProviderHealthCheck",
-  "StripeWebhookEventLog",
-  "TemplateVersion",
-]);
-
-const backlogSeen = [...holdsUserData]
-  .filter((model) => ACTOR_IDENTITY_BACKLOG.has(model) && !registered.has(model))
-  .sort();
-
-for (const model of ACTOR_IDENTITY_BACKLOG) {
-  if (registered.has(model)) {
-    fail(
-      `${model} is registered now, so take it out of ACTOR_IDENTITY_BACKLOG in ` +
-        `scripts/check-data-domain-registry.mjs. A list that keeps names it no ` +
-        `longer excuses stops being a list of what is outstanding.`
-    );
-  } else if (!holdsUserData.has(model)) {
-    fail(
-      `${model} is in ACTOR_IDENTITY_BACKLOG but no longer holds an operator's ` +
-        `address. Take it out rather than leaving an excuse for a table that ` +
-        `does not need one.`
-    );
-  }
-}
-
+// 2026-09-21: the rule above named twenty models that had been holding an
+// address outside this registry. They were listed in an exemption set for one
+// review round, on the argument that a row is a decision and twenty of them
+// were not a reviewer's to invent. The review ruled that it was suppression,
+// and it was right: an exempted model leaves the registry's own counts and its
+// undecided list, so the gap becomes invisible again -- which is the failure
+// this whole derivation exists to prevent. `unverified` is what this registry
+// says when the decision is outstanding, it costs no invented legal basis, and
+// it keeps the table in every count. They are registered that way.
 for (const model of holdsUserData) {
-  if (!registered.has(model) && ACTOR_IDENTITY_BACKLOG.has(model)) continue;
   if (!registered.has(model)) {
     fail(
       `${model} holds user data but is not in the registry. Add a row with its deletion action ` +
@@ -759,14 +760,6 @@ if (planned.length > 0) {
   console.log(
     `   ${planned.length} domain(s) are decided but not yet built -- ` +
       `${planned.map((row) => row.domain).join(", ")}. PRIVACY-01 stays blocked until each ships.`
-  );
-}
-if (backlogSeen.length > 0) {
-  console.log(
-    `   ${backlogSeen.length} model(s) hold an operator's address and have no row ` +
-      `yet -- ${backlogSeen.join(", ")}. They are named in ` +
-      "ACTOR_IDENTITY_BACKLOG, which cannot grow; each comes off it when its " +
-      "row is written."
   );
 }
 if (unverifiedDeletion > 0 || unverifiedExport > 0) {

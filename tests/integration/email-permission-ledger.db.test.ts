@@ -4,7 +4,11 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import { decisionAllowed } from "@/lib/emailPermissionLedgerCore";
-import { EMAIL_PURPOSE_CLASSIFICATION } from "@/lib/emailPreferenceCore";
+import {
+  EMAIL_CLASSIFICATIONS,
+  EMAIL_PURPOSES,
+  EMAIL_PURPOSE_CLASSIFICATION,
+} from "@/lib/emailPreferenceCore";
 
 /**
  * The permission ledger's constraints and triggers.
@@ -631,14 +635,98 @@ test("a verdict takes exactly one transition, each once", async () => {
   );
 });
 
-test("a verdict cannot reach the provider before its evidence closes", async () => {
-  const decision = await seedDecision();
+test("a provider submission has to describe a send that could have happened", async () => {
+  // Handing a message over happens once, at send, only when the verdict
+  // allowed it, only for a real delivery, and only after suppression was read.
+  // A row saying otherwise is a record of a send that did not occur, sitting
+  // in the ledger a regulator reads.
+  const delivery = await seedDelivery();
+  const evaluatedAt = new Date("2026-09-21T00:00:00.000Z");
+  const later = (ms: number) => new Date(evaluatedAt.getTime() + ms);
+
+  const complete = {
+    deliveryId: delivery.id,
+    phase: "send",
+    allowed: true,
+    legalAllowed: true,
+    blockers: [],
+    evaluatedAt,
+    suppressionCheckedAt: later(1000),
+    sealedAt: later(2000),
+    providerSubmittedAt: later(3000),
+  };
+
+  // Each thing the constraint requires, missing one at a time.
+  const broken = [
+    { ...complete, phase: "enqueue" },
+    { ...complete, allowed: false, legalAllowed: false, blockers: ["objected"] },
+    { ...complete, deliveryId: null },
+    { ...complete, sealedAt: null },
+    { ...complete, suppressionCheckedAt: null },
+    // And each ordering, reversed.
+    { ...complete, suppressionCheckedAt: later(-1000) },
+    { ...complete, sealedAt: later(-1000) },
+    { ...complete, providerSubmittedAt: later(1500) },
+  ];
+  for (const row of broken) {
+    await assert.rejects(seedDecision(row), /submission_check|sealedAt_order_check/);
+  }
+
+  const written = await seedDecision(complete);
+  assert.notEqual(written.providerSubmittedAt, null);
+});
+
+test("a withdrawal cannot precede the approval it withdraws", async () => {
+  // An approval is not given until it is sealed -- before that it is a draft
+  // being assembled. "Was this approval live when that message went out" is
+  // answered by comparing the send against revokedAt, and a timestamp before
+  // the seal makes every such comparison wrong in the same direction.
+  const approval = await seedApproval();
+
   await assert.rejects(
-    prisma.emailPermissionDecision.update({
-      where: { id: decision.id },
-      data: { providerSubmittedAt: new Date() },
+    prisma.emailSendApprovalRevocation.create({
+      data: {
+        approvalId: approval.id,
+        revokedById: "owner",
+        revokedByEmail: "owner@example.test",
+        revokedAt: new Date(),
+        reason: "withdrawn before it was given",
+      },
     }),
-    /submitted_after_sealed_check/
+    /not sealed/
+  );
+
+  const sealedAt = new Date();
+  await prisma.emailSendApproval.update({
+    where: { id: approval.id },
+    data: { sealedAt },
+  });
+
+  await assert.rejects(
+    prisma.emailSendApprovalRevocation.create({
+      data: {
+        approvalId: approval.id,
+        revokedById: "owner",
+        revokedByEmail: "owner@example.test",
+        revokedAt: new Date(sealedAt.getTime() - 1000),
+        reason: "backdated",
+      },
+    }),
+    /cannot precede the seal/
+  );
+
+  await prisma.emailSendApprovalRevocation.create({
+    data: {
+      approvalId: approval.id,
+      revokedById: "owner",
+      revokedByEmail: "owner@example.test",
+      revokedAt: sealedAt,
+      reason: "first organic signup arrived",
+    },
+  });
+  assert.equal(
+    await prisma.emailSendApprovalRevocation.count({ where: { approvalId: approval.id } }),
+    1
   );
 });
 
@@ -759,33 +847,42 @@ test("the purpose list is closed too", async () => {
   await assert.rejects(seedDecision({ purpose: "" }), /purpose_check/);
 });
 
-test("a purpose can only carry its own classification", async () => {
-  // This is the S0 defect, one verdict at a time: product news written down
-  // as service is a row saying the marketing switches did not apply to
-  // marketing mail.
-  const wrong = [
-    { purpose: "product_updates", classification: "service" },
-    { purpose: "product_updates", classification: "transactional" },
-    { purpose: "newsletter", classification: "service" },
-    { purpose: "promotions", classification: "transactional" },
-    { purpose: "security", classification: "marketing" },
-    { purpose: "billing", classification: "service" },
-    { purpose: "service_status", classification: "marketing" },
-    { purpose: "service_status", classification: "transactional" },
-  ];
-  for (const row of wrong) {
-    await assert.rejects(
-      seedDecision(row),
-      /purpose_classification_check/,
-      row.purpose + " must not be " + row.classification
-    );
+test("every purpose/classification pair, and only the six", async () => {
+  // Eighteen combinations, six right. Enumerated rather than listed, because a
+  // hand-written list of wrong pairs is a list somebody has to keep complete --
+  // the first version of this test named eight of the twelve and read as
+  // though it had covered them.
+  //
+  // The pair that matters most is product news written down as service: that
+  // is the S0 defect one verdict at a time, a row saying the marketing
+  // switches did not apply to marketing mail.
+  const right = new Map(
+    EMAIL_PURPOSE_CLASSIFICATION.map((entry) => [entry.purpose, entry.classification])
+  );
+  assert.equal(right.size, EMAIL_PURPOSES.length);
+
+  let accepted = 0;
+  let refused = 0;
+
+  for (const purpose of EMAIL_PURPOSES) {
+    for (const classification of EMAIL_CLASSIFICATIONS) {
+      if (right.get(purpose) === classification) {
+        await seedDecision({ purpose, classification });
+        accepted += 1;
+      } else {
+        await assert.rejects(
+          seedDecision({ purpose, classification }),
+          /purpose_classification_check/,
+          purpose + " must not be " + classification
+        );
+        refused += 1;
+      }
+    }
   }
 
-  // And every pair the table does allow is accepted.
-  for (const entry of EMAIL_PURPOSE_CLASSIFICATION) {
-    await seedDecision({
-      purpose: entry.purpose,
-      classification: entry.classification,
-    });
-  }
+  assert.equal(accepted, EMAIL_PURPOSES.length);
+  assert.equal(
+    refused,
+    EMAIL_PURPOSES.length * EMAIL_CLASSIFICATIONS.length - EMAIL_PURPOSES.length
+  );
 });

@@ -213,33 +213,101 @@ test("every selected column exists on the model it is selected from", () => {
   const capitalise = (name) => name[0].toUpperCase() + name.slice(1);
   let checked = 0;
 
+  // Nested selects are followed, not guessed at. An earlier version accepted a
+  // column if any model within two relations of the root had one by that name,
+  // which would have passed `reason` on the approval -- a field deliberately
+  // withheld -- because some other reachable model happens to have one. This
+  // walks the actual path: a `name: {` opens the relation named, and its
+  // matching brace closes it, so at every point the current model is known.
+  const walk = (model, body, path) => {
+    const columns = columnsByModel.get(model);
+    assert.ok(columns, `${path} does not name a model in the schema`);
+    const relations = relationTargets.get(model) ?? new Map();
+
+    for (let i = 0; i < body.length; i += 1) {
+      const rest = body.slice(i);
+
+      const scalar = /^(\w+):\s*true\b/.exec(rest);
+      if (scalar) {
+        assert.ok(
+          columns.has(scalar[1]),
+          `${path} has no column "${scalar[1]}", but a fetcher selects it`
+        );
+        checked += 1;
+        i += scalar[0].length - 1;
+        continue;
+      }
+
+      const nested = /^(\w+):\s*\{/.exec(rest);
+      if (!nested) continue;
+
+      const target = relations.get(nested[1]);
+      if (!target || !columnsByModel.has(target)) continue;
+
+      // Find the brace that closes this nested select.
+      let depth = 0;
+      let end = -1;
+      for (let j = i + nested[0].length - 1; j < body.length; j += 1) {
+        if (body[j] === "{") depth += 1;
+        else if (body[j] === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            end = j;
+            break;
+          }
+        }
+      }
+      assert.ok(end > 0, `${path}.${nested[1]} has no closing brace`);
+
+      const inner = body.slice(i + nested[0].length, end);
+      const innerSelect = /select:\s*\{/.exec(inner);
+      if (innerSelect) {
+        let innerDepth = 0;
+        let innerEnd = -1;
+        for (let j = innerSelect.index + innerSelect[0].length - 1; j < inner.length; j += 1) {
+          if (inner[j] === "{") innerDepth += 1;
+          else if (inner[j] === "}") {
+            innerDepth -= 1;
+            if (innerDepth === 0) {
+              innerEnd = j;
+              break;
+            }
+          }
+        }
+        assert.ok(innerEnd > 0, `${path}.${nested[1]} has no closing select brace`);
+        walk(
+          target,
+          inner.slice(innerSelect.index + innerSelect[0].length, innerEnd),
+          `${path}.${nested[1]} (${target})`
+        );
+      }
+
+      i = end;
+    }
+  };
+
   for (const [index, match] of fetchers.entries()) {
     const model = capitalise(match[1]);
-    const columns = columnsByModel.get(model);
-    assert.ok(columns, `prisma.${match[1]} does not name a model in the schema`);
-
     const end = fetchers[index + 1]?.index ?? fetcherBlock.length;
     const body = fetcherBlock.slice(match.index, end);
 
-    for (const [, column] of body.matchAll(/(\w+):\s*true\b/g)) {
-      // A nested select reaches a related model; accept the column if it is
-      // reachable from this one. Two hops rather than one: the approval
-      // membership export nests the approval and, under it, whether that
-      // approval was later withdrawn, which is two models away. Bounded at two
-      // deliberately -- this test is a spelling check against the schema, and
-      // an unbounded walk would accept any column in the database.
-      const oneHop = [...(relationTargets.get(model)?.values() ?? [])];
-      const twoHops = oneHop.flatMap((target) => [
-        ...(relationTargets.get(target)?.values() ?? []),
-      ]);
-      const reachable =
-        columns.has(column) ||
-        [...oneHop, ...twoHops].some((target) =>
-          columnsByModel.get(target)?.has(column)
-        );
-      assert.ok(reachable, `${model} has no column "${column}", but a fetcher selects it`);
-      checked += 1;
+    const select = /select:\s*\{/.exec(body);
+    if (!select) continue;
+    let depth = 0;
+    let selectEnd = -1;
+    for (let j = select.index + select[0].length - 1; j < body.length; j += 1) {
+      if (body[j] === "{") depth += 1;
+      else if (body[j] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          selectEnd = j;
+          break;
+        }
+      }
     }
+    assert.ok(selectEnd > 0, `prisma.${match[1]} has no closing select brace`);
+
+    walk(model, body.slice(select.index + select[0].length, selectEnd), model);
   }
   assert.ok(checked > 50, `only ${checked} columns were checked`);
 });
