@@ -5825,6 +5825,58 @@ model AmuxWorkerRuntime {
   @@index([instanceId, generation])
 }
 
+model AmuxIncidentTransition {
+  id                      String   @id @default(cuid())
+  fromState               String
+  toState                 String
+  reason                  String
+  ticket                  String
+  approvalId              String?
+  authorizationAuditLogId String?
+  changeAuditLogId        String   @unique
+  createdAt               DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([toState, createdAt])
+}
+
+model AmuxResourcePolicy {
+  scope                 String
+  key                   String
+  displayName           String
+  active                Boolean  @default(true)
+  wipLimit              Int?
+  capacityPoints        Int?
+  costBudgetMicrousd    BigInt?
+  budgetWindowStartsAt  DateTime?
+  budgetWindowEndsAt    DateTime?
+  updatedById           String?
+  updatedByEmail        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@id([scope, key])
+  @@index([active, scope])
+  @@index([budgetWindowEndsAt])
+}
+
+model AmuxQuotaObservation {
+  id                 String   @id @default(cuid())
+  worker             String
+  provider           String
+  remainingBasisPoints Int
+  confidenceBasisPoints Int
+  exhausted          Boolean  @default(false)
+  source             String
+  observedAt         DateTime
+  resetAt            DateTime?
+  createdAt          DateTime @default(now())
+
+  @@index([worker, observedAt])
+  @@index([provider, observedAt])
+  @@index([createdAt])
+}
+
 model AmuxWorkItem {
   id             String   @id @default(cuid())
   title          String
@@ -5836,6 +5888,18 @@ model AmuxWorkItem {
   drag           Int      @default(0)
   owner          String?
   classification Json?
+  projectKey      String?
+  teamKey         String?
+  dueAt           DateTime?
+  duePrecision    String?
+  dueSource       String?
+  dueParseState   String   @default("none")
+  dueRaw          String?
+  effortPoints    Int      @default(1)
+  estimatedCostMicrousd BigInt?
+  requiredRoutingRole String?
+  requiresHumanReview Boolean @default(false)
+  reviewSpecialty String?
   revision       Int      @default(0)
   claimedAt      DateTime?
   archivedAt     DateTime?
@@ -5846,10 +5910,15 @@ model AmuxWorkItem {
   dependents     AmuxWorkDependency[] @relation("AmuxTaskDependents")
   routeDecisions     AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
+  humanEscalations  AmuxHumanEscalation[]
+  costLedgerEntries AmuxCostLedgerEntry[]
 
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
+  @@index([projectKey, status, owner])
+  @@index([teamKey, status, owner])
+  @@index([dueAt, status])
 }
 
 model AmuxWorkDependency {
@@ -5873,6 +5942,13 @@ model AmuxExecutionAttempt {
   workerGeneration   Int
   /// Task revision after the atomic todo -> doing transition.
   taskRevision       Int
+  /// Monotonic within one task for attempts created after the bounded-retry
+  /// migration. Historical attempts remain NULL rather than receiving an
+  /// invented order when their real creation race cannot be reconstructed.
+  attemptNumber      Int?
+  reservedCostMicrousd BigInt @default(0)
+  settledCostMicrousd  BigInt?
+  costConfirmed        Boolean @default(false)
 
   heartbeatAt        DateTime
   leaseExpiresAt     DateTime?
@@ -5891,10 +5967,56 @@ model AmuxExecutionAttempt {
 
   task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
   delivery AmuxWorkDelivery?
+  costLedgerEntries AmuxCostLedgerEntry[]
 
   @@index([taskId, startedAt])
+  @@unique([taskId, attemptNumber])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+}
+
+model AmuxCostLedgerEntry {
+  id              String   @id @default(cuid())
+  scope           String
+  resourceKey     String
+  budgetWindowStartsAt DateTime
+  budgetWindowEndsAt DateTime
+  taskId          String
+  attemptId       String
+  kind            String
+  amountMicrousd  BigInt
+  createdAt       DateTime @default(now())
+
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, scope, resourceKey, kind])
+  @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
+  @@index([taskId, createdAt])
+}
+
+model AmuxHumanEscalation {
+  id              String   @id @default(cuid())
+  taskId          String
+  specialty       String?
+  reason          String
+  status          String   @default("open")
+  openedBy        String
+  acknowledgedById String?
+  acknowledgedByEmail String?
+  acknowledgedAt  DateTime?
+  resolvedById    String?
+  resolvedByEmail String?
+  resolvedAt      DateTime?
+  resolution      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([taskId, createdAt])
+  @@index([specialty, status])
 }
 
 model AmuxWorkDelivery {

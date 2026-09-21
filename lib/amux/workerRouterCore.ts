@@ -26,12 +26,10 @@ type SnapshotRoutingCandidate =
 /**
  * Pure scorer input.
  *
- * The current authoritative routing snapshot deliberately has no historical
- * metrics yet, so those fields are `null` there and provider exhaustion is
- * currently `false`. The scorer contract itself must still model observed
- * evidence because Rust uses the same algorithm when such evidence exists.
- *
- * A current server snapshot remains assignable to this broader type.
+ * The authoritative snapshot supplies confidence-adjusted historical, quota
+ * and cost observations. Missing/stale evidence remains `null`, which this
+ * scorer represents as an explicit neutral prior. Rust uses the same input
+ * and algorithm.
  */
 export type AmuxRoutingCandidate =
   Omit<
@@ -397,16 +395,12 @@ const scoreOne = (
     !candidate.worker.isolated &&
     !candidate.worker.blocked;
 
-  const idleWithoutBoundary =
-    candidate.worker.running &&
-    candidate.worker.status
-      .toLowerCase() === "idle" &&
-    !candidate.worker.dispatch_ready;
-
   const selectedEligible =
     operationallyAllowed &&
     !candidate.provider_exhausted &&
-    !idleWithoutBoundary;
+    candidate.worker.running &&
+    candidate.worker.status.toLowerCase() === "idle" &&
+    candidate.worker.dispatch_ready;
 
   return {
     worker_name:

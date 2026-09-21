@@ -8,8 +8,7 @@ import { prisma } from "@/lib/prisma";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
-const AMUX_DELIVERY_SYSTEM_ACTOR =
-  "tomverse-amux-orchestrator";
+const AMUX_DELIVERY_SYSTEM_ACTOR = "tomverse-amux-orchestrator";
 
 type RuntimeLockRow = {
   workerName: string;
@@ -180,10 +179,7 @@ const attemptMatches = (
   attempt.leaseExpiresAt !== null &&
   attempt.leaseExpiresAt.getTime() > now.getTime();
 
-const taskMatches = (
-  task: TaskLockRow | null,
-  attempt: AttemptLockRow,
-) =>
+const taskMatches = (task: TaskLockRow | null, attempt: AttemptLockRow) =>
   task !== null &&
   task.id === attempt.taskId &&
   task.owner === attempt.worker &&
@@ -218,10 +214,7 @@ export async function pullAmuxWorkDelivery(input: {
   const now = input.now ?? new Date();
 
   return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(
-      tx,
-      input.worker,
-    );
+    const runtime = await lockRuntime(tx, input.worker);
 
     if (!runtimeMatches(runtime, input, now)) {
       return {
@@ -230,35 +223,31 @@ export async function pullAmuxWorkDelivery(input: {
       };
     }
 
-    const candidates =
-      await tx.amuxWorkDelivery.findMany({
-        where: {
-          worker: input.worker,
-          workerInstanceId: input.instanceId,
-          workerGeneration: input.generation,
-          status: {
-            in: ["queued", "leased"],
-          },
+    const candidates = await tx.amuxWorkDelivery.findMany({
+      where: {
+        worker: input.worker,
+        workerInstanceId: input.instanceId,
+        workerGeneration: input.generation,
+        status: {
+          in: ["queued", "leased"],
         },
-        orderBy: [
-          {
-            createdAt: "asc",
-          },
-          {
-            attemptId: "asc",
-          },
-        ],
-        take: 20,
-        select: {
-          attemptId: true,
+      },
+      orderBy: [
+        {
+          createdAt: "asc",
         },
-      });
+        {
+          attemptId: "asc",
+        },
+      ],
+      take: 20,
+      select: {
+        attemptId: true,
+      },
+    });
 
     for (const candidate of candidates) {
-      const attempt = await lockAttempt(
-        tx,
-        candidate.attemptId,
-      );
+      const attempt = await lockAttempt(tx, candidate.attemptId);
 
       if (
         !attempt ||
@@ -277,24 +266,17 @@ export async function pullAmuxWorkDelivery(input: {
         continue;
       }
 
-      const task = await lockTask(
-        tx,
-        attempt.taskId,
-      );
+      const task = await lockTask(tx, attempt.taskId);
 
       if (!taskMatches(task, attempt)) {
         continue;
       }
 
-      const delivery = await lockDelivery(
-        tx,
-        candidate.attemptId,
-      );
+      const delivery = await lockDelivery(tx, candidate.attemptId);
 
       if (
         !delivery ||
-        (delivery.status !== "queued" &&
-          delivery.status !== "leased")
+        (delivery.status !== "queued" && delivery.status !== "leased")
       ) {
         continue;
       }
@@ -302,12 +284,9 @@ export async function pullAmuxWorkDelivery(input: {
       if (
         delivery.taskId !== attempt.taskId ||
         delivery.worker !== input.worker ||
-        delivery.workerInstanceId !==
-          input.instanceId ||
-        delivery.workerGeneration !==
-          input.generation ||
-        delivery.taskRevision !==
-          attempt.taskRevision
+        delivery.workerInstanceId !== input.instanceId ||
+        delivery.workerGeneration !== input.generation ||
+        delivery.taskRevision !== attempt.taskRevision
       ) {
         continue;
       }
@@ -323,13 +302,10 @@ export async function pullAmuxWorkDelivery(input: {
         delivery.status === "leased" &&
         delivery.receiptId !== null &&
         delivery.leaseExpiresAt !== null &&
-        delivery.leaseExpiresAt.getTime() >
-          now.getTime()
+        delivery.leaseExpiresAt.getTime() > now.getTime()
       ) {
-        const receiptId =
-          delivery.receiptId;
-        const leaseExpiresAt =
-          delivery.leaseExpiresAt;
+        const receiptId = delivery.receiptId;
+        const leaseExpiresAt = delivery.leaseExpiresAt;
 
         return {
           available: true as const,
@@ -337,8 +313,7 @@ export async function pullAmuxWorkDelivery(input: {
             attemptId: delivery.attemptId,
             taskId: delivery.taskId,
             worker: delivery.worker,
-            taskRevision:
-              delivery.taskRevision,
+            taskRevision: delivery.taskRevision,
             prompt: delivery.prompt,
             receiptId,
             leaseExpiresAt,
@@ -351,30 +326,24 @@ export async function pullAmuxWorkDelivery(input: {
        * The old receipt must never become valid again.
        */
       const receiptId = randomUUID();
-      const deliveryLeaseExpiresAt =
-        new Date(
-          now.getTime() +
-            AMUX_DELIVERY_RECEIPT_LEASE_MS,
-        );
+      const deliveryLeaseExpiresAt = new Date(
+        now.getTime() + AMUX_DELIVERY_RECEIPT_LEASE_MS,
+      );
 
-      const leased =
-        await tx.amuxWorkDelivery.updateMany({
-          where: {
-            attemptId: delivery.attemptId,
-            status: delivery.status,
-            receiptId:
-              delivery.receiptId,
-            leaseExpiresAt:
-              delivery.leaseExpiresAt,
-          },
-          data: {
-            status: "leased",
-            receiptId,
-            leasedAt: now,
-            leaseExpiresAt:
-              deliveryLeaseExpiresAt,
-          },
-        });
+      const leased = await tx.amuxWorkDelivery.updateMany({
+        where: {
+          attemptId: delivery.attemptId,
+          status: delivery.status,
+          receiptId: delivery.receiptId,
+          leaseExpiresAt: delivery.leaseExpiresAt,
+        },
+        data: {
+          status: "leased",
+          receiptId,
+          leasedAt: now,
+          leaseExpiresAt: deliveryLeaseExpiresAt,
+        },
+      });
 
       if (leased.count !== 1) {
         continue;
@@ -386,12 +355,10 @@ export async function pullAmuxWorkDelivery(input: {
           attemptId: delivery.attemptId,
           taskId: delivery.taskId,
           worker: delivery.worker,
-          taskRevision:
-            delivery.taskRevision,
+          taskRevision: delivery.taskRevision,
           prompt: delivery.prompt,
           receiptId,
-          leaseExpiresAt:
-            deliveryLeaseExpiresAt,
+          leaseExpiresAt: deliveryLeaseExpiresAt,
         },
       };
     }
@@ -403,17 +370,15 @@ export async function pullAmuxWorkDelivery(input: {
   });
 }
 
-export async function acknowledgeAmuxWorkDelivery(
-  input: {
-    attemptId: string;
-    receiptId: string;
-    worker: string;
-    instanceId: string;
-    generation: number;
-    taskRevision: number;
-    now?: Date;
-  },
-): Promise<
+export async function acknowledgeAmuxWorkDelivery(input: {
+  attemptId: string;
+  receiptId: string;
+  worker: string;
+  instanceId: string;
+  generation: number;
+  taskRevision: number;
+  now?: Date;
+}): Promise<
   | {
       acknowledged: true;
       idempotent: boolean;
@@ -426,10 +391,7 @@ export async function acknowledgeAmuxWorkDelivery(
   const now = input.now ?? new Date();
 
   return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(
-      tx,
-      input.worker,
-    );
+    const runtime = await lockRuntime(tx, input.worker);
 
     if (!runtimeMatches(runtime, input, now)) {
       return {
@@ -438,10 +400,7 @@ export async function acknowledgeAmuxWorkDelivery(
       };
     }
 
-    const attempt = await lockAttempt(
-      tx,
-      input.attemptId,
-    );
+    const attempt = await lockAttempt(tx, input.attemptId);
 
     if (!attemptMatches(attempt, input, now)) {
       return {
@@ -450,10 +409,7 @@ export async function acknowledgeAmuxWorkDelivery(
       };
     }
 
-    const task = await lockTask(
-      tx,
-      attempt.taskId,
-    );
+    const task = await lockTask(tx, attempt.taskId);
 
     if (!taskMatches(task, attempt)) {
       return {
@@ -462,20 +418,14 @@ export async function acknowledgeAmuxWorkDelivery(
       };
     }
 
-    const delivery = await lockDelivery(
-      tx,
-      input.attemptId,
-    );
+    const delivery = await lockDelivery(tx, input.attemptId);
 
     if (
       !delivery ||
       delivery.worker !== input.worker ||
-      delivery.workerInstanceId !==
-        input.instanceId ||
-      delivery.workerGeneration !==
-        input.generation ||
-      delivery.taskRevision !==
-        input.taskRevision ||
+      delivery.workerInstanceId !== input.instanceId ||
+      delivery.workerGeneration !== input.generation ||
+      delivery.taskRevision !== input.taskRevision ||
       delivery.receiptId !== input.receiptId
     ) {
       return {
@@ -494,8 +444,7 @@ export async function acknowledgeAmuxWorkDelivery(
     if (
       delivery.status !== "leased" ||
       delivery.leaseExpiresAt === null ||
-      delivery.leaseExpiresAt.getTime() <=
-        now.getTime()
+      delivery.leaseExpiresAt.getTime() <= now.getTime()
     ) {
       return {
         acknowledged: false as const,
@@ -503,24 +452,21 @@ export async function acknowledgeAmuxWorkDelivery(
       };
     }
 
-    const receiptLeaseExpiresAt =
-      delivery.leaseExpiresAt;
+    const receiptLeaseExpiresAt = delivery.leaseExpiresAt;
 
-    const acknowledged =
-      await tx.amuxWorkDelivery.updateMany({
-        where: {
-          attemptId: input.attemptId,
-          status: "leased",
-          receiptId: input.receiptId,
-          leaseExpiresAt:
-            receiptLeaseExpiresAt,
-        },
-        data: {
-          status: "acknowledged",
-          leaseExpiresAt: null,
-          acknowledgedAt: now,
-        },
-      });
+    const acknowledged = await tx.amuxWorkDelivery.updateMany({
+      where: {
+        attemptId: input.attemptId,
+        status: "leased",
+        receiptId: input.receiptId,
+        leaseExpiresAt: receiptLeaseExpiresAt,
+      },
+      data: {
+        status: "acknowledged",
+        leaseExpiresAt: null,
+        acknowledgedAt: now,
+      },
+    });
 
     if (acknowledged.count !== 1) {
       return {
@@ -534,8 +480,7 @@ export async function acknowledgeAmuxWorkDelivery(
       action: "amux.delivery.acknowledged",
       targetType: "AmuxWorkItem",
       targetId: attempt.taskId,
-      summary:
-        `Acknowledged durable AMUX delivery ${input.attemptId}.`,
+      summary: `Acknowledged durable AMUX delivery ${input.attemptId}.`,
       metadata: {
         attempt_id: input.attemptId,
         receipt_id: input.receiptId,
@@ -559,20 +504,19 @@ export async function cancelPendingAmuxWorkDelivery(
   attemptId: string,
   now: Date,
 ): Promise<number> {
-  const cancelled =
-    await tx.amuxWorkDelivery.updateMany({
-      where: {
-        attemptId,
-        status: {
-          in: ["queued", "leased"],
-        },
+  const cancelled = await tx.amuxWorkDelivery.updateMany({
+    where: {
+      attemptId,
+      status: {
+        in: ["queued", "leased"],
       },
-      data: {
-        status: "cancelled",
-        leaseExpiresAt: null,
-        cancelledAt: now,
-      },
-    });
+    },
+    data: {
+      status: "cancelled",
+      leaseExpiresAt: null,
+      cancelledAt: now,
+    },
+  });
 
   return cancelled.count;
 }

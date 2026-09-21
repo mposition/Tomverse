@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPanel";
 
 /**
@@ -11,5 +12,10 @@ import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPa
  * would put an experiment's numbers beside an editable table.
  */
 export default function AdminRoutingPage() {
-  return <AdminRoutingShadowPanel />;
+  return (
+    <div className="space-y-6">
+      <AdminAmuxRoutingPanel />
+      <AdminRoutingShadowPanel />
+    </div>
+  );
 }

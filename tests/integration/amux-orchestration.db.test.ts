@@ -182,6 +182,157 @@ test("two concurrent claimants produce exactly one owner and one route decision"
   });
 });
 
+test("project WIP admission serializes claims for different tasks", async () => {
+  const projectKey = `amux-wip-${randomUUID()}`;
+  const firstTaskId = await createTodo("amux-wip-first");
+  const secondTaskId = await createTodo("amux-wip-second");
+
+  await Promise.all([
+    prisma.amuxWorkItem.update({
+      where: { id: firstTaskId },
+      data: { projectKey },
+    }),
+    prisma.amuxWorkItem.update({
+      where: { id: secondTaskId },
+      data: { projectKey },
+    }),
+    prisma.amuxResourcePolicy.create({
+      data: {
+        scope: "project",
+        key: projectKey,
+        displayName: projectKey,
+        wipLimit: 1,
+      },
+    }),
+  ]);
+
+  try {
+    const [first, second] = await Promise.all([
+      claimUnownedTodo({
+        taskId: firstTaskId,
+        worker: "amux-wip-worker-a",
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      }),
+      claimUnownedTodo({
+        taskId: secondTaskId,
+        worker: "amux-wip-worker-b",
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      }),
+    ]);
+
+    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.equal(
+      await prisma.amuxWorkItem.count({
+        where: {
+          projectKey,
+          status: "todo",
+          owner: { not: null },
+        },
+      }),
+      1,
+    );
+  } finally {
+    await prisma.amuxWorkItem.updateMany({
+      where: { id: { in: [firstTaskId, secondTaskId] } },
+      data: { status: "done" },
+    });
+    await prisma.amuxResourcePolicy.delete({
+      where: { scope_key: { scope: "project", key: projectKey } },
+    });
+  }
+});
+
+test("cost settlement stays attributed to its reservation budget window", async () => {
+  const projectKey = `amux-cost-${randomUUID()}`;
+  const taskId = await createTodo("amux-cost-window");
+  const worker = `amux-cost-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+  const windowStartsAt = new Date(base.getTime() - 60_000);
+  const windowEndsAt = new Date(base.getTime() + 60_000);
+
+  await prisma.amuxResourcePolicy.create({
+    data: {
+      scope: "project",
+      key: projectKey,
+      displayName: projectKey,
+      costBudgetMicrousd: BigInt(100),
+      budgetWindowStartsAt: windowStartsAt,
+      budgetWindowEndsAt: windowEndsAt,
+    },
+  });
+  await prisma.amuxWorkItem.update({
+    where: { id: taskId },
+    data: {
+      projectKey,
+      estimatedCostMicrousd: BigInt(60),
+      owner: worker,
+      claimedAt: base,
+      revision: 1,
+    },
+  });
+
+  try {
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 100),
+    });
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 200),
+    });
+    if (!started.started) {
+      assert.fail(`execution did not start: ${started.reason}`);
+    }
+    const settled = await settleAmuxExecution({
+      attemptId: started.attemptId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      taskRevision: started.taskRevision,
+      outcome: "succeeded",
+      toStatus: "done",
+      actualCostMicrousd: BigInt(40),
+      now: new Date(base.getTime() + 300),
+    });
+    assert.equal(settled.settled, true);
+
+    const ledger = await prisma.amuxCostLedgerEntry.findMany({
+      where: { attemptId: started.attemptId },
+      orderBy: { kind: "asc" },
+    });
+    assert.equal(ledger.length, 2);
+    assert.equal(
+      ledger.reduce((sum, entry) => sum + entry.amountMicrousd, BigInt(0)),
+      BigInt(40),
+    );
+    for (const entry of ledger) {
+      assert.equal(entry.budgetWindowStartsAt.getTime(), windowStartsAt.getTime());
+      assert.equal(entry.budgetWindowEndsAt.getTime(), windowEndsAt.getTime());
+    }
+  } finally {
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: worker } });
+    await prisma.amuxResourcePolicy.delete({
+      where: { scope_key: { scope: "project", key: projectKey } },
+    });
+  }
+});
+
 test("a failed route-decision insert rolls the owner claim back", async () => {
   const taskId = await createTodo("amux-rollback");
 
@@ -343,6 +494,7 @@ test("routing snapshot fails closed without an explicit worker catalog", async (
       reason: "worker_catalog_unavailable",
       task: null,
       candidates: [],
+      telemetry: {},
     });
   } finally {
     if (previousCatalog === undefined) {
@@ -530,7 +682,13 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
   });
 
   assert.equal(decision.worker, worker);
-  assert.deepEqual(decision.signals, evidence);
+  assert.deepEqual(decision.signals, {
+    ...evidence,
+    admission: {
+      incident: { state: "normal", transition_id: null, valid: true },
+      wip: [],
+    },
+  });
 
   await prisma.amuxWorkItem.update({
     where: { id: taskId },
