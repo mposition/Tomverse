@@ -97,6 +97,12 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// 2026-09-21, merging develop into S3: develop moved this closure and so did
+// S3, and neither side is taken -- the value below is computed over the merged
+// tree, the only one that will exist. The position-free inventory is still 228
+// entries hashing to 9aa7ec49..., so nothing was added, removed or altered on
+// either side; only positions moved.
+//
 // 2026-09-21, the permission ledger (S3): two files in this closure moved
 // lines -- lib/emailPreferenceCore.ts gained the purpose classification table
 // and lib/emailPreferences.ts took its bulk-withdrawal scope from it. Neither
@@ -114,12 +120,17 @@ const compilerOptions = parsedConfig.options;
 // altered by either side, only moved. The count is 228 and that inventory
 // hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
 // on this tree and on `origin/develop` alike.
+//
+// 2026-09-21, S1f on top: the same watched-schema comment now also records
+// `MarketingPost.factsDigest`, which moves the positions once more in the
+// same file. The count is still 228 and the position-free inventory still
+// hashes to the value above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "82081d1e8b021ee74ffe0c5a8bf47efb",
-  "b91b91c10060e63c9604ace5630ac807",
+  "4d58d40b2c8c4c8342ce9de5ded7a064",
+  "623f08adc53f5c274a1d14540beb039d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -218,18 +218,28 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
  *
- * 2026-09-21, a third time: the permission ledger (S3) adds six tables to the
- * same watched schema -- EmailPermissionEvent, EmailSendApproval with its
- * cohort and revocations, EmailPermissionDecision and its evidence. None is a
- * marketing model, none changes the descriptor, the config snapshot or an
- * admission decision, and nothing this pipeline stores or reads is different.
- * The one shared edge is ConsentRecord, which gains a back-relation and no
- * column. The digest moves because schema bytes moved, which is the behaviour
- * this constant exists for: it asks for a look rather than deciding for itself
- * what is material. This was the look.
+ * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
+ * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
+ * evidence backs a separate NOT NULL transition. Webhook admission never reads
+ * this column; the fingerprint moves because the schema is watched as a whole.
+ *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
+ *
+ * 2026-09-21, the permission ledger (S3): six more tables on the same watched
+ * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
+ * revocations, EmailPermissionDecision and its evidence. None is a marketing
+ * model, none changes the descriptor, the config snapshot or an admission
+ * decision, and nothing this pipeline stores or reads is different. The one
+ * shared edge is ConsentRecord, which gains a back-relation and no column. The
+ * digest moves because schema bytes moved, which is what this constant is for:
+ * it asks for a look rather than deciding for itself what is material. This
+ * was the look, and the value below was computed over the merged tree rather
+ * than taken from either side of the conflict.
  */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "53b1ea89ed2e84669cda3c41c919952dd5296c227b38df7f379ba8dff0109f9c";
+export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "d76a14eef1b5a001c316c231b66ca1c5258250e0e35b7492e588709e9f72797d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
