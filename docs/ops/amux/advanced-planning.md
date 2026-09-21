@@ -1,10 +1,10 @@
 # AMUX Advanced Planning and Evidence
 
-상태: `planning/routing implementation complete; agent resolution contract pending; activation pending staging evidence and human approval`
+상태: `planning/routing implementation complete; agent resolution implemented behind disabled flag; independent review, CI, policy reconfirmation and staging evidence pending`
 
 이 문서는 AMUX 고도화 10개 항목의 개발 분모와 순서를 고정한다. 구현 완료와
-staging activation은 별개이며, Agent escalation resolve는 승인 계약이 없어
-구현 완료로 보고하지 않는다. 코드와 자동 검증이 완료돼도 실제 비용 한도,
+staging activation은 별개이며, Agent escalation resolve는 정책 보강안의
+재확인·DB/CI·staging 검증 전까지 구현 완료로 보고하지 않는다. 코드와 자동 검증이 완료돼도 실제 비용 한도,
 프로젝트 용량, incident 선언은 운영자가 설정하기 전까지 비활성 상태다.
 
 ## 권장 순서
@@ -21,7 +21,7 @@ staging activation은 별개이며, Agent escalation resolve는 승인 계약이
 | 6 | quota telemetry confidence model | 출처 신뢰도와 freshness를 분리하고, 신뢰도 높은 exhaustion만 hard gate로 사용한다. unknown/stale은 0으로 바꾸지 않는다. |
 | 7 | historical success/rework/latency calibration | terminal attempt만 사용하고, 작은 표본과 오래된 표본을 neutral prior 쪽으로 축소하며 표본 수·신뢰도를 함께 노출한다. |
 | 8 | cost budget guard | append-only micro-USD 관측과 reservation을 합산한다. finance가 정한 한도가 있을 때만 fail-closed admission을 활성화한다. |
-| 9 | human escalation / review specialist routing | human escalation과 model review routing을 분리하고, 명시적 specialty·idempotency·사람 SLA를 보존한다. 별도 Agent 승인 계약이 승인되기 전에는 acknowledge까지만 허용하고 resolve는 명시적으로 거절한다. |
+| 9 | human escalation / review specialist routing | human escalation과 model review routing을 분리하고, 명시적 specialty·idempotency·사람 SLA를 보존한다. 작업 검토 resolve는 별도 계약·불변 제안/결정 원장·PR 원문 결속·권한/step-up·staging 검증 뒤 독립 flag로만 연다. 외부 행위 승인은 제외한다. |
 | 10 | richer explainability UI, 신규 metric | 앞 단계의 urgency·capacity·quota·calibration·cost·escalation provenance를 같은 화면에 추가한다. |
 | 11 | automatic staging evidence capture | serving SHA를 직접 확인하고 secret·prompt·사용자 데이터를 제외한 JSON capture와 digest를 자동 생성한다. 사람의 판정·서명은 채우지 않는다. |
 
@@ -62,11 +62,12 @@ scheduler 입력을 서버 권위로 만든다. Incident brake와 기존 증거 
 ## Agent 승인 경계
 
 `docs/policy/development-agent-orchestration.md`의 현재 계약은 Agent 승인을 2인
-`AdminActionApproval`로 대신하는 것을 금지하며, 별도 승인 계약은 아직 없다. 따라서
-human escalation은 durable 생성·specialty routing·조회·acknowledge까지 구현하고,
+`AdminActionApproval`로 대신하는 것을 금지한다. 별도 작업 검토 계약은
+`docs/policy/amux-agent-approval-contract.md`에 있으며, 기본 꺼짐인
+`TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` 뒤에 구현돼 있다. flag가 꺼져 있으면
 `approve`·`retry`·`block` resolve 요청은 `AMUX_AGENT_APPROVAL_UNAVAILABLE`로
-fail-closed 거절한다. 이 제한을 우회하거나 관리자 2인 승인을 빌려 승인 완료로
-기록하지 않는다.
+fail-closed 거절한다. 보강안 재확인과 staging 판정 전에는 flag를 켜지 않으며,
+외부 행위·PR 병합·배포 승인을 이 결정으로 대신하지 않는다.
 
 ## 점수와 hard gate
 

@@ -154,6 +154,7 @@ type ReviewDetail = {
     description: string | null;
     escalation_reason: string;
     last_attempt_reason: string | null;
+    previous_block_reason: string | null;
   };
   review_artifact: {
     pr_number: number;
@@ -821,7 +822,7 @@ export function AdminAmuxRoutingPanel() {
                           <dt className="text-zinc-500">{m.attemptBudget}</dt>
                           <dd>{number(review.retry.used)} / {number(review.retry.limit)} · {m.remaining} {number(review.retry.remaining)}</dd>
                         </dl>
-                        {review.retry.remaining === 0 && review.task.status === "blocked" && (
+                        {review.retry.remaining === 0 && (
                           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100" data-testid="admin-amux-exhausted-task-notice">
                             {m.exhaustedRequiresNewTask} {m.taskId}: <span className="font-mono">{review.task.id}</span>
                           </p>
@@ -841,6 +842,9 @@ export function AdminAmuxRoutingPanel() {
                           <p className="text-sm text-zinc-400">{m.escalationReason}: {review.review_context.escalation_reason}</p>
                           {review.review_context.last_attempt_reason && (
                             <p className="text-sm text-zinc-400">{m.lastAttemptReason}: {review.review_context.last_attempt_reason}</p>
+                          )}
+                          {review.review_context.previous_block_reason && (
+                            <p className="text-sm text-zinc-400">{m.previousBlockReason}: {review.review_context.previous_block_reason}</p>
                           )}
                         </div>
                         {review.review_artifact &&

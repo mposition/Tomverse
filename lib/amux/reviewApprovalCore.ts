@@ -54,6 +54,7 @@ export type AmuxReviewSubject = {
   last_attempt_outcome: string | null;
   last_attempt_to_status: string | null;
   last_attempt_reason: string | null;
+  previous_block_reason: string | null;
   review_pr_number: number | null;
   review_base_sha: string | null;
   review_head_sha: string | null;
@@ -71,7 +72,7 @@ export const sha256Hex = (value: string) =>
 export const amuxReviewSubjectDigest = (subject: AmuxReviewSubject) =>
   sha256Hex(
     JSON.stringify({
-      version: 4,
+      version: 5,
       escalation_id: subject.escalation_id,
       task_id: subject.task_id,
       task_revision: subject.task_revision,
@@ -87,6 +88,7 @@ export const amuxReviewSubjectDigest = (subject: AmuxReviewSubject) =>
       last_attempt_outcome: subject.last_attempt_outcome,
       last_attempt_to_status: subject.last_attempt_to_status,
       last_attempt_reason: subject.last_attempt_reason,
+      previous_block_reason: subject.previous_block_reason,
       review_pr_number: subject.review_pr_number,
       review_base_sha: subject.review_base_sha,
       review_head_sha: subject.review_head_sha,

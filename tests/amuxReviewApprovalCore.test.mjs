@@ -29,6 +29,7 @@ const subject = {
   last_attempt_outcome: "blocked",
   last_attempt_to_status: "blocked",
   last_attempt_reason: "worker_reported_blocked",
+  previous_block_reason: null,
   review_pr_number: null,
   review_base_sha: null,
   review_head_sha: null,
@@ -73,6 +74,7 @@ test("subject digest binds content and does not depend on caller key insertion o
   );
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, task_revision: 8 }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, description: "new" }));
+  assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, previous_block_reason: "A human blocked this task." }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_pr_number: 1594 }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_base_sha: "c".repeat(40) }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_head_sha: "a".repeat(40) }));
