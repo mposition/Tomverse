@@ -217,9 +217,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * a comment is bytes in a watched file, and the digest asking for a look
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
+ *
+ * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
+ * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
+ * evidence backs a separate NOT NULL transition. Webhook admission never reads
+ * this column; the fingerprint moves because the schema is watched as a whole.
+ *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6024faad222d57304bed312980918a57f6774f1462f8f939b09556f89ad80d36";
+  "a12131378b46a7f0c0c088dfac2538c97435c0ffa0db95666fe1c8c72315225d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -40,6 +40,8 @@
 
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
@@ -60,7 +62,6 @@ import {
   type MarketingEnvelope,
   type MarketingFactSnapshot,
   type MarketingGraduationSnapshot,
-  type MarketingGuardDecision,
   type MarketingHistoryEntry,
   type MarketingLocale,
   type MarketingPausableMode,
@@ -73,6 +74,12 @@ import {
   type MarketingVerificationMethod,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
+import {
+  marketingGuardDecisionIsSealed,
+  marketingGuardDraftDigest,
+  type MarketingGuardDecision as GuardDecision,
+} from "@/lib/marketingGuardCore";
 
 /**
  * Every function takes the client explicitly. A marketing write is part of a
@@ -197,10 +204,24 @@ export type MarketingResumeEvidence = {
  */
 export async function updateMarketingChannel(
   database: MarketingDatabase,
-  id: string,
-  patch: MarketingChannelPatch,
-  resume?: MarketingResumeEvidence,
+  rawId: string,
+  rawPatch: MarketingChannelPatch,
+  rawResume?: MarketingResumeEvidence,
 ) {
+  // Read once. The audit check below is an `await`, and the object it verified
+  // was read again afterwards: a `resume` whose fields answered one pair to
+  // the verification and another to the write had the second pair recorded as
+  // the evidence for the first.
+  const id = String(rawId);
+  const patch: MarketingChannelPatch = { ...rawPatch };
+  const resume =
+    rawResume === undefined
+      ? undefined
+      : {
+          auditLogId: String(rawResume.auditLogId),
+          reasonCode: rawResume.reasonCode,
+        };
+
   const data: Prisma.MarketingChannelUpdateInput = {};
 
   if (patch.status !== undefined) data.status = patch.status;
@@ -229,10 +250,22 @@ export async function updateMarketingChannel(
         : asJson(marketingGraduationSnapshotSchema.parse(patch.graduationSnapshot));
   }
 
+  let current: {
+    status: string;
+    pausedAt: Date | null;
+    pauseReasonCode: string | null;
+    lastResumeAuditLogId: string | null;
+  } | null = null;
+
   if (patch.status === "autonomous_mode") {
-    const current = await database.marketingChannel.findUnique({
+    current = await database.marketingChannel.findUnique({
       where: { id },
-      select: { status: true, pausedAt: true, lastResumeAuditLogId: true },
+      select: {
+        status: true,
+        pausedAt: true,
+        pauseReasonCode: true,
+        lastResumeAuditLogId: true,
+      },
     });
     if (current?.status === "paused") {
       if (!resume) {
@@ -269,7 +302,34 @@ export async function updateMarketingChannel(
     }
   }
 
-  return database.marketingChannel.update({ where: { id }, data });
+  // **Compare and set, not just set.** The audit check above is an `await`,
+  // and what it verified was the row as it was before: another writer could
+  // resume the account with a newer entry and pause it again in between, and
+  // this update would then record the older entry as the evidence for the
+  // pause that is there now. The state the checks were made against is part
+  // of the condition, and nought rows is a refusal rather than a silent
+  // success.
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id,
+      ...(current
+        ? {
+            status: current.status,
+            pausedAt: current.pausedAt,
+            pauseReasonCode: current.pauseReasonCode,
+            lastResumeAuditLogId: current.lastResumeAuditLogId,
+          }
+        : {}),
+    },
+    data,
+  });
+  if (updated.count !== 1) {
+    throw new MarketingStoreRefusedError(
+      "channel_changed_under_us",
+      "The account moved between the checks and the write",
+    );
+  }
+  return database.marketingChannel.findUniqueOrThrow({ where: { id } });
 }
 
 // ---------------------------------------------------------------------------
@@ -291,20 +351,222 @@ export type CreateMarketingPostInput = {
   claimRegistryVersion: number;
   assetRegistryVersion: number;
   factSnapshot: MarketingFactSnapshot;
-  guardDecision: MarketingGuardDecision;
-  guardCodes: readonly string[];
-  guardRuleIds: readonly string[];
-  status: Extract<MarketingPostStatus, "drafted" | "guard_rejected">;
-  mode: MarketingPostMode;
+  /**
+   * The Guard's decision, as the object it returned.
+   *
+   * Not the verdict as a string, and not the codes and the mode beside it. A
+   * caller used to be able to write `guardDecision: "autonomous_eligible"` and
+   * `mode: "autonomous"` into the single-writer API without a Guard having run
+   * at all -- which made every seal above it decoration. The verdict, the
+   * codes, the rule ids, the status and the mode are all derived from this,
+   * and it has to be an object `guardDraft()` sealed.
+   */
+  decision: GuardDecision;
   draftedAt: Date;
 };
 
+/**
+ * The digest of an envelope, computed here so nobody can state it.
+ *
+ * `envelopeDigest` used to be a caller's 64 hex characters, and the same
+ * envelope with the same sealed decision went to the database under any value
+ * the caller liked. The template loader compares that column against
+ * `approvedDigest` to decide whether the words are still the approved ones, so
+ * a digest that says nothing about the content is the check answering a
+ * question it was never asked.
+ *
+ * Keys sorted, so two objects that say the same thing hash the same.
+ */
+const canonicalJson = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonicalJson(inner)]),
+    );
+  }
+  return value;
+};
+
+export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalJson(envelope)), "utf8")
+    .digest("hex");
+}
+
 export async function createMarketingPost(
   database: MarketingDatabase,
-  input: CreateMarketingPostInput,
+  rawInput: CreateMarketingPostInput,
 ) {
-  const envelope = marketingEnvelopeSchema.parse(input.envelope);
-  const factSnapshot = marketingFactSnapshotSchema.parse(input.factSnapshot);
+  // **Read once, into plain values.** Every field below is a property, and a
+  // property can be an accessor: one that returned a sealed decision to the
+  // check and a forged one to the write passed both, and one that returned
+  // `chn_safe` to the digest and `chn_other` to the insert wrote a post for an
+  // account the Guard never saw. The snapshot is what is checked and what is
+  // written, and there is nothing in between for a second read to happen in.
+  const decision = rawInput.decision;
+  const input: CreateMarketingPostInput = {
+    channelId: String(rawInput.channelId),
+    locale: rawInput.locale,
+    kind: rawInput.kind,
+    logicalKey: String(rawInput.logicalKey),
+    envelope: rawInput.envelope,
+    envelopeDigest: String(rawInput.envelopeDigest),
+    rendererVersion: String(rawInput.rendererVersion),
+    templateId: rawInput.templateId === null ? null : String(rawInput.templateId),
+    templateDigest:
+      rawInput.templateDigest === null ? null : String(rawInput.templateDigest),
+    claimIds: [...rawInput.claimIds].map(String),
+    assetIds: [...rawInput.assetIds].map(String),
+    claimRegistryVersion: Number(rawInput.claimRegistryVersion),
+    assetRegistryVersion: Number(rawInput.assetRegistryVersion),
+    // Parsed here rather than after the first `await`. The reference used to
+    // be kept and parsed later, and a caller that mutated the object while the
+    // channel lookup was in flight changed what was stored.
+    factSnapshot: marketingFactSnapshotSchema.parse(
+      rawInput.factSnapshot,
+    ) as MarketingFactSnapshot,
+    decision,
+    draftedAt: new Date(rawInput.draftedAt.getTime()),
+  };
+
+  if (!marketingGuardDecisionIsSealed(decision)) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_sealed",
+      "A post records a decision `guardDraft()` made, not one the caller assembled",
+    );
+  }
+
+  // Read once. Every use below is of this snapshot rather than of the object,
+  // so a decision whose fields answer differently on the second read cannot
+  // pass the checks with one answer and be written with another. The freeze in
+  // `sealDecision()` is what stops the accessor being installed at all; this
+  // is the second lock on the same door.
+  const verdict = decision.verdict;
+  const guardCodes = "codes" in decision ? [...decision.codes] : [];
+  const guardRuleIds = [...decision.ruleIds];
+  const draftDigest = decision.draftDigest;
+  const factsDigest = decision.factsDigest;
+
+  // **The decision has to be about this post.** Provenance says a Guard made
+  // it; it does not say what about. The Guard was shown "Three answers side by
+  // side." and the row written said "The best AI, guaranteed.", with the first
+  // decision attached to the second body.
+  const envelopeForDigest = marketingEnvelopeSchema.parse(input.envelope);
+
+  // **The envelope and the columns say the same thing, or neither is stored.**
+  // The digest was computed from the columns, and the envelope is what a
+  // publisher renders. With the two free to disagree, a post whose columns
+  // said `en` with no claims went to the database carrying an envelope in `ko`
+  // naming a claim and an asset nothing had checked.
+  const envelopeAssetIds = envelopeForDigest.assets.map((asset) => asset.assetId);
+  const sameSet = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((value) => right.includes(value));
+  if (
+    envelopeForDigest.locale !== input.locale ||
+    !sameSet([...envelopeForDigest.claimIds], [...input.claimIds]) ||
+    !sameSet(envelopeAssetIds, [...input.assetIds])
+  ) {
+    throw new MarketingStoreRefusedError(
+      "envelope_disagrees_with_columns",
+      "The envelope and the columns name different locales, claims or assets",
+    );
+  }
+
+  // **And about these facts.** The draft digest says the words match; this
+  // says the claims, the assets, the registry versions and the fact snapshot
+  // are the ones the Guard was resolved against. A decision made with one
+  // registry could otherwise be recorded on a post claiming another.
+  const storedFactsScopeDigest = marketingFactsScopeDigest({
+    channelId: input.channelId,
+    channel: envelopeForDigest.channel,
+    locale: input.locale,
+    claimIds: input.claimIds,
+    assetIds: input.assetIds,
+    claimRegistryVersion: input.claimRegistryVersion,
+    assetRegistryVersion: input.assetRegistryVersion,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(canonicalJson(input.factSnapshot)), "utf8")
+      .digest("hex"),
+  });
+  if (storedFactsScopeDigest !== decision.factsScopeDigest) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_about_these_facts",
+      "That decision was resolved against different facts",
+    );
+  }
+
+  const recomputed = marketingGuardDraftDigest({
+    renderedText: envelopeForDigest.renderedText,
+    locale: input.locale,
+    channel: envelopeForDigest.channel,
+    channelId: input.channelId,
+    claimIds: input.claimIds,
+    assetIds: input.assetIds,
+    templateId: input.templateId ?? undefined,
+  });
+  if (recomputed !== draftDigest) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_about_this_post",
+      "That decision was made about a different draft",
+    );
+  }
+
+  // The digest is of these bytes, not of whatever the caller said.
+  const computedDigest = marketingEnvelopeDigest(envelopeForDigest);
+  if (input.envelopeDigest !== computedDigest) {
+    throw new MarketingStoreRefusedError(
+      "envelope_digest_not_of_this_envelope",
+      "The envelope digest is computed from the envelope, not supplied",
+    );
+  }
+
+  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
+  // has a column for one, and a create that set the first and not the second
+  // left two answers to the same question.
+  if (envelopeForDigest.scheduledAt !== null) {
+    throw new MarketingStoreRefusedError(
+      "envelope_scheduled_at_create",
+      "A post is scheduled by an append, not by the envelope it is created with",
+    );
+  }
+
+  // The account the envelope names has to be the account being written to.
+  // `accountSlug` is what a publisher posts from, and the Guard checked the
+  // channel this row belongs to.
+  const account = await database.marketingChannel.findUnique({
+    where: { id: input.channelId },
+    select: { accountSlug: true, channel: true },
+  });
+  if (
+    !account ||
+    account.accountSlug !== envelopeForDigest.accountSlug ||
+    account.channel !== envelopeForDigest.channel
+  ) {
+    throw new MarketingStoreRefusedError(
+      "envelope_account_not_this_channel",
+      "The envelope names an account other than the one this post belongs to",
+    );
+  }
+
+  // **S1 writes no autonomous post.** The decision's binding says what the
+  // template row has to still look like at the moment of the write, and making
+  // that true means reading the database's own clock and the row in the same
+  // transaction as the insert -- which is the publish path, and the publish
+  // path is S2. Until it exists, the honest answer is that this function
+  // cannot write the row, rather than writing it without the check.
+  if (verdict === "autonomous_eligible") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_creation_not_available",
+      "Creating an autonomous post needs the transactional template check, which is S2",
+    );
+  }
+
+  const envelope = envelopeForDigest;
+  const factSnapshot = input.factSnapshot;
 
   // The first history entry is written here, not by the caller: the insert
   // trigger requires exactly one entry of type `draft`, and a caller that could
@@ -331,11 +593,14 @@ export async function createMarketingPost(
       claimRegistryVersion: input.claimRegistryVersion,
       assetRegistryVersion: input.assetRegistryVersion,
       factSnapshot: asJson(factSnapshot),
-      guardDecision: input.guardDecision,
-      guardCodes: [...input.guardCodes],
-      guardRuleIds: [...input.guardRuleIds],
-      status: input.status,
-      mode: input.mode,
+      factsDigest,
+      // Derived, every one of them. Two columns that could disagree with the
+      // decision are two columns somebody can set to whatever they need.
+      guardDecision: verdict,
+      guardCodes,
+      guardRuleIds,
+      status: verdict === "reject" ? "guard_rejected" : "drafted",
+      mode: "approval",
       history: asJson([draftEntry]),
       historyVersion: 0,
     },
@@ -349,7 +614,17 @@ export async function createMarketingPost(
  */
 export type MarketingPostPatch = {
   status?: MarketingPostStatus;
-  mode?: MarketingPostMode;
+  /**
+   * The mode, which this path may only ever lower.
+   *
+   * `autonomous` is not settable here. It was: a post created in `approval`
+   * mode could be moved to `autonomous` by an ordinary append, which satisfied
+   * the table's own CHECK and the channel trigger, and nothing in between had
+   * read a Guard decision. Turning a post autonomous is the publish path's
+   * business, and the publish path does it inside the transaction that checks
+   * the template row.
+   */
+  mode?: Exclude<MarketingPostMode, "autonomous">;
   envelope?: MarketingEnvelope;
   envelopeDigest?: string;
   approvalAuditLogId?: string | null;
@@ -375,52 +650,107 @@ export type MarketingPostPatch = {
   legalHold?: boolean;
 };
 
+type MaterialisedPostPatch = {
+  data: Prisma.MarketingPostUpdateManyMutationInput;
+  envelope?: MarketingEnvelope;
+  hasScheduledAt: boolean;
+  scheduledAt: string | null;
+};
+
 const postPatchData = (
-  patch: MarketingPostPatch,
-): Prisma.MarketingPostUpdateManyMutationInput => {
+  rawPatch: MarketingPostPatch,
+): MaterialisedPostPatch => {
+  // Read once, for the reason `createMarketingPost()` does it: a `mode`
+  // accessor that answered `approval` to the refusal and `autonomous` to the
+  // assignment put an autonomous row in the database through a path that had
+  // just refused one. A shallow copy is enough -- every value here is a
+  // primitive, a `Date` or `null`.
+  const patch: MarketingPostPatch = { ...rawPatch };
   const data: Prisma.MarketingPostUpdateManyMutationInput = {};
+  let parsedEnvelope: MarketingEnvelope | undefined;
+  const copyDate = (value: Date | null): Date | null =>
+    value === null ? null : new Date(value.getTime());
   if (patch.status !== undefined) data.status = patch.status;
-  if (patch.mode !== undefined) data.mode = patch.mode;
-  if (patch.envelope !== undefined) {
-    data.envelope = asJson(marketingEnvelopeSchema.parse(patch.envelope));
+  if (patch.mode !== undefined) {
+    // The type says `autonomous` is not one of the values; this says it at run
+    // time too, because a caller reaching this through `as never` is exactly
+    // the caller the rule is for.
+    if ((patch.mode as string) === "autonomous") {
+      throw new MarketingStoreRefusedError(
+        "autonomous_mode_not_settable_here",
+        "Turning a post autonomous belongs to the publish path, inside the transaction that checks the template",
+      );
+    }
+    data.mode = patch.mode;
   }
-  if (patch.envelopeDigest !== undefined) data.envelopeDigest = patch.envelopeDigest;
+  if (patch.envelope !== undefined) {
+    // The digest of an envelope is of that envelope, here as on the create
+    // path. A patch that changed the words and carried the old digest left the
+    // column saying the approved post was still the approved post, which is
+    // the question `lib/marketingTemplates.ts` asks it.
+    const envelope = marketingEnvelopeSchema.parse(patch.envelope);
+    parsedEnvelope = envelope;
+    const digest = marketingEnvelopeDigest(envelope);
+    if (patch.envelopeDigest !== undefined && patch.envelopeDigest !== digest) {
+      throw new MarketingStoreRefusedError(
+        "envelope_digest_not_of_this_envelope",
+        "The envelope digest is computed from the envelope, not supplied",
+      );
+    }
+    data.envelope = asJson(envelope);
+    data.envelopeDigest = digest;
+  } else if (patch.envelopeDigest !== undefined) {
+    // A digest without the envelope it is of is a claim about bytes nobody
+    // supplied. The approval path re-renders and patches both together.
+    throw new MarketingStoreRefusedError(
+      "envelope_digest_without_envelope",
+      "An envelope digest is set by the change that sets the envelope",
+    );
+  }
   if (patch.approvalAuditLogId !== undefined) {
     data.approvalAuditLogId = patch.approvalAuditLogId;
   }
-  if (patch.approvedAt !== undefined) data.approvedAt = patch.approvedAt;
+  if (patch.approvedAt !== undefined) data.approvedAt = copyDate(patch.approvedAt);
   if (patch.approvedDigest !== undefined) data.approvedDigest = patch.approvedDigest;
   if (patch.approvalExpiresAt !== undefined) {
-    data.approvalExpiresAt = patch.approvalExpiresAt;
+    data.approvalExpiresAt = copyDate(patch.approvalExpiresAt);
   }
   if (patch.reusableAsTemplate !== undefined) {
     data.reusableAsTemplate = patch.reusableAsTemplate;
   }
-  if (patch.scheduledAt !== undefined) data.scheduledAt = patch.scheduledAt;
-  if (patch.slotDate !== undefined) data.slotDate = patch.slotDate;
+  if (patch.scheduledAt !== undefined) data.scheduledAt = copyDate(patch.scheduledAt);
+  if (patch.slotDate !== undefined) data.slotDate = copyDate(patch.slotDate);
   if (patch.claimToken !== undefined) data.claimToken = patch.claimToken;
-  if (patch.leaseUntil !== undefined) data.leaseUntil = patch.leaseUntil;
+  if (patch.leaseUntil !== undefined) data.leaseUntil = copyDate(patch.leaseUntil);
   if (patch.publishAttempt !== undefined) data.publishAttempt = patch.publishAttempt;
   if (patch.providerRequestKey !== undefined) {
     data.providerRequestKey = patch.providerRequestKey;
   }
   if (patch.externalPostId !== undefined) data.externalPostId = patch.externalPostId;
   if (patch.externalUrl !== undefined) data.externalUrl = patch.externalUrl;
-  if (patch.publishedAt !== undefined) data.publishedAt = patch.publishedAt;
+  if (patch.publishedAt !== undefined) data.publishedAt = copyDate(patch.publishedAt);
   if (patch.verifiedPublicAt !== undefined) {
-    data.verifiedPublicAt = patch.verifiedPublicAt;
+    data.verifiedPublicAt = copyDate(patch.verifiedPublicAt);
   }
   if (patch.verificationMethod !== undefined) {
     data.verificationMethod = patch.verificationMethod;
   }
   if (patch.errorCode !== undefined) data.errorCode = patch.errorCode;
   if (patch.outcomeUnknownAt !== undefined) {
-    data.outcomeUnknownAt = patch.outcomeUnknownAt;
+    data.outcomeUnknownAt = copyDate(patch.outcomeUnknownAt);
   }
-  if (patch.deletedAt !== undefined) data.deletedAt = patch.deletedAt;
+  if (patch.deletedAt !== undefined) data.deletedAt = copyDate(patch.deletedAt);
   if (patch.deletionMethod !== undefined) data.deletionMethod = patch.deletionMethod;
   if (patch.legalHold !== undefined) data.legalHold = patch.legalHold;
-  return data;
+  return {
+    data,
+    ...(parsedEnvelope === undefined ? {} : { envelope: parsedEnvelope }),
+    hasScheduledAt: patch.scheduledAt !== undefined,
+    scheduledAt:
+      patch.scheduledAt === undefined || patch.scheduledAt === null
+        ? null
+        : patch.scheduledAt.toISOString(),
+  };
 };
 
 /** What an operator supplies when re-queueing a post whose publication failed. */
@@ -443,7 +773,7 @@ export type MarketingRequeueEvidence = { auditLogId: string };
  */
 export async function appendMarketingPostHistory(
   database: MarketingDatabase,
-  input: {
+  rawInput: {
     id: string;
     expectedVersion: number;
     entry: MarketingHistoryEntry;
@@ -451,7 +781,26 @@ export async function appendMarketingPostHistory(
     requeue?: MarketingRequeueEvidence;
   },
 ): Promise<{ appended: boolean }> {
+  // Read once, for the reason the two functions above do it. A `patch` getter
+  // that answered `status: "scheduled"` with a forged approval to the check
+  // and `status: "drafted"` to the write walked past the audit verification
+  // and stored the first answer. There is one object from here on and the
+  // original is not read again.
+  const rawPatch = rawInput.patch;
+  const rawRequeue = rawInput.requeue;
+  const input = {
+    id: String(rawInput.id),
+    expectedVersion: Number(rawInput.expectedVersion),
+    entry: rawInput.entry,
+    patch: rawPatch === undefined ? undefined : { ...rawPatch },
+    requeue: rawRequeue === undefined ? undefined : { ...rawRequeue },
+  };
+
   const entry = marketingHistoryEntrySchema.parse(input.entry);
+  // Materialise the patch before the first await. `postPatchData()` parses the
+  // envelope once and returns that same value for both the write and the final
+  // schedule comparison; the original object is never parsed a second time.
+  const materialisedPatch = postPatchData(input.patch ?? {});
   if (
     !(MARKETING_APPENDABLE_HISTORY_TYPES as readonly string[]).includes(entry.type)
   ) {
@@ -468,6 +817,8 @@ export async function appendMarketingPostHistory(
       historyVersion: true,
       status: true,
       envelopeDigest: true,
+      envelope: true,
+      scheduledAt: true,
     },
   });
   if (!current || current.historyVersion !== input.expectedVersion) {
@@ -475,7 +826,30 @@ export async function appendMarketingPostHistory(
   }
 
   const history = marketingHistorySchema.parse(current.history);
-  const data = postPatchData(input.patch ?? {});
+  const data = materialisedPatch.data;
+
+  // **The two places a schedule can live agree after this append, not just
+  // inside it.** Comparing them only when both were patched let either one
+  // move on its own: an envelope carrying a date went in while the column
+  // stayed null, and the row then said two things about when the post goes
+  // out. The values compared are the ones that will be there afterwards.
+  const currentEnvelope = marketingEnvelopeSchema.safeParse(current.envelope);
+  const finalEnvelopeSchedule =
+    materialisedPatch.envelope !== undefined
+      ? (materialisedPatch.envelope.scheduledAt ?? null)
+      : currentEnvelope.success
+        ? (currentEnvelope.data.scheduledAt ?? null)
+        : null;
+  const finalColumnSchedule =
+    materialisedPatch.hasScheduledAt
+      ? materialisedPatch.scheduledAt
+      : (current.scheduledAt?.toISOString() ?? null);
+  if (finalEnvelopeSchedule !== finalColumnSchedule) {
+    throw new MarketingStoreRefusedError(
+      "envelope_schedule_disagrees",
+      "The envelope and the column would name different schedules",
+    );
+  }
 
   // docs/policy/marketing-automation.md §2: a confirmed failure is re-queued by
   // a person, and the decision is about this content and this failure. The

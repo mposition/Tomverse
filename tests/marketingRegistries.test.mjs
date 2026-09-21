@@ -44,6 +44,8 @@ const featureClaim = (overrides = {}) => ({
   locales: ["en"],
   validUntil: "2027-01-31",
   gate: null,
+  planMeaning: null,
+  factSource: null,
   evidence: {
     kind: "page",
     pageRoute: "/compare-ai-models",
@@ -118,6 +120,8 @@ test("a comparison claim names where it was read and stores no quotation", () =>
     locales: ["en"],
     validUntil: "2027-01-31",
     gate: null,
+    planMeaning: null,
+    factSource: null,
     evidence: {
       kind: "external",
       url: "https://competitor.example/pricing",
@@ -150,6 +154,7 @@ test("the generator is given the claims without their evidence", () => {
 
   assert.equal(projected.length, 1);
   assert.equal("evidence" in projected[0], false, "the field is gone, not emptied");
+  assert.equal("factSource" in projected[0], false, "the lookup plan is server-only");
   assert.equal(projected[0].id, registry[0].id);
   assert.equal(projected[0].statementKey, registry[0].statementKey);
 
@@ -225,9 +230,25 @@ test("every claim type is one the resolver can be given", () => {
   for (const type of MARKETING_CLAIM_TYPES) {
     const needsPage = type === "feature" || type === "availability";
     const needsExternal = type === "comparison";
+    const factSource =
+      type === "pricing" || type === "plan"
+        ? {
+            kind: "billing_plan",
+            planId: "pro",
+            fields: ["monthlyPriceCents"],
+            targetsAustralia: false,
+          }
+        : type === "model"
+          ? {
+              kind: "model_registry",
+              modelId: "model.test",
+              minimumPlan: "Pro",
+            }
+          : null;
     const candidate = featureClaim({
       id: `claim.${type}`,
       type,
+      factSource,
       evidence: needsPage
         ? featureClaim().evidence
         : needsExternal
