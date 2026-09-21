@@ -67,10 +67,15 @@ const compilerOptions = parsedConfig.options;
 // line and column -- `path + expression text` for every entry -- came back
 // byte-identical, so nothing was added, removed or changed. Only the snapshot's
 // positions moved.
+//
+// 2026-09-21: the AMUX review adds one system-actor string literal and extends
+// the watched-schema review comment in `lib/marketingAutomationAccess.ts`.
+// The entry count and the same position-free inventory remain identical; only
+// later source positions in those two files moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "895feb8cb275a0fe8ccaeccf6db3f743",
-  "c8895a459cc7fea4561e7d3f57d1b308",
+  "71782e39a60c912f9559d68930f76b53",
+  "ca573dac9b1b411e521e96922b91d66b",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
