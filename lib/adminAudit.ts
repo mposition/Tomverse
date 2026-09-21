@@ -66,8 +66,9 @@ type AuditChainEntry = {
  * The only place a row joins the chain. Every writer -- the administrator
  * writer below and any system-actor writer -- goes through here, so the lock,
  * the database clock, the previous-hash read and the HMAC input cannot drift
- * apart between them (docs/policy/marketing-automation.md §6). The sequence is
- * pinned by tests/server-contract/admin-audit-chain-writer.test.ts.
+ * apart between them. The AMUX contract is recorded in
+ * docs/policy/development-agent-orchestration.md, and the sequence is pinned
+ * by tests/server-contract/admin-audit-chain-writer.test.ts.
  *
  * `integritySecret` is resolved by the caller before any transaction opens,
  * as it always was, so reading the environment is not part of the locked span.
@@ -188,7 +189,7 @@ type SystemAuditInput = {
   /**
    * Required, unlike the administrator writer's. A system action has no
    * request to fail and no person to ask, so its record has to commit or roll
-   * back with the change it describes (docs/policy/marketing-automation.md §6).
+   * back with the change it describes.
    */
   tx: Prisma.TransactionClient;
   systemActor: SystemAuditActor;

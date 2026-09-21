@@ -13,26 +13,16 @@ import {
 
 // The closed list of system actors and the reserved metadata key.
 //
-// Contract: docs/policy/marketing-automation.md §6. Several later checks ask
-// "was this a human?" of a stored audit row -- a template approval, a resume
-// into autonomous mode, a webhook verification signature -- so what counts as
-// human and what counts as system is decided here, once.
+// Contract: docs/policy/development-agent-orchestration.md. What counts as a
+// human or system audit actor is decided here, once.
 
 const ROOT = resolve(import.meta.dirname, "..");
 
 test("the system actor list is closed and changes only by review", () => {
-  // The policy names the publisher (docs/policy/marketing-automation.md §4);
-  // retention and guard are the S1 plan's other two writers. This pins the
-  // reviewed list, not a quotation of the policy.
-  assert.deepEqual([...SYSTEM_AUDIT_ACTORS], [
-    "marketing-publisher",
-    "marketing-retention",
-    "marketing-guard",
-    "tomverse-amux-orchestrator",
-  ]);
+  assert.deepEqual([...SYSTEM_AUDIT_ACTORS], ["tomverse-amux-orchestrator"]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
-  assert.equal(isSystemAuditActor("marketing-guard"), true);
-  assert.equal(isSystemAuditActor("Marketing-Guard"), false);
+  assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
+  assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
   assert.equal(isSystemAuditActor(undefined), false);
 });
 
@@ -65,7 +55,9 @@ test("a stored row is human, system, or unknown -- never guessed", () => {
     "human"
   );
   assert.equal(
-    auditRowActorKind(row({ metadata: { systemActor: "marketing-publisher" } })),
+    auditRowActorKind(
+      row({ metadata: { systemActor: "tomverse-amux-orchestrator" } })
+    ),
     "system"
   );
   // Neither an actor nor a marker.
@@ -73,19 +65,25 @@ test("a stored row is human, system, or unknown -- never guessed", () => {
   // A marker beside session fields cannot come from either writer.
   assert.equal(
     auditRowActorKind(
-      row({ actorUserId: "admin-1", metadata: { systemActor: "marketing-publisher" } })
+      row({
+        actorUserId: "admin-1",
+        metadata: { systemActor: "tomverse-amux-orchestrator" },
+      })
     ),
     "unknown"
   );
   assert.equal(
     auditRowActorKind(
-      row({ ipAddress: "203.0.113.7", metadata: { systemActor: "marketing-publisher" } })
+      row({
+        ipAddress: "203.0.113.7",
+        metadata: { systemActor: "tomverse-amux-orchestrator" },
+      })
     ),
     "unknown"
   );
   // A marker naming an actor that is not listed.
   assert.equal(
-    auditRowActorKind(row({ metadata: { systemActor: "marketing-intern" } })),
+    auditRowActorKind(row({ metadata: { systemActor: "unlisted-worker" } })),
     "unknown"
   );
 });

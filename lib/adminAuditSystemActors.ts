@@ -1,24 +1,19 @@
 /**
  * Who, other than an administrator, may write to the audit hash chain.
  *
- * docs/policy/marketing-automation.md §6 records system actions in the same
- * chain as human ones, in the same transaction as the change. A system entry
- * has no session, so it carries no `actorUserId`, `actorEmail`, IP or user
- * agent; what it carries instead is `metadata.systemActor`, set by
- * `writeSystemAuditLog()` and by nothing else.
+ * docs/policy/development-agent-orchestration.md requires orchestration audit
+ * events. System actions use the same chain as human ones and the same
+ * transaction as the change. A system entry has no session, so it carries no
+ * `actorUserId`, `actorEmail`, IP or user agent; what it carries instead is
+ * `metadata.systemActor`, set by `writeSystemAuditLog()` and by nothing else.
  *
- * The list is closed on purpose. An entry's actor is evidence -- a template
- * approval, a resume into autonomous mode and a webhook verification each
- * require a *human* row -- so a new system actor is a reviewed change to this
- * array, not a string a caller makes up.
+ * The list is closed on purpose. An entry's actor is evidence, so a new system
+ * actor is a reviewed change to this array, not a string a caller makes up.
  *
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
 
 export const SYSTEM_AUDIT_ACTORS = [
-  "marketing-publisher",
-  "marketing-retention",
-  "marketing-guard",
   "tomverse-amux-orchestrator",
 ] as const;
 

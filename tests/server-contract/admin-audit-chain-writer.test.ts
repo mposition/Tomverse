@@ -16,10 +16,11 @@ import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore.ts
  * the chain still looks fine until two writers race.
  *
  * So these tests pin the sequence against a recording client rather than
- * describing it. The marketing policy (docs/policy/marketing-automation.md §6)
- * requires a system-actor writer that shares this lock and hash path, and that
- * writer is added by moving this code, not copying it; these assertions are
- * what has to stay green across the move.
+ * describing it. The AMUX policy
+ * (docs/policy/development-agent-orchestration.md) requires a system-actor
+ * writer that shares this lock and hash path, and that writer is added by
+ * moving this code, not copying it; these assertions are what has to stay
+ * green across the move.
  */
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -424,10 +425,11 @@ test("a database clock read that returns no row falls back to a Date rather than
 
 // --- The system-actor writer -------------------------------------------------
 //
-// docs/policy/marketing-automation.md §6: system actions share this chain. The
-// system writer reaches the same append function, so the sequence above holds
-// for it too; what these add is what differs -- no session fields, the actor
-// marker, the required transaction -- and the reserved key both writers guard.
+// docs/policy/development-agent-orchestration.md: system actions share this
+// chain. The system writer reaches the same append function, so the sequence
+// above holds for it too; what these add is what differs -- no session fields,
+// the actor marker, the required transaction -- and the reserved key both
+// writers guard.
 
 let systemWriter: typeof import("../../lib/adminAudit.ts").writeSystemAuditLog;
 let RefusedError: typeof import("../../lib/adminAudit.ts").AuditWriteRefusedError;
@@ -443,12 +445,12 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
   await loadSystemWriter();
   const id = await systemWriter({
     tx: recordingClient("caller-tx") as never,
-    systemActor: "marketing-retention",
-    action: "marketing_post.content_purged",
-    targetType: "MarketingPost",
-    targetId: "post-1",
-    summary: "  Purged content past its retention.  ",
-    metadata: { purgedCount: 1 },
+    systemActor: "tomverse-amux-orchestrator",
+    action: "amux.execution.expired",
+    targetType: "AmuxWorkItem",
+    targetId: "task-1",
+    summary: "  Expired an execution lease.  ",
+    metadata: { attemptCount: 1 },
   });
 
   assert.equal(id, "created-by-caller-tx");
@@ -463,16 +465,19 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
     'SELECT clock_timestamp() AS "createdAt"'
   );
 
-  const metadata = { purgedCount: 1, systemActor: "marketing-retention" };
+  const metadata = {
+    attemptCount: 1,
+    systemActor: "tomverse-amux-orchestrator",
+  };
   assert.deepEqual(createCall(), {
     select: { id: true },
     data: {
       actorUserId: null,
       actorEmail: null,
-      action: "marketing_post.content_purged",
-      targetType: "MarketingPost",
-      targetId: "post-1",
-      summary: "Purged content past its retention.",
+      action: "amux.execution.expired",
+      targetType: "AmuxWorkItem",
+      targetId: "task-1",
+      summary: "Expired an execution lease.",
       metadata,
       ipAddress: null,
       userAgent: null,
@@ -482,10 +487,10 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
           previousHash: "previous-entry-hash",
           actorUserId: null,
           actorEmail: null,
-          action: "marketing_post.content_purged",
-          targetType: "MarketingPost",
-          targetId: "post-1",
-          summary: "Purged content past its retention.",
+          action: "amux.execution.expired",
+          targetType: "AmuxWorkItem",
+          targetId: "task-1",
+          summary: "Expired an execution lease.",
           metadata,
           ipAddress: null,
           userAgent: null,
@@ -503,12 +508,14 @@ test("a system entry without metadata still carries its actor", async () => {
   await loadSystemWriter();
   await systemWriter({
     tx: recordingClient("caller-tx") as never,
-    systemActor: "marketing-guard",
-    action: "marketing_post.guard_evaluated",
-    targetType: "MarketingPost",
+    systemActor: "tomverse-amux-orchestrator",
+    action: "amux.execution.started",
+    targetType: "AmuxWorkItem",
     summary: "Evaluated.",
   });
-  assert.deepEqual(createCall().data.metadata, { systemActor: "marketing-guard" });
+  assert.deepEqual(createCall().data.metadata, {
+    systemActor: "tomverse-amux-orchestrator",
+  });
 });
 
 const refusedBeforeAnyStatement = async (write: () => Promise<unknown>) => {
@@ -520,7 +527,7 @@ test("the system writer refuses to run without the caller's transaction", async 
   await loadSystemWriter();
   await refusedBeforeAnyStatement(() =>
     systemWriter({
-      systemActor: "marketing-guard",
+      systemActor: "tomverse-amux-orchestrator",
       action: "x",
       targetType: "X",
       summary: "x",
@@ -533,7 +540,7 @@ test("the system writer refuses an actor that is not listed", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "marketing-intern" as never,
+      systemActor: "unlisted-worker" as never,
       action: "x",
       targetType: "X",
       summary: "x",
@@ -546,7 +553,7 @@ test("the system writer refuses metadata that is not an object", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "marketing-guard",
+      systemActor: "tomverse-amux-orchestrator",
       action: "x",
       targetType: "X",
       summary: "x",
@@ -560,11 +567,11 @@ test("neither writer lets a caller set the actor marker itself", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "marketing-guard",
+      systemActor: "tomverse-amux-orchestrator",
       action: "x",
       targetType: "X",
       summary: "x",
-      metadata: { systemActor: "marketing-publisher" },
+      metadata: { systemActor: "caller-supplied" },
     })
   );
   await refusedBeforeAnyStatement(() =>
@@ -573,7 +580,7 @@ test("neither writer lets a caller set the actor marker itself", async () => {
       action: "x",
       targetType: "X",
       summary: "x",
-      metadata: { systemActor: "marketing-publisher" },
+      metadata: { systemActor: "caller-supplied" },
       tx: recordingClient("caller-tx") as never,
     })
   );
