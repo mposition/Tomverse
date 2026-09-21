@@ -705,10 +705,83 @@ export const analyseSource = (path, text) => {
   // spells. The review wrote the call as `const g = await import(p); g[k]({})`
   // and every rule below read an identifier where it wanted a literal.
   const constantStrings = new Map();
+  // Identifiers bound to a module loaded at run time, whatever specifier was
+  // used. A computed key on one of these whose value this pass cannot work out
+  // is refused rather than passed over: that is the shape the seal is reached
+  // through, and "cannot tell" is not "safe".
+  const runtimeModuleBindings = new Map();
+
+  /**
+   * The literal text a specifier starts with, before its first hole.
+   *
+   * `` `../locales/${locale}.ts` `` starts with `../locales/`, which fixes the
+   * directory: whatever the hole turns out to be, the module is not
+   * `@/lib/marketingGuardCore`. That is how the two locale loaders in
+   * `scripts/` stay out of a rule that otherwise refuses every unreadable
+   * specifier -- and refusing every one of them is what makes a rule get
+   * switched off.
+   */
+  const staticHeadOf = (node) => {
+    if (!node) return "";
+    const whole = literalTextOf(node);
+    if (whole !== null) return whole;
+    if (ts.isParenthesizedExpression(node)) return staticHeadOf(node.expression);
+    if (ts.isTemplateExpression(node)) return node.head.text;
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.PlusToken
+    ) {
+      return staticHeadOf(node.left);
+    }
+    return "";
+  };
+
+  /**
+   * Whether a specifier could name the module that declares the seal.
+   *
+   * A readable one is compared outright. An unreadable one is possible unless
+   * its head pins a directory the seal does not live in.
+   */
+  const couldBeSealModule = (node) => {
+    const whole = literalTextOf(node);
+    if (whole !== null) return specifierEndsWithSealModule(whole);
+    const head = staticHeadOf(node);
+    const lastSlash = head.lastIndexOf("/");
+    if (lastSlash <= 0) return true;
+    const directory = head.slice(0, lastSlash);
+    return directory.endsWith("lib");
+  };
+
+  /**
+   * The string a node spells, folding what can be folded.
+   *
+   * Concatenation and template literals are folded, so `"@/lib/" +
+   * "marketingGuardCore"` and `` `${"sealMarketing"}TemplateProof` `` are the
+   * strings they build. The fifth review's bypass was a constant alias; the
+   * sixth's was a `+` between two halves of the same name.
+   */
   const literalTextOf = (node) => {
     if (!node) return null;
     if (ts.isStringLiteralLike(node)) return node.text;
     if (ts.isIdentifier(node)) return constantStrings.get(node.text) ?? null;
+    if (ts.isParenthesizedExpression(node)) return literalTextOf(node.expression);
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.PlusToken
+    ) {
+      const left = literalTextOf(node.left);
+      const right = literalTextOf(node.right);
+      return left === null || right === null ? null : left + right;
+    }
+    if (ts.isTemplateExpression(node)) {
+      let text = node.head.text;
+      for (const span of node.templateSpans) {
+        const value = literalTextOf(span.expression);
+        if (value === null) return null;
+        text += value + span.literal.text;
+      }
+      return text;
+    }
     return null;
   };
   let importsDriver = false;
@@ -721,17 +794,45 @@ export const analyseSource = (path, text) => {
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ts.isStringLiteralLike(node.initializer)
+      literalTextOf(node.initializer) !== null
     ) {
       // A name bound twice is a name whose value this pass cannot state, so it
       // is dropped rather than guessed at.
       constantStrings.set(
         node.name.text,
-        constantStrings.has(node.name.text) ? null : node.initializer.text,
+        constantStrings.has(node.name.text)
+          ? null
+          : literalTextOf(node.initializer),
       );
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      let value = node.initializer;
+      while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
+        value = value.expression;
+      }
+      if (
+        ts.isCallExpression(value) &&
+        (value.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(value.expression) &&
+            value.expression.text === "require"))
+      ) {
+        // `true` means "this could be the seal module": either the specifier
+        // says so, or nothing in it says otherwise.
+        runtimeModuleBindings.set(
+          node.name.text,
+          couldBeSealModule(value.arguments[0]),
+        );
+      }
     }
     ts.forEachChild(node, collectConstants);
   };
+  // Two passes: constants first, so a `const` declared below its use is still
+  // resolvable, then the same walk again now that the map is complete.
+  collectConstants(sourceFile);
   collectConstants(sourceFile);
 
   const visit = (node) => {
@@ -750,14 +851,28 @@ export const analyseSource = (path, text) => {
     // A computed key: `guard["sealMarketingTemplateProof"]({})`. The name is a
     // string here, not an identifier, so the classification above never sees
     // it -- and the review called the function through exactly this.
-    if (
-      ts.isElementAccessExpression(node) &&
-      literalTextOf(node.argumentExpression) === TEMPLATE_SEAL_NAME
-    ) {
-      sealEscapes.push({
-        line: lineOf(sourceFile, node),
-        detail: `${TEMPLATE_SEAL_NAME} reached by a computed key`,
-      });
+    if (ts.isElementAccessExpression(node)) {
+      const key = literalTextOf(node.argumentExpression);
+      if (key === TEMPLATE_SEAL_NAME) {
+        sealEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `${TEMPLATE_SEAL_NAME} reached by a computed key`,
+        });
+      } else if (
+        key === null &&
+        ts.isIdentifier(node.expression) &&
+        runtimeModuleBindings.get(node.expression.text) === true
+      ) {
+        // A key this pass cannot work out, on a module whose specifier it
+        // cannot work out either. Both halves unknown is the shape the seal is
+        // reached through, and "cannot tell" is not "safe". A load whose
+        // specifier *is* readable and is not this module cannot hold the seal,
+        // so the locale loaders next door are left alone.
+        sealEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: "a computed key on a module whose specifier is not readable",
+        });
+      }
     }
 
     if (isReflectGet(node) && literalTextOf(node.arguments[1]) === TEMPLATE_SEAL_NAME) {
@@ -793,7 +908,11 @@ export const analyseSource = (path, text) => {
         (ts.isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
       const specifier = literalTextOf(node.arguments[0]);
-      if (specifier && importsSealModule(specifier)) {
+      if (specifier === null) {
+        // A specifier nobody can read. Refused where the result is then read
+        // by a computed key, which the rule above catches; noted here so the
+        // two halves of the same bypass are visible together.
+      } else if (importsSealModule(specifier)) {
         sealEscapes.push({
           line: lineOf(sourceFile, node),
           detail: `loads ${specifier} at run time`,

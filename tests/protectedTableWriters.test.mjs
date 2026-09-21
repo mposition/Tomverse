@@ -523,6 +523,13 @@ test("the seal rule counts calls, and refuses every way of moving the value", ()
     'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = await import(p);\ng[k]({});',
     'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = require(p);\ng[k]({});',
     'const k = "sealMarketingTemplateProof";\nimport * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, k);',
+    // The sixth review split both strings with a `+`, which the constant map
+    // read as two halves of nothing.
+    'const p = "@/lib/" + "marketingGuardCore";\nconst k = "sealMarketing" + "TemplateProof";\nconst g = await import(p);\ng[k]({});',
+    'const g = await import(`@/lib/${"marketingGuardCore"}`);\ng["sealMarketingTemplateProof"]({});',
+    // Neither half readable: which module and which key are both unknown, and
+    // one of the pairs it could be is the seal.
+    'const g = await import(`@/lib/${name}`);\ng[key]({});',
   ];
 
   for (const text of escapes) {
@@ -593,4 +600,21 @@ test("the declaring file may declare it and is not required to call it", () => {
       finding.path === "lib/marketingGuardCore.ts"
   );
   assert.deepEqual(declared, [], JSON.stringify(declared));
+});
+
+test("a run-time load whose directory is not the seal's is left alone", () => {
+  // The fail-closed rule above refuses a computed key on a module nothing can
+  // identify. It must not refuse the locale loaders in `scripts/`, whose
+  // specifier has a hole in it but whose directory is fixed by the text
+  // before it -- a rule that fires on those is a rule somebody switches off.
+  const quiet = check(
+    sealSource(
+      "const bundle = await import(`../locales/${locale}.ts`);\n" +
+        "export const strings = bundle[locale];"
+    )
+  );
+  assert.deepEqual(
+    quiet.filter((finding) => finding.rule === "template-seal"),
+    []
+  );
 });

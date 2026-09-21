@@ -61,12 +61,38 @@ const PHRASE_CLOSING_PARTICLES: readonly string[] = Object.freeze([
 
 const OPENERS: readonly string[] = Object.freeze(["유일한", "유일하게"]);
 
-/** A token is the target if it is the noun, with or without a particle on it. */
-const isTarget = (token: string): boolean =>
-  TARGET_NOUNS.some((noun) => token.startsWith(noun));
+/**
+ * What may follow a target noun and still be that noun.
+ *
+ * A particle, a copula, or nothing. `비교적` starts with `비교` and is not the
+ * noun -- it is "relatively" -- so a bare `startsWith` read an ordinary
+ * sentence about a small difference as a uniqueness claim.
+ */
+const NOUN_TAIL =
+  /^(?:[\uac00-\ud7a3]{0,2}(?:\uc785\ub2c8\ub2e4|\uc774\ub2e4|\uc784)|[\uac00\uc774\ub294\uc740\ub97c\uc744\ub85c\uc5d0\uc640\uacfc\ub3c4\uc758\uba70\uace0])?$/u;
 
+/** A token is the target if it is the noun, with a particle or a copula on it. */
+const isTarget = (token: string): boolean =>
+  TARGET_NOUNS.some(
+    (noun) => token.startsWith(noun) && NOUN_TAIL.test(token.slice(noun.length)),
+  );
+
+/**
+ * Whether a token closes the noun phrase.
+ *
+ * The particle has to be a particle rather than the last syllable of a word.
+ * `속도` ends in `도` and is one word -- "speed" -- and reading that `도` as
+ * the auxiliary particle stopped the walk in the middle of
+ * "유일한 속도 최적화 AI 비교 도구". So the stem left after the particle has
+ * to be a word in its own right, which for Korean means at least two
+ * syllables.
+ */
 const closesPhrase = (token: string): boolean =>
-  PHRASE_CLOSING_PARTICLES.some((particle) => token.endsWith(particle));
+  PHRASE_CLOSING_PARTICLES.some(
+    (particle) =>
+      token.endsWith(particle) &&
+      Array.from(token.slice(0, token.length - particle.length)).length >= 2,
+  );
 
 export type MarketingKoreanUniquenessFinding = {
   /** The opener and the noun it was found to qualify. */
@@ -94,7 +120,15 @@ export function findKoreanUniquenessClaims(
       // a comma or a full stop ends the phrase as surely as a particle does.
       const tokens = rest.split(/\s+/u).filter((token) => token.length > 0);
 
-      for (const token of tokens) {
+      for (const raw of tokens) {
+        // Brackets are not a boundary: "유일한 (검증된) AI 비교 도구" is one
+        // noun phrase with an aside in it, and treating the bracket as the end
+        // of the phrase stopped the walk before the noun.
+        const token = raw.replace(/[()\[\]{}\u3008-\u3011\uff08\uff09\u300c-\u300f]/gu, "");
+        if (token.length === 0) continue;
+
+        // A comma, a full stop or any other punctuation *is* the end. What is
+        // in front of it may still be the noun.
         if (/[^\p{L}\p{N}]/u.test(token)) {
           const head = token.replace(/[^\p{L}\p{N}][^]*$/u, "");
           if (head.length > 0 && isTarget(head)) {

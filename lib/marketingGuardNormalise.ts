@@ -188,6 +188,20 @@ const IDEOGRAPHIC_HOST_CJK_LABEL = new RegExp(
   "u",
 );
 
+/**
+ * The same, for a suffix that is not in lower case.
+ *
+ * A domain is case-insensitive, so 例子。CoM is an address; the lower-case rule
+ * above was what kept "AI", "Pro" and "App" starting the next sentence out of
+ * it. The difference is what follows -- a sentence goes on, "。AI Review can
+ * help.", and a host at the end of one does not -- so a mixed-case suffix
+ * counts unless a word follows it.
+ */
+const IDEOGRAPHIC_HOST_CJK_MIXED_CASE = new RegExp(
+  `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}${codePoint(0x3002)}(?:${IDEOGRAPHIC_TLDS}|${ASCII_TLDS})(?![\\p{L}\\p{N}-])(?!\\s+\\p{L})`,
+  "iu",
+);
+
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
 
@@ -431,14 +445,26 @@ const SEPARATOR = "[^\\p{L}\\p{N}]*";
  * round is a published superlative. The trade is written down here rather
  * than discovered.
  */
+/**
+ * The separator-tolerant body of a term, without the boundary assertions.
+ *
+ * Exported so a rule can put several of them in one alternation and keep one
+ * pair of assertions around the group. `lib/marketingMemoryClaims.ts` builds
+ * its spaced-out claims from the same vocabulary as its ordinary ones this
+ * way -- the two lists had drifted apart, and "We r e p r o d u c e your
+ * memories." went through because `reproduce` was in one of them.
+ */
+export function marketingTermBody(term: string): string {
+  return Array.from(foldMarketingRuleText(term))
+    .filter((character) => /[\p{L}\p{N}]/u.test(character))
+    .map(escapeForRegExp)
+    .join(SEPARATOR);
+}
 export function marketingTermPattern(
   term: string,
   match: "word" | "substring",
 ): RegExp {
-  const body = Array.from(foldMarketingRuleText(term))
-    .filter((character) => /[\p{L}\p{N}]/u.test(character))
-    .map(escapeForRegExp)
-    .join(SEPARATOR);
+  const body = marketingTermBody(term);
 
   // A term with nothing alphanumeric in it would compile to an empty pattern,
   // which matches everywhere. Never matching is the safe answer for a term
@@ -480,7 +506,8 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
   if (
     URL_LIKE.test(readable) ||
     IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_CJK_LABEL.test(readable)
+    IDEOGRAPHIC_HOST_CJK_LABEL.test(readable) ||
+    IDEOGRAPHIC_HOST_CJK_MIXED_CASE.test(readable)
   ) {
     codes.push("url_like");
   }

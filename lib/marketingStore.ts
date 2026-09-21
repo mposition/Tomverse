@@ -60,7 +60,6 @@ import {
   type MarketingEnvelope,
   type MarketingFactSnapshot,
   type MarketingGraduationSnapshot,
-  type MarketingGuardDecision,
   type MarketingHistoryEntry,
   type MarketingLocale,
   type MarketingPausableMode,
@@ -75,6 +74,7 @@ import {
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
   marketingGuardDecisionIsSealed,
+  marketingGuardDraftDigest,
   type MarketingGuardDecision as GuardDecision,
 } from "@/lib/marketingGuardCore";
 
@@ -320,20 +320,52 @@ export async function createMarketingPost(
     );
   }
 
+  // Read once. Every use below is of this snapshot rather than of the object,
+  // so a decision whose fields answer differently on the second read cannot
+  // pass the checks with one answer and be written with another. The freeze in
+  // `sealDecision()` is what stops the accessor being installed at all; this
+  // is the second lock on the same door.
+  const verdict = input.decision.verdict;
+  const guardCodes =
+    "codes" in input.decision ? [...input.decision.codes] : [];
+  const guardRuleIds = [...input.decision.ruleIds];
+  const draftDigest = input.decision.draftDigest;
+
+  // **The decision has to be about this post.** Provenance says a Guard made
+  // it; it does not say what about. The Guard was shown "Three answers side by
+  // side." and the row written said "The best AI, guaranteed.", with the first
+  // decision attached to the second body.
+  const envelopeForDigest = marketingEnvelopeSchema.parse(input.envelope);
+  const recomputed = marketingGuardDraftDigest({
+    renderedText: envelopeForDigest.renderedText,
+    locale: input.locale,
+    channel: envelopeForDigest.channel,
+    channelId: input.channelId,
+    claimIds: input.claimIds,
+    assetIds: input.assetIds,
+    templateId: input.templateId ?? undefined,
+  });
+  if (recomputed !== draftDigest) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_about_this_post",
+      "That decision was made about a different draft",
+    );
+  }
+
   // **S1 writes no autonomous post.** The decision's binding says what the
   // template row has to still look like at the moment of the write, and making
   // that true means reading the database's own clock and the row in the same
   // transaction as the insert -- which is the publish path, and the publish
   // path is S2. Until it exists, the honest answer is that this function
   // cannot write the row, rather than writing it without the check.
-  if (input.decision.verdict === "autonomous_eligible") {
+  if (verdict === "autonomous_eligible") {
     throw new MarketingStoreRefusedError(
       "autonomous_creation_not_available",
       "Creating an autonomous post needs the transactional template check, which is S2",
     );
   }
 
-  const envelope = marketingEnvelopeSchema.parse(input.envelope);
+  const envelope = envelopeForDigest;
   const factSnapshot = marketingFactSnapshotSchema.parse(input.factSnapshot);
 
   // The first history entry is written here, not by the caller: the insert
@@ -363,10 +395,10 @@ export async function createMarketingPost(
       factSnapshot: asJson(factSnapshot),
       // Derived, every one of them. Two columns that could disagree with the
       // decision are two columns somebody can set to whatever they need.
-      guardDecision: input.decision.verdict,
-      guardCodes: [...input.decision.codes],
-      guardRuleIds: [...input.decision.ruleIds],
-      status: input.decision.verdict === "reject" ? "guard_rejected" : "drafted",
+      guardDecision: verdict,
+      guardCodes,
+      guardRuleIds,
+      status: verdict === "reject" ? "guard_rejected" : "drafted",
       mode: "approval",
       history: asJson([draftEntry]),
       historyVersion: 0,
@@ -381,7 +413,17 @@ export async function createMarketingPost(
  */
 export type MarketingPostPatch = {
   status?: MarketingPostStatus;
-  mode?: MarketingPostMode;
+  /**
+   * The mode, which this path may only ever lower.
+   *
+   * `autonomous` is not settable here. It was: a post created in `approval`
+   * mode could be moved to `autonomous` by an ordinary append, which satisfied
+   * the table's own CHECK and the channel trigger, and nothing in between had
+   * read a Guard decision. Turning a post autonomous is the publish path's
+   * business, and the publish path does it inside the transaction that checks
+   * the template row.
+   */
+  mode?: Exclude<MarketingPostMode, "autonomous">;
   envelope?: MarketingEnvelope;
   envelopeDigest?: string;
   approvalAuditLogId?: string | null;
@@ -412,7 +454,18 @@ const postPatchData = (
 ): Prisma.MarketingPostUpdateManyMutationInput => {
   const data: Prisma.MarketingPostUpdateManyMutationInput = {};
   if (patch.status !== undefined) data.status = patch.status;
-  if (patch.mode !== undefined) data.mode = patch.mode;
+  if (patch.mode !== undefined) {
+    // The type says `autonomous` is not one of the values; this says it at run
+    // time too, because a caller reaching this through `as never` is exactly
+    // the caller the rule is for.
+    if ((patch.mode as string) === "autonomous") {
+      throw new MarketingStoreRefusedError(
+        "autonomous_mode_not_settable_here",
+        "Turning a post autonomous belongs to the publish path, inside the transaction that checks the template",
+      );
+    }
+    data.mode = patch.mode;
+  }
   if (patch.envelope !== undefined) {
     data.envelope = asJson(marketingEnvelopeSchema.parse(patch.envelope));
   }

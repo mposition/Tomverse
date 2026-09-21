@@ -427,6 +427,33 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "memory.pluralNounInList",
+      "ruleId": "rule.memory-claim",
+      "input": "Tomverse is not an OpenAI-certified, Anthropic services partner.",
+      "note": "a plural noun after a name is not a verb, so the negation still governs the whole sentence",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "refuted.koreanRelatively",
+      "ruleId": "rule.refuted-superiority",
+      "input": "이것은 유일한 비교적 작은 차이입니다.",
+      "note": "비교적 is \"relatively\" and merely starts with the target noun",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "free.distractionFree",
+      "ruleId": "rule.free-wording",
+      "input": "Work distraction-free.",
+      "note": "X-free with no price word in it says nothing about a price",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

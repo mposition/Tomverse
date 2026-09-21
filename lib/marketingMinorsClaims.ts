@@ -38,6 +38,15 @@ const AGE_UNDER_SIXTEEN =
   ].join("|") +
   ")";
 
+/**
+ * The bound in "under-N", from one to eighteen.
+ *
+ * Three values were listed -- 13, 16 and 18 -- so "Under-15s, sign up now."
+ * addressed exactly the people the rule is for and matched nothing. Any bound
+ * a post writes is a bound somebody chose, and the rule is about the shape.
+ */
+const UNDER_AGE = "(?:1[0-8]|[1-9])";
+
 /** "-year-old", however it is punctuated. */
 const YEAR_OLDS =
   "\\s*[-\\u2010-\\u2015]?\\s*year\\s*[-\\u2010-\\u2015]?\\s*olds?";
@@ -85,13 +94,13 @@ const MINORS_TARGETING_SOURCES: readonly { source: string; flags: string }[] =
       flags: "iu",
     }),
     Object.freeze({
-      source: "\\b(?:for|to)\\s+under[-\\u2010-\\u2015\\s]?(?:13|16|18)s?\\b",
+      source: "\\b(?:for|to)\\s+under[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?\\b",
       flags: "iu",
     }),
     // "Under-16s, sign up now." addresses them directly rather than naming an
     // audience, and the "for under 16s" shape above could not see it.
     Object.freeze({
-      source: "\\bunder[-\\u2010-\\u2015\\s]?(?:13|16|18)s?" + CALL_TO_ACTION,
+      source: "\\bunder[-\\u2010-\\u2015\\s]?" + UNDER_AGE + "s?" + CALL_TO_ACTION,
       flags: "iu",
     }),
     Object.freeze({

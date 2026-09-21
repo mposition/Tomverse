@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 
 import {
   MARKETING_APPROVAL_CODES,
+  marketingGuardDraftDigest,
   MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
   marketingTemplateWriteConditions,
   MARKETING_REJECT_CODES,
@@ -777,4 +778,57 @@ test("free wording needs the allowance as a claim, not as a word", () => {
   );
   assert.equal(acrossASentence.verdict, "reject", JSON.stringify(acrossASentence));
   assert.ok(acrossASentence.codes.includes("free_wording_without_condition"));
+});
+
+// --- the decision is about this draft, and cannot be edited afterwards -----
+
+test("every decision carries the digest of the draft it was made about", () => {
+  // Provenance says a Guard made it. It does not say what about, and a writer
+  // that checked only the seal attached a decision made for "Three answers side
+  // by side." to a row that said "The best AI, guaranteed."
+  const decision = guardDraft(input());
+  assert.equal(
+    decision.draftDigest,
+    marketingGuardDraftDigest({
+      renderedText: "Three answers to one question, side by side.",
+      locale: "en",
+      channel: "linkedin",
+      channelId: CHANNEL_ID,
+      claimIds: [],
+      assetIds: [],
+    }),
+  );
+
+  // Any field of the draft changes it.
+  const other = guardDraft(
+    input({ draft: { renderedText: "Something else entirely." } }),
+  );
+  assert.notEqual(other.draftDigest, decision.draftDigest);
+  const elsewhere = guardDraft(input({ draft: { channelId: "chn_other" } }));
+  assert.notEqual(elsewhere.draftDigest, decision.draftDigest);
+});
+
+test("a sealed decision cannot be given a different answer afterwards", () => {
+  // The seal is a `WeakSet`, which says where the object came from and nothing
+  // about what it says now. An accessor installed after the fact returned
+  // `approval_required` to the check and `autonomous_eligible` to the line
+  // that wrote the row, so the object is frozen as well as registered.
+  const decision = guardDraft(input());
+  assert.equal(Object.isFrozen(decision), true);
+  assert.equal(Object.isFrozen(decision.ruleIds), true);
+  assert.equal(Object.isFrozen(decision.codes), true);
+
+  assert.throws(() => {
+    Object.defineProperty(decision, "verdict", { get: () => "autonomous_eligible" });
+  });
+  assert.equal(decision.verdict, "approval_required");
+
+  const autonomous = guardDraft(autonomousReady());
+  assert.equal(autonomous.verdict, "autonomous_eligible");
+  assert.equal(Object.isFrozen(autonomous.templateBinding), true);
+  assert.throws(() => {
+    Object.defineProperty(autonomous.templateBinding, "templateId", {
+      value: "template.other",
+    });
+  });
 });

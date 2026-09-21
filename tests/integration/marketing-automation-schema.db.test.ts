@@ -721,6 +721,52 @@ test("the store refuses a decision the Guard did not make", async () => {
   );
 });
 
+test("the store refuses a decision made about a different draft", async () => {
+  const row = await approvedChannel();
+  // Sealed, and about nothing this post says. Provenance without binding is a
+  // stamp on a blank page: the Guard saw one body and the row carries another.
+  const elsewhere = guardDraft({
+    draft: {
+      renderedText: "Something else entirely.",
+      locale: "en",
+      channel: envelope().channel,
+      channelId: row.id,
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: { claims: [], assets: [] },
+    templates: [],
+    context: {
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    },
+  });
+
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-other-draft",
+      envelope: envelope() as never,
+      envelopeDigest: DIGEST,
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      decision: elsewhere,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_about_this_post|different draft/i,
+  );
+});
+
 test("a dispatched post cannot go back to a state that says it never left", async () => {
   const row = await approvedChannel();
   const published = await publishedPost(row.id);

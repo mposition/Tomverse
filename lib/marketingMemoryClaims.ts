@@ -33,7 +33,7 @@
 // Neither half judges translation quality, and neither is a substitute for
 // someone reading the page. They catch the specific sentence §17 names.
 
-import { marketingTermPattern } from "@/lib/marketingGuardNormalise";
+import { marketingTermBody } from "@/lib/marketingGuardNormalise";
 import { marketingClauseAsserts } from "@/lib/marketingNegation";
 
 /** The languages the forbidden-claim patterns below actually cover. */
@@ -123,19 +123,69 @@ export type ForbiddenMemoryClaim = {
  * rather than a neighbouring true one.
  */
 /**
- * A phrase whose letters may be separated by anything that is not a letter.
+ * One vocabulary, two spellings of every claim it makes.
  *
- * `marketingTermPattern()` is the Guard's own compiler, and the reason the
- * phrases below go through it is that a normalised *form* cannot do this job:
- * a twin that joined single letters across spaces fixed one spelling, missed
- * two more, and invented "BEST" out of a sentence listing the letters.
+ * The verbs and the objects are written once. The ordinary pattern joins them
+ * with a gap, and the spaced one joins separator-tolerant bodies of the same
+ * words with the same gap -- so "We r e p r o d u c e your memories." is the
+ * claim `reproduce` already covered in its ordinary spelling. Two hand-written
+ * lists had drifted apart, which is how that sentence went through: the spaced
+ * list had `clone` and `replicate` and not the other three.
  *
- * Phrases rather than words. "clone" on its own refuses an ordinary sentence
- * about copying a repository; "clone your memories" is the claim §17 forbids
- * however it is spaced.
+ * A separate *form* cannot do this job. A twin that joined single letters
+ * across spaces fixed one spelling, missed "c  l  o  n  e" and "cl o ne", and
+ * invented "BEST" out of a sentence listing the letters.
  */
-const spacedClaim = (phrase: string): RegExp =>
-  new RegExp(marketingTermPattern(phrase, "word").source, "iu");
+const REPLICATION_VERBS: readonly string[] = Object.freeze([
+  "clone",
+  "clones",
+  "cloning",
+  "replicate",
+  "replicates",
+  "replicating",
+  "reproduce",
+  "reproduces",
+  "reproducing",
+  "recreate",
+  "recreates",
+  "recreating",
+  "transfer",
+  "transfers",
+  "transferring",
+  "copy",
+  "copies",
+  "copying",
+  "duplicate",
+  "duplicates",
+  "duplicating",
+]);
+
+const REPLICATION_OBJECTS: readonly string[] = Object.freeze([
+  "memory",
+  "memories",
+  "personality",
+  "persona",
+  "brain",
+  "mind",
+]);
+
+const anyOf = (words: readonly string[]): string =>
+  `(?:${words.map(marketingTermBody).join("|")})`;
+
+const NOT_ALPHANUMERIC_BEFORE = "(?<![\\p{L}\\p{N}])";
+const NOT_ALPHANUMERIC_AFTER = "(?![\\p{L}\\p{N}])";
+
+/** The verb, a short gap that does not cross a sentence, then the object. */
+const SPACED_REPLICATION_CLAIM = new RegExp(
+  NOT_ALPHANUMERIC_BEFORE +
+    anyOf(REPLICATION_VERBS) +
+    NOT_ALPHANUMERIC_AFTER +
+    "[^.\\n]{0,30}" +
+    NOT_ALPHANUMERIC_BEFORE +
+    anyOf(REPLICATION_OBJECTS) +
+    NOT_ALPHANUMERIC_AFTER,
+  "iu",
+);
 
 export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
     {
@@ -146,19 +196,12 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
             /(기억|인격|성격|두뇌)[^.\n]{0,20}(복제|재현|그대로\s*옮)/,
             /(복제|재현)[^.\n]{0,12}(기억|인격|두뇌)/,
             /\b(clone|replicate|reproduce|recreate|transfer)s?\b[^.\n]{0,30}\b(memory|memories|personality|persona|brain|mind)\b/i,
-            // The same claims with every separator tolerated inside the words,
-            // so "We c l o n e your memories." and "We clo·ne your memories."
-            // read as what they are. Built through the Guard's own term
-            // compiler, which is what a rule written as a term would get --
-            // except that these stay here, where the clause is read and a
-            // denial is not a claim.
-            spacedClaim("clone your memories"),
-            spacedClaim("clone your memory"),
-            spacedClaim("clones your memories"),
-            spacedClaim("clone your personality"),
-            spacedClaim("replicate your memories"),
-            spacedClaim("replicates your memories"),
-            spacedClaim("copy your personality"),
+            // The same claim with every separator tolerated inside the words,
+            // built from the same vocabulary as the line above so the two
+            // cannot drift. It stays here rather than becoming a Guard term
+            // because this is where the clause is read, and a denial is not a
+            // claim.
+            SPACED_REPLICATION_CLAIM,
             /\b(memory|memories|personality|persona|brain)\b[^.\n]{0,20}\b(cloned|replicated|recreated|reproduced)\b/i,
         ],
     },

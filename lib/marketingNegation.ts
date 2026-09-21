@@ -107,20 +107,52 @@ const COMMA_SPLICE =
  * with, or endorsed by, OpenAI" the name is the object and no lower-case word
  * follows it, so that sentence keeps its one negation.
  */
+/**
+ * The verbs a new clause can start with.
+ *
+ * A closed list, because the guess it replaces was wrong in both directions.
+ * "any lower-case word ending in s or ed" read "Anthropic services partner" as
+ * a subject and a verb and cut a real negation in half, and it would have read
+ * any plural noun the same way.
+ */
+const CLAUSE_VERB =
+  "(?:" +
+  [
+    "is|are|was|were|be|been|being|has|have|had",
+    "does|do|did|can|could|will|would|may|might|shall|should|must",
+    "clones|replicates|reproduces|recreates|transfers|copies|duplicates",
+    "keeps|stores|holds|remembers|learns|reads|writes|saves|deletes",
+    "offers|provides|gives|makes|lets|helps|works|runs|shares|sends",
+    "shows|uses|supports|includes|costs|starts|comes|brings|turns|builds",
+  ].join("|") +
+  ")(?![\\p{L}\\p{N}])";
+
+/**
+ * A comma followed by a proper noun that is itself the subject of a verb.
+ *
+ * "We do not lose files, Tomverse clones your memories." is a comma splice
+ * whose second subject is a name, and a list of pronouns could not see it. The
+ * verb is what tells it apart from a predicate carrying on: in "not affiliated
+ * with, or endorsed by, OpenAI" the name is the object and no verb follows it,
+ * so that sentence keeps its one negation.
+ */
 const NAMED_SUBJECT_SPLICE = new RegExp(
-  "[,\\uff0c]\\s*(?=\\p{Lu}[\\p{Ll}\\p{N}]+\\s+(?:" +
-    [
-      // Auxiliaries, which are verbs wherever they appear.
-      "is|are|was|were|has|have|had|does|do|did|can|could|will|would|may",
-      "might|should|must|keeps|stores|holds",
-      // A lower-case word inflected as a verb. "Anthropic partner product" is
-      // a noun phrase and gets none of these, which is why "not an
-      // OpenAI-certified, Anthropic partner product" keeps its one negation;
-      // "Tomverse clones your memories" gets the first.
-      "[\\p{Ll}]+(?:s|ed)(?![\\p{L}\\p{N}])",
-    ].join("|") +
-    "))",
+  "[,\\uff0c]\\s*(?=\\p{Lu}[\\p{Ll}\\p{N}]+\\s+" + CLAUSE_VERB + ")",
   "gu",
+);
+
+/**
+ * The same, for a subject that is a determiner and a noun.
+ *
+ * "We do not lose files, the service clones your memories." has no name in it
+ * at all, and the rule above wanted one.
+ */
+const DETERMINER_SPLICE = new RegExp(
+  "[,\\uff0c]\\s*(?=(?:the|a|an|our|its|their|this|that|these|those|every|each)" +
+    "\\s+[\\p{Ll}\\p{N}-]+\\s+" +
+    CLAUSE_VERB +
+    ")",
+  "giu",
 );
 
 const KOREAN_COMMA_SPLICE =
@@ -142,7 +174,17 @@ const KOREAN_COMMA_SPLICE =
  * the repository's own copy check.
  */
 const SELLING_OPENER =
-  /^\s*(?:want|need|looking|ready|tired|imagine|fancy|wish|curious|ever\s+wanted|why\s+not|got\s+a)\b/iu;
+  new RegExp(
+    "^\\s*(?:" +
+      [
+        "want|need|looking|ready|tired|imagine|fancy|wish|curious",
+        "would\\s+you\\s+(?:like|rather|prefer)",
+        "do\\s+you\\s+want|how\\s+about|what\\s+if|who\\s+wants",
+        "ever\\s+wanted|why\\s+not|got\\s+a|ready\\s+to|tired\\s+of",
+      ].join("|") +
+      ")\\b",
+    "iu",
+  );
 
 const isAskingRatherThanSelling = (text: string, start: number): boolean =>
   !SELLING_OPENER.test(text.slice(start));
@@ -175,6 +217,7 @@ const lastBoundaryIndex = (sentence: string, offset: number): number => {
   for (const expression of [
     COMMA_SPLICE,
     NAMED_SUBJECT_SPLICE,
+    DETERMINER_SPLICE,
     KOREAN_COMMA_SPLICE,
   ]) {
     // A fresh matcher each time: a `g` expression carries `lastIndex`, and a
@@ -210,6 +253,7 @@ const nextBoundaryIndex = (sentence: string, offset: number): number => {
   for (const expression of [
     COMMA_SPLICE,
     NAMED_SUBJECT_SPLICE,
+    DETERMINER_SPLICE,
     KOREAN_COMMA_SPLICE,
   ]) {
     const scan = new RegExp(expression.source, expression.flags);

@@ -102,12 +102,53 @@ export type MarketingClaimKind = (typeof MARKETING_CLAIM_KINDS)[number];
  */
 export type MarketingCategoryVerdict = "proved_true" | "proved_false" | "unreadable";
 
+/**
+ * The draft a decision was made about, as one string.
+ *
+ * Every decision carries it and a writer checks it, because a sealed decision
+ * was otherwise a decision about *something*: the Guard was shown "Three
+ * answers side by side.", and the row that got written said "The best AI,
+ * guaranteed." Provenance without binding is a stamp on a blank page.
+ *
+ * Built by naming each field rather than by serialising the object, so a field
+ * added to the draft later has to be added here to be covered -- and adding it
+ * is a line in a diff rather than a silent change of meaning.
+ */
+export function marketingGuardDraftDigest(draft: {
+  readonly renderedText: string;
+  readonly locale: string;
+  readonly channel: string;
+  readonly channelId: string;
+  readonly claimIds: readonly string[];
+  readonly assetIds: readonly string[];
+  readonly templateId?: string;
+}): string {
+  return sha256(
+    JSON.stringify([
+      "marketing-guard-draft-v1",
+      draft.renderedText,
+      draft.locale,
+      draft.channel,
+      draft.channelId,
+      [...draft.claimIds].sort(),
+      [...draft.assetIds].sort(),
+      draft.templateId ?? null,
+    ]),
+  );
+}
+
 export type MarketingGuardDecision =
-  | { verdict: "reject"; codes: MarketingRejectCode[]; ruleIds: string[] }
+  | {
+      verdict: "reject";
+      codes: MarketingRejectCode[];
+      ruleIds: string[];
+      draftDigest: string;
+    }
   | {
       verdict: "approval_required";
       codes: MarketingApprovalCode[];
       ruleIds: string[];
+      draftDigest: string;
     }
   | {
       verdict: "autonomous_eligible";
@@ -126,6 +167,7 @@ export type MarketingGuardDecision =
        */
       templateBinding: MarketingTemplateBinding;
       ruleIds: string[];
+      draftDigest: string;
     };
 
 /**
@@ -587,7 +629,10 @@ const NON_PRICE_FREE = new RegExp(
     // every sentence that begins one, and a class holding \\s removed the
     // word from the check entirely.
     `[\\p{L}\\p{N}]+[-\\u2010-\\u2015]free`,
-    `\\bfree[-\\u2010-\\u2015\\s]{1,2}(?:of|from)\\b`,
+    // The two words after "of" or "from" come with it, because they are what
+    // says whether it is a price: "free of charge" is one and "free from the
+    // usual clutter" is not, and the shape alone cannot tell.
+    `\\bfree[-\\u2010-\\u2015\\s]{1,2}(?:of|from)(?:\\s+[\\p{L}]+){1,2}`,
     `\\bfree[-\\u2010-\\u2015\\s]{1,2}(?:form|text|rein|flowing)\\b`,
     `\\bfreeform\\b`,
     `\\bcarefree\\b`,
@@ -595,9 +640,26 @@ const NON_PRICE_FREE = new RegExp(
   "giu",
 );
 
+/**
+ * The words that make a "free" compound a price claim after all.
+ *
+ * "distraction-free" is a feature and "fee-free" is a price; "free of clutter"
+ * is a feature and "free of charge" is a price. The shapes above cannot tell
+ * them apart, so the compound is kept -- and the price check then runs on it --
+ * whenever one of these is the other half.
+ */
+const PRICE_SENSE = new RegExp(
+  "\\b(?:charge|charges|fee|fees|cost|costs|price|prices|payment|payments|" +
+    "subscription|tax|taxes|commission|duty|toll|obligation|commitment|contract)\\b",
+  "iu",
+);
+
 const withoutFreeCompounds = (forms: readonly string[]): string[] =>
   forms.map((form) =>
-    form.replace(new RegExp(NON_PRICE_FREE.source, NON_PRICE_FREE.flags), " "),
+    form.replace(
+      new RegExp(NON_PRICE_FREE.source, NON_PRICE_FREE.flags),
+      (compound) => (PRICE_SENSE.test(compound) ? compound : " "),
+    ),
   );
 
 const anyTermMatches = (
@@ -666,6 +728,9 @@ const sha256 = (value: string): string =>
  */
 export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
   const { draft, facts, templates, context } = input;
+
+  // Computed before anything else reads the draft, and from the same object.
+  const draftDigest = marketingGuardDraftDigest(draft);
 
   const rejectCodes: MarketingRejectCode[] = [];
   const approvalCodes: MarketingApprovalCode[] = [];
@@ -858,6 +923,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       verdict: "reject",
       codes: uniqueInOrder(rejectCodes),
       ruleIds: uniqueInOrder(ruleIds),
+      draftDigest,
     });
   }
 
@@ -914,6 +980,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       verdict: "approval_required",
       codes: uniqueInOrder(approvalCodes),
       ruleIds: uniqueInOrder(ruleIds),
+      draftDigest,
     });
   }
 
@@ -933,6 +1000,7 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
       expiresAt: named!.provenAt + MARKETING_TEMPLATE_PROOF_MAX_AGE_MS,
     },
     ruleIds: uniqueInOrder(ruleIds),
+    draftDigest,
   });
 }
 
@@ -944,10 +1012,23 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
  * each `return`, because the one that gets forgotten is the one that matters.
  */
 function sealDecision(decision: MarketingGuardDecision): MarketingGuardDecision {
-  sealedDecisions.add(decision);
+  // Frozen, not merely registered. Membership of the `WeakSet` says where the
+  // object came from and says nothing about what it says now: an accessor
+  // installed afterwards returned `approval_required` to the check and
+  // `autonomous_eligible` to the line that wrote the row.
+  //
+  // Frozen first, then registered, so a decision that could not be frozen is
+  // never in the set.
+  Object.freeze(decision.ruleIds);
+  if ("codes" in decision) Object.freeze(decision.codes);
   if (decision.verdict === "autonomous_eligible") {
+    Object.freeze(decision.templateBinding);
+    Object.freeze(decision);
     sealedBindings.add(decision.templateBinding);
+  } else {
+    Object.freeze(decision);
   }
+  sealedDecisions.add(decision);
   return decision;
 }
 

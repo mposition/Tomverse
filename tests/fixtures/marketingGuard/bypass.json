@@ -974,6 +974,116 @@
           "free_wording_without_condition"
         ]
       }
+    },
+    {
+      "id": "free.ofCharge",
+      "ruleId": "rule.free-wording",
+      "input": "Start free of charge.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "free.feeFree",
+      "ruleId": "rule.free-wording",
+      "input": "Try our fee-free plan.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "free.costFree",
+      "ruleId": "rule.free-wording",
+      "input": "Enjoy a cost-free subscription.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "free_wording_without_condition"
+        ]
+      }
+    },
+    {
+      "id": "memory.spacedReproduce",
+      "ruleId": "rule.memory-claim",
+      "input": "We r e p r o d u c e your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.determinerSplice",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files, the service clones your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.wouldYouLike",
+      "ruleId": "rule.memory-claim",
+      "input": "Would you like an AI that clones your memories?",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanBracketedAside",
+      "ruleId": "rule.refuted-superiority",
+      "input": "유일한 (검증된) AI 비교 도구입니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "refuted.koreanWordEndingInParticle",
+      "ruleId": "rule.refuted-superiority",
+      "input": "유일한 속도 최적화 AI 비교 도구입니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.ideographicStopMixedCaseCjk",
+      "ruleId": "hygiene.url_like",
+      "input": "访问例子。CoM",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
+    },
+    {
+      "id": "minors.underFifteens",
+      "ruleId": "rule.australia-minors",
+      "input": "Under-15s, sign up now.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
     }
   ]
 }
