@@ -47,9 +47,9 @@ const MAX_ENV_PASSTHROUGH_NAMES: usize =
 /*
  * The orchestrator's own control plane. A worker receives its work over stdin
  * and never calls an internal route itself, so it needs none of these. A lane
- * that could read TOMVERSE_AMUX_SYNC_SECRET could call every
- * /api/internal/amux/* route under any worker name, which would erase the
- * separation between lanes that the deployment's credential table declares.
+ * that could read TOMVERSE_AMUX_SYNC_SECRET could call every internal AMUX
+ * route under any worker name, which would erase the separation between lanes
+ * that the deployment's credential table declares.
  */
 const RESERVED_EXECUTOR_ENV_NAMES:
     [&str; 5] = [
