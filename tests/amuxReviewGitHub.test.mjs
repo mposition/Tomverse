@@ -140,6 +140,15 @@ test("oversized, binary, malformed and JSON-instead-of-diff responses fail close
   await rejectsCode(readAmuxReviewPullRequest(PR_NUMBER, json.fetchImpl), "invalid_response");
 });
 
+test("visually unsafe diff controls cannot become an approval artifact", async (t) => {
+  withToken(t);
+  for (const control of ["\u001b", "\u202e", "\u2067", "\u200f"]) {
+    const response = githubResponses(pullRequest(), `${DIFF}+hidden${control}reordered\n`);
+    await rejectsCode(readAmuxReviewPullRequest(PR_NUMBER, response.fetchImpl), "unsafe_display");
+    assert.equal(response.calls.length, 2);
+  }
+});
+
 test("upstream network errors never expose their original message", async (t) => {
   withToken(t);
   await assert.rejects(

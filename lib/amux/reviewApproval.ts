@@ -113,7 +113,7 @@ async function snapshot(
   const task = escalation.task;
   const artifact = task.status === "review" &&
     task.reviewPrNumber === fetchedArtifact?.prNumber ? fetchedArtifact : null;
-  const [lastAttempt, attemptCount, activeDelivery] = await Promise.all([
+  const [lastAttempt, attemptCount, activeDelivery, previousBlock] = await Promise.all([
     tx.amuxExecutionAttempt.findFirst({
       where: { taskId: task.id },
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
@@ -126,6 +126,11 @@ async function snapshot(
     tx.amuxWorkDelivery.findFirst({
       where: { taskId: task.id, status: { in: ["queued", "leased"] } },
       select: { attemptId: true },
+    }),
+    tx.amuxHumanEscalation.findFirst({
+      where: { taskId: task.id, status: "resolved", resolutionOutcome: "block" },
+      orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
+      select: { resolution: true },
     }),
   ]);
   const budget = decideAmuxAttemptBudget({
@@ -165,6 +170,7 @@ async function snapshot(
   }
   const reason = normalizeAmuxUntrustedReason(escalation.reason) ?? "(unavailable)";
   const attemptReason = normalizeAmuxUntrustedReason(lastAttempt?.reason);
+  const previousBlockReason = normalizeAmuxUntrustedReason(previousBlock?.resolution);
   // The digest covers the entire stored value; a truncated legacy value can
   // be blocked, but never approved or requeued from a partial review.
   const subject: AmuxReviewSubject = {
@@ -183,6 +189,7 @@ async function snapshot(
     last_attempt_outcome: lastAttempt?.outcome ?? null,
     last_attempt_to_status: lastAttempt?.toStatus ?? null,
     last_attempt_reason: attemptReason,
+    previous_block_reason: previousBlockReason,
     review_pr_number: artifact?.prNumber ?? null,
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
@@ -195,6 +202,7 @@ async function snapshot(
     description: safeReviewDisplayText(description),
     escalation_reason: reason,
     last_attempt_reason: attemptReason,
+    previous_block_reason: previousBlockReason,
   };
   return { escalation, task, lastAttempt, budget, used, subject, digest, text, context, displayTruncated, outcomes, artifact };
 }

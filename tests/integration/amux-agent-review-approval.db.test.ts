@@ -462,6 +462,7 @@ test("a recoverable block opens a successor for another reason and bounded retry
     data: { dueParseState: "valid", revision: { increment: 1 } },
   });
   const retryDetail = await getAmuxReviewDetail(successor.id);
+  assert.equal(retryDetail.review_context.previous_block_reason, "Keep blocked while correcting the source.");
   assert.ok(retryDetail.allowed_outcomes.includes("retry"));
   const retryProposal = await createAmuxReviewProposal({
     escalationId: successor.id,

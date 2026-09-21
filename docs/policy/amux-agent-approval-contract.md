@@ -62,7 +62,8 @@ claim을 해제하고 그 뒤의 task snapshot sync로 PR 번호를 붙일 수 �
 기존 제안을 무효화하고 다시 검토하게 한다.
 열려 있고 미병합이며 head가 같은 저장소, base가 `develop`이어야 한다. 서버는
 PR 번호·40자리 base SHA·40자리 head SHA·원시 diff 바이트의 SHA-256을 검토 화면과 제안에
-결속한다. 관리자에게 보이는 diff는 크기·인코딩 상한을 통과한 원문만 안전한
+결속한다. 관리자에게 보이는 diff는 크기·인코딩 상한과 표시를 뒤집거나 숨길 수
+있는 제어문자 검사를 통과한 원문만 안전한
 텍스트로 표시하며, DB·감사·로그에는 diff 본문을 남기지 않는다. PR이 없거나,
 조회·검증이 실패하거나, base·head 또는 diff digest가 제안 이후 달라지면
 `approve`는 거절한다. task 설명의 50,000자 입력 상한은 UTF-8 바이트 상한이
@@ -116,13 +117,15 @@ digest로 원장을 읽어 확정 여부를 확인한다. 미확인 상태에서
 기록은 별도 AMUX 계약·테이블에 두고, `AdminActionApproval`을 참조하거나
 `lib/adminSoleApproverCore.ts`의 예외를 추가하지 않는다.
 
-단일 DB 트랜잭션에서 (1) task → escalation → 제안 순으로 잠그고, (2) 현재
+단일 DB 트랜잭션에서 (1) `retry`라면 resource policy를 먼저 잠그고,
+task → escalation → 제안 순으로 잠그며, (2) 현재
 revision·상태·마지막 시도·만료·digest·권한을 재검사하고, (3) 조건부 전이에서
 task revision을 한 번 올리고 escalation을 `resolved`로 닫으며, (4) 제안을
 소비 처리하고, (5) 별도 원장에 기계가 읽을 수 있는 `approve`·`retry`·`block`
 outcome을 저장하고, (6) 기존 `writeAdminAuditLog()`의 해시 체인에 사람 actor·
-결정·대상 revision·제안 digest·결과를 기록한다. attempt·delivery와 resource·
-incident 잠금은 승인 트랜잭션에서 잡지 않는다. 감사 체인 잠금은 마지막에 잡는다. 실패한
+결정·대상 revision·제안 digest·결과를 기록한다. attempt·delivery 행과 incident
+상태는 승인 트랜잭션에서 별도 잠금을 잡지 않고 task revision·유효 receipt·다음
+claim의 admission으로 fence한다. 감사 체인 잠금은 마지막에 잡는다. 실패한
 트랜잭션은 승인 기록도 남기지 않는다. 거절·revision 충돌·정책 hard gate 실패는
 구조화된 거절 코드와 감사 가능한 measured/verdict를 남기되, 성공 승인으로
 기록하지 않는다. 과거 승인·거절의 원장은 덮어쓰거나 삭제하지 않는다.
@@ -130,12 +133,15 @@ incident 잠금은 승인 트랜잭션에서 잡지 않는다. 감사 체인 잠
 성공 결정은 escalation의 `resolvedById`·`resolvedAt`·제한된 `resolution`을
 같은 트랜잭션에서 채우고, 결과 enum은 별도 컬럼/원장에 보존한다. `retry` 후 다시
 실패하면 이전 escalation은 이미 종결됐으므로 새 escalation을 열 수 있다.
-`blocked`의 `block`은 **현재 미종결 escalation**에만 적용하고, 사유 추가는
-append-only 결정 원장으로 표현한다. 이미 `resolved`인 escalation을 다시 쓰지
+`blocked`의 `block`은 **현재 미종결 escalation**에만 적용하고, 새 사유는 그
+escalation의 제한된 `resolution`과 감사 체인에 남긴다. 불변 결정 원장에는
+사유 원문 대신 결정 ID·대상 digest·outcome만 남긴다. 이미 `resolved`인 escalation을 다시 쓰지
 않는다. `block` 결정은 현재 escalation을 닫되, 시도 상한이 남아 복구 가능한 task에는
 **같은 트랜잭션에서 후속 미종결 escalation을 새로 연다.** 후속 건은 별도 ID·열린
 revision·안전한 reason code를 갖고, 이전 결정과 사유는 원래 건에 남는다. 이 후속
 건을 통해 이미 blocked인 task에 사유를 더하거나 유계 `retry`를 제안할 수 있다.
+후속 보호 검토는 직전 사람의 차단 사유를 길이·제어문자 제한 후 별도 표시하며,
+그 표시값도 제안 대상 digest에 결속한다. 일반 routing GET에는 이 사유를 넣지 않는다.
 상한 5회를 소진한 task에는 후속 재시도 건을 만들지 않고 terminal blocked로 남기며,
 계속 필요하면 새 task를 발행한다. planning-review의 후속 건은 새 열린 revision 이후
 기한 교정·동기화를 다시 증명해야 한다. escalation 생성 자체도 사람에게 보여 주는 raw reason 없이 ID·specialty·

@@ -23,7 +23,8 @@ export class AmuxReviewGitHubError extends Error {
     | "wrong_pr"
     | "pr_changed"
     | "oversized_response"
-    | "binary_diff",
+    | "binary_diff"
+    | "unsafe_display",
   ) {
     // Never put upstream response text, URLs, credentials or diff text in errors.
     super(code);
@@ -196,6 +197,12 @@ export async function readAmuxReviewPullRequest(
     }
     const diffBytes = await readBounded(diffResponse, AMUX_REVIEW_MAX_DIFF_BYTES);
     const diffText = decodeUtf8(diffBytes);
+    // The operator must see the exact bytes whose digest is approved. Reject
+    // controls that can visually reorder or hide the diff instead of silently
+    // normalising the displayed content away from its authoritative digest.
+    if (/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(diffText)) {
+      throw new AmuxReviewGitHubError("unsafe_display");
+    }
     if (!diffText.startsWith("diff --git ") ||
         /^GIT binary patch$/m.test(diffText) ||
         /^Binary files .+ differ$/m.test(diffText)) {

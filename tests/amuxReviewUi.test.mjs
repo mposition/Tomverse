@@ -32,6 +32,8 @@ test("review UI identifies the exact GitHub PR, head, and diff digest", () => {
   assert.match(panel, /review\.review_artifact\.diff_digest/);
   assert.match(panel, /data-testid="admin-amux-review-context"/);
   assert.match(panel, /review\.review_artifact\.diff_text/);
+  assert.match(panel, /review\.review_context\.previous_block_reason/);
+  assert.match(panel, /review\.retry\.remaining === 0 && \(/);
   assert.match(panel, /review\.review_content\?\.truncated/);
   assert.match(panel, /m\.reviewContentTruncated/);
   assert.match(panel, /\{m\.subjectDigest\}: \{review\.review_content\.digest\}/);
