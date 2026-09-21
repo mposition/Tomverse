@@ -128,9 +128,13 @@ test.describe("admin console on a narrow viewport", () => {
             where,
           };
         });
+        // Asserted on a string, never on null: `toContain(null)` is a matcher
+        // error rather than an assertion failure, and Playwright prints no
+        // custom message for a matcher error -- which is how the first attempt
+        // at this diagnostic reported nothing at all.
         expect(
-          probe.topmost,
-          `${label} is not reachable: ${probe.why} (${JSON.stringify(probe.where)})`
+          probe.topmost ?? `nothing (${probe.why})`,
+          `${label} is not reachable at ${JSON.stringify(probe.where)}`
         ).toContain(label);
       }
     });
