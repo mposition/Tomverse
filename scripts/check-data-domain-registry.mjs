@@ -167,10 +167,33 @@ const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map
 // immutable approval evidence. Treat that exact column as user data so future
 // approval tables cannot escape the registry merely by choosing a different
 // name for the actor id.
+//
+// 2026-09-21: the exact name was the hole. `approvedBy` matched and
+// `approvedById`/`approvedByEmail` did not, so EmailSendApproval and
+// EmailSendApprovalRevocation -- both holding an operator's id *and* address,
+// both immutable, both deliberately without a User relation for the reason
+// above -- passed the sweep as if they held nothing.
+//
+// What replaces the one spelling is a pair, not a wider name match. A bare
+// `<verb>ById` is ambiguous: `MobileRefreshRotation.supersededById` points at
+// another token row and `AmuxExecutionAttempt.endedBy` names a worker, and
+// reading either as a person would put rows in this registry that hold none.
+// An address is not ambiguous -- `<verb>ByEmail` is a person, always -- so a
+// model counts when it carries one, and its matching `<verb>ById` is then the
+// same person's id rather than a pointer. Naming the actor column something
+// else no longer helps, because the address beside it is what the rule reads.
+const ACTOR_EMAIL_COLUMN = /^\s{2}(\w+)ByEmail\s+String\b/gm;
+const holdsActorIdentity = (body) => {
+  ACTOR_EMAIL_COLUMN.lastIndex = 0;
+  return ACTOR_EMAIL_COLUMN.test(body);
+};
 const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
 const holdsUserData = new Set(
   models
-    .filter(({ body }) => USER_LINK.test(body) || USER_COLUMN.test(body))
+    .filter(
+      ({ body }) =>
+        USER_LINK.test(body) || USER_COLUMN.test(body) || holdsActorIdentity(body)
+    )
     .map(({ name }) => name)
 );
 // User does not point at a user; it is one. The derivation cannot see that, and
@@ -629,7 +652,71 @@ for (const { model, parentModel } of parentReferences) {
 // letting the table escape. With those two in, the delta between the two rules
 // is empty, so the narrower rule was protecting nothing except the next table
 // to drop a relation while keeping the column.
+// What the widened actor rule found beside the two tables it was widened for.
+//
+// On 2026-09-21 the rule stopped reading one column name and started reading
+// the pair `<verb>ById` + `<verb>ByEmail`. It immediately named eighteen
+// tables that have been holding an operator's address outside this registry --
+// admin approvals and alerts, provider configuration and incidents, Stripe
+// replays, campaign attestations, template publication. None of them is new;
+// the rule that would have caught them is.
+//
+// They are listed rather than registered because a registry row is a decision:
+// an owner, a legal basis, a retention period, a review date, and for an actor
+// row the path to the person it is *about*. Eighteen of those are not a
+// reviewer's to invent, and writing eighteen plausible rows would put claims in
+// a file whose value is that it holds none.
+//
+// So the list is the finding, and it is a ratchet: **it may not grow.** A new
+// table holding an operator's address fails the build, which is the behaviour
+// the widening was for. Each line comes off this list when its row is written.
+//
+// Follow-up: register these eighteen, or record for each one why an operator's
+// address in it is not a data domain. Until then PRIVACY-01/02 stay blocked,
+// which they already are.
+const ACTOR_IDENTITY_BACKLOG = new Set([
+  "AdminActionApproval",
+  "AdminAlertPolicy",
+  "AdminNotificationLog",
+  "AdminOperationReport",
+  "AdminOperationalCheckpoint",
+  "AdminProviderIncident",
+  "AdminRetentionRun",
+  "AdminSlackTemplate",
+  "EmailCampaign",
+  "EmailCampaignAttestation",
+  "EmailPolicyVersion",
+  "InfrastructureCreditConfig",
+  "ModelRegistryEntry",
+  "ProviderBillingConfig",
+  "ProviderCreditConfig",
+  "ProviderHealthCheck",
+  "StripeWebhookEventLog",
+  "TemplateVersion",
+]);
+
+const backlogSeen = [...holdsUserData]
+  .filter((model) => ACTOR_IDENTITY_BACKLOG.has(model) && !registered.has(model))
+  .sort();
+
+for (const model of ACTOR_IDENTITY_BACKLOG) {
+  if (registered.has(model)) {
+    fail(
+      `${model} is registered now, so take it out of ACTOR_IDENTITY_BACKLOG in ` +
+        `scripts/check-data-domain-registry.mjs. A list that keeps names it no ` +
+        `longer excuses stops being a list of what is outstanding.`
+    );
+  } else if (!holdsUserData.has(model)) {
+    fail(
+      `${model} is in ACTOR_IDENTITY_BACKLOG but no longer holds an operator's ` +
+        `address. Take it out rather than leaving an excuse for a table that ` +
+        `does not need one.`
+    );
+  }
+}
+
 for (const model of holdsUserData) {
+  if (!registered.has(model) && ACTOR_IDENTITY_BACKLOG.has(model)) continue;
   if (!registered.has(model)) {
     fail(
       `${model} holds user data but is not in the registry. Add a row with its deletion action ` +
@@ -672,6 +759,14 @@ if (planned.length > 0) {
   console.log(
     `   ${planned.length} domain(s) are decided but not yet built -- ` +
       `${planned.map((row) => row.domain).join(", ")}. PRIVACY-01 stays blocked until each ships.`
+  );
+}
+if (backlogSeen.length > 0) {
+  console.log(
+    `   ${backlogSeen.length} model(s) hold an operator's address and have no row ` +
+      `yet -- ${backlogSeen.join(", ")}. They are named in ` +
+      "ACTOR_IDENTITY_BACKLOG, which cannot grow; each comes off it when its " +
+      "row is written."
   );
 }
 if (unverifiedDeletion > 0 || unverifiedExport > 0) {

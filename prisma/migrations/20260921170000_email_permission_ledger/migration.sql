@@ -7,6 +7,14 @@
 -- Nothing here sends anything, reads a provider or changes an existing row.
 -- Six new tables and their constraints; the send path still refuses marketing
 -- because feature.emailMarketingEnabled is off and no country rule exists yet.
+--
+-- One transaction. Prisma does not wrap a migration file for us, and this one
+-- is six tables, twenty constraints, nine functions and eight triggers: a
+-- failure in the middle would leave a ledger that is half enforced, which is
+-- worse than no ledger at all because it looks like one. Nothing here needs to
+-- run outside a transaction -- no CONCURRENTLY, no database-level statement.
+
+BEGIN;
 
 CREATE TABLE "EmailPermissionEvent" (
     "id" TEXT NOT NULL,
@@ -203,6 +211,27 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_ph
 
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_classification_check"
     CHECK ("classification" IN ('transactional', 'service', 'marketing'));
+
+-- The purpose, and the pair.
+--
+-- Closing the classification alone left two holes. An unregistered purpose
+-- stored a permanent verdict about mail this product does not send; and
+-- 'product_updates' with classification 'service' stored a verdict saying the
+-- marketing switches did not apply to marketing mail. The second is the exact
+-- defect the S0 amendment removed from the classification table, and a row
+-- here could have reintroduced it one verdict at a time.
+--
+-- The pairs are lib/emailPreferenceCore.ts's EMAIL_PURPOSE_CLASSIFICATION, and
+-- tests/emailPurposeClassification.test.mjs holds the two together.
+ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_purpose_check"
+    CHECK ("purpose" IN ('security', 'billing', 'service_status', 'product_updates', 'newsletter', 'promotions'));
+
+ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_purpose_classification_check"
+    CHECK (
+        ("classification" = 'transactional' AND "purpose" IN ('security', 'billing'))
+        OR ("classification" = 'service' AND "purpose" = 'service_status')
+        OR ("classification" = 'marketing' AND "purpose" IN ('product_updates', 'newsletter', 'promotions'))
+    );
 
 -- An override is a reference plus the kind of decision it was. Half of it is
 -- a row that either cannot be resolved or cannot be read. The composite
@@ -582,3 +611,5 @@ CREATE CONSTRAINT TRIGGER "email_permission_decision_evidence_seal_final"
     AFTER INSERT ON "EmailPermissionDecisionEvidence"
     DEFERRABLE INITIALLY IMMEDIATE
     FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_evidence_seal_final"();
+
+COMMIT;

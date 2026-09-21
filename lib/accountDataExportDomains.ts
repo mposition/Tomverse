@@ -133,6 +133,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "When they agreed to what, on which policy version, and how it was captured -- returned in full. Held back: ipHash and userAgentHash, which are salted digests kept to prove a consent event happened and are not readable by the person they describe, and the evidence blob, which holds the consent wording's hash and an internal screen identifier rather than anything they wrote.",
   },
   {
+    domain: "emailSendApproval",
+    publicName: "email_send_approvals",
+    prismaModel: "EmailSendApproval",
+    state: "excluded",
+    exclusionReason:
+      "An owner's decision to send without a legal basis, or to not perform a display duty. The subject of the row is the person who approved it, not the account asking for their data, so returning it would hand one account another person's identity and reasoning. Where an account was inside what was approved, that fact is returned under email_send_approval_membership with the approval's type, scope and dates.",
+  },
+  {
+    domain: "emailSendApprovalRevocation",
+    publicName: "email_send_approval_revocations",
+    prismaModel: "EmailSendApprovalRevocation",
+    state: "excluded",
+    exclusionReason:
+      "Withdrawal of an approval, carrying the identity of the person who withdrew it. Excluded for the same reason as the approval: its subject is an operator. An account reaches the withdrawal through its own membership row, which reports whether the approval covering it was revoked and when.",
+  },
+  {
     domain: "emailPermissionEvent",
     publicName: "email_permission_events",
     prismaModel: "EmailPermissionEvent",

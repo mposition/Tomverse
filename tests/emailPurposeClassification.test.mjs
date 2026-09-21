@@ -145,3 +145,49 @@ test("a draft name resolves to exactly one purpose", () => {
     assert.equal(purposeForDraftName(purpose), purpose);
   }
 });
+
+
+test("the database is pinned to the same pairs", () => {
+  // Two places, compared here. The CHECK stops a verdict the application built
+  // wrongly; this stops the two drifting apart, which is how a purpose would
+  // end up unwritable rather than refused with a message somebody can read.
+  const sql = readFileSync(
+    new URL(
+      "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const quoted = (value) => "'" + value + "'";
+
+  for (const classification of EMAIL_CLASSIFICATIONS) {
+    const purposes = EMAIL_PURPOSE_CLASSIFICATION.filter(
+      (entry) => entry.classification === classification
+    ).map((entry) => quoted(entry.purpose));
+    assert.ok(purposes.length > 0, classification + " has no purpose");
+
+    const clause =
+      purposes.length === 1
+        ? '"classification" = ' +
+          quoted(classification) +
+          ' AND "purpose" = ' +
+          purposes[0]
+        : '"classification" = ' +
+          quoted(classification) +
+          ' AND "purpose" IN (' +
+          purposes.join(", ") +
+          ")";
+
+    assert.ok(
+      sql.includes(clause),
+      "the migration does not pin " + classification + " to " + purposes.join(", ")
+    );
+  }
+
+  for (const purpose of EMAIL_PURPOSES) {
+    assert.ok(
+      sql.includes(quoted(purpose)),
+      purpose + " is not named by the migration"
+    );
+  }
+});

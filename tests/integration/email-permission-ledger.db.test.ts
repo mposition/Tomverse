@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import { decisionAllowed } from "@/lib/emailPermissionLedgerCore";
+import { EMAIL_PURPOSE_CLASSIFICATION } from "@/lib/emailPreferenceCore";
 
 /**
  * The permission ledger's constraints and triggers.
@@ -746,4 +747,45 @@ test("the classification list is closed", async () => {
     seedDecision({ classification: "release_notes" }),
     /classification_check/
   );
+});
+
+test("the purpose list is closed too", async () => {
+  // A verdict names the purpose it decided. A purpose this product does not
+  // send would be a permanent record about mail that does not exist.
+  await assert.rejects(
+    seedDecision({ purpose: "release_notes" }),
+    /purpose_check/
+  );
+  await assert.rejects(seedDecision({ purpose: "" }), /purpose_check/);
+});
+
+test("a purpose can only carry its own classification", async () => {
+  // This is the S0 defect, one verdict at a time: product news written down
+  // as service is a row saying the marketing switches did not apply to
+  // marketing mail.
+  const wrong = [
+    { purpose: "product_updates", classification: "service" },
+    { purpose: "product_updates", classification: "transactional" },
+    { purpose: "newsletter", classification: "service" },
+    { purpose: "promotions", classification: "transactional" },
+    { purpose: "security", classification: "marketing" },
+    { purpose: "billing", classification: "service" },
+    { purpose: "service_status", classification: "marketing" },
+    { purpose: "service_status", classification: "transactional" },
+  ];
+  for (const row of wrong) {
+    await assert.rejects(
+      seedDecision(row),
+      /purpose_classification_check/,
+      row.purpose + " must not be " + row.classification
+    );
+  }
+
+  // And every pair the table does allow is accepted.
+  for (const entry of EMAIL_PURPOSE_CLASSIFICATION) {
+    await seedDecision({
+      purpose: entry.purpose,
+      classification: entry.classification,
+    });
+  }
 });

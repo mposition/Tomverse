@@ -97,6 +97,14 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// 2026-09-21, the permission ledger (S3): two files in this closure moved
+// lines -- lib/emailPreferenceCore.ts gained the purpose classification table
+// and lib/emailPreferences.ts took its bulk-withdrawal scope from it. Neither
+// added, removed or altered a computed access; the position-free inventory
+// still hashes to 9aa7ec49... over 228 entries, which is what makes this a
+// repin rather than a review. The value below is the same inventory with the
+// new line and column numbers.
+//
 // develop's confirmatory shadow v4 added a reviewed runtime path and its own
 // schema and comment changes. Neither is taken over the other -- the value
 // below is computed over the merged tree, which is the only tree that will
@@ -110,8 +118,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e2efb71ad8589f0e934d66a38d147b1d",
-  "89e3f080943c3dcfb08116b429180271",
+  "82081d1e8b021ee74ffe0c5a8bf47efb",
+  "b91b91c10060e63c9604ace5630ac807",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

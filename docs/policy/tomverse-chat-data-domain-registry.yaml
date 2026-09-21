@@ -1359,6 +1359,48 @@ domains:
       as it does in consentRecord; evidence holds a screen identifier and the
       notice copy's hash, never the request and never message content.
 
+  - domain: emailSendApproval
+    prismaModel: EmailSendApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    subjectReference:
+      kind: none
+    minimisationFields:
+      - approvedByEmail
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        An owner's decision to send without a basis, or to not perform a display
+        duty. The identity kept is the approver's, and it is kept on purpose:
+        the whole value of the row is that somebody is answerable for it, and an
+        approval that cannot say who gave it is not an approval. The address is
+        held beside the account id because an account can be renamed and a
+        reader a year later needs the second. Deleting the approver's account
+        must not rewrite it, which is why there is no User relation -- the same
+        reasoning as AdminAuditLog and the Prompt Refiner stage.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject of the row is the approver, not the exporting account.
+      Returning it would hand one account another person's identity and
+      reasoning. An account's own presence in what was approved is exported
+      through emailSendApprovalMember, which carries the approval's type, scope
+      and dates without the approver.
+    note: >-
+      Sealed: once sealedAt is set, triggers refuse every update and delete on
+      the row and on its cohort. An approver asking for their own data or its
+      erasure is a manual PrivacyRequest rather than an automated path: the row
+      is immutable audit evidence under legal hold, so the answer is the
+      retention basis above and not a deletion. The cohort is the link to the
+      people the decision was about.
+
   - domain: emailSendApprovalMember
     prismaModel: EmailSendApprovalMember
     userLinkageRole: subject
@@ -1390,6 +1432,42 @@ domains:
       SHA-256 of its normalised form -- enough to refuse a send to a mailbox the
       approval was not about, not enough to be a second copy of the mailing
       list. addressNormalizationVersion records which rule produced it.
+
+  - domain: emailSendApprovalRevocation
+    prismaModel: EmailSendApprovalRevocation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    subjectReference:
+      kind: parent_row
+      parentColumn: approvalId
+      parentModel: EmailSendApproval
+    minimisationFields:
+      - revokedByEmail
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Withdrawal of an approval, kept for as long as the approval it
+        withdraws, and holding the revoking person's identity for the same
+        reason the approval holds the approver's. A revocation that could be
+        deleted would let a withdrawn approval look live again, which is the one
+        direction this ledger must never move in.
+      retentionStartsFrom: "revokedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The identity in it is the revoking person's, not the exporting account's.
+      The people the withdrawn approval was about reach it through the
+      approval's cohort, which is exported.
+    note: >-
+      Append-only by trigger; the approval row is never touched. Erasure or
+      access for the revoking person is a manual PrivacyRequest against the
+      retention basis above, as it is for the approval itself.
 
   - domain: emailPermissionDecision
     prismaModel: EmailPermissionDecision

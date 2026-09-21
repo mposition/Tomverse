@@ -587,17 +587,37 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
   emailSendApprovalMember: (userId) =>
     prisma.emailSendApprovalMember.findMany({
       where: { userId },
-      // That an approved send covered them, and the date their two-year
-      // confirmation notice counts from. addressDigest is withheld: it exists
-      // so a send can be refused to a mailbox the approval was not about, and
-      // it tells them nothing they do not know while giving anyone else a
-      // value to test guesses against. approvalId is a handle onto a decision
-      // whose subject is the person who approved it.
+      // That an approved send covered them -- which means saying *what* was
+      // approved, or the row is a membership of nothing. The approval's type,
+      // its scope and its dates come through nested, and so does whether it
+      // was later withdrawn; without them the person learns that a decision
+      // included them and not what the decision was.
+      //
+      // The approver's identity, their reason and their review condition stay
+      // behind: their subject is the approver, not this account. addressDigest
+      // is withheld too -- it exists so a send can be refused to a mailbox the
+      // approval was not about, and it tells this person nothing they do not
+      // know while giving anyone else a value to test guesses against.
       select: {
         id: true,
         noticeAnchorAt: true,
         noticeAnchorSource: true,
         createdAt: true,
+        approval: {
+          select: {
+            approvalType: true,
+            purposeKey: true,
+            country: true,
+            obligationKey: true,
+            approvedAt: true,
+            sealedAt: true,
+            revocations: {
+              select: { revokedAt: true },
+              orderBy: { revokedAt: "asc" },
+              take: 1,
+            },
+          },
+        },
       },
       take: EXPORT_ROW_CAP,
     }),
@@ -605,11 +625,21 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
   emailPermissionDecision: (userId) =>
     prisma.emailPermissionDecision.findMany({
       where: { userId },
-      // Why each message to them was or was not permitted. The delivery and
-      // approval ids and the display contract hashes are internal handles --
-      // one onto a send, one onto somebody else's decision. The normalisation
-      // version describes how we compared their address rather than anything
-      // about them.
+      // Why each message to them was or was not permitted, including what the
+      // verdict rested on: the evidence rows come through nested, so the
+      // permission events and consent records already in this export can be
+      // matched to the decision that cited them. Without them the person has
+      // the conclusion and no way to connect it to the facts.
+      //
+      // The rule versions and the policy version travel with it for the same
+      // reason -- a verdict read a year later against a rule that has moved
+      // means nothing without saying which version it read.
+      //
+      // The delivery and approval ids and the display contract hashes stay
+      // behind: one is a handle onto a send, one onto somebody else's decision.
+      // The normalisation version describes how we compared their address
+      // rather than anything about them, and the evidence rows' own
+      // decisionId is redundant once they are nested under it.
       select: {
         id: true,
         phase: true,
@@ -622,7 +652,16 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         blockers: true,
         allowed: true,
         countryCandidates: true,
+        ruleVersions: true,
+        policyVersionId: true,
         evaluatedAt: true,
+        evidence: {
+          select: {
+            authority: true,
+            eventId: true,
+            consentRecordId: true,
+          },
+        },
       },
       take: EXPORT_ROW_CAP,
     }),

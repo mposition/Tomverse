@@ -222,11 +222,19 @@ test("every selected column exists on the model it is selected from", () => {
     const body = fetcherBlock.slice(match.index, end);
 
     for (const [, column] of body.matchAll(/(\w+):\s*true\b/g)) {
-      // A nested select reaches a related model; accept the column if any
-      // relation target of this model has it.
+      // A nested select reaches a related model; accept the column if it is
+      // reachable from this one. Two hops rather than one: the approval
+      // membership export nests the approval and, under it, whether that
+      // approval was later withdrawn, which is two models away. Bounded at two
+      // deliberately -- this test is a spelling check against the schema, and
+      // an unbounded walk would accept any column in the database.
+      const oneHop = [...(relationTargets.get(model)?.values() ?? [])];
+      const twoHops = oneHop.flatMap((target) => [
+        ...(relationTargets.get(target)?.values() ?? []),
+      ]);
       const reachable =
         columns.has(column) ||
-        [...(relationTargets.get(model)?.values() ?? [])].some((target) =>
+        [...oneHop, ...twoHops].some((target) =>
           columnsByModel.get(target)?.has(column)
         );
       assert.ok(reachable, `${model} has no column "${column}", but a fetcher selects it`);

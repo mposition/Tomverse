@@ -828,6 +828,13 @@ const REGISTRY = {
     reason:
       "enqueue and send. The unique index is (deliveryId, phase), so a third phase would silently raise how many verdicts one delivery may have, and the send-time re-decision that the whole design rests on would stop being the last word.",
   },
+  EmailPermissionDecision_purpose_check: {
+    owner: "list",
+    module: "lib/emailPreferenceCore.ts",
+    list: "EMAIL_PURPOSES",
+    reason:
+      "The same six purposes EmailPreference is constrained to. A verdict names the purpose it decided, so a purpose this product does not send would be a permanent record about mail that does not exist -- and EmailPermissionDecision_purpose_classification_check beside it pins which classification each one may carry, which is what stops a marketing purpose being recorded as service and the marketing switches being recorded as not applying.",
+  },
   EmailPermissionDecision_classification_check: {
     owner: "list",
     module: "lib/emailPreferenceCore.ts",
