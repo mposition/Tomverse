@@ -15,14 +15,14 @@
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
 
+export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
   "marketing-guard",
   "prompt-refiner-shadow-runner",
-  "tomverse-amux-orchestrator",
+  AMUX_SYSTEM_AUDIT_ACTOR,
 ] as const;
-
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
 /**
@@ -64,7 +64,7 @@ type AuditRowActorFields = {
  * chain is the integrity verifier's question.
  */
 export const auditRowActorKind = (
-  row: AuditRowActorFields
+  row: AuditRowActorFields,
 ): "human" | "system" | "unknown" => {
   const claimsSystem = metadataClaimsSystemActor(row.metadata);
   if (!claimsSystem) return row.actorUserId ? "human" : "unknown";
