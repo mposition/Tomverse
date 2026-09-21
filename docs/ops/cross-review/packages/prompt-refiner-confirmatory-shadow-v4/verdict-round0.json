@@ -1,0 +1,114 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T22:20:43.069Z",
+  "durationMs": 433767,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 60,
+    "cachedInputTokens": 5496982,
+    "outputTokens": 35138,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 5.8351109999999995,
+    "raw": {
+      "input_tokens": 60,
+      "cache_creation_input_tokens": 220787,
+      "cache_read_input_tokens": 5496982,
+      "output_tokens": 35138,
+      "output_tokens_details": {
+        "thinking_tokens": 26991
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 220787,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3468,
+          "cache_read_input_tokens": 221592,
+          "cache_creation_input_tokens": 2196,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2196
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T22:27:56.897Z",
+  "verdict": {
+    "taskId": "prompt-refiner-confirmatory-shadow-v4",
+    "round": 0,
+    "reviewedDigest": "sha256:92620430d46d8898a459b872d27f2fdc436d8704a03e7bc3eb44c492ec85f823",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowRunStore.ts:885 (terminalInputIsValid) vs lib/promptRefinerShadowEvidenceCore.ts:1174 (aggregatePromptRefinerShadowStoredEvidence)",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "The terminal writer accepts any non-negative durationMs (the DB CHECK only requires >= 0, prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql:139) but the durable aggregator caps stored durationMs at 60_000, so a single case slower than 60s produces an immutable terminal row from which the completed run's aggregate bundle can never be rebuilt — readPromptRefinerShadowEvidenceBundle then refuses 409 PROMPT_REFINER_SHADOW_EVIDENCE_INVALID forever, defeating completion criterion 5.",
+        "reproduction": "In tests/integration/prompt-refiner-shadow-run.db.test.ts, take the existing \"completed durable evidence rebuilds a content-free aggregate from all 16 cases\" test and change `durationMs: 10 + caseIndex` to `durationMs: 60_001`. Expected per the criterion: a bundle with gateOutcome fail/insufficient. Actual: every recordPromptRefinerShadowTerminal succeeds, the run reaches status completed, and readPromptRefinerShadowEvidenceBundle() throws PromptRefinerShadowRunError code PROMPT_REFINER_SHADOW_EVIDENCE_INVALID (from evidence core `stored_duration_ms_invalid_integer`). The 15s adapter bound does not prevent this: lib/promptRefinerShadowLiveAdapter.ts:294 passes a non-standard `timeout` option to generateText, and the route's maxDuration is 300s. Fix by enforcing the same 60_000 upper bound in terminalInputIsValid (and the DB terminal CHECK) so no unreconstructible row can be written."
+      },
+      {
+        "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1231-1250 (\"operator-facing contracts name the enforced runtime source closure size\")",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "The change deletes the assertions that pinned five operator/policy documents to the enforced runtime closure size instead of updating those documents, so the shipped operator-facing approval contracts now state a file count and stage identity that the code no longer implements, and the guard that would have caught it is gone.",
+        "reproduction": "After this commit, `PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT` is 188 (lib/promptRefinerStageAdmissionCore.ts:41) and the live stage id/confirmation are `prompt-refiner-shadow-v2` / `APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES`. Open: docs/ops/prompt-refiner-durable-stage-writer-contract.md:20 (\"현재 deployment의 187개 고정 source 파일\"), :5 (stage: prompt-refiner-shadow-v1), :9/:38 (STAGE V1 confirmation); docs/ops/prompt-refiner-durable-stage-writer-task.md:17 (\"187-file/16 MiB\"); docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40 (\"187개 고정 path allowlist\"); docs/ops/tomverse-chat-progress.md:1182 (\"exact 187-file runtime import-closure source manifest\"); docs/policy/prompt-refiner-observability.md:309 (\"고정 187개 source 파일\") and :49 (\"stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며\") — the last file is edited by this change (header at :3-5) yet left stale. `git show 8381e98a -- tests/promptRefinerRuntimeSourceClosure.test.mjs` shows the five removed assertions. `npm run test:unit` passes only because those assertions were deleted."
+      },
+      {
+        "location": "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:27",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The new `prompt_refiner_runtime_manifest_valid` wrapper short-circuits to the 187-file v2 validator for any row whose manifest declares schemaVersion v2, without binding that branch to `id = 'prompt-refiner-shadow-v1'`, so the database would accept a `prompt-refiner-shadow-v2` stage bound to the superseded 187-file closure even though the same migration's execution-manifest CHECK pins `\"runtimeSource\":{\"fileCount\":188}` for v2 — the two CHECKs on the same row disagree about which closure a v4 authority is bound to.",
+        "reproduction": "Read migration.sql:27-31 together with the `PromptRefinerReservationStage_runtime_identity_check` (migration.sql:133-141) and the v2 execution-manifest literal (migration.sql:~160). The runtime_identity_check passes for `id='prompt-refiner-shadow-v2'` with any structurally valid 187-file v2 manifest; nothing in the schema rejects it. Application reads (promptRefinerStoredStageMatchesRuntime) would reject such a row, so this is defence-in-depth only, but criterion 1 asks schema/migration/application validation to agree. Fix: gate the v2 branch on `id = 'prompt-refiner-shadow-v1'` (or on the manifest version matching the stage's executionManifest fileCount)."
+      },
+      {
+        "location": "lib/promptRefinerShadowAdmissionCore.ts:100-103, 678-681 (PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID / _CONTRACT_DIGEST)",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "The admission proposal that attests the new v2 stage still declares `reservationStage.stageId = \"prompt-refiner-shadow-v1\"` and the v1 reservation contract digest as frozen literals, so the v2 stage row's `proposalDigest` attests to a proposal describing a different reservation authority, and the previous coupling that made any reservation-contract change break the proposal digest (and thus force review) is replaced by duplicated constants.",
+        "reproduction": "Run `node --import tsx -e \"import('./lib/promptRefinerShadowAdmissionCore.ts').then(m=>console.log(m.proposePromptRefinerShadowStage))\"` conceptually, or simply compare: lib/promptRefinerStageAdmission.ts:566-568 creates the stage with id `prompt-refiner-shadow-v2` and contractDigest `sha256:6b60c957…`, while trustedUnsignedProposal() (lib/promptRefinerShadowAdmissionCore.ts:678) emits `stageId: \"prompt-refiner-shadow-v1\"` / `sha256:c5cc412e…`, and tests/promptRefinerShadowAdmissionCore.test.mjs:129-138 now asserts the proposal against the duplicated literals instead of the reservation module's live constants. If freezing the historical proposal is intended, state that explicitly in docs/ops/prompt-refiner-confirmatory-shadow-v4.md §1 and add an assertion that the v2 stage's executionManifest — not the proposal — is the authority binding."
+      },
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx (evidenceCases Field)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The panel renders `${execution.evidence.summary.passedCases}/16` with a hardcoded denominator instead of `summary.attemptedCases`, which the operator-core validator already pins to 16.",
+        "reproduction": "Read the added Field for `m.evidenceCases`; substitute `summary.attemptedCases` so the displayed denominator comes from the validated payload rather than a literal."
+      }
+    ],
+    "nextAction": "Align the terminal writer's durationMs bound with the aggregator's 60_000 cap (and the DB CHECK) so no completed v4 run can become unreconstructible, then update the five stale operator/policy documents to the 188-file v2/v4 contract and restore the closure-size assertions that were deleted."
+  }
+}

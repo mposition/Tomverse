@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import corpusJson from "@/docs/ops/prompt-refiner-shadow/corpus-v1.json";
+import evidenceSpecJson from "@/docs/ops/prompt-refiner-shadow/evidence-spec-v1.json";
 import {
     releasePromptRefinerReservation,
     reservePromptRefinerExecution,
@@ -13,6 +14,10 @@ import type {
 } from "@/lib/promptRefinerReservationCore";
 import { runPromptRefinerShadowLiveAdapter } from "@/lib/promptRefinerShadowLiveAdapter";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+    evaluatePromptRefinerShadowCaseEvidence,
+    validatePromptRefinerShadowEvidenceSpec,
+} from "@/lib/promptRefinerShadowEvidenceCore";
 import {
     PROMPT_REFINER_SHADOW_CASE_IDS,
     PROMPT_REFINER_SHADOW_EXECUTION_FLAG,
@@ -35,6 +40,7 @@ import {
 import { PROMPT_REFINER_TIMEOUT_MS } from "@/lib/promptRefinerExecutionContract";
 
 const corpus = validatePromptRefinerShadowCorpus(corpusJson);
+const evidenceSpec = validatePromptRefinerShadowEvidenceSpec(evidenceSpecJson);
 if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) {
     throw new Error("The bundled Prompt Refiner shadow corpus is not the frozen corpus.");
 }
@@ -177,7 +183,7 @@ const resultFromState = (
     });
 
 const requestIdFor = (caseId: string): string =>
-    `prsv3_${caseId.replaceAll("-", "_")}_${randomUUID().replaceAll("-", "")}`;
+    `prsv4_${caseId.replaceAll("-", "_")}_${randomUUID().replaceAll("-", "")}`;
 
 /**
  * Runs the approved synthetic cases strictly in corpus order. There is no
@@ -381,11 +387,25 @@ export const createPromptRefinerShadowRunner = (
             );
         }
         try {
+            const terminalStatus =
+                outcome.terminalReason === "suggested"
+                    ? "suggested"
+                    : outcome.terminalReason === "unknown_after_dispatch"
+                      ? "unknown"
+                      : "failed";
+            const evidence = evaluatePromptRefinerShadowCaseEvidence({
+                corpus: dependencies.corpus,
+                spec: evidenceSpec,
+                caseIndex,
+                terminalStatus,
+                refinedPrompt: outcome.refinedPrompt,
+            });
             await dependencies.recordTerminal({
                 attemptId,
                 terminalReason: outcome.terminalReason,
                 durationMs: outcome.durationMs,
                 usage: outcome.usage,
+                evidence,
             });
         } catch (error) {
             await reportRunnerIncident(dependencies, {

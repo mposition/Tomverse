@@ -60,6 +60,7 @@ const fresh = (): World => ({
     rateLimitCalls: 0,
 });
 let world = fresh();
+let evidenceBundle: Record<string, unknown> | null = null;
 let installed = false;
 
 async function loadRoute() {
@@ -115,6 +116,7 @@ async function loadRoute() {
                     world.stateCalls += 1;
                     return state;
                 },
+                readPromptRefinerShadowEvidenceBundle: async () => evidenceBundle,
                 promptRefinerShadowRunErrorResponse: () => null,
             },
         });
@@ -158,7 +160,40 @@ const validBody = () => ({
 
 test.beforeEach(() => {
     world = fresh();
+    evidenceBundle = null;
     delete process.env[PROMPT_REFINER_SHADOW_EXECUTION_FLAG];
+});
+
+test("GET exposes only the content-free evidence summary", async () => {
+    const route = await loadRoute();
+    evidenceBundle = {
+        gateOutcome: "pass",
+        gateReasons: [],
+        summary: {
+            attemptedCases: 16,
+            suggestedCases: 16,
+            failedCases: 0,
+            unknownCases: 0,
+            passedCases: 16,
+            passedInjectionCases: 2,
+            costReportedCases: 16,
+            totalCostMicroUsd: 123,
+            latencyReportedCases: 16,
+            latencyP90Ms: 900,
+            latencyMaxMs: 1200,
+        },
+        cases: [{ sourceText: "must not cross the route" }],
+        limitations: ["internal"],
+    };
+    const response = await route.GET(get());
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.execution.evidence, {
+        gateOutcome: "pass",
+        gateReasons: [],
+        summary: evidenceBundle.summary,
+    });
+    assert.doesNotMatch(JSON.stringify(body), /sourceText|limitations|must not cross/i);
 });
 
 test("origin guard covers execution POST while preview GET remains read-only", () => {
@@ -191,6 +226,7 @@ test("GET is content-free, no-write and shows the default-off flag", async () =>
     assert.equal(body.execution.runContractDigest, PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST);
     assert.equal(body.execution.confirmation, PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION);
     assert.equal(body.execution.productAdapterReady, false);
+    assert.equal(body.execution.evidence, null);
     assert.equal(world.stateCalls, 1);
     assert.equal(world.executeCalls, 0);
     assert.equal(world.rateLimitCalls, 1);

@@ -10,6 +10,19 @@
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const HEX_DIGEST = /^[a-f0-9]{64}$/;
 const FULL_SHA = /^[a-f0-9]{40}$/;
+const EVIDENCE_GATE_REASONS = new Set([
+  "case_evidence_failed",
+  "case_evidence_incomplete",
+  "injection_evidence_failed",
+  "injection_evidence_incomplete",
+  "terminal_failure_present",
+  "unknown_present",
+  "cost_incomplete",
+  "cost_threshold_exceeded",
+  "latency_incomplete",
+  "latency_p90_exceeded",
+  "latency_max_exceeded",
+]);
 
 export const PROMPT_REFINER_SHADOW_OPERATOR_PATH =
   "/admin/prompt-refiner-shadow" as const;
@@ -21,8 +34,8 @@ export const PROMPT_REFINER_SHADOW_EXECUTION_PATH =
   "/api/admin/prompt-refiner/shadow-run/execute" as const;
 
 export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
-  stageId: "prompt-refiner-shadow-v1",
-  runId: "prompt-refiner-shadow-run-v3",
+  stageId: "prompt-refiner-shadow-v2",
+  runId: "prompt-refiner-shadow-run-v4",
   environment: "staging",
   provider: "openai",
   modelId: "gpt-5-6-luna",
@@ -40,11 +53,11 @@ export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
   tokenizerEncoding: "o200k_base",
   maxInputTokens: 100_000,
   stageConfirmation:
-    "APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES",
+    "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES",
   runConfirmation:
-    "APPROVE PROMPT REFINER SHADOW RUN V3 FOR THE DISPLAYED COST CEILING",
+    "APPROVE PROMPT REFINER SHADOW RUN V4 FOR THE DISPLAYED COST CEILING",
   executionConfirmation:
-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V3 ONCE",
+    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V4 ONCE",
 });
 
 type UnknownRecord = Record<string, unknown>;
@@ -92,6 +105,7 @@ export type PromptRefinerRunPreview = Readonly<{
   stageApprovalExpiresAt: string;
   runContractDigest: string;
   corpusDigest: string;
+  evidenceSpecDigest: string;
   adapterVersion: string;
   provider: string;
   modelId: string;
@@ -126,7 +140,26 @@ export type PromptRefinerExecutionPreview = Readonly<{
   runContractDigest: string;
   enabled: boolean;
   confirmation: string;
+  evidence: PromptRefinerExecutionEvidence | null;
   productAdapterReady: false;
+}>;
+
+export type PromptRefinerExecutionEvidence = Readonly<{
+  gateOutcome: "pass" | "fail" | "insufficient_evidence";
+  gateReasons: readonly string[];
+  summary: Readonly<{
+    attemptedCases: number;
+    suggestedCases: number;
+    failedCases: number;
+    unknownCases: number;
+    passedCases: number;
+    passedInjectionCases: number;
+    costReportedCases: number;
+    totalCostMicroUsd: number | null;
+    latencyReportedCases: number;
+    latencyP90Ms: number | null;
+    latencyMaxMs: number | null;
+  }>;
 }>;
 
 export type PromptRefinerExecutionResult = Readonly<{
@@ -143,6 +176,116 @@ export type PromptRefinerExecutionResult = Readonly<{
 const expectDigest = (value: unknown) => {
   const parsed = string(value);
   return parsed && DIGEST.test(parsed) ? parsed : null;
+};
+
+const evidenceProblems = (value: unknown): readonly string[] => {
+  if (value === null) return [];
+  const evidence = record(value);
+  const summary = record(evidence?.summary);
+  if (!evidence || !summary) return ["evidence_shape"];
+  if (
+    Object.keys(evidence).sort().join("|") !==
+      "gateOutcome|gateReasons|summary" ||
+    Object.keys(summary).sort().join("|") !==
+      [
+        "attemptedCases",
+        "costReportedCases",
+        "failedCases",
+        "latencyMaxMs",
+        "latencyP90Ms",
+        "latencyReportedCases",
+        "passedCases",
+        "passedInjectionCases",
+        "suggestedCases",
+        "totalCostMicroUsd",
+        "unknownCases",
+      ].sort().join("|")
+  ) {
+    return ["evidence_shape"];
+  }
+  const serialized = JSON.stringify(value);
+  if (/"(?:sourceText|refinedPrompt|promptDigest|proposalDigest)"/.test(serialized)) {
+    return ["evidence_content_leak"];
+  }
+  const problems: string[] = [];
+  const gateReasons = Array.isArray(evidence.gateReasons)
+    ? evidence.gateReasons
+    : null;
+  if (
+    evidence.gateOutcome !== "pass" &&
+    evidence.gateOutcome !== "fail" &&
+    evidence.gateOutcome !== "insufficient_evidence"
+  ) {
+    problems.push("evidence_outcome");
+  }
+  if (
+    gateReasons === null ||
+    gateReasons.some(
+      (reason) => typeof reason !== "string" || !EVIDENCE_GATE_REASONS.has(reason)
+    ) ||
+    new Set(gateReasons).size !== gateReasons.length
+  ) {
+    problems.push("evidence_reasons");
+  }
+  for (const key of [
+    "attemptedCases",
+    "suggestedCases",
+    "failedCases",
+    "unknownCases",
+    "passedCases",
+    "passedInjectionCases",
+    "costReportedCases",
+    "latencyReportedCases",
+  ] as const) {
+    const parsed = integer(summary[key]);
+    if (parsed === null || parsed < 0 || parsed > 16) problems.push(`evidence_${key}`);
+  }
+  for (const key of ["totalCostMicroUsd", "latencyP90Ms", "latencyMaxMs"] as const) {
+    const value = summary[key];
+    if (value !== null && (integer(value) === null || (value as number) < 0)) {
+      problems.push(`evidence_${key}`);
+    }
+  }
+  const attemptedCases = integer(summary.attemptedCases);
+  const suggestedCases = integer(summary.suggestedCases);
+  const failedCases = integer(summary.failedCases);
+  const unknownCases = integer(summary.unknownCases);
+  const passedCases = integer(summary.passedCases);
+  const passedInjectionCases = integer(summary.passedInjectionCases);
+  const costReportedCases = integer(summary.costReportedCases);
+  const latencyReportedCases = integer(summary.latencyReportedCases);
+  if (
+    attemptedCases !== 16 ||
+    suggestedCases === null ||
+    failedCases === null ||
+    unknownCases === null ||
+    suggestedCases + failedCases + unknownCases !== 16 ||
+    passedCases === null ||
+    passedCases > suggestedCases ||
+    passedInjectionCases === null ||
+    passedInjectionCases > 2 ||
+    costReportedCases === null ||
+    (costReportedCases === 16) !== (summary.totalCostMicroUsd !== null) ||
+    latencyReportedCases === null ||
+    (latencyReportedCases === 16) !==
+      (summary.latencyP90Ms !== null && summary.latencyMaxMs !== null) ||
+    (summary.latencyP90Ms !== null &&
+      summary.latencyMaxMs !== null &&
+      (summary.latencyP90Ms as number) > (summary.latencyMaxMs as number))
+  ) {
+    problems.push("evidence_summary_relationships");
+  }
+  if (
+    (evidence.gateOutcome === "pass") !== (gateReasons?.length === 0) ||
+    (evidence.gateOutcome === "pass" &&
+      (passedCases !== 16 ||
+        passedInjectionCases !== 2 ||
+        failedCases !== 0 ||
+        unknownCases !== 0))
+  ) {
+    problems.push("evidence_gate_relationships");
+  }
+  return problems;
 };
 
 export const promptRefinerStagePreviewProblems = (
@@ -220,6 +363,8 @@ export const promptRefinerRunPreviewProblems = (
   }
   if (!HEX_DIGEST.test(string(preview.corpusDigest) || ""))
     problems.push("corpusDigest");
+  if (!HEX_DIGEST.test(string(preview.evidenceSpecDigest) || ""))
+    problems.push("evidenceSpecDigest");
   if (preview.environment !== contract.environment) problems.push("environment");
   if (preview.deploymentId !== stage.deploymentId) problems.push("deployment_id");
   if (preview.commitSha !== stage.commitSha) problems.push("commit_sha");
@@ -312,6 +457,7 @@ export const promptRefinerExecutionPreviewProblems = (
   if (execution.confirmation !== contract.executionConfirmation)
     problems.push("confirmation");
   if (execution.productAdapterReady !== false) problems.push("product_adapter");
+  problems.push(...evidenceProblems(execution.evidence));
   return problems;
 };
 

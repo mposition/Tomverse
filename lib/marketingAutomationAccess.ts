@@ -203,6 +203,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * an admission decision; the fingerprint moves because the closed file digest
  * deliberately requires this review whenever any schema bytes move.
  *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
+ *
  * 2026-09-21, again: the same watched file, and this time the declared change
  * is a documentation comment. `SuppressionCause`'s model comment said the rows
  * were written beside `SuppressionEntry` and read by no send decision, which
@@ -214,7 +219,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5a65edee6a24294a02fc1dbe34f0c7076e2a304d32a855b50ed65955c84ce926";
+  "6024faad222d57304bed312980918a57f6774f1462f8f939b09556f89ad80d36";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

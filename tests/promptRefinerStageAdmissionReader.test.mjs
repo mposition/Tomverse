@@ -40,7 +40,7 @@ test("stage authorization accepts current and legacy canonical HMAC formats acro
   const currentKey = "current-audit-integrity-key";
   const approvedAt = new Date("2026-09-17T02:00:00.000Z");
   const stage = {
-    id: "prompt-refiner-shadow-v1",
+    id: "prompt-refiner-shadow-v2",
     approvedBy: "mposition",
     admissionVersion: "prompt-refiner-stage-admission-v1",
     proposalDigest: `sha256:${"1".repeat(64)}`,
