@@ -222,6 +222,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
  * evidence backs a separate NOT NULL transition. Webhook admission never reads
  * this column; the fingerprint moves because the schema is watched as a whole.
+ *
+ * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
+ * columns and a new attempt check to the same schema. Those additions do not
+ * touch a marketing model or admission decision; the watched-file digest still
+ * moves so the dependency is reviewed explicitly.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
   "0b6176cf9a23368db901b33764f66a8ec314a32c7a401c4202a39827f67b5b44";
