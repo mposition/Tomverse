@@ -135,6 +135,8 @@ a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure
 # commit gets a new fingerprint and remains blocked.
 # Follow-up packages must redact this test-only value while recording command
 # evidence so this immutable exception list does not grow with each review.
+# These fingerprints remain valid only while the named branch commits stay in
+# history: merge PR #1584 with a merge commit; never squash or rebase it.
 26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10335
 26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10438
 26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10644
