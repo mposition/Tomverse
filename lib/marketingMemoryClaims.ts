@@ -33,6 +33,14 @@
 // Neither half judges translation quality, and neither is a substitute for
 // someone reading the page. They catch the specific sentence §17 names.
 
+import {
+  MARKETING_CLAUSE_VERBS,
+  MARKETING_REPLICATION_VERBS,
+  marketingVerbForms,
+} from "@/lib/marketingClaimVerbs";
+import { marketingTermBody } from "@/lib/marketingGuardNormalise";
+import { marketingClauseAsserts } from "@/lib/marketingNegation";
+
 /** The languages the forbidden-claim patterns below actually cover. */
 export const MEMORY_CLAIM_PATTERN_LANGUAGES = ["ko", "en"] as const;
 
@@ -119,6 +127,121 @@ export type ForbiddenMemoryClaim = {
  * hidden prompt) next to the verb, which is what makes it the forbidden claim
  * rather than a neighbouring true one.
  */
+/**
+ * One vocabulary, two spellings of every claim it makes.
+ *
+ * The verbs and the objects are written once. The ordinary pattern joins them
+ * with a gap, and the spaced one joins separator-tolerant bodies of the same
+ * words with the same gap -- so "We r e p r o d u c e your memories." is the
+ * claim `reproduce` already covered in its ordinary spelling. Two hand-written
+ * lists had drifted apart, which is how that sentence went through: the spaced
+ * list had `clone` and `replicate` and not the other three.
+ *
+ * A separate *form* cannot do this job. A twin that joined single letters
+ * across spaces fixed one spelling, missed "c  l  o  n  e" and "cl o ne", and
+ * invented "BEST" out of a sentence listing the letters.
+ */
+const REPLICATION_VERBS: readonly string[] = Object.freeze(
+  MARKETING_REPLICATION_VERBS.flatMap(marketingVerbForms).sort(
+    (left, right) => right.length - left.length,
+  ),
+);
+
+/**
+ * The participles, for the passive: "Your memories were copied."
+ *
+ * The same forms, filtered to the ones a passive uses, so a lemma cannot be in
+ * the active list and missing from this one.
+ */
+const REPLICATION_PARTICIPLES: readonly string[] = Object.freeze(
+  MARKETING_REPLICATION_VERBS.flatMap((verb) =>
+    marketingVerbForms(verb).filter(
+      (form) => form.endsWith("ed") || form.endsWith("ied"),
+    ),
+  ).sort((left, right) => right.length - left.length),
+);
+
+const REPLICATION_OBJECTS: readonly string[] = Object.freeze([
+  "memory",
+  "memories",
+  "personality",
+  "persona",
+  "brain",
+  "mind",
+]);
+
+const anyOf = (words: readonly string[]): string =>
+  `(?:${words.map(marketingTermBody).join("|")})`;
+
+const NOT_ALPHANUMERIC_BEFORE = "(?<![\\p{L}\\p{N}])";
+const NOT_ALPHANUMERIC_AFTER = "(?![\\p{L}\\p{N}])";
+
+/**
+ * What may sit between the verb and the object.
+ *
+ * Bounded by the clause rather than by a number. `{0,30}` was two mistakes at
+ * once: it let a match reach across a question mark, so "We do not clone
+ * files? We clone your memories." was one match whose first half sat in the
+ * negated sentence and swallowed the second; and it was too short for "all of
+ * your carefully curated and deeply personal memories", which is a sentence
+ * somebody would write.
+ *
+ * The class holds every sentence and clause edge, so a match cannot leave the
+ * clause it started in. The number that remains is a backstop against a
+ * pathological line, not the rule.
+ */
+const CLAUSE_SEGMENT = "[^.!?\\n。,;:\\u2014\\u2013]";
+
+/**
+ * The gap, with room for one aside between paired commas.
+ *
+ * A comma ends a clause and an aside is two commas: "We clone, with your
+ * explicit and fully informed approval, your memories." is one clause with
+ * something parked in the middle, and a gap that stopped at the first comma
+ * never reached the object. Two commas' worth, because the object can carry a
+ * list of its own -- "all of your curated, deeply personal memories".
+ *
+ * Reaching across a clause is safe here in a way it is not elsewhere, because
+ * the scanner restarts one character after each match: a gap that spans a
+ * denial into a claim produces a match that is suppressed, and the claim's own
+ * verb is still read on the next pass.
+ */
+/**
+ * A comma the gap may cross.
+ *
+ * Not a count. A comma that separates adjectives -- "all of your curated,
+ * deeply personal memories" -- is inside the object, and one that opens a new
+ * clause -- "Clone a repository, then check your memory usage." -- is the end
+ * of this one. The word after it says which, and counting commas said neither:
+ * two was too few for the first sentence and enough to join the second.
+ */
+const INNER_COMMA =
+  ",(?!\\s*(?:then|so|but|and|or|yet|while|because)\\b)" +
+  // A subject and a *verb*, not a subject and any word. "Clone a repository,
+  // check your memory usage." has no subject at all -- it is an imperative --
+  // so the bare verb after the comma is the tell, and reading "any word" made
+  // "your curated, deeply personal memories" look like a clause too.
+  "(?!\\s*(?:we|it|they|you|i|he|she|the|a|an|our|its|their|this|that)\\s+(?:" +
+  MARKETING_CLAUSE_VERBS.join("|") +
+  "))" +
+  "(?!\\s*(?:" +
+  MARKETING_CLAUSE_VERBS.join("|") +
+  "|check|see|read|open|visit|try|use|start|keep|make|take|get)\\b)";
+
+const CLAUSE_GAP = `${CLAUSE_SEGMENT}{0,160}(?:${INNER_COMMA}${CLAUSE_SEGMENT}{0,80}){0,3}`;
+
+/** The verb, a gap that stays inside one clause, then the object. */
+const SPACED_REPLICATION_CLAIM = new RegExp(
+  NOT_ALPHANUMERIC_BEFORE +
+    anyOf(REPLICATION_VERBS) +
+    NOT_ALPHANUMERIC_AFTER +
+    CLAUSE_GAP +
+    NOT_ALPHANUMERIC_BEFORE +
+    anyOf(REPLICATION_OBJECTS) +
+    NOT_ALPHANUMERIC_AFTER,
+  "iu",
+);
+
 export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
     {
         id: "replicatesMemoryOrPersonality",
@@ -127,8 +250,27 @@ export const FORBIDDEN_MEMORY_CLAIMS: readonly ForbiddenMemoryClaim[] = [
         patterns: [
             /(기억|인격|성격|두뇌)[^.\n]{0,20}(복제|재현|그대로\s*옮)/,
             /(복제|재현)[^.\n]{0,12}(기억|인격|두뇌)/,
-            /\b(clone|replicate|reproduce|recreate|transfer)s?\b[^.\n]{0,30}\b(memory|memories|personality|persona|brain|mind)\b/i,
-            /\b(memory|memories|personality|persona|brain)\b[^.\n]{0,20}\b(cloned|replicated|recreated|reproduced)\b/i,
+            new RegExp(
+                "\\b(?:" + REPLICATION_VERBS.join("|") + ")\\b" +
+                    CLAUSE_GAP +
+                    "\\b(memory|memories|personality|persona|brain|mind)\\b",
+                "iu"
+            ),
+            // The same claim with every separator tolerated inside the words,
+            // built from the same vocabulary as the line above so the two
+            // cannot drift. It stays here rather than becoming a Guard term
+            // because this is where the clause is read, and a denial is not a
+            // claim.
+            SPACED_REPLICATION_CLAIM,
+            // The passive, from the same generator. Writing the participles
+            // out by hand missed `copied`, `duplicated` and `transferred`,
+            // which is the drift the shared lemma list exists to stop.
+            new RegExp(
+                "\\b(?:memory|memories|personality|persona|brain)\\b" +
+                    CLAUSE_GAP +
+                    "\\b(?:" + REPLICATION_PARTICIPLES.join("|") + ")\\b",
+                "iu"
+            ),
         ],
     },
     {
@@ -194,39 +336,60 @@ export type ForbiddenClaimFinding = {
     match: string;
 };
 
-const SENTENCE_BOUNDARY = /[.!?\n。]/;
-
-/** English negators, which precede what they deny. */
-const PRECEDING_NEGATION =
-    /\b(not|never|isn't|aren't|wasn't|doesn't|don't|didn't|cannot|can't|won't)\b/i;
-
-/** Korean negators, which close the clause they deny. */
-const FOLLOWING_NEGATION = /(않|아닙니다|아니라|아니며|아닌|없습니다|없으며|못합니다)/;
-
 /**
  * The sentence a match sits in, plus whether that sentence asserts anything.
  *
- * Marketing pages carry the denial of every claim §17 forbids — "not
- * affiliated with or endorsed by OpenAI or Anthropic" is on the
- * ChatGPT-vs-Claude page today, and it is there precisely to avoid the claim.
- * A guard that reads a disclaimer as the thing it disclaims would force the
- * disclaimers off the page, which is the opposite of what §17 wants. An FAQ
- * question is treated the same way: "Is Tomverse affiliated with OpenAI?"
- * asserts nothing, and the answer below it is scanned on its own.
+ * `lib/marketingNegation.ts` owns this question now. It used to live here, and
+ * the Guard's minors rule wrote a second version of it as a fixed-length
+ * lookbehind -- so "청소년을 위한 도구가 아닙니다" was refused for saying the
+ * thing it denies, while "We do not lose files: we clone your memories." was
+ * read as one denial and reported nothing. One parser, two callers, and the
+ * clause boundaries written down once.
  */
-const assertsTheClaim = (text: string, matchIndex: number, match: string) => {
-    let start = matchIndex;
-    while (start > 0 && !SENTENCE_BOUNDARY.test(text[start - 1])) start -= 1;
-    let end = matchIndex + match.length;
-    while (end < text.length && !SENTENCE_BOUNDARY.test(text[end])) end += 1;
+const assertsTheClaim = marketingClauseAsserts;
 
-    if (text[end] === "?") return false;
-    const before = text.slice(start, matchIndex);
-    const after = text.slice(matchIndex + match.length, end);
-    return !PRECEDING_NEGATION.test(before) && !FOLLOWING_NEGATION.test(after);
-};
+/**
+ * The rule sources, copied at module load and never read from the export again.
+ *
+ * `FORBIDDEN_MEMORY_CLAIMS` is exported for the test that pins its shape, and
+ * an exported array of `RegExp` objects is editable twice over: `splice(0)`
+ * empties it, and `RegExp.prototype.compile` replaces a pattern in place --
+ * which `Object.freeze` does not prevent. So the decision reads these strings
+ * instead, and a caller editing the export changes what it can see rather than
+ * what the matcher does.
+ */
+const FORBIDDEN_CLAIM_SOURCES: ReadonlyArray<{
+    readonly id: string;
+    readonly reason: string;
+    readonly patterns: readonly { readonly source: string; readonly flags: string }[];
+}> = Object.freeze(
+    FORBIDDEN_MEMORY_CLAIMS.map((claim) =>
+        Object.freeze({
+            id: claim.id,
+            reason: claim.reason,
+            patterns: Object.freeze(
+                claim.patterns.map((expression) =>
+                    Object.freeze({
+                        source: expression.source,
+                        flags: expression.flags,
+                    })
+                )
+            ),
+        })
+    )
+);
 
 /** Matches of `pattern` that their own sentence actually asserts. */
+/**
+ * Whether the match a scanner returned swallowed a second start.
+ *
+ * A gap that reaches across a clause can begin at a negated verb and end at an
+ * object two clauses later, which consumes the positive claim in between: "We
+ * do not clone files, we copy chats, but we clone your memories." was one
+ * match, judged at its first character, and the real claim was never looked
+ * at. So the scanner restarts one character after each match rather than after
+ * it, which costs a few comparisons and reads every start.
+ */
 const assertedMatches = (text: string, pattern: RegExp): string[] => {
     // A fresh scanner each time: a shared lastIndex across inputs is how a
     // scanner starts skipping matches after the first file.
@@ -238,6 +401,9 @@ const assertedMatches = (text: string, pattern: RegExp): string[] => {
     let found = scanner.exec(text);
     while (found) {
         if (assertsTheClaim(text, found.index, found[0])) matches.push(found[0]);
+        // One character on, not past the match: a long match can contain the
+        // start of another, and the one it contains is often the asserted one.
+        scanner.lastIndex = found.index + 1;
         found = scanner.exec(text);
     }
     return matches;
@@ -253,13 +419,15 @@ const assertedMatches = (text: string, pattern: RegExp): string[] => {
 export const findForbiddenMemoryClaims = (
     text: string
 ): ForbiddenClaimFinding[] =>
-    FORBIDDEN_MEMORY_CLAIMS.flatMap((claim) =>
+    FORBIDDEN_CLAIM_SOURCES.flatMap((claim) =>
         claim.patterns.flatMap((pattern) =>
-            assertedMatches(text, pattern).map((match) => ({
-                claimId: claim.id,
-                reason: claim.reason,
-                match,
-            }))
+            assertedMatches(text, new RegExp(pattern.source, pattern.flags)).map(
+                (match) => ({
+                    claimId: claim.id,
+                    reason: claim.reason,
+                    match,
+                })
+            )
         )
     );
 

@@ -5,7 +5,8 @@ type PromptRefinerCopy = {
   actionDescription: string;
   requesting: string;
   proposalLabel: string;
-  useProposal: string;
+  previewOnly: string;
+  previewAction: string;
   keepOriginal: string;
   failed: string;
   retry: string;
@@ -22,7 +23,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "전송하지 않고 더 명확한 문장을 제안합니다.",
     requesting: "문장 제안을 준비하고 있습니다. 원문은 그대로 유지됩니다.",
     proposalLabel: "제안된 문장",
-    useProposal: "이 문장 사용",
+    previewOnly: "검증용 미리보기입니다. 원문은 바뀌지 않았고 대화 메시지는 전송되지 않았습니다.",
+    previewAction: "제안 미리보기 확인",
     keepOriginal: "원문 유지",
     failed: "문장을 제안하지 못했습니다. 원문은 바뀌지 않았습니다.",
     retry: "다시 시도",
@@ -37,7 +39,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "Prepare a clearer version without sending it.",
     requesting: "Preparing a suggestion. Your original stays unchanged.",
     proposalLabel: "Suggested wording",
-    useProposal: "Use this wording",
+    previewOnly: "Fixture preview only. Your original is unchanged. No chat message was sent.",
+    previewAction: "Confirm preview",
     keepOriginal: "Keep original",
     failed: "A suggestion could not be prepared. Your original was not changed.",
     retry: "Try again",
@@ -52,7 +55,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "在发送前提供更清晰的表述建议。",
     requesting: "正在准备建议，原文保持不变。",
     proposalLabel: "建议表述",
-    useProposal: "使用此表述",
+    previewOnly: "仅供测试预览。原文未更改，未发送聊天消息。",
+    previewAction: "确认预览",
     keepOriginal: "保留原文",
     failed: "无法生成建议，原文未被更改。",
     retry: "重试",
@@ -67,7 +71,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "Prépare une formulation plus claire sans l’envoyer.",
     requesting: "Préparation d’une suggestion. Le texte original reste inchangé.",
     proposalLabel: "Formulation proposée",
-    useProposal: "Utiliser ce texte",
+    previewOnly: "Aperçu de test uniquement. L’original reste inchangé. Aucun message de chat n’a été envoyé.",
+    previewAction: "Confirmer l’aperçu",
     keepOriginal: "Garder l’original",
     failed: "Aucune suggestion n’a pu être préparée. L’original est inchangé.",
     retry: "Réessayer",
@@ -82,7 +87,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "Erstellt vor dem Senden eine klarere Formulierung.",
     requesting: "Vorschlag wird vorbereitet. Das Original bleibt unverändert.",
     proposalLabel: "Vorgeschlagene Formulierung",
-    useProposal: "Diese Formulierung nutzen",
+    previewOnly: "Nur Testvorschau. Das Original blieb unverändert. Keine Chat-Nachricht wurde gesendet.",
+    previewAction: "Vorschau bestätigen",
     keepOriginal: "Original behalten",
     failed: "Kein Vorschlag möglich. Das Original wurde nicht geändert.",
     retry: "Erneut versuchen",
@@ -97,7 +103,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "Prepara una versión más clara sin enviarla.",
     requesting: "Preparando una sugerencia. El original no cambia.",
     proposalLabel: "Redacción sugerida",
-    useProposal: "Usar esta redacción",
+    previewOnly: "Solo vista previa de prueba. El original no cambió. No se envió ningún mensaje de chat.",
+    previewAction: "Confirmar vista previa",
     keepOriginal: "Conservar original",
     failed: "No se pudo preparar una sugerencia. El original no cambió.",
     retry: "Reintentar",
@@ -112,7 +119,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     actionDescription: "Prepara uma versão mais clara sem enviá-la.",
     requesting: "Preparando uma sugestão. O original permanece igual.",
     proposalLabel: "Redação sugerida",
-    useProposal: "Usar esta redação",
+    previewOnly: "Prévia de teste apenas. O original não mudou. Nenhuma mensagem de chat foi enviada.",
+    previewAction: "Confirmar prévia",
     keepOriginal: "Manter original",
     failed: "Não foi possível preparar uma sugestão. O original não mudou.",
     retry: "Tentar novamente",

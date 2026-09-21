@@ -458,6 +458,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 67,
     reason: "The same migration; see the MarketingChannel entry above.",
   },
+  {
+    path: "prisma/migrations/20260921170000_marketing_post_facts_digest/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
@@ -652,6 +660,79 @@ const isInlinePrismaSql = (node) =>
   node.tag.name.text === "sql";
 
 /**
+ * Every function that can mint a Guard-trusted value, in one list.
+ *
+ * The computed-access rules were written for the template proof and the facts
+ * seal was added beside them, so `g["sealMarketingFacts"]({})` reached a
+ * function nothing counted -- the same bypass, one name along. A second seal
+ * added later joins this list and gets every rule at once.
+ */
+export const PROTECTED_EXPORTS = Object.freeze([
+  "sealMarketingTemplateProof",
+  "sealMarketingFacts",
+  "sealMarketingGuardContext",
+]);
+
+/** The module that declares it, matched on the specifier's last segment. */
+const TEMPLATE_SEAL_MODULE = "marketingGuardCore";
+
+/** The one file entitled to declare it. A second declaration is a second seal. */
+const PROTECTED_EXPORTS_DECLARED_IN = "lib/marketingGuardCore.ts";
+
+const specifierEndsWithSealModule = (specifier) =>
+  specifier.replace(/[.][cm]?[jt]sx?$/, "").split("/").pop() ===
+  TEMPLATE_SEAL_MODULE;
+
+/**
+ * What a reference to the seal function is doing.
+ *
+ * Counting the name is not counting the call. The review put an alias in an
+ * allowed file -- `export const mint = sealMarketingTemplateProof` -- and
+ * called `mint()` from somewhere else, and the count rule saw two mentions in
+ * the file it expected two mentions in and nothing anywhere else. So each
+ * reference is classified, and everything that is not a declaration, an import
+ * under the same name, or a direct call is an escape: the value has left,
+ * and where it goes is no longer visible to a rule that reads one file.
+ */
+const classifySealReference = (node) => {
+  const parent = node.parent;
+  if (!parent) return "escape";
+
+  if (
+    (ts.isFunctionDeclaration(parent) || ts.isVariableDeclaration(parent)) &&
+    parent.name === node
+  ) {
+    return "declaration";
+  }
+
+  if (ts.isImportSpecifier(parent)) {
+    // `import { seal as mint }` renames it, and the rest of the file then
+    // calls a name this check is not looking for.
+    const renamed =
+      parent.propertyName !== undefined && parent.name.text !== node.text;
+    return renamed ? "escape" : "import";
+  }
+
+  // `export { seal }` and `export { seal as mint }` both hand it on.
+  if (ts.isExportSpecifier(parent)) return "escape";
+
+  if (ts.isCallExpression(parent) && parent.expression === node) return "call";
+
+  return "escape";
+};
+
+/**
+ * Whether a module specifier names the module that declares the seal.
+ *
+ * Any import of it other than a named one under the same name puts the
+ * function behind an object, and a rule that reads identifiers cannot follow
+ * it there: `import * as guard` then `guard["sealMarketingTemplateProof"]({})`
+ * is a call this check saw nothing of at all.
+ */
+const importsSealModule = (specifier) =>
+  specifierEndsWithSealModule(specifier);
+
+/**
  * Walks one source file once and returns what the rules need.
  */
 export const analyseSource = (path, text) => {
@@ -668,12 +749,406 @@ export const analyseSource = (path, text) => {
   const dynamicDelegateUses = [];
   const literals = [];
   const runtimeSql = [];
+  const protectedCalls = [];
+  const protectedEscapes = [];
+  // `const p = "@/lib/marketingGuardCore"` and `const k = "seal..."`, so a
+  // module path or a property name stored in a variable is still the thing it
+  // spells. The review wrote the call as `const g = await import(p); g[k]({})`
+  // and every rule below read an identifier where it wanted a literal.
+  const constantStrings = new Map();
+  // Identifiers bound to a module loaded at run time, whatever specifier was
+  // used. A computed key on one of these whose value this pass cannot work out
+  // is refused rather than passed over: that is the shape the seal is reached
+  // through, and "cannot tell" is not "safe".
+  const runtimeModuleBindings = new Map();
+
+  /**
+   * Whether a specifier could name the module that declares the seal.
+   *
+   * A readable one is compared outright. An unreadable one is possible unless
+   * its head pins a directory the seal does not live in.
+   */
+  /** The call under any number of `await`s and parentheses, or null. */
+  const runtimeLoadCall = (node) => {
+    let value = node;
+    while (
+      value &&
+      (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value))
+    ) {
+      value = value.expression;
+    }
+    if (!value || !ts.isCallExpression(value)) return null;
+    const loads =
+      value.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(value.expression) && value.expression.text === "require");
+    return loads ? value : null;
+  };
+
+  const couldBeSealModule = (node) => {
+    const whole = literalTextOf(node);
+    if (whole !== null) return specifierEndsWithSealModule(whole);
+    // A hole can contain anything, including `../lib/marketingGuardCore`, so
+    // the text in front of it fixes nothing: `@/locales/${segment}` reaches
+    // this module when `segment` climbs out of the directory. The previous
+    // version read the prefix as a fence and it is not one.
+    //
+    // So every unreadable specifier is possible, and the two files that
+    // legitimately load a module by name are named below instead. A guess
+    // about a path is not a permission.
+    return true;
+  };
+
+  /**
+   * The string a node spells, folding what can be folded.
+   *
+   * Concatenation and template literals are folded, so `"@/lib/" +
+   * "marketingGuardCore"` and `` `${"sealMarketing"}TemplateProof` `` are the
+   * strings they build. The fifth review's bypass was a constant alias; the
+   * sixth's was a `+` between two halves of the same name.
+   */
+  const literalTextOf = (node) => {
+    if (!node) return null;
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isIdentifier(node)) return constantStrings.get(node.text) ?? null;
+    if (ts.isParenthesizedExpression(node)) return literalTextOf(node.expression);
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.PlusToken
+    ) {
+      const left = literalTextOf(node.left);
+      const right = literalTextOf(node.right);
+      return left === null || right === null ? null : left + right;
+    }
+    if (ts.isTemplateExpression(node)) {
+      let text = node.head.text;
+      for (const span of node.templateSpans) {
+        const value = literalTextOf(span.expression);
+        if (value === null) return null;
+        text += value + span.literal.text;
+      }
+      return text;
+    }
+    return null;
+  };
   let importsDriver = false;
 
   const addRuntimeSql = (kind, node) =>
     runtimeSql.push({ kind, line: lineOf(sourceFile, node) });
 
+  const collectConstants = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      importsSealModule(node.moduleSpecifier.text) &&
+      node.importClause?.namedBindings &&
+      ts.isNamespaceImport(node.importClause.namedBindings)
+    ) {
+      runtimeModuleBindings.set(node.importClause.namedBindings.name.text, true);
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      literalTextOf(node.initializer) !== null
+    ) {
+      // A name bound twice is a name whose value this pass cannot state, so it
+      // is dropped rather than guessed at.
+      constantStrings.set(
+        node.name.text,
+        constantStrings.has(node.name.text)
+          ? null
+          : literalTextOf(node.initializer),
+      );
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      let value = node.initializer;
+      while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
+        value = value.expression;
+      }
+      const call = runtimeLoadCall(node.initializer);
+      if (call) {
+        // `true` means "this could be the seal module": either the specifier
+        // says so, or nothing in it says otherwise.
+        runtimeModuleBindings.set(
+          node.name.text,
+          couldBeSealModule(call.arguments[0]),
+        );
+      } else if (
+        ts.isIdentifier(node.initializer) &&
+        runtimeModuleBindings.get(node.initializer.text) === true
+      ) {
+        // `const other = g` passes the module on under a second name, and the
+        // review reached the seal through `const { [k]: mint } = g`.
+        runtimeModuleBindings.set(node.name.text, true);
+      }
+    }
+    ts.forEachChild(node, collectConstants);
+  };
+  // Two passes: constants first, so a `const` declared below its use is still
+  // resolvable, then the same walk again now that the map is complete.
+  collectConstants(sourceFile);
+  collectConstants(sourceFile);
+
+  const isPossibleModuleNamespace = (node) => {
+    let value = node;
+    while (value && (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value))) {
+      value = value.expression;
+    }
+    if (!value) return false;
+    if (ts.isIdentifier(value)) {
+      return runtimeModuleBindings.get(value.text) === true;
+    }
+    const call = runtimeLoadCall(value);
+    return !!call && couldBeSealModule(call.arguments[0]);
+  };
+
   const visit = (node) => {
+    if (ts.isIdentifier(node) && PROTECTED_EXPORTS.includes(node.text)) {
+      const role = classifySealReference(node);
+      const line = lineOf(sourceFile, node);
+      if (role === "call") protectedCalls.push({ name: node.text, line });
+      if (role === "escape") {
+        protectedEscapes.push({ line, detail: `${node.text} used as a value` });
+      }
+      if (role === "declaration" && path !== PROTECTED_EXPORTS_DECLARED_IN) {
+        protectedEscapes.push({ line, detail: `${node.text} declared here too` });
+      }
+    }
+
+    // A computed key: `guard["sealMarketingTemplateProof"]({})`. The name is a
+    // string here, not an identifier, so the classification above never sees
+    // it -- and the review called the function through exactly this.
+    if (ts.isElementAccessExpression(node)) {
+      const key = literalTextOf(node.argumentExpression);
+      if (PROTECTED_EXPORTS.includes(key)) {
+        protectedEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `${key} reached by a computed key`,
+        });
+      } else if (
+        key === null &&
+        ts.isIdentifier(node.expression) &&
+        runtimeModuleBindings.get(node.expression.text) === true &&
+        !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
+      ) {
+        // A key this pass cannot work out, on a module whose specifier it
+        // cannot work out either. Both halves unknown is the shape the seal is
+        // reached through, and "cannot tell" is not "safe". A load whose
+        // specifier *is* readable and is not this module cannot hold the seal,
+        // so the locale loaders next door are left alone.
+        protectedEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: "a computed key on a module whose specifier is not readable",
+        });
+      }
+    }
+
+    if (isReflectGet(node)) {
+      const key = literalTextOf(node.arguments[1]);
+      if (PROTECTED_EXPORTS.includes(key)) {
+        protectedEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `${key} reached through Reflect.get`,
+        });
+      }
+    }
+
+    // A module namespace can yield a protected export without a member access:
+    // descriptors expose `.value`, while enumeration hands every export to the
+    // caller. If the namespace might be the Guard module, an unreadable key is
+    // not evidence that the protected functions stayed hidden.
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.arguments.length > 0 &&
+      ts.isIdentifier(node.expression.expression) &&
+      ((node.expression.expression.text === "Object" &&
+        [
+          "assign",
+          "entries",
+          "getOwnPropertyDescriptor",
+          "getOwnPropertyDescriptors",
+          "getOwnPropertyNames",
+          "getOwnPropertySymbols",
+          "keys",
+          "values",
+        ].includes(node.expression.name.text)) ||
+        (node.expression.expression.text === "Reflect" &&
+          ["getOwnPropertyDescriptor", "ownKeys"].includes(
+            node.expression.name.text,
+          ))) &&
+      node.arguments.some((argument) => isPossibleModuleNamespace(argument)) &&
+      !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
+    ) {
+      protectedEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `${node.expression.getText(sourceFile)} inspects a possible Guard module namespace`,
+      });
+    }
+
+    if (
+      ts.isForInStatement(node) &&
+      isPossibleModuleNamespace(node.expression) &&
+      !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
+    ) {
+      protectedEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: "enumerates a possible Guard module namespace",
+      });
+    }
+
+    if (
+      ts.isSpreadAssignment(node) &&
+      isPossibleModuleNamespace(node.expression) &&
+      !TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)
+    ) {
+      protectedEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: "spreads a possible Guard module namespace",
+      });
+    }
+
+    // The whole module bound to a name, however it is written. After this the
+    // seal is a property of an object and no identifier rule can follow it.
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      importsSealModule(node.moduleSpecifier.text) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      (node.importClause.name ||
+        (node.importClause.namedBindings &&
+          ts.isNamespaceImport(node.importClause.namedBindings)))
+    ) {
+      protectedEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `binds all of ${node.moduleSpecifier.text} to a name`,
+      });
+    }
+
+    // `require("...")` and `import("...")` do the same thing at run time.
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length > 0 &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require"))
+    ) {
+      const specifier = literalTextOf(node.arguments[0]);
+      if (specifier === null) {
+        // A specifier nobody can read. Refused where the result is then read
+        // by a computed key, which the rule above catches; noted here so the
+        // two halves of the same bypass are visible together.
+      } else if (importsSealModule(specifier)) {
+        protectedEscapes.push({
+          line: lineOf(sourceFile, node),
+          detail: `loads ${specifier} at run time`,
+        });
+      }
+    }
+
+    // `const { [k]: mint } = await import(p)` -- the same reach as `g[k]`, one
+    // syntax further along. The binding pattern is where the name is, and the
+    // rule above was watching the variable a module was assigned to.
+    //
+    // Three shapes, all of which the review reached the sealer through: the
+    // declaration, the assignment form `({ [k]: mint } = await import(p))`,
+    // and a rest binding, which hands on every export at once including the
+    // one this rule exists for.
+    const bindingIsSealModule = (initializer) => {
+      const call = runtimeLoadCall(initializer);
+      if (call) return couldBeSealModule(call.arguments[0]);
+      return (
+        !!initializer &&
+        ts.isIdentifier(initializer) &&
+        runtimeModuleBindings.get(initializer.text) === true
+      );
+    };
+
+    const refuseBindingPattern = (elements, initializer, isObjectLiteral) => {
+      if (!bindingIsSealModule(initializer)) return;
+      if (TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST.includes(path)) return;
+
+      for (const element of elements) {
+        if (isObjectLiteral) {
+          if (ts.isSpreadAssignment(element)) {
+            protectedEscapes.push({
+              line: lineOf(sourceFile, element),
+              detail: "a rest binding of a module loaded at run time",
+            });
+            continue;
+          }
+          if (!ts.isPropertyAssignment(element)) continue;
+          if (!ts.isComputedPropertyName(element.name)) continue;
+          const key = literalTextOf(element.name.expression);
+          if (PROTECTED_EXPORTS.includes(key) || key === null) {
+            protectedEscapes.push({
+              line: lineOf(sourceFile, element),
+              detail: "a computed binding from a module loaded at run time",
+            });
+          }
+          continue;
+        }
+
+        if (element.dotDotDotToken) {
+          protectedEscapes.push({
+            line: lineOf(sourceFile, element),
+            detail: "a rest binding of a module loaded at run time",
+          });
+          continue;
+        }
+        const name = element.propertyName;
+        if (!name || !ts.isComputedPropertyName(name)) continue;
+        const key = literalTextOf(name.expression);
+        if (PROTECTED_EXPORTS.includes(key) || key === null) {
+          protectedEscapes.push({
+            line: lineOf(sourceFile, element),
+            detail: "a computed binding from a module loaded at run time",
+          });
+        }
+      }
+    };
+
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer
+    ) {
+      refuseBindingPattern(node.name.elements, node.initializer, false);
+    }
+
+    // `({ [k]: mint } = await import(p))` -- an assignment rather than a
+    // declaration, which the declaration rule never looked at.
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ) {
+      let target = node.left;
+      while (ts.isParenthesizedExpression(target)) target = target.expression;
+      if (ts.isObjectLiteralExpression(target)) {
+        refuseBindingPattern(target.properties, node.right, true);
+      }
+    }
+
+    // `export *` and `export * as guard` re-export every protected function
+    // without ever writing its name down. The latter has an exportClause -- a
+    // NamespaceExport -- so checking only for a missing clause lets it escape.
+    if (
+      ts.isExportDeclaration(node) &&
+      (!node.exportClause || ts.isNamespaceExport(node.exportClause)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      specifierEndsWithSealModule(node.moduleSpecifier.text)
+    ) {
+      protectedEscapes.push({
+        line: lineOf(sourceFile, node),
+        detail: `re-exports everything from ${node.moduleSpecifier.text}`,
+      });
+    }
+
     if (
       ts.isStringLiteral(node) ||
       ts.isNoSubstitutionTemplateLiteral(node) ||
@@ -856,6 +1331,8 @@ export const analyseSource = (path, text) => {
     dynamicDelegateUses,
     literalText: literals.join("\n"),
     runtimeSql,
+    protectedCalls,
+    protectedEscapes,
     importsDriver,
   };
 };
@@ -988,6 +1465,75 @@ export const RETENTION_SETTING_TOKENS = [
   "MARKETING_RETENTION_SETTING",
 ];
 
+/**
+ * 7. **guard-seal.** Each name in `PROTECTED_EXPORTS` mints a value the Guard
+ * trusts: an approved template, resolved facts, or server-resolved context. A
+ * `WeakSet` proves where an object came from and says nothing about who called
+ * the exported function, so every protected name uses the same syntax rules
+ * and exact call-site allowlist.
+ *
+ * **Calls, classified from the syntax tree -- not mentions.** The first
+ * version counted the name as a string, and the review walked through it: put
+ * `export const mint = sealMarketingTemplateProof` in an allowed file, call
+ * `mint()` from anywhere, and every count still matched. So each reference is
+ * one of four things. A declaration, in the one file entitled to declare it.
+ * An import under the same name. A direct call, which is what the allowlist
+ * counts. And anything else -- an alias, a re-export, a namespace call, a
+ * renamed import, `export *` from the declaring module -- is an escape, which
+ * is a finding whatever the allowlist says, because after it the value is
+ * somewhere this rule cannot see.
+ */
+/**
+ * Files that may read a property of a module they loaded by a computed name.
+ *
+ * The rule above refuses that shape, because both halves being unknown is how
+ * the seal is reached. These two build a locale table: they import
+ * `../locales/<name>.ts` and read the bundle out of it by the same name. They
+ * are in `scripts/`, they are not the product, and neither has a line that
+ * could reach a database. Named here rather than inferred from the shape of
+ * their specifier, which is what a reviewer showed is not a fence.
+ */
+export const TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST = Object.freeze([
+  "scripts/check-locale-translation.mjs",
+  "scripts/check-starter-catalog.mjs",
+]);
+
+/**
+ * Who may say that a fact was resolved.
+ *
+ * The Guard reads `known`, `featurePublic` and the rest out of this bundle and
+ * decides on them, so minting one is deciding what is true. The registries are
+ * read by one file, and that file is the only one that may seal.
+ */
+export const PROTECTED_EXPORT_ALLOWLIST = [
+  {
+    name: "sealMarketingFacts",
+    path: "lib/marketingFactResolution.ts",
+    count: 1,
+    reason:
+      "The resolver that asks the registries, which is the only code entitled to say what they answered.",
+  },
+  {
+    name: "sealMarketingTemplateProof",
+    path: "lib/marketingTemplates.ts",
+    count: 1,
+    reason:
+      "The loader that walks the approval chain, which is the only code entitled to say a template stood.",
+  },
+  {
+    name: "sealMarketingGuardContext",
+    path: "lib/marketingGuardContext.ts",
+    count: 1,
+    reason:
+      "The server-only resolver that owns the S1 fail-closed alert and category answers.",
+  },
+];
+
+// Tests are outside this check's scan, so the suite that proves the autonomous
+// path is reachable does not need an entry -- and could not be given one. What
+// the rule governs is the production surface, where an unlisted call site is
+// a publication nobody approved.
+
 export const RETENTION_SETTING_ALLOWLIST = [
   {
     path: "lib/marketingAutomationSchema.ts",
@@ -1012,6 +1558,7 @@ const retentionSettingMentions = (text) =>
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
   const retentionSettingByPath = new Map();
+  const protectedCallsByKey = new Map();
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
@@ -1070,6 +1617,19 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
     for (const hit of rawSqlTableHits(analysis.literalText)) {
       rawSqlHits.set(keyOf(path, hit.table), { path, ...hit });
+    }
+
+    for (const call of analysis.protectedCalls) {
+      const key = keyOf(path, call.name);
+      protectedCallsByKey.set(key, (protectedCallsByKey.get(key) ?? 0) + 1);
+    }
+    for (const escape of analysis.protectedEscapes) {
+      findings.push({
+        rule: "guard-seal",
+        path,
+        line: escape.line,
+        detail: escape.detail,
+      });
     }
 
     if (analysis.runtimeSql.length > 0) runtimeSqlByPath.set(path, analysis.runtimeSql);
@@ -1177,6 +1737,29 @@ export const checkProtectedTableWriters = ({ sources }) => {
       rule: "retention-setting",
       path: entry.path,
       detail: `allowlist says ${entry.count} mention(s), found 0${missingNote(entry.path)}; remove the entry`,
+    });
+  }
+
+  const allowedProtectedExport = new Map(
+    PROTECTED_EXPORT_ALLOWLIST.map((entry) => [keyOf(entry.path, entry.name), entry])
+  );
+  for (const [key, calls] of protectedCallsByKey) {
+    const entry = allowedProtectedExport.get(key);
+    const [path, name] = key.split(" :: ");
+    const expected = entry?.count ?? 0;
+    if (calls === expected) continue;
+    findings.push({
+      rule: "guard-seal",
+      path,
+      detail: `calls ${name} ${calls} time(s), allowlist says ${expected}`,
+    });
+  }
+  for (const entry of PROTECTED_EXPORT_ALLOWLIST) {
+    if (protectedCallsByKey.has(keyOf(entry.path, entry.name))) continue;
+    findings.push({
+      rule: "guard-seal",
+      path: entry.path,
+      detail: `allowlist says ${entry.count} ${entry.name} call(s), found 0${missingNote(entry.path)}; remove the entry`,
     });
   }
 

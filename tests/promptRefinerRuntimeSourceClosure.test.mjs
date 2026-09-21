@@ -106,12 +106,17 @@ const compilerOptions = parsedConfig.options;
 // altered by either side, only moved. The count is 228 and that inventory
 // hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
 // on this tree and on `origin/develop` alike.
+//
+// 2026-09-21, S1f on top: the same watched-schema comment now also records
+// `MarketingPost.factsDigest`, which moves the positions once more in the
+// same file. The count is still 228 and the position-free inventory still
+// hashes to the value above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e2efb71ad8589f0e934d66a38d147b1d",
-  "89e3f080943c3dcfb08116b429180271",
+  "82081d1e8b021ee74ffe0c5a8bf47efb",
+  "b91b91c10060e63c9604ace5630ac807",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

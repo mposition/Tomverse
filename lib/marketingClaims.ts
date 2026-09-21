@@ -122,6 +122,69 @@ export const marketingClaimEvidenceSchema = z.discriminatedUnion("kind", [
 ]);
 export type MarketingClaimEvidence = z.infer<typeof marketingClaimEvidenceSchema>;
 
+/**
+ * What a `plan` claim can be recorded as meaning.
+ *
+ * Closed, and short. A list that grows by guessing is a list that stops
+ * meaning anything; a value is added when a rule needs to ask the question.
+ */
+export const MARKETING_PLAN_CLAIM_MEANINGS = Object.freeze([
+  "credit_allowance",
+] as const);
+
+export type MarketingPlanClaimMeaning =
+  (typeof MARKETING_PLAN_CLAIM_MEANINGS)[number];
+
+/** Billing fields a registered price or plan claim may say it uses. */
+export const MARKETING_BILLING_PLAN_FACT_FIELDS = Object.freeze([
+  "name",
+  "monthlyPriceCents",
+  "annualPriceCents",
+  "currency",
+  "dailyMessageLimit",
+  "monthlyMessageLimit",
+  "maxModels",
+  "allowAttachments",
+  "allowSharing",
+  "allowDownloads",
+] as const);
+
+/**
+ * Where the resolver must read the claim's changing product fact.
+ *
+ * This is not evidence shown to the generator. It is a closed lookup plan for
+ * server code: the caller still supplies only a claim id, and the resolver
+ * decides which production reader answers it from this reviewed registry row.
+ */
+export const marketingClaimFactSourceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("billing_plan"),
+      planId: z.enum(["free", "pro", "max"]),
+      fields: z.array(z.enum(MARKETING_BILLING_PLAN_FACT_FIELDS)).min(1).max(10),
+      targetsAustralia: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("localized_catalogue"),
+      currency: z.enum(["AUD", "CNY", "EUR", "KRW"]),
+      targetsAustralia: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("model_registry"),
+      modelId: registryId,
+      minimumPlan: z.enum(["Free", "Pro", "Max"]).nullable(),
+    })
+    .strict(),
+]);
+
+export type MarketingClaimFactSource = z.infer<
+  typeof marketingClaimFactSourceSchema
+>;
+
 export const marketingClaimSchema = z
   .object({
     id: registryId,
@@ -140,10 +203,57 @@ export const marketingClaimSchema = z
      * read resolves to not-public rather than to true.
      */
     gate: registryId.nullable(),
+    /**
+     * What a `plan` claim means, from a closed list.
+     *
+     * One value so far. §7.2 rule 4 says a post that says "free" carries the
+     * condition, and the condition is the credit allowance -- not any price
+     * claim that happens to be declared beside it. An earlier Guard took a
+     * boolean from whoever called it, which is the shape S1e spent three
+     * rounds removing; this is the registry recording it once, where a person
+     * with the evidence in front of them writes it down.
+     *
+     * `null` on every other type, and on a plan claim that is about something
+     * else.
+     */
+    planMeaning: z.enum(MARKETING_PLAN_CLAIM_MEANINGS).nullable(),
+    /** The production reader that resolves this claim, never generator input. */
+    factSource: marketingClaimFactSourceSchema.nullable(),
     evidence: marketingClaimEvidenceSchema.nullable(),
   })
   .strict()
   .superRefine((claim, context) => {
+    if (claim.planMeaning !== null && claim.type !== "plan") {
+      context.addIssue({
+        code: "custom",
+        message: "planMeaning belongs to a plan claim",
+      });
+    }
+
+    if (claim.type === "pricing" || claim.type === "plan") {
+      if (
+        claim.factSource?.kind !== "billing_plan" &&
+        claim.factSource?.kind !== "localized_catalogue"
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: `a ${claim.type} claim names its stored price source`,
+        });
+      }
+    } else if (claim.type === "model") {
+      if (claim.factSource?.kind !== "model_registry") {
+        context.addIssue({
+          code: "custom",
+          message: "a model claim names its model registry row",
+        });
+      }
+    } else if (claim.factSource !== null) {
+      context.addIssue({
+        code: "custom",
+        message: `a ${claim.type} claim has no product-fact source`,
+      });
+    }
+
     const needsPageEvidence = (
       MARKETING_PAGE_EVIDENCE_TYPES as readonly string[]
     ).includes(claim.type);
@@ -232,7 +342,10 @@ export const marketingClaimById = (id: string): MarketingClaim | null =>
   MARKETING_CLAIMS.find((claim) => claim.id === id) ?? null;
 
 /** A claim with its evidence removed. This is what a generator is given. */
-export type MarketingClaimProjection = Omit<MarketingClaim, "evidence">;
+export type MarketingClaimProjection = Omit<
+  MarketingClaim,
+  "evidence" | "factSource"
+>;
 
 /**
  * The registry as the generator sees it (§2).
@@ -260,6 +373,7 @@ export function generatorProjection(
       locales: claim.locales,
       validUntil: claim.validUntil,
       gate: claim.gate,
+      planMeaning: claim.planMeaning,
     };
     return projection;
   });

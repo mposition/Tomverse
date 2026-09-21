@@ -217,9 +217,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * a comment is bytes in a watched file, and the digest asking for a look
  * rather than deciding for itself what is material is the behaviour, not a
  * defect. This was the look.
+ *
+ * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
+ * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
+ * evidence backs a separate NOT NULL transition. Webhook admission never reads
+ * this column; the fingerprint moves because the schema is watched as a whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "56bd4e4915361d076e50f295ad81cd437ed65c17c6d591cae8f796879c26a3b1";
+  "0b6176cf9a23368db901b33764f66a8ec314a32c7a401c4202a39827f67b5b44";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

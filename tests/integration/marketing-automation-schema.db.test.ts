@@ -9,6 +9,13 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 
 import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
 import {
+  guardDraft,
+  sealMarketingFacts,
+  sealMarketingGuardContext,
+} from "@/lib/marketingGuardCore";
+import { createHash } from "node:crypto";
+import { marketingEnvelopeDigest } from "@/lib/marketingStore";
+import {
   createMarketingChannel,
   createMarketingPost,
   insertAiVisibilityRun,
@@ -155,6 +162,7 @@ async function post(channelId: string, overrides: Record<string, unknown> = {}) 
       claimRegistryVersion: 1,
       assetRegistryVersion: 1,
       factSnapshot,
+      factsDigest: DIGEST,
       guardDecision: "approval_required",
       guardCodes: [],
       guardRuleIds: [],
@@ -378,6 +386,7 @@ test("a temporary table of the same name cannot answer for the channel", async (
           claimRegistryVersion: 1,
           assetRegistryVersion: 1,
           factSnapshot,
+          factsDigest: DIGEST,
           guardDecision: "autonomous_eligible",
           guardCodes: [],
           guardRuleIds: [],
@@ -639,6 +648,71 @@ test("a post starts as a draft, at version zero, with one draft entry", async ()
   );
 });
 
+/**
+ * A real `approval_required` decision, sealed by the Guard that made it.
+ *
+ * The draft is read out of `envelope()` rather than written out a second time.
+ * The store recomputes the draft digest from the envelope it is handed and
+ * refuses a decision made about anything else, so two copies of this text are
+ * a test that breaks the moment either copy is edited -- which is what
+ * happened.
+ */
+function approvalDecision(channelId: string) {
+  const forDigest = envelope();
+  return guardDraft({
+    draft: {
+      renderedText: forDigest.renderedText,
+      locale: forDigest.locale,
+      channel: forDigest.channel,
+      channelId,
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: storeFacts(channelId),
+    templates: [],
+    context: sealMarketingGuardContext({
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    }),
+  });
+}
+
+/**
+ * The facts bundle the store will check the decision against.
+ *
+ * Sealed, because the Guard takes nothing else, and carrying the digest of the
+ * exact snapshot this test stores -- the store recomputes it and refuses a
+ * decision resolved against anything else.
+ */
+function storeFacts(channelId: string) {
+  return sealMarketingFacts({
+    channelId,
+    channel: "linkedin",
+    locale: "en",
+    claims: [],
+    assets: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(canonical(factSnapshot)), "utf8")
+      .digest("hex"),
+  });
+}
+
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonical(inner)]),
+    );
+  }
+  return value;
+};
+
 test("the store's create writes the draft entry itself", async () => {
   const row = await approvedChannel();
   const created = await createMarketingPost(prisma, {
@@ -647,7 +721,9 @@ test("the store's create writes the draft entry itself", async () => {
     kind: "social",
     logicalKey: "store-created-1",
     envelope: envelope() as never,
-    envelopeDigest: DIGEST,
+    // Computed from the envelope, which is what the store now requires: a
+    // digest the caller states says nothing about the content it names.
+    envelopeDigest: marketingEnvelopeDigest(envelope() as never),
     rendererVersion: "r1",
     templateId: null,
     templateDigest: null,
@@ -656,15 +732,94 @@ test("the store's create writes the draft entry itself", async () => {
     claimRegistryVersion: 1,
     assetRegistryVersion: 1,
     factSnapshot: factSnapshot as never,
-    guardDecision: "approval_required",
-    guardCodes: [],
-    guardRuleIds: [],
-    status: "drafted",
-    mode: "approval",
+    // The Guard's own object, not a verdict typed out here. The store derives
+    // the verdict, the codes, the rule ids, the status and the mode from it,
+    // and refuses one it did not seal.
+    decision: approvalDecision(row.id),
     draftedAt: new Date(),
   });
   assert.equal(created.historyVersion, 0);
+  assert.equal(created.guardDecision, "approval_required");
+  assert.equal(created.factsDigest, approvalDecision(row.id).factsDigest);
+  assert.equal(created.mode, "approval");
   assert.equal((created.history as { type: string }[]).length, 1);
+});
+
+test("the store refuses a decision the Guard did not make", async () => {
+  const row = await approvedChannel();
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-unsealed",
+      envelope: envelope() as never,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      // A plain object of the right shape, which is what writing
+      // `guardDecision: "autonomous_eligible"` used to amount to.
+      decision: {
+        verdict: "approval_required",
+        codes: [],
+        ruleIds: [],
+      } as never,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_sealed|decision/i,
+  );
+});
+
+test("the store refuses a decision made about a different draft", async () => {
+  const row = await approvedChannel();
+  // Sealed, and about nothing this post says. Provenance without binding is a
+  // stamp on a blank page: the Guard saw one body and the row carries another.
+  const elsewhere = guardDraft({
+    draft: {
+      renderedText: "Something else entirely.",
+      locale: "en",
+      channel: envelope().channel,
+      channelId: row.id,
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: storeFacts(row.id),
+    templates: [],
+    context: sealMarketingGuardContext({
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    }),
+  });
+
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-other-draft",
+      envelope: envelope() as never,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      decision: elsewhere,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_about_this_post|different draft/i,
+  );
 });
 
 test("a dispatched post cannot go back to a state that says it never left", async () => {

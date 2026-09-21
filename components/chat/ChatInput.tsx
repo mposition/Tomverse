@@ -152,7 +152,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import {
-  resolvePromptRefinerDecision,
+  resolvePromptRefinerFixtureDecision,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerResolution,
   type PromptRefinerUiState,
@@ -662,9 +662,9 @@ type ChatInputProps = {
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   /**
-   * Called before an accepted proposal changes the controlled textarea. The
-   * owner must leave `ready` after either decision and discard a stored
-   * resolution whenever a later draft no longer equals its displayPrompt.
+   * Fixture decisions are validated by the state owner. Acceptance shows a
+   * read-only preview and never changes the controlled textarea or durable
+   * draft; the owner discards it when the authored source changes.
    */
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   /**
@@ -1325,20 +1325,19 @@ export function ChatInput({
       suggestion: BoundPromptRefinerSuggestion,
       decision: "accepted" | "kept_original"
     ) => {
-      const resolution = resolvePromptRefinerDecision({
+      const resolution = resolvePromptRefinerFixtureDecision({
         suggestion,
         currentPrompt: value,
         decision,
       });
-      // The owner records the original/refined split before a controlled input
-      // update can make the ready state stale and remove it from the screen.
-      onPromptRefinerDecision?.(resolution);
-      if (decision === "accepted") {
-        onChange(resolution.displayPrompt);
-      }
+      // The owner validates the exact source and decision before leaving ready.
+      // A fixture decision is preview-only. The owner may acknowledge a
+      // validated handoff, but these synthetic bytes must never enter the
+      // authored composer draft or its durable draft writer.
       requestAnimationFrame(() => textareaRef.current?.focus());
+      onPromptRefinerDecision?.(resolution);
     },
-    [onChange, onPromptRefinerDecision, value]
+    [onPromptRefinerDecision, value]
   );
 
   /*

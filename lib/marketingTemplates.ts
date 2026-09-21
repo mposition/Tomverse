@@ -29,6 +29,17 @@
  *   digest check already catches an edit that changed the words; this catches
  *   the record of one, so the two answers cannot disagree.
  *
+ * **A proof is about the row as it was read, and only for about a minute.**
+ * Nothing here can stop the row moving afterwards: an edit, or the reusable
+ * marking being withdrawn, lands in another transaction. So the proof carries
+ * the `historyVersion` this walk saw, the Guard returns it in the decision's
+ * binding, and whoever writes the post makes that write conditional on the row
+ * still being at that version and still marked -- nought rows rather than a
+ * post nobody approved. The age bound in `lib/marketingGuardCore.ts` is the
+ * other half: it stops a proof being kept and used later. Neither replaces the
+ * other, and a caller that reads a template and publishes much later has to
+ * read it again.
+ *
  * **In S1 no template resolves.** Nothing writes `marketing_post.approve` or
  * `marketing_post.mark_reusable` -- those routes are S2 -- so every call
  * returns a refusal and `autonomous_eligible` is unreachable in production.
@@ -40,11 +51,18 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { createHash } from "node:crypto";
+
 import {
+  marketingEnvelopeSchema,
   marketingHistorySchema,
   type MarketingHistoryEntry,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import {
+  sealMarketingTemplateProof,
+  type MarketingTemplateProof,
+} from "@/lib/marketingGuardCore";
 
 export type MarketingTemplateReader = PrismaClient | Prisma.TransactionClient;
 
@@ -80,15 +98,29 @@ export type MarketingTemplateRefusal =
   /** An edit whose audit row does not prove it, so it cannot be placed. */
   | "edit_not_datable"
   /** A history that does not parse, which the store cannot produce. */
-  | "history_unreadable";
+  | "history_unreadable"
+  /** An envelope that does not parse, for the same reason. */
+  | "envelope_unreadable";
 
 export type MarketingTemplate = {
   id: string;
   channelId: string;
+  /** The platform the account posts to, from `MarketingChannel.channel`. */
+  channel: string;
   locale: string;
   envelopeDigest: string;
   approvedAt: Date;
   markedReusableAt: Date;
+  /**
+   * The Guard's evidence that this template exists.
+   *
+   * Minted here and nowhere else: this module is the only place that walks the
+   * approval chain, so it is the only place entitled to say a template stood.
+   * `scripts/check-protected-table-writers.mjs` counts the call sites, because
+   * an exported factory with no such check proves only that the object came
+   * from the right function -- not that the right caller made it.
+   */
+  proof: MarketingTemplateProof;
 };
 
 export type MarketingTemplateResult =
@@ -155,8 +187,17 @@ export async function loadApprovedTemplate(
       approvalAuditLogId: true,
       contentPurgedAt: true,
       deletedAt: true,
+      envelope: true,
       history: true,
       historyVersion: true,
+      claimIds: true,
+      assetIds: true,
+      // The platform, read off the account row rather than off the envelope.
+      // The envelope is JSON the renderer wrote; this column is what the
+      // account actually is, and the Guard compares the draft's channel
+      // against it -- a real RedNote proof presented as LinkedIn went
+      // autonomous past a proof that carried only the account id.
+      channel: { select: { channel: true } },
     },
   });
 
@@ -255,6 +296,14 @@ export async function loadApprovedTemplate(
   // a history holding an entry without one can only have arrived by a write
   // that went around the store -- which is exactly the case where the Guard
   // wants an answer it can record rather than an exception.
+  const parsedEnvelope = marketingEnvelopeSchema.safeParse(post.envelope);
+  if (!parsedEnvelope.success) {
+    return { ok: false, refusal: "envelope_unreadable" };
+  }
+  const renderedTextDigest = createHash("sha256")
+    .update(parsedEnvelope.data.renderedText, "utf8")
+    .digest("hex");
+
   const parsedHistory = marketingHistorySchema.safeParse(post.history);
   if (!parsedHistory.success) {
     return { ok: false, refusal: "history_unreadable" };
@@ -297,10 +346,41 @@ export async function loadApprovedTemplate(
     template: {
       id: post.id,
       channelId: post.channelId,
+      channel: post.channel.channel,
       locale: post.locale,
       envelopeDigest: post.envelopeDigest,
       approvedAt: approval.createdAt,
       markedReusableAt: marking.createdAt,
+      proof: sealMarketingTemplateProof({
+        templateId: post.id,
+        // The scope the approval was given in. Without these the Guard
+        // compared a digest and nothing else, so one account's approval
+        // published from another account, in another language.
+        channelId: post.channelId,
+        channel: post.channel.channel,
+        locale: post.locale,
+        // The status this walk saw. The retention purge empties the content
+        // without moving the history version, so the version alone would not
+        // notice a row that is no longer a usable template.
+        status: post.status,
+        // The revision every check above was made against. The Guard hands it
+        // back in the decision's binding, and the publish makes its write
+        // conditional on the row still being at it.
+        historyVersion: post.historyVersion,
+        approvedDigest: post.envelopeDigest,
+        // The words on their own. `envelopeDigest` is of the whole envelope,
+        // and the Guard's question is whether the text it was handed is the
+        // text that was approved -- a different question with a different
+        // answer, and for one round the two were compared to each other so no
+        // template could stand at all.
+        renderedTextDigest,
+        // Every check above passed, which is what "the slots are registry ids"
+        // means for a post whose envelope digest equals its approved digest.
+        slotsFromRegistry: true,
+        // Read off the approved row rather than taken from whoever is asking.
+        claimIds: post.claimIds,
+        assetIds: post.assetIds,
+      }),
     },
   };
 }
