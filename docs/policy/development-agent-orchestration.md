@@ -4,6 +4,16 @@
 
 Tomverse의 개발 Agent 팀은 `tomverse-orchestrator`를 통해 실행한다.
 
+이 문서는 **모든** 개발 Agent worker의 실행 제어를 정한다. 우선순위, 소유권,
+선택과 실행의 분리, 실행 권한, 승인과 감사의 경계가 여기 있다.
+
+**개별 Agent의 권한은 여기 적지 않는다.** 어떤 입력을 작업으로 인정하는지,
+그 결과물이 공개 저장소와 쓰기 가능 자격증명에 어디까지 닿는지는 그 Agent의
+정책 문서가 정한다. engineering Agent는 `docs/policy/engineering-agent.md`다.
+한 Agent의 규칙을 여기 올리면 다른 팀의 worker가 그 규칙에 묶인다.
+
+두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
+
 ## Authority
 
 Tomverse 애플리케이션이 작업 상태의 최종 authority다.
