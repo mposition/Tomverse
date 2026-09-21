@@ -255,12 +255,21 @@ test("the database computes allowed the same way", () => {
     ),
     "utf8"
   );
-  assert.ok(
-    sql.includes(
-      'CHECK ("allowed" = (("legalAllowed" OR "overrideApprovalId" IS NOT NULL) AND jsonb_array_length("blockers") = 0))'
-    ),
-    "the constraint must state the same derivation as decisionAllowed"
-  );
+  // The CASE is why this is a substring set rather than one line: an object
+  // in `blockers` must come back as a shape violation rather than as a
+  // function error from this constraint, so the length is only taken when it
+  // is an array. The derivation is otherwise identical to decisionAllowed.
+  for (const part of [
+    '"allowed" = (',
+    '("legalAllowed" OR "overrideApprovalId" IS NOT NULL)',
+    "WHEN jsonb_typeof(\"blockers\") = 'array' THEN jsonb_array_length(\"blockers\") = 0",
+    "ELSE FALSE",
+  ]) {
+    assert.ok(
+      sql.includes(part),
+      `the constraint must state the same derivation as decisionAllowed: ${part}`
+    );
+  }
   assert.ok(
     sql.includes(
       'CHECK ("overrideApprovalId" IS NULL OR "legalAllowed" = FALSE)'

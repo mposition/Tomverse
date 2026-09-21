@@ -350,16 +350,20 @@ test("a child_rows reference to a model that does not exist is rejected", () => 
 });
 
 test("a child_rows reference to an unregistered model is rejected", () => {
-  const { code, output } = run((registry, find) => {
-    find("emailSendApproval").subjectReference.childColumn = "eventId";
-    find("emailSendApproval").subjectReference.childModel =
-      "EmailPermissionDecisionEvidence";
+  // The reference stays exactly as committed; what goes is the child's own
+  // row. An earlier version of this case swapped the child for a different
+  // model and removed an unrelated one, so it passed on a foreign-key error
+  // or on the sweep and never reached the path it claimed to test.
+  const { code, output } = run((registry) => {
     registry.domains = registry.domains.filter(
-      (row) => row.prismaModel !== "EmailPermissionEvent"
+      (row) => row.prismaModel !== "EmailSendApprovalMember"
     );
   });
   assert.notEqual(code, 0);
-  assert.match(output, /is not in the registry|holds user data but is not in the registry/);
+  assert.match(
+    output,
+    /subjectReference\.childModel "EmailSendApprovalMember" is not in the registry/
+  );
 });
 
 test("a model holding an operator address cannot leave the registry", () => {

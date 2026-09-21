@@ -99,7 +99,8 @@ const seedApproval = (data: Record<string, unknown> = {}) =>
       approvalType: "risk_accepted",
       approvedById: "owner",
       approvedByEmail: "owner@example.test",
-      approvedAt: new Date(),
+      createdAt: FIXTURE_EPOCH,
+      approvedAt: FIXTURE_EPOCH,
       reason: "78 accounts, all reached through personal contact",
       reviewCondition: "any organic signup, unsubscribe or complaint",
       policyVersionId: policyId,
@@ -111,7 +112,7 @@ const seedApproval = (data: Record<string, unknown> = {}) =>
 const seal = (id: string) =>
   prisma.emailSendApproval.update({
     where: { id },
-    data: { sealedAt: new Date() },
+    data: { sealedAt: at(1000) },
   });
 
 /**
@@ -119,15 +120,20 @@ const seal = (id: string) =>
  * message, the INSERT trigger says so, and `(deliveryId, phase)` is unique --
  * so the helper makes one unless the caller supplies it.
  *
- * Times are taken from now rather than from a fixed instant. `createdAt`
- * defaults to the clock, and the constraints require `sealedAt` and the rest
- * to sit at or after it, so a fixture pinned to a date in the past fails on
- * every run for a reason that has nothing to do with what it is testing.
+ * `createdAt` is written rather than defaulted. The constraints order
+ * `sealedAt`, `suppressionCheckedAt` and `providerSubmittedAt` at or after
+ * it, and a fixture that reads the clock before three queries and then adds a
+ * second is one that fails on a slow database for a reason unrelated to what
+ * it tests. Writing it makes every ordering in this file exact.
  */
+const FIXTURE_EPOCH = new Date("2026-09-21T00:00:00.000Z");
+const at = (ms: number) => new Date(FIXTURE_EPOCH.getTime() + ms);
+
 const seedDecision = async (data: Record<string, unknown> = {}) =>
   prisma.emailPermissionDecision.create({
     data: {
       deliveryId: "deliveryId" in data ? undefined : (await seedDelivery()).id,
+      createdAt: FIXTURE_EPOCH,
       phase: "enqueue",
       purpose: "product_updates",
       classification: "marketing",
@@ -138,7 +144,7 @@ const seedDecision = async (data: Record<string, unknown> = {}) =>
       blockers: [],
       allowed: true,
       policyVersionId: policyId,
-      evaluatedAt: new Date(),
+      evaluatedAt: FIXTURE_EPOCH,
       ...data,
     },
   });
@@ -636,7 +642,15 @@ test("a verdict's delivery has to exist, and it has to have one", async () => {
 });
 
 test("a verdict takes exactly one transition, each once", async () => {
-  const decision = await seedDecision();
+  // A complete send verdict, because the submission transition at the end of
+  // this case has to satisfy the submission constraint -- an enqueue verdict
+  // with no suppression read could never record one.
+  const delivery = await seedDelivery();
+  const decision = await seedDecision({
+    deliveryId: delivery.id,
+    phase: "send",
+    suppressionCheckedAt: at(1000),
+  });
 
   await assert.rejects(
     prisma.emailPermissionDecision.update({
@@ -671,19 +685,19 @@ test("a verdict takes exactly one transition, each once", async () => {
 
   await prisma.emailPermissionDecision.update({
     where: { id: decision.id },
-    data: { sealedAt: new Date() },
+    data: { sealedAt: at(2000) },
   });
   await assert.rejects(
     prisma.emailPermissionDecision.update({
       where: { id: decision.id },
-      data: { sealedAt: new Date() },
+      data: { sealedAt: at(2500) },
     }),
     /exactly one of/
   );
 
   await prisma.emailPermissionDecision.update({
     where: { id: decision.id },
-    data: { providerSubmittedAt: new Date() },
+    data: { providerSubmittedAt: at(3000) },
   });
   const after = await prisma.emailPermissionDecision.findUnique({
     where: { id: decision.id },
@@ -694,9 +708,63 @@ test("a verdict takes exactly one transition, each once", async () => {
   await assert.rejects(
     prisma.emailPermissionDecision.update({
       where: { id: decision.id },
-      data: { providerSubmittedAt: new Date() },
+      data: { providerSubmittedAt: at(4000) },
     }),
     /exactly one of/
+  );
+});
+
+test("a sent verdict still detaches when its message is purged", async () => {
+  // The condition that was briefly in the persisted CHECK. Holding
+  // "deliveryId is not null" there would make a sent verdict refuse to
+  // detach, so the purge would fail on exactly the rows that had been sent,
+  // and the retention job would stop.
+  const delivery = await seedDelivery();
+  const decision = await seedDecision({
+    deliveryId: delivery.id,
+    phase: "send",
+    suppressionCheckedAt: at(1000),
+  });
+  await prisma.emailPermissionDecision.update({
+    where: { id: decision.id },
+    data: { sealedAt: at(2000) },
+  });
+  await prisma.emailPermissionDecision.update({
+    where: { id: decision.id },
+    data: { providerSubmittedAt: at(3000) },
+  });
+
+  await prisma.emailDelivery.delete({ where: { id: delivery.id } });
+
+  const kept = await prisma.emailPermissionDecision.findUnique({
+    where: { id: decision.id },
+  });
+  assert.equal(kept?.deliveryId, null);
+  assert.notEqual(kept?.providerSubmittedAt, null);
+});
+
+test("a purged verdict cannot then record a submission", async () => {
+  // Having had a delivery at the moment of submission is a fact about that
+  // moment. Once the message is gone there is nothing to hand over.
+  const delivery = await seedDelivery();
+  const decision = await seedDecision({
+    deliveryId: delivery.id,
+    phase: "send",
+    suppressionCheckedAt: at(1000),
+  });
+  await prisma.emailPermissionDecision.update({
+    where: { id: decision.id },
+    data: { sealedAt: at(2000) },
+  });
+
+  await prisma.emailDelivery.delete({ where: { id: delivery.id } });
+
+  await assert.rejects(
+    prisma.emailPermissionDecision.update({
+      where: { id: decision.id },
+      data: { providerSubmittedAt: at(3000) },
+    }),
+    /no delivery to submit/
   );
 });
 
@@ -706,10 +774,7 @@ test("a provider submission has to describe a send that could have happened", as
   // A row saying otherwise is a record of a send that did not occur, sitting
   // in the ledger a regulator reads.
   const delivery = await seedDelivery();
-  // Relative to now, because `createdAt` is the clock and the constraints
-  // order everything at or after it.
-  const evaluatedAt = new Date();
-  const later = (ms: number) => new Date(evaluatedAt.getTime() + ms);
+  const later = at;
 
   const complete = {
     deliveryId: delivery.id,
@@ -717,27 +782,33 @@ test("a provider submission has to describe a send that could have happened", as
     allowed: true,
     legalAllowed: true,
     blockers: [],
-    evaluatedAt,
+    createdAt: FIXTURE_EPOCH,
+    evaluatedAt: FIXTURE_EPOCH,
     suppressionCheckedAt: later(1000),
     sealedAt: later(2000),
     providerSubmittedAt: later(3000),
   };
 
   // Each thing the constraint requires, missing one at a time.
+  // Each row breaks exactly one of the constraint's conditions, so a failure
+  // names the condition rather than whichever guard happened to fire first.
+  // `deliveryId: null` is not here: the insert trigger refuses that before
+  // this constraint is reached, and it has its own case.
   const broken = [
     { ...complete, phase: "enqueue" },
     { ...complete, allowed: false, legalAllowed: false, blockers: ["objected"] },
-    { ...complete, deliveryId: null },
     { ...complete, sealedAt: null },
     { ...complete, suppressionCheckedAt: null },
-    // And each ordering, reversed, one at a time.
-    { ...complete, suppressionCheckedAt: later(-1000) },
-    { ...complete, sealedAt: later(-1000) },
+    // Read after the handover, which makes 7.4's gap unmeasurable.
+    { ...complete, suppressionCheckedAt: later(3500) },
+    // Sealed after the handover. Still at or after createdAt, so this breaks
+    // the submission ordering and not sealedAt_order_check.
+    { ...complete, sealedAt: later(3500) },
     // Handed over before the evidence closed.
     { ...complete, providerSubmittedAt: later(1500) },
     // Handed over before suppression was read. Separate from the one above:
-    // the two orderings are different requirements and a single case that
-    // breaks both would pass while only one of them was enforced.
+    // two orderings are two requirements, and one row breaking both passes
+    // while only one of them is enforced.
     { ...complete, suppressionCheckedAt: later(2500), sealedAt: later(1000) },
   ];
   for (const [index, row] of broken.entries()) {

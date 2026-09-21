@@ -828,6 +828,13 @@ const REGISTRY = {
     reason:
       "enqueue and send. The unique index is (deliveryId, phase), so a third phase would silently raise how many verdicts one delivery may have, and the send-time re-decision that the whole design rests on would stop being the last word.",
   },
+  EmailSendApproval_purposeKey_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_SEND_APPROVAL_PURPOSE_KEYS",
+    reason:
+      "Which purposes a risk_accepted override may cover: the six, or a star for all of them. It sat inside the composite scope constraint until 2026-09-21, where this checker could not see it -- one closed list per constraint is what it reads -- so the code and the database could have drifted apart silently, which is the failure it exists to catch. A waiver has no purpose scope at all and the column is NULL there.",
+  },
   EmailPermissionEvent_scopeKey_check: {
     owner: "list",
     module: "lib/emailPermissionLedgerCore.ts",

@@ -204,13 +204,22 @@ ALTER TABLE "EmailSendApproval" ADD CONSTRAINT "EmailSendApproval_scope_check"
             AND "purposeKey" IS NULL)
         OR
         ("approvalType" = 'risk_accepted'
-            AND "purposeKey" IN (
-                '*', 'security', 'billing', 'service_status',
-                'product_updates', 'newsletter', 'promotions'
-            )
+            AND "purposeKey" IS NOT NULL
             AND "ruleKey" IS NULL AND "ruleVersion" IS NULL
             AND "country" IS NULL AND "obligationKey" IS NULL)
     );
+
+-- Which purposes an override may cover, on its own so it can be checked.
+--
+-- Inside the composite constraint above the list was invisible to
+-- scripts/check-enum-constraints.mjs, which reads one closed list per
+-- constraint. The code's six purposes and the database's could have drifted
+-- apart silently, which is the exact failure that check exists to catch.
+ALTER TABLE "EmailSendApproval" ADD CONSTRAINT "EmailSendApproval_purposeKey_check"
+    CHECK ("purposeKey" IS NULL OR "purposeKey" IN (
+        '*', 'security', 'billing', 'service_status',
+        'product_updates', 'newsletter', 'promotions'
+    ));
 
 -- An approval cannot be closed before it was given. Without this, sealing with
 -- a backdated timestamp would make the seal look like part of the approval
@@ -267,8 +276,22 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_js
 -- allowed is derived, so it is computed here too. Two places saying it is the
 -- point: the application can be wrong about one row, and this refuses to store
 -- the row it was wrong about.
+-- `jsonb_array_length` raises on anything that is not an array, and Postgres
+-- does not promise to evaluate constraints in any order. An object in
+-- `blockers` would therefore come back as a function error from this
+-- constraint rather than as the shape violation it is, so the caller would be
+-- told the wrong thing about their row. The CASE makes the derivation
+-- indifferent and leaves `json_shape_check` to say what is actually wrong.
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_allowed_derivation_check"
-    CHECK ("allowed" = (("legalAllowed" OR "overrideApprovalId" IS NOT NULL) AND jsonb_array_length("blockers") = 0));
+    CHECK (
+        "allowed" = (
+            ("legalAllowed" OR "overrideApprovalId" IS NOT NULL)
+            AND CASE
+                WHEN jsonb_typeof("blockers") = 'array' THEN jsonb_array_length("blockers") = 0
+                ELSE FALSE
+            END
+        )
+    );
 
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_sealedAt_order_check"
     CHECK ("sealedAt" IS NULL OR "sealedAt" >= "createdAt");
@@ -284,13 +307,21 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_se
 -- The timestamps are ordered for the same reason. `suppressionCheckedAt` is
 -- the gap section 7.4 is about; if it could sit after the handover the gap
 -- would be unmeasurable, which is the one thing this column exists for.
+--
+-- `deliveryId IS NOT NULL` is deliberately **not** here, and it was, briefly.
+-- A persisted CHECK is re-evaluated on every later write, and the later write
+-- this row takes is the foreign key's own `SET NULL` when the message is
+-- purged. Holding the condition here would have made a sent verdict refuse to
+-- detach -- so the purge would fail, and the retention job would stop on the
+-- rows that had actually been sent. Having had a delivery at the moment of
+-- submission is a fact about that moment, so the transition trigger checks it
+-- there, where it stays true afterwards.
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_submission_check"
     CHECK (
         "providerSubmittedAt" IS NULL
         OR (
             "phase" = 'send'
             AND "allowed" = TRUE
-            AND "deliveryId" IS NOT NULL
             AND "sealedAt" IS NOT NULL
             AND "suppressionCheckedAt" IS NOT NULL
             AND "suppressionCheckedAt" >= "evaluatedAt"
@@ -643,6 +674,15 @@ BEGIN
 
     IF NOT submitting AND NEW."providerSubmittedAt" IS DISTINCT FROM OLD."providerSubmittedAt" THEN
         RAISE EXCEPTION 'EmailPermissionDecision % has already recorded provider submission.', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- The half of the submission contract a persisted CHECK cannot hold.
+    -- A message cannot be handed over for a delivery that is already gone,
+    -- and once it has been the row may still detach when that delivery is
+    -- purged -- which is why this lives here and not in the constraint.
+    IF submitting AND OLD."deliveryId" IS NULL THEN
+        RAISE EXCEPTION 'EmailPermissionDecision % has no delivery to submit.', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
 

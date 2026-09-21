@@ -587,11 +587,12 @@ const seedUser = async () => {
   // them was or was not permitted, and what an approval that covered them
   // said. What is not theirs is the operator behind it -- who approved, their
   // reasoning, and what would make them look again.
-  // Everything below is dated from one instant taken now. `createdAt`
-  // defaults to the clock and the ledger's constraints order the rest at or
-  // after it, so a fixture pinned to a past date fails on every run for a
-  // reason that has nothing to do with what it is testing.
-  const now = new Date();
+  // Everything below is dated from one fixed instant, written into
+  // `createdAt` rather than left to default. The ledger's constraints order
+  // `sealedAt` and the rest at or after `createdAt`, and a fixture that reads
+  // the clock before several queries and then adds a second is one that fails
+  // on a slow database for a reason unrelated to what it tests.
+  const now = new Date("2026-09-21T00:00:00.000Z");
 
   const policy = await prisma.emailPolicyVersion.create({
     data: {
@@ -606,6 +607,7 @@ const seedUser = async () => {
       approvalType: "risk_accepted",
       approvedById: sentinel("emailSendApproval-approvedById"),
       approvedByEmail: sentinel("emailSendApproval-approvedByEmail"),
+      createdAt: now,
       approvedAt: now,
       reason: sentinel("emailSendApproval-reason"),
       reviewCondition: sentinel("emailSendApproval-reviewCondition"),
@@ -646,15 +648,68 @@ const seedUser = async () => {
       scopeKey: "product_updates",
       occurredAt: now,
       capturedVia: "in_product_notice",
+      createdAt: now,
       sourceEventKey: sentinel("emailPermissionEvent-sourceEventKey"),
       policyVersionId: policy.id,
       evidence: { screen: sentinel("emailPermissionEvent-evidence") },
     },
   });
 
+  // A verdict is taken for a delivery and the insert trigger requires one,
+  // so the fixture builds the template, version, event and delivery it needs.
+  const template = await prisma.emailTemplate.create({
+    data: {
+      key: `product_news_${randomUUID()}`,
+      classification: "marketing",
+      purpose: "product_updates",
+      requiresUnsubscribe: true,
+    },
+  });
+  const templateVersion = await prisma.templateVersion.create({
+    data: {
+      templateId: template.id,
+      version: 1,
+      language: "en",
+      subject: "s",
+      bodyHtml: "<p>s</p>",
+      bodyText: "s",
+      contentHash: "hash",
+      classification: "marketing",
+      purpose: "product_updates",
+      requiresUnsubscribe: true,
+      status: "published",
+      publishedAt: now,
+    },
+  });
+  const emailEvent = await prisma.emailEvent.create({
+    data: {
+      kind: "product.news",
+      templateId: template.id,
+      payload: {},
+      audienceKind: "single_user",
+    },
+  });
+  const delivery = await prisma.emailDelivery.create({
+    data: {
+      eventId: emailEvent.id,
+      userId,
+      recipientKey: `user:${userId}`,
+      lane: "standard",
+      emailAddress: "subject@example.test",
+      language: "en",
+      jurisdictionCountry: "AU",
+      jurisdictionProfileKey: "AU",
+      policyVersionId: policy.id,
+      templateVersionId: templateVersion.id,
+      idempotencyKey: randomUUID(),
+    },
+  });
+
   const decision = await prisma.emailPermissionDecision.create({
     data: {
       userId,
+      deliveryId: delivery.id,
+      createdAt: now,
       phase: "enqueue",
       purpose: "product_updates",
       classification: "marketing",
