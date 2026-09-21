@@ -2,22 +2,24 @@
 
 ## 1. 불변 식별자
 
-- stage: `prompt-refiner-shadow-v1`
-- admission: `prompt-refiner-stage-admission-v1`
+- stage: `prompt-refiner-shadow-v2` (`prompt-refiner-shadow-v1`은 완료된 legacy 행으로 보존)
+- admission: `prompt-refiner-stage-admission-v2`
 - approval TTL: 정확히 60분
 - environment: `staging`만
-- confirmation: `APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES`
+- confirmation: `APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES`
 - 감사 reason은 클라이언트 입력이 아니라 서버 내부 상수 `bounded_staging_shadow_cost_approval`로만 기록한다.
 
-과거 proposal/evidence/corpus/source digest와 reservation/execution contract의 실제 값은
-코드와 migration CHECK에 함께 고정된다. 운영자는 값을 request로 교체할 수 없다.
+과거 v1 proposal/evidence/corpus/source digest는 그대로 재검증하지만, 현행 v2 reservation
+authority는 v2 execution manifest가 별도로 결속한다. 과거 proposal 안의 v1 stage 표기는
+과거 승인 제안의 byte identity이며 현행 stage identity가 아니다. 두 계약의 실제 값은 코드와
+migration CHECK에 함께 고정되고 운영자는 값을 request로 교체할 수 없다.
 
 ## 2. GET preview
 
 `GET /api/admin/prompt-refiner/shadow-stage`
 
 인증된 owner와 최근 인증을 요구한다. DB mutation, rate-limit 소비, stage/audit 생성은 없다.
-서버가 과거 evidence를 replay하고 현재 deployment의 187개 고정 source 파일 raw bytes를 읽어
+서버가 과거 evidence를 replay하고 현재 deployment의 188개 고정 source 파일 raw bytes를 읽어
 proposal/runtime-source/execution digest, commit, deployment, 고정 비용·slot·TTL과
 `executionAdmitted:false`, `productAdapterReady:false`를 반환한다. 또한 environment,
 deployment id, commit SHA, 세 digest, 비용·capacity·TTL 전체의 canonical JSON을 결속한
@@ -35,7 +37,7 @@ body는 4 KiB 이하 strict JSON이고 다음 다섯 필드만 허용한다.
   "runtimeSourceManifestDigest": "sha256:<64 hex>",
   "executionManifestDigest": "sha256:<64 hex>",
   "previewBindingDigest": "sha256:<64 hex>",
-  "confirmation": "APPROVE PROMPT REFINER SHADOW STAGE V1 FOR 60 MINUTES"
+  "confirmation": "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES"
 }
 ```
 
@@ -63,7 +65,7 @@ stage를 200으로 반환하며 audit을 추가하지 않는다. actor 또는 im
 
 ## 5. 저장 manifest
 
-runtime source manifest v2는 schema version, full commit SHA, 정렬된 고정 경로 각각의 byte
+runtime source manifest v3는 schema version, full commit SHA, 정렬된 고정 경로 각각의 byte
 size와 SHA-256 및 검증된 총 byte 수만 담는다. 8 MiB/file과 16 MiB/closure를 모두
 fail-closed로 적용한다. execution manifest는 고정 reservation/execution contract,
 cost/capacity와 두 false readiness boolean만 담는다. 두 JSON 모두 strict canonical digest로
@@ -75,9 +77,9 @@ error/body는 담지 않는다.
 - migration은 기존 stage가 있으면 중단하고 seed/backfill하지 않는다.
 - writer가 UTC로 정규화한 한 DB clock snapshot으로 승인·만료 시각을 audit metadata와 stage 양쪽에
   기록하고, INSERT trigger는 두 값이 정확히 일치하지 않으면 거부한다.
-- DB CHECK는 187개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
+- DB CHECK는 188개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
   digest를 다시 계산하고 execution manifest의 canonical digest도 다시 계산한다.
-- 187개 중 178개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
+- 188개 중 178개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
   static import/re-export, literal dynamic import, literal `require`, require alias,
   `module.require`와 `createRequire` 호출로 도달하는 local runtime 폐쇄와 같아야 한다.
   `node:module`과 `module`은 같은 builtin으로 취급하고 named·default·namespace import의
@@ -86,8 +88,8 @@ error/body는 담지 않는다.
   `require("node:module")` 또는 `module.require("module")`의 반환값에서 곧바로
   `createRequire`/`_load` 등을 호출하는 체인도 별칭 추적을 우회할 수 있으므로 거부한다.
   type-only import는 제외하고, 해석할 수 없는 local 또는 non-literal runtime import도
-  테스트에서 거부한다. 나머지 9개는 root/workspace package metadata와
-  TypeScript/Prisma/migration 형식을 결속하는 고정 파일이다. 경로 해석은 checked-in
+  테스트에서 거부한다. 나머지 10개는 root/workspace package metadata와
+  TypeScript/Prisma/two-migration 형식을 결속하는 고정 파일이다. 경로 해석은 checked-in
   `tsconfig` compiler option과 workspace package exports를 사용한다. closure 검사는 현재
   실행 폐쇄에서 사용하는 `process.env`, 직접 `process.cwd()`, 고정 operational state용
   `globalThis.__tomverseOperationalState`, `lib/prisma.ts`의 정확한

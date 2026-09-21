@@ -26,6 +26,7 @@ const corpus = validatePromptRefinerShadowCorpus(corpusJson);
 const fixture = (options = {}) => {
   const events = [];
   const incidents = [];
+  const terminalEvidence = [];
   let enabled = true;
   let dispatchCount = 0;
   let terminalCount = 0;
@@ -81,7 +82,7 @@ const fixture = (options = {}) => {
           reservation: {
             reservationId: `reservation_${dispatchCount}`,
             requestId,
-            stageId: "prompt-refiner-shadow-v1",
+            stageId: "prompt-refiner-shadow-v2",
             contractDigest: `sha256:${"c".repeat(64)}`,
           },
         },
@@ -153,8 +154,11 @@ const fixture = (options = {}) => {
         },
       };
     },
-    recordTerminal: async ({ attemptId, terminalReason }) => {
+    recordTerminal: async ({ attemptId, terminalReason, evidence }) => {
       events.push(`terminal:${attemptId}:${terminalReason}`);
+      assert.equal(evidence.caseId, PROMPT_REFINER_SHADOW_CASE_IDS[terminalCount]);
+      assert.equal("refinedPrompt" in evidence, false);
+      terminalEvidence.push(evidence);
       if (options.failTerminalAt === terminalCount) {
         throw new Error("raw terminal failure must not escape");
       }
@@ -174,7 +178,13 @@ const fixture = (options = {}) => {
     },
     corpus: options.corpus ?? corpus,
   };
-  return { run: createPromptRefinerShadowRunner(dependencies), events, incidents, state };
+  return {
+    run: createPromptRefinerShadowRunner(dependencies),
+    events,
+    incidents,
+    state,
+    terminalEvidence,
+  };
 };
 
 test("the runner sweeps first and executes all 16 cases once in exact order", async () => {
@@ -194,6 +204,8 @@ test("the runner sweeps first and executes all 16 cases once in exact order", as
   const reservations = world.events.filter((event) => event.startsWith("reserve:"));
   assert.equal(reservations.length, 16);
   assert.equal(new Set(reservations).size, 16);
+  assert.equal(world.terminalEvidence.length, 16);
+  assert.doesNotMatch(JSON.stringify(world.terminalEvidence), /discarded transient result/);
 });
 
 test("a known unknown outcome latches the run and stops later cases", async () => {
@@ -235,7 +247,7 @@ test("a reservation refusal reports its fixed cause before stopping", async () =
   assert.equal(world.incidents.length, 1);
   assert.equal(world.incidents[0].context.phase, "pre_dispatch");
   assert.equal(world.incidents[0].context.causeCode, "stage_capacity_exhausted");
-  assert.doesNotMatch(JSON.stringify(world.incidents), /prsv3_/);
+  assert.doesNotMatch(JSON.stringify(world.incidents), /prsv4_/);
 });
 
 test("a post-intent exception leaves one durable intent and forbids redispatch", async () => {

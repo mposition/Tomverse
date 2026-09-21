@@ -69,6 +69,7 @@ export const writePromptRefinerTerminalAudit = (input: {
     outputTokens: number | null;
     reasoningTokens: number | null;
     actualCostMicroUsd: number | null;
+    evidence: Prisma.InputJsonValue;
 }): Promise<string> =>
     writeSystemAuditLog({
         tx: input.tx,
@@ -92,6 +93,7 @@ export const writePromptRefinerTerminalAudit = (input: {
             outputTokens: input.outputTokens,
             reasoningTokens: input.reasoningTokens,
             actualCostMicroUsd: input.actualCostMicroUsd,
+            evidence: input.evidence,
             retryCount: 0,
         },
     });

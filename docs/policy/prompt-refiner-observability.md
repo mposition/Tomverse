@@ -1,5 +1,9 @@
 # Prompt Refiner receipt와 관측 계약
 
+구현 승인 기록: `mposition`, 2026-09-21 (Australia/Brisbane). 승인 범위는
+confirmatory shadow v4 계약과 content-free evidence writer의 구현·독립 검토까지이며,
+provider 호출·유료 실행·제품 노출·Router 결합은 포함하지 않는다.
+
 상태: **provider-independent 데이터·실행 사전등록·예약 authority 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를
@@ -42,8 +46,9 @@ profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease
 
 ## 0. Durable reservation authority 경계
 
-- stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며 요청당 24,916 microUSD,
-  최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
+- 완료된 legacy stage는 `prompt-refiner-shadow-v1`, confirmatory authority는
+  `prompt-refiner-shadow-v2`로 분리한다. 새 승인은 v2 한 행에만 생성되며 요청당 24,916
+  microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
 - reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
   검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
   counter를 결속한다. stage 최초 counter는 0/0이어야 하고 direct stage counter UPDATE는
@@ -295,17 +300,17 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
 실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
 검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
 새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
-추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
+추가한다. 그 writer 전까지 현재 v2 admission의 fail-closed 결과와 default-off 제품 상태를
 유지한다.
 
 ## 11. durable staging approval provenance
 
-후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시
+후속 `prompt-refiner-stage-admission-v2`는 과거 proposal을 현재 staging 배포에 다시
 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
-다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 187개 source
+다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 188개 source
 파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는
-admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 9개는
-root/workspace resolution metadata를 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
+admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 10개는
+root/workspace resolution metadata, Prisma schema와 두 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
 넘으면 거부한다. 별도 execution manifest는
 고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
 `executionAdmitted=false`, `productAdapterReady=false`를 유지한다.

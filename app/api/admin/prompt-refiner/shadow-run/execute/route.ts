@@ -28,6 +28,7 @@ import {
 } from "@/lib/promptRefinerShadowRunner";
 import {
     promptRefinerShadowRunErrorResponse,
+    readPromptRefinerShadowEvidenceBundle,
     readPromptRefinerShadowExecutionState,
 } from "@/lib/promptRefinerShadowRunStore";
 import { promptRefinerStageAdmissionErrorResponse } from "@/lib/promptRefinerStageAdmission";
@@ -101,10 +102,19 @@ export async function GET(request: Request) {
             { minute: 10, day: 40 }
         );
         const state = await readPromptRefinerShadowExecutionState();
+        const evidenceBundle = await readPromptRefinerShadowEvidenceBundle();
+        const evidence = evidenceBundle
+            ? {
+                  gateOutcome: evidenceBundle.gateOutcome,
+                  gateReasons: evidenceBundle.gateReasons,
+                  summary: evidenceBundle.summary,
+              }
+            : null;
         return NextResponse.json(
             {
                 execution: {
                     ...state,
+                    evidence,
                     runContractDigest:
                         PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
                     enabled:

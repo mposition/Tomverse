@@ -1179,7 +1179,7 @@ events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검
 ## 2026-09-17 Prompt Refiner durable stage writer 회차 (round 0 request_changes, 수정 검증·round 1 대기)
 
 앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source
-identity와 승인 시점 staging deployment의 full commit, exact 187-file runtime import-closure source manifest,
+identity와 승인 시점 staging deployment의 full commit, 당시 v1의 exact 187-file runtime import-closure source manifest,
 고정 execution manifest를 하나의 immutable stage에 결속한다. 승인 시각과 60분 expiry는
 DB clock이 소유하며, owner 전용 POST는 advisory lock 아래 tamper-evident success audit과
 stage insert를 한 transaction으로 처리한다. 동일 actor·동일 runtime의 exact replay만
@@ -1222,19 +1222,23 @@ provider admission은 열리지 않는다.
 ## 2026-09-20 Prompt Refiner durable stage writer 통합 완료 회차
 
 앞 회차의 durable DB provenance/admin writer를 최종 독립 검토와 Linux 통합 CI까지
-마쳤다. stage는 과거 evidence, 사람 승인·비용 상한, 승인 시점 staging deployment의
+마쳤다. 당시 v1 stage는 과거 evidence, 사람 승인·비용 상한, 승인 시점 staging deployment의
 full commit, 187개 고정 runtime import-closure 파일, execution manifest와 60분 DB-clock
 expiry를 한 행에 결속한다. owner 전용 preview/create는 advisory lock 아래 stage와
 tamper-evident audit을 같은 transaction으로 기록하며, exact replay만 idempotent하다.
 reserve/consume도 같은 stage-linked audit HMAC, runtime source와 execution manifest,
 expiry를 다시 검증한다.
 
-rebase 뒤 source closure와 정책 문서의 187개 전체·178개 runtime source·9개 metadata
+rebase 뒤 당시 v1 source closure와 정책 문서의 187개 전체·178개 runtime source·9개 metadata
 설명을 실제 계산값에 다시 결속했다. Linux CI에서만 드러난 관리자 route test loader의
 query-suffix named-export 차이는 제품 route를 바꾸지 않고 direct import와 명시적 auth
 mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 caller/flag를 연결하지
 않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
 seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
+
+후속 confirmatory v2/v4 현재 계약은 exact 188-file runtime import-closure source manifest를
+사용한다. 178개 runtime source와 10개 metadata/schema/migration 파일이며, v1의 187-file
+행과 manifest는 수정하거나 소급 재해석하지 않는다.
 
 ### 한눈에 보는 전체 Chat 진척
 

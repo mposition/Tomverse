@@ -19,6 +19,8 @@ import {
     PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION,
     PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF,
     PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
+    PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST,
+    PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID,
     PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
     PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION,
     proposePromptRefinerShadowStage,
@@ -37,6 +39,7 @@ import {
     PROMPT_REFINER_RESERVATION_STAGE_ID,
     PROMPT_REFINER_RESERVATION_TTL_MS,
 } from "../lib/promptRefinerReservationCore.ts";
+import { promptRefinerExecutionManifest } from "../lib/promptRefinerStageAdmissionCore.ts";
 import {
     canonicalBenchmarkJson,
 } from "../lib/routerDevelopmentBenchmark.ts";
@@ -129,9 +132,28 @@ test("checked-in evidence emits only the fixed content-free proposal", () => {
         PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
     );
     assert.equal(proposal.provenance.sourceRef, PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF);
-    assert.equal(proposal.reservationStage.stageId, PROMPT_REFINER_RESERVATION_STAGE_ID);
+    assert.equal(
+        proposal.reservationStage.stageId,
+        PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_STAGE_ID
+    );
     assert.equal(
         proposal.reservationStage.contractDigest,
+        PROMPT_REFINER_SHADOW_PROPOSAL_RESERVATION_CONTRACT_DIGEST
+    );
+    assert.notEqual(
+        proposal.reservationStage.stageId,
+        PROMPT_REFINER_RESERVATION_STAGE_ID,
+        "the frozen proposal must retain its historical v1 stage identity"
+    );
+    assert.notEqual(
+        proposal.reservationStage.contractDigest,
+        PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+        "the frozen proposal must retain its historical v1 reservation digest"
+    );
+    const currentExecutionManifest = promptRefinerExecutionManifest();
+    assert.equal(currentExecutionManifest.stageId, PROMPT_REFINER_RESERVATION_STAGE_ID);
+    assert.equal(
+        currentExecutionManifest.reservationContractDigest,
         PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST
     );
     assert.equal(proposal.reservationStage.perRequestCostMicroUsd, 24_916);
