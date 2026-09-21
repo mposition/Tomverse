@@ -1338,10 +1338,21 @@ marketing을 포함하지 않는다는 범위 결정.
 | 10 | 법정 통지 | legal | 가능 | **가능(필수)** | **금지** | P0 | 공격적 + 대체 채널 | transactional |
 
 **marketing 세 행의 "조건부"** — 2026-09-16 개정(승인 A) 전에는 `불가`였고,
-전역 opt-in이 사라지면서 조건이 생겼습니다. 판정은 5.1.1의 국가 rule과 호주
-발신자 authority가 함께 하며, 명시적 동의가 없어도 통과하는 경우가 셋입니다 —
-미국의 `opt_out`(거부하지 않음), 호주의 `inferred_consent`(관계 활성), 그리고
-승인 F의 `risk_accepted` cohort(이 경우 판정에는 `legalAllowed: false`가 남습니다).
+전역 opt-in이 사라지면서 조건이 생겼습니다. 조건은 하나의 식입니다.
+
+> `(수신자 authority 통과 AND 호주 발신자 authority 통과) OR 유효한 override`,
+> 그리고 `blockers`가 비어 있을 것 (5.1.1, 초안 7.6)
+
+**세 경로를 따로 나열하지 않는 이유**는 그것이 독립된 통과 근거로 읽히기
+때문입니다. 미국의 `opt_out`은 **수신자 authority만** 통과시키고, 호주 발신자
+authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred_consent`는
+관계가 활성일 때 한쪽을 채우는 근거이고, 명시적 동의 하나가 양쪽을 다 채우는
+경우도 있습니다 — 그때는 그 사실이 기록에 남습니다(초안 §4.2).
+
+승인 F의 `risk_accepted`는 **authority를 통과시키지 않습니다.** 판정에는
+`legalAllowed: false`가 그대로 남고 `overrideApplied`가 옆에 붙으며, 위 식의
+`OR` 가지에만 들어갑니다.
+
 **"marketing 거부자에게도" 열은 여전히 `불가`입니다** — 거부는 어느 경로로도
 넘지 못합니다.
 
@@ -3694,13 +3705,13 @@ opt-in만 막습니다.
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | **2026-09-16 개정(승인 A) 이후 Q1은 전역 차단이 아닙니다** — EEA·영국의 soft opt-in만 막습니다(초안 §11 G). 그 밖의 국가는 5.1.1의 국가 rule이 정하고, 활성화 전에 닫아야 하는 것은 **R3**(싱가포르 수신거부 이메일 주소)와 **R2**(발송 도메인 평판)이며, 구현 순서는 초안 §12입니다. Q8·Q12는 2026-09-14, Q2는 2026-09-15 해소(그 뒤 승인 A가 개정) |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | **2026-09-16 개정(승인 A) 이후 Q1은 전역 차단이 아닙니다** — G가 막는 것은 **EEA·영국에서 soft opt-in을 근거로 쓰는 것**입니다(초안 §11 G). 그 밖의 국가는 5.1.1의 국가 rule이 정하고, 활성화 전에 닫아야 하는 것은 **R3**(싱가포르 수신거부 이메일 주소)와 **R2**(발송 도메인 평판)이며, 구현 순서는 초안 §12입니다. **다만 21절 Q1이 남긴 "그 넷 밖 국가의 첫 캠페인 전 국가별 확인"은 별개 질문이고 없어지지 않았습니다** — 그것은 근거가 아니라 **표시·등록 의무**에 대한 것이라 `express_consent`로 보내는 EEA 발송에도 걸립니다. 실제로 읽은 것은 DE·FR·AT·CH 넷뿐입니다. 즉 EEA는 **근거(G)와 의무 확인(Q1 잔여)** 두 가지가 각각 열려야 합니다. Q8·Q12는 2026-09-14, Q2는 2026-09-15 해소(그 뒤 승인 A가 개정) |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
-| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
+| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | **한국 `(광고)`는 면제로 결정됐습니다**(초안 7.7 — 승인 D의 의무별 결정). 싱가포르 `<ADV>`는 **R3와 함께** 확인합니다. ~~Q4~~는 야간 발송 창에 대한 질문이었고 2026-09-16에 해소됐습니다 — 접두어와 무관합니다 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
-| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | Q4 — 회신이 "전자우편은 예외 매체"이면 KR profile의 `quietHours`를 비우는 새 policy version 하나로 끕니다 |
+| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | ~~Q4~~ **해소 (2026-09-16)** — 시행령 제61조제2항이 전자우편을 야간 제한 대상에서 제외하므로 KR profile의 `quietHours`는 비어 있습니다. 기계는 그대로 두고, 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version입니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면
 나중에 급하게 만들게 되고, 급하게 만든 동의 시스템이 정확히 이 문서가 막으려는
@@ -3719,11 +3730,14 @@ opt-in만 막습니다.
 
 ## 16. 2단계 및 장기 로드맵
 
-### Phase 2 (법률 검토 완료 후, 약 1~2개월)
+### Phase 2 (약 1~2개월)
+
+**"법률 검토 완료 후"가 이 단계의 조건이었습니다. 2026-09-16 개정(승인 A) 이후
+그렇지 않습니다** — 조건은 항목마다 다르고 15.2의 표가 그것입니다.
 
 | 항목 | 내용 |
 |---|---|
-| marketing 발송 활성화 | **선행 조건: 5.3.1의 결정 2**(별도 Resend team/region 또는 별도 provider, 아니면 한 계정 유지 + 이메일 외 복구 수단 필수화)를 먼저 확정. 그 다음 flag 해제, `news.` 도메인 warm-up 시작(14.6) |
+| marketing 발송 활성화 | ~~5.3.1의 결정 2를 먼저 확정~~ — **A18이 2026-09-14에 해소됐습니다**(별도 Resend 계정, 22절). 남은 선행 조건은 **R3**(싱가포르 수신거부 이메일 주소)·**R2**(발송 도메인 평판)이고, 그 다음 flag 해제와 `news.` 도메인 warm-up(14.6)입니다 |
 | 관리자 캠페인 UI | 12.2의 전체 플로우 + 이중 승인 |
 | 동의 2년 **확인 고지** 배치 | `nextConfirmationNoticeAt` 도래 시 고지 발송 -> `ConsentRecord("confirmation_notice_sent")` + 다음 주기로 이동. **동의는 유지됩니다.** 자동 opt-out은 `feature.emailConsentLapseAutoOptOut`이 켜진 경우에만(기본 OFF, 22절 A14) |
 | DMARC 강화 | `p=none` -> `p=quarantine` -> `p=reject` |
@@ -3882,11 +3896,12 @@ opt-in만 막습니다.
   | `display_unsatisfiable` — 후보의 표시 의무를 합성할 수 없음 | 차단 |
   | 표시 계약 변경(`display_contract_changed`) | skip + 현재 version으로 재enqueue |
   | 승인 유형이 `risk_accepted`가 아님 | override 미적용 → 차단 |
-  | 승인 scope 밖(policy version · rule · country · obligation key) | override 미적용 → 차단 |
+  | 승인 scope 밖 — policy version · rule · country · obligation key **각각** | override 미적용 → 차단 |
   | 승인 철회(`EmailSendApprovalRevocation`) | override 미적용 → 차단 |
-  | cohort 불일치 | 차단 |
+  | cohort 불일치 — `userId` · delivery에 고정된 주소 · send 시점 현재 주소 **각각** | 차단 |
   | enqueue 이후 주소 변경 | 차단 |
-  | 계정 삭제 · 주소 없음 | 차단 |
+  | 계정 삭제 | 차단 |
+  | 주소 없음 | 차단 |
 
   `allowed`는 `(legalAllowed || overrideApplied) && blockers가 비어 있음`이고,
   **`blockers`는 override가 넘지 못합니다**(초안 7.6, 5.6의 표). 위 표의 모든
