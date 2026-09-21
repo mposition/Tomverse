@@ -33,6 +33,9 @@ playwright.local-sandbox.config.ts
 # production
 /build
 
+# Rust workspace build output.
+/target/
+
 # misc
 .DS_Store
 *.pem
