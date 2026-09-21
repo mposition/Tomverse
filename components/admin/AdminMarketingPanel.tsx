@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { Loader2, Lock, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
@@ -62,7 +63,13 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         `/api/admin/marketing?section=${encodeURIComponent(initial.section)}`,
         { cache: "no-store" }
       );
-      if (!response.ok) throw new Error(String(response.status));
+      if (!response.ok) {
+        // Every path consumes the body, not only the one that parses it:
+        // `/api/*` answers `private, no-store`, under which an unconsumed body
+        // did not reach `requestfinished` (lib/discardResponseBody.ts).
+        await discardResponseBody(response);
+        throw new Error(String(response.status));
+      }
       setView((await response.json()) as MarketingConsoleView);
     } catch {
       setError(m.loadFailed);
