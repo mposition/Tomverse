@@ -3223,8 +3223,10 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    ( ) transactional   ( ) service   ( ) legal   ( ) marketing
 
    -> 선택 즉시 화면 전체가 바뀝니다:
-      marketing:  수신자 = 5.1.1의 국가 rule과 호주 발신자 authority를 모두
-                  통과한 사용자(동의·추론 동의·opt_out·승인된 override).
+      marketing:  수신자 = (수신자 authority 통과 AND 호주 발신자 authority 통과)
+                  OR 유효한 override. 그리고 blockers가 비어 있어야 합니다.
+                  override는 authority를 통과시키지 않습니다 — 판정에는
+                  legalAllowed: false가 그대로 남습니다(5.1.1, 초안 7.6).
                   unsubscribe 강제. 승인 필수.
       legal:      수신자 = 전원(hard bounce 제외). unsubscribe 없음. 승인 필수.
       service:    수신자 = service_status ON. 승인 필요(단일 승인).
@@ -3847,10 +3849,33 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - **US + `objected` -> 차단.** `opt_out` 국가에서 거부는 거부입니다
 - **`risk_accepted` 양성 사례는 좁게** — 고신뢰 국가, 의무 상태가 정해진 rule,
   blocker 없음일 때만 통과합니다
-- **같은 override에 아래를 각각 결합하면 전부 차단**: `ZZ`, `objected`,
-  suppression, 승인 철회(`EmailSendApprovalRevocation`), cohort 불일치,
-  enqueue 이후 주소 변경. **하나씩 따로** 겁니다 — 묶어서 한 번만 시험하면 그중
-  하나만 구현한 코드가 통과합니다
+- **같은 override에 blocker를 하나씩 따로 결합하면 전부 차단**입니다. 묶어서 한
+  번만 시험하면 그중 하나만 구현한 코드가 통과하고, 조기 반환 구현은 목록의
+  앞쪽만 만족시켜도 통과합니다. 초안 7.6의 `blockers` 전체입니다.
+
+  | 결합한 blocker | 기대 |
+  |---|---|
+  | `objected`(철회·거부) | 차단 |
+  | suppression — 전역 · classification · purpose **각각** | 차단 |
+  | 국가 미확정 `ZZ` | 차단 |
+  | `jurisdiction_conflict`(후보 충돌) | 차단 |
+  | 의무 상태 **미결** | 차단 |
+  | 의무 상태 **실패** | 차단 |
+  | kill switch | 차단 |
+  | send flag — `marketing` · `releaseNotes` · `collection` **각각** | 차단 |
+  | readiness 미충족 | 차단 |
+  | 표시 계약 미충족 | 차단 |
+  | 표시 계약 변경(`display_contract_changed`) | skip + 현재 version으로 재enqueue |
+  | 승인 유형이 `risk_accepted`가 아님 | override 미적용 → 차단 |
+  | 승인 scope 밖(policy version · rule · country · obligation key) | override 미적용 → 차단 |
+  | 승인 철회(`EmailSendApprovalRevocation`) | override 미적용 → 차단 |
+  | cohort 불일치 | 차단 |
+  | enqueue 이후 주소 변경 | 차단 |
+  | 계정 삭제 · 주소 없음 | 차단 |
+
+  `allowed`는 `(legalAllowed || overrideApplied) && blockers가 비어 있음`이고,
+  **`blockers`는 override가 넘지 못합니다**(초안 7.6, 5.6의 표). 위 표의 모든
+  행이 그 한 문장을 각각 한 번씩 시험합니다.
 - marketing + `nextConfirmationNoticeAt` 경과 -> **발송됨**(동의는 유지). 별도로
   확인 고지가 큐에 들어감
 - marketing + `feature.emailConsentLapseAutoOptOut` ON + 고지 후 무응답 ->
