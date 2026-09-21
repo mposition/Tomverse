@@ -519,6 +519,23 @@ run(
   ],
   "Running the administrator refund decision transaction and its outbox"
 );
+// Also its own process, and for the same reason: it replaces next-auth. What
+// it pins is which requests reach the lift at all -- a stale cause set, a dead
+// handle, an unknown handle and the entry authority are four different
+// refusals, and every one of them used to answer "not found".
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/admin-suppression-lift-route.db.test.ts",
+  ],
+  "Running the administrator suppression lift route and its refusals"
+);
 // Also its own process: it replaces next-auth and the AI SDK's streamText to
 // drive a real searching turn end to end. What it asserts is the wiring
 // between the route and the cost ledger -- a claim no test calling

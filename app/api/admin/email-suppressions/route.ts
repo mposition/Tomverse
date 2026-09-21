@@ -18,16 +18,13 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { listSuppressions } from "@/lib/adminEmailDeliveries";
-import { prisma } from "@/lib/prisma";
 import { suppressionRemovalProblem } from "@/lib/adminEmailDeliveryFilters";
 import {
-  APPROVAL_REQUIRED_SUPPRESSION_REASONS,
   GLOBAL_PURPOSE_KEY,
-  activeCausesForEntry,
+  activeCausesForSelector,
   liftSuppressionCauses,
   normalizeSuppressionAddress,
   recordSuppression,
-  removeSuppression,
 } from "@/lib/emailSuppression";
 import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
 
@@ -42,18 +39,34 @@ import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
  * starts mail to an address that a provider, or the person, previously said to
  * stop mailing.** The reason is the only record of why we overrode that.
  *
- * Three levels, by what the entry says:
+ * **A lift acts on a selector's whole set of active causes and releases the
+ * subset its action may.** That is the shape this screen works in, and it is
+ * not the shape "three levels, by what the entry says" described. That was
+ * written when one merged row stood for the whole suppression: the row had one
+ * reason, so the lift had one answer about it.
  *
- *  - `privacy_request` is refused outright. It is the record of someone
+ * What the reasons decide now is which causes come out.
+ *
+ *  - `privacy_request` is released by nothing. It is the record of someone
  *    exercising a legal right, and the process entitled to lift it is the
- *    privacy process that created it, not a button here.
+ *    privacy process that created it, not a button here. It no longer refuses
+ *    the request, because it is no longer the request: an address holding a
+ *    `manual` hold and a `privacy_request` has the hold released and the
+ *    privacy request left standing, so the address stays suppressed. Refusing
+ *    outright would leave an operator with no way to undo their own hold.
  *  - `hard_bounce` and `complaint` need a second administrator. §13.3 calls
  *    them permanent, and complaints are what a receiver measures a sending
- *    domain by (§14.5) -- the part of this system that recovers slowest.
+ *    domain by (§14.5) -- the part of this system that recovers slowest. One
+ *    of them anywhere in the set is what makes the whole request need approval.
  *  - everything else needs a reason that says something, and an audit entry.
  *
+ * So a lift answers with `released` and `remaining` rather than removed or not,
+ * and the audit entry names the set (`SuppressionCauseSet`) rather than the
+ * handle the operator clicked. The matrix is `releasableBy()` in
+ * `lib/emailSuppressionAuthorityCore.ts` and is not restated here.
+ *
  * Our own list is not the provider's. Resend's suppression is account- and
- * region-wide (§5.3.1), so lifting an entry here does not lift one there, and
+ * region-wide (§5.3.1), so lifting a cause here does not lift one there, and
  * the response says so rather than letting an operator conclude that mail will
  * now flow.
  */
@@ -68,6 +81,28 @@ const addSchema = z.object({
 const removeSchema = z.object({
   action: z.literal("remove"),
   id: z.string().trim().min(1).max(60),
+  /**
+   * `causeSetDigest` from the row the caller was looking at, out of its own GET.
+   *
+   * Required, and carried in rather than read here. A set the server reads for
+   * itself at this instant is approved by definition: a cause added between the
+   * listing and the click -- a fresh unsubscribe on an address being lifted for
+   * a stale soft bounce -- would be released with nobody having seen it, and we
+   * would resume mailing somebody who asked us to stop. Naming what was on the
+   * screen is what makes the comparison mean anything.
+   *
+   * A digest rather than the ids themselves, and this is not a stylistic
+   * choice. Causes are append-only and nothing bounds how many a selector
+   * accumulates, while the listing returns all of them -- so a request carrying
+   * the ids has a ceiling wherever the body limit falls, and past it the
+   * selector is visible and permanently unliftable: send them all and the body
+   * is refused, send fewer and the set does not match. Sixty-four hex
+   * characters do not move.
+   */
+  causeSetDigest: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{64}$/, "a sha-256 digest in lower-case hex"),
   reason: z.string().trim().min(1).max(1_000),
 });
 
@@ -200,27 +235,93 @@ export async function POST(req: Request) {
     // approval is bound to the exact set of active causes it was asked for
     // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
     if ((await readSuppressionAuthority()) === "causes") {
-      const active = await activeCausesForEntry(body.id);
-      if (!active) {
+      const active = await activeCausesForSelector(body.id);
+      if (!active.found) {
         return NextResponse.json({ error: "Not found." }, { status: 404 });
       }
+
+      // A handle that resolved but is no longer active, and a caller naming a
+      // set that is not the live one, are the same situation: the screen this
+      // came from is describing a suppression that has changed. Saying "not
+      // found" for the first would tell an operator whose page went stale that
+      // the suppression they were looking at has vanished.
+      //
+      // This is the early refusal, and it is not the one that matters: the set
+      // is checked again inside the lift's transaction, under the address lock,
+      // against the rows that are there at the moment of the release. What this
+      // buys is refusing before an approval is asked for.
+      if (active.stale || active.digest !== body.causeSetDigest) {
+        return NextResponse.json(
+          {
+            error:
+              "The causes on this address changed after it was listed. Look at it again before lifting it.",
+            code: "approval_stale",
+          },
+          { status: 409 }
+        );
+      }
+
+      // The audited thing is the selector's set of causes, not the row handle.
+      //
+      // The handle is whichever cause the listing put first, and the release
+      // matrix does not release by that: an operator lifting an address that
+      // holds a `manual` and a `privacy_request` releases the manual and keeps
+      // the privacy request, while the newest cause -- the handle -- is the
+      // privacy request. Naming it as the target writes an immutable record
+      // that reads as though the privacy request had been removed.
+      //
+      // So the target is the set, named by its digest, and the metadata says
+      // what was actually released and what stayed. Those come from inside the
+      // transaction rather than from the read above, because the decision is
+      // made there.
       const releaseAudit =
-        (evidenceKind: string) => (tx: Parameters<typeof writeAdminAuditLog>[0]["tx"]) =>
+        (evidence: {
+          kind: string;
+          approvalId?: string;
+          authorizationAuditLogId?: string;
+        }) =>
+        (
+          tx: Parameters<typeof writeAdminAuditLog>[0]["tx"],
+          outcome: {
+            released: Array<{ id: string; reason: string }>;
+            remaining: Array<{ id: string; reason: string }>;
+          }
+        ) =>
           writeAdminAuditLog({
             session,
             request: req,
             action: "email_suppression.removed",
-            targetType: "SuppressionEntry",
-            targetId: body.id,
-            summary: `Lifted suppression causes on ${active.entry.emailAddress}.`,
+            targetType: "SuppressionCauseSet",
+            targetId: active.digest,
+            summary:
+              outcome.remaining.length === 0
+                ? `Lifted every active suppression cause on ${active.selector.emailAddress}.`
+                : `Lifted ${outcome.released.length} of ${
+                    outcome.released.length + outcome.remaining.length
+                  } suppression causes on ${active.selector.emailAddress}; ${outcome.remaining
+                    .map((cause) => cause.reason)
+                    .join(", ")} remain.`,
             metadata: {
               reason: body.reason,
-              emailAddress: active.entry.emailAddress,
-              scope: active.entry.scope,
-              purposeKey: active.entry.purposeKey,
-              causeIds: active.causeIds,
-              causeReasons: active.reasons,
-              evidenceKind,
+              emailAddress: active.selector.emailAddress,
+              scope: active.selector.scope,
+              purposeKey: active.selector.purposeKey,
+              // The handle is recorded as what it is -- the row the operator
+              // acted from -- rather than as the target.
+              viaCauseId: body.id,
+              causeSetDigest: active.digest,
+              releasedCauseIds: outcome.released.map((cause) => cause.id),
+              releasedReasons: outcome.released.map((cause) => cause.reason),
+              remainingCauseIds: outcome.remaining.map((cause) => cause.id),
+              remainingReasons: outcome.remaining.map((cause) => cause.reason),
+              // Which authorisation this was, and which one specifically. The
+              // kind alone says a second administrator approved it somewhere;
+              // the ids say which approval and which authorisation entry, so
+              // the release can be followed from this row rather than from the
+              // cause's own evidence.
+              evidenceKind: evidence.kind,
+              approvalId: evidence.approvalId ?? null,
+              authorizationAuditLogId: evidence.authorizationAuditLogId ?? null,
             },
             tx,
           });
@@ -236,17 +337,17 @@ export async function POST(req: Request) {
                 session,
                 request: req,
                 action: "email_suppression.remove",
-                targetType: "SuppressionEntry",
-                targetId: body.id,
+                targetType: "SuppressionCauseSet",
+                targetId: active.digest,
                 // The cause ids are part of what is approved: a cause added after
                 // the request is a different approval.
-                payload: { id: body.id, causeIds: active.causeIds },
+                payload: { viaCauseId: body.id, causeSetDigest: body.causeSetDigest },
                 reason: body.reason,
               },
               async (context) => {
                 const outcome = await liftSuppressionCauses({
-                  entryId: body.id,
-                  approvedCauseIds: active.causeIds,
+                  causeId: body.id,
+                  approvedDigest: body.causeSetDigest,
                   action: "approved_admin",
                   evidence: context.approvalId
                     ? {
@@ -255,18 +356,22 @@ export async function POST(req: Request) {
                         authorizationAuditLogId: context.authorizationAuditLogId,
                       }
                     : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
-                  writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
+                  writeReleaseAudit: releaseAudit({
+                    kind: context.approvalId ? "dual_approval" : "sole_admin",
+                    ...(context.approvalId ? { approvalId: context.approvalId } : {}),
+                    authorizationAuditLogId: context.authorizationAuditLogId,
+                  }),
                 });
                 if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
                 return outcome;
               }
             )
           : await liftSuppressionCauses({
-              entryId: body.id,
-              approvedCauseIds: active.causeIds,
+              causeId: body.id,
+              approvedDigest: body.causeSetDigest,
               action: "admin",
               evidence: { kind: "admin" },
-              writeReleaseAudit: releaseAudit("admin"),
+              writeReleaseAudit: releaseAudit({ kind: "admin" }),
             });
       } catch (error) {
         if (!(error instanceof SuppressionLiftRefused)) throw error;
@@ -294,86 +399,27 @@ export async function POST(req: Request) {
       });
     }
 
-    // Which reason the *stored* row holds decides whether a second
-    // administrator is needed. Deriving that from the request body would let
-    // the caller choose its own approval requirement, and the row is read again
-    // inside the removal transaction, so this read only picks the path.
-    const stored = await prisma.suppressionEntry.findUnique({
-      where: { id: body.id },
-      select: { reason: true },
-    });
-    if (!stored) {
-      return NextResponse.json({ error: "Not found." }, { status: 404 });
-    }
-
-    const lift = async () => removeSuppression({ id: body.id });
-
-    const needsApproval = (
-      APPROVAL_REQUIRED_SUPPRESSION_REASONS as readonly string[]
-    ).includes(stored.reason);
-
-    const result = needsApproval
-      ? await runWithAdminApproval(
-          {
-            session,
-            request: req,
-            action: "email_suppression.remove",
-            targetType: "SuppressionEntry",
-            targetId: body.id,
-            payload: { id: body.id },
-            reason: body.reason,
-          },
-          lift
-        )
-      : await lift();
-
-    if (!result.removed) {
-      if (result.refusal === "authority_changed") {
-        return NextResponse.json(
-          {
-            error: "Suppression decisions changed over while this was in progress. Try again.",
-            code: "authority_changed",
-          },
-          { status: 409 }
-        );
-      }
-      return NextResponse.json(
-        {
-          error:
-            result.refusal === "unliftable"
-              ? "A suppression created by a privacy request is lifted by the privacy process that created it, not from here."
-              : "Not found.",
-          code: result.refusal,
-        },
-        { status: result.refusal === "unliftable" ? 409 : 404 }
-      );
-    }
-
-    await writeAdminAuditLog({
-      session,
-      request: req,
-      action: "email_suppression.removed",
-      targetType: "SuppressionEntry",
-      targetId: result.entry.id,
-      summary: `Lifted the ${result.entry.reason} suppression on ${result.entry.emailAddress}.`,
-      metadata: {
-        reason: body.reason,
-        emailAddress: result.entry.emailAddress,
-        scope: result.entry.scope,
-        purposeKey: result.entry.purposeKey,
-        suppressionReason: result.entry.reason,
-        source: result.entry.source,
-        occurredAt: result.entry.occurredAt.toISOString(),
-        requiredApproval: needsApproval,
+    // Entry authority, and the console no longer speaks it.
+    //
+    // The lift above is reached by a cause id, because that is what the list
+    // hands out now (docs/policy/email-product-news-redesign-draft.md, section
+    // 7.4). An entry-authority lift would have to resolve the same id as a
+    // `SuppressionEntry` row, find nothing, and answer 404 -- which reads as
+    // "that suppression is gone" when what happened is that the setting was
+    // moved back below this build's floor.
+    //
+    // So it says which of those it is. Production has read causes since
+    // 2026-09-17 and the rollback floor for this deploy is the causes cutover;
+    // an environment that finds itself here is one whose setting went backwards
+    // and needs it put back, not an operator who should try again.
+    return NextResponse.json(
+      {
+        error:
+          "This build's suppression console lists causes, and the suppression setting is back on entries. Nothing was changed. Put the setting back to causes before lifting anything here.",
+        code: "authority_changed",
       },
-    });
-
-    return NextResponse.json({
-      removed: true,
-      // Said plainly, because the opposite assumption is the expensive one:
-      // our list is not the provider's, and Resend's is account-wide (§5.3.1).
-      providerListUnchanged: true,
-    });
+      { status: 409 }
+    );
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;
