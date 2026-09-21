@@ -6,8 +6,10 @@
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
 - 개정: **v29 (2026-09-21).** marketing 권한을 전역 opt-in에서 **국가 rule +
   호주 발신자 authority의 이중 판정**으로 개정합니다(승인 A·C·F). 0절 참조.
-- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
-  전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
+- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록 중 **아직 열린 것이 막는
+  범위**를 전제로 씁니다 — 2026-09-16 개정(승인 A) 이후 Q1/G는 **EEA·영국의 soft
+  opt-in만** 막고, 전체 활성화의 선행 조건은 **R2**(발송 도메인 평판)와
+  **R3**(싱가포르 수신거부 주소)입니다(15.2).
 
 ---
 
@@ -1137,7 +1139,9 @@ marketing을 포함하지 않는다는 범위 결정.
    그 경계를 8절과 15절에서 명시합니다.
 5. **MVP는 marketing을 포함하지 않습니다.** 1단계는 transactional/service 경로의
    신뢰성(outbox, suppression, 감사 스냅샷)과 preference center의 뼈대까지입니다.
-   marketing 발송은 인프라를 만들되 flag로 잠근 채 법률 검토를 기다립니다.
+   marketing 발송은 인프라를 만들되 flag로 잠급니다. **무엇을 기다리는지는
+   2026-09-16 개정으로 좁아졌습니다** — 법률 검토 전체가 아니라 R2·R3이고,
+   EEA·영국만 Q1/G를 추가로 기다립니다(15.2).
 6. **가장 큰 현재 리스크는 마케팅이 아니라 유실입니다.** 로그인 코드, 환영 메일,
    Stripe 결제 확인 메일이 지금 큐 밖에서 fire-and-forget으로 나갑니다. 실패하면
    사용자는 로그인하지 못하고 아무도 그것을 모릅니다.
@@ -1327,11 +1331,19 @@ marketing을 포함하지 않는다는 범위 결정.
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
-| 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
-| 7 | 신규 기능 소개, 뉴스레터 | marketing | 불가 | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
-| 8 | 프로모션, 할인, 재참여 | marketing | 불가 | 불가 | **필수** | P3 | 관대 | marketing |
+| 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | **조건부**(아래) | 불가 | **필수** | P2 | 표준 | marketing |
+| 7 | 신규 기능 소개, 뉴스레터 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
+| 8 | 프로모션, 할인, 재참여 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대 | marketing |
 | 9 | 관리자 긴급 공지 | 내용에 따라 갈림 | 조건부 | 조건부 | 조건부 | P0 | 공격적 | transactional |
 | 10 | 법정 통지 | legal | 가능 | **가능(필수)** | **금지** | P0 | 공격적 + 대체 채널 | transactional |
+
+**marketing 세 행의 "조건부"** — 2026-09-16 개정(승인 A) 전에는 `불가`였고,
+전역 opt-in이 사라지면서 조건이 생겼습니다. 판정은 5.1.1의 국가 rule과 호주
+발신자 authority가 함께 하며, 명시적 동의가 없어도 통과하는 경우가 셋입니다 —
+미국의 `opt_out`(거부하지 않음), 호주의 `inferred_consent`(관계 활성), 그리고
+승인 F의 `risk_accepted` cohort(이 경우 판정에는 `legalAllowed: false`가 남습니다).
+**"marketing 거부자에게도" 열은 여전히 `불가`입니다** — 거부는 어느 경로로도
+넘지 못합니다.
 
 ### 3.2 유형별 상세
 
@@ -3673,9 +3685,12 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | M13 | 분류별 재시도 정책 | 9.4 표대로. legal abandoned가 critical incident |
 | M14 | 감사 로그 + 발송 이력 조회 | 13.7의 모든 항목 |
 
-### 15.2 MVP에 만들되 **비활성**으로 두는 것 (법률 검토 대기)
+### 15.2 MVP에 만들되 **비활성**으로 두는 것
 
-`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **활성화는 법률 검토 완료 후.**
+`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **2026-09-16 개정(승인 A) 전에는
+"법률 검토 완료 후"가 활성화 조건이었습니다.** 지금은 항목마다 다르고, 아래 표가
+그것입니다 — marketing 발송의 선행 조건은 R2·R3이며, Q1/G는 EEA·영국의 soft
+opt-in만 막습니다.
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
@@ -3864,7 +3879,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
   | kill switch | 차단 |
   | send flag — `marketing` · `releaseNotes` · `collection` **각각** | 차단 |
   | readiness 미충족 | 차단 |
-  | 표시 계약 미충족 | 차단 |
+  | `display_unsatisfiable` — 후보의 표시 의무를 합성할 수 없음 | 차단 |
   | 표시 계약 변경(`display_contract_changed`) | skip + 현재 version으로 재enqueue |
   | 승인 유형이 `risk_accepted`가 아님 | override 미적용 → 차단 |
   | 승인 scope 밖(policy version · rule · country · obligation key) | override 미적용 → 차단 |
