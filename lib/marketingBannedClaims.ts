@@ -70,8 +70,11 @@ export const MARKETING_SUPERLATIVE_TERMS: readonly MarketingBannedTerm[] =
     term("state of the art", "en", "word"),
 
     term("최고", "ko", "substring"),
-    term("제일 좋은", "ko", "substring"),
-    term("제일 뛰어난", "ko", "substring"),
+    // Korean inflects, so the stem is the term: "제일 좋은", "제일 좋습니다"
+    // and "제일 좋다" all carry it.
+    term("제일 좋", "ko", "substring"),
+    term("제일 뛰어", "ko", "substring"),
+    term("가장 뛰어", "ko", "substring"),
     term("최적", "ko", "substring"),
     term("최강", "ko", "substring"),
     term("가장 좋은", "ko", "substring"),
@@ -80,6 +83,12 @@ export const MARKETING_SUPERLATIVE_TERMS: readonly MarketingBannedTerm[] =
 
     term("最佳", "zh", "substring"),
     term("最优", "zh", "substring"),
+    // Traditional forms. zh-Hant is a first-class marketing locale -- Threads
+    // is entirely zh-Hant and half of Facebook is -- so adding only the
+    // Simplified spelling covered the smaller half of the audience.
+    term("最優", "zh-Hant", "substring"),
+    term("最強", "zh-Hant", "substring"),
+    term("最好的", "zh-Hant", "substring"),
     term("最好", "zh", "substring"),
     term("最强", "zh", "substring"),
     term("最快", "zh", "substring"),

@@ -243,6 +243,60 @@
       "expect": {
         "verdict": "approval_required"
       }
+    },
+    {
+      "id": "hygiene.chineseSentences",
+      "ruleId": "hygiene.url_like",
+      "input": "比较答案。然后决定。",
+      "note": "the ideographic stop ends a sentence; it is not a host separator",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "hygiene.englishSentences",
+      "ruleId": "hygiene.url_like",
+      "input": "Compare answers. Then decide.",
+      "note": "a full stop between two words is not a domain",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "refuted.koreanIdentifier",
+      "ruleId": "rule.refuted-superiority",
+      "input": "각 요청에는 유일한 식별자가 있습니다.",
+      "note": "유일한 qualifies an identifier, not a superiority claim",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.contraction",
+      "ruleId": "rule.australia-minors",
+      "input": "Tomverse isn't for under 16s.",
+      "note": "the same safety notice, contracted",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "minors.koreanNegation",
+      "ruleId": "rule.australia-minors",
+      "input": "Tomverse는 청소년 대상이 아닙니다.",
+      "note": "Korean negates at the end of the clause",
+      "expect": {
+        "verdict": "approval_required"
+      }
+    },
+    {
+      "id": "free.freedom",
+      "ruleId": "rule.free-wording",
+      "input": "Enjoy freedom to compare answers.",
+      "note": "freedom is not free; the English terms need boundaries",
+      "expect": {
+        "verdict": "approval_required"
+      }
     }
   ]
 }

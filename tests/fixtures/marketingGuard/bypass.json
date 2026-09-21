@@ -501,6 +501,116 @@
           "free_wording_without_condition"
         ]
       }
+    },
+    {
+      "id": "guarantee.emDashInside",
+      "ruleId": "rule.guarantee",
+      "input": "Results are guar—anteed.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "rank.separatorInsideChinese",
+      "ruleId": "rule.rank-claim",
+      "input": "第·一 AI 工具",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "rank.chineseDigit",
+      "ruleId": "rule.rank-claim",
+      "input": "Tomverse 是第1 AI 工具。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.leetClone",
+      "ruleId": "rule.memory-claim",
+      "input": "We cl0ne your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.negationElsewhereInSentence",
+      "ruleId": "rule.memory-claim",
+      "input": "We do not lose files, and we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "memory.negationBeforeSemicolon",
+      "ruleId": "rule.memory-claim",
+      "input": "We never drop a message; we clone your memories.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "superlative.traditionalOptimal",
+      "ruleId": "rule.superlative",
+      "input": "Tomverse 是最優的 AI 工具。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "superlative.traditionalStrongest",
+      "ruleId": "rule.superlative",
+      "input": "Tomverse 是最強的 AI 工具。",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "superlative.koreanInflected",
+      "ruleId": "rule.superlative",
+      "input": "Tomverse가 제일 좋습니다.",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "banned_claim"
+        ]
+      }
+    },
+    {
+      "id": "hygiene.punycodeTld",
+      "ruleId": "hygiene.url_like",
+      "input": "Visit evil.xn--fiqs8s",
+      "expect": {
+        "verdict": "reject",
+        "codes": [
+          "hygiene"
+        ]
+      }
     }
   ]
 }

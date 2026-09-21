@@ -129,15 +129,23 @@ const SUPERLATIVE = rule("rule.superlative", "superlative", {
   exceptions: MARKETING_SUPERLATIVE_EXCEPTIONS,
 });
 
+// Terms rather than patterns, because a term compiles into something that
+// tolerates separators inside it and a raw pattern does not:
+// "Results are guar-anteed." with an em dash went through the regex.
 const GUARANTEE = rule("rule.guarantee", "guarantee", {
-  patterns: [
-    pattern("\\bguarantee(?:d|s)?\\b", "en"),
-    pattern("\\bwe promise\\b", "en"),
-    pattern("\\brisk[- ]free\\b", "en"),
-    pattern("보장(?!보험)", "ko"),
-    pattern("약속드립니다", "ko"),
-    pattern("保证|保障", "zh"),
+  terms: [
+    { text: "guarantee", language: "en", match: "word" },
+    { text: "guaranteed", language: "en", match: "word" },
+    { text: "guarantees", language: "en", match: "word" },
+    { text: "we promise", language: "en", match: "word" },
+    { text: "risk free", language: "en", match: "word" },
+    { text: "보장", language: "ko", match: "substring" },
+    { text: "약속드립니다", language: "ko", match: "substring" },
+    { text: "保证", language: "zh", match: "substring" },
+    { text: "保障", language: "zh", match: "substring" },
+    { text: "保證", language: "zh-Hant", match: "substring" },
   ],
+  exceptions: ["보장보험"],
 });
 
 /**
@@ -148,6 +156,28 @@ const GUARANTEE = rule("rule.guarantee", "guarantee", {
  * that refused it would refuse a sentence explaining how to start.
  */
 const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
+  // The Chinese claims are terms as well as patterns: a term tolerates a
+  // separator inside it, and 第·一 went through the pattern untouched.
+  terms: [
+    { text: "第一AI", language: "zh", match: "substring" },
+    { text: "第一平台", language: "zh", match: "substring" },
+    { text: "第一产品", language: "zh", match: "substring" },
+    { text: "第一產品", language: "zh", match: "substring" },
+    { text: "第一工具", language: "zh", match: "substring" },
+    { text: "第一选择", language: "zh", match: "substring" },
+    { text: "第一選擇", language: "zh", match: "substring" },
+    { text: "第一品牌", language: "zh", match: "substring" },
+    { text: "第一名", language: "zh", match: "substring" },
+    { text: "第1AI", language: "zh", match: "substring" },
+    { text: "第1平台", language: "zh", match: "substring" },
+    { text: "第1产品", language: "zh", match: "substring" },
+    { text: "第1產品", language: "zh", match: "substring" },
+    { text: "第1工具", language: "zh", match: "substring" },
+    { text: "第1选择", language: "zh", match: "substring" },
+    { text: "第1選擇", language: "zh", match: "substring" },
+    { text: "第1品牌", language: "zh", match: "substring" },
+    { text: "第1名", language: "zh", match: "substring" },
+  ],
   patterns: [
     pattern("#\\s*1\\b", "en"),
     pattern("\\bno\\.?\\s*1\\b", "en"),
@@ -155,7 +185,7 @@ const RANK_CLAIM = rule("rule.rank-claim", "rank_claim", {
     pattern("\\btop[- ]rated\\b", "en"),
     pattern("1\\s*위", "ko"),
     pattern("업계\\s*1", "ko"),
-    pattern("第一(?:的)?\\s*(?:AI|平台|产品|工具|选择|品牌|名)", "zh"),
+    pattern("第[一1](?:的)?\\s*(?:AI|平台|产品|工具|选择|產品|選擇|品牌|名)", "zh"),
     pattern("(?:排名|销量|市场)\\s*第一", "zh"),
   ],
 });
@@ -198,6 +228,27 @@ const AI_REVIEW_CONTRACT = rule("rule.ai-review-contract", "ai_review_contract",
  * about file handling.
  */
 const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiority", {
+  // Same reason as the rank rule.
+  terms: [
+    { text: "唯一AI", language: "zh", match: "substring" },
+    { text: "唯一工具", language: "zh", match: "substring" },
+    { text: "唯一平台", language: "zh", match: "substring" },
+    { text: "唯一产品", language: "zh", match: "substring" },
+    { text: "唯一產品", language: "zh", match: "substring" },
+    { text: "唯一服务", language: "zh", match: "substring" },
+    { text: "唯一服務", language: "zh", match: "substring" },
+    { text: "唯一选择", language: "zh", match: "substring" },
+    { text: "唯一選擇", language: "zh", match: "substring" },
+    { text: "唯1AI", language: "zh", match: "substring" },
+    { text: "唯1工具", language: "zh", match: "substring" },
+    { text: "唯1平台", language: "zh", match: "substring" },
+    { text: "唯1产品", language: "zh", match: "substring" },
+    { text: "唯1產品", language: "zh", match: "substring" },
+    { text: "唯1服务", language: "zh", match: "substring" },
+    { text: "唯1服務", language: "zh", match: "substring" },
+    { text: "唯1选择", language: "zh", match: "substring" },
+    { text: "唯1選擇", language: "zh", match: "substring" },
+  ],
   patterns: [
     pattern(
       "\\b(?:the )?only (?:ai|assistant|tool|app|service|platform|product|workspace)\\b",
@@ -206,10 +257,13 @@ const REFUTED_SUPERIORITY = rule("rule.refuted-superiority", "refuted_superiorit
     pattern("\\bfirst (?:and only|ever)\\b", "en"),
     pattern("\\bonly (?:one|place|way) to compare\\b", "en"),
     pattern("\\bonly .{0,30}\\bhwp\\b", "en"),
-    pattern("유일(?:한|하게)\\s*(?:AI|도구|서비스|플랫폼|제품)?", "ko"),
+    pattern(
+      "유일(?:한|하게)\\s*(?:[^\\s]{1,8}\\s*){0,3}(?:AI|도구|서비스|플랫폼|제품|비교|교차검토)",
+      "ko",
+    ),
     pattern("최초의?\\s*(?:다중|멀티|교차)", "ko"),
     pattern("우리만", "ko"),
-    pattern("唯一(?:的)?\\s*(?:AI|工具|平台|产品|服务|选择)", "zh"),
+    pattern("唯[一1](?:的)?\\s*(?:AI|工具|平台|产品|產品|服务|服務|选择|選擇)", "zh"),
   ],
 });
 
@@ -266,12 +320,12 @@ const AUSTRALIA_URGENCY = rule("rule.australia-urgency", "australia_urgency", {
  */
 const AUSTRALIA_MINORS = rule("rule.australia-minors", "australia_minors", {
   patterns: [
-    pattern("(?<!\\bnot )\\bfor (?:kids|children|teens|teenagers)\\b", "en"),
+    pattern("(?<!\\b(?:not|isn't|aren't|never)\\s)\\bfor (?:kids|children|teens|teenagers)\\b", "en"),
     pattern("\\b(?:kids|teens),? (?:sign up|try it|get started)\\b", "en"),
-    pattern("(?<!\\bnot )\\bfor under (?:13|16|18)s?\\b", "en"),
+    pattern("(?<!\\b(?:not|isn't|aren't|never)\\s)\\bfor under (?:13|16|18)s?\\b", "en"),
     pattern("\\bhigh ?school(?:ers)? ?(?:can|should|get)\\b", "en"),
     pattern(
-      "(?:어린이|청소년|중학생|초등학생)(?:들)?(?:을|를|도)?\\s*(?:위한|대상)",
+      "(?:어린이|청소년|중학생|초등학생)(?:들)?(?:을|를|도)?\\s*(?:위한|대상)(?![^.\n]{0,12}아[닙니])",
       "ko",
     ),
     pattern("(?:青少年|中学生|小学生)(?:专用|适用|快来)", "zh"),

@@ -75,6 +75,11 @@ const autonomousReady = (overrides = {}) => {
         templateId: "template.compare",
         approvedDigest: TEMPLATE_DIGEST,
         slotsFromRegistry: true,
+        // The ids the loader read off the approved post. The Guard compares
+        // the draft's against these rather than against facts from the same
+        // caller, which is what closes the "empty claim list" hole.
+        claimIds: facts.claims.map((claim) => claim.claimId),
+        assetIds: facts.assets.map((asset) => asset.assetId),
       }),
     ],
     context: { priceFallbackAlertReady: true, ...(overrides.context ?? {}) },
@@ -135,6 +140,8 @@ test("a template with a slot filled from free text is not a template", () => {
           templateId: "template.compare",
           approvedDigest: TEMPLATE_DIGEST,
           slotsFromRegistry: false,
+          claimIds: ["claim.compare"],
+          assetIds: ["asset.hero"],
         }),
       ],
     }),
@@ -260,31 +267,39 @@ test("an Australian price in the wrong currency is refused too", () => {
   assert.ok(decision.codes.includes("au_price_gst_unverifiable"));
 });
 
-test("when the catalogue can prove GST, an Australian price is an approval", () => {
-  // §7.4: still a person's decision, never autonomous. Reachable only once
-  // the catalogue carries the flag, which is why both halves are inputs.
-  const decision = guardDraft(
-    autonomousReady({
-      facts: {
-        claims: [
-          {
-            claimId: "claim.pro-price-au",
-            type: "pricing",
-            known: true,
-            priceSourcesAllStored: true,
-            targetsAustralia: true,
-            currency: "AUD",
-            gstInclusiveStored: true,
-            usedBefore: true,
-          },
-        ],
-        assets: [],
-      },
-    }),
-  );
-  assert.equal(decision.verdict, "approval_required");
-  assert.ok(decision.codes.includes("australian_price"));
-  assert.ok(decision.codes.includes("price_or_promotion"));
+test("no input lifts the Australian price refusal", () => {
+  // The refusal is unconditional while `billingPriceCatalogSchema` has no
+  // GST-inclusive field. An earlier version took `gstInclusiveStored` from the
+  // caller -- a stored proof of something the catalogue cannot store, which is
+  // a boolean standing in for evidence that does not exist.
+  for (const extra of [
+    {},
+    { gstInclusiveStored: true },
+    { gstInclusive: true },
+    { currency: "AUD", gstInclusiveStored: true },
+  ]) {
+    const decision = guardDraft(
+      autonomousReady({
+        facts: {
+          claims: [
+            {
+              claimId: "claim.pro-price-au",
+              type: "pricing",
+              known: true,
+              priceSourcesAllStored: true,
+              targetsAustralia: true,
+              currency: "AUD",
+              usedBefore: true,
+              ...extra,
+            },
+          ],
+          assets: [],
+        },
+      }),
+    );
+    assert.equal(decision.verdict, "reject", JSON.stringify(extra));
+    assert.ok(decision.codes.includes("au_price_gst_unverifiable"));
+  }
 });
 
 test("a model claim the registry does not agree with is refused", () => {

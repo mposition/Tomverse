@@ -110,7 +110,13 @@ const URL_LIKE = new RegExp(
     // an ASCII word boundary, so there is none before 例 and `\b例子.中国\b`
     // matches nothing at all -- which is how an entirely ordinary Chinese
     // domain got past the first version of this.
-    `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}[.${codePoint(0xff0e)}${codePoint(0x3002)}${codePoint(0xfe52)}]\\p{L}{2,24}(?![\\p{L}\\p{N}-])`,
+    // The ASCII and full-width stops separate a host from its suffix.
+    // The ideographic stop is sentence punctuation in Chinese, and
+    // treating it as a separator made an ordinary pair of sentences
+    // read as an address.
+    `(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]{0,62}[.${codePoint(0xff0e)}${codePoint(0xfe52)}]\\p{L}{2,24}(?![\\p{L}\\p{N}-])`,
+    // A punycode label, which is never prose whatever surrounds it.
+    "xn--[a-z0-9-]{2,59}",
     `\\b\\d{1,3}(?:[.${codePoint(0xff0e)}${codePoint(0x3002)}]\\d{1,3}){3}\\b`,
     "\\[\\s*\\.\\s*\\]",
     "\\(\\s*(?:dot|점|点)\\s*\\)",

@@ -956,6 +956,35 @@ export const RETENTION_SETTING_TOKENS = [
   "MARKETING_RETENTION_SETTING",
 ];
 
+/**
+ * 7. **template-seal.** `sealMarketingTemplateProof()` mints the Guard's only
+ * evidence that an approved template exists, and reaching
+ * `autonomous_eligible` means publishing without a person looking. A `WeakSet`
+ * proves the object came from that function; it says nothing about who called
+ * it, and the function is exported. So the call sites are counted here, which
+ * is the same answer this file already gives for an audit row: the question is
+ * not what the code does but who is allowed to do it.
+ */
+export const TEMPLATE_SEAL_ALLOWLIST = [
+  {
+    path: "lib/marketingGuardCore.ts",
+    count: 1,
+    reason:
+      "Where the function is declared. Declaring it is not calling it.",
+  },
+  {
+    path: "lib/marketingTemplates.ts",
+    count: 2,
+    reason:
+      "The loader that walks the approval chain, which is the only code entitled to say a template stood: the import and the one call.",
+  },
+];
+
+// Tests are outside this check's scan, so the suite that proves the autonomous
+// path is reachable does not need an entry -- and could not be given one. What
+// the rule governs is the production surface, where an unlisted call site is
+// a publication nobody approved.
+
 export const RETENTION_SETTING_ALLOWLIST = [
   {
     path: "lib/marketingAutomationSchema.ts",
@@ -980,6 +1009,7 @@ const retentionSettingMentions = (text) =>
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
   const retentionSettingByPath = new Map();
+  const templateSealByPath = new Map();
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
@@ -990,6 +1020,9 @@ export const checkProtectedTableWriters = ({ sources }) => {
 
     const retentionMentions = retentionSettingMentions(text);
     if (retentionMentions > 0) retentionSettingByPath.set(path, retentionMentions);
+
+    const sealMentions = (text.match(/sealMarketingTemplateProof/g) ?? []).length;
+    if (sealMentions > 0) templateSealByPath.set(path, sealMentions);
 
     if (path.endsWith(".sql")) {
       const sql = sqlWithoutComments(text);
@@ -1143,6 +1176,27 @@ export const checkProtectedTableWriters = ({ sources }) => {
     if (retentionSettingByPath.has(entry.path)) continue;
     findings.push({
       rule: "retention-setting",
+      path: entry.path,
+      detail: `allowlist says ${entry.count} mention(s), found 0${missingNote(entry.path)}; remove the entry`,
+    });
+  }
+
+  const allowedSeal = new Map(
+    TEMPLATE_SEAL_ALLOWLIST.map((entry) => [entry.path, entry])
+  );
+  for (const [path, mentions] of templateSealByPath) {
+    const expected = allowedSeal.get(path)?.count ?? 0;
+    if (mentions === expected) continue;
+    findings.push({
+      rule: "template-seal",
+      path,
+      detail: `names sealMarketingTemplateProof ${mentions} time(s), allowlist says ${expected}`,
+    });
+  }
+  for (const entry of TEMPLATE_SEAL_ALLOWLIST) {
+    if (templateSealByPath.has(entry.path)) continue;
+    findings.push({
+      rule: "template-seal",
       path: entry.path,
       detail: `allowlist says ${entry.count} mention(s), found 0${missingNote(entry.path)}; remove the entry`,
     });

@@ -45,6 +45,10 @@ import {
   type MarketingHistoryEntry,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import {
+  sealMarketingTemplateProof,
+  type MarketingTemplateProof,
+} from "@/lib/marketingGuardCore";
 
 export type MarketingTemplateReader = PrismaClient | Prisma.TransactionClient;
 
@@ -89,6 +93,16 @@ export type MarketingTemplate = {
   envelopeDigest: string;
   approvedAt: Date;
   markedReusableAt: Date;
+  /**
+   * The Guard's evidence that this template exists.
+   *
+   * Minted here and nowhere else: this module is the only place that walks the
+   * approval chain, so it is the only place entitled to say a template stood.
+   * `scripts/check-protected-table-writers.mjs` counts the call sites, because
+   * an exported factory with no such check proves only that the object came
+   * from the right function -- not that the right caller made it.
+   */
+  proof: MarketingTemplateProof;
 };
 
 export type MarketingTemplateResult =
@@ -157,6 +171,8 @@ export async function loadApprovedTemplate(
       deletedAt: true,
       history: true,
       historyVersion: true,
+      claimIds: true,
+      assetIds: true,
     },
   });
 
@@ -301,6 +317,16 @@ export async function loadApprovedTemplate(
       envelopeDigest: post.envelopeDigest,
       approvedAt: approval.createdAt,
       markedReusableAt: marking.createdAt,
+      proof: sealMarketingTemplateProof({
+        templateId: post.id,
+        approvedDigest: post.envelopeDigest,
+        // Every check above passed, which is what "the slots are registry ids"
+        // means for a post whose envelope digest equals its approved digest.
+        slotsFromRegistry: true,
+        // Read off the approved row rather than taken from whoever is asking.
+        claimIds: post.claimIds,
+        assetIds: post.assetIds,
+      }),
     },
   };
 }

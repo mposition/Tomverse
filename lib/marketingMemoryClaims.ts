@@ -221,10 +221,61 @@ const assertsTheClaim = (text: string, matchIndex: number, match: string) => {
     while (end < text.length && !SENTENCE_BOUNDARY.test(text[end])) end += 1;
 
     if (text[end] === "?") return false;
-    const before = text.slice(start, matchIndex);
+
+    // The negation has to govern *this* clause. Scoped to the whole sentence,
+    // an unrelated denial earlier in it covered a claim made later:
+    // "We do not lose files, and we clone your memories." and
+    // "We never drop a message; we clone your memories." both read as denials
+    // and were not reported at all.
+    //
+    // Clause boundaries are the semicolon and the coordinating conjunctions --
+    // not the bare comma, which usually continues the predicate being denied:
+    // "not affiliated with, or endorsed by, OpenAI" is one denial and is on a
+    // public page today.
+    const sentenceBefore = text.slice(start, matchIndex);
+    const lastBoundary = Math.max(
+        sentenceBefore.lastIndexOf(";"),
+        ...[" and ", " but ", " while ", "그리고 ", "하지만 ", "，"].map((token) => {
+            const at = sentenceBefore.lastIndexOf(token);
+            return at === -1 ? -1 : at + token.length;
+        })
+    );
+    const before =
+        lastBoundary > 0 ? sentenceBefore.slice(lastBoundary) : sentenceBefore;
     const after = text.slice(matchIndex + match.length, end);
     return !PRECEDING_NEGATION.test(before) && !FOLLOWING_NEGATION.test(after);
 };
+
+/**
+ * The rule sources, copied at module load and never read from the export again.
+ *
+ * `FORBIDDEN_MEMORY_CLAIMS` is exported for the test that pins its shape, and
+ * an exported array of `RegExp` objects is editable twice over: `splice(0)`
+ * empties it, and `RegExp.prototype.compile` replaces a pattern in place --
+ * which `Object.freeze` does not prevent. So the decision reads these strings
+ * instead, and a caller editing the export changes what it can see rather than
+ * what the matcher does.
+ */
+const FORBIDDEN_CLAIM_SOURCES: ReadonlyArray<{
+    readonly id: string;
+    readonly reason: string;
+    readonly patterns: readonly { readonly source: string; readonly flags: string }[];
+}> = Object.freeze(
+    FORBIDDEN_MEMORY_CLAIMS.map((claim) =>
+        Object.freeze({
+            id: claim.id,
+            reason: claim.reason,
+            patterns: Object.freeze(
+                claim.patterns.map((expression) =>
+                    Object.freeze({
+                        source: expression.source,
+                        flags: expression.flags,
+                    })
+                )
+            ),
+        })
+    )
+);
 
 /** Matches of `pattern` that their own sentence actually asserts. */
 const assertedMatches = (text: string, pattern: RegExp): string[] => {
@@ -253,13 +304,15 @@ const assertedMatches = (text: string, pattern: RegExp): string[] => {
 export const findForbiddenMemoryClaims = (
     text: string
 ): ForbiddenClaimFinding[] =>
-    FORBIDDEN_MEMORY_CLAIMS.flatMap((claim) =>
+    FORBIDDEN_CLAIM_SOURCES.flatMap((claim) =>
         claim.patterns.flatMap((pattern) =>
-            assertedMatches(text, pattern).map((match) => ({
-                claimId: claim.id,
-                reason: claim.reason,
-                match,
-            }))
+            assertedMatches(text, new RegExp(pattern.source, pattern.flags)).map(
+                (match) => ({
+                    claimId: claim.id,
+                    reason: claim.reason,
+                    match,
+                })
+            )
         )
     );
 

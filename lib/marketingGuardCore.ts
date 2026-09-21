@@ -129,9 +129,8 @@ export type MarketingGuardClaimFact = {
   readonly known: boolean;
   /** For `pricing` and `plan`: whether every field it uses is `stored`. */
   readonly priceSourcesAllStored?: boolean;
-  /** For a price claim: the stored currency, and whether GST is stored as included. */
+  /** For a price claim: the stored currency. */
   readonly currency?: string;
-  readonly gstInclusiveStored?: boolean;
   readonly targetsAustralia?: boolean;
   /** For `model`: the runtime row agreed with the claim. */
   readonly modelMatches?: boolean;
@@ -164,15 +163,27 @@ export type MarketingGuardDraft = {
 /**
  * A template the loader proved, sealed so it cannot be assembled by a caller.
  *
- * `lib/marketingTemplates.ts` walks the approval chain; this is the only shape
- * the Guard accepts as its answer, and `sealMarketingTemplateProof()` is the
- * only way to make one. An earlier version took a plain object, so a caller
- * supplying `{ approvedDigest: <sha256 of my own text>, slotsFromRegistry:
- * true }` published whatever it liked without an approval existing.
+ * `lib/marketingTemplates.ts` walks the approval chain and mints this; the
+ * Guard accepts nothing else. Two earlier versions were not enough, and both
+ * failures are worth keeping written down:
  *
- * Identity in a module-private `WeakSet`, not a property: a symbol is reachable
- * through `Object.getOwnPropertySymbols()` and copied by a spread, which is how
- * the same mistake was made in S1e and found there.
+ * - a plain object, so a caller supplying `{ approvedDigest: <sha256 of my own
+ *   text>, slotsFromRegistry: true }` published whatever it liked;
+ * - a `WeakSet` with an **exported** factory, which proves the object was made
+ *   by this function and says nothing about who called it. The review put it
+ *   plainly: with an exported factory the `WeakSet` alone is not enough.
+ *
+ * So the call sites are counted by
+ * `scripts/check-protected-table-writers.mjs`, the way the repository already
+ * restricts who may write an audit row. The seal is what stands between a
+ * caller and a publication nobody approved, so who may mint one is a fact the
+ * build checks rather than a comment.
+ *
+ * The proof also carries **what the loader verified**, not just that it did:
+ * the claim and asset ids the approved post actually holds. The Guard compares
+ * the draft's declared ids against these rather than against another set the
+ * same caller supplied, which is how `"Pro costs $20 per month."` with empty
+ * claim lists was reaching `autonomous_eligible` with no price check at all.
  */
 const sealedProofs = new WeakSet<object>();
 
@@ -184,23 +195,27 @@ export type MarketingTemplateProof = {
   readonly approvedDigest: string;
   /** Whether every slot was filled from a registry id rather than free text. */
   readonly slotsFromRegistry: boolean;
+  /** The claim ids the approved post holds. */
+  readonly claimIds: readonly string[];
+  /** The asset ids the approved post holds. */
+  readonly assetIds: readonly string[];
   readonly [TEMPLATE_PROOF_BRAND]?: true;
 };
 
-/**
- * Seal a template the loader proved.
- *
- * Only `lib/marketingTemplates.ts` may call this, and
- * `scripts/check-protected-table-writers.mjs` counts the call sites: the seal
- * is what stands between a caller and an autonomous publication, so who may
- * mint one is a fact the build checks rather than a comment.
- */
 export function sealMarketingTemplateProof(proof: {
   templateId: string;
   approvedDigest: string;
   slotsFromRegistry: boolean;
+  claimIds: readonly string[];
+  assetIds: readonly string[];
 }): MarketingTemplateProof {
-  const sealed = Object.freeze({ ...proof }) as MarketingTemplateProof;
+  const sealed = Object.freeze({
+    templateId: proof.templateId,
+    approvedDigest: proof.approvedDigest,
+    slotsFromRegistry: proof.slotsFromRegistry,
+    claimIds: Object.freeze([...proof.claimIds]),
+    assetIds: Object.freeze([...proof.assetIds]),
+  }) as MarketingTemplateProof;
   sealedProofs.add(sealed);
   return sealed;
 }
@@ -267,15 +282,33 @@ const FACT_PATTERNS: readonly { source: string; flags: string }[] = Object.freez
 );
 
 /** The credit condition a "free" post has to carry with it (§7.2 rule 4). */
-const FREE_CONDITION = Object.freeze(["credit", "크레딧", "额度", "积分"]);
-const FREE_WORDING = Object.freeze(["free", "무료", "免费"]);
+/**
+ * Each term with the boundary rule its script needs.
+ *
+ * "freedom" is not "free" and "creditor" is not "credit", so the English terms
+ * are matched as words; Korean and Chinese have no boundaries to match on.
+ */
+const FREE_CONDITION: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["credit", "word"] as const),
+    Object.freeze(["credits", "word"] as const),
+    Object.freeze(["크레딧", "substring"] as const),
+    Object.freeze(["额度", "substring"] as const),
+    Object.freeze(["积分", "substring"] as const),
+  ]);
+
+const FREE_WORDING: readonly (readonly [string, "word" | "substring"])[] =
+  Object.freeze([
+    Object.freeze(["free", "word"] as const),
+    Object.freeze(["무료", "substring"] as const),
+    Object.freeze(["免费", "substring"] as const),
+  ]);
 
 const anyTermMatches = (
   forms: readonly string[],
-  terms: readonly string[],
-  match: "word" | "substring" = "substring",
+  terms: readonly (readonly [string, "word" | "substring"])[],
 ): boolean =>
-  terms.some((term) => {
+  terms.some(([term, match]) => {
     const pattern = marketingTermPattern(term, match);
     return forms.some((form) => pattern.test(form));
   });
@@ -314,10 +347,13 @@ const ruleFires = (rule: MarketingGuardRule, forms: readonly string[]): boolean 
 
   if (anyPatternMatches(cleaned, rule.patterns)) return true;
 
-  // A detector reads the text as a person would rather than as folded forms:
-  // the memory detector is sentence-aware, and folding would break the
-  // negation handling that keeps a denial from reading as a claim.
-  return rule.detectors.some((detector) => detector(forms[0] ?? ""));
+  // Every form, not just the readable one. The memory detector is
+  // sentence-aware and reads the text as a person would, but "We cl0ne your
+  // memories." is a person's sentence too once the digit is folded -- and an
+  // earlier version handed the detector only `forms[0]`, so it was not.
+  return rule.detectors.some((detector) =>
+    forms.some((form) => detector(form)),
+  );
 };
 
 const uniqueInOrder = <T>(values: readonly T[]): T[] => [...new Set(values)];
@@ -394,16 +430,17 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
         rejectCodes.push("price_source_not_stored");
         ruleIds.push(`claim.${claim.claimId}`);
       } else if (claim.targetsAustralia === true) {
-        // S1 plan, B2 amendment: an Australian price needs a stored AUD
-        // amount *and* a stored flag proving the displayed price includes
-        // GST. Neither is derivable from the number, and the catalogue
-        // carries no such flag today, so this refuses.
-        if (claim.currency !== "AUD" || claim.gstInclusiveStored !== true) {
-          rejectCodes.push("au_price_gst_unverifiable");
-          ruleIds.push(`claim.${claim.claimId}`);
-        } else {
-          approvalCodes.push("australian_price");
-        }
+        // S1 plan, B2 amendment: an Australian price needs a stored AUD amount
+        // *and* a stored flag proving the displayed price includes GST.
+        //
+        // Unconditional, and it takes no argument that could lift it. An
+        // earlier version accepted a `gstInclusiveStored` boolean from the
+        // caller -- a stored proof of something `billingPriceCatalogSchema`
+        // has no field for, which `lib/marketingFactSources.ts` says in as
+        // many words. When the catalogue gains a typed field, its reader and
+        // this branch change in one commit.
+        rejectCodes.push("au_price_gst_unverifiable");
+        ruleIds.push(`claim.${claim.claimId}`);
       }
       approvalCodes.push("price_or_promotion");
     }
@@ -444,12 +481,16 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
 
   // --- 5. "free" needs its condition in the same post ---------------------
   // Checked on the folded forms, so "frее" with Cyrillic е is the same word.
-  if (
-    anyTermMatches(forms, FREE_WORDING) &&
-    !anyTermMatches(forms, FREE_CONDITION)
-  ) {
-    rejectCodes.push("free_wording_without_condition");
-    ruleIds.push("rule.free-wording");
+  // §7.4 lists "무료" among the categories that always need a person, so the
+  // word is an approval whether or not its condition is there. An earlier
+  // version only refused the unconditional case, which made
+  // "Start free with monthly credits included." autonomous.
+  if (anyTermMatches(forms, FREE_WORDING)) {
+    approvalCodes.push("price_or_promotion");
+    if (!anyTermMatches(forms, FREE_CONDITION)) {
+      rejectCodes.push("free_wording_without_condition");
+      ruleIds.push("rule.free-wording");
+    }
   }
 
   // --- 6. §7.4 ------------------------------------------------------------
@@ -462,8 +503,21 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     [context.testimonial, "testimonial"],
     [context.legalOrPolicy, "legal_or_policy"],
   ] as const) {
-    if (verdict === "proved_true") approvalCodes.push(code);
-    if (verdict === "unreadable") approvalCodes.push("category_unreadable");
+    // Exhaustive, and the default is the approval queue. `undefined`, a
+    // missing field and a string nobody defined are all "not checked", and an
+    // earlier version let every one of them through as though it were
+    // `proved_false` -- so a caller who passed nothing at all published.
+    switch (verdict) {
+      case "proved_true":
+        approvalCodes.push(code);
+        break;
+      case "proved_false":
+        break;
+      case "unreadable":
+      default:
+        approvalCodes.push("category_unreadable");
+        break;
+    }
   }
 
   // --- 7. the verdict -----------------------------------------------------
@@ -479,13 +533,17 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     ? templates.find((entry) => entry.templateId === draft.templateId)
     : undefined;
 
-  // The seal, the slots, and a digest this function computed from the text it
-  // was given. An earlier version compared two values the caller supplied.
+  // The seal, the slots, a digest this function computed from the text it was
+  // given, and the ids the loader read off the approved post. An earlier
+  // version compared two values the caller supplied, and the version after
+  // that compared the draft's ids against facts from the same caller.
   const templateStands =
     !!named &&
     sealedProofs.has(named) &&
     named.slotsFromRegistry &&
-    named.approvedDigest === sha256(draft.renderedText);
+    named.approvedDigest === sha256(draft.renderedText) &&
+    sameSet([...draft.claimIds], [...named.claimIds]) &&
+    sameSet([...draft.assetIds], [...named.assetIds]);
 
   if (!templateStands) approvalCodes.push("new_copy");
 
@@ -496,7 +554,9 @@ export function guardDraft(input: MarketingGuardInput): MarketingGuardDecision {
     approvalCodes.push("undeclared_fact");
   }
 
-  if (!context.priceFallbackAlertReady) {
+  // `!== true` rather than `!`: the string "false" is truthy, and a
+  // configuration read that produced one would have switched the gate off.
+  if (context.priceFallbackAlertReady !== true) {
     approvalCodes.push("alert_path_not_ready");
   }
 
