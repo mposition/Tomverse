@@ -440,7 +440,7 @@ provider grain에서는 옳았지만, deployment grain에서는 "아직 아무 �
 
 | 선행조건 | 상태 | 무엇이 남았나 |
 |---|---|---|
-| 1. probe·attempt에 nullable endpoint·deployment 컬럼 | 미충족 | `ProviderProbeResult`·`RoutingAttempt` 어느 쪽에도 두 컬럼이 없습니다. `AvailabilityObservation`이 그 컬럼을 갖지만 **아무것도 쓰지 않습니다**. |
+| 1. probe·attempt에 nullable endpoint·deployment 컬럼 | **충족** (2026-09-23, `13af0bcfe`) | 두 테이블에 컬럼이 들어갔고 `AvailabilityObservation`이 가졌어야 할 FK 둘도 함께 들어갔습니다. 여전히 **아무것도 쓰지 않습니다** — 스키마 틈이 닫힌 것이고, 표본이 생긴 것이 아닙니다. |
 | 2. deployment별 synthetic canary | 미충족 | `lib/providerProbe.ts`는 여전히 provider당 대표 모델 하나입니다. |
 | 3. 분류 결과의 settlement 보존 | **코드상 충족, 4번에 가려짐** | `app/api/chat/route.ts`가 모든 종료 경로를 `completeInstrumentedDispatch()` 하나로 모으고, 거기에 `routingOutcomeForSettlement()`·`routingFailureLayerForSettlement()`의 결과를 넘깁니다. 다만 instrumentation mode가 `off`면 `beginInstrumentedDispatch()`가 `null`을 돌려주므로 **행이 하나도 생기지 않습니다.** 배선은 끝났고 표본이 없는 것입니다. |
 | 4. 계측 활성화 후 최소 한 관측 window | 미충족 | 계측이 꺼져 있고, 켠 뒤에 세는 것이므로 시간이 조건입니다. |
@@ -812,16 +812,55 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 셋 모두에 대해 통과하는 것이 기계적인 절반이고, 나머지 절반은 소유자의
 서명입니다.
 
-## 14.2 남은 것은 소유자 결정입니다 (2026-09-23)
+## 14.2 남은 것은 소유자 결정입니다 (2026-09-23, A-5 이후 갱신)
 
-이 시점에서 저장소가 스스로 진행할 수 있는 항목이 남아 있지 않습니다.
+§14의 권장 순서 중 저장소가 스스로 끝낼 수 있는 항목은 A-5까지입니다.
+
+| 순서 | 항목 | 상태 |
+|---|---|---|
+| 1 | T1·T2와 workspace/account 소유권 | **소유자.** account로 결정됨(2026-09-23) |
+| 2 | canonical failure classification과 scope identity | **완료** (A-2·A-3a·A-3b·A-4a, §10) |
+| 3 | residency approval과 recipient/destination 계약을 C schema에 | **완료** (`EndpointResidencyApproval`, `lib/providerDataDestinations.ts`) |
+| 4 | A-3b CHECK를 운영값 조사 후 `VALIDATE` | **소유자.** production 조사가 선행 |
+| 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 11개·dark column 6개, migration이 어느 환경에도 적용되지 않음 |
+| 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
+| 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
+| 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료(`RoutingCandidateVerdict`), ceiling 미착수 |
+| 9 | sticky·score snapshot grain 전환, 그 뒤 shadow 검증 | 미착수 |
+| 10 | decision grain을 `deploymentId`로 원자 전환 | §8.1 선행조건 5개가 선행 |
+| 11 | scope·capacity 준비 후 2-attempt fallback 활성화 | 미착수 |
+| 12 | provider attestation 입증 시 equivalence class 재검토 | 미착수 |
+
+막고 있는 것은 넷이고 전부 사람의 행위입니다.
 
 | 남은 것 | 막는 것 | 누가 |
 |---|---|---|
 | exploration 켜기 (D-3) | `allocateWithinTie`는 tie 안에서만 배분하므로 품질/비용 trade는 필요 없지만, **어느 모델이 답하는지가 바뀝니다.** 켜는 것은 제품 결정입니다. | 소유자 |
-| PACKAGE-01 재승인 | 세 번째 package가 새 사실입니다. | 소유자 |
+| PACKAGE-01 재승인 | 세 번째 package가 새 사실입니다. `npm run check:shared-packages`가 셋 모두에 통과하는 것이 기계적 절반입니다. | 소유자 |
 | Privacy 페이지 공급자별 데이터 이동 고지 (F-2) | 공급자 계약 조사 결과. `lib/providerDataDestinations.ts`의 12개 공급자가 전부 `unproven`이고, `providerDestinationIsEstablished()`가 fail-closed입니다. | 소유자 (조사 중) |
-| §8.1 cutover 선행조건 1·2·4·5 | probe·attempt 컬럼, deployment별 canary, 계측 활성화 후 관측 window, `unproven` = routing-ineligible 규칙. 1·2는 착수 가능하지만 4가 시간 조건이라 순서상 뒤입니다. | 혼합 |
+| §8.1 cutover 선행조건 2·4·5 | 1번(probe·attempt의 grain 컬럼)은 `13af0bcfe`에서 완료. 2번은 deployment별 canary이고 A-5 배포 이후에 착수 가능합니다. 4번은 계측을 켠 뒤의 시간 조건이고, 5번은 그 표본 위의 규칙입니다. | 혼합 |
+
+### 이 라운드에서 registry가 잡은 것 (2026-09-23)
+
+전체 유닛 스위트를 돌려 이 작업이 만든 실패 다섯을 찾았고, 셋은 게이트가
+제대로 작동한 것이었습니다. 그중 하나는 privacy입니다.
+
+`CredentialBinding`과 `QuotaScope`는 `User`에 cascade로 닿는데
+data-domain registry에 없었습니다. **dark라는 것은 면제 사유가 아닙니다** —
+등록되지 않은 채 행이 도착하면 그 행은 아무도 등급을 매기지 않은 것이고,
+첫 행은 누군가 config writer를 켜는 날 도착합니다.
+
+`RoutingCandidateVerdict`와 `DeploymentCacheAffinity`도 사람에게 닿지만
+체커가 보지 못했습니다 — 체커는 `User` 관계나 `*userId` 컬럼을 봅니다. 손으로
+등록하는 것은 불가능합니다(체커가 대칭이라, 스키마가 뒷받침하지 않는 등록을
+거절합니다). 저장소는 이미 답을 갖고 있고 `RoutingAttempt`·`ContextManifest`
+옆에 적어 두었습니다 — 자기 `userId`를 비정규화해 그 자체로 data domain이
+되는 것. 두 테이블도 같게 했습니다.
+
+**체커를 Conversation까지 따라가도록 넓히는 것은 이 변경이 할 일이 아닙니다.**
+스키마의 모든 conversation-linked 테이블에 대한 질문이고, 체커의 주석이 그
+규칙을 얼마나 조심스럽게 넓혀 왔는지 기록하고 있습니다. 그 틈은 누군가 볼
+가치가 있습니다.
 
 ## 15. 되돌릴 수 없는 것
 
