@@ -209,7 +209,10 @@ import {
     decideFallback,
     recoveryAfterFallback,
 } from "@/lib/routingFallbackPolicy";
-import { classifyStreamFailure } from "@/lib/routingStreamFailure";
+import {
+    classifyStreamFailure,
+    type StreamFailureClassification,
+} from "@/lib/routingStreamFailure";
 import {
     FAULT_INJECTION_HEADER,
     decideFaultInjection,
@@ -4743,6 +4746,26 @@ async function handleChatPost(
          * nothing gets one refusal for every turn and never a second provider
          * call.
          */
+        /**
+         * The last classification this turn produced, for the settlement.
+         *
+         * `attemptFallback` computes one for every stream failure and, until
+         * this was kept, threw it away unless a fallback actually happened --
+         * and fallback is off by default, so on almost every failed turn the
+         * attempt row recorded no class at all. The classifier's verdict is
+         * the only place a rate limit is told apart from an outage, and a row
+         * written without it cannot be reanalysed later.
+         *
+         * Only the class travels. The outcome does not: `classifyStreamFailure`
+         * answers "may this be substituted", and calls a provider timeout
+         * `cancelled` for that purpose, while `DISPATCH_OUTCOMES_COUNTED`
+         * excludes `cancelled` because it means the person changed their mind.
+         * Moving the outcome would take provider timeouts out of the Router's
+         * success-rate denominator, which is a scoring change and not a
+         * naming one.
+         */
+        let lastStreamFailure: StreamFailureClassification | null = null;
+
         const attemptFallback = async (
             controller: ReadableStreamDefaultController<string>,
             error: unknown
@@ -4753,6 +4776,7 @@ async function handleChatPost(
                 visibleTokenEmitted: generatedText.length > 0,
                 downstreamOpen: streamState === "open",
             });
+            lastStreamFailure = classified;
             const scope = autoFallbackScope({
                 routed: autoSelection.routed,
                 isGuest: access.kind === "guest",
@@ -5913,7 +5937,15 @@ async function handleChatPost(
                     // user-ledger fields are left alone -- only the provider
                     // ledger is told that the count is unknown rather than
                     // zero.
-                    await settleSafely("failed", { searchQueriesObserved: false });
+                    await settleSafely(
+                        "failed",
+                        { searchQueriesObserved: false },
+                        // The class only. See `lastStreamFailure` for why the
+                        // outcome stays with the generic mapping.
+                        lastStreamFailure
+                            ? { errorClass: lastStreamFailure.errorClass }
+                            : undefined
+                    );
                     errorSafely(controller, error);
                     await releaseSafely();
                 }

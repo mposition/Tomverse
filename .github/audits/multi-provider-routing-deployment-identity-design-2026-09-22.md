@@ -1,9 +1,9 @@
 # 멀티 공급자 라우팅 — deployment identity 설계 (v2.1 ADR 개정안)
 
 - 작성일: 2026-09-22
-- **개정 3** (같은 날). 개정 1·2 모두 독립 검토에서 `reject`. 이 판은 2차 검토의
-  blocker 2건·major 5건과 **사실 오류 5건**을 반영한 것입니다. 변경 요약은 §13.
-- 상태: **제안. 3차 독립 검토 대기.**
+- **개정 4** (같은 날). 개정 1·2·3 모두 독립 검토에서 `reject`. 이 판은 3차 검토의
+  blocker 2건·major 3건과 **사실 오류 2건**을 반영한 것입니다. 변경 요약은 §13.
+- 상태: **제안. 4차 독립 검토 대기.**
 - 선행 문서
   - [`.github/audits/multi-provider-routing-adr-gap-analysis-2026-09-22.md`](./multi-provider-routing-adr-gap-analysis-2026-09-22.md)
   - [`docs/policy/tomverse-multi-provider-routing-v2.1.md`](../../docs/policy/tomverse-multi-provider-routing-v2.1.md) (ADR, 미채택)
@@ -16,7 +16,7 @@
 것인가?" — 에 소유자가 **전면 도입**으로 답했고, 이어서 identity 형태에 대한 결정이
 내려졌습니다. 이 문서는 그 결정과, 결정에 딸려 나오는 기존 코드 영향을 기록합니다.
 
-**이 문서의 사실 주장은 두 차례 독립 검토에서 각각 5건씩 정정됐습니다.** 그 이력은
+**이 문서의 사실 주장은 세 차례 독립 검토에서 각각 5·5·2건 정정됐습니다.** 그 이력은
 §9와 §13에 남깁니다 — 무엇이 틀렸는지가 무엇이 맞는지만큼 중요합니다.
 
 ## 1. 소유자 결정
@@ -126,48 +126,67 @@ credential.endpointOverride / regionOverride / residencyOverride
 
 만들지 않습니다. 강제 수단은 §12.
 
-## 4. Broker 경로와 residency (개정 3에서 크게 바뀜)
+## 4. Broker 경로와 residency (개정 4에서 다시 바뀜)
 
-개정 2는 `routingPolicyDigest`를 routing-eligible의 증거로 썼습니다. **거부됐습니다.**
-digest는 **우리가 보낸 설정**을 증명할 뿐, broker가 실제로 어느 공급자·어느 region
-에서 실행했는지를 증명하지 않습니다. broker가 upstream pool이나 fallback 의미를
-바꿔도 digest는 그대로입니다.
+개정 2는 `routingPolicyDigest`를 routing-eligible의 증거로 썼고, 거부됐습니다 —
+digest는 **우리가 보낸 설정**을 증명할 뿐 broker가 어디서 실행했는지를 증명하지
+않기 때문입니다.
 
-### 4.1 digest는 의도, attestation은 사실
+개정 3은 그것을 **응답별 serving attestation**으로 대체했습니다. **그것도
+거부됐습니다. 이유가 더 근본적입니다** — 응답 attestation은 **데이터가 이미 전송된
+뒤에 도착합니다.** 불일치를 발견했을 때는 사용자 데이터가 이미 잘못된 관할에 가
+있습니다. 사후 증거는 사전 게이트가 될 수 없습니다.
 
-| 값 | 무엇인가 | 무엇에 쓰는가 |
+### 4.1 판정은 사전에, 증거는 사후에
+
+| 값 | 언제 | 무엇에 쓰는가 |
 |---|---|---|
-| `routingPolicyDigest` | 우리가 건 pinning/fallback 설정 | **의도 기록.** 변경 감지, 재현 |
-| 응답별 serving attestation | 공급자가 그 응답에 대해 보고한 실제 provider·region | **판정.** routing-eligible 여부 |
+| endpoint/region pin + 승인된 계약 | **dispatch 전** | **routing-eligible 판정.** 강제 가능해야 함 |
+| `routingPolicyDigest` | dispatch 전 | 우리가 건 설정. 의도이지 저쪽 사실이 아님 |
+| 응답별 serving attestation | dispatch 후 | **이 요청의 사후 감사**, 그리고 **이후 요청의 quarantine 신호** |
 
 규칙:
 
-1. **routing-eligible이 되려면 응답별 attestation이 pin과 일치해야 합니다.**
-   attestation을 얻을 수단이 없는 broker 경로는 **제약 트래픽의 후보가 아닙니다.**
-2. digest 일치만으로는 부족합니다. digest는 우리 쪽 사실이고 residency는 저쪽
-   사실입니다.
-3. **모르면 `unknown`입니다.** 추정하지 않습니다.
+1. **routing-eligible은 계약으로 정합니다** — 공급자가 계약상 보장하고 요청 옵션으로
+   강제할 수 있는 endpoint/region pin. 그것이 없으면 제약 트래픽의 후보가 아닙니다.
+2. **attestation 불일치는 그 요청을 되돌리지 못합니다.** 할 수 있는 것은 기록과,
+   그 endpoint를 이후 제약 트래픽에서 격리하는 것뿐입니다. 이 한계를 문서에
+   적는 것이 이 절의 요점입니다.
+3. **모르면 `unproven`입니다** (§4.3).
 
 ### 4.2 `unknown`은 "아무 데나 괜찮다"가 아닙니다
 
-개정 2는 "요청에 residency 제약이 없으면 `unknown` endpoint도 후보"라고 했습니다.
-**거부됐습니다.**
-
-Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사용자가 제약을 명시하지
-않았다는 것은 **조직이 어떤 해외 공개를 기본으로 허용하는가**에 대한 답이 아닙니다.
-이 저장소는 같은 문제를 반대 방향으로 이미 결정해 두었습니다 —
+Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사용자가 제약을
+명시하지 않았다는 것은 **조직이 어떤 해외 공개를 기본으로 허용하는가**에 대한 답이
+아닙니다. 이 저장소는 같은 문제를 반대 방향으로 이미 결정했습니다 —
 `docs/policy/voice-input.md`는 destination을 이름 댈 수 없으면 고지가 참이 될 수
 없다고 적습니다.
 
-그러므로:
+### 4.3 전환 순서 (S2)
 
-- `unknown` endpoint는 **사용자 제약과 조직 기본 해외 공개 정책을 모두** 통과해야
-  합니다.
-- 승인된 기본 destination 집합이 **없으면 fail-closed**입니다.
-- 그 집합을 정하는 것은 Privacy Owner의 승인 행위이며 이 문서가 정하지 않습니다.
+즉시 fail-closed는 **후보 전체를 탈락시켜 게이트를 도로 풀게 만드는 실패 양상**을
+가집니다. "explicit legacy"라는 라벨만 붙이는 것도 허용되지 않습니다. 순서:
 
-관측 사실 하나: `regionBlockedModelIds`는 현재 **입력만 존재하고 production producer가
-없습니다**(`lib/routerCandidates.ts`). residency는 아직 아무것도 막고 있지 않습니다.
+1. 기존 endpoint·recipient·destination **인벤토리** 작성
+2. **Privacy Owner가 기본 해외 공개 집합 승인**
+3. 기존 endpoint를 **근거 있는 값으로 분류**
+4. 그 후 fail-closed 활성화
+
+3단계 이전의 예외는 **기한·소유자·만료·신규 트래픽 확장 금지를 가진 승인된 예외**
+라야 합니다. 라벨이 아니라 승인입니다.
+
+관측 사실: `regionBlockedModelIds`는 현재 입력만 존재하고 **production producer가
+없습니다**(`app/api/chat/route.ts`). residency는 아직 아무것도 막고 있지 않습니다.
+
+### 4.4 S1의 답: 검증된 공급자 없음
+
+3차 검토 시점에 **serving attestation을 제공한다고 확인된 공급자는 0개**입니다.
+이 저장소가 읽는 것은 OpenAI의 `serviceTier` 하나뿐이고(`lib/servedProcessingTier.ts`),
+현재 provider 목록에 OpenRouter는 아예 없습니다(`lib/models.ts`).
+
+그러므로 **ADR §14의 "OpenRouter = emergency fallback" 역할은 제약 트래픽에 대해
+성립하지 않습니다.** 명시적으로 적습니다. digest만으로 허용하면 broker가 upstream을
+바꿔도 탐지하지 못합니다.
 
 ## 5. Scope 표
 
@@ -195,8 +214,22 @@ expiry·membership·attestation이라는 복잡성만 남은 채 절감은 생�
   한다는 비용은 그대로 받습니다.
 - equivalence class는 **attestation 조사가 실제 재사용 가능성을 증명한 뒤** 도입
   합니다. 그 조사 자체가 별도 작업 항목입니다.
-- ADR §3.3의 "같은 equivalence group에서만 자동 fallback"은 그때까지 **deployment
-  동일성**으로 읽습니다.
+
+### 6.1 class는 품질 증거 재사용에만 씁니다 (개정 4에서 정정)
+
+개정 3은 ADR §3.3의 "같은 equivalence group에서만 자동 fallback"을 그때까지
+**deployment 동일성**으로 읽자고 했습니다. **그것은 §11과 정면으로 모순됩니다** —
+§11은 endpoint/provider scope 실패에서 다른 endpoint를 요구하는데, 같은 deployment는
+정의상 하나의 endpoint를 가리킵니다. 두 조건을 동시에 만족하는 후보는 존재하지
+않으므로, 그대로 읽으면 **fallback 자체가 사라집니다.**
+
+정정:
+
+- **equivalence class는 품질 증거를 재사용해도 되는가**에만 답합니다.
+- **fallback 대상은 자기 deployment gate를 독립적으로 통과한 deployment**면
+  충분합니다. class가 없다는 것이 fallback을 금지하지 않습니다.
+
+두 질문은 애초에 다른 질문이었고, 하나의 개념으로 답하려 한 것이 잘못이었습니다.
 
 이것은 개정 2의 §6을 통째로 미루는 결정이며, 미루는 이유는 근거가 없어서입니다 —
 설계가 틀렸다기보다 **전제가 조사되지 않았습니다.**
@@ -208,10 +241,23 @@ BYOK에서는 같은 deployment가 credential에 따라 다른 비용을 갖습�
 
 | 값 | 의미 | 쓰이는 곳 |
 |---|---|---|
-| `providerChargeEstimate` | 이 route가 공급자에게 청구될 금액 | **tie-break 비용 기준**, 사용자 operational guardrail |
-| `tomverseMarginalCost` | Tomverse가 부담하는 금액 | Tomverse provider budget, COGS |
-| `workspaceExternalCost` | workspace가 자기 계정으로 부담하는 금액 | workspace 리포트 |
+| `providerChargeEstimate` | 이 route가 공급자에게 청구될 금액 | **tie-break 비용 기준만** |
+| `tomverseMarginalCost` | Tomverse가 부담하는 금액 | **사용자 operational guardrail, Tomverse provider budget, 구매 크레딧 funded allowance**, COGS |
+| `workspaceExternalCost` | workspace가 자기 계정으로 부담하는 금액 | **별도 `byok-spend-*` namespace**, workspace 한도 |
 | `billingOwner` | 분배를 정하는 라벨 | 귀속 |
+
+**개정 3은 guardrail에 `providerChargeEstimate`를 쓰자고 했습니다. 정정합니다.**
+`reservedCost`에는 소비자가 **셋** 있고, 개정 3은 그중 둘만 찾았습니다 — 세 번째는
+구매 크레딧의 `fundedCostMicroUsd` 배분입니다(`lib/chatSecurity.ts`,
+`addOnReservedCost = ceil(reservedCost * addOnReservedCredits / usageCredits)`).
+BYOK에 `providerChargeEstimate`를 쓰면 **사용자가 자기 돈으로 낸 지출이
+Tomverse-funded allowance를 소진**합니다.
+
+그리고 guardrail 자체가 코드 주석에서 "internal cost safety"입니다. Tomverse가 한
+푼도 안 내는 지출에 Tomverse의 운영 보호 한도를 적용하는 것은 **사용자가 자기 돈을
+쓴다는 이유로 조이는 일**입니다. BYOK 지출에는 자기 namespace와 명시적 workspace
+한도가 필요합니다 — 사용자 크레딧도, operational guardrail도, Tomverse provider
+예산도 아닌 **네 번째 것**입니다.
 
 tie-break는 `providerChargeEstimate`입니다. BYOK workspace도 그 외부 청구서를
 부담하므로 "내지 않는 돈으로 순위가 정해진다"는 것은 사실이 아닙니다.
@@ -265,6 +311,30 @@ tie-break는 `providerChargeEstimate`입니다. BYOK workspace도 그 외부 청
    두 grain이 동시에 후보를 판정해서는 안 됩니다. 전환은 **atomic cutover**입니다.
 4. `ProviderHealthState`는 그대로 둡니다. 과거 행을 추측 백필하지 않습니다.
 
+#### 표본이 없으면 자를 수 없습니다 (S4, 개정 4에서 추가)
+
+**지금 cutover하면 health filter가 조용히 사라집니다.** 현재:
+
+- probe는 **provider당 대표 모델 하나**이고 Perplexity는 표본이 아예 없습니다
+  (`lib/providerProbe.ts`)
+- probe 행에 **endpoint·deployment 컬럼이 없습니다**(`prisma/schema.prisma`)
+- `RoutingAttempt` 계측은 **기본이 꺼져 있습니다**(`lib/routerRuntimeSignals.ts`)
+
+표본 없이 deployment grain으로 자르면 모든 deployment가 `unknown`이 되고, 현행
+정책상 `unknown`은 **아무도 제외하지 않습니다**. 필터가 있는 척하며 통과시킵니다.
+
+cutover 전에 필요한 것:
+
+1. probe·attempt에 **nullable `providerEndpointId`·`modelDeploymentId`**
+2. **deployment별 synthetic canary**
+3. §9 분류 결과가 **settlement까지 보존**될 것 (A-4a의 남은 절반 — §10)
+4. 계측 활성화 후 **최소 한 관측 window** 축적
+5. 표본 없음은 `unknown`이 아니라 **`unproven` = routing-ineligible**
+
+5번이 개정 4의 규칙 변경입니다. `unknown`(아무도 제외 안 함)은 probe가 성긴
+provider grain에서는 옳았지만, deployment grain에서는 "아직 아무 증거도 없다"가
+기본 상태가 되므로 같은 규칙이 필터를 무효로 만듭니다.
+
 ### 8.2 `QuotaScope` registry
 
 ```
@@ -317,9 +387,17 @@ catalogue information a reader can reconstruct"는 자기 전제에서 틀렸습
 
 - **`RoutingCandidateVerdict` 자식 테이블.** run당 후보마다 한 행.
 - 컬럼: `routingRunId`, `deploymentId`, 고정 `reason` 식별자, 판정 입력의 snapshot id.
-- **run당 후보 상한**을 둡니다. 행 크기·보존·replay 가능성을 최대 deployment 수에서
-  측정한 뒤 정합니다.
 - 원문·잔액·오류 문구는 저장하지 않습니다 — content-free가 유지됩니다.
+
+**run당 상한은 두지 않습니다** (S5, 개정 4에서 정정). 개정 3은 행 크기를 위해 상한을
+두자고 했습니다. 어떤 절단선을 잡아도 **버려지는 것은 하위 순위이거나 특정 rejection
+reason이고, 그것이 정확히 "왜 이 deployment는 안 뽑혔는가"라는 질문의 답**입니다.
+새로 추가된 deployment가 가장 먼저 잘립니다 — 그 답이 가장 필요한 대상입니다.
+
+대신 **활성 registry 자체에 승인된 ceiling**을 둡니다. 상한을 넘는 config는
+publish를 거절하고 마지막 승인 snapshot을 유지합니다. 런타임에서 예상 밖 초과가
+나면 overflow 사건으로 기록합니다. 크기는 config 승인 시점에 통제하지 실행 시점에
+증거를 버려 통제하지 않습니다.
 
 ## 9. 갭 4·5 확정 결과 (두 차례 정정 반영)
 
@@ -341,10 +419,34 @@ attempt 기록 경로:      classifyStreamFailure()      ← 나중에 실행
 `app/api/chat/route.ts`에서 `recordProviderFailure`가 `attemptFallback`보다 **앞에**
 있습니다. 따라서:
 
-- **attempt 기록은** timeout·ECONN을 provider 실패에서 분리합니다.
-- **provider health는** 분리하지 않습니다. `PROVIDER_SCOPED`가 `NETWORK`를 담습니다.
-- 개정 2의 "뒤섞이는 것은 429·5xx 계열로 한정"은 **attempt 경로에만 참**이고 provider
-  health에는 거짓입니다.
+- **provider health는** timeout·`ECONNRESET`을 분리하지 않습니다. `PROVIDER_SCOPED`가
+  `NETWORK`를 담습니다.
+- **`classifyStreamFailure`는** 분리합니다 — 그러나 **그 결과가 행에 도달하는지는
+  별개 문제였습니다**(아래).
+- 정확한 표현은 `ECONN`이 아니라 **`ECONNRESET`** 하나입니다. `ECONNREFUSED`·
+  `ETIMEDOUT`·`EPIPE`는 abort-shaped 분기에 들어가지 않습니다
+  (`lib/routingStreamFailure.ts`).
+
+#### 분류가 행에 도달하지 않고 있었습니다 (F1, 개정 4에서 정정)
+
+개정 3은 "attempt 기록은 timeout·ECONN을 provider 실패에서 분리한다"고 적었습니다.
+**코드에 대해 거짓이었습니다.**
+
+`attemptFallback`이 분류를 계산하지만, **fallback이 거절되면**(기본값 —
+`AUTO_ROUTER_FALLBACK_ENABLED`가 꺼져 있음) 그 결과는 버려지고
+`settleSafely("failed")`가 instrumentation 없이 호출됩니다. 저장되는 것은 generic
+매핑의 `failed_post_token` / `stream` / `errorClass = NULL`입니다. 분류가 행에
+도달하는 유일한 경로는 **fallback이 성공한 경우**뿐이었습니다.
+
+A-4a가 분류를 보존하도록 고쳤지만, 그 절반만 고쳤던 것입니다. 나머지 절반은
+개정 4와 함께 고쳤습니다 — 이제 fallback이 거절돼도 `errorClass`가 행에 실립니다.
+
+**`errorClass`만 전달합니다.** `classifyStreamFailure`의 `outcome`은 "대체해도
+되는가"에 답하며 그 목적으로 provider timeout을 `cancelled`라고 부르는데,
+`DISPATCH_OUTCOMES_COUNTED`는 `cancelled`를 "사용자가 마음을 바꿨다"는 뜻으로
+제외합니다. outcome까지 옮기면 provider timeout이 성공률 분모에서 빠집니다 —
+이름이 아니라 점수 변경입니다. **한 값이 두 질문에 쓰이고 있다는 것 자체가 갭 4가
+가리키는 문제의 또 다른 사례입니다.**
 
 그리고 attempt 경로에서 소실되는 범위도 더 넓습니다 — `classifyStreamFailure`가 따로
 다루는 provider category는 `PAYMENT_REQUIRED` 하나뿐이고, `AUTHENTICATION`·
@@ -415,6 +517,16 @@ dispatched attempt 최대 2회를 유지합니다. 첫 fallback이 신뢰성 이
 
 같은 장애 영역만 남았다면 세 번째 후보 대신 종료합니다.
 
+**이 표는 아직 구현할 수 없습니다** (개정 4에서 추가). `classifyStreamFailure`는
+scope를 반환하지 않고, `classifyProviderFailure().scope`를 읽고 나서 버립니다
+(`lib/routingStreamFailure.ts`). `PROVIDER_SCOPED`는 이미 provider-scoped와
+model-scoped를 구분하고 있으므로 **없는 것을 만드는 일이 아니라 또 한 번 버려지는
+것을 살리는 일**입니다 — A-4a가 `errorClass`에 대해 한 것과 같은 모양입니다.
+scope 보존이 §11 표의 선행 조건이고, 그 전까지 fallback 규칙은 현행 그대로입니다.
+
+그리고 **fallback 대상은 class 소속이 아니라 자기 gate를 통과한 deployment**입니다
+(§6.1). class 부재가 fallback을 금지하지 않습니다.
+
 ### 충돌 5 — 두 번째 원장 (해소)
 
 `routing_attempts.actual_cost`는 만들지 않습니다. `ChatAttemptUsage`가 이미 attempt
@@ -442,51 +554,69 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 
 과거 행은 추측 백필하지 않고 legacy/null로 남깁니다.
 
-## 13. 개정 2에서 바뀐 것
+## 13. 개정 3에서 바뀐 것
 
-| 항목 | 개정 2 | 개정 3 |
+| 항목 | 개정 3 | 개정 4 |
 |---|---|---|
-| broker 판정 | `routingPolicyDigest`가 증거 | **digest는 의도, 응답별 attestation이 판정** |
-| `unknown` residency | 제약 없는 요청에는 후보 | **조직 기본 해외 공개 정책(APP 8)도 통과해야 함. 없으면 fail-closed** |
-| quality equivalence class | `servingContractDigest` 도입 | **보류.** attestation 입증 provider 0개. deployment 단위로 시작 |
-| health 대상 | `ProviderHealthState` 보존 + projection | **Router의 원본은 `ProviderProbeResult`**. canonical observation + event id, authority는 한 grain, atomic cutover |
-| BYOK 비용 배선 | 4값 분리 | 분리 + **사용자 guardrail과 provider hold가 같은 `reservedCost`를 쓴다는 사실 반영** |
-| quota scope | typed FK | + **type별 partial unique index**, enum registry 등록 |
-| 후보 동결 | "candidate id 또는 snapshot version" | **`RoutingCandidateVerdict` 테이블 + run당 상한** |
-| fallback endpoint | 항상 다른 endpoint | **실패 scope가 정함** |
-| 갭 4 범위 | 429·5xx로 한정 | **분류 경로가 둘.** attempt는 분리, provider health는 안 함 |
-| broker 필드 위치 | §4에만 | **§2 정본 계층과 §2.3 로그 명명에 반영** |
-| BYOK 0의 실패 양상 | 비싼 모델이 최선 | **전 후보 비용 동률** |
+| broker 판정 | 응답별 attestation이 판정 | **계약·강제 가능한 pin이 사전 판정.** attestation은 사후 감사와 이후 quarantine — 데이터는 이미 나간 뒤 도착하므로 게이트가 될 수 없음 |
+| OpenRouter | 제약 트래픽 제외 가능성 | **attestation 공급자 0개 확인. 제약 트래픽에 대해 ADR §14의 역할 불성립**을 명시 |
+| residency 전환 | 열린 질문(S2) | **4단계 순서 확정.** 라벨이 아니라 기한·소유자·만료를 가진 승인된 예외 |
+| equivalence group | "당분간 deployment 동일성"으로 읽음 | **철회.** §11의 다른 endpoint 요구와 모순돼 fallback이 사라짐. class는 **품질 증거 재사용 전용**, fallback 대상은 자기 gate를 통과한 deployment |
+| guardrail 비용 | `providerChargeEstimate` | **`tomverseMarginalCost`.** `reservedCost`의 **세 번째** 소비자(구매 크레딧 funded allowance)를 놓쳤음. BYOK는 별도 `byok-spend-*` namespace |
+| health cutover | atomic cutover | + **표본 전제 5건.** 표본 없음은 `unknown`이 아니라 **`unproven` = routing-ineligible** |
+| 후보 동결 | run당 상한 | **상한 없음.** 자르면 신규 deployment의 판정부터 사라짐. **활성 registry ceiling을 config publish에서** 강제 |
+| §11 fallback 표 | 실패 scope가 정함 | 유지 + **지금은 구현 불가**를 명시. `classifyStreamFailure`가 scope를 버림 |
+| 갭 4 서술 | attempt 기록은 분리함 | **거짓이었음.** fallback 거절 시 분류가 행에 도달하지 않았음(F1). 고쳤고, `errorClass`만 전달 |
+| `ECONN` | 넓게 서술 | **`ECONNRESET` 하나**로 정정 |
 
-## 14. 권장 작업 순서 (2차 검토 반영)
+## 14. 권장 작업 순서 (3차 검토 반영)
 
-1. §4 residency·broker attestation 규칙과 APP 8 기본 destination 정책 — **Privacy
-   Owner 승인 필요**
-2. §8.1 single-authority cutover, §8.3 비용 변수·bucket key migration, §8.5 verdict
-   저장 형태 확정
-3. **A-3b와 A-4a를 한 migration에서** — `errorClass` 닫힌 vocabulary를 분류 보존과
-   함께 맞춥니다
-4. C의 identity schema를 **additive/nullable로 먼저** 도입. 과거 행 추측 백필 없음
-5. **A-5 atomic config manifest는 C 이후** — deployment·endpoint·routing policy
-   digest를 함께 동결해야 의미가 있습니다
-6. projection shadow 검증 후 §8.4 방식으로 decision grain을 한 번에 전환
-7. A-4b capacity state와 failure-scope별 fallback
-8. provider attestation 조사 → 재사용 가능성이 입증되면 quality equivalence class
+1. **S1·S2, workspace/account 소유권, BYOK namespace, §6/§11 관계를 먼저 결정** —
+   대부분 소유자·Privacy Owner의 승인 행위입니다
+2. 현재 stream 분류 결과가 settlement와 attempt 행까지 도달하게 고침 —
+   **개정 4와 함께 완료** (§10)
+3. A-3b/A-4a는 하나의 vocabulary로 설계하되 **한 migration으로 뭉개지 않음**:
+   expand CHECK → writer 배포 → 운영값 조사 → **별도 validation**
+4. C identity schema를 **additive/nullable**로 도입. 과거 행 추측 백필 없음
+5. **C 직후 A-5 config manifest** — multi-deployment decision 전환보다 **반드시
+   먼저**여야 합니다
+6. canonical observation journal과 deployment canary 구축, 표본 축적
+7. BYOK 비용·funded allowance·bucket key를 **versioned dual-read/write**로 전환
+8. 모든 후보 verdict 저장과 **registry ceiling** 구현
+9. shadow 비교 후 decision grain을 한 번에 `deploymentId`로 전환
+10. failure scope와 capacity state가 갖춰진 뒤 2-attempt fallback 활성화
+11. provider attestation이 재사용 가능성을 입증한 뒤 equivalence class 재검토
 
-## 15. 3차 검토에 올리는 열린 질문
+## 15. 되돌릴 수 없는 것
 
-- **S1** — §4.1의 "응답별 serving attestation"을 실제로 제공하는 공급자가 있는가?
-  없다면 broker 경로는 제약 트래픽에서 영구 제외이고, ADR §14의 OpenRouter 역할
-  (emergency fallback)이 성립하는가?
-- **S2** — §4.2의 "조직 기본 해외 공개 정책"이 정해지기 전까지 fail-closed면, 지금
-  `residencyClass`를 모르는 기존 공급자 전체가 후보에서 빠집니다. 전환 규칙이
-  필요한가, 아니면 현행 무제약 상태를 명시적 legacy로 두는가?
-- **S3** — §6 보류가 D3(region별 deployment)와 충돌하지 않는가? region마다 eval을
-  통과시키는 비용을 실제로 감당할 수 있는가?
-- **S4** — §8.1의 atomic cutover 시점에 probe 표본이 deployment 단위로 충분한가?
-  probe는 provider당 한 모델만 찌릅니다.
-- **S5** — §8.5의 run당 후보 상한을 무엇으로 정하는가? 상한을 넘으면 무엇을
-  버리는가 — 버리는 순간 "왜 밀렸는가"에 답할 수 없는 후보가 생깁니다.
+3차 검토의 판정을 그대로 받습니다. 비가역적인 것은 셋입니다.
+
+1. **해외 공개** — 나간 데이터는 회수되지 않습니다.
+2. **요청 당시 저장하지 않은 증거** — serving·config·candidate 판정. 나중에
+   재구성할 수 없습니다.
+3. **근거 없이 백필해 오염시킨 과거 identity** — 틀린 값을 지운 자리에 진짜 값이
+   없습니다.
+
+비용·순위·fallback 정책 자체는 **수정 배포로 되돌릴 수 있으므로** 같은 수준의
+릴리스 차단으로 취급하지 않습니다. 이것이 AGENTS.md "검증 범위는 되돌릴 수 없는
+것에 비례합니다"의 적용입니다.
+
+## 15.1 4차 검토에 올리는 열린 질문
+
+- **T1** — §4.1의 "계약상 보장되고 요청 옵션으로 강제 가능한 region pin"을 실제로
+  제공하는 공급자는 어디인가? Azure·Vertex·Bedrock은 그럴 것으로 보이지만
+  확인되지 않았습니다. 확인되지 않으면 §4는 또 실행 불가입니다.
+- **T2** — §8.3의 `byok-spend-*` namespace에 한도를 정하는 주체는 누구인가?
+  workspace가 자기 한도를 정한다면 그것은 abuse 방어가 아니고, Tomverse가 정한다면
+  왜 남의 돈에 한도를 거는지 답해야 합니다.
+- **T3** — §8.1의 `unproven`이 routing-ineligible이면, deployment 도입 직후 **모든
+  deployment가 ineligible**입니다. 첫 표본은 어떻게 얻는가 — canary가 ineligible
+  deployment로 트래픽을 보내야 하는데 그것이 허용되는가?
+- **T4** — §8.5의 registry ceiling을 넘는 config를 거절하면, 공급자가 모델을
+  늘릴 때 **승인 없이는 카탈로그가 멈춥니다.** 의도한 것인가?
+- **T5** — §14의 5번(A-5를 C 직후)은 A-5가 deployment·endpoint·routing policy
+  digest를 함께 동결해야 한다는 뜻입니다. 그러면 A-5 이전의 C 작업은 **동결되지
+  않은 config 위에서** 이루어집니다. 그 구간의 재현성은 포기하는가?
 
 ## 16. 검토 이력
 
@@ -495,4 +625,6 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 - 개정 1: Cursor 독립 검토 → **`reject`**. blocker 2, major 6, 사실 오류 5.
 - 개정 2: Cursor 독립 검토 → **`reject`**. blocker 2, major 5, 사실 오류 5.
   round 1 findings 중 `closed` 2건, `partially closed` 3건, `not closed` 3건.
-- 개정 3: 3차 독립 검토 대기.
+- 개정 3: Cursor 독립 검토 → **`reject`**. blocker 2, major 3, 사실 오류 2.
+  round 2 findings 중 `not closed` 1건, `partially closed` 5건.
+- 개정 4: 4차 독립 검토 대기.
