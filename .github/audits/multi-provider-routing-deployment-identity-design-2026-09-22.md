@@ -822,7 +822,7 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 | 2 | canonical failure classification과 scope identity | **완료** (A-2·A-3a·A-3b·A-4a, §10) |
 | 3 | residency approval과 recipient/destination 계약을 C schema에 | **완료** (`EndpointResidencyApproval`, `lib/providerDataDestinations.ts`) |
 | 4 | A-3b CHECK를 운영값 조사 후 `VALIDATE` | **소유자.** production 조사가 선행 |
-| 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 11개·dark column 6개, migration이 어느 환경에도 적용되지 않음 |
+| 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 12개·dark column 6개, migration이 어느 환경에도 적용되지 않음. A-5는 2라운드 검토를 거쳤습니다 — 1라운드가 reject였고, digest가 덮는 field 목록이 `model_deployment_gate_follows_identity()`보다 좁았던 것과 digest만으로는 재구성이 안 된다는 것 둘입니다. 후자가 `RoutingIdentityManifestEntry`를 만든 이유입니다 |
 | 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
 | 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
 | 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료(`RoutingCandidateVerdict`), ceiling 미착수 |
