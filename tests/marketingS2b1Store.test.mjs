@@ -718,40 +718,72 @@ const marketingExportIsCallable = (specifier, exported, seen = new Set()) => {
  */
 const moduleReachesTheStore = (specifier, fromDirectory, depth = 0) => {
   if (!specifier.startsWith(".") && !specifier.startsWith("@/")) return false;
-  // The wrapper reaches the store on purpose -- that is what it is for, and
-  // the permission checks, the step-up check and the audit transaction are
-  // wrapped around the reaching. Treating it as a helper would refuse every
-  // route for importing the thing they are required to import.
-  if (specifier.endsWith("marketingAdminMutations")) return false;
   if (WRITES_MARKETING_STATE.test(specifier)) return true;
-  if (depth > 0) return true;
+  // Two helpers deep is where this stops looking, and stopping means "yes".
+  // The guard was written before anything recursed, so it never fired and the
+  // second helper was a clear path to the store.
+  if (depth > 1) return true;
 
   const candidate = specifier.startsWith("@/")
     ? join(process.cwd(), `${specifier.slice(2)}.ts`)
     : join(fromDirectory, `${specifier}.ts`);
   let source;
+  let opened = candidate;
   try {
     source = readFileSync(candidate, "utf8");
   } catch {
+    // A directory import. The earlier fallback built `fooindex.ts`, so every
+    // directory specifier was unreadable and therefore refused.
+    opened = join(candidate.replace(/\.ts$/u, ""), "index.ts");
     try {
-      source = readFileSync(
-        candidate.replace(/\.ts$/u, join("", "index.ts")),
-        "utf8"
-      );
+      source = readFileSync(opened, "utf8");
     } catch {
       // Unreadable is "reaches the store": a path this check cannot open is
       // not a path it may vouch for.
       return true;
     }
   }
-  const tree = ts.createSourceFile(candidate, source, ts.ScriptTarget.Latest, true);
-  for (const statement of tree.statements) {
-    if (!ts.isImportDeclaration(statement)) continue;
-    if (statement.importClause?.isTypeOnly) continue;
-    const from = statement.moduleSpecifier.getText(tree).slice(1, -1);
-    if (WRITES_MARKETING_STATE.test(from)) return true;
-  }
-  return false;
+  const tree = ts.createSourceFile(opened, source, ts.ScriptTarget.Latest, true);
+  const directory = opened.slice(0, opened.lastIndexOf(sep));
+  let reaches = false;
+  const look = (node) => {
+    if (reaches) return;
+
+    // An import, a re-export, or a dynamic load -- all three bring the store
+    // into this module, and only the first was being read.
+    let from = null;
+    if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) {
+      from = node.moduleSpecifier.getText(tree).slice(1, -1);
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      !node.isTypeOnly
+    ) {
+      from = node.moduleSpecifier.getText(tree).slice(1, -1);
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+      node.arguments[0] &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      from = node.arguments[0].text;
+    }
+
+    if (from !== null) {
+      if (WRITES_MARKETING_STATE.test(from)) {
+        reaches = true;
+        return;
+      }
+      if (moduleReachesTheStore(from, directory, depth + 1)) {
+        reaches = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, look);
+  };
+  look(tree);
+  return reaches;
 };
 
 const marketingRouteOffenders = (relative, source) => {
@@ -882,9 +914,14 @@ const marketingRouteOffenders = (relative, source) => {
     // The directory this file sits in, for relative specifiers. A synthetic
     // probe has none, and its relative imports are therefore unreadable, which
     // is the answer those probes are testing for.
-    const directory = relative.includes(sep)
-      ? join(process.cwd(), relative.slice(0, relative.lastIndexOf(sep)))
-      : process.cwd();
+    const lastSeparator = Math.max(
+      relative.lastIndexOf(sep),
+      relative.lastIndexOf("/")
+    );
+    const directory =
+      lastSeparator > 0
+        ? join(process.cwd(), relative.slice(0, lastSeparator))
+        : process.cwd();
 
     for (const statement of tree.statements) {
       if (!ts.isImportDeclaration(statement)) continue;
@@ -906,6 +943,16 @@ const marketingRouteOffenders = (relative, source) => {
         if (bindings && ts.isNamedImports(bindings)) {
           for (const element of bindings.elements) {
             if (element.isTypeOnly) continue;
+            // The wrapper itself is the sanctioned way in, and every route
+            // imports it. Excluding its whole module was too much: anything
+            // else it exported would have been invisible too, and a
+            // re-exported store function would have passed both the type
+            // checker and this check.
+            if (
+              (element.propertyName ?? element.name).text === "runMarketingAdminMutation"
+            ) {
+              continue;
+            }
             storeBindings.set(element.name.text, { specifier: from, exported: null });
           }
         }
@@ -999,14 +1046,18 @@ const marketingRouteOffenders = (relative, source) => {
             );
           }
         }
-        // A direct `eval` sees this module's bindings, so it can call one that
-        // was imported without ever writing its name where this check looks.
+        // Code built from a string. A direct `eval` sees this module's
+        // bindings, so it can call one that was imported without writing its
+        // name where this check looks; `(0, eval)` and `Function` do not see
+        // them, but they can load the store themselves. All three are refused,
+        // and only outside the zone the wrapper runs -- refusing `eval` inside
+        // `run` was refusing something the wrapper had already authorised.
         if (
-          ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) &&
-          node.expression.text === "eval"
+          ts.isIdentifier(node) &&
+          (node.text === "eval" || node.text === "Function") &&
+          !within(node)
         ) {
-          offenders.push(`${relative}: evaluates a string`);
+          offenders.push(`${relative}: builds code from a string with ${node.text}`);
         }
         ts.forEachChild(node, findLoads);
       };
@@ -1838,6 +1889,66 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  });\n" +
         "}\n",
     ],
+    // Five where the store is a file or two away. These import real modules
+    // under `tests/fixtures/marketingRouteProbe/`, because "does this helper
+    // reach the store" is a question about a file that exists.
+    [
+      "a helper that names a second helper, which names the store",
+      'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+        'import { pauseViaHelper } from "./twoDeepHelper";\n\n' +
+        "pauseViaHelper();\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "a helper that re-exports the store instead of importing it",
+      'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+        'import { pauseMarketingChannel } from "./reExportHelper";\n\n' +
+        "pauseMarketingChannel(undefined as never, {});\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "a helper that re-exports the whole store module",
+      'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+        'import { pauseMarketingChannel } from "./starHelper";\n\n' +
+        "pauseMarketingChannel(undefined as never, {});\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "a helper that loads the store dynamically",
+      'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+        'import { pauseDynamically } from "./dynamicHelper";\n\n' +
+        "void pauseDynamically();\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "code built from a string by an indirect eval",
+      imports +
+        'const run = (0, eval);\n' +
+        'run("pauseMarketingChannel(undefined, {})");\n' +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
+    [
+      "code built from a string by Function",
+      imports +
+        'Function("return 1")();\n' +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
     // Four that never name the store in a static import, so watching the
     // names could not see them.
     [
@@ -2203,9 +2314,12 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 48, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 54, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
-    .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
+    .filter(
+      ([, source, at]) =>
+        marketingRouteOffenders(at ?? "probe/route.ts", source).length === 0
+    )
     .map(([name]) => name);
   assert.deepEqual(passed, []);
 });
@@ -2267,6 +2381,26 @@ test("the route sweep accepts the shape the real routes are written in", () => {
     "  });\n" +
     "}\n";
   assert.deepEqual(marketingRouteOffenders("probe/route.ts", localTable), []);
+
+  // An ordinary helper, and a directory import. Opening a route's imports to
+  // ask whether they reach the store is the kind of rule that refuses too
+  // much: the earlier directory fallback built `barrelindex.ts`, so every
+  // directory specifier was unreadable and therefore refused.
+  const ordinaryHelpers =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+    'import { SAFE_LABEL } from "./safeHelper";\n' +
+    'import { SAFE_LABEL as VIA_BARREL } from "./barrel";\n\n' +
+    "export async function POST(req: Request) {\n" +
+    "  return runMarketingAdminMutation({\n" +
+    "    request: req,\n" +
+    "    bucket: SAFE_LABEL,\n" +
+    "    targetType: VIA_BARREL,\n" +
+    "  });\n" +
+    "}\n";
+  assert.deepEqual(
+    marketingRouteOffenders("tests/fixtures/marketingRouteProbe/route.ts", ordinaryHelpers),
+    []
+  );
 
   // A table read twice. Counting mentions called the second read a write:
   // `action: TABLE.a, summary: TABLE.b` failed for being "written to after it
