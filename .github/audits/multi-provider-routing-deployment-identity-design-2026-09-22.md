@@ -1,10 +1,9 @@
 # 멀티 공급자 라우팅 — deployment identity 설계 (v2.1 ADR 개정안)
 
 - 작성일: 2026-09-22
-- **개정 5** (2026-09-23). 개정 1–4 모두 독립 검토에서 `reject`. 이 판은 4차 검토의
-  blocker 1건·major 3건과 **사실 오류 2건**, 그리고 개정 4가 스스로 만든 결함
-  1건을 반영한 것입니다. 변경 요약은 §13.
-- 상태: **제안. 5차 독립 검토 대기.**
+- **개정 6** (2026-09-23). 개정 1–5 모두 독립 검토에서 `reject`. 이 판은 5차 검토의
+  major 4건과 사실 오류 2건을 반영합니다. 변경 요약은 §13, 5차 결과는 §15.3.
+- 상태: **제안. 소유자 결정 3건 대기** — 더 이상 검토로 진전되지 않습니다(§15.3).
 - 선행 문서
   - [`.github/audits/multi-provider-routing-adr-gap-analysis-2026-09-22.md`](./multi-provider-routing-adr-gap-analysis-2026-09-22.md)
   - [`docs/policy/tomverse-multi-provider-routing-v2.1.md`](../../docs/policy/tomverse-multi-provider-routing-v2.1.md) (ADR, 미채택)
@@ -17,7 +16,7 @@
 것인가?" — 에 소유자가 **전면 도입**으로 답했고, 이어서 identity 형태에 대한 결정이
 내려졌습니다. 이 문서는 그 결정과, 결정에 딸려 나오는 기존 코드 영향을 기록합니다.
 
-**이 문서의 사실 주장은 네 차례 독립 검토에서 각각 5·5·2·2건 정정됐습니다.** 그 이력은
+**이 문서의 사실 주장은 다섯 차례 독립 검토에서 각각 5·5·2·2·2건 정정됐습니다.** 그 이력은
 §9와 §13에 남깁니다 — 무엇이 틀렸는지가 무엇이 맞는지만큼 중요합니다.
 
 ## 1. 소유자 결정
@@ -515,10 +514,15 @@ A-4a가 분류를 보존하도록 고쳤지만, 그 절반만 고쳤던 것입�
 이름이 아니라 점수 변경입니다. **한 값이 두 질문에 쓰이고 있다는 것 자체가 갭 4가
 가리키는 문제의 또 다른 사례입니다.**
 
-그리고 attempt 경로에서 소실되는 범위도 더 넓습니다 — `classifyStreamFailure`가 따로
-다루는 provider category는 `PAYMENT_REQUIRED` 하나뿐이고, `AUTHENTICATION`·
-`RATE_LIMIT`·`SERVER_ERROR`·`NETWORK`·`UNKNOWN`이 모두 `failureLayer: "provider"`로
-접힙니다.
+**정정(개정 6)**: category는 이제 소실되지 않습니다. A-4a가 열 개 전부를
+`errorClass`로 보존합니다. 지금도 소실되는 것은 **`scope`와 HTTP status** 둘이며,
+그것이 §11 표를 아직 구현할 수 없는 이유입니다.
+
+그리고 A-6이 **관측과 판정을 분리**했습니다. `outcome`은 "대체해도 되는가"에 답하는
+보수적 판정이고, `observedOutcome`은 실제로 일어난 일입니다. 한 값이 둘을 겸하던
+동안 기록은 **양쪽으로** 틀렸습니다 — 연결 손실이 `cancelled`로 기록돼 성공률
+분모에서 빠지거나, generic 매핑이 진짜 사용자 취소를 `failed_post_token`으로 적어
+모델 탓으로 셌습니다.
 
 **같은 사건을 두 하위 시스템이 다르게 분류하고 있다는 것 자체가 발견 사항입니다.**
 이 저장소가 "두 증거 계열이 서로 덮어쓰지 않는다"를 여러 곳에서 지키는 것과 어긋
@@ -741,6 +745,44 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
   영구 `unproven`** 이고 Auto에서 영구 제외됩니다. canary가 별도 계약·예산을
   가져야 한다는 뜻인데, 그 비용은 누가 승인하는가?
 
+## 15.3 5차 검토가 남긴 것, 그리고 이 문서가 멈추는 곳
+
+5차 검토도 `reject`입니다. 다만 **발견의 성격이 바뀌었습니다** — 설계 모순이 아니라
+**구현 선행 조건**입니다.
+
+코드로 고친 것(A-6, 커밋 `3e203051d`):
+
+- 관측과 판정이 한 값이었고 **양쪽으로 틀렸습니다.** `observedOutcome`을 분리
+- fallback 거절이 연결 손실을 `cancelled`로 보고 → `connection_lost` 신설
+
+문서에 남긴 것:
+
+| 발견 | 처리 |
+|---|---|
+| `EndpointResidencyApproval`과 가변 `ProviderEndpoint.region`이 **두 source of truth** | eligibility는 **approval만 읽습니다.** DB에서 결속하거나 endpoint의 region을 파생값으로 만듭니다 |
+| §14에 **instrumentation 활성화 단계가 없음** (현재 `off`) | C/A-5 배포 후 `observe`로 coverage 축적 → constrained dispatch 전에 `enforce` |
+| 가격이 `model.id`로 해석됨 | deployment/provider-account별 요율이 가능하면 **pricing profile과 snapshot key도 그 grain**으로. `docs/policy/credit-and-cost-limits.md` 계약에 닿으므로 별도 승인 |
+| fallback 활성화 전 **서로 다른 endpoint에 proven deployment 2개 이상** 필요 | 아니면 endpoint-scoped 실패의 후보가 항상 0개 |
+| Perplexity canary 비용 (U5) | **별도 예산 불요.** residency 증명 후 수동 dispatch의 `RoutingAttempt`를 증거로 쓰고, 표본이 모자라면 Auto에서 계속 제외. 그때만 canary 예산 승인 요청 |
+
+### 이 문서가 더 나아가지 못하는 이유
+
+개정 1→5의 발견 수는 blocker 2·6 → 2·5 → 2·3 → 1·3 → 0·4로 줄었고, 5차의 넷은
+전부 **무엇을 만들기 전에 정해야 할 것**입니다. 순환이 아니라 수렴입니다.
+
+그런데 **남은 차단 항목이 전부 사람의 결정입니다.** 세 차례 검토가 모두 같은 것을
+1번으로 적었습니다:
+
+1. **조직의 기본 해외 공개 정책** (§4.2) — Privacy Owner 승인. 없으면 residency는
+   fail-closed이고, 그러면 미기록 endpoint 전체가 후보에서 빠집니다.
+2. **`Workspace` 모델이 스키마에 없습니다** — BYOK의 소유권이 account인지
+   workspace인지가 §8.2·§8.3·T2 전체의 선행 조건입니다.
+3. **계약상 강제 가능한 region pin을 제공하는 공급자** (T1) — 확인된 곳 **0개**.
+   추정 승인은 금지이고, 조사는 공급자 계약 문서 접근이 필요합니다.
+
+이 셋이 정해지기 전에 C의 스키마를 쓰면 **뒤집힐 전제 위에 씁니다.** 개정 6을 쓰는
+것은 답이 아니고, 결정을 올리는 것이 답입니다.
+
 ## 16. 검토 이력
 
 - ADR v2.1: C1–C15 → N1–N11 → R1–R6. **세 번 모두 그린필드 전제.**
@@ -753,4 +795,7 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 - 개정 4: Cursor 독립 검토 → **`reject`**. blocker 1, major 3, 사실 오류 2.
   round 3 findings 중 `closed` 1건, `partially closed` 3건, `not closed` 1건.
   그리고 개정 4의 수정 자체가 틀린 증거를 저장하고 있었습니다(§13.1).
-- 개정 5: 5차 독립 검토 대기.
+- 개정 5: Cursor 독립 검토 → **`reject`**. 새 blocker 0, major 4, 사실 오류 2.
+  발견이 설계 모순에서 **구현 선행 조건**으로 옮겨 갔습니다 — 수렴 신호입니다.
+- 개정 6: 5차 검토 반영 완료. **6차 검토를 돌리지 않습니다** — 남은 차단 항목이
+  전부 사람의 결정이고, 검토를 한 번 더 도는 것으로는 풀리지 않습니다(§15.3).
