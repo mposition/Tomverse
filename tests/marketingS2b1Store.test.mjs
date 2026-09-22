@@ -608,6 +608,19 @@ const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 /**
  * Modules whose exports write marketing state.
  *
+ * **What this cannot see.** The check reads one file. A route that imports a
+ * helper from beside it and calls *that*, with the store call written in the
+ * helper, passes -- the route never names the store, so nothing here fires.
+ * Eleven rounds of review established that this is not closable by a
+ * single-file check, and it is recorded rather than implied: the guarantee is
+ * "no route reaches the store outside the wrapper's transaction", not "nothing
+ * reaches the store".
+ *
+ * What covers the rest is review of a new file under `app/api/admin/` and the
+ * fact that such a helper has no other reason to exist. If that stops being
+ * enough, the next shape of this check is a repository-wide rule about who may
+ * import the store at all, not another clause here.
+ *
  * A route may call one of these only from inside the specification fields the
  * wrapper runs in its own transaction. Anywhere else in the file -- module
  * scope, a getter, a schema default, a property installed afterwards -- the
@@ -624,6 +637,73 @@ const INSIDE_THE_TRANSACTION = new Set([
   "targetId",
   "metadata",
 ]);
+
+/**
+ * Whether an export of a marketing module is something that can be called.
+ *
+ * Read from the module rather than guessed from the name. The store exports
+ * both functions and frozen tables, and every route reads a member of one of
+ * the tables -- so refusing every mention of every store export would refuse
+ * all twenty of them.
+ */
+const marketingExportIsCallable = (specifier, exported, seen = new Set()) => {
+  if (!specifier.startsWith("@/lib/")) return true;
+  if (seen.has(`${specifier}#${exported}`)) return true;
+  seen.add(`${specifier}#${exported}`);
+  let source;
+  try {
+    source = readFileSync(join(process.cwd(), `${specifier.slice(2)}.ts`), "utf8");
+  } catch {
+    // Unreadable is treated as callable: this check does not get to assume
+    // the safer answer about a file it could not open.
+    return true;
+  }
+  const tree = ts.createSourceFile(specifier, source, ts.ScriptTarget.Latest, true);
+  for (const statement of tree.statements) {
+    // A function is the thing that writes.
+    if (ts.isFunctionDeclaration(statement) && statement.name?.text === exported) {
+      return true;
+    }
+    // A class is not. `MarketingSwitchRefusedError` is an error type, and the
+    // routes name it in `instanceof`; refusing that mention refuses the
+    // refusal handling every route has.
+    if (ts.isClassDeclaration(statement) && statement.name?.text === exported) {
+      return false;
+    }
+    // A re-export is not a declaration, and treating it as unknown made
+    // `MARKETING_PAUSE_REASON_CODES` -- a frozen list the store re-exports
+    // from the schema module -- look like a function.
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        if (element.name.text !== exported) continue;
+        return marketingExportIsCallable(
+          statement.moduleSpecifier.getText(tree).slice(1, -1),
+          (element.propertyName ?? element.name).text,
+          seen
+        );
+      }
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== exported) {
+        continue;
+      }
+      const initializer = declaration.initializer;
+      if (!initializer) return true;
+      return (
+        ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)
+      );
+    }
+  }
+  // Not found: the module may re-export it from somewhere this walk did not
+  // follow, so it is treated as callable rather than assumed harmless.
+  return true;
+};
 
 const marketingRouteOffenders = (relative, source) => {
   const offenders = [];
@@ -676,7 +756,7 @@ const marketingRouteOffenders = (relative, source) => {
       }
     }
 
-    // Where the store is called, wherever it is written.
+    // Where the store is *mentioned*, wherever it is written.
     //
     // Ten rounds found ten shapes that run code before the wrapper: a
     // conditional, a spread, a computed name, a getter, a named function, a
@@ -684,35 +764,57 @@ const marketingRouteOffenders = (relative, source) => {
     // property installed after the declaration, a Zod `default`. Reading the
     // shape found each one only after somebody thought of it. This reads the
     // call instead, and the call is the same in all ten.
-    const storeBindings = new Set();
+    const storeBindings = new Map();
     for (const statement of tree.statements) {
       if (!ts.isImportDeclaration(statement)) continue;
       if (statement.importClause?.isTypeOnly) continue;
       const from = statement.moduleSpecifier.getText(tree).slice(1, -1);
       if (!WRITES_MARKETING_STATE.test(from)) continue;
       const named = statement.importClause?.namedBindings;
-      if (named && ts.isNamespaceImport(named)) storeBindings.add(named.name.text);
+      if (named && ts.isNamespaceImport(named)) {
+        // A whole module under one name: every call through it is a call into
+        // the store, and there is no export list to narrow it by.
+        storeBindings.set(named.name.text, { specifier: from, exported: null });
+      }
       if (!named || !ts.isNamedImports(named)) continue;
       for (const element of named.elements) {
         if (element.isTypeOnly) continue;
-        storeBindings.add(element.name.text);
+        storeBindings.set(element.name.text, {
+          specifier: from,
+          exported: (element.propertyName ?? element.name).text,
+        });
       }
     }
 
     if (storeBindings.size > 0) {
       // The places a store call is allowed: inside the function value of a
       // transaction-side specification field.
+      // The specification handed to the wrapper, and only that. Matching any
+      // property with one of the five names made a decoy object into an
+      // allowed zone: `const trap = { run: () => store() }; trap.run()` put
+      // the call inside a `run` arrow that the wrapper never sees.
       const allowed = [];
       const findAllowed = (node) => {
         if (
-          ts.isPropertyAssignment(node) &&
-          ts.isIdentifier(node.name) &&
-          INSIDE_THE_TRANSACTION.has(node.name.text) &&
-          node.initializer &&
-          (ts.isArrowFunction(node.initializer) ||
-            ts.isFunctionExpression(node.initializer))
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          wrapperBinding !== null &&
+          node.expression.text === wrapperBinding
         ) {
-          allowed.push(node.initializer);
+          const [spec] = node.arguments;
+          if (spec && ts.isObjectLiteralExpression(spec)) {
+            for (const property of spec.properties) {
+              if (
+                ts.isPropertyAssignment(property) &&
+                ts.isIdentifier(property.name) &&
+                INSIDE_THE_TRANSACTION.has(property.name.text) &&
+                (ts.isArrowFunction(property.initializer) ||
+                  ts.isFunctionExpression(property.initializer))
+              ) {
+                allowed.push(property.initializer);
+              }
+            }
+          }
         }
         ts.forEachChild(node, findAllowed);
       };
@@ -725,29 +827,37 @@ const marketingRouteOffenders = (relative, source) => {
         return false;
       };
 
-      const findCalls = (node) => {
-        if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
-          let callee = node.expression;
-          while (
-            ts.isPropertyAccessExpression(callee) ||
-            ts.isElementAccessExpression(callee) ||
-            ts.isParenthesizedExpression(callee)
-          ) {
-            callee = callee.expression;
-          }
-          if (
-            ts.isIdentifier(callee) &&
-            storeBindings.has(callee.text) &&
-            !within(node)
-          ) {
-            offenders.push(
-              `${relative}: calls ${callee.text} outside the predicate's transaction`
-            );
-          }
+      // Only the callable exports. `MARKETING_S2B1_ACTIONS` comes from the
+      // same module and every route reads a member of it; reading a frozen
+      // table runs nothing, and the member read is checked separately for
+      // accessors. A function is the thing that must not be reachable outside
+      // the zone.
+      const callable = new Set();
+      for (const [local, origin] of storeBindings) {
+        if (
+          origin.exported === null ||
+          marketingExportIsCallable(origin.specifier, origin.exported)
+        ) {
+          callable.add(local);
         }
-        ts.forEachChild(node, findCalls);
+      }
+
+      const findMentions = (node) => {
+        if (
+          ts.isIdentifier(node) &&
+          callable.has(node.text) &&
+          !within(node) &&
+          // Its own import specifier is where it arrives, not a use of it.
+          !(node.parent && ts.isImportSpecifier(node.parent))
+        ) {
+          offenders.push(
+            `${relative}: mentions ${node.text} outside the predicate's transaction`
+          );
+          return;
+        }
+        ts.forEachChild(node, findMentions);
       };
-      findCalls(tree);
+      findMentions(tree);
     }
 
     const mutatingHandlers = [];
@@ -1235,16 +1345,59 @@ const marketingRouteOffenders = (relative, source) => {
             return found ? "which holds an accessor" : true;
           };
 
-          /** Whether a name appears anywhere but its own declaration. */
+          /**
+           * Whether a name is written to after it is declared.
+           *
+           * Counting mentions was the wrong question: a table read twice --
+           * `action: TABLE.a, summary: TABLE.b` -- counted three and failed
+           * for being "written to". Reading it any number of times changes
+           * nothing; what matters is an assignment, a `delete`, or being
+           * handed to something that installs a property.
+           */
+          const INSTALLS_A_PROPERTY = new Set([
+            "defineProperty",
+            "defineProperties",
+            "assign",
+            "setPrototypeOf",
+          ]);
           const mentionedAgain = (local) => {
-            let count = 0;
+            let written = false;
             const look = (node) => {
-              if (ts.isIdentifier(node) && node.text === local) count += 1;
+              if (written) return;
+              if (
+                ts.isBinaryExpression(node) &&
+                node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+              ) {
+                let target = node.left;
+                while (
+                  ts.isPropertyAccessExpression(target) ||
+                  ts.isElementAccessExpression(target)
+                ) {
+                  target = target.expression;
+                }
+                if (ts.isIdentifier(target) && target.text === local) written = true;
+              }
+              if (
+                ts.isDeleteExpression(node) &&
+                node.expression.getText(tree).startsWith(`${local}.`)
+              ) {
+                written = true;
+              }
+              if (
+                ts.isCallExpression(node) &&
+                ts.isPropertyAccessExpression(node.expression) &&
+                INSTALLS_A_PROPERTY.has(node.expression.name.text) &&
+                node.arguments.some(
+                  (argument) =>
+                    ts.isIdentifier(argument) && argument.text === local
+                )
+              ) {
+                written = true;
+              }
               ts.forEachChild(node, look);
             };
             look(tree);
-            // Its declaration, and its one use in the specification.
-            return count > 2;
+            return written;
           };
 
           /** What a name in this file was declared as, or null. */
@@ -1579,6 +1732,54 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  });\n" +
         "}\n",
     ],
+    // Five that got past watching for a *call*, because in each of them the
+    // imported name is not the callee.
+    [
+      "an alias called at module scope",
+      imports +
+        "const f = pauseMarketingChannel;\n" +
+        "f(undefined as never, {});\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
+    [
+      "an alias taken out of a namespace import",
+      'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+        'import * as store from "@/lib/marketingStore";\n\n' +
+        "const { pauseMarketingChannel: f } = store;\n" +
+        "f(undefined as never, {});\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
+    [
+      "the store handed to something else to call",
+      imports +
+        "Reflect.apply(pauseMarketingChannel, null, [undefined, {}]);\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
+    [
+      "an alias handed to a Zod default, which calls it while parsing",
+      imports +
+        'import { z } from "zod";\n' +
+        "const f = pauseMarketingChannel;\n" +
+        "const schema = z.object({ hold: z.boolean().default(f as never) });\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, schema });\n" +
+        "}\n",
+    ],
+    [
+      "a decoy object with a run arrow, called at module scope",
+      imports +
+        "const trap = { run: () => { pauseMarketingChannel(undefined as never, {}); } };\n" +
+        "trap.run();\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
     // Five more that got past the allowlist itself, which is what the
     // tenth round was asked to attack instead of hunting another shape.
     [
@@ -1859,7 +2060,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 39, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 44, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);
@@ -1923,6 +2124,36 @@ test("the route sweep accepts the shape the real routes are written in", () => {
     "  });\n" +
     "}\n";
   assert.deepEqual(marketingRouteOffenders("probe/route.ts", localTable), []);
+
+  // A table read twice. Counting mentions called the second read a write:
+  // `action: TABLE.a, summary: TABLE.b` failed for being "written to after it
+  // is declared", which it is not.
+  const readTwice =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n\n' +
+    'const TABLE = { a: "marketing_post.approve", b: "Approved a draft." };\n\n' +
+    "export async function POST(req: Request) {\n" +
+    "  return runMarketingAdminMutation({\n" +
+    "    request: req,\n" +
+    "    action: TABLE.a,\n" +
+    "    summary: TABLE.b,\n" +
+    "  });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", readTwice), []);
+
+  // An error type named in `instanceof`, which comes from the same module as
+  // the writers. Refusing every mention of every store export would refuse
+  // the refusal handling every route has.
+  const errorType =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+    'import { MarketingStoreRefusedError } from "@/lib/marketingStore";\n\n' +
+    "export async function POST(req: Request) {\n" +
+    "  return runMarketingAdminMutation({\n" +
+    "    request: req,\n" +
+    "    refusal: (error) =>\n" +
+    "      error instanceof MarketingStoreRefusedError ? { code: error.code } : null,\n" +
+    "  });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", errorType), []);
 
   // The read every route makes: a member of a table imported from `@/lib`.
   // The rule that opens the module to look for an accessor is exactly the kind
