@@ -6,7 +6,7 @@ import {
     ROUTING_ALLOCATION_MODES,
     allocateWithinTie,
     ROUTING_ALLOCATION_SEED_GRAINS,
-    mayBreakCacheAffinity,
+    cacheAffinityExposure,
     routingAllocationProblems,
 } from "../lib/routingAllocation.ts";
 
@@ -85,27 +85,35 @@ test("an unknown value is refused before the shape is judged", () => {
     );
 });
 
-test("the affinity answer abstains where nothing was recorded", () => {
-    // Null, not false. A run that recorded no allocation did not record a
-    // deterministic one.
-    assert.equal(mayBreakCacheAffinity({}), null);
-    assert.equal(mayBreakCacheAffinity({ allocationMode: "deterministic" }), false);
+test("the affinity answer distinguishes the two exposures", () => {
+    // A boolean conflated them. A session seed re-picks once when the session
+    // starts, and that one pick can land somewhere other than where the
+    // conversation had been going; a request seed re-picks every turn.
+    assert.equal(cacheAffinityExposure({}), "unknown");
+    assert.equal(cacheAffinityExposure({ allocationMode: "deterministic" }), "never");
     assert.equal(
-        mayBreakCacheAffinity({
+        cacheAffinityExposure({
             allocationMode: "explore_bounded",
             allocationSeedGrain: "session",
         }),
-        false
+        "once_per_session"
     );
     assert.equal(
-        mayBreakCacheAffinity({
+        cacheAffinityExposure({
             allocationMode: "explore_bounded",
             allocationSeedGrain: "request",
         }),
-        true
+        "every_turn"
     );
+    // An exploration with no grain is a row the constraint refuses. Reaching
+    // it means reading something written before the constraint, and the
+    // honest answer is that nothing can be said -- not "never".
+    assert.equal(
+        cacheAffinityExposure({ allocationMode: "explore_bounded" }),
+        "unknown"
+    );
+    assert.equal(cacheAffinityExposure({ allocationMode: "nonsense" }), "unknown");
 });
-
 test("the axis is a second column and not more values in the first", () => {
     const sql = migration();
     // mode is untouched: it answers whether the decision was acted on.
@@ -148,14 +156,40 @@ test("the database refuses the same three shapes", () => {
     );
     assert.match(
         sql,
-        /\("allocationMode" = 'deterministic' AND "allocationSeedGrain" IS NULL\)/
+        /"allocationMode" IS NOT DISTINCT FROM 'deterministic'\s*\n\s*AND "allocationSeedGrain" IS NULL/
     );
     assert.match(
         sql,
-        /\("allocationMode" = 'explore_bounded' AND "allocationSeedGrain" IS NOT NULL\)/
+        /"allocationMode" IS NOT DISTINCT FROM 'explore_bounded'\s*\n\s*AND "allocationSeedGrain" IS NOT NULL/
     );
 });
 
+test("no branch of the shape rule can evaluate to NULL", () => {
+    // A CHECK passes when its expression is TRUE *or NULL*, and only refuses
+    // on FALSE. The first version used `=`, so a row carrying a grain and no
+    // mode evaluated FALSE OR FALSE OR NULL -- and the database accepted
+    // exactly the row the validator calls malformed.
+    //
+    // The rule is mechanical: inside this constraint, a nullable column may
+    // only meet an operator that cannot itself be NULL.
+    const sql = migration();
+    const constraint = /ADD CONSTRAINT "RoutingRun_allocation_axis_check"([\s\S]*?);/.exec(
+        sql
+    );
+    assert.ok(constraint, "the constraint is in the migration");
+    const body = constraint[1]
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n");
+    for (const nullable of ["allocationMode", "allocationSeedGrain"]) {
+        for (const operator of ["=", "<>", "!=", " IN ", " ~ ", " LIKE "]) {
+            assert.ok(
+                !body.includes(`"${nullable}" ${operator.trim()}`),
+                `${nullable} meets ${operator.trim()}, which can evaluate to NULL`
+            );
+        }
+    }
+});
 test("nothing reads the two columns", () => {
     // RoutingRun is live, so the table check cannot cover this: the columns
     // are dark on a table that is not. check-dark-tables scans for the two

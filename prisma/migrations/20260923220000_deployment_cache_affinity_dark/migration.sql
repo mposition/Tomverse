@@ -80,6 +80,13 @@ ALTER TABLE "ModelDeployment"
         AND ("promptCacheMinPrefixTokens" IS NULL OR "promptCacheMinPrefixTokens" >= 0)
     );
 
+-- The `IS NOT NULL` before each regex is not redundant. A CHECK passes when
+-- its expression is TRUE *or NULL*, and `NULL ~ '...'` is NULL: without it, a
+-- verified row with no evidence reference at all evaluated
+-- FALSE OR NULL OR FALSE and the database accepted the row the validator
+-- calls malformed. The rule for any branch here is that a comparison against
+-- a nullable column must be one that cannot itself be NULL.
+--
 -- The blank test is a character class rather than btrim, because btrim
 -- strips only U+0020 while JavaScript's trim() strips every Unicode space.
 -- The two definitions disagreed: an evidence reference of one tab satisfied
@@ -114,12 +121,14 @@ ALTER TABLE "ModelDeployment"
             AND "promptCacheTtlSeconds" IS NULL
             AND "promptCacheMinPrefixTokens" IS NULL
             AND "promptCacheVerifiedAt" IS NOT NULL
+            AND "promptCacheEvidenceRef" IS NOT NULL
             AND "promptCacheEvidenceRef" ~ E'[^ \\t\\n\\r\\f\\v]'
         )
         OR (
             "promptCacheSupport" IN ('verified_automatic', 'verified_explicit')
             AND "promptCacheTtlSeconds" IS NOT NULL
             AND "promptCacheVerifiedAt" IS NOT NULL
+            AND "promptCacheEvidenceRef" IS NOT NULL
             AND "promptCacheEvidenceRef" ~ E'[^ \\t\\n\\r\\f\\v]'
         )
     );

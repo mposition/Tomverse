@@ -224,15 +224,39 @@ test("nothing separated them means nothing is named", () => {
 test("the package takes no product decisions", () => {
     // A criterion list imported here would make this a Tomverse Chat package
     // that happens to live under packages/, and the next client would inherit
-    // decisions it never made.
+    // decisions it never made. Checked two ways, because the import rule alone
+    // would not catch a criterion written out by hand.
+    // `epsilon` is deliberately not on this list. It is a parameter name --
+    // the tolerance is supplied by the caller -- and a generic word for one.
+    // What the list is for is a criterion or a reading this package should
+    // never know about.
+    const vocabulary =
+        /\b(quality|ttft|latency|cost|credit|plan|provider|model|token|sticky|health|degraded)/i;
     for (const file of ["index.ts", "refinement.ts"]) {
         const source = readFileSync(
             new URL(`../packages/router-core/src/${file}`, import.meta.url),
             "utf8"
         );
-        const imports = source.match(/^\s*(import|export)\s[^;]*from\s+["'][^"']+["']/gm) ?? [];
+        const imports =
+            source.match(/^\s*(import|export)\s[^;]*from\s+["'][^"']+["']/gm) ?? [];
         for (const statement of imports) {
             assert.match(statement, /["']\.\/[\w.]+["']/, statement);
         }
+        // Product words may appear in prose -- the module explains what it was
+        // extracted from -- but not in code. A criterion named here is a
+        // decision the package has taken.
+        const code = source
+            .split("\n")
+            .filter((line) => {
+                const trimmed = line.trimStart();
+                return (
+                    !trimmed.startsWith("*") &&
+                    !trimmed.startsWith("/*") &&
+                    !trimmed.startsWith("//")
+                );
+            })
+            .join("\n");
+        const found = vocabulary.exec(code);
+        assert.equal(found, null, `${file} names ${found?.[0]}`);
     }
 });

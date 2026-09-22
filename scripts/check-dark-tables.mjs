@@ -52,6 +52,15 @@ const DARK_TABLES = [
  * Matched as whole identifiers, because these names are distinctive enough
  * that any occurrence in runtime code is a use. A generic column name could
  * not be protected this way and should not be added to this list.
+ *
+ * What a name scan cannot see, and this does not claim to: a Prisma read
+ * with no `select` returns every scalar, so `scripts/verify-fallback-drill.mjs`
+ * and the `create` in `lib/routingDispatchInstrumentation.ts` both receive
+ * these columns without naming them. Neither reads the values, and the
+ * values are null on every row, so nothing is decided on them -- but the
+ * scan is a guard against a use being written, not proof that no row ever
+ * reaches a caller. An identifier built by concatenation is invisible to it
+ * for the same reason.
  */
 const DARK_COLUMNS = ["allocationMode", "allocationSeedGrain"];
 

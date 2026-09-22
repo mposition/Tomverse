@@ -2803,10 +2803,6 @@ model AdminRetentionRun {
   createdAt      DateTime @default(now())
 
   @@index([mode, createdAt])
-  // Exploration rate is counted by allocationMode over a window. The
-  // migration makes that index partial on allocationMode IS NOT NULL, which
-  // Prisma cannot express: every row is null until the allocator ships, so a
-  // full index would be one entry per run for nothing.
   @@index([status, createdAt])
 }
 
@@ -4018,6 +4014,10 @@ model RoutingRun {
 
   @@index([createdAt])
   @@index([mode, createdAt])
+  // Exploration rate is counted by allocationMode over a window. The
+  // migration makes that index partial on allocationMode IS NOT NULL, which
+  // Prisma cannot express: every row is null until the allocator ships, so a
+  // full index would be one entry per run for nothing.
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
   @@index([productKey, createdAt])

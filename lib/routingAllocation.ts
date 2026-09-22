@@ -118,26 +118,50 @@ export const routingAllocationProblems = (
 };
 
 /**
- * Whether this allocation could have moved a conversation off the placement
+ * How often this allocation could move a conversation off the placement
  * holding its prefix.
  *
- * `null` where nothing was recorded -- the honest answer for a run that
- * predates the allocator, and not `false`.
+ * Four answers rather than a boolean, because a boolean was conflating two
+ * different exposures. An earlier version answered `false` for a
+ * session-seeded exploration, and that is wrong: a session seed re-picks once
+ * when the session starts, and that one pick can land somewhere other than
+ * where the conversation had been going. What it does not do is re-pick every
+ * turn, which is the request-seeded case and a different size of problem.
  *
- * This says the allocation *could* have moved it, not that it did. Whether it
- * actually did is `DeploymentCacheAffinity`, which records where turns landed;
- * an exploration seeded per request may still have re-picked the same
- * placement.
+ * `unknown` covers both a run that recorded no allocation and an exploration
+ * that recorded no grain. The second is a row the constraint refuses, so
+ * reaching it means reading something written before the constraint; either
+ * way the honest answer is that nothing can be said, not `never`.
+ *
+ * Says what the allocation *could* do, never what it did. What it did is
+ * `DeploymentCacheAffinity`, which records where turns actually landed -- a
+ * per-request exploration may re-pick the same placement every time.
  */
-export const mayBreakCacheAffinity = (
-    input: RoutingAllocationInput
-): boolean | null => {
-    const mode = input.allocationMode ?? null;
-    if (mode === null) return null;
-    if (mode === "deterministic") return false;
-    return (input.allocationSeedGrain ?? null) === "request";
-};
+export const CACHE_AFFINITY_EXPOSURES = [
+    "unknown",
+    "never",
+    "once_per_session",
+    "every_turn",
+] as const;
 
+export type CacheAffinityExposure = (typeof CACHE_AFFINITY_EXPOSURES)[number];
+
+export const cacheAffinityExposure = (
+    input: RoutingAllocationInput
+): CacheAffinityExposure => {
+    const mode = input.allocationMode ?? null;
+    if (mode === null) return "unknown";
+    if (mode === "deterministic") return "never";
+    if (mode !== "explore_bounded") return "unknown";
+    switch (input.allocationSeedGrain ?? null) {
+        case "request":
+            return "every_turn";
+        case "session":
+            return "once_per_session";
+        default:
+            return "unknown";
+    }
+};
 /**
  * The exploration the router is allowed to do, and what it was told to do it
  * with.

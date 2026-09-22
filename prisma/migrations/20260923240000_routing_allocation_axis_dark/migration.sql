@@ -83,12 +83,30 @@ ALTER TABLE "RoutingRun"
 --
 -- One constraint rather than two so that a grain without a mode is refused as
 -- well. A grain alone would be a seed for a choice nobody recorded.
+--
+-- `IS NOT DISTINCT FROM` rather than `=`, and this is the whole reason the
+-- rule works. A CHECK passes when its expression is TRUE *or NULL*, and only
+-- refuses on FALSE. With `=`, a row carrying a grain and no mode evaluated
+-- FALSE OR FALSE OR (NULL = 'explore_bounded' AND TRUE) -- which is NULL, so
+-- the database accepted exactly the row the application calls malformed.
+-- `IS NOT DISTINCT FROM` is always boolean, so that branch is FALSE and the
+-- row is refused.
+--
+-- The rule for any later branch here: a comparison against a nullable column
+-- must be one that cannot itself be NULL. `IS NULL`, `IS NOT NULL` and
+-- `IS NOT DISTINCT FROM` qualify; `=`, `<>`, `IN` and `~` do not.
 ALTER TABLE "RoutingRun"
     ADD CONSTRAINT "RoutingRun_allocation_axis_check"
     CHECK (
         ("allocationMode" IS NULL AND "allocationSeedGrain" IS NULL)
-        OR ("allocationMode" = 'deterministic' AND "allocationSeedGrain" IS NULL)
-        OR ("allocationMode" = 'explore_bounded' AND "allocationSeedGrain" IS NOT NULL)
+        OR (
+            "allocationMode" IS NOT DISTINCT FROM 'deterministic'
+            AND "allocationSeedGrain" IS NULL
+        )
+        OR (
+            "allocationMode" IS NOT DISTINCT FROM 'explore_bounded'
+            AND "allocationSeedGrain" IS NOT NULL
+        )
     );
 
 -- Counting exploration rate scans by mode over a window. Partial, because the

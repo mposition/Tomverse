@@ -316,10 +316,17 @@ const partitionFor = (
  * What stays here is every product decision -- which criteria there are, what
  * each one reads, and what its epsilon is.
  *
- * `decidedBy` answers `model_id` where the package answers null. Null means two
- * identical rank keys, which happens only when the same model id appears twice;
- * naming the last criterion is the honest thing to say about that pair, and it
- * is a statement about this criteria list rather than about refinement.
+ * `decidedBy` answers `model_id` where the package answers null. Null means
+ * two identical rank keys, which here happens only when the same model id
+ * appears twice -- and `model_id` did not decide that pair, it put them in one
+ * bucket. The label is a fallback for a case `selectRouterModel` does not
+ * produce, because its candidates are one per catalogue id. The package is
+ * right not to name a criterion there; this keeps the non-null return type the
+ * callers already have.
+ *
+ * The fold is also only correct while `model_id` is last in
+ * `ROUTER_TIE_BREAK_ORDER`. It reads the end of the list rather than the
+ * literal, so reordering the list moves it too.
  */
 export const rankCandidates = (
     candidates: readonly ScoredCandidate[],
