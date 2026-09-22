@@ -417,6 +417,13 @@ const REGISTRY = {
     reason:
       "AmuxExecutionToStatus in lib/amux/execution.ts types the four worker settlement destinations. Cancelled is a board lifecycle state rather than a worker-supplied settlement result, so it remains in the durable constraint but outside the route's union and zod input.",
   },
+  AmuxBoardImportApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/boardImportCore.ts",
+    list: "BOARD_IMPORT_APPROVAL_STATUSES",
+    reason:
+      "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
+  },
   AmuxWorkDelivery_status_check: {
     owner: "database",
     reason:
