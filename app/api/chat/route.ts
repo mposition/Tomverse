@@ -4756,24 +4756,23 @@ async function handleChatPost(
          * the only place a rate limit is told apart from an outage, and a row
          * written without it cannot be reanalysed later.
          *
-         * The class and the layer travel; the outcome does not.
+         * What is recorded is `observedOutcome`, the layer and the class --
+         * what happened -- and not `outcome`, which is the fallback verdict.
          *
-         * The layer has to, or the row contradicts itself: a rate limit would
-         * be stored as `errorClass: "provider_rate_limited"` beside the
+         * The two were one value, and that was the defect. The verdict is
+         * conservative on purpose: a lost connection is called `cancelled` so
+         * that no second model is tried. Recording the verdict as the
+         * observation then told `lib/routerSignalCore.ts` that the person had
+         * changed their mind, which drops the turn from the success rate --
+         * true of an abort, false of a dropped connection. Recording the
+         * generic mapping instead was wrong the other way: it filed a genuine
+         * cancellation as `failed_post_token` and counted it against the
+         * model.
+         *
+         * The layer has to travel too, or the row contradicts itself: a rate
+         * limit would carry `errorClass: "provider_rate_limited"` beside the
          * generic mapping's `failureLayer: "stream"`, which says the failure
-         * was this process or this connection. Nothing branches on the stored
-         * layer -- `decideFallback` reads the in-memory classification, and
-         * the success rate reads the outcome -- so making it accurate costs
-         * nothing.
-         *
-         * The outcome does not travel, because `classifyStreamFailure` answers
-         * "may this be substituted" and calls a lost connection `cancelled`
-         * for that purpose, while `DISPATCH_OUTCOMES_COUNTED` excludes
-         * `cancelled` because it means the person changed their mind. Moving
-         * it would take those turns out of the Router's success-rate
-         * denominator: a scoring change wearing a naming change's clothes.
-         * That one value answers two questions is a defect in its own right,
-         * recorded in the deployment identity design rather than fixed here.
+         * was this process or this connection.
          */
         let lastStreamFailure: StreamFailureClassification | null = null;
 
@@ -4816,6 +4815,7 @@ async function handleChatPost(
                 attempt: {
                     modelId: dispatched.modelId,
                     outcome: classified.outcome,
+                    observedOutcome: classified.observedOutcome,
                     failureLayer: classified.failureLayer,
                     providerRefusal: classified.providerRefusal,
                 },
@@ -5951,10 +5951,11 @@ async function handleChatPost(
                     await settleSafely(
                         "failed",
                         { searchQueriesObserved: false },
-                        // The class and the layer. See `lastStreamFailure`
-                        // for why the outcome stays with the generic mapping.
+                        // What was observed, not what was decided. See
+                        // `lastStreamFailure`.
                         lastStreamFailure
                             ? {
+                                  outcome: lastStreamFailure.observedOutcome,
                                   failureLayer: lastStreamFailure.failureLayer,
                                   errorClass: lastStreamFailure.errorClass,
                               }

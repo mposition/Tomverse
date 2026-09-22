@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { classifyStreamFailure } from "../lib/routingStreamFailure.ts";
 import { ROUTING_ATTEMPT_ERROR_CLASSES } from "../lib/routingAttemptStore.ts";
+import { DISPATCH_OUTCOMES_COUNTED } from "../lib/routerSignalCore.ts";
 import { decideFallback } from "../lib/routingFallbackPolicy.ts";
 
 // The claim under test is the one §9.1 of the rollout note had to withdraw:
@@ -283,4 +284,70 @@ test("a real client abort still says so", () => {
         assert.equal(classification.errorClass, "client_gone");
         assert.equal(classification.outcome, "cancelled");
     }
+});
+
+/**
+ * The verdict and the observation are two values now.
+ *
+ * `outcome` answers "may this be substituted" and is conservative: a lost
+ * connection is `cancelled` there so no second model is tried. Recording that
+ * as what happened told the success rate the person had changed their mind,
+ * which is true of an abort and false of a dropped connection.
+ */
+test("a lost connection is observed as a failure and disposed of as a cancellation", () => {
+    const lost = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { code: "ECONNRESET" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    assert.equal(lost.outcome, "cancelled", "not substituted");
+    assert.equal(lost.observedOutcome, "failed_pre_token", "nobody cancelled");
+    assert.ok(DISPATCH_OUTCOMES_COUNTED.includes(lost.observedOutcome));
+});
+
+test("a turn the person abandoned is observed as a cancellation", () => {
+    const abandoned = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { name: "AbortError" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    assert.equal(abandoned.outcome, "cancelled");
+    assert.equal(abandoned.observedOutcome, "cancelled");
+    assert.ok(!DISPATCH_OUTCOMES_COUNTED.includes(abandoned.observedOutcome));
+});
+
+test("the refusal says which of the two it was", () => {
+    const refusal = (classification) =>
+        decideFallback({
+            attempt: {
+                modelId: "m",
+                outcome: classification.outcome,
+                observedOutcome: classification.observedOutcome,
+                failureLayer: classification.failureLayer,
+                providerRefusal: classification.providerRefusal,
+            },
+            run: { passThroughUsed: false, rerouteCount: 0, visibleTokenEmitted: false },
+            nextCandidateModelIds: ["other"],
+        });
+
+    const lost = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { code: "ECONNRESET" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    const abandoned = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { name: "AbortError" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+
+    // Both refuse. They say different things about why.
+    assert.equal(refusal(lost).action, "terminate");
+    assert.equal(refusal(lost).reason, "connection_lost");
+    assert.equal(refusal(abandoned).action, "terminate");
+    assert.equal(refusal(abandoned).reason, "cancelled");
 });

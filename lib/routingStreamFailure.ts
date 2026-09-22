@@ -80,6 +80,26 @@ export type StreamFailureClassification = {
     RoutingAttemptOutcome,
     "failed_pre_token" | "failed_post_token" | "cancelled"
   >;
+  /**
+   * What actually happened, as the attempt record should say it.
+   *
+   * Separate from `outcome` because that one answers "may this be
+   * substituted", and answers it conservatively: a lost connection is called
+   * `cancelled` there so that no second model is tried, although nobody
+   * cancelled anything. Recording that verdict as the observation put two
+   * different turns under one name -- `lib/routerSignalCore.ts` drops
+   * `cancelled` from the success rate on the grounds that the person changed
+   * their mind, which is true of an abort and false of a dropped connection.
+   *
+   * So the disposition stays conservative and the observation stays true. A
+   * connection that died without an answer is `failed_pre_token`: the person
+   * did not get one. A turn the person abandoned is `cancelled`: they did not
+   * ask for one any more.
+   */
+  observedOutcome: Extract<
+    RoutingAttemptOutcome,
+    "failed_pre_token" | "failed_post_token" | "cancelled"
+  >;
   failureLayer: Extract<RoutingFailureLayer, "provider" | "stream">;
   /**
    * A provider answer §7 refuses to route around, or null.
@@ -234,6 +254,7 @@ export const classifyStreamFailure = (
   if (!downstreamOpen) {
     return {
       outcome: "cancelled",
+      observedOutcome: "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "client_gone",
@@ -244,6 +265,7 @@ export const classifyStreamFailure = (
   if (isClientAbort(error) || isClosedController(error)) {
     return {
       outcome: "cancelled",
+      observedOutcome: "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "client_gone",
@@ -256,6 +278,8 @@ export const classifyStreamFailure = (
   if (isConnectionLost(error)) {
     return {
       outcome: "cancelled",
+      // Nobody cancelled. See `observedOutcome`.
+      observedOutcome: visibleTokenEmitted ? "failed_post_token" : "failed_pre_token",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "provider_network",
@@ -269,6 +293,7 @@ export const classifyStreamFailure = (
   if (phase === "emit") {
     return {
       outcome: visibleTokenEmitted ? "failed_post_token" : "cancelled",
+      observedOutcome: visibleTokenEmitted ? "failed_post_token" : "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "client_gone",
@@ -283,6 +308,7 @@ export const classifyStreamFailure = (
       // still emitted no visible token -- the layer, not the outcome, is what
       // keeps it from being substituted.
       outcome: visibleTokenEmitted ? "failed_post_token" : "failed_pre_token",
+      observedOutcome: visibleTokenEmitted ? "failed_post_token" : "failed_pre_token",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "completion_handling_failed",
@@ -296,6 +322,7 @@ export const classifyStreamFailure = (
   if (isPolicyRefusal(error)) {
     return {
       outcome,
+      observedOutcome: outcome,
       failureLayer: "provider",
       providerRefusal: "policy",
       errorClass: "provider_policy_refusal",
@@ -311,6 +338,7 @@ export const classifyStreamFailure = (
   if (category === "PAYMENT_REQUIRED") {
     return {
       outcome,
+      observedOutcome: outcome,
       failureLayer: "provider",
       providerRefusal: "insufficient_credits",
       errorClass: "provider_payment_required",
@@ -325,6 +353,7 @@ export const classifyStreamFailure = (
   // records can answer later.
   return {
     outcome,
+    observedOutcome: outcome,
     failureLayer: "provider",
     providerRefusal: null,
     errorClass: errorClassForCategory(category),
