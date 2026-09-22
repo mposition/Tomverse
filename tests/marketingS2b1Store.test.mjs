@@ -620,6 +620,21 @@ const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
  * repository-wide rule about who may import the store. Declaring something
  * unclosable is a claim like any other, and that one was not checked.
  *
+ * **Two more this deliberately does not chase**, because the threat is a
+ * person with write access to this repository putting a bypass route in, and
+ * that person can delete this file:
+ *
+ * - A specifier assembled at run time -- `import("@/lib/" + "marketingStore")`.
+ *   Following it would mean evaluating expressions, and a specifier can be
+ *   built from anything.
+ * - A name reached through a bracket -- `globalThis["eval"]`. The rule above
+ *   refuses `eval` and `Function` as names; a second spelling of a global is
+ *   not a different capability, and chasing spellings is what rounds five
+ *   through nine established does not finish.
+ *
+ * Both were weighed in round fourteen against that threat and left here as
+ * stated limits rather than open findings.
+ *
  * A route may call one of these only from inside the specification fields the
  * wrapper runs in its own transaction. Anywhere else in the file -- module
  * scope, a getter, a schema default, a property installed afterwards -- the
@@ -765,7 +780,9 @@ const moduleReachesTheStore = (specifier, fromDirectory, depth = 0) => {
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
       node.arguments[0] &&
-      ts.isStringLiteral(node.arguments[0])
+      // A no-substitution template is a static specifier; reading only string
+      // literals let one pair of backticks past.
+      ts.isStringLiteralLike(node.arguments[0])
     ) {
       from = node.arguments[0].text;
     }
@@ -933,12 +950,30 @@ const marketingRouteOffenders = (relative, source) => {
       if (!WRITES_MARKETING_STATE.test(from)) {
         if (!moduleReachesTheStore(from, directory)) continue;
         const clause = statement.importClause;
+        // Importing it is loading it. A side-effect import takes no bindings,
+        // so no binding of it can be watched -- and the module runs anyway.
+        // The same is true of an import whose bindings are never used: the
+        // names are there to make the load look like it has a reason.
+        if (!clause) {
+          offenders.push(
+            `${relative}: loads ${from}, which reaches the store, for its effect`
+          );
+          continue;
+        }
         const bindings = clause?.namedBindings;
         if (clause?.name) {
-          storeBindings.set(clause.name.text, { specifier: from, exported: null });
+          storeBindings.set(clause.name.text, {
+            specifier: from,
+            exported: null,
+            viaHelper: true,
+          });
         }
         if (bindings && ts.isNamespaceImport(bindings)) {
-          storeBindings.set(bindings.name.text, { specifier: from, exported: null });
+          storeBindings.set(bindings.name.text, {
+            specifier: from,
+            exported: null,
+            viaHelper: true,
+          });
         }
         if (bindings && ts.isNamedImports(bindings)) {
           for (const element of bindings.elements) {
@@ -953,7 +988,11 @@ const marketingRouteOffenders = (relative, source) => {
             ) {
               continue;
             }
-            storeBindings.set(element.name.text, { specifier: from, exported: null });
+            storeBindings.set(element.name.text, {
+              specifier: from,
+              exported: null,
+              viaHelper: true,
+            });
           }
         }
         continue;
@@ -1039,7 +1078,7 @@ const marketingRouteOffenders = (relative, source) => {
             node.expression.text === "require")
             ? node.arguments[0]
             : null;
-        if (specifier && ts.isStringLiteral(specifier)) {
+        if (specifier && ts.isStringLiteralLike(specifier)) {
           if (WRITES_MARKETING_STATE.test(specifier.text) && !within(node)) {
             offenders.push(
               `${relative}: loads ${specifier.text} outside the predicate's transaction`
@@ -1062,6 +1101,33 @@ const marketingRouteOffenders = (relative, source) => {
         ts.forEachChild(node, findLoads);
       };
       findLoads(tree);
+
+      // A binding that is imported and never mentioned is a load wearing a
+      // name. The module still runs.
+      for (const [local, origin] of storeBindings) {
+        if (!origin.viaHelper) continue;
+        let used = false;
+        const look = (node) => {
+          if (used) return;
+          if (
+            ts.isIdentifier(node) &&
+            node.text === local &&
+            !(node.parent && ts.isImportSpecifier(node.parent)) &&
+            !(node.parent && ts.isImportClause(node.parent)) &&
+            !(node.parent && ts.isNamespaceImport(node.parent))
+          ) {
+            used = true;
+            return;
+          }
+          ts.forEachChild(node, look);
+        };
+        look(tree);
+        if (!used) {
+          offenders.push(
+            `${relative}: imports ${local} from ${origin.specifier}, which reaches the store, and never uses it`
+          );
+        }
+      }
 
       const findMentions = (node) => {
         if (
@@ -1889,6 +1955,39 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  });\n" +
         "}\n",
     ],
+    // Three the fourteenth round found, and the last it asked to be closed
+    // before freezing this check.
+    [
+      "a module imported for its effect, which reaches the store",
+        "import { runMarketingAdminMutation } from \"@/lib/marketingAdminMutations\";\n" +
+        "import \"./planter\";\n" +
+        "\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "the same module imported under a name nothing uses",
+        "import { runMarketingAdminMutation } from \"@/lib/marketingAdminMutations\";\n" +
+        "import { planted } from \"./planter\";\n" +
+        "\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
+    [
+      "a helper that loads the store with backticks",
+        "import { runMarketingAdminMutation } from \"@/lib/marketingAdminMutations\";\n" +
+        "import { pauseByTemplate } from \"./templateHelper\";\n" +
+        "\n" +
+        "void pauseByTemplate();\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+      "tests/fixtures/marketingRouteProbe/route.ts",
+    ],
     // Five where the store is a file or two away. These import real modules
     // under `tests/fixtures/marketingRouteProbe/`, because "does this helper
     // reach the store" is a question about a file that exists.
@@ -2314,7 +2413,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 54, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 57, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(
       ([, source, at]) =>
