@@ -777,6 +777,17 @@ const marketingRouteOffenders = (relative, source) => {
       // may unwrap its dynamic segment, and then it must answer. Two forms,
       // nothing else. A handler that needs a third has to say so here, where
       // somebody will read the reason.
+      // A parameter default runs before the body does, and Next passes only
+      // the request and the context -- so a third parameter's default runs on
+      // every request, before anything in the handler.
+      for (const parameter of fn.parameters) {
+        if (parameter.initializer) {
+          offenders.push(
+            `${relative}: ${name} has a parameter default, which runs before it does`
+          );
+        }
+      }
+
       const statements = fn.body.statements;
       for (let index = 0; index < statements.length; index += 1) {
         const statement = statements[index];
@@ -818,11 +829,33 @@ const marketingRouteOffenders = (relative, source) => {
           // session, `marketing:write`, a recent sign-in or an audit
           // transaction around it.
           //
-          // Functions are where the walk stops. `run`, `action`, `summary`,
-          // `gate` and `metadata` are arrows the wrapper calls *inside* the
-          // transaction; a call in one of their bodies is the point of them.
-          const evaluatesEarly = (node) => {
+          // And a *read* can run code. `bucket: prelude.bucket` is a call
+          // with no call in it, because `prelude` may have a getter. The rule
+          // cannot be "no property reads" -- every route here writes
+          // `action: MARKETING_S2B1_ACTIONS.postApprove` -- so it is "no
+          // property reads off a lower-case root". A shouting name is a module
+          // constant by this repository's convention; a lower-case one may be
+          // a local object with an accessor on it.
+          //
+          // Functions are where the walk stops, but which functions matters.
+          // `lib/marketingAdminMutations.ts` calls `action`, `summary`,
+          // `targetId`, `metadata` and `run` inside the transaction, and a
+          // call in one of those is the point of them. `gate` runs *before*
+          // the transaction and `refusal` runs in the catch after it, so
+          // their bodies are walked instead -- with property reads allowed,
+          // because by then the wrapper is supplying the argument.
+          const evaluatesEarly = (node, { rejectReads = true } = {}) => {
             let found = false;
+            const shoutingRoot = (access) => {
+              let current = access;
+              while (
+                ts.isPropertyAccessExpression(current) ||
+                ts.isElementAccessExpression(current)
+              ) {
+                current = current.expression;
+              }
+              return ts.isIdentifier(current) && /^[A-Z][A-Z0-9_]*$/u.test(current.text);
+            };
             const walk = (inner) => {
               if (found) return;
               if (
@@ -844,7 +877,18 @@ const marketingRouteOffenders = (relative, source) => {
                 ts.isCallExpression(inner) ||
                 ts.isNewExpression(inner) ||
                 ts.isAwaitExpression(inner) ||
-                ts.isTaggedTemplateExpression(inner)
+                ts.isTaggedTemplateExpression(inner) ||
+                ts.isSpreadAssignment(inner) ||
+                ts.isSpreadElement(inner)
+              ) {
+                found = true;
+                return;
+              }
+              if (
+                rejectReads &&
+                (ts.isPropertyAccessExpression(inner) ||
+                  ts.isElementAccessExpression(inner)) &&
+                !shoutingRoot(inner)
               ) {
                 found = true;
                 return;
@@ -854,6 +898,9 @@ const marketingRouteOffenders = (relative, source) => {
             walk(node);
             return found;
           };
+
+          /** The two fields the wrapper reads outside its own transaction. */
+          const OUTSIDE_THE_TRANSACTION = new Set(["gate", "refusal"]);
 
           for (const property of spec.properties) {
             // What names the property, before what it is set to. A computed
@@ -904,11 +951,78 @@ const marketingRouteOffenders = (relative, source) => {
 
             const value = ts.isPropertyAssignment(property)
               ? property.initializer
-              : null;
+              : ts.isShorthandPropertyAssignment(property)
+                ? property.name
+                : null;
             if (!value) continue;
+            const field = property.name.getText(tree);
+
+            // `gate` and `refusal` are the two the wrapper calls outside its
+            // transaction, so stopping at their boundary hid exactly the
+            // calls that matter. Reads are allowed inside them: by then the
+            // wrapper is supplying the argument.
+            if (OUTSIDE_THE_TRANSACTION.has(field)) {
+              const body =
+                (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) && value.body
+                  ? value.body
+                  : value;
+              if (evaluatesEarly(body, { rejectReads: false })) {
+                offenders.push(
+                  `${relative}: ${name} runs something in ${field}, which is outside the transaction`
+                );
+              }
+              continue;
+            }
+
+            // A schema is parsed before the transaction opens, so a
+            // `refine`/`transform`/`superRefine` callback runs there too.
+            // The field is a shorthand, so the value is a name: follow it to
+            // its declaration in this file and read those callbacks.
+            if (field === "schema") {
+              const declared = ts.isIdentifier(value)
+                ? tree.statements
+                    .filter((statement) => ts.isVariableStatement(statement))
+                    .flatMap((statement) => statement.declarationList.declarations)
+                    .find(
+                      (declaration) =>
+                        ts.isIdentifier(declaration.name) &&
+                        declaration.name.text === value.text
+                    )
+                : null;
+              if (declared?.initializer) {
+                const look = (inner) => {
+                  if (
+                    ts.isCallExpression(inner) &&
+                    ts.isPropertyAccessExpression(inner.expression) &&
+                    ["refine", "transform", "superRefine"].includes(
+                      inner.expression.name.text
+                    )
+                  ) {
+                    for (const argument of inner.arguments) {
+                      const body =
+                        (ts.isArrowFunction(argument) ||
+                          ts.isFunctionExpression(argument)) &&
+                        argument.body
+                          ? argument.body
+                          : argument;
+                      if (evaluatesEarly(body, { rejectReads: false })) {
+                        offenders.push(
+                          `${relative}: ${name} runs something while parsing its schema`
+                        );
+                      }
+                    }
+                  }
+                  ts.forEachChild(inner, look);
+                };
+                look(declared.initializer);
+              }
+              continue;
+            }
+
+            if (ts.isShorthandPropertyAssignment(property)) continue;
             if (evaluatesEarly(value)) {
               offenders.push(
-                `${relative}: ${name} evaluates ${property.name.getText(tree)} before the predicate runs`
+                `${relative}: ${name} evaluates ${field} before the predicate runs`
               );
             }
           }
@@ -937,6 +1051,9 @@ const marketingRouteOffenders = (relative, source) => {
               ts.forEachChild(inner, look);
             };
             look(awaited);
+            // `const { postId = store() } = await context.params` runs the
+            // default when the segment is missing, before anything else.
+            look(declaration.name);
             return !calls;
           });
         if (!unwrapsParams) {
@@ -1065,6 +1182,75 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  });\n" +
         "}\n",
     ],
+    // Seven more, every one of which runs outside something: the
+    // transaction, or the wrapper entirely.
+    [
+      "a getter reached by a property read, which is a call with no call in it",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, bucket: prelude.bucket });\n" +
+        "}\n",
+    ],
+    [
+      "the same getter reached by an element read",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        '  return runMarketingAdminMutation({ request: req, bucket: prelude["bucket"] });\n' +
+        "}\n",
+    ],
+    [
+      "a spread one level down, where only the top level was refused",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, metadata: { ...prelude } });\n" +
+        "}\n",
+    ],
+    [
+      "a parameter default, which runs before the body",
+      imports +
+        "export async function POST(req: Request, context: unknown, _side = pauseMarketingChannel(req, {})) {\n" +
+        "  return runMarketingAdminMutation({ request: req });\n" +
+        "}\n",
+    ],
+    [
+      "a binding default in the params unwrap",
+      imports +
+        "export async function POST(req: Request, context: { params: Promise<{ postId: string }> }) {\n" +
+        "  const { postId = pauseMarketingChannel(req, {}) } = await context.params;\n" +
+        "  return runMarketingAdminMutation({ request: req, targetId: postId });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in gate, which the wrapper calls before the transaction",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        '    gate: () => { pauseMarketingChannel(req, {}); return "operator_restriction"; },\n' +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in a schema transform, which runs while the body is parsed",
+      imports +
+        'import { z } from "zod";\n' +
+        "const schema = z.object({}).transform((value) => {\n" +
+        "  pauseMarketingChannel(undefined as never, {});\n" +
+        "  return value;\n" +
+        "});\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, schema });\n" +
+        "}\n",
+    ],
     [
       "a store call in a getter on a spread object, which runs during the copy",
       imports +
@@ -1126,7 +1312,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 18, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 25, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);
@@ -1152,6 +1338,25 @@ test("the route sweep accepts the shape the real routes are written in", () => {
     "  return runMarketingAdminMutation({ request: req });\n" +
     "}\n";
   assert.deepEqual(marketingRouteOffenders("probe/route.ts", withoutParams), []);
+
+  // A module constant read off a shouting name, which every route does, and a
+  // `gate` that reads the parsed body, which two routes do. The rules added
+  // for getters and for `gate` are the kind that go too far.
+  const ordinary =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+    'import { MARKETING_S2B1_ACTIONS } from "@/lib/marketingStore";\n' +
+    'import { z } from "zod";\n\n' +
+    "const schema = z.object({ enabled: z.boolean() }).strict();\n\n" +
+    "export async function PATCH(req: Request) {\n" +
+    "  return runMarketingAdminMutation({\n" +
+    "    request: req,\n" +
+    "    action: MARKETING_S2B1_ACTIONS.settingDraftsChanged,\n" +
+    "    schema,\n" +
+    '    gate: (body) => (body.enabled ? "account_control" : "operator_restriction"),\n' +
+    "    metadata: (body) => ({ enabled: body.enabled }),\n" +
+    "  });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", ordinary), []);
 });
 
 test("the marketing transaction brand has exactly one cast", () => {
