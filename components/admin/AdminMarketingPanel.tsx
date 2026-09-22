@@ -3,9 +3,26 @@
 import { useCallback, useState } from "react";
 import { Loader2, Lock, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import {
+  MARKETING_CHECKED,
+  MarketingActionRail,
+  instantFromLocalInput,
+  localDateTimeValue,
+  type MarketingAction,
+} from "@/components/admin/MarketingActions";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
+import {
+  MARKETING_CHANNEL_CAPS,
+  MARKETING_LOCALES,
+  MARKETING_PAUSE_REASON_CODES,
+  MARKETING_PROVIDERS,
+  MARKETING_RESUME_REASON_CODES,
+} from "@/lib/marketingAutomationSchema";
+import {
+  MARKETING_CONSOLE_SWITCH_CONTROLS,
+  type MarketingConsoleSection,
+} from "@/lib/marketingConsoleSections";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -26,6 +43,7 @@ export type MarketingConsoleView = {
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
+  configGeneration: number | null;
 };
 
 const stamp = (value: unknown) => {
@@ -36,18 +54,52 @@ const stamp = (value: unknown) => {
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : null);
+const str = (value: unknown) => (typeof value === "string" ? value : "");
+const int = (value: unknown) => (typeof value === "number" ? value : 0);
+
+/** An empty box means "no override", which is a value the writer accepts. */
+const capOverride = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+};
+
+/** The words the draft actually holds, so an edit starts from them. */
+const envelopeText = (envelope: unknown): string => {
+  if (!envelope || typeof envelope !== "object") return "";
+  const value = (envelope as { renderedText?: unknown }).renderedText;
+  return typeof value === "string" ? value : "";
+};
+
+/** A week out, which is the ordinary answer and still an editable one. */
+const defaultApprovalExpiry = () =>
+  localDateTimeValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString());
+
+const POST = (id: unknown, action: string) =>
+  `/api/admin/marketing/posts/${encodeURIComponent(String(id))}/${action}`;
+const ACCOUNT = (id: unknown, action: string) =>
+  `/api/admin/marketing/accounts/${encodeURIComponent(String(id))}/${action}`;
 
 /**
- * The whole Marketing console, read only.
+ * The whole Marketing console.
  *
  * The first payload arrives from the page's server component, so the rows are
  * in the HTML rather than appearing after hydration. Refreshing calls the same
- * loader through `GET /api/admin/marketing`.
+ * loader through `GET /api/admin/marketing`, and so does every control here
+ * once its write lands -- a screen that has just changed a row and still shows
+ * the old one is a screen that will be acted on twice.
  *
  * One component for six sections because the sections differ in their columns
  * and in nothing else: the same switch strip, the same "newest N, not a total"
  * sentence, and the same treatment of a section a later stage owns. Six
  * components would be five copies of that sentence to keep in step.
+ *
+ * Every control sends a compare-and-set. The values it sends back -- an
+ * envelope digest, a history version, a connection generation, a
+ * configuration generation -- are read from the payload this screen rendered,
+ * so a change is a decision about the row the operator was looking at rather
+ * than whichever row is there when the request lands.
  */
 export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView }) {
   const m = useAdminMessages(adminMarketingMessages);
@@ -100,7 +152,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             {heading.description}
           </p>
-          <p className="mt-2 text-xs text-zinc-500">{m.readOnly}</p>
+          <p className="mt-2 text-xs text-zinc-500">{m.writesNote}</p>
         </div>
         <button
           type="button"
@@ -117,7 +169,12 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         </button>
       </div>
 
-      <MarketingSwitchStrip switches={view.switches} m={m} />
+      <MarketingSwitchStrip
+        switches={view.switches}
+        configGeneration={view.configGeneration}
+        onDone={() => void refresh()}
+        m={m}
+      />
 
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
 
@@ -128,6 +185,9 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         </p>
       ) : (
         <>
+          {view.section === "accounts" ? (
+            <MarketingAccountCreate onDone={() => void refresh()} m={m} />
+          ) : null}
           <p className="mt-4 text-xs text-zinc-500">
             {m.showing.replace("{count}", String(view.pageSize))}
           </p>
@@ -138,9 +198,15 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
               {view.rows.map((row) => (
                 <article
                   key={String(row.id)}
+                  data-testid="marketing-row"
                   className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
                 >
                   <MarketingRow section={view.section} row={row} m={m} />
+                  <MarketingActionRail
+                    actions={rowActions(view.section, row, m)}
+                    onDone={() => void refresh()}
+                    m={m}
+                  />
                 </article>
               ))}
             </div>
@@ -152,19 +218,29 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
 }
 
 /**
- * What is switched on, on every section.
+ * What is switched on, on every section, and the three an operator may change.
  *
  * docs/policy/marketing-automation.md §6.1 makes each capability its own
  * switch, and the page's job is to answer "why did nothing publish".
  * "Drafts: off" is that answer, and it belongs beside the empty queue rather
  * than in another workspace.
  * `unreadable` is its own word: a read that failed is not evidence of `off`.
+ *
+ * A toggle is offered only for a switch whose state was actually read and only
+ * when the configuration generation was read with it. Both come from the same
+ * snapshot, so a screen cannot save a change against a state nobody saw;
+ * without the generation there is nothing to compare and set against, and a
+ * control whose only outcome is 409 is not a control.
  */
 function MarketingSwitchStrip({
   switches,
+  configGeneration,
+  onDone,
   m,
 }: {
   switches: Record<string, SwitchState>;
+  configGeneration: number | null;
+  onDone: () => void;
   m: Record<string, string>;
 }) {
   const labels: [string, string][] = [
@@ -194,6 +270,38 @@ function MarketingSwitchStrip({
         ? "text-amber-300"
         : "text-zinc-400";
 
+  const switchLabel = (name: string) =>
+    ({
+      drafts: m.switchDrafts,
+      publish: m.switchPublish,
+      autonomous: m.switchAutoPublish,
+    })[name] ?? name;
+
+  const toggles: MarketingAction[] =
+    configGeneration === null
+      ? []
+      : MARKETING_CONSOLE_SWITCH_CONTROLS.flatMap((control) => {
+          const state = switches[control.state];
+          if (state !== "on" && state !== "off") return [];
+          const turningOn = state === "off";
+          return [
+            {
+              id: `switch-${control.name}`,
+              label: (turningOn ? m.switchTurnOn : m.switchTurnOff).replace(
+                "{switch}",
+                switchLabel(control.name)
+              ),
+              path: "/api/admin/marketing/settings",
+              confirm: turningOn ? m.switchConfirmOn : undefined,
+              body: () => ({
+                switch: control.name,
+                enabled: turningOn,
+                expectedConfigGeneration: configGeneration,
+              }),
+            },
+          ];
+        });
+
   return (
     <div
       data-testid="marketing-switches"
@@ -215,8 +323,489 @@ function MarketingSwitchStrip({
           </div>
         ))}
       </dl>
+      {configGeneration === null ? (
+        <p className="mt-2 text-[11px] text-amber-300">{m.switchNoGeneration}</p>
+      ) : null}
+      <MarketingActionRail actions={toggles} onDone={onDone} m={m} />
     </div>
   );
+}
+
+/**
+ * Registering a brand account.
+ *
+ * It lands in `connect_pending`: registering an account is not connecting one,
+ * and the row says so until a person confirms the connection separately.
+ */
+function MarketingAccountCreate({
+  onDone,
+  m,
+}: {
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const action: MarketingAction = {
+    id: "account-create",
+    label: m.actCreateAccount,
+    path: "/api/admin/marketing/accounts",
+    fields: [
+      {
+        name: "channel",
+        label: m.fieldChannel,
+        kind: "select",
+        options: Object.keys(MARKETING_CHANNEL_CAPS),
+      },
+      {
+        name: "provider",
+        label: m.fieldProvider,
+        kind: "select",
+        options: MARKETING_PROVIDERS,
+      },
+      {
+        name: "externalAccountRef",
+        label: m.fieldExternalRef,
+        kind: "text",
+        hint: m.hintOptional,
+      },
+      {
+        name: "defaultLocale",
+        label: m.fieldDefaultLocale,
+        kind: "select",
+        options: MARKETING_LOCALES,
+      },
+      {
+        name: "allowedLocales",
+        label: m.fieldAllowedLocales,
+        kind: "text",
+        hint: m.hintCommaSeparated,
+      },
+      {
+        name: "scopesDigest",
+        label: m.fieldScopesDigest,
+        kind: "text",
+        hint: m.hintDigest,
+      },
+      {
+        name: "policyVersion",
+        label: m.fieldPolicyVersion,
+        kind: "number",
+        initial: "1",
+      },
+    ],
+    body: (values) => ({
+      channel: values.channel,
+      provider: values.provider,
+      externalAccountRef:
+        values.externalAccountRef.trim() === ""
+          ? null
+          : values.externalAccountRef.trim(),
+      defaultLocale: values.defaultLocale,
+      allowedLocales: values.allowedLocales
+        .split(",")
+        .map((locale) => locale.trim())
+        .filter((locale) => locale !== ""),
+      scopesDigest: values.scopesDigest.trim(),
+      policyVersion: Number(values.policyVersion),
+    }),
+  };
+
+  return (
+    <div
+      data-testid="marketing-account-create"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+    >
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+        {m.createAccountTitle}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">{m.createAccountNote}</p>
+      <MarketingActionRail actions={[action]} onDone={onDone} m={m} />
+    </div>
+  );
+}
+
+/**
+ * Which controls a row can take, decided from the row's own state.
+ *
+ * The server decides every one of these again, and it is the server's answer
+ * that counts. This only declines to draw a control whose sole outcome would
+ * be a 409 -- offering "approve" on something already approved teaches an
+ * operator that this screen's buttons are guesses.
+ */
+function rowActions(
+  section: MarketingConsoleSection,
+  row: Row,
+  m: Record<string, string>
+): MarketingAction[] {
+  if (section === "queue") return queueActions(row, m);
+  if (section === "published") return publishedActions(row, m);
+  if (section === "accounts") return accountActions(row, m);
+  return [];
+}
+
+/** The two values every post writer compares against. */
+const postCas = (row: Row) => ({
+  expectedEnvelopeDigest: str(row.envelopeDigest),
+  expectedHistoryVersion: int(row.historyVersion),
+});
+
+const legalHoldAction = (row: Row, m: Record<string, string>): MarketingAction => {
+  const held = row.legalHold === true;
+  return {
+    id: held ? "legal-hold-release" : "legal-hold-set",
+    label: held ? m.actReleaseHold : m.actSetHold,
+    path: POST(row.id, "legal-hold"),
+    confirm: held ? m.confirmReleaseHold : undefined,
+    body: () => ({ hold: !held, expectedHistoryVersion: int(row.historyVersion) }),
+  };
+};
+
+function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const actions: MarketingAction[] = [];
+  if (row.status === "pending_approval") {
+    actions.push({
+      id: "approve",
+      label: m.actApprove,
+      path: POST(row.id, "approve"),
+      fields: [
+        {
+          name: "approvalExpiresAt",
+          label: m.fieldApprovalExpires,
+          kind: "datetime",
+          initial: defaultApprovalExpiry(),
+          hint: m.hintLocalTime,
+        },
+      ],
+      body: (values) => ({
+        ...postCas(row),
+        approvalExpiresAt: instantFromLocalInput(values.approvalExpiresAt),
+      }),
+    });
+    actions.push({
+      id: "edit",
+      label: m.actEdit,
+      path: POST(row.id, "edit"),
+      fields: [
+        {
+          name: "renderedText",
+          label: m.fieldRenderedText,
+          kind: "textarea",
+          initial: envelopeText(row.envelope),
+          hint: m.hintGuardReruns,
+        },
+      ],
+      // Only the words change. Everything else the envelope holds -- the
+      // claims, the assets, the channel and locale it was written for -- is
+      // carried through, because an edit is a correction to the copy and not
+      // a new draft wearing the old one's history.
+      body: (values) => ({
+        ...postCas(row),
+        envelope: {
+          ...((row.envelope as Record<string, unknown> | null) ?? {}),
+          renderedText: values.renderedText,
+        },
+      }),
+    });
+    actions.push({
+      id: "reject",
+      label: m.actReject,
+      path: POST(row.id, "reject"),
+      confirm: m.confirmReject,
+      danger: true,
+      body: () => postCas(row),
+    });
+  }
+  actions.push(legalHoldAction(row, m));
+  return actions;
+}
+
+const TEMPLATE_SOURCE = new Set(["approved", "scheduled", "published", "verified"]);
+
+function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const actions: MarketingAction[] = [];
+  const status = str(row.status);
+
+  if (status === "approved") {
+    actions.push({
+      id: "schedule",
+      label: m.actSchedule,
+      path: POST(row.id, "schedule"),
+      fields: [
+        {
+          name: "scheduledAt",
+          label: m.fieldScheduledAt,
+          kind: "datetime",
+          hint: m.hintLocalTime,
+        },
+      ],
+      body: (values) => ({
+        ...postCas(row),
+        scheduledAt: instantFromLocalInput(values.scheduledAt),
+      }),
+    });
+  }
+
+  if (status === "failed") {
+    actions.push({
+      id: "requeue",
+      label: m.actRequeue,
+      path: POST(row.id, "requeue"),
+      confirm: m.confirmRequeue,
+      body: () => postCas(row),
+    });
+  }
+
+  if (TEMPLATE_SOURCE.has(status) && row.reusableAsTemplate !== true) {
+    actions.push({
+      id: "mark-reusable",
+      label: m.actMarkReusable,
+      path: POST(row.id, "mark-reusable"),
+      confirm: m.confirmMarkReusable,
+      body: () => postCas(row),
+    });
+  }
+
+  if (status === "outcome_unknown") {
+    actions.push({
+      id: "resolve-published",
+      label: m.actResolvePublished,
+      path: POST(row.id, "resolve-outcome"),
+      fields: [
+        { name: "externalPostId", label: m.fieldExternalPostId, kind: "text" },
+        { name: "externalUrl", label: m.fieldExternalUrl, kind: "url" },
+        {
+          name: "evidenceRef",
+          label: m.fieldEvidenceRef,
+          kind: "text",
+          hint: m.hintEvidence,
+        },
+      ],
+      body: (values) => ({
+        resolution: "published",
+        expectedHistoryVersion: int(row.historyVersion),
+        externalPostId: values.externalPostId.trim(),
+        externalUrl: values.externalUrl.trim(),
+        evidenceRef: values.evidenceRef.trim(),
+      }),
+    });
+    actions.push({
+      id: "resolve-failed",
+      label: m.actResolveFailed,
+      path: POST(row.id, "resolve-outcome"),
+      danger: true,
+      fields: [
+        { name: "errorCode", label: m.fieldErrorCode, kind: "text" },
+        {
+          name: "evidenceRef",
+          label: m.fieldEvidenceRef,
+          kind: "text",
+          hint: m.hintEvidence,
+        },
+      ],
+      body: (values) => ({
+        resolution: "failed",
+        expectedHistoryVersion: int(row.historyVersion),
+        errorCode: values.errorCode.trim(),
+        evidenceRef: values.evidenceRef.trim(),
+      }),
+    });
+  }
+
+  if (status === "published" || status === "verified") {
+    actions.push({
+      id: "unpublish",
+      label: m.actUnpublish,
+      path: POST(row.id, "unpublish"),
+      danger: true,
+      // Both statements are the operator's, so both are boxes they tick.
+      // Sending a silent `true` would be this screen saying, in their name,
+      // that they had checked something they were never asked about.
+      fields: [
+        {
+          name: "evidenceRef",
+          label: m.fieldEvidenceRef,
+          kind: "text",
+          hint: m.hintEvidence,
+        },
+        {
+          name: "cancellationSupported",
+          label: m.fieldCancellationSupported,
+          kind: "checkbox",
+          hint: m.hintCancellationSupported,
+        },
+        {
+          name: "removalConfirmed",
+          label: m.fieldRemovalConfirmed,
+          kind: "checkbox",
+          hint: m.hintRemovalConfirmed,
+        },
+      ],
+      body: (values) => ({
+        expectedStatus: status,
+        expectedHistoryVersion: int(row.historyVersion),
+        expectedExternalPostId: str(row.externalPostId),
+        evidenceRef: values.evidenceRef.trim(),
+        cancellationSupported: values.cancellationSupported === MARKETING_CHECKED,
+        removalConfirmed: values.removalConfirmed === MARKETING_CHECKED,
+      }),
+    });
+  }
+
+  actions.push(legalHoldAction(row, m));
+  return actions;
+}
+
+function accountActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const actions: MarketingAction[] = [];
+  const status = str(row.status);
+  const generation = int(row.connectionGeneration);
+  const identityCas = {
+    expectedScopesDigest: str(row.scopesDigest),
+    expectedPolicyVersion: int(row.policyVersion),
+    expectedGraduationEpoch: int(row.graduationEpoch),
+  };
+
+  if (status === "connect_pending") {
+    actions.push({
+      id: "confirm-connection",
+      label: m.actConfirmConnection,
+      path: ACCOUNT(row.id, "confirm-connection"),
+      body: () => ({ expectedConnectionGeneration: generation }),
+    });
+  }
+
+  if (status === "disconnected") {
+    actions.push({
+      id: "reconnect",
+      label: m.actReconnect,
+      path: ACCOUNT(row.id, "reconnect"),
+      body: () => ({ expectedConnectionGeneration: generation }),
+    });
+  }
+
+  if (status === "approval_mode" || status === "autonomous_mode") {
+    actions.push({
+      id: "pause",
+      label: m.actPause,
+      path: ACCOUNT(row.id, "pause"),
+      danger: true,
+      fields: [
+        {
+          name: "reasonCode",
+          label: m.fieldReasonCode,
+          kind: "select",
+          options: MARKETING_PAUSE_REASON_CODES,
+        },
+      ],
+      body: (values) => ({ expectedStatus: status, reasonCode: values.reasonCode }),
+    });
+    actions.push({
+      id: "scopes",
+      label: m.actChangeScopes,
+      path: ACCOUNT(row.id, "scopes"),
+      fields: [
+        {
+          name: "scopesDigest",
+          label: m.fieldScopesDigest,
+          kind: "text",
+          hint: m.hintIdentityChange,
+        },
+      ],
+      body: (values) => ({ ...identityCas, scopesDigest: values.scopesDigest.trim() }),
+    });
+    actions.push({
+      id: "policy-version",
+      label: m.actChangePolicyVersion,
+      path: ACCOUNT(row.id, "policy-version"),
+      fields: [
+        {
+          name: "policyVersion",
+          label: m.fieldPolicyVersion,
+          kind: "number",
+          initial: String(int(row.policyVersion) + 1),
+          hint: m.hintIdentityChange,
+        },
+      ],
+      body: (values) => ({ ...identityCas, policyVersion: Number(values.policyVersion) }),
+    });
+  }
+
+  if (status === "paused") {
+    actions.push({
+      id: "resume-approval",
+      label: m.actResumeApproval,
+      path: ACCOUNT(row.id, "resume"),
+      body: () => ({ mode: "approval" }),
+    });
+    if (row.pausedFromMode === "autonomous_mode") {
+      actions.push({
+        id: "resume-autonomous",
+        label: m.actResumeAutonomous,
+        path: ACCOUNT(row.id, "resume"),
+        fields: [
+          {
+            name: "reasonCode",
+            label: m.fieldReasonCode,
+            kind: "select",
+            options: MARKETING_RESUME_REASON_CODES,
+          },
+        ],
+        body: (values) => ({ mode: "autonomous", reasonCode: values.reasonCode }),
+      });
+    }
+    // Offered on every paused account rather than only on one that is known to
+    // need it: the console does not count due posts, and a control that
+    // appears only once a backlog is visible would be missing exactly when the
+    // resume starts refusing.
+    actions.push({
+      id: "drain",
+      label: m.actDrain,
+      path: ACCOUNT(row.id, "drain"),
+      body: () => ({}),
+    });
+  }
+
+  if (status !== "disconnected") {
+    actions.push({
+      id: "lower-caps",
+      label: m.actLowerCaps,
+      path: ACCOUNT(row.id, "caps"),
+      fields: [
+        {
+          name: "dailyCapOverride",
+          label: m.fieldDailyCap,
+          kind: "number",
+          initial:
+            typeof row.dailyCapOverride === "number" ? String(row.dailyCapOverride) : "",
+          hint: m.hintCapEmpty,
+        },
+        {
+          name: "weeklyCapOverride",
+          label: m.fieldWeeklyCap,
+          kind: "number",
+          initial:
+            typeof row.weeklyCapOverride === "number" ? String(row.weeklyCapOverride) : "",
+          hint: m.hintCapEmpty,
+        },
+      ],
+      body: (values) => ({
+        dailyCapOverride: capOverride(values.dailyCapOverride),
+        weeklyCapOverride: capOverride(values.weeklyCapOverride),
+      }),
+    });
+    actions.push({
+      id: "disconnect",
+      label: m.actDisconnect,
+      path: ACCOUNT(row.id, "disconnect"),
+      confirm: m.confirmDisconnect,
+      danger: true,
+      body: () => ({
+        expectedStatus: status,
+        expectedConnectionGeneration: generation,
+      }),
+    });
+  }
+
+  return actions;
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -261,6 +850,7 @@ function MarketingRow({
         <p className="mt-2 text-xs text-zinc-500">
           {m.colCreated} {stamp(row.createdAt) ?? m.none} UTC / {m.colExpires}{" "}
           {stamp(row.approvalExpiresAt) ?? m.none}
+          {row.legalHold === true ? ` / ${m.legalHeld}` : ""}
         </p>
       </>
     );
@@ -294,6 +884,9 @@ function MarketingRow({
             }
           />
         </div>
+        {row.legalHold === true ? (
+          <p className="mt-2 text-xs font-bold text-amber-300">{m.legalHeld}</p>
+        ) : null}
       </>
     );
   }
@@ -321,6 +914,10 @@ function MarketingRow({
               ? `${stamp(row.pausedAt)} (${row.pauseReasonCode ?? m.none}, from ${row.pausedFromMode ?? m.none})`
               : m.notPaused
           }
+        />
+        <Field
+          label={m.colIdentity}
+          value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
         />
       </div>
     );

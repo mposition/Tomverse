@@ -66,6 +66,7 @@ import {
   type MarketingHistoryEntry,
   type MarketingLocale,
   type MarketingPausableMode,
+  type MarketingPauseReasonCode,
   type MarketingPostKind,
   type MarketingPostMode,
   type MarketingPostStatus,
@@ -74,6 +75,7 @@ import {
   type MarketingResumeReasonCode,
   type MarketingVerificationMethod,
   MARKETING_CHANNEL_CAPS,
+  MARKETING_PAUSE_REASON_CODES,
   MARKETING_NO_AUTONOMY_CHANNELS,
   MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
@@ -95,6 +97,41 @@ import {
  * those outside the transaction that wrote the other.
  */
 export type MarketingDatabase = PrismaClient | Prisma.TransactionClient;
+
+declare const MARKETING_TRANSACTION_BRAND: unique symbol;
+
+/**
+ * A client that is provably inside a transaction.
+ *
+ * `Prisma.TransactionClient` does not prove it: it is `Omit<PrismaClient, …>`,
+ * and a whole `PrismaClient` is assignable to it, so annotating a parameter
+ * with it refuses nothing. `resumeMarketingChannelToAutonomous(prisma, …)`
+ * typechecked, and each of its four writes -- the row locks, the post
+ * expiries, their audit entries, the channel CAS -- went out on its own
+ * autocommit, so a failing CAS at the end left the expiries and their audit
+ * behind.
+ *
+ * The brand is a property no client has, so the only value of this type is one
+ * `runMarketingTransaction()` produced, and that function's argument is a
+ * `$transaction` callback parameter. The single cast below is the whole
+ * surface, and `tests/marketingS2b1Store.test.mjs` fails if a second one
+ * appears anywhere in `lib/`.
+ */
+export type MarketingTransaction = Prisma.TransactionClient & {
+  readonly [MARKETING_TRANSACTION_BRAND]: "marketing";
+};
+
+/** The one place a `MarketingTransaction` comes from. */
+export async function runMarketingTransaction<T>(
+  client: PrismaClient,
+  run: (tx: MarketingTransaction) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number },
+): Promise<T> {
+  return client.$transaction(
+    (tx) => run(tx as unknown as MarketingTransaction),
+    options,
+  );
+}
 
 /** A write refused before it reached the database. */
 export class MarketingStoreRefusedError extends Error {
@@ -203,6 +240,8 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     requeue_evidence_missing: 409,
     requeue_without_failure: 409,
     resume_approval_conflict: 409,
+  resume_drain_required: 409,
+  drain_not_paused: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -224,6 +263,7 @@ export const MARKETING_S2B1_ACTIONS = Object.freeze({
   accountResumeApproval: "marketing_account.resume_approval",
   postApprovalExpiredOnResume: "marketing_post.approval_expired_on_resume",
   accountResumeAutonomous: MARKETING_RESUME_AUTONOMOUS_ACTION,
+  accountDrainDueApprovals: "marketing_account.drain_due_approvals",
   accountLowerCaps: "marketing_account.lower_caps",
   postApprove: "marketing_post.approve",
   postReject: "marketing_post.reject",
@@ -240,13 +280,13 @@ export const MARKETING_S2B1_ACTIONS = Object.freeze({
   settingAutonomousChanged: "marketing_setting.autonomous_changed",
 } as const);
 
-export const MARKETING_PAUSE_REASON_CODES = Object.freeze([
-  "operator_requested",
-  "operator_problem_report",
-  "incident_review",
-] as const);
-export type MarketingPauseReasonCode =
-  (typeof MARKETING_PAUSE_REASON_CODES)[number];
+// Defined in the pure schema module, beside the resume codes, because the
+// console offers both and cannot import this one: this file is server-only.
+// Re-exported under its own name so nothing that reads it has to know that.
+export {
+  MARKETING_PAUSE_REASON_CODES,
+  type MarketingPauseReasonCode,
+} from "@/lib/marketingAutomationSchema";
 
 // ---------------------------------------------------------------------------
 // Channels
@@ -611,7 +651,7 @@ export async function disconnectMarketingChannel(
 }
 
 export async function reconnectMarketingChannel(
-  database: MarketingDatabase,
+  database: MarketingTransaction,
   rawInput: { id: string; expectedConnectionGeneration: number },
 ) {
   const input = {
@@ -628,6 +668,24 @@ export async function reconnectMarketingChannel(
       "The account is no longer the disconnected connection being resumed",
     );
   }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -648,7 +706,7 @@ export async function reconnectMarketingChannel(
 }
 
 export async function changeMarketingChannelScopes(
-  database: MarketingDatabase,
+  database: MarketingTransaction,
   rawInput: {
     id: string;
     expectedScopesDigest: string;
@@ -681,6 +739,24 @@ export async function changeMarketingChannelScopes(
       "The account identity changed before its scopes were saved",
     );
   }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -701,7 +777,7 @@ export async function changeMarketingChannelScopes(
 }
 
 export async function changeMarketingChannelPolicyVersion(
-  database: MarketingDatabase,
+  database: MarketingTransaction,
   rawInput: {
     id: string;
     expectedPolicyVersion: number;
@@ -738,6 +814,24 @@ export async function changeMarketingChannelPolicyVersion(
       "The account identity changed before its policy version was saved",
     );
   }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -808,6 +902,18 @@ type DueApprovalPost = {
 };
 
 /**
+ * How many due approvals one transaction may expire.
+ *
+ * Each one is a locked row, a conditional update and an audit append, and the
+ * audit append takes a chain-wide advisory lock -- so this is not only this
+ * account's latency, it is how long every other audit write waits. Fifty is
+ * chosen to stay far inside the wrapper's twenty-second transaction timeout
+ * with the chain lock held; a backlog larger than it is drained rather than
+ * pushed through one transaction.
+ */
+const MARKETING_RESUME_DRAIN_LIMIT = 50;
+
+/**
  * Default resume path. Due approvals are expired and audited before the
  * account leaves paused, all under the caller's one transaction.
  */
@@ -826,10 +932,13 @@ type DueApprovalPost = {
  * the row nor the audit entry may assume one.
  */
 async function expireDueApprovals(
-  database: Prisma.TransactionClient,
+  database: MarketingTransaction,
   channelId: string,
   now: Date,
-): Promise<string[]> {
+  options: { refuseIfMore: boolean },
+): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
+  // One more row than this transaction will touch, so "is there more" is an
+  // answer this query already has rather than a second scan.
   const due = await database.$queryRaw<DueApprovalPost[]>(Prisma.sql`
     SELECT "id", "status", "historyVersion", "approvalExpiresAt", "scheduledAt"
     FROM "MarketingPost"
@@ -840,10 +949,20 @@ async function expireDueApprovals(
         OR ("scheduledAt" IS NOT NULL AND "scheduledAt" <= ${now})
       )
     ORDER BY "id"
+    LIMIT ${MARKETING_RESUME_DRAIN_LIMIT + 1}
     FOR UPDATE
   `);
+  const remaining = due.length > MARKETING_RESUME_DRAIN_LIMIT;
+  if (remaining && options.refuseIfMore) {
+    // Before the first update, so the transaction that cannot succeed has not
+    // also spent the chain lock on fifty audit appends on its way to failing.
+    throw new MarketingStoreRefusedError(
+      "resume_drain_required",
+      "Too many approvals came due during the pause to expire in one resume",
+    );
+  }
   const expiredPostIds: string[] = [];
-  for (const post of due) {
+  for (const post of due.slice(0, MARKETING_RESUME_DRAIN_LIMIT)) {
     const expired = await database.marketingPost.updateMany({
       where: {
         id: post.id,
@@ -868,23 +987,72 @@ async function expireDueApprovals(
       metadata: {
         channelId,
         historyVersion: post.historyVersion,
-        // Which of the two made it due, because "expired" alone does not say
-        // whether the approval ran out or the slot went by.
-        dueBy:
-          post.approvalExpiresAt !== null && post.approvalExpiresAt <= now
-            ? "approval_window"
-            : "schedule",
+        // Both reasons, not the first true one: a post can be past its slot
+        // *and* out of approval window, and reporting only the window loses
+        // the fact that the schedule had also gone by.
+        dueByApprovalWindow:
+          post.approvalExpiresAt !== null && post.approvalExpiresAt <= now,
+        dueBySchedule: post.scheduledAt !== null && post.scheduledAt <= now,
+        // The instant both were judged against, so the two booleans can be
+        // checked afterwards rather than taken on trust.
+        judgedAt: now.toISOString(),
         approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
         scheduledAt: post.scheduledAt?.toISOString() ?? null,
       },
     });
     expiredPostIds.push(post.id);
   }
-  return expiredPostIds;
+  return { expiredPostIds, remaining };
+}
+
+/**
+ * Expires a bounded batch of due approvals while the account stays paused.
+ *
+ * A resume does its own expiry, but it can only do a bounded amount of it --
+ * so an account that accumulated more due posts than one transaction may touch
+ * could not resume at all, and each attempt burned the same work again under
+ * the audit chain's advisory lock before timing out. Lifting the bound was not
+ * the answer: it only moved the ceiling from a number to a latency.
+ *
+ * This is the other half. It expires up to the same bound and leaves the
+ * account exactly where it was -- `paused`, which is the state that keeps the
+ * publisher away from those posts in the meantime -- and says whether more
+ * remain. Called until `remaining` is false, it leaves a resume with nothing
+ * to do but the small final batch, and the resume still verifies that for
+ * itself rather than trusting that this ran.
+ *
+ * It only ever moves posts to `approval_expired`, so there is no state it can
+ * reach in which something goes out; that is why the kill switch does not gate
+ * it. A kill-switched account that could not be drained could not be resumed
+ * afterwards either.
+ */
+export async function drainDueMarketingApprovals(
+  database: MarketingTransaction,
+  rawInput: { id: string },
+): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
+  const input = { id: String(rawInput.id) };
+  const channel = await lockMarketingChannel(database, input.id);
+  if (channel.status !== "paused") {
+    throw new MarketingStoreRefusedError(
+      "drain_not_paused",
+      "Only a paused account has approvals to drain",
+    );
+  }
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  return expireDueApprovals(database, input.id, now, { refuseIfMore: false });
 }
 
 export async function resumeMarketingChannelToApproval(
-  database: Prisma.TransactionClient,
+  database: MarketingTransaction,
   rawInput: { id: string },
 ): Promise<{ expiredPostIds: string[] }> {
   const input = { id: String(rawInput.id) };
@@ -905,7 +1073,12 @@ export async function resumeMarketingChannelToApproval(
       "The database clock did not return a timestamp",
     );
   }
-  const expiredPostIds = await expireDueApprovals(database, input.id, now);
+  const { expiredPostIds } = await expireDueApprovals(database, input.id, now, {
+    // A backlog larger than one transaction's bound refuses here rather than
+    // being half-expired and rolled back. The drain action clears it while
+    // the account stays paused.
+    refuseIfMore: true,
+  });
   const resumed = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -926,7 +1099,7 @@ export async function resumeMarketingChannelToApproval(
 }
 
 export async function resumeMarketingChannelToAutonomous(
-  database: MarketingDatabase,
+  database: MarketingTransaction,
   rawInput: {
     id: string;
     auditLogId: string;
@@ -993,7 +1166,12 @@ export async function resumeMarketingChannelToAutonomous(
       "The database clock did not return a timestamp",
     );
   }
-  const expiredPostIds = await expireDueApprovals(database, input.id, now);
+  const { expiredPostIds } = await expireDueApprovals(database, input.id, now, {
+    // A backlog larger than one transaction's bound refuses here rather than
+    // being half-expired and rolled back. The drain action clears it while
+    // the account stays paused.
+    refuseIfMore: true,
+  });
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,

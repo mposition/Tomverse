@@ -647,6 +647,15 @@ export type MarketingAutomationSettingsRead = {
   webhookShadowEnabled: ReadResult<boolean>;
   webhookShadowStoredValue: ReadResult<string | null>;
   webhookApplyScopeValue: ReadResult<string | null>;
+  /**
+   * The version token a switch change has to send back.
+   *
+   * Read here rather than in its own query so the console shows a generation
+   * from the same snapshot as the values it read: two queries can straddle a
+   * change, and a screen that showed the old values with the new generation
+   * would save against a state nobody saw.
+   */
+  configGenerationValue: ReadResult<string | null>;
 };
 
 export async function readMarketingAutomationSettingsFrom(
@@ -688,6 +697,10 @@ export async function readMarketingAutomationSettingsFrom(
       ok: true as const,
       value: values.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY) ?? null,
     },
+    configGenerationValue: {
+      ok: true as const,
+      value: values.get(MARKETING_CONFIG_GENERATION_KEY) ?? null,
+    },
   });
 
   if (!databaseEnabled) return fromValues(new Map());
@@ -703,6 +716,7 @@ export async function readMarketingAutomationSettingsFrom(
             MARKETING_EXPERIMENTS_KEY,
             MARKETING_WEBHOOK_SHADOW_KEY,
             MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+            MARKETING_CONFIG_GENERATION_KEY,
           ],
         },
       },
@@ -718,6 +732,7 @@ export async function readMarketingAutomationSettingsFrom(
       experimentsEnabled: unreadable,
       webhookShadowEnabled: unreadable,
       webhookShadowStoredValue: unreadable,
+      configGenerationValue: unreadable,
       webhookApplyScopeValue: unreadable,
     };
   }
@@ -741,9 +756,15 @@ export async function readMarketingAutomationSettings(): Promise<
  * the route wrote -- that pairing is the only thing that makes the change
  * answerable afterwards.
  */
-export const MARKETING_CONSOLE_SWITCH_NAMES = ["drafts", "publish", "autonomous"] as const;
-
-export type MarketingConsoleSwitch = (typeof MARKETING_CONSOLE_SWITCH_NAMES)[number];
+// Defined in the pure sections module, beside the console control table that
+// pairs each one with the switch-strip state it reports, because the panel is
+// a client component and this file is server-only. Re-exported here so every
+// existing reader keeps the import it has.
+export {
+  MARKETING_CONSOLE_SWITCH_NAMES,
+  type MarketingConsoleSwitch,
+} from "@/lib/marketingConsoleSections";
+import { type MarketingConsoleSwitch } from "@/lib/marketingConsoleSections";
 
 /**
  * The generation number every admission-affecting setting change moves by one.
@@ -817,14 +838,27 @@ const readConfigGeneration = (value: string | undefined): number => {
       "The marketing configuration generation is not readable",
     );
   }
-  const generation =
-    parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as { generation?: unknown }).generation
-      : undefined;
-  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 0) {
+  // Strict means strict. An extra key, or a stored zero, is a document written
+  // by something that did not agree with this module, and reading it as a
+  // generation would bind a decision to a number nobody meant. Absent is the
+  // only zero there is.
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).length !== 1 ||
+    !Object.hasOwn(parsed, "generation")
+  ) {
     throw new MarketingSwitchRefusedError(
       "config_generation_unreadable",
-      "The marketing configuration generation is not a whole number",
+      "The marketing configuration generation is not the document it should be",
+    );
+  }
+  const generation = (parsed as { generation: unknown }).generation;
+  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 1) {
+    throw new MarketingSwitchRefusedError(
+      "config_generation_unreadable",
+      "The marketing configuration generation is not a whole number above zero",
     );
   }
   return generation;
@@ -925,14 +959,51 @@ export async function writeMarketingAutomationSwitch(
 
   const configGeneration = previousGeneration + 1;
   const generationValue = JSON.stringify({ generation: configGeneration });
-  await client.appSetting.upsert({
-    where: { key: MARKETING_CONFIG_GENERATION_KEY },
-    update: { value: generationValue },
-    create: { key: MARKETING_CONFIG_GENERATION_KEY, value: generationValue },
-  });
+  // Conditional on the document this transaction read, so two writers that
+  // both read generation n cannot both store n+1. The API path is already
+  // serialised by the audit chain's advisory lock, but a store contract that
+  // rests on a lock another module happens to take first is not a contract.
+  if (previousGeneration === 0) {
+    // No row yet, so the unique key is the condition: a second writer racing
+    // to create it fails on the constraint instead of overwriting.
+    await client.appSetting.create({
+      data: { key: MARKETING_CONFIG_GENERATION_KEY, value: generationValue },
+    });
+  } else {
+    const moved = await client.appSetting.updateMany({
+      where: {
+        key: MARKETING_CONFIG_GENERATION_KEY,
+        value: JSON.stringify({ generation: previousGeneration }),
+      },
+      data: { value: generationValue },
+    });
+    if (moved.count !== 1) {
+      throw new MarketingSwitchRefusedError(
+        "switch_conflict",
+        "The marketing switches changed since the screen read them",
+      );
+    }
+  }
 
   return { configGeneration };
 }
+
+/**
+ * The generation a console shows, or null when the stored document is not one.
+ *
+ * A screen that cannot read it must say so and refuse to save rather than
+ * guess a number: the whole point of the token is that a save carries the
+ * state it was made against.
+ */
+export const marketingConfigGenerationFromValue = (
+  value: string | null,
+): number | null => {
+  try {
+    return readConfigGeneration(value ?? undefined);
+  } catch {
+    return null;
+  }
+};
 
 /** What a console has to send back with a switch change. */
 export async function readMarketingConfigGeneration(

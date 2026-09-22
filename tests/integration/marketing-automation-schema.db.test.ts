@@ -27,6 +27,7 @@ import {
   MARKETING_S2B1_ACTIONS,
   lowerMarketingChannelCaps,
   resumeMarketingChannelToApproval,
+  runMarketingTransaction,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -1920,7 +1921,7 @@ test("approval-mode resume expires every due approved or scheduled post in its t
     },
   });
 
-  const result = await prisma.$transaction((tx) =>
+  const result = await runMarketingTransaction(prisma, (tx) =>
     resumeMarketingChannelToApproval(tx, { id: account.id }),
   );
   assert.deepEqual(result.expiredPostIds, [due.id]);

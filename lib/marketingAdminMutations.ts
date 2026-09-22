@@ -19,6 +19,8 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationA
 import {
   MARKETING_REFUSAL_STATUS,
   MarketingStoreRefusedError,
+  runMarketingTransaction,
+  type MarketingTransaction,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -145,7 +147,7 @@ export type MarketingMutationSpec<TBody, TResult> = {
    */
   refusal?: (error: unknown) => MarketingMutationRefusal | null;
   run: (
-    tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+    tx: MarketingTransaction,
     context: { body: TBody; auditLogId: string; session: Session }
   ) => Promise<TResult>;
 };
@@ -188,7 +190,7 @@ export async function runMarketingAdminMutation<TBody, TResult>(
     // write in the process queues behind this transaction -- lib/adminAudit.ts
     // says so in as many words. A resume that expires a long queue of due
     // posts is the one that can run long, and it is bounded separately.
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runMarketingTransaction(prisma, async (tx) => {
       const auditLogId = await writeAdminAuditLog({
         session,
         request: spec.request,

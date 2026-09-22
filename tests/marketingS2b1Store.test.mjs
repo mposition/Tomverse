@@ -11,7 +11,13 @@ import {
 } from "../lib/adminAuditIntegrityCore.ts";
 import { MARKETING_AUDIT_PROBLEMS } from "../lib/marketingAuditEvidence.ts";
 import {
+  MARKETING_CONSOLE_SWITCH_CONTROLS,
+  MARKETING_CONSOLE_SWITCH_NAMES,
+} from "../lib/marketingConsoleSections.ts";
+import {
   approveMarketingPost,
+  drainDueMarketingApprovals,
+  resumeMarketingChannelToApproval,
   createMarketingChannel,
   lowerMarketingChannelCaps,
   markMarketingPostReusable,
@@ -86,6 +92,13 @@ test("S2b1 action names are the exact approved inventory strings", () => {
     "marketing_account.resume_approval",
     "marketing_post.approval_expired_on_resume",
     "marketing_account.resume_autonomous",
+    // Added by the S2 plan r6 amendment, which the round-2 independent review
+    // asked for in as many words: a resume may only expire a bounded batch of
+    // due approvals, so an account with a larger backlog needed a path that
+    // clears it without leaving `paused`. It is its own action because it is
+    // its own decision -- the record has to be able to say an operator drained
+    // an account without saying they resumed it.
+    "marketing_account.drain_due_approvals",
     "marketing_account.lower_caps",
     "marketing_post.approve",
     "marketing_post.reject",
@@ -629,47 +642,328 @@ test("every marketing admin mutation route goes through the one predicate", () =
       }
     }
 
+    // Every local name a function is reachable under, so the handlers can be
+    // found whether the file writes `export async function POST` or declares
+    // it and writes `export { handler as POST }` underneath. The second form
+    // is not exotic -- it is what a file looks like after somebody wraps a
+    // handler -- and a sweep that only reads the first would pass it without
+    // looking at it, which for a permission boundary is worse than no sweep.
+    const locals = new Map();
+    for (const statement of tree.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) {
+        locals.set(statement.name.text, statement);
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name)) {
+            locals.set(declaration.name.text, declaration);
+          }
+        }
+      }
+    }
+
     const mutatingHandlers = [];
+    const seen = new Set();
+    const take = (exportedName, node) => {
+      if (!MUTATING.has(exportedName) || seen.has(exportedName)) return;
+      seen.add(exportedName);
+      mutatingHandlers.push({ name: exportedName, node });
+    };
     for (const statement of tree.statements) {
       const exported = ts
         .getModifiers?.(statement)
         ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
-      if (!exported) continue;
-      if (ts.isFunctionDeclaration(statement) && statement.name) {
-        if (MUTATING.has(statement.name.text)) mutatingHandlers.push(statement);
-      } else if (ts.isVariableStatement(statement)) {
+      if (exported && ts.isFunctionDeclaration(statement) && statement.name) {
+        take(statement.name.text, statement);
+      } else if (exported && ts.isVariableStatement(statement)) {
         for (const declaration of statement.declarationList.declarations) {
-          if (ts.isIdentifier(declaration.name) && MUTATING.has(declaration.name.text)) {
-            mutatingHandlers.push(declaration);
+          if (ts.isIdentifier(declaration.name)) {
+            take(declaration.name.text, declaration);
           }
+        }
+      } else if (
+        ts.isExportDeclaration(statement) &&
+        statement.exportClause &&
+        ts.isNamedExports(statement.exportClause)
+      ) {
+        for (const element of statement.exportClause.elements) {
+          const exportedName = element.name.text;
+          if (!MUTATING.has(exportedName)) continue;
+          const localName = (element.propertyName ?? element.name).text;
+          const local = locals.get(localName);
+          if (!local) {
+            offenders.push(
+              `${relative}: ${exportedName} is exported from somewhere this check cannot read`
+            );
+            seen.add(exportedName);
+            continue;
+          }
+          take(exportedName, local);
         }
       }
     }
     if (mutatingHandlers.length === 0) continue;
 
-    for (const handler of mutatingHandlers) {
-      let callsWrapper = false;
+    for (const { name, node } of mutatingHandlers) {
       let readsSession = false;
-      const visit = (node) => {
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-          const called = node.expression.text;
-          if (wrapperBinding && called === wrapperBinding) callsWrapper = true;
-          if (sessionBindings.has(called)) readsSession = true;
+      const visitAll = (inner) => {
+        if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+          if (sessionBindings.has(inner.expression.text)) readsSession = true;
         }
-        ts.forEachChild(node, visit);
+        ts.forEachChild(inner, visitAll);
       };
-      visit(handler);
-      const name = ts.isFunctionDeclaration(handler)
-        ? handler.name.text
-        : handler.name.getText(tree);
-      if (!callsWrapper) {
-        offenders.push(`${relative}: ${name} mutates without calling the shared predicate`);
-      }
+      visitAll(node);
       if (readsSession) {
         offenders.push(`${relative}: ${name} reads the session itself`);
       }
+
+      // The handler's own body, not the file's. `run` is an arrow inside the
+      // wrapper's argument and has returns of its own; they are the store's
+      // results, not responses, and reading them as responses would be
+      // reading the wrong function.
+      const fn = ts.isFunctionDeclaration(node)
+        ? node
+        : node.initializer &&
+            (ts.isArrowFunction(node.initializer) ||
+              ts.isFunctionExpression(node.initializer))
+          ? node.initializer
+          : null;
+      if (!fn || !fn.body) {
+        offenders.push(`${relative}: ${name} is not a function this check can read`);
+        continue;
+      }
+
+      const isWrapperCall = (expression) => {
+        if (!expression) return false;
+        let value = expression;
+        while (ts.isAwaitExpression(value) || ts.isParenthesizedExpression(value)) {
+          value = value.expression;
+        }
+        return (
+          ts.isCallExpression(value) &&
+          ts.isIdentifier(value.expression) &&
+          wrapperBinding !== null &&
+          value.expression.text === wrapperBinding
+        );
+      };
+
+      // A concise arrow body is the whole answer; anything else has to be a
+      // block whose every return is the wrapper.
+      if (!ts.isBlock(fn.body)) {
+        if (!isWrapperCall(fn.body)) {
+          offenders.push(`${relative}: ${name} answers without the shared predicate`);
+        }
+        continue;
+      }
+
+      // Every return this handler can reach. Nested functions are skipped,
+      // because their returns belong to them. A sweep that only asked whether
+      // the wrapper appears *somewhere* passed a handler that called the store
+      // from an early return and kept an unreachable wrapper call below it --
+      // the call was there, and nothing ever ran it.
+      const returns = [];
+      const visitReturns = (inner) => {
+        if (
+          ts.isFunctionDeclaration(inner) ||
+          ts.isFunctionExpression(inner) ||
+          ts.isArrowFunction(inner) ||
+          ts.isMethodDeclaration(inner) ||
+          ts.isClassDeclaration(inner)
+        ) {
+          return;
+        }
+        if (ts.isReturnStatement(inner)) returns.push(inner);
+        ts.forEachChild(inner, visitReturns);
+      };
+      ts.forEachChild(fn.body, visitReturns);
+
+      if (returns.length === 0) {
+        offenders.push(`${relative}: ${name} mutates without calling the shared predicate`);
+        continue;
+      }
+      for (const returned of returns) {
+        if (!isWrapperCall(returned.expression)) {
+          offenders.push(
+            `${relative}: ${name} has a return that is not the shared predicate`
+          );
+        }
+      }
+      // Nothing may run after it, so the wrapper's answer is the handler's.
+      const last = fn.body.statements[fn.body.statements.length - 1];
+      if (!last || !ts.isReturnStatement(last)) {
+        offenders.push(`${relative}: ${name} does not end by answering`);
+      }
     }
   }
-
   assert.deepEqual(offenders, []);
+});
+
+test("the marketing transaction brand has exactly one cast", () => {
+  const dir = join(process.cwd(), "lib");
+  const files = [];
+  const walk = (at) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const next = join(at, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name.endsWith(".ts")) files.push(next);
+    }
+  };
+  walk(dir);
+
+  // A brand is only a boundary while the cast that produces it is one place.
+  // Anywhere else, `prisma as unknown as MarketingTransaction` would satisfy
+  // the type and put the four writes of a resume back on four autocommits,
+  // which is exactly the defect the brand was added for.
+  const casts = [];
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    if (!source.includes("MarketingTransaction")) continue;
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    const visit = (node) => {
+      if (
+        (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) &&
+        node.type.getText(tree).includes("MarketingTransaction")
+      ) {
+        casts.push(`${file.slice(file.indexOf("lib" + sep))}: ${node.getText(tree).slice(0, 60)}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+
+  assert.equal(
+    casts.length,
+    1,
+    `expected the one cast inside runMarketingTransaction, saw ${casts.join(" | ")}`
+  );
+  assert.ok(casts[0].startsWith("lib" + sep + "marketingStore.ts:"), casts[0]);
+});
+
+/** A paused channel row, in the shape `lockMarketingChannel` returns. */
+const pausedChannel = (overrides = {}) => ({
+  id: "channel-1",
+  channel: "linkedin",
+  status: "paused",
+  connectionGeneration: 1,
+  scopesDigest: DIGEST,
+  policyVersion: 1,
+  graduationEpoch: 2,
+  graduatedAt: new Date("2026-09-20T00:00:00.000Z"),
+  graduationSnapshot: {},
+  pausedAt: new Date("2026-09-22T00:00:00.000Z"),
+  pausedFromMode: "approval_mode",
+  pauseReasonCode: "incident_review",
+  lastResumeAuditLogId: null,
+  dailyCapOverride: null,
+  weeklyCapOverride: null,
+  ...overrides,
+});
+
+/**
+ * A `$queryRaw` that answers the three reads a resume makes, in order: the
+ * row lock, the database clock, then the due posts.
+ */
+const resumeReads = (channel, due) => {
+  let call = 0;
+  return async () => {
+    call += 1;
+    if (call === 1) return [channel];
+    if (call === 2) return [{ now: new Date("2026-09-22T01:00:00.000Z") }];
+    return due;
+  };
+};
+
+const duePost = (index) => ({
+  id: `post-${index}`,
+  status: "scheduled",
+  historyVersion: 0,
+  approvalExpiresAt: null,
+  scheduledAt: new Date("2026-09-21T00:00:00.000Z"),
+});
+
+test("a resume refuses a backlog larger than one transaction before touching a row", async () => {
+  // Fifty-one due posts: one more than the bound, which is the case the
+  // review found could never resume. It refuses *before* the first update,
+  // so the transaction that cannot succeed has not also spent the audit
+  // chain's advisory lock on fifty appends to reach that answer.
+  const due = Array.from({ length: 51 }, (unused, index) => duePost(index));
+  let updates = 0;
+  await assert.rejects(
+    resumeMarketingChannelToApproval(
+      {
+        $queryRaw: resumeReads(pausedChannel(), due),
+        marketingPost: {
+          updateMany: async () => {
+            updates += 1;
+            return { count: 1 };
+          },
+        },
+        marketingChannel: {
+          updateMany: async () => {
+            updates += 1;
+            return { count: 1 };
+          },
+        },
+      },
+      { id: "channel-1" },
+    ),
+    (error) =>
+      error instanceof MarketingStoreRefusedError &&
+      error.code === "resume_drain_required",
+  );
+  assert.equal(updates, 0);
+});
+
+test("the drain refuses an account that is not paused", async () => {
+  // A drain is only meaningful while the publisher is being kept away from
+  // those posts, and `paused` is what keeps it away. On a running account it
+  // would be expiring approvals nobody asked it to expire.
+  let reads = 0;
+  await assert.rejects(
+    drainDueMarketingApprovals(
+      {
+        $queryRaw: async () => {
+          reads += 1;
+          return [pausedChannel({ status: "approval_mode" })];
+        },
+      },
+      { id: "channel-1" },
+    ),
+    (error) =>
+      error instanceof MarketingStoreRefusedError &&
+      error.code === "drain_not_paused",
+  );
+  assert.equal(reads, 1);
+});
+
+test("the drain does not resume the account it drains", async () => {
+  // The whole point of the path: it clears the backlog and leaves the account
+  // exactly where it was. A drain that also resumed would be a resume with a
+  // different name, and it would do the unbounded work this bound exists to
+  // stop.
+  const source = readFileSync(
+    new URL("../lib/marketingStore.ts", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf("export async function drainDueMarketingApprovals(");
+  assert.ok(start > 0, "the drain store function is missing");
+  const body = source.slice(start, source.indexOf("\n}", start));
+  assert.ok(
+    !body.includes("marketingChannel.update"),
+    "the drain writes the channel row",
+  );
+  assert.ok(!body.includes("status:"), "the drain names a status to write");
+});
+
+test("the console switch controls name switches the writer accepts", () => {
+  // Two names for one thing -- the payload's `autonomous` and the strip's
+  // `autoPublish` -- so the pairing is written once. A control naming a
+  // switch the writer does not know would be a button that only ever 422s.
+  assert.deepEqual(
+    MARKETING_CONSOLE_SWITCH_CONTROLS.map((control) => control.name),
+    [...MARKETING_CONSOLE_SWITCH_NAMES],
+  );
+  assert.deepEqual(
+    MARKETING_CONSOLE_SWITCH_CONTROLS.map((control) => control.state),
+    ["drafts", "publish", "autoPublish"],
+  );
 });

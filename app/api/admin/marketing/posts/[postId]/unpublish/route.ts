@@ -32,7 +32,8 @@ const schema = z
   .strict();
 
 /**
- * POST: a person takes a published post down (design §8, C10).
+ * POST: a person takes a published post down
+ * (docs/policy/marketing-automation.md §8, design C10).
  *
  * A narrowing, so no switch refuses it -- removing something already public is
  * damage control, and the console says as much: S0's C10 recorded that on some

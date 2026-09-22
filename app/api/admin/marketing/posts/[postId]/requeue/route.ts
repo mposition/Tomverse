@@ -19,7 +19,8 @@ const schema = z
 /**
  * POST: a person re-queues a post whose publish failed.
  *
- * There is no automatic retry (policy §2). The store requires a *new* approval
+ * There is no automatic retry
+ * (docs/policy/marketing-automation.md §2). The store requires a *new* approval
  * entry dated after the failure it answers, and refuses one that reuses the
  * approval the failed attempt already had -- so a re-queue is a fresh decision
  * about a post somebody looked at, not a button that tries again.
