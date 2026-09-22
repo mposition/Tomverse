@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { routingOutcomeForSettlement } from "../lib/chatSettlementOutcome.ts";
+import {
+    routingFailureLayerForSettlement,
+    routingOutcomeForSettlement,
+} from "../lib/chatSettlementOutcome.ts";
 import { DISPATCH_OUTCOMES_COUNTED } from "../lib/routerSignalCore.ts";
 
 /**
@@ -63,6 +66,64 @@ test("every settlement outcome maps to a recordable attempt outcome", () => {
     for (const settlement of ["completed", "cancelled", "failed", "empty"]) {
         assert.ok(
             allowed.includes(routingOutcomeForSettlement(settlement)),
+            settlement
+        );
+    }
+});
+
+/**
+ * The layer an empty answer is attributed to.
+ *
+ * `stream` is this process or this connection. An empty answer is neither: the
+ * call reached the provider and succeeded.
+ */
+
+test("an empty answer is attributed to the model's output, not to the stream", () => {
+    assert.equal(routingFailureLayerForSettlement("empty"), "model_output");
+    assert.equal(routingFailureLayerForSettlement("failed"), "stream");
+});
+
+test("a turn that did not fail carries no layer, as the database requires", () => {
+    // `RoutingAttempt_outcome_failure_layer_check` forces 'none' for the
+    // outcomes that are not failures, so these two are not a style choice.
+    for (const settlement of ["completed", "cancelled"]) {
+        assert.equal(routingFailureLayerForSettlement(settlement), "none");
+        assert.ok(
+            ["succeeded", "cancelled", "pending"].includes(
+                routingOutcomeForSettlement(settlement)
+            )
+        );
+    }
+    for (const settlement of ["empty", "failed"]) {
+        assert.notEqual(routingFailureLayerForSettlement(settlement), "none");
+        assert.ok(
+            !["succeeded", "cancelled", "pending"].includes(
+                routingOutcomeForSettlement(settlement)
+            )
+        );
+    }
+});
+
+test("every layer this maps to is one the constraint allows", () => {
+    // Written out rather than imported, so that widening the union cannot
+    // satisfy this test by moving the target. Matches
+    // prisma/migrations/20260922120000_routing_attempt_model_output_layer.
+    const allowed = [
+        "none",
+        "planner",
+        "adapter",
+        "manifest",
+        "billing",
+        "provider",
+        "stream",
+        "process",
+        "storage",
+        "application",
+        "model_output",
+    ];
+    for (const settlement of ["completed", "cancelled", "failed", "empty"]) {
+        assert.ok(
+            allowed.includes(routingFailureLayerForSettlement(settlement)),
             settlement
         );
     }

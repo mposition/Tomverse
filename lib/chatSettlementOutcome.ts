@@ -24,16 +24,13 @@
  * empty text throws nothing and never reaches it. `decideFallback` does not
  * read the persisted row.
  *
- * The failure *layer* is not decided here. An empty answer is currently filed
- * under `stream`, which `lib/routingStreamFailure.ts` documents as this
- * process or this connection rather than the provider's output, and correcting
- * that needs a value the `RoutingAttempt_failureLayer_check` constraint does
- * not yet allow. That is its own change, with its own migration.
- *
  * Pure: no database, no clock, no network.
  */
 
-import type { RoutingAttemptOutcome } from "@/lib/routingAttemptStore";
+import type {
+    RoutingAttemptOutcome,
+    RoutingFailureLayer,
+} from "@/lib/routingAttemptStore";
 
 /** What the chat route's settlement funnel calls a terminal turn. */
 export type ChatSettlementOutcome =
@@ -60,5 +57,40 @@ export const routingOutcomeForSettlement = (
             // and narrowing it would need the same evidence this change had
             // for the empty one.
             return "failed_post_token";
+    }
+};
+
+/**
+ * The layer a settled turn's failure is attributed to.
+ *
+ * `stream` is documented as this process or this connection
+ * (`lib/routingStreamFailure.ts`), and an empty answer is neither: the call
+ * reached the provider and succeeded, and what came back was nothing. That is
+ * `model_output` -- the provider answered, and the answer was not usable.
+ *
+ * Keeping the two apart is what stops a quality problem being counted as an
+ * outage, and it is a line the codebase already draws for this exact case
+ * under another name: `AI_EMPTY_RESPONSE` classifies as `MODEL_TRANSIENT` with
+ * `scope: "model"` and is excluded from `PROVIDER_SCOPED`, so an empty answer
+ * has never reached `ProviderHealthState`.
+ *
+ * No routing behaviour follows from the name. `lib/routingFallbackPolicy.ts`
+ * falls back only on `adapter` and `provider`, so an empty answer moves nobody
+ * to another model, exactly as before.
+ *
+ * The `succeeded`/`cancelled` cases must stay `none`: the database enforces
+ * that agreement (`RoutingAttempt_outcome_failure_layer_check`).
+ */
+export const routingFailureLayerForSettlement = (
+    outcome: ChatSettlementOutcome
+): RoutingFailureLayer => {
+    switch (outcome) {
+        case "completed":
+        case "cancelled":
+            return "none";
+        case "empty":
+            return "model_output";
+        case "failed":
+            return "stream";
     }
 };

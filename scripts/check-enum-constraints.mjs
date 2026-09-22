@@ -258,7 +258,7 @@ const REGISTRY = {
   RoutingAttempt_failureLayer_check: {
     owner: "type_only",
     reason:
-      "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+      "RoutingFailureLayer in lib/routingAttemptStore.ts. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed. Three of the values exist to keep something out of provider health rather than to describe a provider: 'process' is this host stopping, 'storage' is an object store that no longer holds what the turn needed, and 'model_output' is the provider answering with nothing usable -- the call succeeded, so counting it as an outage would make a quality problem look like one.",
   },
   ModelMigrationRecord_field_check: {
     owner: "database",

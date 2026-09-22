@@ -4164,11 +4164,16 @@ model RoutingAttempt {
   /// Not `failed_pre_token`, which would be a claim about a provider call
   /// nobody observed.
   outcome      String @default("pending")
-  /// planner | adapter | manifest | billing | process | provider | stream | none
+  /// planner | adapter | manifest | billing | process | storage | application |
+  /// model_output | provider | stream | none
   ///
   /// `process` is this process stopping, which is not a provider failure --
   /// filing a host restart under `provider` would move conversations off a
   /// model that did nothing wrong.
+  ///
+  /// `model_output` is the provider answering with something unusable, which
+  /// is not an availability failure either: the call succeeded. Keeping it
+  /// apart is what stops a quality problem being counted as an outage.
   failureLayer String @default("none")
 
   /// Copied from the manifest at finalization, in the same transaction.

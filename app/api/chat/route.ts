@@ -200,7 +200,10 @@ import {
     type AttemptPriceSnapshot,
     type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
-import { routingOutcomeForSettlement } from "@/lib/chatSettlementOutcome";
+import {
+    routingFailureLayerForSettlement,
+    routingOutcomeForSettlement,
+} from "@/lib/chatSettlementOutcome";
 import {
     decideFallback,
     recoveryAfterFallback,
@@ -4373,9 +4376,7 @@ async function handleChatPost(
                             routingOutcomeForSettlement(outcome),
                         failureLayer:
                             instrumentation?.failureLayer ??
-                            (outcome === "completed" || outcome === "cancelled"
-                                ? "none"
-                                : "stream"),
+                            routingFailureLayerForSettlement(outcome),
                         actualInputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
                         actualOutputTokens:

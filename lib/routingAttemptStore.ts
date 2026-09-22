@@ -80,6 +80,27 @@ export type RoutingFailureLayer =
   | "storage"
   /** Our own code or database failed before anything was dispatched. */
   | "application"
+  /**
+   * The provider answered, and the answer was not usable.
+   *
+   * Separate from `provider` and `stream` because those are availability: one
+   * says the provider could not serve the request, the other that this process
+   * or this connection did not survive it. An empty completion is neither. The
+   * call succeeded, the stream ended cleanly, and what came back was nothing.
+   *
+   * Keeping it apart is what stops a quality problem being counted as an
+   * outage. `lib/providerErrorClassification.ts` already draws this line for
+   * the same case under a different name -- `AI_EMPTY_RESPONSE` classifies as
+   * `MODEL_TRANSIENT` with `scope: "model"`, and `PROVIDER_SCOPED` excludes
+   * it, so it never reaches `ProviderHealthState`. This is that decision
+   * arriving in the attempt record, which previously called it `stream`.
+   *
+   * Not fallback-eligible: `lib/routingFallbackPolicy.ts` falls back only on
+   * `adapter` and `provider`, and it should stay that way here. A second model
+   * asked the same question may well answer, but that is a retry policy with
+   * its own cost, not something a layer name should decide by accident.
+   */
+  | "model_output"
   | "provider"
   | "stream"
   | "none";
