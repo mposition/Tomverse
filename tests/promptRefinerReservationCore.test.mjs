@@ -174,7 +174,23 @@ test("authority source stores no prompt/content identity and calls no provider",
     }
 
     const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
-    const tables = schema.slice(schema.indexOf("model PromptRefinerReservationStage"));
+    // The two models this contract is about, and only those. An earlier
+    // version sliced from the first of them to the end of the file, so it read
+    // every model declared below and every word of their prose: a table added
+    // underneath, or a comment saying "prompt caching", failed a test about
+    // the refiner holding no content.
+    const tables = ["PromptRefinerReservationStage", "PromptRefinerReservation"]
+        .map((model) => {
+            const block = new RegExp(`model ${model} \\{([\\s\\S]*?)\\n\\}`).exec(schema);
+            assert.ok(block, model);
+            // Column declarations only. A doc comment is prose about a column,
+            // not a column.
+            return block[1]
+                .split("\n")
+                .filter((line) => !line.trimStart().startsWith("///"))
+                .join("\n");
+        })
+        .join("\n");
     for (const forbiddenColumn of [
         "prompt ",
         "content ",

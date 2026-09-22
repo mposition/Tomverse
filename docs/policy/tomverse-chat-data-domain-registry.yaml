@@ -1151,6 +1151,118 @@ domains:
       references and hashes, never the prompt, so there is nothing here that
       deletion would otherwise have to scrub.
 
+  # --- routing identity (dark) ----------------------------------------------
+  #
+  # Design: .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md.
+  #
+  # Both tables are dark -- nothing reads or writes them, held by
+  # `npm run check:dark-tables` -- and both are here anyway. A table reaches
+  # this registry because the schema says it is reachable from User, not
+  # because a writer exists yet: a row that arrives before the registry entry
+  # is a row nobody graded, and the first one would arrive on the day somebody
+  # enables the config writer.
+  #
+  # Neither holds a secret. A credential binding names where a key is kept and
+  # who pays for calls made with it; the key itself is not in this database.
+
+  - domain: credentialBinding
+    prismaModel: CredentialBinding
+    # The row is about the account whose key it is -- the BYOK case -- and
+    # cascades with them. A Tomverse-funded binding carries no accountId and
+    # so is nobody's personal data; the same table holds both because the
+    # question it answers, which credential authorises this call, is one
+    # question.
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.3 (BYOK cost wiring) and section 14 step 7
+    inUnifiedExport: excluded
+    note: >-
+      Which credential authorises a call, and who is billed for it. Separate
+      from deployment identity on purpose: one deployment can be reached with
+      a Tomverse-managed key and with a customer's own, and a credential must
+      never redefine the endpoint, region, residency, model version or
+      capability semantics it is used against. Holds a reference to where the
+      secret lives, never the secret. Cascade rather than SetNull: a binding
+      whose account is gone still names that account's provider identity in
+      its reference, so a surviving row would be a half-anonymisation.
+
+  - domain: quotaScope
+    prismaModel: QuotaScope
+    # Five kinds, and only the `account` kind is about a person. The other
+    # four name a credential, an endpoint, a deployment or a provider, and
+    # cascade with those instead. The registry grades the table by its
+    # strongest linkage, which is the one that reaches User.
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.2 (QuotaScope registry) and section 14 step 11
+    inUnifiedExport: excluded
+    note: >-
+      What a capacity limit is counted against. Each kind names exactly the
+      columns its kind needs and the database holds that, so a row cannot be
+      an account scope carrying a credential. Counters and windows only --
+      no prompt, no answer, no request content. QuotaCapacityState hangs off
+      this row and cascades with it, and holds nothing that identifies anyone
+      either: it is how much room a scope has left.
+
+  # Neither of the next two is required by the sweep, and both are here.
+  #
+  # `holdsUserData` is a model with a User relation or a `*userId` column, and
+  # these have neither -- they reach a person through a conversation and a
+  # routing run. Registering them by hand is the answer to that, rather than
+  # widening the rule: widening is a governance question about every
+  # conversation-linked table in the schema, not a decision that belongs in a
+  # routing change. The gap itself is worth somebody looking at.
+
+  - domain: routingCandidateVerdict
+    prismaModel: RoutingCandidateVerdict
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.5 (candidate verdict freeze)
+    inUnifiedExport: excluded
+    note: >-
+      One row per candidate the Router considered for one turn, saying whether
+      it was eligible and, when it was not, which fixed reason ruled it out.
+      About the person only through the run it hangs off; it holds no prompt,
+      no answer and no free text, and its reasons come from a closed list the
+      database enforces. Cascades from RoutingRun, which cascades from User.
+
+  - domain: deploymentCacheAffinity
+    prismaModel: DeploymentCacheAffinity
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 14.1 (cache affinity)
+    inUnifiedExport: excluded
+    note: >-
+      Which placement a conversation's turns last went to, and when. One row
+      per conversation and logical model. Deliberately holds no digest of the
+      prompt prefix: that would sharpen the cache answer and is derived from
+      what the person wrote, and it would confirm a guess about their text.
+      Cascades from Conversation, which cascades from User.
+
   # --- email notification (MVP) ---------------------------------------------
   #
   # Contract: docs/policy/email-notifications.md.

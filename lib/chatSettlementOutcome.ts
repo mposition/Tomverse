@@ -18,7 +18,8 @@
  * sit in `DISPATCH_OUTCOMES_COUNTED` and only `succeeded` counts as a success,
  * so the rate this feeds is unchanged. Only the name of the failure moves.
  *
- * **It changes no behaviour.** §7's automatic fallback is decided from
+ * **It changes no behaviour.** The automatic fallback of
+ * docs/policy/tomverse-chat-routing.md §7 is decided from
  * `classifyStreamFailure`'s result on the thrown-error path
  * (`app/api/chat/route.ts`, `decideFallback`), and a completion that returns
  * empty text throws nothing and never reaches it. `decideFallback` does not
