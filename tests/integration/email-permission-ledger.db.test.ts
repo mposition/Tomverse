@@ -85,7 +85,7 @@ const seedEvent = (data: Record<string, unknown> = {}) =>
       addressNormalizationVersion: "v1",
       kind: "notice_shown",
       scopeKey: "product_updates",
-      occurredAt: new Date(),
+      occurredAt: FIXTURE_EPOCH,
       capturedVia: "in_product_notice",
       sourceEventKey: `notice:${randomUUID()}`,
       policyVersionId: policyId,
@@ -128,6 +128,12 @@ const seal = (id: string) =>
  */
 const FIXTURE_EPOCH = new Date("2026-09-21T00:00:00.000Z");
 const at = (ms: number) => new Date(FIXTURE_EPOCH.getTime() + ms);
+
+// Every value a constraint compares comes from `at`, including the ones
+// inside raw SQL -- `now()` there would reintroduce the wall clock into an
+// ordering the fixture claims is exact. `new Date()` survives only on
+// columns nothing orders against -- and after this round there are none left
+// in this file, so a future one is a decision rather than an oversight.
 
 const seedDecision = async (data: Record<string, unknown> = {}) =>
   prisma.emailPermissionDecision.create({
@@ -174,7 +180,7 @@ beforeEach(async () => {
       purpose: "product_updates",
       requiresUnsubscribe: true,
       status: "published",
-      publishedAt: new Date(),
+      publishedAt: FIXTURE_EPOCH,
     },
   });
   templateVersionId = version.id;
@@ -325,7 +331,7 @@ test("a cohort belongs to an override, never to a waiver", async () => {
         userId: user.id,
         addressDigest: "a".repeat(64),
         addressNormalizationVersion: "v1",
-        noticeAnchorAt: new Date(),
+        noticeAnchorAt: FIXTURE_EPOCH,
         noticeAnchorSource: "signup",
       },
     }),
@@ -339,7 +345,7 @@ test("a cohort belongs to an override, never to a waiver", async () => {
       userId: user.id,
       addressDigest: "a".repeat(64),
       addressNormalizationVersion: "v1",
-      noticeAnchorAt: new Date(),
+      noticeAnchorAt: FIXTURE_EPOCH,
       noticeAnchorSource: "signup",
     },
   });
@@ -369,7 +375,7 @@ test("sealing closes the approval and its whole membership", async () => {
       userId: user.id,
       addressDigest: "a".repeat(64),
       addressNormalizationVersion: "v1",
-      noticeAnchorAt: new Date(),
+      noticeAnchorAt: FIXTURE_EPOCH,
       noticeAnchorSource: "signup",
     },
   });
@@ -396,7 +402,7 @@ test("sealing closes the approval and its whole membership", async () => {
         userId: second.id,
         addressDigest: "b".repeat(64),
         addressNormalizationVersion: "v1",
-        noticeAnchorAt: new Date(),
+        noticeAnchorAt: FIXTURE_EPOCH,
         noticeAnchorSource: "signup",
       },
     }),
@@ -426,17 +432,18 @@ test("sealing and adding a member in one statement is still refused", async () =
   await assert.rejects(
     prisma.$executeRawUnsafe(
       `WITH s AS (
-         UPDATE "EmailSendApproval" SET "sealedAt" = now()
+         UPDATE "EmailSendApproval" SET "sealedAt" = $5::timestamp
            WHERE "id" = $1 RETURNING "id"
        )
        INSERT INTO "EmailSendApprovalMember"
          ("id", "approvalId", "userId", "addressDigest",
           "addressNormalizationVersion", "noticeAnchorAt", "noticeAnchorSource")
-       SELECT $2, s."id", $3, $4, 'v1', now(), 'signup' FROM s`,
+       SELECT $2, s."id", $3, $4, 'v1', $5::timestamp, 'signup' FROM s`,
       approval.id,
       `m-${randomUUID()}`,
       user.id,
-      "d".repeat(64)
+      "d".repeat(64),
+      at(1000).toISOString()
     ),
     /sealed/
   );
@@ -452,7 +459,7 @@ test("the update that seals may not also edit", async () => {
   await assert.rejects(
     prisma.emailSendApproval.update({
       where: { id: approval.id },
-      data: { sealedAt: new Date(), reason: "edited while sealing" },
+      data: { sealedAt: at(1000), reason: "edited while sealing" },
     }),
     /may not change while being sealed/
   );
@@ -474,7 +481,7 @@ test("withdrawal is a new row, never an edit", async () => {
       approvalId: approval.id,
       revokedById: "owner",
       revokedByEmail: "owner@example.test",
-      revokedAt: new Date(),
+      revokedAt: at(2000),
       reason: "first organic signup arrived",
     },
   });
@@ -668,7 +675,7 @@ test("a verdict takes exactly one transition, each once", async () => {
   await assert.rejects(
     prisma.emailPermissionDecision.update({
       where: { id: decision.id },
-      data: { sealedAt: new Date(), providerSubmittedAt: new Date() },
+      data: { sealedAt: at(2000), providerSubmittedAt: at(3000) },
     }),
     /exactly one of/
   );
@@ -678,7 +685,7 @@ test("a verdict takes exactly one transition, each once", async () => {
   await assert.rejects(
     prisma.emailPermissionDecision.update({
       where: { id: decision.id },
-      data: { sealedAt: new Date(), purpose: "promotions" },
+      data: { sealedAt: at(2000), purpose: "promotions" },
     }),
     /may not change any other column/
   );
@@ -806,10 +813,16 @@ test("a provider submission has to describe a send that could have happened", as
     { ...complete, sealedAt: later(3500) },
     // Handed over before the evidence closed.
     { ...complete, providerSubmittedAt: later(1500) },
-    // Handed over before suppression was read. Separate from the one above:
+    // Handed over before suppression was read, and after the seal -- so this
+    // breaks the suppression ordering alone. Separate from the one above:
     // two orderings are two requirements, and one row breaking both passes
     // while only one of them is enforced.
-    { ...complete, suppressionCheckedAt: later(2500), sealedAt: later(1000) },
+    {
+      ...complete,
+      sealedAt: later(1000),
+      providerSubmittedAt: later(2000),
+      suppressionCheckedAt: later(2500),
+    },
   ];
   for (const [index, row] of broken.entries()) {
     await assert.rejects(
@@ -836,14 +849,14 @@ test("a withdrawal cannot precede the approval it withdraws", async () => {
         approvalId: approval.id,
         revokedById: "owner",
         revokedByEmail: "owner@example.test",
-        revokedAt: new Date(),
+        revokedAt: at(2000),
         reason: "withdrawn before it was given",
       },
     }),
     /not sealed/
   );
 
-  const sealedAt = new Date();
+  const sealedAt = at(1000);
   await prisma.emailSendApproval.update({
     where: { id: approval.id },
     data: { sealedAt },
@@ -938,7 +951,7 @@ test("evidence cites exactly one ledger, and closes with the verdict", async () 
 
   await prisma.emailPermissionDecision.update({
     where: { id: decision.id },
-    data: { sealedAt: new Date() },
+    data: { sealedAt: at(1000) },
   });
 
   await assert.rejects(
@@ -956,7 +969,7 @@ test("sealing a verdict and adding evidence in one statement is refused", async 
   await assert.rejects(
     prisma.$executeRawUnsafe(
       `WITH s AS (
-         UPDATE "EmailPermissionDecision" SET "sealedAt" = now()
+         UPDATE "EmailPermissionDecision" SET "sealedAt" = $4::timestamp
            WHERE "id" = $1 RETURNING "id"
        )
        INSERT INTO "EmailPermissionDecisionEvidence"
@@ -964,7 +977,8 @@ test("sealing a verdict and adding evidence in one statement is refused", async 
        SELECT $2, s."id", $3, 'au_sender' FROM s`,
       decision.id,
       `ev-${randomUUID()}`,
-      event.id
+      event.id,
+      at(1000).toISOString()
     ),
     /sealed/
   );
@@ -994,9 +1008,18 @@ test("a fact's scope and an override's purpose are closed sets", async () => {
   await seedEvent({ scopeKey: "marketing" });
   await seedEvent({ scopeKey: "promotions" });
 
-  await assert.rejects(seedApproval({ purposeKey: "prmotions" }), /scope_check/);
-  await assert.rejects(seedApproval({ purposeKey: "" }), /scope_check/);
-  await assert.rejects(seedApproval({ purposeKey: "marketing" }), /scope_check/);
+  // purposeKey_check, not scope_check: these rows are the right shape for a
+  // risk_accepted approval -- the purpose is non-null and no waiver column is
+  // set -- and what they break is the list of purposes an override may cover.
+  await assert.rejects(
+    seedApproval({ purposeKey: "prmotions" }),
+    /purposeKey_check/
+  );
+  await assert.rejects(seedApproval({ purposeKey: "" }), /purposeKey_check/);
+  await assert.rejects(
+    seedApproval({ purposeKey: "marketing" }),
+    /purposeKey_check/
+  );
   await seedApproval({ purposeKey: "*" });
   await seedApproval({ purposeKey: "newsletter" });
 });

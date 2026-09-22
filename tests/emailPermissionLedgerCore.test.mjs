@@ -255,15 +255,17 @@ test("the database computes allowed the same way", () => {
     ),
     "utf8"
   );
-  // The CASE is why this is a substring set rather than one line: an object
-  // in `blockers` must come back as a shape violation rather than as a
-  // function error from this constraint, so the length is only taken when it
-  // is an array. The derivation is otherwise identical to decisionAllowed.
+  // The CASE is why this is a substring set rather than one line. An object in
+  // `blockers` must come back as a shape violation and nothing else, so the
+  // whole equality sits in the array branch and the other branch is NULL --
+  // a CHECK that evaluates to NULL passes. The derivation inside the branch is
+  // identical to decisionAllowed.
   for (const part of [
+    "WHEN jsonb_typeof(\"blockers\") = 'array' THEN",
     '"allowed" = (',
     '("legalAllowed" OR "overrideApprovalId" IS NOT NULL)',
-    "WHEN jsonb_typeof(\"blockers\") = 'array' THEN jsonb_array_length(\"blockers\") = 0",
-    "ELSE FALSE",
+    'AND jsonb_array_length("blockers") = 0',
+    "ELSE NULL",
   ]) {
     assert.ok(
       sql.includes(part),

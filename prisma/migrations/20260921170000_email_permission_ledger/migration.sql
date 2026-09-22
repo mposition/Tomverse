@@ -278,19 +278,27 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_js
 -- the row it was wrong about.
 -- `jsonb_array_length` raises on anything that is not an array, and Postgres
 -- does not promise to evaluate constraints in any order. An object in
--- `blockers` would therefore come back as a function error from this
+-- `blockers` would otherwise come back as a function error from this
 -- constraint rather than as the shape violation it is, so the caller would be
--- told the wrong thing about their row. The CASE makes the derivation
--- indifferent and leaves `json_shape_check` to say what is actually wrong.
+-- told the wrong thing about their row.
+--
+-- The whole equality sits inside the array branch, and the other branch is
+-- NULL rather than FALSE. A CHECK that evaluates to NULL passes, so a
+-- malformed `blockers` breaks `json_shape_check` and only that -- which is
+-- what makes the test for one of them a test for one of them. `ELSE FALSE`
+-- was the first attempt and it made every malformed row violate both;
+-- putting only the inner value at NULL does not work either, because
+-- `FALSE AND NULL` is FALSE and the row would still be refused here.
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_allowed_derivation_check"
     CHECK (
-        "allowed" = (
-            ("legalAllowed" OR "overrideApprovalId" IS NOT NULL)
-            AND CASE
-                WHEN jsonb_typeof("blockers") = 'array' THEN jsonb_array_length("blockers") = 0
-                ELSE FALSE
-            END
-        )
+        CASE
+            WHEN jsonb_typeof("blockers") = 'array' THEN
+                "allowed" = (
+                    ("legalAllowed" OR "overrideApprovalId" IS NOT NULL)
+                    AND jsonb_array_length("blockers") = 0
+                )
+            ELSE NULL
+        END
     );
 
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_sealedAt_order_check"
