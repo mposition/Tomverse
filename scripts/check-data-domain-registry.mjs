@@ -114,7 +114,13 @@ const ALLOWED_EXPORT_STATES = new Set([
 // deleted their own account: the relation was onDelete: SetNull, which cleared
 // the id and left the address beside it.
 const DIRECT_IDENTIFIER_COLUMNS = ["userId", "ownerId", "subjectKey", "traceId"];
-const DIRECT_IDENTIFIER_PATTERN = /^(email|.*Email)$/;
+// 2026-09-22: and `emailAddress`. The pattern read `email` or something
+// ending in `Email`, which let `SuppressionCause` and `SuppressionEntry` hold
+// a mailbox outside this registry -- the two tables whose whole purpose is to
+// remember an address after the account is gone. A name is not a reason, so
+// the pattern now matches the word wherever it sits rather than only where it
+// happened to sit in the tables somebody had already thought about.
+const DIRECT_IDENTIFIER_PATTERN = /^(.*[Ee]mail([Aa]ddress)?)$/;
 
 const isDirectIdentifier = (column) =>
   DIRECT_IDENTIFIER_COLUMNS.includes(column) || DIRECT_IDENTIFIER_PATTERN.test(column);

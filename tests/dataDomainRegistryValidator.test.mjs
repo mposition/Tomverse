@@ -378,3 +378,22 @@ test("a model holding an operator address cannot leave the registry", () => {
   assert.notEqual(code, 0);
   assert.match(output, /EmailSendApproval holds user data but is not in the registry/);
 });
+
+test("a table holding an address under any column name cannot escape", () => {
+  // The identifier pattern read `email` or something ending in `Email` until
+  // 2026-09-22, and the suppression tables spell it `emailAddress` -- so the
+  // two tables whose entire purpose is to remember a mailbox after the account
+  // is gone were the ones the sweep could not see. A name is not a reason.
+  for (const model of ["SuppressionCause", "SuppressionEntry"]) {
+    const { code, output } = run((registry) => {
+      registry.domains = registry.domains.filter(
+        (row) => row.prismaModel !== model
+      );
+    });
+    assert.notEqual(code, 0, `${model} escaped the registry`);
+    assert.match(
+      output,
+      new RegExp(`${model} holds user data but is not in the registry`)
+    );
+  }
+});

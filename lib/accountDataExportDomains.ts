@@ -259,6 +259,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "suppressionCause",
+    publicName: "email_suppression_causes",
+    prismaModel: "SuppressionCause",
+    state: "unverified",
+  },
+  {
+    domain: "suppressionEntry",
+    publicName: "email_suppression_entries",
+    prismaModel: "SuppressionEntry",
+    state: "unverified",
+  },
+  {
     domain: "emailSendApproval",
     publicName: "email_send_approvals",
     prismaModel: "EmailSendApproval",

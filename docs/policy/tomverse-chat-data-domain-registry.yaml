@@ -1656,6 +1656,83 @@ domains:
       widened past one column name. Every axis is unverified: nobody has
       decided this one yet, and that is what the state means.
 
+  # The two suppression tables, registered 2026-09-22.
+  #
+  # They were outside this registry because the identifier pattern read
+  # `email` or something ending in `Email`, and theirs is `emailAddress` --
+  # the two tables whose entire purpose is to remember a mailbox after the
+  # account is gone were the ones the pattern could not see.
+  #
+  # Deletion and retention are decided: docs/policy/email-notifications.md
+  # section 13.3 keys suppression by address precisely so that closing an
+  # account and signing up again does not clear it. The export axis is not
+  # decided, and saying so is the point of `unverified`.
+
+  - domain: suppressionCause
+    prismaModel: SuppressionCause
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        One cause of a suppression, append-only, and the record every send
+        decision reads. It is keyed by address rather than by account on
+        purpose: a spam complaint follows the mailbox, so deleting an account
+        and signing up again must not clear it
+        (docs/policy/email-notifications.md section 13.3). A suppression that
+        disappeared with the account would mean sending again to the person
+        who complained, which is the outcome the whole table exists to
+        prevent.
+      retentionStartsFrom: "occurredAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: unverified
+    note: >-
+      No User relation, by design. The export axis is unverified rather than
+      decided: this registry's export is scoped to an account, and a
+      suppression is scoped to an address, so returning one means resolving
+      the account's current address -- which would miss a suppression against
+      a previous address and disclose one against an address the account no
+      longer holds. Whether an account is entitled to be told it is suppressed,
+      and against which address, is a decision nobody has made.
+
+  - domain: suppressionEntry
+    prismaModel: SuppressionEntry
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        What the suppression list looked like before causes existed. Nothing
+        writes it since deploy C (migration 20260921090000) and nothing reads
+        it in a send decision, but the rows are the record of why addresses
+        were suppressed before 2026-09, which the cause rows derived from them
+        do not independently prove.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: unverified
+    note: >-
+      Frozen: no writer remains. Registered for the same reason as
+      suppressionCause and carrying the same open export question; a table
+      nothing writes is still a table holding addresses.
+
   - domain: emailPermissionEvent
     prismaModel: EmailPermissionEvent
     userLinkageRole: subject

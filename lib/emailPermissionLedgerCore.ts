@@ -201,8 +201,15 @@ export const approvalScopeRefusal = (
     return null;
   }
 
-  // risk_accepted. "*" covers every purpose; anything else is exact.
-  if (approval.purposeKey !== "*" && approval.purposeKey !== (query.purpose ?? null)) {
+  // risk_accepted. "*" covers every purpose, but only when a purpose was
+  // asked about: a query with none is a caller that has not worked out what
+  // it is sending, and answering "covered" would make the override apply to a
+  // send whose purpose nothing has looked at. The type says `purpose?` for
+  // the waiver branch above, which has no purpose scope at all.
+  if (typeof query.purpose !== "string" || query.purpose.length === 0) {
+    return "approval_purpose_mismatch";
+  }
+  if (approval.purposeKey !== "*" && approval.purposeKey !== query.purpose) {
     return "approval_purpose_mismatch";
   }
   return null;

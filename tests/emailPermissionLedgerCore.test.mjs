@@ -206,6 +206,37 @@ test("a purpose-scoped override does not cover another purpose", () => {
   );
 });
 
+test('"*" still has to be asked about a purpose', () => {
+  // A query with no purpose is a caller that has not worked out what it is
+  // sending. Answering "covered" would apply the override to a send whose
+  // purpose nothing has looked at, which is the opposite of a scope.
+  for (const query of [
+    { approvalType: "risk_accepted", policyVersionId: "pv1" },
+    { approvalType: "risk_accepted", policyVersionId: "pv1", purpose: null },
+    { approvalType: "risk_accepted", policyVersionId: "pv1", purpose: undefined },
+    { approvalType: "risk_accepted", policyVersionId: "pv1", purpose: "" },
+  ]) {
+    assert.equal(
+      approvalScopeRefusal(riskAccepted, query),
+      "approval_purpose_mismatch",
+      JSON.stringify(query)
+    );
+  }
+
+  // A waiver has no purpose scope at all, so its branch never asks.
+  assert.equal(
+    approvalScopeRefusal(waiver, {
+      approvalType: "obligation_waiver",
+      policyVersionId: "pv1",
+      ruleKey: "kr",
+      ruleVersion: 3,
+      country: "KR",
+      obligationKey: "subject_prefix",
+    }),
+    null
+  );
+});
+
 test("the cohort needs all three digests to agree", () => {
   const member = { userId: "u1", addressDigest: "d1" };
   assert.equal(

@@ -6221,7 +6221,11 @@ model EmailPermissionDecision {
   /// the approval this names is necessarily of the type claimed here.
   overrideApprovalId String?
   overrideType       String?
-  overrideApproval   EmailSendApproval? @relation(fields: [overrideApprovalId, overrideType], references: [id, approvalType])
+  /// Restrict, not the optional relation's default of SetNull: clearing the
+  /// pair would turn a verdict that used an override into one that did not,
+  /// which is the single fact this row exists to keep. The migration says the
+  /// same, and the schema drift check compares the two.
+  overrideApproval   EmailSendApproval? @relation(fields: [overrideApprovalId, overrideType], references: [id, approvalType], onDelete: Restrict)
 
   /// Reasons the send is refused regardless of the override, sorted. Empty
   /// array when there are none -- null would not distinguish "none" from
