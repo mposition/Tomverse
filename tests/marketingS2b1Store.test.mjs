@@ -610,17 +610,24 @@ const marketingRouteOffenders = (relative, source) => {
   {
     const tree = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true);
 
-    // What the file imported the wrapper as, if it did at all.
+    // What the file imported the wrapper as, if it did at all -- and every
+    // other name it imported, because those are the only ones a property read
+    // may start from.
     let wrapperBinding = null;
     const sessionBindings = new Set();
+    const importedBindings = new Set();
     for (const statement of tree.statements) {
       if (!ts.isImportDeclaration(statement)) continue;
       const from = statement.moduleSpecifier.getText(tree).slice(1, -1);
-      const named = statement.importClause?.namedBindings;
+      const clause = statement.importClause;
+      if (clause?.name) importedBindings.add(clause.name.text);
+      const named = clause?.namedBindings;
+      if (named && ts.isNamespaceImport(named)) importedBindings.add(named.name.text);
       if (!named || !ts.isNamedImports(named)) continue;
       for (const element of named.elements) {
         const imported = (element.propertyName ?? element.name).text;
         const local = element.name.text;
+        importedBindings.add(local);
         if (from.endsWith("marketingAdminMutations") && imported === "runMarketingAdminMutation") {
           wrapperBinding = local;
         }
@@ -844,9 +851,16 @@ const marketingRouteOffenders = (relative, source) => {
           // the transaction and `refusal` runs in the catch after it, so
           // their bodies are walked instead -- with property reads allowed,
           // because by then the wrapper is supplying the argument.
-          const evaluatesEarly = (node, { rejectReads = true } = {}) => {
+          const evaluatesEarly = (node, readRoots = importedBindings) => {
             let found = false;
-            const shoutingRoot = (access) => {
+            // Where a read starts. A name this file imported is another
+            // module's business; a name this file declares may be an object
+            // with an accessor on it, and reading it runs code here. The
+            // earlier version asked whether the name was in capitals, which
+            // made the rule a spelling convention -- `const PRELUDE = { get
+            // bucket() {…} }` satisfied it and ran a store call before the
+            // wrapper was entered.
+            const allowedRoot = (access) => {
               let current = access;
               while (
                 ts.isPropertyAccessExpression(current) ||
@@ -854,7 +868,13 @@ const marketingRouteOffenders = (relative, source) => {
               ) {
                 current = current.expression;
               }
-              return ts.isIdentifier(current) && /^[A-Z][A-Z0-9_]*$/u.test(current.text);
+              if (!ts.isIdentifier(current)) return false;
+              if (readRoots.has(current.text)) return true;
+              // Or a local table this check can see is data. A refusal-status
+              // map is an object literal of string keys and numbers; there is
+              // nowhere in it for an accessor to be, and the check does not
+              // have to take anyone's word for that -- it reads the literal.
+              return isPlainData(declaredHere(current));
             };
             const walk = (inner) => {
               if (found) return;
@@ -885,10 +905,9 @@ const marketingRouteOffenders = (relative, source) => {
                 return;
               }
               if (
-                rejectReads &&
                 (ts.isPropertyAccessExpression(inner) ||
                   ts.isElementAccessExpression(inner)) &&
-                !shoutingRoot(inner)
+                !allowedRoot(inner)
               ) {
                 found = true;
                 return;
@@ -901,6 +920,111 @@ const marketingRouteOffenders = (relative, source) => {
 
           /** The two fields the wrapper reads outside its own transaction. */
           const OUTSIDE_THE_TRANSACTION = new Set(["gate", "refusal"]);
+
+          /**
+           * Whether a node is data all the way down.
+           *
+           * Reading a property runs code only when something on the way is an
+           * accessor, and an object literal of plain assignments has nowhere
+           * for one. This is the difference between allowing a read because of
+           * how the name is spelled and allowing it because of what it is.
+           */
+          const isPlainData = (node) => {
+            if (!node) return false;
+            let current = node;
+            while (
+              ts.isAsExpression(current) ||
+              ts.isParenthesizedExpression(current) ||
+              (ts.isSatisfiesExpression?.(current) ?? false)
+            ) {
+              current = current.expression;
+            }
+            if (
+              ts.isStringLiteral(current) ||
+              ts.isNumericLiteral(current) ||
+              ts.isNoSubstitutionTemplateLiteral(current) ||
+              current.kind === ts.SyntaxKind.TrueKeyword ||
+              current.kind === ts.SyntaxKind.FalseKeyword ||
+              current.kind === ts.SyntaxKind.NullKeyword
+            ) {
+              return true;
+            }
+            if (ts.isArrayLiteralExpression(current)) {
+              return current.elements.every(isPlainData);
+            }
+            if (ts.isObjectLiteralExpression(current)) {
+              return current.properties.every(
+                (member) =>
+                  ts.isPropertyAssignment(member) &&
+                  !ts.isComputedPropertyName(member.name) &&
+                  isPlainData(member.initializer)
+              );
+            }
+            return false;
+          };
+
+          /** What a name in this file was declared as, or null. */
+          const declaredHere = (identifier) => {
+            for (const statement of tree.statements) {
+              if (
+                ts.isFunctionDeclaration(statement) &&
+                statement.name?.text === identifier.text
+              ) {
+                return statement;
+              }
+              if (!ts.isVariableStatement(statement)) continue;
+              for (const declaration of statement.declarationList.declarations) {
+                if (
+                  ts.isIdentifier(declaration.name) &&
+                  declaration.name.text === identifier.text
+                ) {
+                  return declaration.initializer ?? null;
+                }
+              }
+            }
+            return null;
+          };
+
+          /**
+           * Whether a function runs something it should not, wherever it was
+           * written.
+           *
+           * A value that names a function is followed to it: `gate: myGate`
+           * runs `myGate` just as surely as an inline arrow, and reading the
+           * identifier node found no call in it. A name this file does not
+           * declare cannot be followed, and unknown is a failure here.
+           *
+           * Inside the body, a read may start from the function's own
+           * parameters as well as from an import: the wrapper supplies the
+           * argument, so `body.enabled` is the parsed body and not an
+           * accessor of somebody's.
+           */
+          const functionRuns = (value) => {
+            let node = value;
+            if (ts.isIdentifier(node)) {
+              const found = declaredHere(node);
+              if (!found) return "names something this check cannot follow";
+              node = found;
+            }
+            const isFunction =
+              ts.isArrowFunction(node) ||
+              ts.isFunctionExpression(node) ||
+              ts.isFunctionDeclaration(node) ||
+              ts.isMethodDeclaration(node);
+            if (!isFunction) {
+              return evaluatesEarly(node) ? "runs something" : null;
+            }
+            for (const parameter of node.parameters) {
+              if (parameter.initializer) return "has a parameter default";
+            }
+            const roots = new Set(importedBindings);
+            for (const parameter of node.parameters) {
+              if (ts.isIdentifier(parameter.name)) roots.add(parameter.name.text);
+            }
+            return node.body && evaluatesEarly(node.body, roots)
+              ? "runs something"
+              : null;
+          };
 
           for (const property of spec.properties) {
             // What names the property, before what it is set to. A computed
@@ -953,7 +1077,9 @@ const marketingRouteOffenders = (relative, source) => {
               ? property.initializer
               : ts.isShorthandPropertyAssignment(property)
                 ? property.name
-                : null;
+                : ts.isMethodDeclaration(property)
+                  ? property
+                  : null;
             if (!value) continue;
             const field = property.name.getText(tree);
 
@@ -962,13 +1088,10 @@ const marketingRouteOffenders = (relative, source) => {
             // calls that matter. Reads are allowed inside them: by then the
             // wrapper is supplying the argument.
             if (OUTSIDE_THE_TRANSACTION.has(field)) {
-              const body =
-                (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) && value.body
-                  ? value.body
-                  : value;
-              if (evaluatesEarly(body, { rejectReads: false })) {
+              const problem = functionRuns(value);
+              if (problem) {
                 offenders.push(
-                  `${relative}: ${name} runs something in ${field}, which is outside the transaction`
+                  `${relative}: ${name} ${problem} in ${field}, which is outside the transaction`
                 );
               }
               continue;
@@ -979,43 +1102,51 @@ const marketingRouteOffenders = (relative, source) => {
             // The field is a shorthand, so the value is a name: follow it to
             // its declaration in this file and read those callbacks.
             if (field === "schema") {
-              const declared = ts.isIdentifier(value)
-                ? tree.statements
-                    .filter((statement) => ts.isVariableStatement(statement))
-                    .flatMap((statement) => statement.declarationList.declarations)
-                    .find(
-                      (declaration) =>
-                        ts.isIdentifier(declaration.name) &&
-                        declaration.name.text === value.text
-                    )
-                : null;
-              if (declared?.initializer) {
-                const look = (inner) => {
-                  if (
-                    ts.isCallExpression(inner) &&
-                    ts.isPropertyAccessExpression(inner.expression) &&
-                    ["refine", "transform", "superRefine"].includes(
-                      inner.expression.name.text
-                    )
-                  ) {
-                    for (const argument of inner.arguments) {
-                      const body =
-                        (ts.isArrowFunction(argument) ||
-                          ts.isFunctionExpression(argument)) &&
-                        argument.body
-                          ? argument.body
-                          : argument;
-                      if (evaluatesEarly(body, { rejectReads: false })) {
-                        offenders.push(
-                          `${relative}: ${name} runs something while parsing its schema`
-                        );
-                      }
+              // Whatever the value is, and whatever it names. An expression
+              // written in place was not followed at all, and a name this
+              // file does not declare cannot be.
+              let definition = value;
+              if (ts.isIdentifier(value)) {
+                const found = declaredHere(value);
+                if (!found) {
+                  offenders.push(
+                    `${relative}: ${name} names a schema this check cannot follow`
+                  );
+                  continue;
+                }
+                definition = found;
+              }
+              // Every Zod method that takes code and runs it during `parse`.
+              // `preprocess` and `overwrite` were missing from the list and
+              // both run their callback (node_modules/zod/v4/classic/schemas.js).
+              const RUNS_A_CALLBACK = [
+                "refine",
+                "transform",
+                "superRefine",
+                "preprocess",
+                "overwrite",
+                "check",
+              ];
+              const look = (inner) => {
+                if (
+                  ts.isCallExpression(inner) &&
+                  ((ts.isPropertyAccessExpression(inner.expression) &&
+                    RUNS_A_CALLBACK.includes(inner.expression.name.text)) ||
+                    (ts.isIdentifier(inner.expression) &&
+                      RUNS_A_CALLBACK.includes(inner.expression.text)))
+                ) {
+                  for (const argument of inner.arguments) {
+                    const problem = functionRuns(argument);
+                    if (problem) {
+                      offenders.push(
+                        `${relative}: ${name} ${problem} while parsing its schema`
+                      );
                     }
                   }
-                  ts.forEachChild(inner, look);
-                };
-                look(declared.initializer);
-              }
+                }
+                ts.forEachChild(inner, look);
+              };
+              look(definition);
               continue;
             }
 
@@ -1182,6 +1313,106 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  });\n" +
         "}\n",
     ],
+    // Nine that were found by running this checker rather than reading it,
+    // after an earlier version allowed a read because the name was in
+    // capitals.
+    [
+      "a getter on a local object with a shouting name",
+      imports +
+        "const PRELUDE = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, bucket: PRELUDE.bucket });\n" +
+        "}\n",
+    ],
+    [
+      "the same, reached through optional chaining",
+      imports +
+        "const PRELUDE = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, bucket: PRELUDE?.bucket });\n" +
+        "}\n",
+    ],
+    [
+      "a static getter on a class with a shouting name",
+      imports +
+        "class PRELUDE {\n" +
+        "  static get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; }\n" +
+        "}\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, bucket: PRELUDE.bucket });\n" +
+        "}\n",
+    ],
+    [
+      "a gate that names a function instead of being one",
+      imports +
+        "function myGate() { pauseMarketingChannel(undefined as never, {}); return \"operator_restriction\"; }\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, gate: myGate });\n" +
+        "}\n",
+    ],
+    [
+      "a gate written as a method",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        "    gate() { pauseMarketingChannel(req, {}); return \"operator_restriction\"; },\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a gate that reads a getter instead of calling anything",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        "    gate: () => { void prelude.bucket; return \"operator_restriction\"; },\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a schema written in place rather than named",
+      imports +
+        'import { z } from "zod";\n' +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        "    schema: z.object({}).transform((value) => {\n" +
+        "      pauseMarketingChannel(req, {});\n" +
+        "      return value;\n" +
+        "    }),\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a schema transform that names its callback",
+      imports +
+        'import { z } from "zod";\n' +
+        "const touch = (value: unknown) => { pauseMarketingChannel(undefined as never, {}); return value; };\n" +
+        "const schema = z.object({}).transform(touch);\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, schema });\n" +
+        "}\n",
+    ],
+    [
+      "a schema preprocess, which was missing from the list of methods that run code",
+      imports +
+        'import { z } from "zod";\n' +
+        "const schema = z.preprocess((value) => {\n" +
+        "  pauseMarketingChannel(undefined as never, {});\n" +
+        "  return value;\n" +
+        "}, z.object({}));\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ request: req, schema });\n" +
+        "}\n",
+    ],
     // Seven more, every one of which runs outside something: the
     // transaction, or the wrapper entirely.
     [
@@ -1312,7 +1543,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 25, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 34, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);
@@ -1357,6 +1588,25 @@ test("the route sweep accepts the shape the real routes are written in", () => {
     "  });\n" +
     "}\n";
   assert.deepEqual(marketingRouteOffenders("probe/route.ts", ordinary), []);
+
+  // A refusal that reads a local status table. `settings` does this, and the
+  // import-binding rule would have refused it -- the table is not imported.
+  // It is allowed because the check can read the literal and see there is
+  // nowhere in it for an accessor, which is a fact rather than a convention.
+  const localTable =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+    'import { MarketingStoreRefusedError } from "@/lib/marketingStore";\n\n' +
+    "const REFUSAL_STATUS: Record<string, number> = { switch_conflict: 409 };\n\n" +
+    "export async function PATCH(req: Request) {\n" +
+    "  return runMarketingAdminMutation({\n" +
+    "    request: req,\n" +
+    "    refusal: (error) =>\n" +
+    "      error instanceof MarketingStoreRefusedError\n" +
+    "        ? { code: error.code, status: REFUSAL_STATUS[error.code] ?? 409, message: error.message }\n" +
+    "        : null,\n" +
+    "  });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", localTable), []);
 });
 
 test("the marketing transaction brand has exactly one cast", () => {
