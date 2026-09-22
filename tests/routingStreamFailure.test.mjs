@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { classifyStreamFailure } from "../lib/routingStreamFailure.ts";
+import { ROUTING_ATTEMPT_ERROR_CLASSES } from "../lib/routingAttemptStore.ts";
 import { decideFallback } from "../lib/routingFallbackPolicy.ts";
 
 // The claim under test is the one §9.1 of the rollout note had to withdraw:
@@ -165,4 +166,78 @@ test("an unrecognisable error is still a provider failure, not a shrug", () => {
   const classified = classify({ error: "a string, somehow" });
   assert.equal(classified.failureLayer, "provider");
   assert.equal(classified.outcome, "failed_pre_token");
+});
+
+/**
+ * The provider category the classification now keeps.
+ *
+ * `classifyProviderFailure` produced one for every provider failure and this
+ * function read it, kept `PAYMENT_REQUIRED` and dropped the rest, so a rate
+ * limit, a 5xx, a DNS failure and an unrecognised error all arrived in the
+ * attempt record as one `failureLayer: "provider"` and nothing else. Telling
+ * capacity apart from availability is a later change; it cannot be made from
+ * records that never kept the difference.
+ *
+ * The layer and the outcome are deliberately unchanged. `decideFallback` reads
+ * those, so nothing about what runs is different.
+ */
+
+const providerError = (code, status) =>
+    Object.assign(new Error("upstream"), { code, status });
+
+test("a rate limit and an outage are no longer the same record", () => {
+    const rateLimited = classifyStreamFailure({
+        error: providerError(undefined, 429),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    const serverError = classifyStreamFailure({
+        error: providerError(undefined, 503),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+
+    assert.equal(rateLimited.errorClass, "provider_rate_limited");
+    assert.equal(serverError.errorClass, "provider_server_error");
+    assert.notEqual(rateLimited.errorClass, serverError.errorClass);
+
+    // And the parts that decide are identical, which is the point: this is a
+    // record keeping a difference, not a routing change.
+    assert.equal(rateLimited.failureLayer, serverError.failureLayer);
+    assert.equal(rateLimited.outcome, serverError.outcome);
+    assert.equal(rateLimited.providerRefusal, serverError.providerRefusal);
+});
+
+test("every classification carries a class from the closed vocabulary", () => {
+    const observations = [
+        { error: new Error("x"), phase: "read", visibleTokenEmitted: false, downstreamOpen: false },
+        { error: Object.assign(new Error("x"), { name: "AbortError" }), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: new Error("x"), phase: "emit", visibleTokenEmitted: true, downstreamOpen: true },
+        { error: new Error("x"), phase: "completion", visibleTokenEmitted: true, downstreamOpen: true },
+        { error: providerError(undefined, 402), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: providerError(undefined, 401), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: providerError("ENOTFOUND"), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: new Error("x"), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+    ];
+    for (const observation of observations) {
+        const classification = classifyStreamFailure(observation);
+        assert.ok(
+            ROUTING_ATTEMPT_ERROR_CLASSES.includes(classification.errorClass),
+            `${observation.phase}: ${classification.errorClass}`
+        );
+    }
+});
+
+test("a client that went away is not filed as a provider failure", () => {
+    const gone = classifyStreamFailure({
+        error: new Error("x"),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: false,
+    });
+    assert.equal(gone.errorClass, "client_gone");
+    assert.equal(gone.failureLayer, "stream");
+    assert.ok(!gone.errorClass.startsWith("provider_"));
 });

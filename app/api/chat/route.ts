@@ -69,6 +69,7 @@ import {
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
 import type {
+    RoutingAttemptErrorClass,
     RoutingAttemptOutcome,
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
@@ -4250,7 +4251,7 @@ async function handleChatPost(
             instrumentation?: {
                 outcome?: RoutingAttemptOutcome;
                 failureLayer?: RoutingFailureLayer;
-                errorClass?: string | null;
+                errorClass?: RoutingAttemptErrorClass | null;
             }
         ) => {
             if (usageSettlement) return usageSettlement;
@@ -5037,7 +5038,13 @@ async function handleChatPost(
                     failureLayer: classified.failureLayer,
                     actualInputTokens: budget.inputTokens,
                     actualOutputTokens: 0,
-                    errorClass: "provider_pre_token_failure",
+                    // The classifier's own category, rather than one word for
+                    // every provider failure there is. It changes nothing
+                    // about this attempt -- the layer and the outcome above
+                    // are what decide -- and it is the only place the
+                    // difference between a rate limit and an outage can be
+                    // kept for later.
+                    errorClass: classified.errorClass,
                     settlementOutcome: "failed",
                     cost: usageReservation
                         ? {

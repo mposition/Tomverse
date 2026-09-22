@@ -4189,6 +4189,15 @@ model RoutingAttempt {
   actualInputTokens   Int?
   actualOutputTokens  Int?
   /// A fixed classification, never provider error text.
+  ///
+  /// The list is `ROUTING_ATTEMPT_ERROR_CLASSES` in lib/routingAttemptStore.ts.
+  /// The `provider_*` half mirrors `ProviderFailureCategory`, which the routing
+  /// layer computed and then discarded: telling a rate limit apart from an
+  /// outage is a later change, and it cannot be made from records that never
+  /// kept the difference.
+  ///
+  /// The CHECK is NOT VALID until a production report shows the historical
+  /// values are the ones the list believes them to be.
   errorClass          String?
 
   manifest  ContextManifest?

@@ -35,9 +35,11 @@ import {
   providerDiagnosticCode,
   safeErrorMessage,
   safeErrorMetadata,
+  type ProviderFailureCategory,
 } from "@/lib/providerErrorClassification";
 import type { ProviderRefusal } from "@/lib/routingFallbackPolicy";
 import type {
+  RoutingAttemptErrorClass,
   RoutingAttemptOutcome,
   RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
@@ -88,10 +90,57 @@ export type StreamFailureClassification = {
    */
   providerRefusal: ProviderRefusal | null;
   /**
+   * The fixed identifier this failure is recorded under.
+   *
+   * The provider categories were computed here and then dropped: everything
+   * but `PAYMENT_REQUIRED` left this function as one `failureLayer:
+   * "provider"`, so a rate limit and a 5xx and a DNS failure arrived in the
+   * attempt record indistinguishable from each other. Telling capacity apart
+   * from availability is a later change, and it cannot be made at all from
+   * records that never kept the difference. This keeps it.
+   *
+   * It decides nothing on its own. The layer and the outcome are unchanged,
+   * and `decideFallback` reads those.
+   */
+  errorClass: RoutingAttemptErrorClass;
+  /**
    * Operator-facing, and never provider text. A classification nobody can
    * explain is a classification nobody can argue with when it is wrong.
    */
   reason: string;
+};
+
+/**
+ * The provider's own category, as the identifier the attempt record keeps.
+ *
+ * One arm per member of `ProviderFailureCategory`, so a category added there
+ * fails to compile here rather than silently arriving as `provider_unknown`.
+ */
+const errorClassForCategory = (
+  category: ProviderFailureCategory
+): RoutingAttemptErrorClass => {
+  switch (category) {
+    case "LOCAL_REJECTION":
+      return "provider_local_rejection";
+    case "REQUEST_CONTRACT":
+      return "provider_request_contract";
+    case "MODEL_NOT_FOUND":
+      return "provider_model_not_found";
+    case "MODEL_TRANSIENT":
+      return "provider_model_transient";
+    case "AUTHENTICATION":
+      return "provider_authentication";
+    case "PAYMENT_REQUIRED":
+      return "provider_payment_required";
+    case "RATE_LIMIT":
+      return "provider_rate_limited";
+    case "SERVER_ERROR":
+      return "provider_server_error";
+    case "NETWORK":
+      return "provider_network";
+    case "UNKNOWN":
+      return "provider_unknown";
+  }
 };
 
 /**
@@ -180,6 +229,7 @@ export const classifyStreamFailure = (
       outcome: "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
+      errorClass: "client_gone",
       reason: "The response the user was connected to is no longer open.",
     };
   }
@@ -189,6 +239,7 @@ export const classifyStreamFailure = (
       outcome: "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
+      errorClass: "client_gone",
       reason: "The turn was aborted or its response controller was already closed.",
     };
   }
@@ -201,6 +252,7 @@ export const classifyStreamFailure = (
       outcome: visibleTokenEmitted ? "failed_post_token" : "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
+      errorClass: "client_gone",
       reason: "The client stopped accepting the response.",
     };
   }
@@ -214,6 +266,7 @@ export const classifyStreamFailure = (
       outcome: visibleTokenEmitted ? "failed_post_token" : "failed_pre_token",
       failureLayer: "stream",
       providerRefusal: null,
+      errorClass: "completion_handling_failed",
       reason:
         "The provider's stream finished; the failure came from Tomverse's completion handling.",
     };
@@ -226,6 +279,7 @@ export const classifyStreamFailure = (
       outcome,
       failureLayer: "provider",
       providerRefusal: "policy",
+      errorClass: "provider_policy_refusal",
       reason: "The provider refused the request on content-policy grounds.",
     };
   }
@@ -240,14 +294,21 @@ export const classifyStreamFailure = (
       outcome,
       failureLayer: "provider",
       providerRefusal: "insufficient_credits",
+      errorClass: "provider_payment_required",
       reason: "The provider account cannot fund the request.",
     };
   }
 
+  // Everything else is a provider failure, and until now every one of them
+  // arrived here indistinguishable from the rest. The layer and the outcome
+  // are unchanged -- this keeps the category the classifier already produced,
+  // so that telling a rate limit apart from an outage is a question the
+  // records can answer later.
   return {
     outcome,
     failureLayer: "provider",
     providerRefusal: null,
+    errorClass: errorClassForCategory(category),
     reason: "The provider's stream failed.",
   };
 };
