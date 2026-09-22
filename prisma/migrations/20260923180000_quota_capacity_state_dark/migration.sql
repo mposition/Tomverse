@@ -66,8 +66,11 @@ ALTER TABLE "QuotaCapacityState"
         AND ("tokenBucketRemaining" IS NULL OR "tokenBucketRemaining" >= 0)
     );
 
--- A count belongs to a window. Without one, "seven rate limits" is a number
--- with no period attached and every reader picks their own.
+-- A count belongs to a window it started in. There is no length column, so
+-- this does not define a period: what it stops is a count with no start at
+-- all, which nothing can age or rotate. How long a window runs and when it
+-- turns over are the writer's contract, and there is no writer yet. An
+-- earlier draft of this comment said the start time settled the period.
 ALTER TABLE "QuotaCapacityState"
     ADD CONSTRAINT "QuotaCapacityState_count_has_window_check"
     CHECK ("rateLimitedCount" = 0 OR "windowStartedAt" IS NOT NULL);

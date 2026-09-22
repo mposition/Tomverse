@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+    AVAILABILITY_FAILURE_CLASSES,
     AVAILABILITY_OBSERVATION_SOURCES,
     availabilityObservationProblems,
     rollupGrainsFor,
@@ -13,9 +14,13 @@ import { ROUTING_ATTEMPT_ERROR_CLASSES } from "../lib/routingAttemptStore.ts";
 /**
  * One availability observation, and the rollups derived from it.
  *
- * What these hold is the property the whole table is for: an event is applied
- * at most once, so a projection that failed half way can be run again rather
- * than reasoned about.
+ * What these hold is what the table actually gives: one observation cannot be
+ * inserted twice, an availability failure is only a failure of availability,
+ * and nothing is attributed to a grain it was never part of.
+ *
+ * A re-runnable projection is a further thing and is not here -- no rollup
+ * table records what it has applied, so `shouldApply` is the rule stated
+ * ahead of the thing that will follow it.
  */
 
 const migration = () =>
@@ -39,7 +44,7 @@ test("a well formed observation is accepted", () => {
     assert.deepEqual(availabilityObservationProblems(ok()), []);
     assert.deepEqual(
         availabilityObservationProblems(
-            ok({ outcome: "failed", errorClass: "provider_rate_limited" })
+            ok({ outcome: "failed", errorClass: "provider_server_error" })
         ),
         []
     );
@@ -57,10 +62,15 @@ test("a failure says what kind it was", () => {
     );
 });
 
-test("the error class is the same vocabulary the attempt record uses", () => {
-    // Not a second list: one table calling a rate limit something the other
-    // cannot read is how the two grains of health stopped being joinable.
-    for (const errorClass of ROUTING_ATTEMPT_ERROR_CLASSES) {
+test("the spelling is shared and the membership is not", () => {
+    // Sharing the spelling keeps an attempt and an observation from calling a
+    // rate limit different things. Sharing the membership would have counted
+    // one as the provider being unavailable.
+    for (const errorClass of AVAILABILITY_FAILURE_CLASSES) {
+        assert.ok(
+            ROUTING_ATTEMPT_ERROR_CLASSES.includes(errorClass),
+            `${errorClass} is spelled the same in both`
+        );
         assert.deepEqual(
             availabilityObservationProblems(ok({ outcome: "failed", errorClass })),
             [],
@@ -73,15 +83,39 @@ test("the error class is the same vocabulary the attempt record uses", () => {
     );
 });
 
+test("what is not an availability failure is refused, and says which", () => {
+    // Each of these is a real class and none means the provider could not
+    // serve the request. The rate limit is the sharpest: counting it here
+    // would undo the capacity table in the summary this feeds.
+    for (const errorClass of [
+        "provider_rate_limited",
+        "empty_response",
+        "provider_model_transient",
+        "client_gone",
+        "process_stopped_after_dispatch",
+        "completion_handling_failed",
+        "provider_payment_required",
+        "provider_authentication",
+    ]) {
+        assert.ok(ROUTING_ATTEMPT_ERROR_CLASSES.includes(errorClass), errorClass);
+        assert.deepEqual(
+            availabilityObservationProblems(ok({ outcome: "failed", errorClass })),
+            [`"${errorClass}" is not an availability failure`],
+            errorClass
+        );
+    }
+});
+
 test("an observation carries the id a projection is idempotent on", () => {
     assert.deepEqual(availabilityObservationProblems(ok({ eventId: "  " })), [
         "an observation carries the id a projection is idempotent on",
     ]);
 });
 
-test("an event is applied at most once", () => {
-    // The whole reason for the table. A rollup that failed half way is run
-    // again rather than reasoned about.
+test("the rule a projection would be idempotent on", () => {
+    // Stated ahead of the projection that will use it. What exists today is
+    // this predicate and a unique index on the observation; neither makes a
+    // rollup safe to re-run, because nothing records what a rollup applied.
     const seen = new Set(["evt_1"]);
     assert.equal(shouldApply("evt_2", seen), true);
     assert.equal(shouldApply("evt_1", seen), false);
@@ -140,6 +174,9 @@ test("the database holds the same rules, and the row cannot be rewritten", () =>
     // moved.
     assert.match(sql, /CREATE TRIGGER "availability_observation_is_append_only_trigger"/);
     assert.match(sql, /BEFORE UPDATE OR DELETE ON "AvailabilityObservation"/);
+    // TRUNCATE does not fire an ON DELETE trigger, so it needs its own.
+    assert.match(sql, /CREATE TRIGGER "availability_observation_is_not_truncatable_trigger"/);
+    assert.match(sql, /BEFORE TRUNCATE ON "AvailabilityObservation"/);
 });
 
 test("neither existing health table is touched", () => {

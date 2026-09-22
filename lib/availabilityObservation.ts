@@ -12,10 +12,12 @@
  * facts nothing can join.
  *
  * So an observation is written once, carries an `eventId`, and the deployment,
- * endpoint and provider views are derived from it. Idempotent on that id: a
- * projection that failed half way can be run again without double-counting,
- * which is what makes a rollup safe to rebuild rather than something to be
- * careful with.
+ * endpoint and provider views are derived from it. The id is the key a
+ * projection would be idempotent on; a unique index stops the same observation
+ * being inserted twice, and that is all it stops. No rollup table exists yet
+ * and nothing records which events a rollup has applied, so a rollup is not
+ * safe to re-run today. `shouldApply` states the rule ahead of the projection
+ * that will need it.
  *
  * ## Nothing is backfilled
  *
@@ -50,6 +52,49 @@ export const AVAILABILITY_OBSERVATION_OUTCOMES = ["succeeded", "failed"] as cons
 
 export type AvailabilityObservationOutcome =
     (typeof AVAILABILITY_OBSERVATION_OUTCOMES)[number];
+
+/**
+ * The failures that mean the provider could not serve the request.
+ *
+ * A subset of `ROUTING_ATTEMPT_ERROR_CLASSES`, and the spelling is shared on
+ * purpose -- an attempt and an observation calling a rate limit different
+ * things is how the two grains of health stopped being joinable. What is not
+ * shared is which of them counts as unavailable here.
+ *
+ * The first draft admitted the whole vocabulary, which would have put every
+ * one of these into an availability rollup:
+ *
+ * - `provider_rate_limited` -- capacity, and the reason `QuotaCapacityState`
+ *   exists. Counting it as unavailable here would undo that table in the
+ *   summary it feeds;
+ * - `empty_response`, `provider_model_transient` -- the call succeeded and the
+ *   answer was unusable, which `failureLayer: "model_output"` keeps out of
+ *   provider health for exactly this reason;
+ * - `client_gone` -- the person left;
+ * - `process_stopped_after_dispatch`, `completion_handling_failed`,
+ *   `request_failed` -- ours;
+ * - `provider_policy_refusal`, `provider_payment_required`,
+ *   `provider_authentication`, `provider_request_contract`,
+ *   `provider_model_not_found`, `provider_local_rejection` -- the provider
+ *   answered, and the answer was about this request or this account rather
+ *   than about whether it could serve.
+ *
+ * `RoutingAttempt` draws these lines with `failureLayer`. An observation has
+ * no layer, so the line is drawn by which classes may appear at all.
+ */
+export const AVAILABILITY_FAILURE_CLASSES = [
+    /** The provider answered with an error of its own. */
+    "provider_server_error",
+    /** The request never completed a round trip. */
+    "provider_network",
+    /** A provider failure nothing could classify further. */
+    "provider_unknown",
+    /** No first token inside the turn's deadline. */
+    "first_token_deadline_exceeded",
+] as const;
+
+export type AvailabilityFailureClass =
+    (typeof AVAILABILITY_FAILURE_CLASSES)[number];
 
 /** The grains a rollup can be taken at, widest last. */
 export const AVAILABILITY_ROLLUP_GRAINS = [
@@ -107,9 +152,20 @@ export const availabilityObservationProblems = (
     }
     if (
         input.errorClass &&
-        !(ROUTING_ATTEMPT_ERROR_CLASSES as readonly string[]).includes(input.errorClass)
+        !(AVAILABILITY_FAILURE_CLASSES as readonly string[]).includes(input.errorClass)
     ) {
-        problems.push(`unknown error class ${JSON.stringify(input.errorClass)}`);
+        // Either it is not a class at all, or it is one that means something
+        // other than "the provider could not serve this". Both are refused;
+        // the second earns its own sentence, because a rate limit recorded as
+        // unavailable undoes the capacity table in the summary it feeds.
+        const known = (ROUTING_ATTEMPT_ERROR_CLASSES as readonly string[]).includes(
+            input.errorClass
+        );
+        problems.push(
+            known
+                ? `${JSON.stringify(input.errorClass)} is not an availability failure`
+                : `unknown error class ${JSON.stringify(input.errorClass)}`
+        );
     }
 
     // An endpoint is what a deployment is served from. An observation naming a

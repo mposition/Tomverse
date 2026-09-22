@@ -5785,6 +5785,12 @@ model QuotaCapacityState {
   deprioritizeUntil DateTime?
 
   /// Requests this scope may have in flight, and has.
+  ///
+  /// Null and zero are different answers. Null is no declared limit -- the
+  /// provider never told us one and nothing here may invent it. Zero is a
+  /// declared limit of none, which is how a scope is held closed without
+  /// deleting it. A reader that treats null as zero stops every scope whose
+  /// provider is simply quiet about concurrency.
   concurrencyLimit Int?
   concurrencyInUse Int  @default(0)
 

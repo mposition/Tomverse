@@ -13,11 +13,18 @@
 -- `ProviderProbeResult` per provider for one representative model. The two
 -- share no identifier, so the same outage is two facts nothing can join.
 --
--- An independent review asked for a canonical observation with an event id,
--- and for the deployment, endpoint and provider views to be derived from it
--- idempotently, so a projection that failed half way can be run again without
--- double-counting. That is this table. `eventId` is unique; a projection
--- applies an event at most once.
+-- An independent review asked for a canonical observation with an event id
+-- that the deployment, endpoint and provider views can be derived from. This
+-- table is that record and no more than that.
+--
+-- What the unique index gives is exactly one thing: the same observation
+-- cannot be inserted twice, and a second attempt raises a unique violation
+-- rather than adding a row. **That is not an idempotent projection.** There
+-- are no rollup tables here, nothing records which events a rollup has
+-- already applied, and two projectors running at once would each believe they
+-- were first. A projection that can be re-run safely needs a record of what it
+-- has applied, per grain, and that is a separate piece of work. An earlier
+-- draft of this comment claimed it was already true.
 --
 -- Neither existing table is changed or deleted. They are the grain the public
 -- status page and the operator recovery path read, and this is the grain the
@@ -74,31 +81,28 @@ ALTER TABLE "AvailabilityObservation"
         OR ("outcome" = 'succeeded' AND "errorClass" IS NULL)
     );
 
--- The same closed vocabulary RoutingAttempt.errorClass uses. A second list
--- would let one table call a rate limit something the other could not read.
+-- Which failures mean the provider could not serve the request.
+--
+-- The spelling is shared with RoutingAttempt.errorClass on purpose: an attempt
+-- and an observation calling a rate limit different things is how the two
+-- grains of health stopped being joinable. What is not shared is which of them
+-- counts as unavailable.
+--
+-- The first draft of this file admitted the whole vocabulary, which would have
+-- put a rate limit, an empty answer, a client disconnect and our own process
+-- stopping into an availability rollup. RoutingAttempt draws those lines with
+-- failureLayer; an observation has no layer, so the line is drawn by which
+-- classes may appear at all. A rate limit counted as unavailable here would
+-- undo QuotaCapacityState in the summary it feeds.
 ALTER TABLE "AvailabilityObservation"
     ADD CONSTRAINT "AvailabilityObservation_errorClass_check"
     CHECK (
         "errorClass" IS NULL
         OR "errorClass" IN (
-            'empty_response',
-            'first_token_deadline_exceeded',
-            'request_failed',
-            'process_stopped_after_dispatch',
-            'client_gone',
-            'completion_handling_failed',
-            'provider_pre_token_failure',
-            'provider_policy_refusal',
-            'provider_payment_required',
-            'provider_rate_limited',
             'provider_server_error',
             'provider_network',
-            'provider_authentication',
-            'provider_request_contract',
-            'provider_model_not_found',
-            'provider_model_transient',
-            'provider_local_rejection',
-            'provider_unknown'
+            'provider_unknown',
+            'first_token_deadline_exceeded'
         )
     );
 
@@ -114,8 +118,8 @@ ALTER TABLE "AvailabilityObservation"
     ADD CONSTRAINT "AvailabilityObservation_deployment_has_endpoint_check"
     CHECK ("modelDeploymentId" IS NULL OR "providerEndpointId" IS NOT NULL);
 
--- The idempotency key. A projection applies an event at most once, so a
--- rollup that failed half way can be run again.
+-- The key a projection would be idempotent on, once one exists. Today it
+-- stops the same observation being inserted twice, which is all it stops.
 CREATE UNIQUE INDEX "AvailabilityObservation_eventId_key"
     ON "AvailabilityObservation"("eventId");
 
@@ -144,3 +148,24 @@ CREATE TRIGGER "availability_observation_is_append_only_trigger"
     BEFORE UPDATE OR DELETE ON "AvailabilityObservation"
     FOR EACH ROW
     EXECUTE FUNCTION "availability_observation_is_append_only"();
+
+-- TRUNCATE does not fire an ON DELETE trigger, so the row trigger above walks
+-- straight past it. It needs its own, and a statement-level one because there
+-- is no row to be called for.
+--
+-- This stops the application, not the database owner: a superuser can disable
+-- the trigger, and `session_replication_role = replica` skips it. What it
+-- makes impossible is the ordinary mistake.
+CREATE OR REPLACE FUNCTION "availability_observation_is_not_truncatable"()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION
+        'AvailabilityObservation is append-only and cannot be truncated'
+        USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "availability_observation_is_not_truncatable_trigger"
+    BEFORE TRUNCATE ON "AvailabilityObservation"
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION "availability_observation_is_not_truncatable"();

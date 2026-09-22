@@ -271,10 +271,10 @@ const REGISTRY = {
   },
   AvailabilityObservation_errorClass_check: {
     owner: "list",
-    module: "lib/routingAttemptStore.ts",
-    list: "ROUTING_ATTEMPT_ERROR_CLASSES",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_FAILURE_CLASSES",
     reason:
-      "The same closed vocabulary RoutingAttempt.errorClass uses, deliberately not a second list: one table calling a rate limit something the other cannot read is how the two grains of health stopped being joinable in the first place. Nullable because a success has nothing to classify.",
+      "A subset of ROUTING_ATTEMPT_ERROR_CLASSES, sharing its spelling so an attempt and an observation cannot call a rate limit different things, but not its membership. The first draft admitted the whole vocabulary, which would have counted a rate limit, an empty answer, a client disconnect and our own process stopping as the provider being unavailable -- RoutingAttempt draws those lines with failureLayer and an observation has no layer, so the line is which classes may appear at all. A rate limit counted here would undo QuotaCapacityState in the summary it feeds. Nullable because a success has nothing to classify.",
   },
   RoutingCandidateVerdict_verdict_check: {
     owner: "list",
