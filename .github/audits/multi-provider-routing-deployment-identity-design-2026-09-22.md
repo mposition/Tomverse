@@ -27,8 +27,39 @@
 | D2 | credential은 deployment identity에 **넣지 않음** | health↔capacity scope 분리의 근거 |
 | D3 | Azure 경계 사례는 **(a)** — region마다 별도 deployment | residency가 deployment에서 결정 가능 |
 | D4 | `ProviderEndpoint`를 **독립 infrastructure identity로 신설** | 4계층 모델 |
+| D5 | **destination을 댈 수 없으면 안 됩니다.** 그리고 Privacy 페이지에 **공급자별 개인정보 이동 고지**가 필요합니다 | §4.2 확정 + 새 산출물 §4.6 |
+| D6 | BYOK 소유권은 **account**입니다 | `Workspace` 모델을 만들지 않습니다. §8.2·§8.3의 FK 대상이 `User` |
+| D7 | 공급자 계약 조사는 **소유자가 진행 중** | T1의 답을 기다립니다. 그 전까지 모든 endpoint는 `unproven` |
 
 D1이 승인하지 **않는** 것은 §11에 따로 적습니다.
+
+### 1.1 D5가 만드는 산출물
+
+D5는 §4.2를 확정하는 데 그치지 않고 **새 작업 항목**을 만듭니다. 현재 Privacy
+페이지는 이렇게 적고 있습니다(`locales/*.ts`의 `providers`):
+
+> "Providers may process or retain data under their own terms and privacy
+> policies, **potentially in a different country**."
+
+이것이 정확히 D5가 배제한 형태입니다 — destination을 대지 못하는 문장입니다.
+`docs/policy/voice-input.md`가 voice input에 대해 이미 반대로 결정했고, Privacy
+페이지는 그 결정을 PIPA 28-8(2)의 8개 항목 목록으로 렌더링하고 있습니다. 같은
+기준이 AI 공급자 전송에도 적용돼야 합니다.
+
+**목록은 하나여야 합니다.** 공급자별 고지와 §4의 residency 게이트는 **같은 사실**을
+읽습니다 — 누가 받고, 어느 region으로 가고, 무슨 근거로 그렇게 말하는가.
+두 목록을 만들면 고지와 게이트가 서로 다른 말을 하게 되고, 그때 사용자에게 보이는
+쪽이 틀리면 그건 회수되지 않습니다.
+
+### 1.2 D6이 닫는 것
+
+`Workspace` 모델은 만들지 않습니다. 따라서:
+
+- `CredentialBinding.workspaceId` → **`accountId`**(= `User`)
+- `QuotaScope`의 `workspace` scope → **account scope**, FK 대상 `User`
+- `byok-spend-*` namespace의 한도 주체 → **account admin** (T2의 답)
+
+Provider registry는 여전히 필요합니다(§8.2의 `provider` scope FK 대상).
 
 ## 2. 4계층 모델
 
@@ -205,7 +236,42 @@ Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사
 가변 행으로 두면 "그때 무엇이 허용돼 있었나"에 답할 수 없고, 답할 수 없는 것에
 법적 판정을 얹는 구조가 됩니다.
 
-### 4.5 S1의 답: 검증된 공급자 없음
+### 4.5 고지와 게이트는 한 목록을 읽습니다 (D5)
+
+`lib/providerDataDestinations.ts` — 공급자별로 **누가 받고 어디로 가는가**를 적는
+단일 registry입니다. 두 소비자가 있습니다.
+
+| 소비자 | 무엇에 쓰는가 |
+|---|---|
+| Privacy 페이지의 공급자별 고지 | 사용자에게 보이는 문장 |
+| §4.1의 routing-eligible 판정 | dispatch 전 게이트 |
+
+한 행이 담는 것:
+
+| 필드 | 의미 |
+|---|---|
+| `provider` | `AiProvider` |
+| `recipientEntity` | 데이터를 받는 법인 |
+| `destinationRegions` | 처리되는 region |
+| `evidenceRef` | 그렇게 말할 수 있는 근거 (계약·DPA·공식 문서) |
+| `status` | **`proven` \| `unproven`** |
+
+규칙 넷:
+
+1. **`unproven`은 사용자에게 렌더링하지 않습니다.** 현재 문장이 모호하다는 이유로
+   "destination 미확정"이라고 적힌 표를 내보내는 것은 더 나은 고지가 아닙니다.
+   페이지는 D7의 조사 결과가 들어온 뒤에 바뀝니다.
+2. **`unproven`은 제약 트래픽의 후보가 아닙니다**(§4.1 규칙 1).
+3. **추정 금지.** `evidenceRef` 없이 `proven`이 될 수 없습니다.
+4. **지금은 gate가 아니라 보고입니다.** 활성 공급자 전부가 `unproven`인 상태에서
+   gate로 만들면 PR Fast Gate가 즉시 깨집니다. `report:model-credit-weights`와
+   같은 위치 — 차이를 나열하되 막지 않습니다. D7이 채워지면 gate로 승격합니다.
+
+이 registry가 §4.4의 `EndpointResidencyApproval`이 나중에 참조할 **사실의 출처**
+이기도 합니다. 승인은 "이 사실을 근거로 이 endpoint를 허용한다"는 행위이고, 사실
+자체는 여기 있습니다.
+
+### 4.6 S1의 답: 검증된 공급자 없음
 
 3차 검토 시점에 **serving attestation을 제공한다고 확인된 공급자는 0개**입니다.
 이 저장소가 읽는 것은 OpenAI의 `serviceTier` 하나뿐이고(`lib/servedProcessingTier.ts`),
