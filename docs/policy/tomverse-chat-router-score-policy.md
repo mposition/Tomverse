@@ -150,7 +150,10 @@ A signal missing means *unknown*. The criterion abstains and the next one
 decides. Treating an absent success rate as a perfect one would rank a model
 nobody has ever called above one with a measured record.
 
-Two values within these thresholds are the same value:
+These are the thresholds below which two measurements are not treated as
+different. What "the same value" means precisely is in "The order is built, not
+compared" below — it cannot be read pairwise, because at a 5% ratio 100 ties
+104 and 104 ties 108 while 100 beats 108.
 
 | Threshold | Value |
 |---|---|
@@ -214,6 +217,25 @@ margin and the hysteresis turns are all unchanged.
 every permutation of its inputs rather than over one reversal, and fixes the
 epsilon chain's buckets. Two candidates cannot expose intransitivity, which is
 why the older order-independence test did not.
+
+**What is traded for it.** The ranking is now transitive and independent of the
+order candidates arrive in, and in exchange it depends on *which* candidates
+arrive. A bucket is anchored inside its own group, so 104 shares a bucket with
+108 when 100 is absent and not when it is present; and a criterion abstains for
+a group that one unmeasured member joins. Removing a candidate — a hard filter
+refusing it, a model being disabled — can therefore change the order of the
+rest. The old comparator did not have that property, and had no consistent
+order instead. Only one of the two is available with an epsilon and an
+abstention in the rules.
+
+The full-catalogue diagnostic reports where this happens, as
+`subset_context_reversal`. It was `pairwise_inversion` and was described as
+evidence of non-transitivity, which it no longer is.
+
+**Comparing across the change.** `lib/routingShadowReport.ts` compares runs by
+`selectionPolicyVersion` by default, and this change deliberately did not move
+that version. A before-and-after of the ranking itself must be taken over
+`selectionVersion`, or both sides land in the same bucket.
 
 ## 6. Stickiness, in the units of this scale
 

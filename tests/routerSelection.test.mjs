@@ -562,3 +562,66 @@ test("the criterion named as deciding is one that actually separates", () => {
     assert.equal(result.decidedBy, "recent_success_rate");
     assert.equal(result.rankedModelIds[3], "model-d");
 });
+
+/**
+ * Values that are not numbers in the sense the bucketing needs.
+ *
+ * `partitionByMetric` groups by value, and a reading that is not equal to
+ * itself lands in no bucket: the candidate would leave that criterion with a
+ * shorter rank key than everybody else, and the final sort would fall back to
+ * input order for it -- the failure the whole ranking exists to remove. So a
+ * non-finite reading abstains the criterion, and `rankCandidates` checks that
+ * a partition covered its group rather than trusting it to.
+ */
+test("a non-finite measurement abstains rather than losing its candidate", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const signals = {
+            expectedTotalCostUsdByModelId: {
+                "model-a": 1,
+                "model-b": bad,
+                "model-c": 3,
+            },
+        };
+        const orders = permutations(["model-a", "model-b", "model-c"]).map(
+            (order) =>
+                selectRouterModel({
+                    profile: plainTurn,
+                    eligible: candidates(...order),
+                    signals,
+                }).rankedModelIds
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], String(bad));
+        }
+        // Cost could not speak for the whole group, so the model id did.
+        assert.deepEqual(orders[0], ["model-a", "model-b", "model-c"], String(bad));
+    }
+});
+
+test("negative zero and positive zero are one reading", () => {
+    const orders = permutations(["model-a", "model-b"]).map(
+        (order) =>
+            selectRouterModel({
+                profile: plainTurn,
+                eligible: candidates(...order),
+                signals: {
+                    expectedTotalCostUsdByModelId: { "model-a": 0, "model-b": -0 },
+                },
+            }).rankedModelIds
+    );
+    for (const order of orders) assert.deepEqual(order, orders[0]);
+    assert.deepEqual(orders[0], ["model-a", "model-b"]);
+});
+
+test("a duplicated model id leaves the ranking well defined", () => {
+    // The candidate type does not forbid it even though the catalogue does.
+    // Nothing separates the two, so they stay adjacent and the length is kept.
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-a", "model-b"),
+        signals: {},
+    });
+    assert.equal(result.rankedModelIds.length, 3);
+    assert.deepEqual(result.rankedModelIds, ["model-a", "model-a", "model-b"]);
+    assert.equal(result.decidedBy, "model_id");
+});

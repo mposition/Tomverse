@@ -190,12 +190,18 @@ const partitionByQuality = (group: Bucket): Bucket[] => {
     for (const band of bands) {
         const inBand = group.filter((entry) => entry.cell.qualityBand === band);
         // The interval refines the order inside one band, and only while every
-        // cell in that band carries one. The band stays a strict primary key:
-        // an interval never reaches across bands, because that would make the
-        // comparison non-transitive on a partly-measured snapshot.
+        // cell in that band carries a finite one. The band stays a strict
+        // primary key: an interval never reaches across bands, because that
+        // would make the comparison non-transitive on a partly-measured
+        // snapshot.
+        //
+        // Finite rather than merely non-null, because the bucketing below
+        // groups by value equality and `NaN === NaN` is false: a cell carrying
+        // one would land in no bucket at all, and the candidate would leave
+        // this criterion with a shorter rank key than everybody else.
         if (
             inBand.length > 1 &&
-            inBand.every((entry) => entry.cell.qualityCi95Lower !== null)
+            inBand.every((entry) => Number.isFinite(entry.cell.qualityCi95Lower))
         ) {
             const bounds = [
                 ...new Set(
@@ -387,10 +393,20 @@ const rankCandidates = (
             // A group of one is already decided. Skipping the partition keeps
             // every rank key the same length, which is what makes the
             // lexicographic comparison below well defined.
-            const buckets =
+            const split =
                 group.length <= 1
                     ? [group]
                     : partitionFor(criterion, group, signals);
+            // Equal key lengths are the whole basis of that comparison, so
+            // they are checked rather than assumed. A partitioner that lost a
+            // member -- by grouping on a value that is not equal to itself,
+            // say -- would give that candidate a shorter key, and the final
+            // sort would fall back to input order for it: the exact failure
+            // this ranking exists to remove. Losing the criterion is the safe
+            // direction, so a partition that does not cover its group is
+            // treated as an abstention.
+            const covered = split.reduce((sum, bucket) => sum + bucket.length, 0);
+            const buckets = covered === group.length ? split : [group];
             buckets.forEach((bucket, index) => {
                 for (const candidate of bucket) keys.get(candidate)?.push(index);
                 refined.push(bucket);

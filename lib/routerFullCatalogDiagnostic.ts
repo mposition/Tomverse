@@ -76,7 +76,7 @@ import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 /** Bump with any change to the shape of the report or how a row is derived. */
-export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v3";
+export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v4";
 
 /** One request to diagnose. The shape `EvalSetItem` already has, and no more. */
 export type DiagnosticItem = {
@@ -221,12 +221,23 @@ export type ModelDisposition = {
     /** The cost figure the tie-break compared, from the pricing registry. */
     expectedTotalCostUsd: number | null;
     /**
-     * How this model compares with the primary, head to head, using the
-     * product's own comparator. Null for the primary itself and for rejected
-     * models. `wouldBeatPrimary` is true when the pairwise call picks this
-     * model over the primary -- possible only if the tie-break's epsilons
-     * make the order non-transitive, and reported rather than hidden when it
-     * happens.
+     * How this model compares with the primary when the two of them are the
+     * only candidates. Null for the primary itself and for rejected models.
+     *
+     * `wouldBeatPrimary` is true when that two-model ranking picks this model
+     * over the primary although the full-catalogue ranking did not. It is an
+     * observation about the candidate set, not a defect: the tie-break groups
+     * measurements into buckets anchored to each bucket's own first value and
+     * abstains for a whole group, so removing candidates can move a bucket
+     * boundary and change the answer. Three models at 100, 104 and 108 with a
+     * 5% ratio split into {100, 104} and {108}; the pair 104/108 is one
+     * bucket and the model id decides it.
+     *
+     * It was a defect while the ranking came from a pairwise comparator,
+     * because then a reversal could only mean the order was non-transitive.
+     * `router-selection-v3` replaced that comparator with a partition
+     * refinement, which is transitive and context-dependent rather than the
+     * other way round.
      */
     versusPrimary: {
         decidedBy: RouterTieBreakCriterion;
@@ -353,7 +364,7 @@ export type ImprovementCandidate = {
         | "decided_by_tie_break"
         | "web_search_capability_gap"
         | "output_cap_mismatch"
-        | "pairwise_inversion"
+        | "subset_context_reversal"
         | "fallback_candidate_does_not_fit";
     modelIds: readonly string[];
     taskKinds: readonly TaskKind[];
@@ -390,7 +401,7 @@ export type DiagnosticReport = {
         evidenceCells: { withEvidence: number; total: number };
         outputCapMismatchItems: number;
         consistencyProblems: number;
-        pairwiseInversions: number;
+        subsetContextReversals: number;
         fallbackScopeAsDeployed: Readonly<Record<string, number>>;
         /** Items by `reachable` or by the refusal that stopped them, as deployed. */
         fallbackReachableAsDeployed: Readonly<Record<string, number>>;
@@ -797,7 +808,7 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
 
     const outputCapMismatchItems = items.filter((item) => item.caps.primary?.outputCapDiffers).length;
     const consistencyProblems = items.filter((item) => !item.consistency.agreesWithProduct).length;
-    const pairwiseInversions = items.reduce(
+    const subsetContextReversals = items.reduce(
         (sum, item) => sum + item.models.filter((model) => model.versusPrimary?.wouldBeatPrimary).length,
         0
     );
@@ -921,9 +932,9 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
                 "the answer is sized under another.",
         });
     }
-    if (pairwiseInversions > 0) {
+    if (subsetContextReversals > 0) {
         improvementCandidates.push({
-            kind: "pairwise_inversion",
+            kind: "subset_context_reversal",
             modelIds: [
                 ...new Set(
                     items.flatMap((item) =>
@@ -932,10 +943,12 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
                 ),
             ].sort(),
             taskKinds: kindsSeen,
-            itemCount: pairwiseInversions,
+            itemCount: subsetContextReversals,
             detail:
-                "beats the primary head to head under the product's comparator but ranked below it in the sort. " +
-                "The tie-break's epsilons make the order non-transitive on these inputs.",
+                "wins when it and the primary are the only candidates, and ranks below it over the whole catalogue. " +
+                "Not an inconsistency: the tie-break's buckets are anchored within the candidate set, so a smaller " +
+                "set can put the two in one bucket and let the model id decide. Listed because it shows where a " +
+                "bucket boundary, rather than a measured difference, is deciding.",
         });
     }
 
@@ -987,7 +1000,7 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
             evidenceCells: { withEvidence: evidenceWith, total: evidenceTotal },
             outputCapMismatchItems,
             consistencyProblems,
-            pairwiseInversions,
+            subsetContextReversals,
             fallbackScopeAsDeployed,
             fallbackReachableAsDeployed,
             fallbackReachableIfFlagOn,
