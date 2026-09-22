@@ -107,7 +107,7 @@ import {
 } from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
-import { chatRuntimeKey, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
+import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
 import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
@@ -4365,12 +4365,20 @@ export function ChatPageClient({
     const submitFence = submitIdentityFenceRef.current;
     const ownerKey = identityKey ?? "unresolved";
     if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
-    if (mountedSurface === "chat" && currentChatIdRef.current && isChatRuntimeStreaming(chatRuntimeKey({
+    const existingChatRuntimeKey = mountedSurface === "chat" && currentChatIdRef.current
+      ? chatRuntimeKey({
       identityKey: identityKey ?? "account",
       conversationId: currentChatIdRef.current,
       modelId: latestModelSettingsRef.current.models[0] ?? "",
       transcriptScope: "conversation",
-    }))) return;
+    }) : null;
+    if (existingChatRuntimeKey && !getChatRuntimeSnapshot(existingChatRuntimeKey).isLoaded) {
+      if (getChatRuntimeSnapshot(existingChatRuntimeKey).loadFailed) {
+        showToast(t("chat.workspaceError.body"), "error");
+      }
+      return;
+    }
+    if (existingChatRuntimeKey && isChatRuntimeStreaming(existingChatRuntimeKey)) return;
     const owner: PendingSubmissionOwner = {
       token: crypto.randomUUID(),
       identityKey,
@@ -4728,7 +4736,7 @@ export function ChatPageClient({
       // all: the preflight would price an empty set and the turn would sit
       // unanswered. Abandon instead, leaving the answers already on screen.
       if (!activeModelIds.length) return;
-      const chatSendIsCurrent = () => {
+      const chatSendIsCurrent = (requireLoaded = true) => {
         if (!submitOwnerIsCurrent()) return false;
         if (mountedSurface !== "chat") return true;
         const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
@@ -4744,7 +4752,24 @@ export function ChatPageClient({
         if (!current && identityKey === currentIdentityKey) {
           showToast(t("chat.sendPreparationChanged"), "info");
         }
-        return current;
+        if (!current) return false;
+        // A viewport remount can begin a fresh history load without changing
+        // the conversation or selection ticket. The initial submit check is
+        // no longer evidence after an awaited preflight/context/draft step.
+        // Fresh Chat has no origin transcript to reload and keeps its first
+        // send path unchanged.
+        const currentRuntime = requireLoaded && submitOwner.originConversationId
+          ? getChatRuntimeSnapshot(chatRuntimeKey({
+          identityKey: identityKey ?? "account",
+          conversationId: submitOwner.originConversationId,
+          modelId: activeModelIds[0] ?? "",
+          transcriptScope: "conversation",
+        })) : null;
+        if (currentRuntime && !currentRuntime.isLoaded) {
+          if (currentRuntime.loadFailed) showToast(t("chat.workspaceError.body"), "error");
+          return false;
+        }
+        return true;
       };
       if (!chatSendIsCurrent()) return;
       const preflight = await runComparisonPreflight({
@@ -4820,6 +4845,7 @@ export function ChatPageClient({
       }
       let savedAttachments: ChatAttachment[] = promptAttachments;
       let sendCurrentAfterMessageSave = true;
+      let messageWasSaved = false;
       if (!isGuestMode) {
         const messageToSave: {
           clientRequestId: string;
@@ -4853,6 +4879,10 @@ export function ChatPageClient({
           | "transport"
           | null = null;
         let indeterminateFailureCode: string | undefined;
+        if (!chatSendIsCurrent()) {
+          if (preparedDraft) abortDraftSend(preparedDraft);
+          return;
+        }
         try {
           const { response: saveResponse, body: saveBody, bodyValid } =
             await fetchJsonWithTimeout(
@@ -5004,6 +5034,7 @@ export function ChatPageClient({
         }
 
         if (saved) {
+          messageWasSaved = true;
           /*
             Swap the composer's upload ids for the durable attachment ids the
             save just wrote, in place, so the cards already on screen are the
@@ -5042,7 +5073,10 @@ export function ChatPageClient({
             // exact revision. Only now may the local snapshot disappear; any
             // text typed while the request was frozen is retained as a fresh
             // revision-0 draft by the hook.
-            sendCurrentAfterMessageSave = chatSendIsCurrent();
+            // The Message is durable. A viewport remount may now refresh its
+            // history, but must not erase the accepted turn merely because
+            // that GET is pending. The panel will wait for a complete view.
+            sendCurrentAfterMessageSave = chatSendIsCurrent(false);
             const submittedDraftStillCurrent = commitDraftSend(
               preparedDraft,
               originScopeId,
@@ -5080,7 +5114,7 @@ export function ChatPageClient({
 
       // Last await boundary: an intervening model/account/conversation change
       // must not publish a payload to another panel or discard the draft.
-      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent()) return;
+      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount = promptCountsRef.current.get(activeChatId) ??
         (conversation?.messageCount ? 1 : 0);

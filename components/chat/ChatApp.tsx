@@ -69,6 +69,7 @@ import {
   beginChatRuntimeRun,
   chatRuntimeIdentityKey,
   chatRuntimeKey,
+  captureChatRuntimeCompleteView,
   claimChatRuntimeLoad,
   endChatRuntimeRun,
   getChatRuntimeLastPrompt,
@@ -83,6 +84,8 @@ import {
   markChatRuntimeJobResumed,
   ownsChatRuntimeTranscript,
   releaseChatRuntimeLoad,
+  restoreChatRuntimeCompleteViewForSend,
+  isChatRuntimeCompleteViewRecordCurrent,
   setChatRuntimeLastPrompt,
   settleChatRuntimeLoad,
   subscribeChatRuntime,
@@ -431,6 +434,7 @@ function ChatAppComponent({
    * first will settle the record either way.
    */
   const settledViewKeyRef = useRef<string | null>(null);
+  const [historyLoadRetry, setHistoryLoadRetry] = useState(0);
   /**
    * The send barrier and this panel's current model, read through refs by the
    * auto-send effect below.
@@ -816,8 +820,17 @@ function ChatAppComponent({
           });
           if (response.ok) {
             const data = await response.json();
+            if (!Array.isArray(data.messages) || !data.messagePage ||
+                typeof data.messagePage.hasMore !== "boolean") {
+              throw new Error("Conversation history first page is incomplete.");
+            }
             let nextCursor = data.messagePage?.nextCursor;
-            while (data.messagePage?.hasMore && nextCursor && isCurrentLoad()) {
+            const visitedCursors = new Set<string>();
+            while (data.messagePage?.hasMore && isCurrentLoad()) {
+              if (typeof nextCursor !== "string" || !nextCursor || visitedCursors.has(nextCursor)) {
+                throw new Error("Conversation history cursor is missing or repeated.");
+              }
+              visitedCursors.add(nextCursor);
               const pageResponse = await fetch(
                 `/api/conversations/${initialConversationId}?${modelQuery}&cursor=${encodeURIComponent(nextCursor)}`,
                 {
@@ -827,12 +840,14 @@ function ChatAppComponent({
               );
               if (!pageResponse.ok) {
                 await discardResponseBody(pageResponse);
-                break;
+                throw new Error(`Conversation history page failed: ${pageResponse.status}`);
               }
               const pageData = await pageResponse.json();
-              if (Array.isArray(pageData.messages)) {
-                data.messages.push(...pageData.messages);
+              if (!Array.isArray(pageData.messages) || !pageData.messagePage ||
+                  typeof pageData.messagePage.hasMore !== "boolean") {
+                throw new Error("Conversation history page is incomplete.");
               }
+              data.messages.push(...pageData.messages);
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
@@ -915,7 +930,9 @@ function ChatAppComponent({
         // because a send advanced this key while the request was in flight:
         // the transcript on screen is then the send's, and it is loaded.
         if (isCurrentLoad()) {
-          if (loadFailed) {
+          if (getChatRuntimeRevision(loadKey) !== revisionAtStart || isChatRuntimeStreaming(loadKey)) {
+            settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
+          } else if (loadFailed) {
             // Let a later re-run retry instead of pinning the view to a failed
             // load, which would leave the loading placeholder up for good.
             settledViewKeyRef.current = null;
@@ -954,6 +971,7 @@ function ChatAppComponent({
     t,
     runtimeKey,
     transcriptScope,
+    historyLoadRetry,
   ]);
 
   // A reload never resubmits /api/chat. The history read above discovers
@@ -1353,7 +1371,9 @@ function ChatAppComponent({
 	};
 	
     writeChatRuntimeMessages(runKey, (prev) => [
-      ...prev,
+      // A refresh that completed after the durable Message POST may already
+      // include this user row. The accepted turn must appear once, in order.
+      ...prev.filter((message) => message.id !== userMsgId),
       userMessage,
       assistantMessage,
     ]);
@@ -2392,17 +2412,21 @@ function ChatAppComponent({
     // models the send was made for may answer it -- a model swapped in
     // afterwards was not part of this run and has no answer to give here.
     if (!promptPayload.modelIds.includes(modelId)) return;
+    if (transcriptScope === "conversation" && !runtime.isLoaded) return;
 
     const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
     if (processedPromptKeys.has(promptKey)) return;
 
     let cancelled = false;
+    let claimed = false;
+    let retainClaim = false;
     queueMicrotask(() => {
       if (cancelled || isPanelDisabled) return;
       if (processedPromptKeys.has(promptKey)) return;
       // Claimed before the barrier is awaited, not after: a re-render during
       // the await must not let a second pass start the same send.
       processedPromptKeys.add(promptKey);
+      claimed = true;
       void (async () => {
         // Every other send path (global submit, per-panel follow-up, both
         // retries) flushes the model-settings sync before it sends. This one
@@ -2413,6 +2437,7 @@ function ChatAppComponent({
         // server rather than racing it.
         const settingsReady =
           (await onBeforeSendRef.current?.(promptPayload.chatId)) ?? true;
+        if (cancelled) return;
         // Abandoned stays abandoned, exactly like the other send paths: a
         // refused flush has already told the user and put the screen back on
         // the selection the server confirmed, so re-sending behind that would
@@ -2420,7 +2445,19 @@ function ChatAppComponent({
         // payload up again. The model check catches the panel having moved on
         // while the flush was running -- sending then would file this answer
         // under a model the panel is no longer showing.
-        if (!settingsReady || panelModelIdRef.current !== modelId) return;
+        if (!settingsReady || panelModelIdRef.current !== modelId) {
+          retainClaim = true;
+          return;
+        }
+        if (transcriptScope === "conversation" &&
+            !getChatRuntimeSnapshot(runtimeKey).isLoaded) {
+          // A remount claimed a fresh history load while settings were being
+          // confirmed. Keep the durable user Message but wait for the full
+          // transcript (or its manual retry) before contacting a provider.
+          processedPromptKeys.delete(promptKey);
+          return;
+        }
+        retainClaim = true;
         void handleSendPrompt(
           promptPayload.text,
           promptPayload.chatId,
@@ -2439,6 +2476,7 @@ function ChatAppComponent({
     });
     return () => {
       cancelled = true;
+      if (claimed && !retainClaim) processedPromptKeys.delete(promptKey);
     };
   }, [
     handleSendPrompt,
@@ -2447,19 +2485,30 @@ function ChatAppComponent({
     isPanelDisabled,
     modelId,
     promptPayload,
+    runtime.isLoaded,
+    runtimeKey,
     session?.user,
     status,
+    transcriptScope,
   ]);
 
     const handleModelOnlySubmit = async () => {
         const trimmed = modelInput.trim();
-        if (!trimmed || isSending || isPanelDisabled || !initialConversationId) return;
+        if (!trimmed || isSending || isPanelDisabled || !initialConversationId ||
+            !getChatRuntimeSnapshot(runtimeKey).isLoaded) return;
         const preparationToken = beginSendPreparation(runtimeKey);
         if (!preparationToken) return;
 
         try {
           const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
           if (!settingsReady) return;
+          // Settings preparation can outlive this view's history load claim.
+          // Do not persist or dispatch a follow-up against an incomplete page.
+          if (!getChatRuntimeSnapshot(runtimeKey).isLoaded) return;
+          const completeView = !isGuestMode
+            ? captureChatRuntimeCompleteView(runtimeKey)
+            : null;
+          if (!isGuestMode && !completeView) return;
 
           const userRequestId = crypto.randomUUID();
           let userMsgId = userRequestId;
@@ -2489,6 +2538,16 @@ function ChatAppComponent({
             }
           }
 
+          if (completeView && !restoreChatRuntimeCompleteViewForSend(completeView)) {
+            // A newer local turn owns this panel now. The Message is durable,
+            // but this stale continuation has no authority to dispatch it.
+            // Do not ask for a blind resend: that could duplicate the saved
+            // question. The provider was never contacted for this turn.
+            if (isChatRuntimeCompleteViewRecordCurrent(completeView)) {
+              dispatchAppToast(t("chat.savedQuestionNotSent"), "info");
+            }
+            return;
+          }
           setModelInput("");
           onFollowupSent?.(modelId);
           await handleSendPrompt(trimmed, initialConversationId, userMsgId);
@@ -2504,11 +2563,30 @@ function ChatAppComponent({
                   <div className="min-h-0 flex-1 overflow-hidden">
       {!isCurrentMessageViewLoaded ? (
         <div
-          data-testid="chat-panel-loading"
-          aria-busy="true"
-          className="flex h-full items-center justify-center text-xs text-zinc-500"
+          data-testid={runtime.loadFailed
+            ? "chat-history-load-error" : "chat-panel-loading"}
+          role={runtime.loadFailed ? "alert" : undefined}
+          aria-busy={!runtime.loadFailed}
+          className={runtime.loadFailed
+            ? "flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-xs text-zinc-500"
+            : "flex h-full items-center justify-center text-xs text-zinc-500"}
         >
-          {t("auth.loading")}
+          {runtime.loadFailed ? (
+            <>
+              <p>{t("chat.workspaceError.title")}</p>
+              <p>{t("chat.workspaceError.body")}</p>
+              <button
+                type="button"
+                data-testid="chat-history-load-retry"
+                onClick={() => {
+                  setHistoryLoadRetry((current) => current + 1);
+                }}
+                className="min-h-11 rounded-lg border border-zinc-300 px-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
+              >
+                {t("chat.workspaceError.retry")}
+              </button>
+            </>
+          ) : t("auth.loading")}
         </div>
       ) : useCenteredWelcome &&
         isConversationEmpty &&
@@ -2600,7 +2678,8 @@ function ChatAppComponent({
                           type="submit"
                           data-testid="model-only-send"
                           data-model-id={modelId}
-                          disabled={!modelInput.trim() || isSending || isSendPreparing || !initialConversationId}
+                          disabled={!modelInput.trim() || isSending || isSendPreparing ||
+                            !initialConversationId || !isCurrentMessageViewLoaded}
                           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                           title={t("chat.modelOnlySendTitle")}
                           aria-label={t("chat.modelOnlySendTitle")}

@@ -307,6 +307,7 @@ async function openChat(page: Page, options: {
   messageSaveResponseLostAfterCommit?: boolean;
   messageSaveBodyStall?: boolean;
   holdMessageSaveBeforeTransaction?: boolean;
+  holdFirstMessageSaveBeforeTransaction?: boolean;
   messageReceiptUnavailable?: boolean;
   messageReceiptResponseBody?: unknown;
   messageReceiptBodyStall?: boolean;
@@ -315,6 +316,10 @@ async function openChat(page: Page, options: {
   holdDraftHydrate?: boolean;
   holdNextDraftMutation?: boolean;
   draftSyncFailure?: boolean;
+  historyPageFailureOnCursorRead?: number;
+  holdHistoryPageFailure?: boolean;
+  holdContextBundleOnce?: boolean;
+  malformedFirstHistoryPageOnRead?: number;
   malformedDraftRead?: boolean;
   invalidDraftAttachmentRead?: boolean;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
@@ -369,6 +374,11 @@ async function openChat(page: Page, options: {
   let attemptReadCount = 0;
   const attemptPollFailures: Array<{ status: number; retryAfter?: string }> = [];
   let contextBundleRead = 0;
+  let contextBundleStarted = false;
+  let releaseContextBundle = () => {};
+  const contextBundleGate = new Promise<void>((resolve) => {
+    releaseContextBundle = resolve;
+  });
   let messageSaveFailureReturned = false;
   let draftHydrateStarted = false;
   let draftReadCount = 0;
@@ -377,6 +387,7 @@ async function openChat(page: Page, options: {
   let draftFailuresReturned = 0;
   let draftMutationStarted = false;
   let messageSaveStarted = false;
+  let messageSaveCount = 0;
   let messageReceiptStarted = false;
   let releaseDraftHydrate = () => {};
   let releaseDraftMutation = () => {};
@@ -400,6 +411,13 @@ async function openChat(page: Page, options: {
   const accountBConversations: ConversationFixture[] = [];
   let exposePreviousAccountDrafts = true;
   let visibleConversations = conversations;
+  let historyCursorReadCount = 0;
+  let firstHistoryPageReadCount = 0;
+  let historyPageFailureStarted = false;
+  let releaseHistoryPageFailure = () => {};
+  const historyPageFailureGate = new Promise<void>((resolve) => {
+    releaseHistoryPageFailure = resolve;
+  });
   const payload = (row: ConversationFixture) => ({
     ...row, disabledPanels: options.disabledPanels ?? [], webSearchMode: "off", memoryMode: "inherit",
     selectionMode: "manual", autoSelection: { offered: false },
@@ -629,7 +647,11 @@ async function openChat(page: Page, options: {
     if (!row) return route.fulfill({ status: 404, json: { code: "CONVERSATION_NOT_FOUND" } });
     if (path.endsWith("/messages") && method === "POST") {
       messageSaveStarted = true;
-      if (options.holdMessageSaveBeforeTransaction) await messageSaveGate;
+      messageSaveCount += 1;
+      if (options.holdMessageSaveBeforeTransaction ||
+          (options.holdFirstMessageSaveBeforeTransaction && messageSaveCount === 1)) {
+        await messageSaveGate;
+      }
       if (
         options.messageSaveFailure ||
         (options.messageSaveFailureOnce && !messageSaveFailureReturned)
@@ -712,7 +734,33 @@ async function openChat(page: Page, options: {
     }
     if (method === "PATCH" && Array.isArray(body.selectedModels)) row.selectedModels = body.selectedModels as string[];
     if (method === "GET") historyReads.push(url.pathname + url.search);
-    return route.fulfill({ json: payload(row) });
+    if (method === "GET" && row.id === CONVERSATION && !url.searchParams.has("cursor") &&
+        ++firstHistoryPageReadCount === options.malformedFirstHistoryPageOnRead) {
+      return route.fulfill({ json: {
+        ...payload(row), messages: null,
+        messagePage: { hasMore: false, nextCursor: null },
+      } });
+    }
+    if (method === "GET" && options.historyPageFailureOnCursorRead && row.id === CONVERSATION) {
+      const cursor = url.searchParams.get("cursor");
+      if (cursor && ++historyCursorReadCount === options.historyPageFailureOnCursorRead) {
+        historyPageFailureStarted = true;
+        if (options.holdHistoryPageFailure) await historyPageFailureGate;
+        return route.fulfill({ status: 503, json: { code: "QA_HISTORY_PAGE_UNAVAILABLE" } });
+      }
+      const cursorIndex = cursor ? row.messages.findIndex((message) => message.id === cursor) : -1;
+      if (cursor && cursorIndex < 0) throw new Error("QA history cursor was not found");
+      const start = cursorIndex + 1;
+      const messages = row.messages.slice(start, start + 50);
+      const hasMore = start + messages.length < row.messages.length;
+      return route.fulfill({ json: {
+        ...payload(row), messages,
+        messagePage: { hasMore, nextCursor: hasMore ? messages.at(-1)?.id ?? null : null },
+      } });
+    }
+    return route.fulfill({ json: method === "GET"
+      ? { ...payload(row), messagePage: { hasMore: false, nextCursor: null } }
+      : payload(row) });
   });
   // No title generation, provider operation or real ownership mutation escapes
   // the fabricated routes, even if a regression calls an unexpected endpoint.
@@ -720,6 +768,14 @@ async function openChat(page: Page, options: {
   // Same no-memory contract used by chat-memory-context.spec.ts. Preparation
   // stays local too; a dummy database refusal is not needed for this journey.
   await page.route("**/api/chat/context", (route) => {
+    if (options.holdContextBundleOnce && contextBundleRead === 0) {
+      contextBundleStarted = true;
+      return contextBundleGate.then(() => {
+        contextBundleRead += 1;
+        return route.fulfill({ json: { ok: true, contextBundle: options.contextBundle ?? null,
+          memoryUsedCount: 0 } });
+      });
+    }
     const bundles = options.contextBundles;
     const contextBundle = bundles
       ? bundles[Math.min(contextBundleRead, bundles.length - 1)] ?? null
@@ -758,6 +814,10 @@ async function openChat(page: Page, options: {
   }
   return {
     conversations, writes, historyReads, userSettingsWrites, drafts,
+    contextBundleStarted: () => contextBundleStarted,
+    releaseContextBundle,
+    historyPageFailureStarted: () => historyPageFailureStarted,
+    releaseHistoryPageFailure,
     detail: (id: string) => payload(conversations.find((row) => row.id === id)!),
     hidePreviousAccount: () => {
       visibleConversations = accountBConversations;
@@ -1692,6 +1752,402 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(sent[0].sourceUserMessageId).toBe(sent[1].sourceUserMessageId);
     expect(sent[1].contextBundle).toBe("qa-fresh-context-bundle");
     expect(await persistentProviderStreamCount(page)).toBe(1);
+  });
+
+  test("a failed later history page stays unloaded until retry restores the complete send context", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      viewport: MOBILE_VIEWPORT,
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+    });
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await expect(message(page, "Saved answer 26.")).toHaveCount(0);
+    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Use the whole saved conversation.");
+    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.at(-1)?.content).toBe("Use the whole saved conversation.");
+    expect(state.historyReads.some((read) => read.includes("cursor=history-answer-24"))).toBe(true);
+    await drive(page, 0, "push", "Answer with complete history.");
+    await drive(page, 0, "finish");
+  });
+
+  test("an in-flight history page does not announce a load failure before it fails", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+      holdHistoryPageFailure: true,
+    });
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await expect(page.getByTestId("chat-panel-loading")).toBeVisible();
+    await expect(page.getByTestId("chat-send-button")).toBeDisabled();
+    await submitComposer(page, "Wait until loading completes.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await submitComposer(page, "Wait until loading completes.", DESKTOP_VIEWPORT.width);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  test("a cached transcript cannot bypass a failed later-page refresh", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      viewport: DESKTOP_VIEWPORT,
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${SECOND_CONVERSATION}"]`).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${CONVERSATION}"]`).click();
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Do not send partial cached history.");
+    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.at(-1)?.content).toBe("Do not send partial cached history.");
+    await drive(page, 0, "finish");
+  });
+
+  test("a global Chat send rechecks history after async preparation and viewport remount", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+      holdContextBundleOnce: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(state.contextBundleStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseContextBundle();
+    await page.waitForTimeout(200);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for the refreshed full history.");
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    await drive(page, 0, "finish");
+  });
+
+  test("a committed Chat Message survives a history refresh started during its POST", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Finish the accepted request after the remount.", DESKTOP_VIEWPORT.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseMessageSave();
+    await page.waitForTimeout(200);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.filter((item) => item.id === savedMessages.at(-1)?.id)).toHaveLength(1);
+    expect(outgoing.filter((item) => item.content === "Finish the accepted request after the remount."))
+      .toHaveLength(1);
+    await expect(message(page, "Finish the accepted request after the remount.")).toHaveCount(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a remounted panel learns that its inherited history request failed", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    const item = (id: string) => page.locator(
+      `[data-testid="sidebar-conversation-item"][data-conversation-id="${id}"]`
+    );
+    await item(SECOND_CONVERSATION).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await item(CONVERSATION).click();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await item(SECOND_CONVERSATION).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await item(CONVERSATION).click();
+    await expect(page.getByTestId("chat-panel-loading")).toBeVisible();
+    state.releaseHistoryPageFailure();
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for inherited load recovery.");
+    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review model-only follow-up waits for complete history and retains its draft through retry", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
+      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Review answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+      holdHistoryPageFailure: true,
+    });
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    const form = page.getByTestId("model-only-form").first();
+    const input = page.getByTestId("model-only-input").first();
+    const send = page.getByTestId("model-only-send").first();
+    await input.fill("Review with the full prior history.");
+    await expect(send).toBeDisabled();
+    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(input).toHaveValue("Review with the full prior history.");
+    await expect(send).toBeDisabled();
+    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Review answer 26.")).toBeVisible();
+    await expect(input).toHaveValue("Review with the full prior history.");
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review model-only turn stays visible when its saved Message races a remount load", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
+      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Review answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 3,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Review answer 26.")).toBeVisible();
+    await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseMessageSave();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
+    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
+    state.releaseHistoryPageFailure();
+    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.filter((item) => item.content === "Show this accepted Review question while answering."))
+      .toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review question saved behind a newer turn is not mislabeled as unsaved", async ({ page }) => {
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdFirstMessageSaveBeforeTransaction: true,
+    });
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await page.getByTestId("model-only-input").first().fill("Earlier Review-only question.");
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+
+    await submitComposer(page, "Newer global Review question.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBeGreaterThan(0);
+    await expect.poll(() => state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`).length).toBe(2);
+    state.releaseMessageSave();
+    await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+      item.content === "Earlier Review-only question.")).toBe(true);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toBeVisible();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "The conversation or model changed while preparing the answer.",
+    })).toHaveCount(0);
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) =>
+        item.content !== "Earlier Review-only question.") ?? true)).toBe(true);
+    await drive(page, 0, "finish");
+    const dispatchedBeforeReload = await persistentChatPostCount(page);
+    await page.reload();
+    await expect(message(page, "Earlier Review-only question.")).toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(dispatchedBeforeReload);
+  });
+
+  for (const returnToA of [false, true]) {
+    test(`a saved Review question from an old identity raises no notice after ${returnToA ? "A-to-B-to-A" : "A-to-B"}`, async ({ page }) => {
+      const state = await openChat(page, {
+        legacyReview: true,
+        selectedModels: [MODEL_A, MODEL_B],
+        holdMessageSaveBeforeTransaction: true,
+      });
+      await page.evaluate(() => {
+        const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+        tracker.__qaSavedNoticeEvents = [];
+        window.addEventListener("tomverse:toast", (event) => {
+          const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+          if (message) tracker.__qaSavedNoticeEvents.push(message);
+        });
+      });
+      await page.getByTestId("model-only-input").first().fill("Account A saved question.");
+      await page.getByTestId("model-only-send").first().click();
+      await expect.poll(state.messageSaveStarted).toBe(true);
+
+      await switchToFixtureAccountB(page, state);
+      await expect(message(page, FIRST_ANSWER)).toHaveCount(0);
+      if (returnToA) {
+        await switchToFixtureAccountA(page, state);
+        await chooseConversation(page, CONVERSATION);
+        await expect(message(page, FIRST_ANSWER)).toBeVisible();
+      }
+      state.releaseMessageSave();
+      await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+        item.content === "Account A saved question.")).toBe(true);
+      await page.waitForTimeout(200);
+      const notices = await page.evaluate(() =>
+        (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents);
+      expect(notices).not.toContain(
+        "Your question was saved, but no answer request was sent. Reload this conversation to check it before trying again."
+      );
+      expect(await persistentChatPostCount(page)).toBe(0);
+    });
+  }
+
+  test("a malformed first history page remains retryable without a send", async ({ page }) => {
+    const state = await openChat(page, { malformedFirstHistoryPageOnRead: 2 });
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, FIRST_ANSWER)).toHaveCount(0);
+    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for valid first page.");
+    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await drive(page, 0, "finish");
   });
 
   test("reload adopts a durable partial and passively polls to terminal without resubmitting", async ({ page }) => {

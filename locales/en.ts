@@ -126,6 +126,7 @@ export const en = {
     },
    chat: {
         sendPreparationChanged: "The conversation or model changed while preparing the answer. Check your question and send again.",
+        savedQuestionNotSent: "Your question was saved, but no answer request was sent. Reload this conversation to check it before trying again.",
         conversationOpenFailed: "This conversation could not be opened. Your current conversation has not changed.",
         questionSaveFailed: "The question could not be saved with its files. Your draft has been kept.",
         retryQuestionSaveFailed: "The question could not be saved for this retry. No answer request was sent.",

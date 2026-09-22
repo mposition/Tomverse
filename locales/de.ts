@@ -139,6 +139,7 @@ export const de = {
         messageReceiptRecoveryBody: "Die Speicherantwort wurde unterbrochen. Die Bearbeitung ist pausiert, damit die Frage nicht doppelt gesendet wird oder verloren geht. Laden Sie die Unterhaltung neu, um den Speicherstatus sicher zu prüfen.",
         messageReceiptRecoveryReload: "Unterhaltung neu laden",
         sendPreparationChanged: "Während der Vorbereitung wurde die Unterhaltung oder das Modell geändert. Prüfe deine Frage und sende sie erneut.",
+        savedQuestionNotSent: "Deine Frage wurde gespeichert, aber keine Antwortanfrage gesendet. Lade diese Unterhaltung neu, um den Status vor einem erneuten Versuch zu prüfen.",
         conversationOpenFailed: "Diese Unterhaltung konnte nicht geöffnet werden. Deine aktuelle Unterhaltung bleibt unverändert.",
         questionSaveFailed: "Die Frage konnte nicht mit ihren Dateien gespeichert werden. Dein Entwurf bleibt erhalten.",
         retryQuestionSaveFailed: "Die Frage konnte für diesen erneuten Versuch nicht gespeichert werden. Es wurde keine Antwort angefordert.",

@@ -139,6 +139,7 @@ export const es = {
         messageReceiptRecoveryBody: "La respuesta de guardado se interrumpió. La edición está pausada para evitar preguntas duplicadas o perdidas. Recarga la conversación para comprobar el estado guardado de forma segura.",
         messageReceiptRecoveryReload: "Recargar conversación",
         sendPreparationChanged: "La conversación o el modelo cambió mientras se preparaba la respuesta. Revisa tu pregunta y envíala de nuevo.",
+        savedQuestionNotSent: "Tu pregunta se guardó, pero no se envió ninguna solicitud de respuesta. Recarga esta conversación para comprobar su estado antes de intentarlo de nuevo.",
         conversationOpenFailed: "No se pudo abrir esta conversación. Tu conversación actual no ha cambiado.",
         questionSaveFailed: "No se pudo guardar la pregunta con sus archivos. Tu borrador se ha conservado.",
         retryQuestionSaveFailed: "No se pudo guardar la pregunta para este reintento. No se envió ninguna solicitud de respuesta.",
