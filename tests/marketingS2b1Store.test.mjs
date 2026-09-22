@@ -848,6 +848,38 @@ const marketingRouteOffenders = (relative, source) => {
           };
 
           for (const property of spec.properties) {
+            // What names the property, before what it is set to. A computed
+            // name runs when the object is built whatever kind of member it
+            // names, and `{ [(() => { store(); return "request"; })()]: req }`
+            // typechecks clean.
+            if (
+              property.name &&
+              ts.isComputedPropertyName(property.name) &&
+              evaluatesEarly(property.name.expression)
+            ) {
+              offenders.push(
+                `${relative}: ${name} evaluates a computed property name before the predicate runs`
+              );
+            }
+
+            // An accessor does not run when the object is built; it runs when
+            // the property is read, and the wrapper reads `request`,
+            // `bucket`, `schema` and `gate` before it opens the transaction
+            // (lib/marketingAdminMutations.ts). A store call in a getter
+            // therefore commits outside the audit transaction while looking
+            // like an ordinary field. The specification is data: it has no
+            // reason to carry an accessor at all, so the shape is refused
+            // rather than its body inspected.
+            if (
+              ts.isGetAccessorDeclaration(property) ||
+              ts.isSetAccessorDeclaration(property)
+            ) {
+              offenders.push(
+                `${relative}: ${name} puts an accessor in the specification`
+              );
+              continue;
+            }
+
             const value = ts.isPropertyAssignment(property)
               ? property.initializer
               : ts.isSpreadAssignment(property)
@@ -1008,6 +1040,24 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "}\n",
     ]),
     [
+      "a store call in a computed property name, which runs when the object is built",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        '    [(() => { pauseMarketingChannel(req, {}); return "request"; })()]: req,\n' +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in a getter, which runs when the wrapper reads the field",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    get request() { pauseMarketingChannel(req, {}); return req; },\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
       "a handler that reads the session itself",
       'import { getServerSession } from "next-auth/next";\n' +
         imports +
@@ -1019,7 +1069,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 14, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 16, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);

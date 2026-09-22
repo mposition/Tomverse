@@ -613,7 +613,12 @@ export async function confirmMarketingChannelConnection(
   }
   await expireDueApprovals(database, input.id, now, {
     refuseIfMore: true,
-    trigger: "identity_change",
+    // Its own edge, not an identity change. Nothing identifying moves here --
+    // the connection generation, the scopes digest and the policy version all
+    // stay, and the channel trigger's own `identity_changed` condition does
+    // not include this transition. Recording it as one would have the
+    // hash-chained record name a door that was not used.
+    trigger: "connection_confirmed",
   });
 
   const updated = await database.marketingChannel.updateMany({
@@ -1011,7 +1016,11 @@ async function expireDueApprovals(
      * identity change is not spelled like one, so the record was asserting a
      * door that had not been used.
      */
-    trigger: "resume" | "identity_change" | "drain";
+    trigger:
+      | "resume"
+      | "identity_change"
+      | "connection_confirmed"
+      | "drain";
   },
 ): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
   // One more row than this transaction will touch, so "is there more" is an
