@@ -16,6 +16,7 @@ import {
 } from "../lib/marketingConsoleSections.ts";
 import {
   approveMarketingPost,
+  changeMarketingChannelScopes,
   drainDueMarketingApprovals,
   resumeMarketingChannelToApproval,
   createMarketingChannel,
@@ -965,5 +966,107 @@ test("the console switch controls name switches the writer accepts", () => {
   assert.deepEqual(
     MARKETING_CONSOLE_SWITCH_CONTROLS.map((control) => control.state),
     ["drafts", "publish", "autoPublish"],
+  );
+});
+
+/**
+ * Counts the reads a channel writer makes, so "did it look for due posts" is
+ * an observable rather than an inference.
+ *
+ * Every one of these writers reads the row, then the clock, and only then --
+ * if it is resuming something that was stopped -- the due posts.
+ */
+const countingReads = (channel) => {
+  const reads = { total: 0 };
+  return {
+    reads,
+    $queryRaw: async () => {
+      reads.total += 1;
+      if (reads.total === 1) return [channel];
+      if (reads.total === 2) return [{ now: new Date("2026-09-22T01:00:00.000Z") }];
+      return [];
+    },
+  };
+};
+
+test("a scope change on a running account does not expire its live schedules", async () => {
+  // The round-two finding was that an identity change *resumes* a paused
+  // account without paying what a resume pays. On an account that is already
+  // publishing, expiring its due posts would be a different decision -- about
+  // live schedules -- and policy §8.2 does not make it.
+  const channel = pausedChannel({
+    status: "approval_mode",
+    pausedAt: null,
+    pausedFromMode: null,
+    pauseReasonCode: null,
+  });
+  const { reads, $queryRaw } = countingReads(channel);
+  let postUpdates = 0;
+  await changeMarketingChannelScopes(
+    {
+      $queryRaw,
+      marketingPost: {
+        updateMany: async () => {
+          postUpdates += 1;
+          return { count: 1 };
+        },
+      },
+      marketingChannel: { updateMany: async () => ({ count: 1 }) },
+    },
+    {
+      id: channel.id,
+      expectedScopesDigest: channel.scopesDigest,
+      expectedPolicyVersion: channel.policyVersion,
+      expectedGraduationEpoch: channel.graduationEpoch,
+      scopesDigest: "c".repeat(64),
+    },
+  );
+  assert.equal(postUpdates, 0);
+  // The row and the clock, and no third read: it never went looking.
+  assert.equal(reads.total, 2);
+});
+
+test("a scope change on a stopped account does look for due schedules", async () => {
+  // The other half of the same rule, and the half the finding was about: an
+  // identity change walks a stopped account back to approval mode, which is a
+  // resume however it is spelled, so it owes the expiry a resume owes.
+  const { reads, $queryRaw } = countingReads(pausedChannel());
+  await changeMarketingChannelScopes(
+    {
+      $queryRaw,
+      marketingPost: { updateMany: async () => ({ count: 1 }) },
+      marketingChannel: { updateMany: async () => ({ count: 1 }) },
+    },
+    {
+      id: "channel-1",
+      expectedScopesDigest: DIGEST,
+      expectedPolicyVersion: 1,
+      expectedGraduationEpoch: 2,
+      scopesDigest: "c".repeat(64),
+    },
+  );
+  assert.equal(reads.total, 3);
+});
+
+test("the expiry record does not claim a door that was not used", () => {
+  // One action name, because it is one fact. But the sentence used to say
+  // "while its account resumed", and a drain is not a resume -- so the
+  // sentence stopped naming a door and the metadata names it instead.
+  const source = readFileSync(
+    new URL("../lib/marketingStore.ts", import.meta.url),
+    "utf8",
+  );
+  // The summary line itself, not the paragraph above it explaining why the
+  // summary changed -- matching the explanation would fail on the comment that
+  // documents the fix.
+  assert.ok(
+    !source.includes(
+      'summary: "Expired a due marketing approval while its account resumed."',
+    ),
+    "the per-post expiry audit still says every expiry happened during a resume",
+  );
+  assert.ok(
+    source.includes("trigger: options.trigger"),
+    "the per-post expiry audit does not record which path expired it",
   );
 });

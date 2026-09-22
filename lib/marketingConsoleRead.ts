@@ -66,6 +66,17 @@ export type MarketingConsolePayload = {
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
   /**
+   * Whether this viewer may change anything, or only read.
+   *
+   * docs/policy/marketing-automation.md §6.1 gives record viewing to any
+   * administrator and every mutation to `marketing:write`. Both people open
+   * the same page, so without this the screen draws the same controls for
+   * both and one of them gets a 403 for every one they press. The routes
+   * decide it again and it is their answer that counts; this only decides
+   * what is worth drawing.
+   */
+  canWrite: boolean;
+  /**
    * The version token a switch change must send back, or null when it cannot
    * be read.
    *
@@ -171,7 +182,8 @@ async function readSwitches(): Promise<{
 }
 
 export async function readMarketingConsole(
-  section: MarketingConsoleSection
+  section: MarketingConsoleSection,
+  canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
   const { switches, configGeneration } = await readSwitches();
@@ -185,6 +197,7 @@ export async function readMarketingConsole(
       rows: [],
       switches,
       configGeneration,
+      canWrite,
     };
   }
 
@@ -219,6 +232,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      canWrite,
       rows: posts.map((post) => ({
         id: post.id,
         accountSlug: post.channel.accountSlug,
@@ -276,6 +290,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      canWrite,
       rows: posts.map((post) => ({
         id: post.id,
         accountSlug: post.channel.accountSlug,
@@ -337,6 +352,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      canWrite,
       rows: channels.map((channel) => ({
         ...channel,
         approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
@@ -365,6 +381,7 @@ export async function readMarketingConsole(
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
     configGeneration,
+    canWrite,
     rows: reports.map((report) => ({
       ...report,
       periodStart: report.periodStart.toISOString(),

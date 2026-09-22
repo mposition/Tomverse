@@ -43,6 +43,7 @@ export type MarketingConsoleView = {
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
+  canWrite: boolean;
   configGeneration: number | null;
 };
 
@@ -152,7 +153,9 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             {heading.description}
           </p>
-          <p className="mt-2 text-xs text-zinc-500">{m.writesNote}</p>
+          <p className="mt-2 text-xs text-zinc-500">
+            {view.canWrite ? m.writesNote : m.readOnlyNote}
+          </p>
         </div>
         <button
           type="button"
@@ -171,6 +174,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
 
       <MarketingSwitchStrip
         switches={view.switches}
+        canWrite={view.canWrite}
         configGeneration={view.configGeneration}
         onDone={() => void refresh()}
         m={m}
@@ -185,7 +189,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         </p>
       ) : (
         <>
-          {view.section === "accounts" ? (
+          {view.section === "accounts" && view.canWrite ? (
             <MarketingAccountCreate onDone={() => void refresh()} m={m} />
           ) : null}
           <p className="mt-4 text-xs text-zinc-500">
@@ -203,7 +207,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
                 >
                   <MarketingRow section={view.section} row={row} m={m} />
                   <MarketingActionRail
-                    actions={rowActions(view.section, row, m)}
+                    actions={view.canWrite ? rowActions(view.section, row, m) : []}
                     onDone={() => void refresh()}
                     m={m}
                   />
@@ -234,11 +238,13 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
  */
 function MarketingSwitchStrip({
   switches,
+  canWrite,
   configGeneration,
   onDone,
   m,
 }: {
   switches: Record<string, SwitchState>;
+  canWrite: boolean;
   configGeneration: number | null;
   onDone: () => void;
   m: Record<string, string>;
@@ -278,7 +284,7 @@ function MarketingSwitchStrip({
     })[name] ?? name;
 
   const toggles: MarketingAction[] =
-    configGeneration === null
+    !canWrite || configGeneration === null
       ? []
       : MARKETING_CONSOLE_SWITCH_CONTROLS.flatMap((control) => {
           const state = switches[control.state];
@@ -323,7 +329,13 @@ function MarketingSwitchStrip({
           </div>
         ))}
       </dl>
-      {configGeneration === null ? (
+      {/*
+        Only when the version is genuinely unreadable. A reader who may not
+        write has no missing version -- they have no business changing these
+        -- and telling them something could not be read would send them
+        looking for a fault that is not there.
+      */}
+      {canWrite && configGeneration === null ? (
         <p className="mt-2 text-[11px] text-amber-300">{m.switchNoGeneration}</p>
       ) : null}
       <MarketingActionRail actions={toggles} onDone={onDone} m={m} />

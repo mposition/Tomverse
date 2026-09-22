@@ -684,7 +684,15 @@ export async function reconnectMarketingChannel(
       "The database clock did not return a timestamp",
     );
   }
-  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
 
   const updated = await database.marketingChannel.updateMany({
     where: {
@@ -755,7 +763,15 @@ export async function changeMarketingChannelScopes(
       "The database clock did not return a timestamp",
     );
   }
-  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
 
   const updated = await database.marketingChannel.updateMany({
     where: {
@@ -830,7 +846,15 @@ export async function changeMarketingChannelPolicyVersion(
       "The database clock did not return a timestamp",
     );
   }
-  await expireDueApprovals(database, input.id, now, { refuseIfMore: true });
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
 
   const updated = await database.marketingChannel.updateMany({
     where: {
@@ -914,6 +938,25 @@ type DueApprovalPost = {
 const MARKETING_RESUME_DRAIN_LIMIT = 50;
 
 /**
+ * The states in which the publisher is not taking this account's posts.
+ *
+ * What policy section 8.2 is actually about: a slot that passed while nothing
+ * was publishing must not go out the instant something is. Being paused is the
+ * obvious one, but a disconnected account is not publishing either, and a
+ * reconnect walks it straight back to `approval_mode` -- so it owes the same
+ * expiry. Written as `status === "paused"` that call was dead code, which is
+ * what the compiler pointed at.
+ */
+const MARKETING_STOPPED_STATUSES = [
+  "paused",
+  "disconnected",
+  "connect_pending",
+] as const;
+
+const marketingChannelWasStopped = (status: string): boolean =>
+  (MARKETING_STOPPED_STATUSES as readonly string[]).includes(status);
+
+/**
  * Default resume path. Due approvals are expired and audited before the
  * account leaves paused, all under the caller's one transaction.
  */
@@ -935,7 +978,20 @@ async function expireDueApprovals(
   database: MarketingTransaction,
   channelId: string,
   now: Date,
-  options: { refuseIfMore: boolean },
+  options: {
+    refuseIfMore: boolean;
+    /**
+     * Which door this came through.
+     *
+     * The action name stays the one the S2 inventory names, because it is one
+     * fact -- an approval that came due while the account was stopped -- and
+     * splitting it would mean two names for one thing. But the sentence used
+     * to say "while its account resumed", and a drain is not a resume and an
+     * identity change is not spelled like one, so the record was asserting a
+     * door that had not been used.
+     */
+    trigger: "resume" | "identity_change" | "drain";
+  },
 ): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
   // One more row than this transaction will touch, so "is there more" is an
   // answer this query already has rather than a second scan.
@@ -983,9 +1039,10 @@ async function expireDueApprovals(
       action: MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume,
       targetType: "MarketingPost",
       targetId: post.id,
-      summary: "Expired a due marketing approval while its account resumed.",
+      summary: "Expired a due marketing approval while its account was stopped.",
       metadata: {
         channelId,
+        trigger: options.trigger,
         historyVersion: post.historyVersion,
         // Both reasons, not the first true one: a post can be past its slot
         // *and* out of approval window, and reporting only the window loses
@@ -1048,7 +1105,10 @@ export async function drainDueMarketingApprovals(
       "The database clock did not return a timestamp",
     );
   }
-  return expireDueApprovals(database, input.id, now, { refuseIfMore: false });
+  return expireDueApprovals(database, input.id, now, {
+    refuseIfMore: false,
+    trigger: "drain",
+  });
 }
 
 export async function resumeMarketingChannelToApproval(
@@ -1078,6 +1138,7 @@ export async function resumeMarketingChannelToApproval(
     // being half-expired and rolled back. The drain action clears it while
     // the account stays paused.
     refuseIfMore: true,
+    trigger: "resume",
   });
   const resumed = await database.marketingChannel.updateMany({
     where: {
@@ -1171,6 +1232,7 @@ export async function resumeMarketingChannelToAutonomous(
     // being half-expired and rolled back. The drain action clears it while
     // the account stays paused.
     refuseIfMore: true,
+    trigger: "resume",
   });
   const updated = await database.marketingChannel.updateMany({
     where: {

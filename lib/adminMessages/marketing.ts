@@ -6,6 +6,8 @@ export const adminMarketingMessages = defineAdminMessages({
     loadFailed: "Could not refresh marketing data.",
     writesNote:
       "Every control here writes, and every write compares against the version this screen read. A refusal means the row moved, not that the control is broken.",
+    readOnlyNote:
+      "You can read this record but not change it. Changing anything here takes marketing write access.",
     actionFailed: "That did not go through.",
     actionDone: "Done.",
     actionCancel: "Cancel",
@@ -146,6 +148,8 @@ export const adminMarketingMessages = defineAdminMessages({
     loadFailed: "마케팅 데이터를 새로 가져오지 못했습니다.",
     writesNote:
       "여기의 모든 조작은 쓰기이며, 화면이 읽은 버전과 대조해 저장합니다. 거절은 행이 그 사이에 바뀌었다는 뜻이지 조작이 고장 났다는 뜻이 아닙니다.",
+    readOnlyNote:
+      "이 기록을 읽을 수는 있지만 바꿀 수는 없습니다. 여기서 무엇을 바꾸려면 marketing 쓰기 권한이 필요합니다.",
     actionFailed: "처리되지 않았습니다.",
     actionDone: "완료했습니다.",
     actionCancel: "취소",
