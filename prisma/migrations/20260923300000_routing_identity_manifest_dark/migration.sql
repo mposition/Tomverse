@@ -166,9 +166,14 @@ CREATE INDEX "RoutingAttempt_identityManifestId_createdAt_idx"
 
 -- RESTRICT, for the reason the grain columns use it: an attempt is a
 -- historical record, and deleting the manifest it names must not delete it or
--- drop the attribution. A manifest is immutable anyway, so the only way to
--- reach this is a delete the trigger already refuses -- the foreign key says
--- so a second time, in the direction the trigger cannot see.
+-- drop the attribution.
+--
+-- Not the same statement twice. The trigger refuses every UPDATE and DELETE on
+-- a manifest; the foreign key refuses an id change or a delete *while an
+-- attempt points at it*, and it keeps doing that after somebody drops the
+-- trigger. What it does not add is a defence against
+-- `session_replication_role = replica`, which skips user triggers and foreign
+-- key triggers alike -- an earlier version of this comment implied it did.
 ALTER TABLE "RoutingAttempt"
     ADD CONSTRAINT "RoutingAttempt_identityManifestId_fkey"
     FOREIGN KEY ("identityManifestId") REFERENCES "RoutingIdentityManifest"("id")
