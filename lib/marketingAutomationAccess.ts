@@ -236,9 +236,19 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * the same watched schema. It does not change a marketing model, webhook
  * writer, or admission decision. The digest moves because the schema file
  * is watched as a whole.
+ *
+ * 2026-09-21, the permission ledger (S3): six more tables on the same watched
+ * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
+ * revocations, EmailPermissionDecision and its evidence. None is a marketing
+ * model, none changes the descriptor, the config snapshot or an admission
+ * decision, and nothing this pipeline stores or reads is different. The one
+ * shared edge is ConsentRecord, which gains a back-relation and no column.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side of
+ * the conflict -- the merged tree is the only one that will exist.
  */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c39e0736f7acdfeb5e8ad339ae3737bca5d8846794615f63bd68a5b74dd63bfb";
+export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "41dcdb7b9b274c70f54c9205cc0c3ac9121b62cf7352b20a97e6825699025743";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

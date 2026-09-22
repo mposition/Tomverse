@@ -97,6 +97,25 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// 2026-09-22, merging develop into S3 again: both sides moved positions in
+// this closure and neither is taken -- the value below is computed over the
+// merged tree. The position-free inventory is unchanged on both sides, so
+// this is a repin and not a review of new computed access.
+//
+// 2026-09-21, merging develop into S3: develop moved this closure and so did
+// S3, and neither side is taken -- the value below is computed over the merged
+// tree, the only one that will exist. The position-free inventory is still 228
+// entries hashing to 9aa7ec49..., so nothing was added, removed or altered on
+// either side; only positions moved.
+//
+// 2026-09-21, the permission ledger (S3): two files in this closure moved
+// lines -- lib/emailPreferenceCore.ts gained the purpose classification table
+// and lib/emailPreferences.ts took its bulk-withdrawal scope from it. Neither
+// added, removed or altered a computed access; the position-free inventory
+// still hashes to 9aa7ec49... over 228 entries, which is what makes this a
+// repin rather than a review. The value below is the same inventory with the
+// new line and column numbers.
+//
 // develop's confirmatory shadow v4 added a reviewed runtime path and its own
 // schema and comment changes. Neither is taken over the other -- the value
 // below is computed over the merged tree, which is the only tree that will
@@ -131,8 +150,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "9c1aeb8bd9193febcc8e0399552ee3f9",
-  "7045dafadb9deb7bf037c9b053e15571",
+  "e405145a9f6d68d57321a96de4623e4",
+  "d8b9896f638040fdd05adb0259657cdbc",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -119,6 +119,64 @@ import { createHash } from "node:crypto";
 
 import ts from "typescript";
 
+/**
+ * Tables whose append-only claim a row trigger cannot defend on its own.
+ *
+ * The permission ledger and the consent ledger refuse UPDATE and DELETE by
+ * trigger. TRUNCATE is neither: it fires no row trigger, and
+ * `TRUNCATE ... CASCADE` on a table these point at reaches them through their
+ * foreign keys. A BEFORE TRUNCATE trigger would close it and would also break
+ * 84 of the 138 DB integration suites, which reset by truncating `User` and
+ * `EmailDelivery`; revoking the privilege reaches every table in the schema
+ * and belongs with whoever owns the database roles
+ * (prisma/migrations/20260921170000_email_permission_ledger).
+ *
+ * What is closed here is the vector this repository controls.
+ */
+export const APPEND_ONLY_LEDGER_TABLES = [
+  "EmailPermissionEvent",
+  "EmailSendApproval",
+  "EmailSendApprovalMember",
+  "EmailSendApprovalRevocation",
+  "EmailPermissionDecision",
+  "EmailPermissionDecisionEvidence",
+  "ConsentRecord",
+];
+
+/**
+ * Every SQL TRUNCATE in scanned source, whatever it names.
+ *
+ * Categorical rather than a search for the seven table names, and that is the
+ * point: `TRUNCATE "User" CASCADE` names none of them and empties four, and a
+ * statement long enough to push its table list past any window would have
+ * slipped a name-matching scan. No production code in this repository
+ * truncates anything -- the scanned set excludes tests/ -- so "none at all" is
+ * a rule that costs nothing and has no gap to reason about.
+ *
+ * Matches the SQL statement, not the CSS class: `TRUNCATE` followed by TABLE,
+ * ONLY, or a quoted identifier. `className="truncate"` and "do not truncate
+ * sentences" are neither.
+ *
+ * Case-insensitive. This repository writes SQL in upper case, so the first
+ * version only matched that -- and `truncate table "User"` would have passed a
+ * rule whose whole value is that it has no gap to reason about. The suffix is
+ * what keeps the CSS class out, at either case.
+ */
+export const SQL_TRUNCATE_PATTERN = /\bTRUNCATE\s+(?:TABLE\b|ONLY\b|")/gi;
+
+export const findTruncateStatements = ({ sources }) => {
+  const findings = [];
+  for (const { path, text } of sources) {
+    SQL_TRUNCATE_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = SQL_TRUNCATE_PATTERN.exec(text)) !== null) {
+      const line = text.slice(0, match.index).split("\n").length;
+      findings.push({ path, line });
+    }
+  }
+  return findings;
+};
+
 export const PROTECTED_TABLES = [
   {
     table: "AdminAuditLog",
@@ -462,6 +520,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
+    count: 10,
+    reason:
+      "Ten trigger bodies read a sibling ledger table with EXECUTE over a name built from TG_TABLE_SCHEMA -- the schema the trigger own table is in. The alternative was an unqualified name, which resolves against the session search path, where a temporary table of the same name answers for the real one and the seal, cohort and evidence checks read it instead. A hard-coded public. was wrong too: the runtime reads ?schema= from DATABASE_URL and sets a search_path with no public fallback (lib/postgresConnectionConfigCore.mjs). The schema is the trigger own, never input, and it is quoted with %I; every value is bound with USING.",
+  },
   {
     path: "prisma/migrations/20260918090000_admin_audit_log_append_only/migration.sql",
     count: 1,

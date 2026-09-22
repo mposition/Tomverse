@@ -243,6 +243,11 @@ run(
     // or a bucket outage cannot record an account as having lost its files.
     "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The permission ledger's constraints and triggers. Append-only, sealing and
+    // verdict immutability are enforced in Postgres because a ledger the
+    // application alone protects is one a migration or an admin script can
+    // rewrite -- and the row it rewrites is the proof that a send was allowed.
+    "tests/integration/email-permission-ledger.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
