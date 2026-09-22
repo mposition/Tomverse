@@ -33,7 +33,7 @@ export async function POST(req: Request, context: RouteContext) {
     targetType: "MarketingChannel",
     targetId: channelId,
     summary: "Recorded a change to a brand account's scopes.",
-    gate: "operator_restriction",
+    gate: "account_control",
     bucket: "admin-marketing-account-scopes",
     schema,
     metadata: (body) => ({

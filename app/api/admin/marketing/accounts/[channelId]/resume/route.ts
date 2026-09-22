@@ -33,11 +33,12 @@ const schema = z
  * audit actions because they are different decisions, and a record that called
  * both "resume" could not tell them apart afterwards.
  *
- * Resuming into approval mode also expires, in this same transaction and each
- * with its own system audit row, the posts whose approval window closed or
- * whose scheduled time passed while the account was stopped (policy 8.2).
- * Nothing goes out the moment an account comes back because its slot arrived
- * while it was off.
+ * Either resume expires, in this same transaction and each with its own system
+ * audit row, the posts whose approval window closed or whose scheduled time
+ * passed while the account was stopped (policy 8.2). Nothing goes out the
+ * moment an account comes back because its slot arrived while it was off --
+ * and that is true of an account coming back into autonomous mode too, which
+ * is where it was missing and where it would have mattered most.
  */
 export async function POST(req: Request, context: RouteContext) {
   const { channelId } = await context.params;
@@ -62,12 +63,12 @@ export async function POST(req: Request, context: RouteContext) {
         : { mode: body.mode },
     run: async (tx, { body, auditLogId }) => {
       if (body.mode === "autonomous") {
-        await resumeMarketingChannelToAutonomous(tx, {
+        const { expiredPostIds } = await resumeMarketingChannelToAutonomous(tx, {
           id: channelId,
           auditLogId,
           reasonCode: body.reasonCode,
         });
-        return { id: channelId, mode: body.mode, expiredPostIds: [] as string[] };
+        return { id: channelId, mode: body.mode, expiredPostIds };
       }
       const { expiredPostIds } = await resumeMarketingChannelToApproval(tx, {
         id: channelId,

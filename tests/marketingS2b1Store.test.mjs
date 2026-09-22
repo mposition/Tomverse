@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
+import ts from "typescript";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +9,7 @@ import {
   adminAuditEntryHashVariants,
   ADMIN_AUDIT_SIGNING_KEY_ORDER,
 } from "../lib/adminAuditIntegrityCore.ts";
+import { MARKETING_AUDIT_PROBLEMS } from "../lib/marketingAuditEvidence.ts";
 import {
   approveMarketingPost,
   createMarketingChannel,
@@ -521,11 +523,10 @@ test("lower-caps refuses an effective increase before issuing UPDATE", async () 
 
 test("every refusal the store can raise has an HTTP meaning", () => {
   // The route layer used to keep its own copy of this table and three of its
-  // keys were misspellings -- `cap_change_is_a_no_op` for `cap_change_is_noop`,
-  // `reject_conflict` for `rejection_conflict`, and one that matched nothing at
-  // all -- so those conflicts went out as 422 instead of 409. Transcription is
-  // what failed, so nothing transcribes any more and this fails when a new
-  // refusal arrives without a status.
+  // keys were misspellings, so those conflicts went out as 422 instead of 409.
+  // The first version of this test then read quoted strings only, which missed
+  // the thirty codes three call sites build from MARKETING_AUDIT_PROBLEMS --
+  // a structural test with a hole exactly where the codes were not literals.
   const source = readFileSync(
     fileURLToPath(new URL("../lib/marketingStore.ts", import.meta.url)),
     "utf8"
@@ -541,7 +542,19 @@ test("every refusal the store can raise has an HTTP meaning", () => {
   )) {
     codes.add(code);
   }
-  assert.ok(codes.size > 40, `expected the store to raise many refusals, saw ${codes.size}`);
+
+  // The built ones, from the same closed list the store builds them from, and
+  // only for prefixes the source actually uses.
+  const prefixes = ["resume_evidence", "requeue_evidence", "audit_evidence"];
+  for (const prefix of prefixes) {
+    assert.ok(
+      source.includes(`\`${prefix}_\${verdict.problem}\``),
+      `${prefix} is in the table but no call site builds it`
+    );
+    for (const problem of MARKETING_AUDIT_PROBLEMS) codes.add(`${prefix}_${problem}`);
+  }
+
+  assert.ok(codes.size > 70, `expected the store to raise many refusals, saw ${codes.size}`);
   const missing = [...codes].filter((code) => !(code in MARKETING_REFUSAL_STATUS)).sort();
   assert.deepEqual(missing, [], "refusals with no HTTP meaning");
   const unused = Object.keys(MARKETING_REFUSAL_STATUS)
@@ -569,8 +582,13 @@ test("the mutation gate reads the kill switch by the name the resolver uses", ()
 test("every marketing admin mutation route goes through the one predicate", () => {
   // The permission and step-up checks live in `runMarketingAdminMutation`
   // rather than in each route, which is only equivalent to checking them in
-  // the route while every route actually goes through it. Nothing enforced
-  // that, so a route added later could quietly have neither.
+  // the route while every route actually goes through it.
+  //
+  // Read with the TypeScript parser rather than by searching the text. The
+  // first version matched the function's name anywhere in the file, so a route
+  // that called the store directly and mentioned the wrapper in a comment or
+  // an unused import passed; it also missed `export const POST = ...` and any
+  // aliased session read.
   const dir = fileURLToPath(new URL("../app/api/admin/marketing", import.meta.url));
   const files = [];
   const walk = (at) => {
@@ -583,18 +601,75 @@ test("every marketing admin mutation route goes through the one predicate", () =
   walk(dir);
   assert.ok(files.length >= 10, `expected the marketing routes, saw ${files.length}`);
 
+  const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
   const offenders = [];
+
   for (const file of files) {
     const source = readFileSync(file, "utf8");
-    const mutates = /export async function (POST|PATCH|PUT|DELETE)\b/.test(source);
-    if (!mutates) continue;
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     const relative = file.slice(file.indexOf("app" + sep));
-    if (!source.includes("runMarketingAdminMutation")) {
-      offenders.push(`${relative}: mutates without the shared predicate`);
+
+    // What the file imported the wrapper as, if it did at all.
+    let wrapperBinding = null;
+    const sessionBindings = new Set();
+    for (const statement of tree.statements) {
+      if (!ts.isImportDeclaration(statement)) continue;
+      const from = statement.moduleSpecifier.getText(tree).slice(1, -1);
+      const named = statement.importClause?.namedBindings;
+      if (!named || !ts.isNamedImports(named)) continue;
+      for (const element of named.elements) {
+        const imported = (element.propertyName ?? element.name).text;
+        const local = element.name.text;
+        if (from.endsWith("marketingAdminMutations") && imported === "runMarketingAdminMutation") {
+          wrapperBinding = local;
+        }
+        if (imported === "getServerSession" || imported === "auth") {
+          sessionBindings.add(local);
+        }
+      }
     }
-    if (source.includes("getServerSession")) {
-      offenders.push(`${relative}: reads the session itself`);
+
+    const mutatingHandlers = [];
+    for (const statement of tree.statements) {
+      const exported = ts
+        .getModifiers?.(statement)
+        ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+      if (!exported) continue;
+      if (ts.isFunctionDeclaration(statement) && statement.name) {
+        if (MUTATING.has(statement.name.text)) mutatingHandlers.push(statement);
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name) && MUTATING.has(declaration.name.text)) {
+            mutatingHandlers.push(declaration);
+          }
+        }
+      }
+    }
+    if (mutatingHandlers.length === 0) continue;
+
+    for (const handler of mutatingHandlers) {
+      let callsWrapper = false;
+      let readsSession = false;
+      const visit = (node) => {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+          const called = node.expression.text;
+          if (wrapperBinding && called === wrapperBinding) callsWrapper = true;
+          if (sessionBindings.has(called)) readsSession = true;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(handler);
+      const name = ts.isFunctionDeclaration(handler)
+        ? handler.name.text
+        : handler.name.getText(tree);
+      if (!callsWrapper) {
+        offenders.push(`${relative}: ${name} mutates without calling the shared predicate`);
+      }
+      if (readsSession) {
+        offenders.push(`${relative}: ${name} reads the session itself`);
+      }
     }
   }
+
   assert.deepEqual(offenders, []);
 });

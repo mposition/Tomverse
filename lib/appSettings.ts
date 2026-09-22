@@ -795,24 +795,75 @@ const switchKey = (name: MarketingConsoleSwitch) =>
  * Everything commits with the caller's transaction, including the generation
  * bump, so a reader can never see the new value under the old generation.
  */
+/**
+ * Reads the configuration generation, which is the version token for every
+ * admission-affecting setting.
+ *
+ * Stored as the strict `{ "generation": <positive integer> }` the plan's
+ * binding matrix specifies rather than as a bare decimal string: a reader
+ * built to that shape could not read what a bare string wrote, and neither
+ * could this one read what such a reader seeded. Anything else is refused
+ * rather than treated as zero -- a malformed generation is a configuration
+ * nobody can bind to, not a fresh one.
+ */
+const readConfigGeneration = (value: string | undefined): number => {
+  if (value === undefined) return 0;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new MarketingSwitchRefusedError(
+      "config_generation_unreadable",
+      "The marketing configuration generation is not readable",
+    );
+  }
+  const generation =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as { generation?: unknown }).generation
+      : undefined;
+  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 0) {
+    throw new MarketingSwitchRefusedError(
+      "config_generation_unreadable",
+      "The marketing configuration generation is not a whole number",
+    );
+  }
+  return generation;
+};
+
+/**
+ * Turns one of the three marketing switches on or off, under compare-and-set.
+ *
+ * The caller says which configuration generation its screen read, and a
+ * generation that has moved is refused. That is the version token the plan
+ * asks for, and it is the one thing an expected *value* could not be: a switch
+ * taken false to true and back to false again reads as unchanged, so a stale
+ * screen's "I saw false" was satisfied by a different false. Every change here
+ * moves the generation, so a screen that missed one cannot pretend otherwise.
+ *
+ * A save that would change nothing is refused too, because an audit row for a
+ * change nobody made is worse than no row.
+ *
+ * Turning one *on* is also checked against what it depends on. Autonomous
+ * publishing needs drafts and publishing already on -- enabling it alone would
+ * write an audit entry saying autonomous publishing was switched on when
+ * nothing can publish. Publishing itself is refused outright: the publisher
+ * arrives in S2c, and the plan requires its capability to be available before
+ * this switch may be enabled, so until it exists the honest answer is no.
+ *
+ * Everything commits with the caller's transaction, including the generation
+ * bump, so a reader can never see the new value under the old generation.
+ */
 export async function writeMarketingAutomationSwitch(
   client: Pick<PrismaClient, "appSetting">,
   input: {
     name: MarketingConsoleSwitch;
     enabled: boolean;
-    expectedEnabled: boolean;
+    expectedConfigGeneration: number;
   },
 ): Promise<{ configGeneration: number }> {
   const name = input.name;
   const enabled = Boolean(input.enabled);
-  const expectedEnabled = Boolean(input.expectedEnabled);
-
-  if (enabled === expectedEnabled) {
-    throw new MarketingSwitchRefusedError(
-      "switch_change_is_noop",
-      "That switch is already in the state this change would set",
-    );
-  }
+  const expectedConfigGeneration = Number(input.expectedConfigGeneration);
 
   const rows = await client.appSetting.findMany({
     where: {
@@ -830,11 +881,21 @@ export async function writeMarketingAutomationSwitch(
   const stored = new Map(rows.map((row) => [row.key, row.value]));
   const on = (key: string) => marketingAutomationEnabledFromValue(stored.get(key));
 
-  const key = switchKey(name);
-  if (on(key) !== expectedEnabled) {
+  const previousGeneration = readConfigGeneration(
+    stored.get(MARKETING_CONFIG_GENERATION_KEY),
+  );
+  if (previousGeneration !== expectedConfigGeneration) {
     throw new MarketingSwitchRefusedError(
       "switch_conflict",
-      "That switch changed since the screen read it",
+      "The marketing switches changed since the screen read them",
+    );
+  }
+
+  const key = switchKey(name);
+  if (on(key) === enabled) {
+    throw new MarketingSwitchRefusedError(
+      "switch_change_is_noop",
+      "That switch is already in the state this change would set",
     );
   }
 
@@ -862,24 +923,26 @@ export async function writeMarketingAutomationSwitch(
     create: { key, value },
   });
 
-  const previousGeneration = Number.parseInt(
-    stored.get(MARKETING_CONFIG_GENERATION_KEY) ?? "0",
-    10,
-  );
-  if (!Number.isInteger(previousGeneration) || previousGeneration < 0) {
-    throw new MarketingSwitchRefusedError(
-      "config_generation_unreadable",
-      "The marketing configuration generation is not a number",
-    );
-  }
   const configGeneration = previousGeneration + 1;
+  const generationValue = JSON.stringify({ generation: configGeneration });
   await client.appSetting.upsert({
     where: { key: MARKETING_CONFIG_GENERATION_KEY },
-    update: { value: String(configGeneration) },
-    create: { key: MARKETING_CONFIG_GENERATION_KEY, value: String(configGeneration) },
+    update: { value: generationValue },
+    create: { key: MARKETING_CONFIG_GENERATION_KEY, value: generationValue },
   });
 
   return { configGeneration };
+}
+
+/** What a console has to send back with a switch change. */
+export async function readMarketingConfigGeneration(
+  client: Pick<PrismaClient, "appSetting">,
+): Promise<number> {
+  const row = await client.appSetting.findUnique({
+    where: { key: MARKETING_CONFIG_GENERATION_KEY },
+    select: { value: true },
+  });
+  return readConfigGeneration(row?.value);
 }
 
 export class MemoryFeatureDisabledError extends Error {

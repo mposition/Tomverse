@@ -14,13 +14,14 @@ const schema = z
     switch: z.enum(MARKETING_CONSOLE_SWITCH_NAMES),
     enabled: z.boolean(),
     /**
-     * What the screen believed the switch was.
+     * The configuration generation the screen read.
      *
-     * Compare-and-set rather than last-writer-wins: two consoles open on this
-     * page would otherwise have the later save silently undo the earlier one,
-     * with both audit entries reading "changed".
+     * Compare-and-set rather than last-writer-wins, and a generation rather
+     * than the switch's own value: a switch taken false to true and back reads
+     * as unchanged, so "I saw false" was satisfied by a different false. Every
+     * change moves the generation.
      */
-    expectedEnabled: z.boolean(),
+    expectedConfigGeneration: z.number().int().nonnegative(),
   })
   .strict();
 
@@ -75,7 +76,7 @@ export async function PATCH(req: Request) {
       const { configGeneration } = await writeMarketingAutomationSwitch(tx, {
         name: body.switch,
         enabled: body.enabled,
-        expectedEnabled: body.expectedEnabled,
+        expectedConfigGeneration: body.expectedConfigGeneration,
       });
       return { switch: body.switch, enabled: body.enabled, configGeneration };
     },

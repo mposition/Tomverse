@@ -48,11 +48,11 @@ export type MarketingMutationGate =
   /**
    * An operator stopping or narrowing something: gated on nothing at all.
    *
-   * Pausing, disconnecting, lowering a cap, turning a switch off, and the
-   * scope and policy-version changes that send an account back to approval
-   * mode. None of them make publishing more possible, so none of them is
-   * something the kill switch needs to refuse -- and refusing them under it
-   * would leave an operator unable to stop or narrow anything while it is on.
+   * Pausing, disconnecting, lowering a cap and turning a switch off. Nothing
+   * else: a scope or policy-version change looks like a narrowing because it
+   * sends the account back to approval mode, but the trigger that does that
+   * also clears `pausedAt`, so from `paused` it is a *start* -- and under the
+   * kill switch it would put back an account the switch had stopped.
    */
   | "operator_restriction";
 

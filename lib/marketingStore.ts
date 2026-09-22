@@ -77,7 +77,10 @@ import {
   MARKETING_NO_AUTONOMY_CHANNELS,
   MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
-import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import {
+  MARKETING_AUDIT_PROBLEMS,
+  verifyMarketingAuditEvidence,
+} from "@/lib/marketingAuditEvidence";
 import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
@@ -125,8 +128,28 @@ export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
  * A conflict is the default: almost every refusal here is the row not being in
  * the state the caller decided against, which is exactly what 409 is for.
  */
+/**
+ * The evidence refusals, which are built from a closed list rather than typed.
+ *
+ * Three call sites raise `${prefix}_${problem}` from
+ * `MARKETING_AUDIT_PROBLEMS`, so thirty codes exist that no quoted string in
+ * this file contains. The completeness test read quoted strings, so all thirty
+ * were missing from the table and went out as 422 instead of 409 -- a
+ * structural test with a hole exactly where the codes were not literals.
+ */
+const evidenceRefusalStatuses = (): Record<string, number> => {
+  const statuses: Record<string, number> = {};
+  for (const prefix of ["resume_evidence", "requeue_evidence", "audit_evidence"]) {
+    for (const problem of MARKETING_AUDIT_PROBLEMS) {
+      statuses[`${prefix}_${problem}`] = 409;
+    }
+  }
+  return statuses;
+};
+
 export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   Object.freeze({
+    ...evidenceRefusalStatuses(),
     channel_not_found: 404,
     post_not_found: 404,
     approval_expiry_invalid: 400,
@@ -184,7 +207,6 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
     resume_evidence_reused: 409,
-    resume_expiry_batch_too_large: 409,
     schedule_conflict: 409,
     scopes_change_conflict: 409,
     unpublish_conflict: 409,
@@ -217,16 +239,6 @@ export const MARKETING_S2B1_ACTIONS = Object.freeze({
   settingPublishChanged: "marketing_setting.publish_changed",
   settingAutonomousChanged: "marketing_setting.autonomous_changed",
 } as const);
-
-/**
- * How many due approvals one resume may expire.
- *
- * Each one is a conditional update plus a system audit entry, and they happen
- * inside the transaction that holds the audit chain lock. A number rather than
- * no limit so that a long queue is a refusal an operator can read instead of a
- * transaction timeout that leaves the account stuck.
- */
-export const MARKETING_RESUME_EXPIRY_BATCH = 100;
 
 export const MARKETING_PAUSE_REASON_CODES = Object.freeze([
   "operator_requested",
@@ -782,66 +794,55 @@ type DueApprovalPost = {
   id: string;
   status: "approved" | "scheduled";
   historyVersion: number;
-  approvalExpiresAt: Date;
+  /**
+   * Null for an autonomous post, which has no approval window at all.
+   *
+   * It was typed as a `Date` while the query selected only rows whose window
+   * had closed. Widening the query to cover a schedule that came due made the
+   * null reachable, and the audit metadata dereferenced it -- so the resume
+   * that was supposed to expire the post threw instead, and rolled back the
+   * resume with it.
+   */
+  approvalExpiresAt: Date | null;
+  scheduledAt: Date | null;
 };
 
 /**
  * Default resume path. Due approvals are expired and audited before the
  * account leaves paused, all under the caller's one transaction.
  */
-export async function resumeMarketingChannelToApproval(
+/**
+ * Expires every approval this account has that came due while it was stopped.
+ *
+ * Policy section 8.2 says a schedule that came due during a pause becomes an
+ * expired approval rather than a post that goes out the moment the account is
+ * back, and it does not say that only one kind of resume has to do it. It was
+ * written inside the approval resume, so an account resumed into autonomous
+ * mode kept its stale schedules and the publisher could take them straight
+ * out -- which is the thing the rule exists to stop.
+ *
+ * Two independent reasons a post is due: its approval window closed, or its
+ * slot passed. An autonomous post has no approval window at all, so neither
+ * the row nor the audit entry may assume one.
+ */
+async function expireDueApprovals(
   database: Prisma.TransactionClient,
-  rawInput: { id: string },
-): Promise<{ expiredPostIds: string[] }> {
-  const input = { id: String(rawInput.id) };
-  const channel = await lockMarketingChannel(database, input.id);
-  if (channel.status !== "paused") {
-    throw new MarketingStoreRefusedError(
-      "resume_approval_conflict",
-      "Only a paused account can resume into approval mode",
-    );
-  }
-  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
-  `);
-  const now = clock[0]?.now;
-  if (!now) {
-    throw new MarketingStoreRefusedError(
-      "database_clock_unavailable",
-      "The database clock did not return a timestamp",
-    );
-  }
+  channelId: string,
+  now: Date,
+): Promise<string[]> {
   const due = await database.$queryRaw<DueApprovalPost[]>(Prisma.sql`
-    SELECT "id", "status", "historyVersion", "approvalExpiresAt"
+    SELECT "id", "status", "historyVersion", "approvalExpiresAt", "scheduledAt"
     FROM "MarketingPost"
-    WHERE "channelId" = ${input.id}
+    WHERE "channelId" = ${channelId}
       AND "status" IN ('approved', 'scheduled')
       AND (
         "approvalExpiresAt" <= ${now}
-        -- Policy section 8.2: a schedule that came due while the account was
-        -- stopped becomes an expired approval rather than a post that goes out
-        -- the moment it resumes. The approval window and the scheduled time
-        -- expire independently, and only reading the first left a post whose
-        -- slot had passed both due and still approved -- which the plan missed
-        -- and the policy does not allow.
         OR ("scheduledAt" IS NOT NULL AND "scheduledAt" <= ${now})
       )
     ORDER BY "id"
-    LIMIT ${MARKETING_RESUME_EXPIRY_BATCH + 1}
     FOR UPDATE
   `);
-  if (due.length > MARKETING_RESUME_EXPIRY_BATCH) {
-    // Deterministic rather than slow: this runs inside a transaction that holds
-    // the audit chain lock, and an unbounded queue of due posts would take the
-    // transaction past its budget and roll the resume back -- leaving an
-    // account that cannot be resumed at all, because expiring them is what
-    // resuming requires. A refusal that names the number is something an
-    // operator can act on.
-    throw new MarketingStoreRefusedError(
-      "resume_expiry_batch_too_large",
-      `This account has more than ${MARKETING_RESUME_EXPIRY_BATCH} approvals to expire; they have to be cleared before it resumes`,
-    );
-  }
+  const expiredPostIds: string[] = [];
   for (const post of due) {
     const expired = await database.marketingPost.updateMany({
       where: {
@@ -865,12 +866,46 @@ export async function resumeMarketingChannelToApproval(
       targetId: post.id,
       summary: "Expired a due marketing approval while its account resumed.",
       metadata: {
-        channelId: input.id,
+        channelId,
         historyVersion: post.historyVersion,
-        approvalExpiresAt: post.approvalExpiresAt.toISOString(),
+        // Which of the two made it due, because "expired" alone does not say
+        // whether the approval ran out or the slot went by.
+        dueBy:
+          post.approvalExpiresAt !== null && post.approvalExpiresAt <= now
+            ? "approval_window"
+            : "schedule",
+        approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
+        scheduledAt: post.scheduledAt?.toISOString() ?? null,
       },
     });
+    expiredPostIds.push(post.id);
   }
+  return expiredPostIds;
+}
+
+export async function resumeMarketingChannelToApproval(
+  database: Prisma.TransactionClient,
+  rawInput: { id: string },
+): Promise<{ expiredPostIds: string[] }> {
+  const input = { id: String(rawInput.id) };
+  const channel = await lockMarketingChannel(database, input.id);
+  if (channel.status !== "paused") {
+    throw new MarketingStoreRefusedError(
+      "resume_approval_conflict",
+      "Only a paused account can resume into approval mode",
+    );
+  }
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const expiredPostIds = await expireDueApprovals(database, input.id, now);
   const resumed = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -887,7 +922,7 @@ export async function resumeMarketingChannelToApproval(
     "resume_approval_conflict",
     "The account changed before approval-mode resume",
   );
-  return { expiredPostIds: due.map((post) => post.id) };
+  return { expiredPostIds };
 }
 
 export async function resumeMarketingChannelToAutonomous(
@@ -943,6 +978,22 @@ export async function resumeMarketingChannelToAutonomous(
       `The audit entry for this resume is not evidence of it: ${verdict.problem}`,
     );
   }
+  // Policy section 8.2 does not limit this to one kind of resume: a schedule
+  // that came due while the account was stopped is an expired approval either
+  // way. Written only into the approval resume, it left an autonomous account
+  // holding stale schedules the publisher could take out the moment it came
+  // back -- which is the thing the rule exists to stop.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const expiredPostIds = await expireDueApprovals(database, input.id, now);
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -965,6 +1016,7 @@ export async function resumeMarketingChannelToAutonomous(
     "resume_autonomous_conflict",
     "The account changed before autonomous resume",
   );
+  return { expiredPostIds };
 }
 
 export async function lowerMarketingChannelCaps(
