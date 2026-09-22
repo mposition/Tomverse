@@ -63,7 +63,7 @@ export type MarketingAuditRequirement = {
   action: string;
   targetId: string;
   /** Metadata keys that must be present with exactly these values. */
-  metadata?: Readonly<Record<string, string>>;
+  metadata?: Readonly<Record<string, string | number | boolean>>;
   /**
    * The moment the entry has to be later than: the pause it resumes, the
    * failure it re-queues. Without it an entry written for an earlier decision

@@ -45,6 +45,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
+import { writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -72,6 +73,9 @@ import {
   type MarketingReportKind,
   type MarketingResumeReasonCode,
   type MarketingVerificationMethod,
+  MARKETING_CHANNEL_CAPS,
+  MARKETING_NO_AUTONOMY_CHANNELS,
+  MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
@@ -107,6 +111,39 @@ const asJson = (value: unknown): Prisma.InputJsonValue =>
 export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_autonomous";
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
+/** Exact S2b1 action names. These strings are audit/store contracts. */
+export const MARKETING_S2B1_ACTIONS = Object.freeze({
+  accountCreate: "marketing_account.create",
+  accountConnectionConfirmed: "marketing_account.connection_confirmed",
+  accountDisconnect: "marketing_account.disconnect",
+  accountReconnect: "marketing_account.reconnect",
+  accountScopesChanged: "marketing_account.scopes_changed",
+  accountPolicyVersionChanged: "marketing_account.policy_version_changed",
+  accountPause: "marketing_account.pause",
+  accountResumeApproval: "marketing_account.resume_approval",
+  postApprovalExpiredOnResume: "marketing_post.approval_expired_on_resume",
+  accountResumeAutonomous: MARKETING_RESUME_AUTONOMOUS_ACTION,
+  accountLowerCaps: "marketing_account.lower_caps",
+  postApprove: "marketing_post.approve",
+  postReject: "marketing_post.reject",
+  postEdit: "marketing_post.edit",
+  postMarkReusable: "marketing_post.mark_reusable",
+  postSchedule: "marketing_post.schedule",
+  postRequeueAfterFailure: MARKETING_REQUEUE_ACTION,
+  postLegalHoldSet: "marketing_post.legal_hold_set",
+  postLegalHoldReleased: "marketing_post.legal_hold_released",
+  postResolveOutcomeUnknown: "marketing_post.resolve_outcome_unknown",
+  postUnpublish: "marketing_post.unpublish",
+} as const);
+
+export const MARKETING_PAUSE_REASON_CODES = Object.freeze([
+  "operator_requested",
+  "operator_problem_report",
+  "incident_review",
+] as const);
+export type MarketingPauseReasonCode =
+  (typeof MARKETING_PAUSE_REASON_CODES)[number];
+
 // ---------------------------------------------------------------------------
 // Channels
 // ---------------------------------------------------------------------------
@@ -134,21 +171,38 @@ async function nextAccountSlug(
   database: MarketingDatabase,
   channel: MarketingChannelName,
 ): Promise<string> {
-  const existing = await database.marketingChannel.count({ where: { channel } });
-  const candidate = existing + 1;
-  if (candidate > 999) {
-    throw new MarketingStoreRefusedError(
-      "account_slug_exhausted",
-      `No free account slug for ${channel}`,
-    );
+  const existing = await database.marketingChannel.findMany({
+    where: { channel },
+    select: { accountSlug: true },
+  });
+  const used = new Set(existing.map((row) => row.accountSlug));
+  for (let candidate = 1; candidate <= 999; candidate += 1) {
+    const slug = `${channel}-${candidate}`;
+    if (!used.has(slug)) return slug;
   }
-  return `${channel}-${candidate}`;
+  throw new MarketingStoreRefusedError(
+    "account_slug_exhausted",
+    `No free account slug for ${channel}`,
+  );
 }
 
 export async function createMarketingChannel(
   database: MarketingDatabase,
-  input: CreateMarketingChannelInput,
+  rawInput: CreateMarketingChannelInput,
 ) {
+  // Materialise before the slug lookup awaits. A caller-owned object must not
+  // answer validation with one account and the insert with another.
+  const rawExternalAccountRef = rawInput.externalAccountRef;
+  const input: CreateMarketingChannelInput = {
+    channel: rawInput.channel,
+    provider: rawInput.provider,
+    externalAccountRef:
+      rawExternalAccountRef === null ? null : String(rawExternalAccountRef),
+    defaultLocale: rawInput.defaultLocale,
+    allowedLocales: [...rawInput.allowedLocales],
+    scopesDigest: String(rawInput.scopesDigest),
+    policyVersion: Number(rawInput.policyVersion),
+  };
   if (!input.allowedLocales.includes(input.defaultLocale)) {
     throw new MarketingStoreRefusedError(
       "default_locale_not_allowed",
@@ -330,6 +384,539 @@ export async function updateMarketingChannel(
     );
   }
   return database.marketingChannel.findUniqueOrThrow({ where: { id } });
+}
+
+type LockedMarketingChannel = {
+  id: string;
+  channel: MarketingChannelName;
+  status: MarketingChannelStatus;
+  connectionGeneration: number;
+  scopesDigest: string;
+  policyVersion: number;
+  graduationEpoch: number;
+  graduatedAt: Date | null;
+  graduationSnapshot: Prisma.JsonValue | null;
+  pausedAt: Date | null;
+  pausedFromMode: MarketingPausableMode | null;
+  pauseReasonCode: string | null;
+  lastResumeAuditLogId: string | null;
+  dailyCapOverride: number | null;
+  weeklyCapOverride: number | null;
+};
+
+/** S2b1 lifecycle writers always take the row lock before deciding. */
+async function lockMarketingChannel(
+  database: MarketingDatabase,
+  id: string,
+): Promise<LockedMarketingChannel> {
+  const rows = await database.$queryRaw<LockedMarketingChannel[]>(Prisma.sql`
+    SELECT
+      "id", "channel", "status", "connectionGeneration", "scopesDigest",
+      "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
+      "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
+      "dailyCapOverride", "weeklyCapOverride"
+    FROM "MarketingChannel"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const row = rows[0];
+  if (!row) {
+    throw new MarketingStoreRefusedError(
+      "channel_not_found",
+      "The marketing account does not exist",
+    );
+  }
+  return row;
+}
+
+const requireOne = (count: number, code: string, message: string): void => {
+  if (count !== 1) throw new MarketingStoreRefusedError(code, message);
+};
+
+export async function confirmMarketingChannelConnection(
+  database: MarketingDatabase,
+  rawInput: { id: string; expectedConnectionGeneration: number },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "connect_pending" ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "connection_confirmation_conflict",
+      "The account is no longer the connection that was confirmed",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "connect_pending",
+      connectionGeneration: input.expectedConnectionGeneration,
+    },
+    data: { status: "approval_mode" },
+  });
+  requireOne(
+    updated.count,
+    "connection_confirmation_conflict",
+    "The account changed before connection confirmation committed",
+  );
+}
+
+export async function disconnectMarketingChannel(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: MarketingChannelStatus;
+    expectedConnectionGeneration: number;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  if (input.expectedStatus === "disconnected") {
+    throw new MarketingStoreRefusedError(
+      "account_already_disconnected",
+      "A disconnected account cannot be disconnected again",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== input.expectedStatus ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "disconnect_conflict",
+      "The account is no longer in the expected connection state",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: input.expectedStatus,
+      connectionGeneration: input.expectedConnectionGeneration,
+    },
+    data: { status: "disconnected", pauseReasonCode: null },
+  });
+  requireOne(updated.count, "disconnect_conflict", "The account changed before disconnect");
+}
+
+export async function reconnectMarketingChannel(
+  database: MarketingDatabase,
+  rawInput: { id: string; expectedConnectionGeneration: number },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "disconnected" ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "reconnect_conflict",
+      "The account is no longer the disconnected connection being resumed",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "disconnected",
+      connectionGeneration: input.expectedConnectionGeneration,
+      graduationEpoch: row.graduationEpoch,
+    },
+    data: {
+      status: "approval_mode",
+      connectionGeneration: input.expectedConnectionGeneration + 1,
+      graduationEpoch: row.graduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "reconnect_conflict", "The account changed before reconnect");
+}
+
+export async function changeMarketingChannelScopes(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedScopesDigest: string;
+    expectedPolicyVersion: number;
+    expectedGraduationEpoch: number;
+    scopesDigest: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedScopesDigest: String(rawInput.expectedScopesDigest),
+    expectedPolicyVersion: Number(rawInput.expectedPolicyVersion),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    scopesDigest: String(rawInput.scopesDigest),
+  };
+  if (input.scopesDigest === input.expectedScopesDigest) {
+    throw new MarketingStoreRefusedError(
+      "scopes_digest_unchanged",
+      "A scope change needs a different digest",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.scopesDigest !== input.expectedScopesDigest ||
+    row.policyVersion !== input.expectedPolicyVersion ||
+    row.graduationEpoch !== input.expectedGraduationEpoch
+  ) {
+    throw new MarketingStoreRefusedError(
+      "scopes_change_conflict",
+      "The account identity changed before its scopes were saved",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      scopesDigest: input.expectedScopesDigest,
+      policyVersion: input.expectedPolicyVersion,
+      graduationEpoch: input.expectedGraduationEpoch,
+    },
+    data: {
+      scopesDigest: input.scopesDigest,
+      status: "approval_mode",
+      graduationEpoch: input.expectedGraduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "scopes_change_conflict", "The account changed before scopes update");
+}
+
+export async function changeMarketingChannelPolicyVersion(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedPolicyVersion: number;
+    expectedScopesDigest: string;
+    expectedGraduationEpoch: number;
+    policyVersion: number;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedPolicyVersion: Number(rawInput.expectedPolicyVersion),
+    expectedScopesDigest: String(rawInput.expectedScopesDigest),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    policyVersion: Number(rawInput.policyVersion),
+  };
+  if (
+    !Number.isInteger(input.policyVersion) ||
+    input.policyVersion <= 0 ||
+    input.policyVersion === input.expectedPolicyVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "policy_version_invalid",
+      "A policy change needs a different positive integer version",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.policyVersion !== input.expectedPolicyVersion ||
+    row.scopesDigest !== input.expectedScopesDigest ||
+    row.graduationEpoch !== input.expectedGraduationEpoch
+  ) {
+    throw new MarketingStoreRefusedError(
+      "policy_change_conflict",
+      "The account identity changed before its policy version was saved",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      policyVersion: input.expectedPolicyVersion,
+      scopesDigest: input.expectedScopesDigest,
+      graduationEpoch: input.expectedGraduationEpoch,
+    },
+    data: {
+      policyVersion: input.policyVersion,
+      status: "approval_mode",
+      graduationEpoch: input.expectedGraduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "policy_change_conflict", "The account changed before policy update");
+}
+
+export async function pauseMarketingChannel(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: MarketingPausableMode;
+    reasonCode: MarketingPauseReasonCode;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    reasonCode: rawInput.reasonCode,
+  };
+  if (!(MARKETING_PAUSE_REASON_CODES as readonly string[]).includes(input.reasonCode)) {
+    throw new MarketingStoreRefusedError(
+      "pause_reason_invalid",
+      "The pause reason is not one of the recorded reason codes",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (row.status !== input.expectedStatus) {
+    throw new MarketingStoreRefusedError(
+      "pause_conflict",
+      "The account is no longer in the mode being paused",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: { id: input.id, status: input.expectedStatus },
+    data: { status: "paused", pauseReasonCode: input.reasonCode },
+  });
+  requireOne(updated.count, "pause_conflict", "The account changed before pause");
+}
+
+type DueApprovalPost = {
+  id: string;
+  status: "approved" | "scheduled";
+  historyVersion: number;
+  approvalExpiresAt: Date;
+};
+
+/**
+ * Default resume path. Due approvals are expired and audited before the
+ * account leaves paused, all under the caller's one transaction.
+ */
+export async function resumeMarketingChannelToApproval(
+  database: Prisma.TransactionClient,
+  rawInput: { id: string },
+): Promise<{ expiredPostIds: string[] }> {
+  const input = { id: String(rawInput.id) };
+  const channel = await lockMarketingChannel(database, input.id);
+  if (channel.status !== "paused") {
+    throw new MarketingStoreRefusedError(
+      "resume_approval_conflict",
+      "Only a paused account can resume into approval mode",
+    );
+  }
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const due = await database.$queryRaw<DueApprovalPost[]>(Prisma.sql`
+    SELECT "id", "status", "historyVersion", "approvalExpiresAt"
+    FROM "MarketingPost"
+    WHERE "channelId" = ${input.id}
+      AND "status" IN ('approved', 'scheduled')
+      AND "approvalExpiresAt" <= ${now}
+    ORDER BY "id"
+    FOR UPDATE
+  `);
+  for (const post of due) {
+    const expired = await database.marketingPost.updateMany({
+      where: {
+        id: post.id,
+        status: post.status,
+        historyVersion: post.historyVersion,
+        approvalExpiresAt: post.approvalExpiresAt,
+      },
+      data: { status: "approval_expired" },
+    });
+    requireOne(
+      expired.count,
+      "approval_expiry_conflict",
+      "A due post changed while the account was resuming",
+    );
+    await writeSystemAuditLog({
+      tx: database,
+      systemActor: "marketing-guard",
+      action: MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume,
+      targetType: "MarketingPost",
+      targetId: post.id,
+      summary: "Expired a due marketing approval while its account resumed.",
+      metadata: {
+        channelId: input.id,
+        historyVersion: post.historyVersion,
+        approvalExpiresAt: post.approvalExpiresAt.toISOString(),
+      },
+    });
+  }
+  const resumed = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "paused",
+      pausedAt: channel.pausedAt,
+      pausedFromMode: channel.pausedFromMode,
+      pauseReasonCode: channel.pauseReasonCode,
+      lastResumeAuditLogId: channel.lastResumeAuditLogId,
+    },
+    data: { status: "approval_mode", pauseReasonCode: null },
+  });
+  requireOne(
+    resumed.count,
+    "resume_approval_conflict",
+    "The account changed before approval-mode resume",
+  );
+  return { expiredPostIds: due.map((post) => post.id) };
+}
+
+export async function resumeMarketingChannelToAutonomous(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    auditLogId: string;
+    reasonCode: MarketingResumeReasonCode;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    auditLogId: String(rawInput.auditLogId),
+    reasonCode: rawInput.reasonCode,
+  };
+  if (
+    !(MARKETING_RESUME_REASON_CODES as readonly unknown[]).includes(
+      input.reasonCode,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "resume_reason_invalid",
+      "Autonomous resume needs a closed reason code",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "paused" ||
+    row.pausedFromMode !== "autonomous_mode" ||
+    (MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(row.channel)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "resume_autonomous_not_allowed",
+      "The account cannot resume into autonomous mode",
+    );
+  }
+  if (input.auditLogId === row.lastResumeAuditLogId) {
+    throw new MarketingStoreRefusedError(
+      "resume_evidence_reused",
+      "That audit entry already resumed this account once",
+    );
+  }
+  const verdict = await verifyMarketingAuditEvidence(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_RESUME_AUTONOMOUS_ACTION,
+    targetId: input.id,
+    metadata: { reasonCode: input.reasonCode },
+    notBefore: row.pausedAt ?? undefined,
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `resume_evidence_${verdict.problem}`,
+      `The audit entry for this resume is not evidence of it: ${verdict.problem}`,
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "paused",
+      pausedFromMode: "autonomous_mode",
+      pausedAt: row.pausedAt,
+      pauseReasonCode: row.pauseReasonCode,
+      lastResumeAuditLogId: row.lastResumeAuditLogId,
+      graduationEpoch: row.graduationEpoch,
+    },
+    data: {
+      status: "autonomous_mode",
+      lastResumeAuditLogId: input.auditLogId,
+      lastResumeReasonCode: input.reasonCode,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(
+    updated.count,
+    "resume_autonomous_conflict",
+    "The account changed before autonomous resume",
+  );
+}
+
+export async function lowerMarketingChannelCaps(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    dailyCapOverride: number | null;
+    weeklyCapOverride: number | null;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    dailyCapOverride:
+      rawInput.dailyCapOverride === null ? null : Number(rawInput.dailyCapOverride),
+    weeklyCapOverride:
+      rawInput.weeklyCapOverride === null
+        ? null
+        : Number(rawInput.weeklyCapOverride),
+  };
+  for (const value of [input.dailyCapOverride, input.weeklyCapOverride]) {
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      throw new MarketingStoreRefusedError(
+        "cap_override_invalid",
+        "Posting cap overrides are non-negative integers",
+      );
+    }
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  const policy = MARKETING_CHANNEL_CAPS[row.channel];
+  if (!policy) {
+    throw new MarketingStoreRefusedError(
+      "manual_channel_has_no_caps",
+      "A manual channel has no publisher cap to override",
+    );
+  }
+  const oldDaily = row.dailyCapOverride ?? policy.daily;
+  const oldWeekly = row.weeklyCapOverride ?? policy.weekly;
+  const newDaily = input.dailyCapOverride ?? policy.daily;
+  const newWeekly = input.weeklyCapOverride ?? policy.weekly;
+  if (newDaily > oldDaily || newWeekly > oldWeekly) {
+    throw new MarketingStoreRefusedError(
+      "cap_change_raises_limit",
+      "This action may only lower effective posting caps",
+    );
+  }
+  if (
+    input.dailyCapOverride === row.dailyCapOverride &&
+    input.weeklyCapOverride === row.weeklyCapOverride
+  ) {
+    throw new MarketingStoreRefusedError(
+      "cap_change_is_noop",
+      "At least one cap must change",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      dailyCapOverride: row.dailyCapOverride,
+      weeklyCapOverride: row.weeklyCapOverride,
+    },
+    data: {
+      dailyCapOverride: input.dailyCapOverride,
+      weeklyCapOverride: input.weeklyCapOverride,
+    },
+  });
+  requireOne(updated.count, "cap_change_conflict", "The caps changed before this update");
 }
 
 // ---------------------------------------------------------------------------
@@ -904,6 +1491,794 @@ export async function appendMarketingPostHistory(
   });
 
   return { appended: updated.count === 1 };
+}
+
+type LockedMarketingPost = {
+  id: string;
+  channelId: string;
+  channel: MarketingChannelName;
+  accountSlug: string;
+  locale: MarketingLocale;
+  status: MarketingPostStatus;
+  envelope: Prisma.JsonValue | null;
+  envelopeDigest: string;
+  approvedDigest: string | null;
+  approvalAuditLogId: string | null;
+  approvedAt: Date | null;
+  approvalExpiresAt: Date | null;
+  reusableAsTemplate: boolean;
+  scheduledAt: Date | null;
+  publishAttempt: number;
+  externalPostId: string | null;
+  publishedAt: Date | null;
+  deletedAt: Date | null;
+  contentPurgedAt: Date | null;
+  legalHold: boolean;
+  history: Prisma.JsonValue;
+  historyVersion: number;
+  claimIds: string[];
+  assetIds: string[];
+  claimRegistryVersion: number;
+  assetRegistryVersion: number;
+  factSnapshot: Prisma.JsonValue;
+  factsDigest: string | null;
+};
+
+async function lockMarketingPost(
+  database: MarketingDatabase,
+  id: string,
+): Promise<LockedMarketingPost> {
+  const rows = await database.$queryRaw<LockedMarketingPost[]>(Prisma.sql`
+    SELECT
+      p."id", p."channelId", c."channel", c."accountSlug", p."locale",
+      p."status", p."envelope", p."envelopeDigest", p."approvedDigest",
+      p."approvalAuditLogId", p."approvedAt", p."approvalExpiresAt",
+      p."reusableAsTemplate", p."scheduledAt", p."publishAttempt",
+      p."externalPostId", p."publishedAt", p."deletedAt", p."contentPurgedAt",
+      p."legalHold", p."history", p."historyVersion", p."claimIds",
+      p."assetIds", p."claimRegistryVersion", p."assetRegistryVersion",
+      p."factSnapshot", p."factsDigest"
+    FROM "MarketingPost" AS p
+    JOIN "MarketingChannel" AS c ON c."id" = p."channelId"
+    WHERE p."id" = ${id}
+    FOR UPDATE OF p
+  `);
+  const row = rows[0];
+  if (!row) {
+    throw new MarketingStoreRefusedError(
+      "post_not_found",
+      "The marketing post does not exist",
+    );
+  }
+  return row;
+}
+
+async function marketingDatabaseNow(database: MarketingDatabase): Promise<Date> {
+  const rows = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = rows[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  return now;
+}
+
+async function requireMarketingAudit(
+  database: MarketingDatabase,
+  input: {
+    auditLogId: string;
+    action: string;
+    targetId: string;
+    metadata?: Readonly<Record<string, string | number | boolean>>;
+    notBefore?: Date;
+  },
+): Promise<Date> {
+  const verdict = await verifyMarketingAuditEvidence(database, input);
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry is not evidence of this write: ${verdict.problem}`,
+    );
+  }
+  return verdict.createdAt;
+}
+
+export async function approveMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    approvalAuditLogId: string;
+    approvalExpiresAt: Date;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    approvalAuditLogId: String(rawInput.approvalAuditLogId),
+    approvalExpiresAt: new Date(rawInput.approvalExpiresAt.getTime()),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "approval_conflict",
+      "The pending post changed before approval",
+    );
+  }
+  const approvedAt = await requireMarketingAudit(database, {
+    auditLogId: input.approvalAuditLogId,
+    action: MARKETING_S2B1_ACTIONS.postApprove,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+  });
+  if (input.approvalExpiresAt.getTime() <= approvedAt.getTime()) {
+    throw new MarketingStoreRefusedError(
+      "approval_expiry_invalid",
+      "An approval must expire after it was recorded",
+    );
+  }
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: {
+      status: "approved",
+      approvalAuditLogId: input.approvalAuditLogId,
+      approvedDigest: input.expectedEnvelopeDigest,
+      approvedAt,
+      approvalExpiresAt: input.approvalExpiresAt,
+    },
+  });
+  requireOne(updated.count, "approval_conflict", "Another approval won this post");
+}
+
+export async function rejectMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "rejection_conflict",
+      "The pending post changed before rejection",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postReject,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: { status: "rejected" },
+  });
+  requireOne(updated.count, "rejection_conflict", "Another decision won this post");
+}
+
+export async function editMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    envelope: MarketingEnvelope;
+    decision: GuardDecision;
+    auditLogId: string;
+  },
+) {
+  const decision = rawInput.decision;
+  const envelope = marketingEnvelopeSchema.parse(rawInput.envelope);
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    envelope,
+    decision,
+    auditLogId: String(rawInput.auditLogId),
+  };
+  if (!marketingGuardDecisionIsSealed(decision)) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_sealed",
+      "An edit records a decision guardDraft() made",
+    );
+  }
+  if (decision.verdict === "reject") {
+    throw new MarketingStoreRefusedError(
+      "edited_content_guard_rejected",
+      "Guard-rejected content cannot remain in the approval queue",
+    );
+  }
+  const digest = marketingEnvelopeDigest(envelope);
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.contentPurgedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_conflict",
+      "The post changed before the edit was saved",
+    );
+  }
+  const history = marketingHistorySchema.parse(row.history);
+  if (
+    history.some(
+      (entry) =>
+        entry.type === "edit_revision" && entry.byAuditLogId === input.auditLogId,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_audit_reused",
+      "One audit entry authorises one edit",
+    );
+  }
+  const sameSet = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((value) => right.includes(value));
+  if (
+    envelope.channel !== row.channel ||
+    envelope.accountSlug !== row.accountSlug ||
+    envelope.locale !== row.locale ||
+    !sameSet(envelope.claimIds, row.claimIds) ||
+    !sameSet(
+      envelope.assets.map((asset) => asset.assetId),
+      row.assetIds,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_changes_immutable_scope",
+      "An edit cannot move the post to different account, locale, claims or assets",
+    );
+  }
+  const draftDigest = marketingGuardDraftDigest({
+    renderedText: envelope.renderedText,
+    locale: row.locale,
+    channel: row.channel,
+    channelId: row.channelId,
+    claimIds: row.claimIds,
+    assetIds: row.assetIds,
+  });
+  const factSnapshotDigest = createHash("sha256")
+    .update(JSON.stringify(canonicalJson(row.factSnapshot)), "utf8")
+    .digest("hex");
+  const factsScopeDigest = marketingFactsScopeDigest({
+    channelId: row.channelId,
+    channel: row.channel,
+    locale: row.locale,
+    claimIds: row.claimIds,
+    assetIds: row.assetIds,
+    claimRegistryVersion: row.claimRegistryVersion,
+    assetRegistryVersion: row.assetRegistryVersion,
+    factSnapshotDigest,
+  });
+  if (
+    decision.draftDigest !== draftDigest ||
+    decision.factsScopeDigest !== factsScopeDigest
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_guard_binding_mismatch",
+      "The Guard decision is not about this edited post and its stored facts",
+    );
+  }
+  const editedAt = await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postEdit,
+    targetId: input.id,
+    metadata: {
+      digest,
+      previousDigest: input.expectedEnvelopeDigest,
+    },
+  });
+  const codes = "codes" in decision ? [...decision.codes] : [];
+  const entries: MarketingHistoryEntry[] = [
+    {
+      at: editedAt.toISOString(),
+      type: "edit_revision",
+      envelopeDigest: digest,
+      previousEnvelopeDigest: input.expectedEnvelopeDigest,
+      byAuditLogId: input.auditLogId,
+    },
+    {
+      at: editedAt.toISOString(),
+      type: "guard_result",
+      decision: decision.verdict,
+      codes,
+      ruleIds: [...decision.ruleIds],
+    },
+  ];
+  entries.forEach((entry) => marketingHistoryEntrySchema.parse(entry));
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: {
+      envelope: asJson(envelope),
+      envelopeDigest: digest,
+      guardDecision: decision.verdict,
+      guardCodes: codes,
+      guardRuleIds: [...decision.ruleIds],
+      factsDigest: decision.factsDigest,
+      reusableAsTemplate: false,
+      history: asJson([...history, ...entries]),
+      historyVersion: input.expectedHistoryVersion + 1,
+    },
+  });
+  requireOne(updated.count, "edit_conflict", "The post changed before the edit committed");
+}
+
+export async function markMarketingPostReusable(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "published" ||
+    row.reusableAsTemplate ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.approvedDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.contentPurgedAt !== null ||
+    row.deletedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "mark_reusable_conflict",
+      "Only unchanged published approved content can become reusable",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postMarkReusable,
+    targetId: input.id,
+    metadata: {
+      digest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "published",
+      reusableAsTemplate: false,
+      envelopeDigest: input.expectedEnvelopeDigest,
+      approvedDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      contentPurgedAt: null,
+      deletedAt: null,
+    },
+    data: { reusableAsTemplate: true },
+  });
+  requireOne(updated.count, "mark_reusable_conflict", "The post changed before marking");
+}
+
+export async function scheduleMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    scheduledAt: Date;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    scheduledAt: new Date(rawInput.scheduledAt.getTime()),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  const envelope = marketingEnvelopeSchema.safeParse(row.envelope);
+  const now = await marketingDatabaseNow(database);
+  if (
+    row.status !== "approved" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.approvedDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    !envelope.success ||
+    envelope.data.scheduledAt !== input.scheduledAt.toISOString() ||
+    input.scheduledAt.getTime() <= now.getTime()
+  ) {
+    throw new MarketingStoreRefusedError(
+      "schedule_conflict",
+      "The approval or its future envelope schedule no longer matches",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postSchedule,
+    targetId: input.id,
+    metadata: {
+      digest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "approved",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      approvedDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: { status: "scheduled", scheduledAt: input.scheduledAt },
+  });
+  requireOne(updated.count, "schedule_conflict", "The post changed before scheduling");
+}
+
+export async function requeueMarketingPostAfterFailure(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "failed" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    input.auditLogId === row.approvalAuditLogId
+  ) {
+    throw new MarketingStoreRefusedError(
+      "requeue_conflict",
+      "The failed post changed before re-queue",
+    );
+  }
+  const history = marketingHistorySchema.parse(row.history);
+  const lastFailureAt = history
+    .filter(
+      (entry) =>
+        entry.type === "attempt" &&
+        entry.outcome === "failed" &&
+        entry.attempt === row.publishAttempt,
+    )
+    .map((entry) => new Date(entry.at).getTime())
+    .reduce((latest, at) => Math.max(latest, at), Number.NEGATIVE_INFINITY);
+  if (!Number.isFinite(lastFailureAt)) {
+    throw new MarketingStoreRefusedError(
+      "requeue_without_failure",
+      "The current failed attempt is absent from history",
+    );
+  }
+  const approvedAt = await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_REQUEUE_ACTION,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+    notBefore: new Date(lastFailureAt),
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "failed",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      approvalAuditLogId: row.approvalAuditLogId,
+      publishAttempt: row.publishAttempt,
+    },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: input.auditLogId,
+      approvedAt,
+      approvedDigest: input.expectedEnvelopeDigest,
+    },
+  });
+  requireOne(updated.count, "requeue_conflict", "The post changed before re-queue");
+}
+
+async function updateMarketingPostLegalHold(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+  legalHold: boolean,
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.legalHold !== !legalHold
+  ) {
+    throw new MarketingStoreRefusedError(
+      "legal_hold_conflict",
+      "The post or its legal-hold state changed",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: legalHold
+      ? MARKETING_S2B1_ACTIONS.postLegalHoldSet
+      : MARKETING_S2B1_ACTIONS.postLegalHoldReleased,
+    targetId: input.id,
+    metadata: { historyVersion: input.expectedHistoryVersion },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      historyVersion: input.expectedHistoryVersion,
+      legalHold: !legalHold,
+    },
+    data: { legalHold },
+  });
+  requireOne(updated.count, "legal_hold_conflict", "The post changed before legal hold update");
+}
+
+export const setMarketingPostLegalHold = (
+  database: MarketingDatabase,
+  input: { id: string; expectedHistoryVersion: number; auditLogId: string },
+) => updateMarketingPostLegalHold(database, input, true);
+
+export const releaseMarketingPostLegalHold = (
+  database: MarketingDatabase,
+  input: { id: string; expectedHistoryVersion: number; auditLogId: string },
+) => updateMarketingPostLegalHold(database, input, false);
+
+export async function resolveMarketingPostOutcomeUnknown(
+  database: MarketingDatabase,
+  rawInput:
+    | {
+        id: string;
+        expectedHistoryVersion: number;
+        resolution: "published";
+        externalPostId: string;
+        externalUrl: string;
+        evidenceRef: string;
+        auditLogId: string;
+      }
+    | {
+        id: string;
+        expectedHistoryVersion: number;
+        resolution: "failed";
+        errorCode: string;
+        evidenceRef: string;
+        auditLogId: string;
+      },
+) {
+  const common = {
+    id: String(rawInput.id),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    resolution: rawInput.resolution,
+    evidenceRef: String(rawInput.evidenceRef),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const input =
+    rawInput.resolution === "published"
+      ? {
+          ...common,
+          resolution: "published" as const,
+          externalPostId: String(rawInput.externalPostId),
+          externalUrl: String(rawInput.externalUrl),
+        }
+      : {
+          ...common,
+          resolution: "failed" as const,
+          errorCode: String(rawInput.errorCode),
+        };
+  if (
+    input.evidenceRef.length < 1 ||
+    input.evidenceRef.length > 2048 ||
+    /[\u0000-\u001F\u007F]/u.test(input.evidenceRef)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "outcome_evidence_invalid",
+      "Outcome evidence must be a bounded control-free reference",
+    );
+  }
+  if (
+    input.resolution === "published" &&
+    (input.externalPostId.length < 1 || !input.externalUrl.startsWith("https://"))
+  ) {
+    throw new MarketingStoreRefusedError(
+      "published_evidence_invalid",
+      "Confirmed publication needs an external id and HTTPS URL",
+    );
+  }
+  if (
+    input.resolution === "failed" &&
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u.test(input.errorCode)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "failure_code_invalid",
+      "Confirmed failure needs a bounded error code",
+    );
+  }
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "outcome_unknown" ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.publishedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "outcome_resolution_conflict",
+      "The unknown outcome changed before resolution",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postResolveOutcomeUnknown,
+    targetId: input.id,
+    metadata: {
+      resolution: input.resolution,
+      evidenceRef: input.evidenceRef,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const now = await marketingDatabaseNow(database);
+  const history = marketingHistorySchema.parse(row.history);
+  const failedEntry: MarketingHistoryEntry | null =
+    input.resolution === "failed"
+      ? {
+          at: now.toISOString(),
+          type: "attempt",
+          attempt: row.publishAttempt,
+          outcome: "failed",
+          errorCode: input.errorCode,
+        }
+      : null;
+  if (failedEntry) marketingHistoryEntrySchema.parse(failedEntry);
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "outcome_unknown",
+      historyVersion: input.expectedHistoryVersion,
+      publishAttempt: row.publishAttempt,
+      publishedAt: null,
+    },
+    data:
+      input.resolution === "published"
+        ? {
+            status: "published",
+            externalPostId: input.externalPostId,
+            externalUrl: input.externalUrl,
+            publishedAt: now,
+            errorCode: null,
+          }
+        : {
+            status: "failed",
+            errorCode: input.errorCode,
+            history: asJson([...history, failedEntry!]),
+            historyVersion: input.expectedHistoryVersion + 1,
+          },
+  });
+  requireOne(
+    updated.count,
+    "outcome_resolution_conflict",
+    "The unknown outcome changed before resolution committed",
+  );
+}
+
+export async function unpublishMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: "published" | "verified";
+    expectedHistoryVersion: number;
+    expectedExternalPostId: string;
+    evidenceRef: string;
+    cancellationSupported: true;
+    removalConfirmed: true;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    expectedExternalPostId: String(rawInput.expectedExternalPostId),
+    evidenceRef: String(rawInput.evidenceRef),
+    cancellationSupported: rawInput.cancellationSupported,
+    removalConfirmed: rawInput.removalConfirmed,
+    auditLogId: String(rawInput.auditLogId),
+  };
+  if (input.cancellationSupported !== true || input.removalConfirmed !== true) {
+    throw new MarketingStoreRefusedError(
+      "unpublish_not_confirmed",
+      "No ledger deletion is written until external removal is confirmed",
+    );
+  }
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== input.expectedStatus ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.externalPostId !== input.expectedExternalPostId ||
+    row.deletedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "unpublish_conflict",
+      "The published post changed before removal was recorded",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postUnpublish,
+    targetId: input.id,
+    metadata: {
+      externalPostId: input.expectedExternalPostId,
+      evidenceRef: input.evidenceRef,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const now = await marketingDatabaseNow(database);
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: input.expectedStatus,
+      historyVersion: input.expectedHistoryVersion,
+      externalPostId: input.expectedExternalPostId,
+      deletedAt: null,
+    },
+    data: {
+      status: "deleted",
+      deletedAt: now,
+      deletionMethod: "api_unpublish",
+    },
+  });
+  requireOne(updated.count, "unpublish_conflict", "The post changed before removal commit");
 }
 
 // ---------------------------------------------------------------------------

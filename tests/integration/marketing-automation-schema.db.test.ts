@@ -16,6 +16,7 @@ import {
 import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
+  approveMarketingPost,
   createMarketingChannel,
   createMarketingPost,
   insertAiVisibilityRun,
@@ -23,6 +24,9 @@ import {
   MarketingStoreRefusedError,
   updateMarketingChannel,
   MARKETING_RESUME_AUTONOMOUS_ACTION,
+  MARKETING_S2B1_ACTIONS,
+  lowerMarketingChannelCaps,
+  resumeMarketingChannelToApproval,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -1826,4 +1830,129 @@ test("a second dispatch cannot reuse the first attempt's number", async () => {
     data: { status: "publishing", publishAttempt: 2 },
   });
   assert.equal(second.publishAttempt, 2);
+});
+
+// ---------------------------------------------------------------------------
+// S2b1 ordinary Admin store writes
+// ---------------------------------------------------------------------------
+
+// These are integration tests on purpose. The Admin E2E harness builds its
+// database with `prisma db push`, which installs none of the migration SQL;
+// putting a trigger-refusal assertion there would produce a green test that
+// never exercised the trigger this contract depends on.
+
+const postAuditEntry = (
+  action: string,
+  targetId: string,
+  metadata: Prisma.InputJsonObject,
+) =>
+  writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing"),
+    action,
+    targetType: "MarketingPost",
+    targetId,
+    summary: "S2b1 operator decision.",
+    metadata: { actorHadMarketingWrite: true, ...metadata },
+  });
+
+test("two S2b1 approvers racing one digest and version produce one winner", async () => {
+  const account = await approvedChannel();
+  const draft = await post(account.id);
+  const pending = await prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: { status: "pending_approval" },
+  });
+  const [firstAudit, secondAudit] = await Promise.all([
+    postAuditEntry(MARKETING_S2B1_ACTIONS.postApprove, pending.id, {
+      digest: DIGEST,
+    }),
+    postAuditEntry(MARKETING_S2B1_ACTIONS.postApprove, pending.id, {
+      digest: DIGEST,
+    }),
+  ]);
+  const expiry = new Date(Date.now() + DAY);
+  const attempt = (approvalAuditLogId: string) =>
+    prisma.$transaction((tx) =>
+      approveMarketingPost(tx, {
+        id: pending.id,
+        expectedEnvelopeDigest: DIGEST,
+        expectedHistoryVersion: pending.historyVersion,
+        approvalAuditLogId,
+        approvalExpiresAt: expiry,
+      }),
+    );
+  const results = await Promise.allSettled([
+    attempt(firstAudit),
+    attempt(secondAudit),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+
+  const stored = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: pending.id },
+  });
+  assert.equal(stored.status, "approved");
+  assert.equal(stored.approvedDigest, DIGEST);
+  assert.equal(stored.approvalExpiresAt?.toISOString(), expiry.toISOString());
+  assert.ok([firstAudit, secondAudit].includes(stored.approvalAuditLogId ?? ""));
+});
+
+test("approval-mode resume expires every due approved or scheduled post in its transaction", async () => {
+  const account = await approvedChannel();
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "paused", pauseReasonCode: "incident_review" },
+  });
+  const due = await post(account.id);
+  await prisma.marketingPost.update({
+    where: { id: due.id },
+    data: { status: "pending_approval" },
+  });
+  await prisma.marketingPost.update({
+    where: { id: due.id },
+    data: {
+      status: "approved",
+      approvalAuditLogId: "fixture-approval",
+      approvedAt: new Date(Date.now() - 2 * DAY),
+      approvedDigest: DIGEST,
+      approvalExpiresAt: new Date(Date.now() - DAY),
+    },
+  });
+
+  const result = await prisma.$transaction((tx) =>
+    resumeMarketingChannelToApproval(tx, { id: account.id }),
+  );
+  assert.deepEqual(result.expiredPostIds, [due.id]);
+  const [resumed, expired, audit] = await Promise.all([
+    prisma.marketingChannel.findUniqueOrThrow({ where: { id: account.id } }),
+    prisma.marketingPost.findUniqueOrThrow({ where: { id: due.id } }),
+    prisma.adminAuditLog.findFirstOrThrow({
+      where: {
+        action: MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume,
+        targetId: due.id,
+      },
+    }),
+  ]);
+  assert.equal(resumed.status, "approval_mode");
+  assert.equal(expired.status, "approval_expired");
+  assert.equal(expired.historyVersion, due.historyVersion);
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "marketing-guard");
+});
+
+test("the S2b1 cap writer refuses an effective increase before the DB trigger", async () => {
+  const account = await approvedChannel();
+  await lowerMarketingChannelCaps(prisma, {
+    id: account.id,
+    dailyCapOverride: 0,
+    weeklyCapOverride: 2,
+  });
+  await refusedByStore(
+    lowerMarketingChannelCaps(prisma, {
+      id: account.id,
+      dailyCapOverride: 1,
+      weeklyCapOverride: 2,
+    }),
+    "cap_change_raises_limit",
+  );
 });
