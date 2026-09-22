@@ -34,6 +34,7 @@ const DARK_TABLES = [
     "QuotaScope",
     "ProviderRegistryEntry",
     "RoutingCandidateVerdict",
+    "QuotaCapacityState",
 ];
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */

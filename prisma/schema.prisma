@@ -5645,11 +5645,12 @@ model QuotaScope {
 
   createdAt DateTime @default(now())
 
-  credentialBinding CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  endpoint          ProviderEndpoint?      @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  deployment        ModelDeployment?       @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  account           User?                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  provider          ProviderRegistryEntry? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  credentialBinding  CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  endpoint           ProviderEndpoint?      @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  deployment         ModelDeployment?       @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  account            User?                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider           ProviderRegistryEntry? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaCapacityState QuotaCapacityState?
 
   @@index([scopeKind])
 }
@@ -5744,4 +5745,57 @@ model RoutingCandidateVerdict {
   // three columns would accept two rows for the same model with no deployment.
   @@index([routingRunId, verdict])
   @@index([reason])
+}
+
+/// How much room a quota scope has left, right now.
+///
+/// Dark. Capacity, not health, and the separation is the point of the table:
+/// a 429 says this key is spending too fast, and a 5xx says the provider could
+/// not serve the request. Today both increment one counter
+/// (`ProviderHealthState.consecutiveFailures`), so a peak-hour rate limit
+/// marches a healthy provider toward a breaker and pushes its traffic onto a
+/// fallback that is about to hit the same wall.
+///
+/// Nothing here reaches provider health, and nothing in provider health
+/// reaches here.
+///
+/// One row per scope: the scope already says what is being counted, and a
+/// second row would be a second answer to how much is left.
+model QuotaCapacityState {
+  id           String @id @default(cuid())
+  quotaScopeId String @unique
+
+  /// How many rate-limit answers this scope has had in the current window.
+  rateLimitedCount Int       @default(0)
+  /// When the window those counts belong to started.
+  windowStartedAt  DateTime?
+
+  /// What the provider asked us to wait until, when it said so.
+  ///
+  /// Read from `Retry-After` when a provider sends one. The chat path does not
+  /// read that header today, which is why this can only be filled by the work
+  /// that starts reading it.
+  retryAfterUntil DateTime?
+
+  /// How long this scope stays at the back of the queue.
+  ///
+  /// An expiry, not a counter -- which is the difference from health. A
+  /// demotion that ends by itself cannot leave a scope permanently behind
+  /// because of one busy afternoon, and there is no recovery probe to write.
+  deprioritizeUntil DateTime?
+
+  /// Requests this scope may have in flight, and has.
+  concurrencyLimit Int?
+  concurrencyInUse Int  @default(0)
+
+  /// Tokens left in a local bucket, when one is being kept.
+  tokenBucketRemaining  Int?
+  tokenBucketRefilledAt DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  scope QuotaScope @relation(fields: [quotaScopeId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([deprioritizeUntil])
+  @@index([retryAfterUntil])
 }
