@@ -747,6 +747,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     exclusionReason:
       "A sixty-second handshake row that lets a signed-in browser hand the native app one exchange. It holds two digests -- of the grant secret and of the PKCE verifier -- an expiry and a consumed-at, and no content the user wrote. A completed sign-in consumes it and the sweep deletes it, so an export run at any ordinary moment would find nothing to include.",
   },
+  {
+    domain: "amuxBoardImportApproval",
+    publicName: "amux_board_import_approvals",
+    prismaModel: "AmuxBoardImportApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for a catalog import, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
 ];
 
 /** Domains whose data reaches the export at all. */

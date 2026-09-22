@@ -232,6 +232,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
  * admission decision; the whole-schema fingerprint moves by design.
  *
+ * 2026-09-22: the catalog-import approval table is another `Amux*` model on
+ * the same watched schema. It does not change a marketing model, webhook
+ * writer, or admission decision. The digest moves because the schema file
+ * is watched as a whole.
+ *
  * 2026-09-21, the permission ledger (S3): six more tables on the same watched
  * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
  * revocations, EmailPermissionDecision and its evidence. None is a marketing
@@ -243,7 +248,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * is computed over the merged schema rather than taken from either side of
  * the conflict -- the merged tree is the only one that will exist.
  */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "a3936dc7b4bb797f938ff57b6a940c69a64383b0770f2f9b147ba9855d95002a";
+export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "41dcdb7b9b274c70f54c9205cc0c3ac9121b62cf7352b20a97e6825699025743";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

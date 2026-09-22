@@ -141,12 +141,17 @@ const compilerOptions = parsedConfig.options;
 // access below it moves down. The new function has no element access of its
 // own. The count is still 228 and the position-free inventory still hashes to
 // the value above, so this is a repin and not a review.
+//
+// 2026-09-22, catalog import: the watched-schema comment in
+// `lib/marketingAutomationAccess.ts` records `AmuxBoardImportApproval`. The
+// count is still 228 and the position-free inventory still hashes to the
+// value above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "9804ab3482d14c3724dbe22f5509607",
-  "05514c32c3d4f9173aec203c234c3b03a",
+  "e405145a9f6d68d57321a96de4623e4",
+  "d8b9896f638040fdd05adb0259657cdbc",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
