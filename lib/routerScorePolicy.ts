@@ -101,7 +101,8 @@ export type RouterQualityEvidence = {
      * scale the record defines, or null when it carries no interval.
      *
      * Only ever compared against another cell's lower bound from the same kind
-     * of record, and only inside one band -- see `compareRouterScoreCells`.
+     * of record, and only inside one band -- see `partitionByQuality` in
+     * lib/routerSelection.ts, which applies it to a whole tied group.
      */
     qualityCi95Lower: number | null;
 };
@@ -256,7 +257,7 @@ export const ROUTER_TIE_BREAK_ORDER = [
 export type RouterTieBreakCriterion = (typeof ROUTER_TIE_BREAK_ORDER)[number];
 
 /**
- * Measured signals for criteria 2 to 4, supplied by the caller.
+ * Measured signals for criteria 2 to 5, supplied by the caller.
  *
  * Injected rather than looked up, exactly as `unhealthyModelIds` already is:
  * where a number comes from is the caller's business, and what it means is
@@ -424,36 +425,3 @@ export const stickyHysteresisTurnsFor = (profile: TaskProfile): number =>
         ? ROUTER_STICKY_HYSTERESIS_TURNS + ROUTER_WEAK_CONFIDENCE_EXTRA_TURNS
         : ROUTER_STICKY_HYSTERESIS_TURNS;
 
-/**
- * The quality *relation* between two cells. Negative means the left one ranks
- * higher, zero means this criterion does not separate them.
- *
- * **Not the ordering, and not a comparator to sort with.** It abstains when
- * either cell has no interval, and abstention is not transitive: A ahead of B
- * on an interval, with C carrying none, leaves C tied with both while A and B
- * are not tied with each other. The ranking is built instead, by partition
- * refinement, in `lib/routerSelection.ts`, which implements the same two rules
- * over a whole group rather than over a pair.
- *
- * What this is for is stating those two rules in one place that
- * `tests/routerScorePolicy.test.mjs` can pin:
- *
- * - band first, always. The tempting alternative -- let a measured interval
- *   outrank a band -- does not survive a partly-measured snapshot, so the band
- *   is a strict primary key;
- * - an interval refines only *within* a band, and only when both cells carry
- *   one, for the same reason a missing signal abstains: a cell with no
- *   interval is unmeasured, not zero.
- */
-export const compareRouterScoreCells = (
-    left: RouterScoreCell,
-    right: RouterScoreCell
-): number => {
-    if (left.qualityBand !== right.qualityBand) {
-        return right.qualityBand - left.qualityBand;
-    }
-    if (left.qualityCi95Lower !== null && right.qualityCi95Lower !== null) {
-        return right.qualityCi95Lower - left.qualityCi95Lower;
-    }
-    return 0;
-};

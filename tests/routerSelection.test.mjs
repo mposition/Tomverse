@@ -10,6 +10,7 @@ import {
     ROUTER_TTFT_TIE_EPSILON_MS,
 } from "../lib/routerScorePolicy.ts";
 import {
+    rankCandidates,
     ROUTER_SELECTION_VERSION,
     SELECTION_REASONS,
     selectRouterModel,
@@ -624,4 +625,102 @@ test("a duplicated model id leaves the ranking well defined", () => {
     assert.equal(result.rankedModelIds.length, 3);
     assert.deepEqual(result.rankedModelIds, ["model-a", "model-a", "model-b"]);
     assert.equal(result.decidedBy, "model_id");
+});
+
+/**
+ * The quality partition, tested directly.
+ *
+ * `ROUTER_SCORE_SNAPSHOT` carries no interval in any cell, so nothing routed
+ * through `selectRouterModel` can reach this branch -- which is how a cell
+ * whose interval was not a number could sit in it, unbucketed, until an
+ * independent review found it. `rankCandidates` takes the cells, so the branch
+ * is reachable from a test without inventing a snapshot.
+ */
+
+const cell = (qualityBand, qualityCi95Lower = null) => ({
+    qualityBand,
+    qualityCi95Lower,
+    evidenceRef: qualityCi95Lower === null ? null : "evidence",
+});
+const scored = (entries) =>
+    entries.map(([modelId, band, ci]) => ({ modelId, cell: cell(band, ci) }));
+const ids = (entries, signals = {}) =>
+    rankCandidates(scored(entries), signals).ranked.map((entry) => entry.modelId);
+
+test("the band decides before any interval does", () => {
+    // A high interval in a low band never outranks a higher band.
+    assert.deepEqual(
+        ids([
+            ["low-band-high-ci", 1, 0.99],
+            ["high-band-no-ci", 3, null],
+            ["mid", 2, 0.5],
+        ]),
+        ["high-band-no-ci", "mid", "low-band-high-ci"]
+    );
+});
+
+test("an interval refines a band only when every cell in it carries one", () => {
+    // Both measured: the interval orders them.
+    assert.deepEqual(
+        ids([
+            ["worse", 2, 0.4],
+            ["better", 2, 0.9],
+        ]),
+        ["better", "worse"]
+    );
+    // One unmeasured: the band keeps its whole membership, and the model id
+    // decides. "better" would have won on its interval; it does not, because
+    // the criterion cannot speak for everyone still tied with it.
+    assert.deepEqual(
+        ids([
+            ["zzz-better", 2, 0.9],
+            ["aaa-unmeasured", 2, null],
+        ]),
+        ["aaa-unmeasured", "zzz-better"]
+    );
+});
+
+test("an interval that is not a number abstains, and loses nobody", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const entries = [
+            ["aaa", 2, 0.9],
+            ["bbb", 2, bad],
+            ["ccc", 2, 0.4],
+        ];
+        const orders = permutations([0, 1, 2]).map((order) =>
+            ids(order.map((index) => entries[index]))
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], String(bad));
+        }
+        // Three in, three out: the unbucketable cell is still ranked.
+        assert.equal(orders[0].length, 3);
+        // The criterion abstained for the band, so the model id decided.
+        assert.deepEqual(orders[0], ["aaa", "bbb", "ccc"], String(bad));
+    }
+});
+
+test("cells sharing an interval share a bucket, and the model id orders them", () => {
+    assert.deepEqual(
+        ids([
+            ["zzz", 2, 0.9],
+            ["aaa", 2, 0.9],
+            ["mmm", 2, 0.4],
+        ]),
+        ["aaa", "zzz", "mmm"]
+    );
+});
+
+test("the criterion named is the one that separated the top two", () => {
+    const ranking = rankCandidates(
+        scored([
+            ["a", 3, null],
+            ["b", 2, null],
+        ]),
+        {}
+    );
+    assert.equal(
+        ranking.decidedBy(ranking.ranked[0], ranking.ranked[1]),
+        "quality_band"
+    );
 });

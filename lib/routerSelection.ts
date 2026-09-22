@@ -132,7 +132,7 @@ export type RouterSelectionResult = {
     turnsFavouringChallenger: number;
 };
 
-type ScoredCandidate = {
+export type ScoredCandidate = {
     modelId: string;
     cell: RouterScoreCell;
 };
@@ -150,8 +150,9 @@ type ScoredCandidate = {
  * model neither wins nor loses on a number it does not have. Pairwise, that
  * means one criterion decides one pair and is skipped for another, and a cycle
  * follows directly. With A and B both carrying a quality interval, C carrying
- * none, and costs C < B < A: quality says A beats B, cost says B beats C (they
- * abstained on quality), and cost says C beats A (likewise). A > B > C > A.
+ * none, and costs B < C < A: quality says A beats B, cost says B beats C (they
+ * abstained on quality, and B is the cheaper), and cost says C beats A
+ * (likewise). A > B > C > A.
  *
  * And two values within an epsilon are "the same value", which is not
  * transitive either: at a 5% ratio 100 ties 104 and 104 ties 108, while 100
@@ -367,13 +368,35 @@ const partitionFor = (
 };
 
 /**
+ * Whether `buckets` is a partition of `group`: every member once, nothing else.
+ *
+ * Identity rather than value, because two candidates can carry the same model
+ * id and they are still two entries in the ranking.
+ */
+const partitions = (buckets: readonly Bucket[], group: Bucket): boolean => {
+    const remaining = new Set(group);
+    if (remaining.size !== group.length) {
+        // The group itself holds the same object twice, which no caller builds
+        // and this check cannot reason about. Abstain rather than guess.
+        return false;
+    }
+    for (const bucket of buckets) {
+        if (bucket.length === 0) return false;
+        for (const candidate of bucket) {
+            if (!remaining.delete(candidate)) return false;
+        }
+    }
+    return remaining.size === 0;
+};
+
+/**
  * Applies `ROUTER_TIE_BREAK_ORDER` and reports which entry decided.
  *
  * One pass rather than a ranking plus a separate explanation, so the order a
  * decision is explained by cannot drift from the order it was made in: the
  * criterion named is the position at which two rank keys first differ.
  */
-const rankCandidates = (
+export const rankCandidates = (
     candidates: readonly ScoredCandidate[],
     signals: RouterTieBreakSignals
 ): {
@@ -402,11 +425,17 @@ const rankCandidates = (
             // member -- by grouping on a value that is not equal to itself,
             // say -- would give that candidate a shorter key, and the final
             // sort would fall back to input order for it: the exact failure
-            // this ranking exists to remove. Losing the criterion is the safe
-            // direction, so a partition that does not cover its group is
-            // treated as an abstention.
-            const covered = split.reduce((sum, bucket) => sum + bucket.length, 0);
-            const buckets = covered === group.length ? split : [group];
+            // this ranking exists to remove.
+            //
+            // Counting is not enough. A partition that dropped one candidate
+            // and repeated another has the right total and the wrong keys, so
+            // the check is membership: every candidate of the group appears
+            // exactly once across the buckets, by identity, and nothing else
+            // appears at all. Losing the criterion is the safe direction, so a
+            // partition that fails is treated as an abstention rather than
+            // thrown on -- a chat turn that could still be answered should not
+            // fail over a ranking refinement.
+            const buckets = partitions(split, group) ? split : [group];
             buckets.forEach((bucket, index) => {
                 for (const candidate of bucket) keys.get(candidate)?.push(index);
                 refined.push(bucket);
@@ -443,7 +472,7 @@ export function selectRouterModel(input: {
     profile: TaskProfile;
     eligible: readonly RouterCandidate[];
     sticky?: RouterStickyState | null;
-    /** Measured inputs for tie-break criteria 2 to 4. See the policy module. */
+    /** Measured inputs for tie-break criteria 2 to 5. See the policy module. */
     signals?: RouterTieBreakSignals;
 }): RouterSelectionResult {
     const base = {

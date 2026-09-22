@@ -92,11 +92,14 @@ catalogue addition remove a model from Auto silently.
 
 Applied in order, most decisive first:
 
-1. **quality band** — §3. Within one band, and only when both cells carry one,
-   a 95% confidence interval refines the order. The band is a strict primary
-   key: letting an interval outrank a band would make the comparison
-   non-transitive on a partly-measured snapshot, and the sort result would then
-   depend on the order the filters happened to emit.
+1. **quality band** — §3. Within one band, and only when *every* cell still
+   tied at that point carries a finite one, a 95% confidence interval refines
+   the order. The band is a strict primary key: letting an interval outrank a
+   band would make the comparison non-transitive on a partly-measured snapshot,
+   and the answer would then depend on the order the filters happened to emit.
+   "Every cell rather than both" is the group-scoped abstention described in
+   "The order is built, not compared" below; a band holding one cell with an
+   interval and one without keeps its whole membership together.
 2. **health degraded** — the health path reports this model misbehaving. Not a
    refusal: refusal is `unavailable`, and that is a hard filter. It sits above
    cost because "this model is currently misbehaving" is a stronger reason to
@@ -237,6 +240,17 @@ evidence of non-transitivity, which it no longer is.
 that version. A before-and-after of the ranking itself must be taken over
 `selectionVersion`, or both sides land in the same bucket.
 
+And the comparison is weaker than it was, for the same reason the ranking is
+better. A shadow row records `eligibleCount` and not which models were
+eligible, so two runs with the same count can have had different membership —
+which, now that the order depends on membership, is a second explanation for
+any difference between them that cannot be told apart from the first. A
+content-free digest of the sorted eligible ids would separate the two, and it
+belongs with the candidate-verdict record that the deployment-identity work
+adds rather than as a column of its own: that record already names the eligible
+set. Until then, a shadow comparison across this version attributes less than
+it appears to.
+
 ## 6. Stickiness, in the units of this scale
 
 `ROUTER_STICKY_SWITCH_MARGIN_BANDS` is 1: a challenger must be a full band
@@ -255,7 +269,7 @@ filter. That is the correct behaviour for a scale with no measurements in it —
 there is no evidence on which to move anyone — and it means the first approved
 evidence record is also the first thing that can make Auto switch mid
 conversation. A cheaper or faster model is a reason to have started somewhere
-else, not a reason to change models mid-conversation, so criteria 2 to 4 rank
+else, not a reason to change models mid-conversation, so criteria 2 to 5 rank
 the first turn and never trigger a switch.
 
 The task profile's own confidence band is used rather than recorded and

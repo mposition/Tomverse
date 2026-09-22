@@ -402,6 +402,7 @@ export type DiagnosticReport = {
         outputCapMismatchItems: number;
         consistencyProblems: number;
         subsetContextReversals: number;
+        subsetContextReversalPairs: number;
         fallbackScopeAsDeployed: Readonly<Record<string, number>>;
         /** Items by `reachable` or by the refusal that stopped them, as deployed. */
         fallbackReachableAsDeployed: Readonly<Record<string, number>>;
@@ -808,10 +809,18 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
 
     const outputCapMismatchItems = items.filter((item) => item.caps.primary?.outputCapDiffers).length;
     const consistencyProblems = items.filter((item) => !item.consistency.agreesWithProduct).length;
-    const subsetContextReversals = items.reduce(
+    // Two numbers, because they answer different questions and the one the
+    // finding reports has to be the one its `itemCount` field means. Every
+    // other finding counts items; this one was counting (item, model) pairs
+    // and calling the total `itemCount`, so a single item with two reversing
+    // models read as two items.
+    const subsetContextReversalPairs = items.reduce(
         (sum, item) => sum + item.models.filter((model) => model.versusPrimary?.wouldBeatPrimary).length,
         0
     );
+    const subsetContextReversals = items.filter((item) =>
+        item.models.some((model) => model.versusPrimary?.wouldBeatPrimary)
+    ).length;
     for (const item of items) {
         for (const problem of item.consistency.problems) problems.push(`${item.itemId}: ${problem}`);
     }
@@ -1001,6 +1010,7 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
             outputCapMismatchItems,
             consistencyProblems,
             subsetContextReversals,
+            subsetContextReversalPairs,
             fallbackScopeAsDeployed,
             fallbackReachableAsDeployed,
             fallbackReachableIfFlagOn,
