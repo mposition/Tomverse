@@ -963,6 +963,93 @@ const marketingRouteOffenders = (relative, source) => {
             return false;
           };
 
+          /**
+           * Why a specification value is not one of the forms a route uses,
+           * or null when it is.
+           *
+           * The twenty routes write five things and nothing else: a literal, a
+           * bare name, a member of something imported or of a local table this
+           * check can read, an arrow the wrapper calls later, and an object or
+           * array of those. Everything else is unrecognised.
+           *
+           * Unrecognised is a failure, not a pass. That is the whole change:
+           * the earlier versions named the forms that were dangerous, and
+           * every round of review found one more that had not been named.
+           */
+          const notAnAllowedValue = (node) => {
+            let current = node;
+            while (ts.isParenthesizedExpression(current)) current = current.expression;
+
+            if (
+              ts.isStringLiteral(current) ||
+              ts.isNumericLiteral(current) ||
+              ts.isNoSubstitutionTemplateLiteral(current) ||
+              ts.isIdentifier(current) ||
+              current.kind === ts.SyntaxKind.TrueKeyword ||
+              current.kind === ts.SyntaxKind.FalseKeyword ||
+              current.kind === ts.SyntaxKind.NullKeyword
+            ) {
+              return null;
+            }
+
+            // An arrow or function the wrapper calls inside its transaction.
+            // What it does there is the point of it, so the body is not read
+            // -- but a default runs before the wrapper calls anything.
+            if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+              return current.parameters.some((parameter) => parameter.initializer)
+                ? "a function with a parameter default, which runs before the wrapper calls it"
+                : null;
+            }
+
+            // A member of something imported, or of a local table this check
+            // has read and found to be data. Reading anything else can run an
+            // accessor before the wrapper is entered.
+            if (
+              ts.isPropertyAccessExpression(current) ||
+              ts.isElementAccessExpression(current)
+            ) {
+              let root = current;
+              while (
+                ts.isPropertyAccessExpression(root) ||
+                ts.isElementAccessExpression(root)
+              ) {
+                if (ts.isElementAccessExpression(root)) {
+                  const argument = notAnAllowedValue(root.argumentExpression);
+                  if (argument) return `an index that is ${argument}`;
+                }
+                root = root.expression;
+              }
+              if (!ts.isIdentifier(root)) return "a member of something unrecognised";
+              if (importedBindings.has(root.text)) return null;
+              if (isPlainData(declaredHere(root))) return null;
+              return `a member of ${root.text}, which is not imported and not a plain table`;
+            }
+
+            if (ts.isObjectLiteralExpression(current)) {
+              for (const member of current.properties) {
+                if (
+                  !ts.isPropertyAssignment(member) ||
+                  !ts.isIdentifier(member.name)
+                ) {
+                  return "an object with a member this check does not recognise";
+                }
+                const inner = notAnAllowedValue(member.initializer);
+                if (inner) return `an object whose ${member.name.text} is ${inner}`;
+              }
+              return null;
+            }
+
+            if (ts.isArrayLiteralExpression(current)) {
+              for (const element of current.elements) {
+                const inner = notAnAllowedValue(element);
+                if (inner) return `an array holding ${inner}`;
+              }
+              return null;
+            }
+
+            return "an expression this check does not recognise";
+          };
+
           /** What a name in this file was declared as, or null. */
           const declaredHere = (identifier) => {
             for (const statement of tree.statements) {
@@ -1027,66 +1114,48 @@ const marketingRouteOffenders = (relative, source) => {
           };
 
           for (const property of spec.properties) {
-            // What names the property, before what it is set to. A computed
-            // name runs when the object is built whatever kind of member it
-            // names, and `{ [(() => { store(); return "request"; })()]: req }`
-            // typechecks clean.
-            if (
-              property.name &&
-              ts.isComputedPropertyName(property.name) &&
-              evaluatesEarly(property.name.expression)
-            ) {
+            // A computed name runs when the object is built, whatever kind of
+            // member it names, so it is read before anything else about the
+            // member is considered.
+            if (property.name && ts.isComputedPropertyName(property.name)) {
               offenders.push(
-                `${relative}: ${name} evaluates a computed property name before the predicate runs`
-              );
-            }
-
-            // An accessor does not run when the object is built; it runs when
-            // the property is read, and the wrapper reads `request`,
-            // `bucket`, `schema` and `gate` before it opens the transaction
-            // (lib/marketingAdminMutations.ts). A store call in a getter
-            // therefore commits outside the audit transaction while looking
-            // like an ordinary field. The specification is data: it has no
-            // reason to carry an accessor at all, so the shape is refused
-            // rather than its body inspected.
-            if (
-              ts.isGetAccessorDeclaration(property) ||
-              ts.isSetAccessorDeclaration(property)
-            ) {
-              offenders.push(
-                `${relative}: ${name} puts an accessor in the specification`
+                `${relative}: ${name} computes a property name in the specification`
               );
               continue;
             }
-
-            // A spread copies by reading, so a getter on the spread object
-            // runs during the copy -- before the wrapper is entered. The
-            // spread's own expression is usually an identifier, so walking it
-            // finds nothing, and following it would mean following it into
-            // another module. The specification is this route's own decision
-            // in every field; assembling it from elsewhere is the shape, so
-            // the shape is refused.
-            if (ts.isSpreadAssignment(property)) {
+            if (!property.name || !ts.isIdentifier(property.name)) {
               offenders.push(
-                `${relative}: ${name} spreads something into the specification`
+                `${relative}: ${name} writes a specification member this check does not recognise`
+              );
+              continue;
+            }
+            const field = property.name.text;
+
+            // Methods and accessors are not how any route writes a field, and
+            // both run code the wrapper did not ask for at a time it did not
+            // choose -- an accessor when the field is read, a method when it
+            // is called. Neither is refused for being dangerous; they are
+            // refused for not being one of the two forms below.
+            if (
+              !ts.isPropertyAssignment(property) &&
+              !ts.isShorthandPropertyAssignment(property)
+            ) {
+              offenders.push(
+                `${relative}: ${name} writes ${field} as something other than a plain field`
               );
               continue;
             }
 
             const value = ts.isPropertyAssignment(property)
               ? property.initializer
-              : ts.isShorthandPropertyAssignment(property)
-                ? property.name
-                : ts.isMethodDeclaration(property)
-                  ? property
-                  : null;
-            if (!value) continue;
-            const field = property.name.getText(tree);
+              : property.name;
 
-            // `gate` and `refusal` are the two the wrapper calls outside its
-            // transaction, so stopping at their boundary hid exactly the
-            // calls that matter. Reads are allowed inside them: by then the
-            // wrapper is supplying the argument.
+            // `gate` and `refusal` are the fields the wrapper uses outside
+            // its own transaction: it calls `gate` before opening one
+            // (lib/marketingAdminMutations.ts) and `refusal` in the catch
+            // after it. `schema` is parsed there too. So these three are
+            // followed into whatever they name; the rest are checked for the
+            // shape they are written in.
             if (OUTSIDE_THE_TRANSACTION.has(field)) {
               const problem = functionRuns(value);
               if (problem) {
@@ -1097,14 +1166,7 @@ const marketingRouteOffenders = (relative, source) => {
               continue;
             }
 
-            // A schema is parsed before the transaction opens, so a
-            // `refine`/`transform`/`superRefine` callback runs there too.
-            // The field is a shorthand, so the value is a name: follow it to
-            // its declaration in this file and read those callbacks.
             if (field === "schema") {
-              // Whatever the value is, and whatever it names. An expression
-              // written in place was not followed at all, and a name this
-              // file does not declare cannot be.
               let definition = value;
               if (ts.isIdentifier(value)) {
                 const found = declaredHere(value);
@@ -1117,8 +1179,8 @@ const marketingRouteOffenders = (relative, source) => {
                 definition = found;
               }
               // Every Zod method that takes code and runs it during `parse`.
-              // `preprocess` and `overwrite` were missing from the list and
-              // both run their callback (node_modules/zod/v4/classic/schemas.js).
+              // `preprocess` and `overwrite` were missing and both do
+              // (node_modules/zod/v4/classic/schemas.js).
               const RUNS_A_CALLBACK = [
                 "refine",
                 "transform",
@@ -1150,11 +1212,9 @@ const marketingRouteOffenders = (relative, source) => {
               continue;
             }
 
-            if (ts.isShorthandPropertyAssignment(property)) continue;
-            if (evaluatesEarly(value)) {
-              offenders.push(
-                `${relative}: ${name} evaluates ${field} before the predicate runs`
-              );
+            const unrecognised = notAnAllowedValue(value);
+            if (unrecognised) {
+              offenders.push(`${relative}: ${name} sets ${field} to ${unrecognised}`);
             }
           }
           continue;
