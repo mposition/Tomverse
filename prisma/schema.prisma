@@ -5968,3 +5968,47 @@ model AmuxRouteDecision {
   @@index([worker, createdAt])
   @@index([scoringVersion, createdAt])
 }
+
+/// Operator evidence for one catalog-import attempt. No User foreign key:
+/// deleting an operator must not rewrite the row. Apply stays off until a
+/// separate latch is enabled; this table existing is not that enablement.
+model AmuxBoardImportApproval {
+  id                           String    @id
+  status                       String
+  actorUserId                  String
+  authorizationAuditLogId      String    @unique
+  manifestDigest               String
+  canonicalizerVersion         String
+  sourceCommit                 String
+  boardDigest                  String
+  sourceVerificationMode       String
+  sourceAttestedAt             DateTime
+  activeItemCount              Int
+  sectionCount                 Int
+  recommendationReferenceCount Int
+  createKeys                   Json
+  noOpKeys                     Json
+  conflictKeys                 Json
+  excludeKeys                  Json
+  executionBriefDigests        Json
+  itemBindings                 Json
+  itemBindingsDigest           String
+  plannerVersion               String
+  validatorVersion             String
+  scannerVersion               String
+  scannerRulesetDigest         String
+  policyVersion                Int
+  rawBodyDigest                String
+  outcomeUnknownAt             DateTime?
+  preparedAt                   DateTime
+  approvedAt                   DateTime?
+  consumedAt                   DateTime?
+  rejectedAt                   DateTime?
+  expiredAt                    DateTime?
+  expiresAt                    DateTime
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}

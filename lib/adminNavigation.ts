@@ -656,6 +656,18 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 export const ADMIN_DETAIL_ROUTES = [
   {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // catalog import is owner-only and must not be advertised to roles that
+    // receive a 404 from the page and the API.
+    id: "amux-board-import",
+    pattern: /^\/admin\/amux-board-import$/,
+    label: "AMUX catalog import",
+    description: "Owner-only preview and approval. Apply stays off on this screen.",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // those tables feed the palette for every admin role, while this one-shot
     // cost-authority surface is owner-only and should not be advertised to
     // roles that receive a 404 from the page and API routes.
