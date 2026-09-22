@@ -200,6 +200,7 @@ import {
     type AttemptPriceSnapshot,
     type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
+import { routingOutcomeForSettlement } from "@/lib/chatSettlementOutcome";
 import {
     decideFallback,
     recoveryAfterFallback,
@@ -4369,11 +4370,7 @@ async function handleChatPost(
                     await completeInstrumentedDispatch(dispatchRecord, {
                         outcome:
                             instrumentation?.outcome ??
-                            (outcome === "completed"
-                                ? "succeeded"
-                                : outcome === "cancelled"
-                                  ? "cancelled"
-                                  : "failed_post_token"),
+                            routingOutcomeForSettlement(outcome),
                         failureLayer:
                             instrumentation?.failureLayer ??
                             (outcome === "completed" || outcome === "cancelled"
