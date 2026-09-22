@@ -255,6 +255,20 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  ProviderEndpoint_residencyClass_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "ENDPOINT_RESIDENCY_CLASSES",
+    reason:
+      "proven and unproven, and deliberately no third value for 'probably'. The question this answers is binary -- may a residency-constrained request be served from here -- and a middle value would be read as a yes by whoever needed one. 'unproven' is the honest default rather than a gap: it says nobody has read a contract naming a recipient entity and a processing region, which is where every provider stands until the contract review lands.",
+  },
+  ModelDeployment_qualityGateStatus_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "DEPLOYMENT_QUALITY_GATE_STATUSES",
+    reason:
+      "pending, passed, failed, stale -- per deployment rather than per equivalence class, because no provider in the pool has been shown to attest the immutable artifact that would let one placement's quality evidence stand for another's. 'stale' is its own value rather than a flavour of 'failed': evidence that expired is not evidence the model got worse, and collapsing them would make an expiry read as a regression.",
+  },
   RoutingAttempt_errorClass_check: {
     owner: "list",
     module: "lib/routingAttemptStore.ts",

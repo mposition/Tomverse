@@ -1031,15 +1031,15 @@ model ProviderProbeResult {
 // `scopeKey` is either "new" or the conversation id. Attachment references
 // are ordered opaque ids only; route validation owns their exact JSON shape.
 model ChatComposerDraft {
-  id                   String       @id @default(cuid())
+  id                   String   @id @default(cuid())
   userId               String
   scopeKey             String
   conversationId       String?
-  text                  String       @default("")
+  text                 String   @default("")
   attachmentReferences Json
-  revision              Int          @default(1)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  revision             Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1053,7 +1053,7 @@ model ChatComposerDraft {
 // Message because claim must precede provider and reservation work, while the
 // assistant Message is committed only later.
 model ChatResponseAttempt {
-  assistantMessageId  String   @id
+  assistantMessageId  String    @id
   userId              String
   conversationId      String
   sourceUserMessageId String
@@ -1061,16 +1061,16 @@ model ChatResponseAttempt {
   requestedModelId    String
   actualModelId       String?
   provider            String?
-  status              String   @default("claimed")
-  partialContent      String   @default("")
-  checkpointRevision  Int      @default(0)
+  status              String    @default("claimed")
+  partialContent      String    @default("")
+  checkpointRevision  Int       @default(0)
   ownerId             String
   leaseExpiresAt      DateTime
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1903,81 +1903,81 @@ model Feedback {
 /// human -- it never modifies code, never pushes a branch, never opens a PR.
 /// llmConfidence is observational only and stays null in Phase 2.
 model FeedbackAutoFixCase {
-  id                  String    @id @default(cuid())
-  feedbackId          String    @unique
-  feedback            Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  traceId             String
+  id                     String    @id @default(cuid())
+  feedbackId             String    @unique
+  feedback               Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId                String
   /// Trusted occurrence identity from the verified token, when one existed.
-  occurrenceId        String?
+  occurrenceId           String?
   /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
-  fingerprint         String?
-  sourceRelease       String?
+  fingerprint            String?
+  sourceRelease          String?
   /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
   /// written with compare-and-swap conditional updates.
-  state               String    @default("received")
+  state                  String    @default("received")
   /// One of AUTOFIX_CLASSIFICATION once classified.
-  classification      String?
-  ineligibilityReason String?
+  classification         String?
+  ineligibilityReason    String?
   /// Reserved for a future LLM diagnosis pass; observational, never a gate.
-  llmConfidence       Float?
+  llmConfidence          Float?
   /// Bounded technical facts only -- no user text, no prompts, no tokens.
-  diagnosticSummary   Json?
-  attemptCount        Int       @default(0)
-  claimedAt           DateTime?
-  heartbeatAt         DateTime?
+  diagnosticSummary      Json?
+  attemptCount           Int       @default(0)
+  claimedAt              DateTime?
+  heartbeatAt            DateTime?
   /// Doubles as the not-before instant while state = evidence_delayed.
-  leaseExpiresAt      DateTime?
-  terminalReason      String?
-  closedAt            DateTime?
+  leaseExpiresAt         DateTime?
+  terminalReason         String?
+  closedAt               DateTime?
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
-  fixBranch           String?
+  fixBranch              String?
   /// The running fix attempt's server-minted id. Every heartbeat and result
   /// must present it; a claim replaces it and a reclaim or a terminal result
   /// clears it, so a late callback from an expired run matches nothing.
-  fixAttemptId        String?
-  fixPrNumber         Int?
-  fixPrUrl            String?
+  fixAttemptId           String?
+  fixPrNumber            Int?
+  fixPrUrl               String?
   /// Read back from GitHub after the human-approved merge; never inferred
   /// from enabling auto-merge.
-  mergeSha            String?
-  stagingSha          String?
+  mergeSha               String?
+  stagingSha             String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
-  redGreenProof       Json?
+  redGreenProof          Json?
   /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
   /// The develop PR head and its change manifest digest, read from GitHub by
   /// the server (lib/feedbackAutoFixChangeManifest.ts).
-  fixHeadSha          String?
-  fixManifestDigest   String?
+  fixHeadSha             String?
+  fixManifestDigest      String?
   /// The manifest itself: path, base blob and head blob per changed file.
-  fixManifest         Json?
+  fixManifest            Json?
   /// Root cause, fix and test summaries from the fix run: bounded, technical,
   /// derived only from the diagnostic summary -- never the report body.
-  fixReport           Json?
+  fixReport              Json?
   /// --- Owner approval, bound to one head and one manifest --------------------
   /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
   /// here: the case keeps no account identifier of its own.
-  approvedAt          DateTime?
-  approvedHeadSha     String?
+  approvedAt             DateTime?
+  approvedHeadSha        String?
   approvedManifestDigest String?
   /// --- Promotion: every value observed by the server itself -----------------
-  stagingDeploymentId String?
-  stagingFirstSeenAt  DateTime?
-  stagingVerifiedAt   DateTime?
-  productionBranch    String?
-  productionPrNumber  Int?
-  productionPrUrl     String?
-  productionPrHeadSha String?
-  productionMergeSha  String?
+  stagingDeploymentId    String?
+  stagingFirstSeenAt     DateTime?
+  stagingVerifiedAt      DateTime?
+  productionBranch       String?
+  productionPrNumber     Int?
+  productionPrUrl        String?
+  productionPrHeadSha    String?
+  productionMergeSha     String?
   productionDeploymentId String?
   productionFirstSeenAt  DateTime?
   productionVerifiedAt   DateTime?
   /// The last observer pass that read this case and why it did not advance:
   /// what the console shows as "observation delayed".
-  promotionObservedAt DateTime?
-  promotionObservation String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  promotionObservedAt    DateTime?
+  promotionObservation   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([state, leaseExpiresAt])
   @@index([createdAt])
@@ -5144,7 +5144,7 @@ model EmailUnsubscribeKeyAdoption {
   id          String   @id @default(cuid())
   keyVersions String[]
   adoptedAt   DateTime @default(now())
-  singleton   Boolean  @default(true) @unique
+  singleton   Boolean  @unique @default(true)
 }
 
 /// Raw provider callbacks, stored before they are acted on.
@@ -5464,4 +5464,128 @@ model PromptRefinerReservation {
   stage PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([stageId, status, expiresAt])
+}
+
+/// Where a provider actually serves a request from.
+///
+/// Dark. Nothing writes this, nothing routes from it, and no request consults
+/// it. It exists so that the identity the routing work needs can be added
+/// before the facts that fill it arrive, which is the order the independent
+/// review asked for: additive schema first, activation separately.
+///
+/// Separate from `ModelDeployment` because a region is infrastructure and a
+/// model is not. One Azure resource serves several model deployments under one
+/// credential, and the question "which jurisdiction processed this" is answered
+/// here rather than once per model.
+///
+/// Design: .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+model ProviderEndpoint {
+  id                  String   @id @default(cuid())
+  /// The provider the request is sent to.
+  gatewayProvider     String
+  /// The provider that actually serves the model.
+  ///
+  /// Null when an aggregator will not say, or can change it. Equal to
+  /// `gatewayProvider` on a direct route. There is deliberately no single
+  /// `provider` column: a reader could not tell which of the two it meant.
+  servingProvider     String?
+  /// The region this endpoint serves from, when it is known.
+  region              String?
+  endpointUrl         String?
+  /// The cloud account or resource this endpoint belongs to.
+  resourceId          String?
+  /// proven | unproven
+  ///
+  /// `unproven` is the honest default and not a gap: it says nobody has read a
+  /// contract that names where the data goes. An unproven endpoint carries no
+  /// residency-constrained traffic. There is no third value for "probably" --
+  /// whoever needed one would read it as a yes.
+  residencyClass      String   @default("unproven")
+  /// The regions this endpoint can reach, as fixed identifiers.
+  destinationRegions  Json?
+  /// A digest of the routing configuration we send an aggregator.
+  ///
+  /// Our intent, never their fact: it proves what was asked for and says
+  /// nothing about where the broker ran it. Eligibility is decided from the
+  /// approval below, not from this.
+  routingPolicyDigest String?
+  enabled             Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  deployments ModelDeployment[]
+  approvals   EndpointResidencyApproval[]
+
+  @@index([gatewayProvider, enabled])
+  @@index([residencyClass])
+}
+
+/// What was approved, and on what basis, at a point in time.
+///
+/// Append-only. An approval is never edited: a change is a new row, so that
+/// "what was allowed when this request ran" has an answer that cannot be
+/// rewritten afterwards. An operator who could edit a destination could make a
+/// past disclosure look compliant.
+///
+/// The routing gate reads this, not `ProviderEndpoint.region`, so that a legal
+/// question has one source rather than two that can disagree.
+model EndpointResidencyApproval {
+  id                   String    @id @default(cuid())
+  providerEndpointId   String
+  /// Fixed identifier of what permits this -- a contract, a DPA, a published
+  /// sub-processor page. Never prose: a later reader checks the reference
+  /// rather than trusting the row.
+  evidenceRef          String
+  /// The legal entities that receive the data.
+  allowedRecipients    Json
+  /// The regions the data may be processed in.
+  allowedRegions       Json
+  /// What makes the pin hold -- an endpoint URL, a request option, an account
+  /// setting. A region nothing enforces is a hope.
+  enforcementMechanism String
+  effectiveFrom        DateTime
+  effectiveTo          DateTime?
+  /// The person who approved it.
+  approvedBy           String
+  createdAt            DateTime  @default(now())
+
+  endpoint ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([providerEndpointId, effectiveFrom])
+}
+
+/// One routable placement of a logical model.
+///
+/// Dark, as above. The same logical model on two endpoints is two rows here
+/// and one model to the person using it: `logicalModelId` stays the product's
+/// own model id, because a user's saved model must not become an
+/// infrastructure identifier.
+model ModelDeployment {
+  id                     String    @id @default(cuid())
+  /// The catalogue model a person selects. Not a foreign key: the catalogue is
+  /// partly static, and a deployment must not be deleted by a registry edit.
+  logicalModelId         String
+  providerEndpointId     String
+  /// What the provider calls it, which is not what we call it. Azure's own
+  /// word for this is "deployment", which is why the column says whose.
+  upstreamDeploymentName String
+  modelVersion           String?
+  modelRevision          String?
+  quantization           String?
+  tokenizerRevision      String?
+  /// Quality evidence is per-deployment until an attestation survey shows that
+  /// two placements can honestly share it. Reusing evidence across regions
+  /// without that would hide drift.
+  qualityGateStatus      String    @default("pending")
+  qualityGateExpiresAt   DateTime?
+  /// Capability declarations, as the candidate filter would read them.
+  capabilities           Json?
+  enabled                Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  endpoint ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([providerEndpointId, upstreamDeploymentName])
+  @@index([logicalModelId, enabled])
 }
