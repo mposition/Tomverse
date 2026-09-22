@@ -113,8 +113,13 @@ const RELATION_FIELDS = (() => {
         }
         if (host === null || DARK_TABLES.includes(host)) continue;
 
-        const field = /^\s+(\w+)\s+(\w+)(\[\])?\s*(@|$)/.exec(line);
-        if (field && byTable[field[2]]) byTable[field[2]].push(field[1]);
+        // `Type`, `Type[]` and `Type?` all reach the table. An earlier
+        // version matched only the first two, so an optional relation was
+        // invisible to this list.
+        const field = /^\s+(\w+)\s+(\w+)(\[\]|\?)?\s*(@|$)/.exec(line);
+        if (field && byTable[field[2]] && !byTable[field[2]].includes(field[1])) {
+            byTable[field[2]].push(field[1]);
+        }
     }
 
     return byTable;

@@ -1025,6 +1025,29 @@ model ProviderProbeResult {
   diagnosticCode      String?
   createdAt           DateTime @default(now())
 
+  /// Which placement this sample came from. Dark, and null on every row.
+  ///
+  /// Routing needs health per deployment and this table samples per
+  /// provider, which is the first of the five things section 8.1 of the
+  /// identity design lists before the candidate filter can cut over. The
+  /// columns close that gap in the schema and nothing else: no writer
+  /// produces a value until a per-deployment canary exists.
+  ///
+  /// No backfill. There is no record of which placement served a past
+  /// sample and no rule that could recover one.
+  ///
+  /// RESTRICT on both: this is a historical record, and the way to stop
+  /// routing to a placement is to disable it, not to delete the rows
+  /// saying it answered turns.
+  providerEndpointId String?
+  modelDeploymentId  String?
+
+  probedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  probedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The migration makes the two grain indexes partial on IS NOT NULL,
+  // which Prisma cannot express: every row is null until a canary writes
+  // one, so a full index would be one entry per sample for nothing.
+
   @@index([provider, createdAt])
   @@index([provider, modelId, createdAt])
   @@index([runId])
@@ -4232,6 +4255,26 @@ model RoutingAttempt {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
+  /// Which placement served this attempt. Dark, and null on every row.
+  ///
+  /// Routing needs dispatch signals per deployment and this table records
+  /// them per provider, which is the first of the five things section 8.1 of
+  /// the identity design lists before the candidate filter can cut over. No
+  /// writer produces a value yet.
+  ///
+  /// No backfill: there is no record of which placement served a past
+  /// attempt and no rule that could recover one.
+  ///
+  /// RESTRICT on both: an attempt says what happened, and deleting the
+  /// placement it names must not delete it or drop the attribution.
+  providerEndpointId String?
+  modelDeploymentId  String?
+
+  dispatchedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  dispatchedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The migration makes the two grain indexes partial on IS NOT NULL, which
+  // Prisma cannot express: every row is null until a writer produces one.
+
   @@unique([runId, attemptIndex])
   @@index([outcome, createdAt])
   @@index([modelId, createdAt])
@@ -5543,10 +5586,13 @@ model ProviderEndpoint {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  deployments        ModelDeployment[]
-  approvals          EndpointResidencyApproval[]
-  credentialBindings CredentialBinding[]
-  quotaScopes        QuotaScope[]
+  deployments              ModelDeployment[]
+  approvals                EndpointResidencyApproval[]
+  credentialBindings       CredentialBinding[]
+  quotaScopes              QuotaScope[]
+  providerProbeResults     ProviderProbeResult[]
+  routingAttempts          RoutingAttempt[]
+  availabilityObservations AvailabilityObservation[]
 
   @@index([gatewayProvider, enabled])
   @@index([residencyClass])
@@ -5645,9 +5691,12 @@ model ModelDeployment {
   promptCacheVerifiedAt      DateTime?
   promptCacheEvidenceRef     String?
 
-  endpoint        ProviderEndpoint          @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  quotaScopes     QuotaScope[]
-  cacheAffinities DeploymentCacheAffinity[]
+  endpoint                 ProviderEndpoint          @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaScopes              QuotaScope[]
+  cacheAffinities          DeploymentCacheAffinity[]
+  providerProbeResults     ProviderProbeResult[]
+  routingAttempts          RoutingAttempt[]
+  availabilityObservations AvailabilityObservation[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
@@ -5940,6 +5989,13 @@ model AvailabilityObservation {
 
   observedAt DateTime
   createdAt  DateTime @default(now())
+
+  /// The foreign keys this table should have had when it was added. Without
+  /// them the two columns accept an id matching no row, and an observation
+  /// attributed to nothing is indistinguishable from one attributed to
+  /// something until somebody joins.
+  observedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  observedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([provider, observedAt])
   @@index([providerEndpointId, observedAt])
