@@ -255,6 +255,20 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  RoutingCandidateVerdict_verdict_check: {
+    owner: "list",
+    module: "lib/routingCandidateVerdict.ts",
+    list: "ROUTING_CANDIDATE_VERDICTS",
+    reason:
+      "eligible or rejected. An earlier draft of this table held only rejections, which left it unable to say why a model that passed every filter still lost -- the question the table exists for. A nullable reason carries both, bound to the verdict by its own CHECK so the two cannot disagree.",
+  },
+  RoutingCandidateVerdict_reason_check: {
+    owner: "list",
+    module: "lib/routerCandidates.ts",
+    list: "CANDIDATE_REJECTIONS",
+    reason:
+      "The eleven reasons the candidate filter can give, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
+  },
   QuotaScope_scopeKind_check: {
     owner: "list",
     module: "lib/deploymentIdentity.ts",

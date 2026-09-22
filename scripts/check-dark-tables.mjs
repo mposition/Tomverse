@@ -33,6 +33,7 @@ const DARK_TABLES = [
     "CredentialBinding",
     "QuotaScope",
     "ProviderRegistryEntry",
+    "RoutingCandidateVerdict",
 ];
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */

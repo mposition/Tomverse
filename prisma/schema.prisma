@@ -3987,8 +3987,9 @@ model RoutingRun {
   conversationId String?
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
-  routingAttempts RoutingAttempt[] @relation("RunAttempts")
-  updatedAt       DateTime         @default(now()) @updatedAt
+  routingAttempts          RoutingAttempt[]          @relation("RunAttempts")
+  updatedAt                DateTime                  @default(now()) @updatedAt
+  routingCandidateVerdicts RoutingCandidateVerdict[]
 
   @@index([createdAt])
   @@index([mode, createdAt])
@@ -5682,4 +5683,49 @@ model CredentialBinding {
 
   @@index([providerEndpointId, status])
   @@index([accountId])
+}
+
+/// Why each candidate was or was not chosen, frozen at decision time.
+///
+/// Dark. `RoutingRun.rejectedByReason` records counts per reason, on the
+/// stated ground that which models were refused is stable catalogue
+/// information a reader can reconstruct. It is not: candidates come from the
+/// runtime registry, where `enabled`, `catalogDeleted`, `minimumPlan`, the
+/// context window and backend readiness all move, and the health and credit
+/// verdicts are that moment's state. Nothing about a past decision can be
+/// rebuilt from a count.
+///
+/// One row per candidate, and it records the eligible ones too -- a table that
+/// held only rejections could not answer why a model that passed every filter
+/// still lost, which is the question it exists for.
+///
+/// Content-free: identifiers, a fixed reason, a rank. No prompt, no balance,
+/// no provider text.
+model RoutingCandidateVerdict {
+  id                      String   @id @default(cuid())
+  routingRunId            String
+  /// The product model, which is what a person selects.
+  logicalModelId          String
+  /// The placement, once deployments route. Null while nothing has one.
+  modelDeploymentId       String?
+  /// eligible | rejected
+  verdict                 String
+  /// A fixed `CandidateRejection`. Null exactly when the verdict is eligible.
+  reason                  String?
+  /// Where this candidate came in the ranking. Null when it was rejected.
+  rank                    Int?
+  /// The bucket the ranking put it in, so a tie is legible as a tie.
+  rankBucket              Int?
+  /// The decision inputs as they stood, so health and cost do not have to be
+  /// reconstructed from tables that have since moved.
+  decisionInputSnapshotId String?
+  createdAt               DateTime @default(now())
+
+  run RoutingRun @relation(fields: [routingRunId], references: [id], onDelete: Cascade)
+
+  // The uniqueness is two partial indexes in the migration, which Prisma
+  // cannot express: PostgreSQL treats NULLs as distinct, so one index over the
+  // three columns would accept two rows for the same model with no deployment.
+  @@index([routingRunId, verdict])
+  @@index([reason])
 }
