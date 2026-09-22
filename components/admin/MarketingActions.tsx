@@ -53,6 +53,26 @@ export type MarketingAction = {
   id: string;
   label: string;
   path: string;
+  /**
+   * The method the route actually exports.
+   *
+   * Not always POST: the settings route is a PATCH, and sending POST to it
+   * answered 405 -- which reached the operator as the generic failure line,
+   * so three switch toggles looked broken rather than misaddressed.
+   */
+  method?: "POST" | "PATCH";
+  /**
+   * Why this cannot be done yet, when that is a fact rather than a refusal.
+   *
+   * A control the server is certain to refuse is not a control. Turning
+   * publishing on is the case: the publisher capability arrives in S2c, so the
+   * writer answers `publisher_capability_unavailable` every time. It is drawn
+   * disabled with this sentence instead of being hidden, because an operator
+   * looking for the switch should find out why rather than find nothing.
+   */
+  unavailable?: string;
+  /** Turns a successful result into a sentence, when the result says something. */
+  describe?: (result: unknown) => string | null;
   /** Said before the request, not after: this is the last chance to stop. */
   confirm?: string;
   danger?: boolean;
@@ -83,10 +103,21 @@ export { localDateTimeValue };
 
 export function MarketingActionRail({
   actions,
+  section,
   onDone,
   m,
 }: {
   actions: MarketingAction[];
+  /**
+   * The tab this rail is on.
+   *
+   * The step-up callback is built from it rather than from `usePathname()`,
+   * which drops the query: re-authenticating from the accounts tab used to
+   * land the operator back on the queue, having lost the row they were acting
+   * on. docs/ui-contracts/admin-console-ia.md rule 2 -- the section lives in
+   * `?tab=`, so a link that omits it is a link to a different screen.
+   */
+  section: string;
   onDone: () => void;
   m: Record<string, string>;
 }) {
@@ -109,7 +140,7 @@ export function MarketingActionRail({
       setDone(null);
       try {
         const response = await fetch(action.path, {
-          method: "POST",
+          method: action.method ?? "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
           cache: "no-store",
@@ -136,10 +167,19 @@ export function MarketingActionRail({
           });
           return;
         }
-        await discardResponseBody(response);
+        // Read rather than discarded: the drain's answer is `remaining`, and
+        // an operator told only "done" would have to discover the rest of the
+        // backlog by watching the resume refuse again.
+        let described: string | null = null;
+        try {
+          const payload = (await response.json()) as { result?: unknown };
+          described = action.describe ? action.describe(payload.result) : null;
+        } catch {
+          await discardResponseBody(response);
+        }
         setOpen(null);
         setValues({});
-        setDone(action.id);
+        setDone(described ?? m.actionDone);
         onDone();
       } catch {
         setFailure({ message: m.actionFailed, requiresReauthentication: false });
@@ -147,11 +187,12 @@ export function MarketingActionRail({
         setBusy(null);
       }
     },
-    [m.actionFailed, onDone]
+    [m.actionDone, m.actionFailed, onDone]
   );
 
   const start = useCallback(
     (action: MarketingAction) => {
+      if (action.unavailable) return;
       if (action.fields && action.fields.length > 0) {
         if (open === action.id) {
           setOpen(null);
@@ -185,8 +226,14 @@ export function MarketingActionRail({
             type="button"
             data-testid={`marketing-action-${action.id}`}
             onClick={() => start(action)}
-            disabled={busy !== null}
-            aria-expanded={action.fields ? open === action.id : undefined}
+            disabled={busy !== null || action.unavailable !== undefined}
+            title={action.unavailable}
+            aria-describedby={
+              action.unavailable ? `marketing-why-${action.id}` : undefined
+            }
+            aria-expanded={
+              action.fields && !action.unavailable ? open === action.id : undefined
+            }
             className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
               action.danger
                 ? "border-red-500/40 text-red-200 hover:bg-red-500/10"
@@ -200,6 +247,21 @@ export function MarketingActionRail({
           </button>
         ))}
       </div>
+      {actions.some((action) => action.unavailable) ? (
+        <ul className="mt-2 grid gap-1">
+          {actions
+            .filter((action) => action.unavailable)
+            .map((action) => (
+              <li
+                key={action.id}
+                id={`marketing-why-${action.id}`}
+                className="text-[11px] text-zinc-500"
+              >
+                {action.label}: {action.unavailable}
+              </li>
+            ))}
+        </ul>
+      ) : null}
 
       {opened ? (
         <form
@@ -313,7 +375,7 @@ export function MarketingActionRail({
           data-testid="marketing-action-done"
           className="mt-2 text-xs font-bold text-emerald-300"
         >
-          {m.actionDone}
+          {done}
         </p>
       ) : null}
 
@@ -332,7 +394,9 @@ export function MarketingActionRail({
               // screen once the sign-in is recent again. A message naming the
               // remedy with no way to reach it is what
               // docs/ui-contracts/admin-console-ia.md calls a defect.
-              href={adminRecentAuthenticationHref(pathname)}
+              href={adminRecentAuthenticationHref(
+                `${pathname}?tab=${encodeURIComponent(section)}`
+              )}
               data-testid="marketing-reauthenticate-link"
               className="mt-2 inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-red-400/50 px-2.5 py-1.5 font-bold text-red-50 underline-offset-4 transition hover:bg-red-500/20 hover:underline"
             >

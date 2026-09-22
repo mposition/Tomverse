@@ -241,7 +241,7 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     requeue_without_failure: 409,
     resume_approval_conflict: 409,
   resume_drain_required: 409,
-  drain_not_paused: 409,
+  drain_not_stopped: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -1072,9 +1072,9 @@ async function expireDueApprovals(
  * the answer: it only moved the ceiling from a number to a latency.
  *
  * This is the other half. It expires up to the same bound and leaves the
- * account exactly where it was -- `paused`, which is the state that keeps the
- * publisher away from those posts in the meantime -- and says whether more
- * remain. Called until `remaining` is false, it leaves a resume with nothing
+ * account exactly where it was -- in one of the states where the publisher is
+ * not taking its posts, which is what keeps them from going out meanwhile --
+ * and says whether more remain. Called until `remaining` is false, it leaves a resume with nothing
  * to do but the small final batch, and the resume still verifies that for
  * itself rather than trusting that this ran.
  *
@@ -1082,6 +1082,10 @@ async function expireDueApprovals(
  * reach in which something goes out; that is why the kill switch does not gate
  * it. A kill-switched account that could not be drained could not be resumed
  * afterwards either.
+ *
+ * It accepts every state the resumes refuse from, not just `paused`. A drain
+ * narrower than the refusal is a hole: a disconnected account past the bound
+ * refused to reconnect, could not be drained, and has no edge into `paused`.
  */
 export async function drainDueMarketingApprovals(
   database: MarketingTransaction,
@@ -1089,10 +1093,15 @@ export async function drainDueMarketingApprovals(
 ): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
   const input = { id: String(rawInput.id) };
   const channel = await lockMarketingChannel(database, input.id);
-  if (channel.status !== "paused") {
+  if (!marketingChannelWasStopped(channel.status)) {
+    // The same predicate the resumes use, and it has to be: a drain that
+    // covered fewer states than the refusal did left a hole. A disconnected
+    // account with more than one batch of due posts refused to reconnect, had
+    // no way to be drained, and has no transition into `paused` -- so no
+    // Admin route could reduce the backlog and the account was stuck for good.
     throw new MarketingStoreRefusedError(
-      "drain_not_paused",
-      "Only a paused account has approvals to drain",
+      "drain_not_stopped",
+      "Only an account that is not publishing has approvals to drain",
     );
   }
   const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`

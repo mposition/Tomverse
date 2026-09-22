@@ -10,13 +10,15 @@ import {
   MARKETING_S2B1_ACTIONS,
   createMarketingChannel,
 } from "@/lib/marketingStore";
-import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
+import { MARKETING_CHANNELS } from "@/lib/marketingAutomationSchema";
 
 const schema = z
   .object({
-    channel: z.enum(
-      Object.keys(MARKETING_CHANNEL_CAPS) as [string, ...string[]]
-    ),
+    // The tuple itself, not its keys widened to `string`. Reading the keys
+    // produced `string`, which the store then had to be told to accept with
+    // `as never` -- an assertion that would have silenced a genuinely wrong
+    // value just as quietly as it silenced this one.
+    channel: z.enum(MARKETING_CHANNELS),
     provider: z.enum(MARKETING_PROVIDERS),
     externalAccountRef: z.string().trim().min(1).max(200).nullable(),
     defaultLocale: z.enum(MARKETING_LOCALES),
@@ -55,7 +57,7 @@ export async function POST(req: Request) {
     }),
     run: async (tx, { body }) => {
       const row = await createMarketingChannel(tx, {
-        channel: body.channel as never,
+        channel: body.channel,
         provider: body.provider,
         externalAccountRef: body.externalAccountRef,
         defaultLocale: body.defaultLocale,

@@ -18,7 +18,18 @@ const schema = z
   .object({
     expectedEnvelopeDigest: z.string().regex(/^[0-9a-f]{64}$/),
     expectedHistoryVersion: z.number().int().nonnegative(),
-    envelope: marketingEnvelopeSchema,
+    /**
+     * The words, and only the words.
+     *
+     * An earlier shape took the whole envelope back from the client, which
+     * could not work: the console never carried the envelope, so the request
+     * was always a single field against a strict schema and every edit was a
+     * 400. It is also the wrong shape. An edit is a correction to the copy;
+     * the claims, assets, channel and locale it was written for are the
+     * draft's, and the stored row is where they are. The merge happens below,
+     * inside the transaction, against the row the digest names.
+     */
+    renderedText: marketingEnvelopeSchema.shape.renderedText,
   })
   .strict();
 
@@ -64,7 +75,7 @@ export async function POST(req: Request, context: RouteContext) {
     run: async (tx, { body, auditLogId }) => {
       const post = await tx.marketingPost.findUnique({
         where: { id: postId },
-        select: { channelId: true, factSnapshot: true },
+        select: { channelId: true, factSnapshot: true, envelope: true },
       });
       if (!post) {
         // The store would refuse it anyway; failing here keeps the message
@@ -72,7 +83,14 @@ export async function POST(req: Request, context: RouteContext) {
         throw new Error(`Marketing post ${postId} does not exist`);
       }
 
-      const envelope = body.envelope;
+      // Parsed rather than trusted. The column is JSON and this row is about
+      // to be re-judged and re-stored; a shape that no longer satisfies the
+      // schema is a refusal, not something to patch a field into.
+      const stored = marketingEnvelopeSchema.safeParse(post.envelope);
+      if (!stored.success) {
+        throw new Error(`Marketing post ${postId} has no readable envelope`);
+      }
+      const envelope = { ...stored.data, renderedText: body.renderedText };
       const facts = await resolveMarketingFacts(tx, {
         claimIds: envelope.claimIds,
         assetIds: envelope.assets.map((asset) => asset.assetId),

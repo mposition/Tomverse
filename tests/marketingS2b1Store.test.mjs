@@ -593,35 +593,21 @@ test("the mutation gate reads the kill switch by the name the resolver uses", ()
   );
 });
 
-test("every marketing admin mutation route goes through the one predicate", () => {
-  // The permission and step-up checks live in `runMarketingAdminMutation`
-  // rather than in each route, which is only equivalent to checking them in
-  // the route while every route actually goes through it.
-  //
-  // Read with the TypeScript parser rather than by searching the text. The
-  // first version matched the function's name anywhere in the file, so a route
-  // that called the store directly and mentioned the wrapper in a comment or
-  // an unused import passed; it also missed `export const POST = ...` and any
-  // aliased session read.
-  const dir = fileURLToPath(new URL("../app/api/admin/marketing", import.meta.url));
-  const files = [];
-  const walk = (at) => {
-    for (const entry of readdirSync(at, { withFileTypes: true })) {
-      const next = join(at, entry.name);
-      if (entry.isDirectory()) walk(next);
-      else if (entry.name === "route.ts") files.push(next);
-    }
-  };
-  walk(dir);
-  assert.ok(files.length >= 10, `expected the marketing routes, saw ${files.length}`);
+const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
-  const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+/**
+ * What is wrong with one marketing admin route, as a list of sentences.
+ *
+ * A function rather than a loop body so the same judgement runs over the real
+ * routes *and* over a table of shapes that must not pass. A check that has
+ * only ever seen code that passes cannot say whether it would catch code that
+ * does not, and this one is a permission boundary -- three shapes got past an
+ * earlier version of it.
+ */
+const marketingRouteOffenders = (relative, source) => {
   const offenders = [];
-
-  for (const file of files) {
-    const source = readFileSync(file, "utf8");
-    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-    const relative = file.slice(file.indexOf("app" + sep));
+  {
+    const tree = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true);
 
     // What the file imported the wrapper as, if it did at all.
     let wrapperBinding = null;
@@ -679,8 +665,30 @@ test("every marketing admin mutation route goes through the one predicate", () =
         for (const declaration of statement.declarationList.declarations) {
           if (ts.isIdentifier(declaration.name)) {
             take(declaration.name.text, declaration);
+            continue;
+          }
+          // `export const { POST } = handlers`: the name is bound by a
+          // pattern, and what it is bound to is a value this check does not
+          // follow. It used to produce no handler, which read as nothing to
+          // check.
+          const bound = declaration.name.getText(tree);
+          for (const method of MUTATING) {
+            if (bound.includes(method)) {
+              offenders.push(
+                `${relative}: ${method} is bound by a pattern this check cannot follow`
+              );
+              seen.add(method);
+            }
           }
         }
+      } else if (ts.isExportDeclaration(statement) && !statement.exportClause) {
+        // `export * from "..."`: what it exports is in another file, so this
+        // check cannot say whether a mutating handler is among them. Unknown
+        // is a failure here, not a pass -- the question is a permission
+        // boundary.
+        offenders.push(
+          `${relative}: exports a whole module, so its handlers cannot be read here`
+        );
       } else if (
         ts.isExportDeclaration(statement) &&
         statement.exportClause &&
@@ -702,7 +710,7 @@ test("every marketing admin mutation route goes through the one predicate", () =
         }
       }
     }
-    if (mutatingHandlers.length === 0) continue;
+    if (mutatingHandlers.length === 0) return offenders;
 
     for (const { name, node } of mutatingHandlers) {
       let readsSession = false;
@@ -747,8 +755,7 @@ test("every marketing admin mutation route goes through the one predicate", () =
         );
       };
 
-      // A concise arrow body is the whole answer; anything else has to be a
-      // block whose every return is the wrapper.
+      // A concise arrow body is the whole answer.
       if (!ts.isBlock(fn.body)) {
         if (!isWrapperCall(fn.body)) {
           offenders.push(`${relative}: ${name} answers without the shared predicate`);
@@ -756,59 +763,183 @@ test("every marketing admin mutation route goes through the one predicate", () =
         continue;
       }
 
-      // Every return this handler can reach. Nested functions are skipped,
-      // because their returns belong to them. A sweep that only asked whether
-      // the wrapper appears *somewhere* passed a handler that called the store
-      // from an early return and kept an unreachable wrapper call below it --
-      // the call was there, and nothing ever ran it.
-      const returns = [];
-      const visitReturns = (inner) => {
-        if (
-          ts.isFunctionDeclaration(inner) ||
-          ts.isFunctionExpression(inner) ||
-          ts.isArrowFunction(inner) ||
-          ts.isMethodDeclaration(inner) ||
-          ts.isClassDeclaration(inner)
-        ) {
-          return;
-        }
-        if (ts.isReturnStatement(inner)) returns.push(inner);
-        ts.forEachChild(inner, visitReturns);
-      };
-      ts.forEachChild(fn.body, visitReturns);
+      // The shape, not the presence.
+      //
+      // Asking whether the wrapper appears somewhere passed a handler that
+      // called the store from an early return with an unreachable wrapper call
+      // below it. Asking whether every *return* is the wrapper passed a
+      // handler that did the write first and returned the wrapper afterwards
+      // -- the write ran outside the permission check, the step-up check and
+      // the audit transaction, and the sweep saw nothing wrong.
+      //
+      // So the body is restricted to what these handlers actually are: a route
+      // may unwrap its dynamic segment, and then it must answer. Two forms,
+      // nothing else. A handler that needs a third has to say so here, where
+      // somebody will read the reason.
+      const statements = fn.body.statements;
+      for (let index = 0; index < statements.length; index += 1) {
+        const statement = statements[index];
+        const isLast = index === statements.length - 1;
 
-      if (returns.length === 0) {
-        offenders.push(`${relative}: ${name} mutates without calling the shared predicate`);
-        continue;
-      }
-      for (const returned of returns) {
-        if (!isWrapperCall(returned.expression)) {
+        if (isLast) {
+          if (!ts.isReturnStatement(statement) || !isWrapperCall(statement.expression)) {
+            offenders.push(
+              `${relative}: ${name} does not end by returning the shared predicate`
+            );
+          }
+          continue;
+        }
+
+        // `const { postId } = await context.params;` and nothing else: every
+        // declaration awaits, so no statement before the answer can call a
+        // store, read a session or write a row.
+        const unwrapsParams =
+          ts.isVariableStatement(statement) &&
+          statement.declarationList.declarations.every(
+            (declaration) =>
+              declaration.initializer &&
+              ts.isAwaitExpression(declaration.initializer)
+          );
+        if (!unwrapsParams) {
           offenders.push(
-            `${relative}: ${name} has a return that is not the shared predicate`
+            `${relative}: ${name} does something before answering`
           );
         }
       }
-      // Nothing may run after it, so the wrapper's answer is the handler's.
-      const last = fn.body.statements[fn.body.statements.length - 1];
-      if (!last || !ts.isReturnStatement(last)) {
-        offenders.push(`${relative}: ${name} does not end by answering`);
+      if (statements.length === 0) {
+        offenders.push(`${relative}: ${name} does not answer at all`);
       }
+
     }
   }
-  assert.deepEqual(offenders, []);
-});
+  return offenders;
+};
 
-test("the marketing transaction brand has exactly one cast", () => {
-  const dir = join(process.cwd(), "lib");
+test("every marketing admin mutation route goes through the one predicate", () => {
+  // The permission and step-up checks live in `runMarketingAdminMutation`
+  // rather than in each route, which is only equivalent to checking them in
+  // the route while every route actually goes through it.
+  //
+  // Read with the TypeScript parser rather than by searching the text. The
+  // first version matched the function's name anywhere in the file, so a route
+  // that called the store directly and mentioned the wrapper in a comment or
+  // an unused import passed; it also missed `export const POST = ...` and any
+  // aliased session read.
+  const dir = fileURLToPath(new URL("../app/api/admin/marketing", import.meta.url));
   const files = [];
   const walk = (at) => {
     for (const entry of readdirSync(at, { withFileTypes: true })) {
       const next = join(at, entry.name);
       if (entry.isDirectory()) walk(next);
-      else if (entry.name.endsWith(".ts")) files.push(next);
+      else if (entry.name === "route.ts") files.push(next);
     }
   };
   walk(dir);
+  assert.ok(files.length >= 10, `expected the marketing routes, saw ${files.length}`);
+
+  const offenders = files.flatMap((file) =>
+    marketingRouteOffenders(
+      file.slice(file.indexOf("app" + sep)),
+      readFileSync(file, "utf8")
+    )
+  );
+  assert.deepEqual(offenders, []);
+});
+
+test("the route sweep fails every shape that gets past the predicate", () => {
+  // Each of these writes without the wrapper's permission check, step-up
+  // check and audit transaction, or hides whether it does. Three passed an
+  // earlier version of the sweep.
+  const imports =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n' +
+    'import { pauseMarketingChannel } from "@/lib/marketingStore";\n\n';
+  const bypasses = [
+    [
+      "an early return to the store, with the wrapper unreachable below it",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  if (req) return pauseMarketingChannel;\n" +
+        "  return runMarketingAdminMutation({});\n" +
+        "}\n",
+    ],
+    [
+      "the write first, the wrapper afterwards",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  await pauseMarketingChannel(req, {});\n" +
+        "  return runMarketingAdminMutation({});\n" +
+        "}\n",
+    ],
+    [
+      "a handler exported by specifier",
+      imports +
+        "async function POST(req: Request) {\n" +
+        "  return pauseMarketingChannel;\n" +
+        "}\n" +
+        "export { POST };\n",
+    ],
+    [
+      "a handler exported by a binding pattern",
+      imports +
+        "const handlers = { POST: async () => new Response() };\n" +
+        "export const { POST } = handlers;\n",
+    ],
+    ["a whole module re-exported", imports + 'export * from "@/lib/elsewhere";\n'],
+    [
+      "a handler that reads the session itself",
+      'import { getServerSession } from "next-auth/next";\n' +
+        imports +
+        "export async function POST(req: Request) {\n" +
+        "  const session = await getServerSession();\n" +
+        "  return runMarketingAdminMutation({ session });\n" +
+        "}\n",
+    ],
+  ];
+
+  const passed = bypasses
+    .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
+    .map(([name]) => name);
+  assert.deepEqual(passed, []);
+});
+
+test("the route sweep accepts the shape the real routes are written in", () => {
+  // The other half. A check that refuses everything is not a check either,
+  // and the shape restriction added for the "write first" bypass is exactly
+  // the kind that can go too far.
+  const withParams =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n\n' +
+    "type RouteContext = { params: Promise<{ postId: string }> };\n\n" +
+    "export async function POST(req: Request, context: RouteContext) {\n" +
+    "  const { postId } = await context.params;\n" +
+    "  return runMarketingAdminMutation({ request: req, targetId: postId });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", withParams), []);
+
+  const withoutParams =
+    'import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";\n\n' +
+    "export async function PATCH(req: Request) {\n" +
+    "  return runMarketingAdminMutation({ request: req });\n" +
+    "}\n";
+  assert.deepEqual(marketingRouteOffenders("probe/route.ts", withoutParams), []);
+});
+
+test("the marketing transaction brand has exactly one cast", () => {
+  // Every directory that ships runtime code, not just `lib`. A cast in a
+  // route is the same hole as a cast in a store, and the first version of this
+  // check could not see one.
+  const files = [];
+  const walk = (at) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const next = join(at, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+        files.push(next);
+      }
+    }
+  };
+  for (const root of ["lib", "app", "components"]) {
+    walk(join(process.cwd(), root));
+  }
 
   // A brand is only a boundary while the cast that produces it is one place.
   // Anywhere else, `prisma as unknown as MarketingTransaction` would satisfy
@@ -836,7 +967,50 @@ test("the marketing transaction brand has exactly one cast", () => {
     1,
     `expected the one cast inside runMarketingTransaction, saw ${casts.join(" | ")}`
   );
-  assert.ok(casts[0].startsWith("lib" + sep + "marketingStore.ts:"), casts[0]);
+  assert.ok(casts[0].includes("marketingStore.ts:"), casts[0]);
+});
+
+test("nothing in the marketing code casts its way past a type", () => {
+  // The brand check above looks for the brand's *name*, so `prisma as never`
+  // and `prisma as any` would satisfy a `MarketingTransaction` parameter
+  // without ever mentioning it. Those two assertions have no legitimate use in
+  // this code, so they are refused outright rather than judged case by case.
+  const files = [];
+  const walk = (at) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const next = join(at, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+        files.push(next);
+      }
+    }
+  };
+  walk(join(process.cwd(), "app", "api", "admin", "marketing"));
+  for (const entry of readdirSync(join(process.cwd(), "lib"), {
+    withFileTypes: true,
+  })) {
+    if (entry.isFile() && /^marketing.*\.ts$/u.test(entry.name)) {
+      files.push(join(process.cwd(), "lib", entry.name));
+    }
+  }
+  assert.ok(files.length >= 12, `the sweep found only ${files.length} files`);
+
+  const escapes = [];
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    const visit = (node) => {
+      if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+        const written = node.type.getText(tree).trim();
+        if (written === "any" || written === "never") {
+          escapes.push(`${file.slice(file.indexOf("lib") >= 0 ? file.indexOf("lib") : 0)}: ${node.getText(tree).slice(0, 60)}`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+  assert.deepEqual(escapes, []);
 });
 
 /** A paused channel row, in the shape `lockMarketingChannel` returns. */
@@ -914,10 +1088,12 @@ test("a resume refuses a backlog larger than one transaction before touching a r
   assert.equal(updates, 0);
 });
 
-test("the drain refuses an account that is not paused", async () => {
+test("the drain refuses an account that is still publishing", async () => {
   // A drain is only meaningful while the publisher is being kept away from
-  // those posts, and `paused` is what keeps it away. On a running account it
-  // would be expiring approvals nobody asked it to expire.
+  // those posts. On a running account it would be expiring approvals nobody
+  // asked it to expire -- and it has to accept every state the resumes refuse
+  // from, because a drain narrower than the refusal left a disconnected
+  // account past the bound with no way back at all.
   let reads = 0;
   await assert.rejects(
     drainDueMarketingApprovals(
@@ -931,7 +1107,7 @@ test("the drain refuses an account that is not paused", async () => {
     ),
     (error) =>
       error instanceof MarketingStoreRefusedError &&
-      error.code === "drain_not_paused",
+      error.code === "drain_not_stopped",
   );
   assert.equal(reads, 1);
 });
@@ -993,7 +1169,8 @@ test("a scope change on a running account does not expire its live schedules", a
   // The round-two finding was that an identity change *resumes* a paused
   // account without paying what a resume pays. On an account that is already
   // publishing, expiring its due posts would be a different decision -- about
-  // live schedules -- and policy §8.2 does not make it.
+  // live schedules -- and docs/policy/marketing-automation.md §8.2 does not
+  // make it.
   const channel = pausedChannel({
     status: "approval_mode",
     pausedAt: null,
@@ -1068,5 +1245,55 @@ test("the expiry record does not claim a door that was not used", () => {
   assert.ok(
     source.includes("trigger: options.trigger"),
     "the per-post expiry audit does not record which path expired it",
+  );
+});
+
+test("the drain reaches every state a resume can refuse from", async () => {
+  // The hole this closes: a disconnected account past the bound refused to
+  // reconnect (the reconnect owes the expiry, and the expiry refuses a
+  // backlog), refused to drain (the drain wanted `paused`), and has no
+  // transition into `paused` at all. No Admin route could reduce the backlog,
+  // so the account was stuck for good. A drain narrower than the refusal is
+  // not a smaller drain, it is a trap.
+  for (const status of ["paused", "disconnected", "connect_pending"]) {
+    const { reads, $queryRaw } = countingReads(pausedChannel({ status }));
+    const result = await drainDueMarketingApprovals(
+      { $queryRaw, marketingPost: { updateMany: async () => ({ count: 1 }) } },
+      { id: "channel-1" },
+    );
+    assert.deepEqual(result, { expiredPostIds: [], remaining: false }, status);
+    // The row, the clock, and the due query: it looked.
+    assert.equal(reads.total, 3, status);
+  }
+});
+
+test("the console offers the drain in exactly those states", () => {
+  // Two lists that have to agree, in two languages, so they are compared
+  // rather than trusted. The panel cannot import the store's predicate -- it
+  // is a client component and the store is server-only -- and the last time
+  // two copies of a closed list existed in this feature, they drifted.
+  const panel = readFileSync(
+    new URL("../components/admin/AdminMarketingPanel.tsx", import.meta.url),
+    "utf8",
+  );
+  const store = readFileSync(
+    new URL("../lib/marketingStore.ts", import.meta.url),
+    "utf8",
+  );
+  const listed = (source, name) => {
+    const at = source.indexOf(name);
+    assert.ok(at > 0, `${name} is missing`);
+    const open = source.indexOf("[", at);
+    const close = source.indexOf("]", open);
+    return source
+      .slice(open + 1, close)
+      .split(",")
+      .map((entry) => entry.trim().replace(/^"|"$/gu, ""))
+      .filter((entry) => entry.length > 0)
+      .sort();
+  };
+  assert.deepEqual(
+    listed(panel, "MARKETING_STOPPED_ACCOUNT_STATUSES"),
+    listed(store, "MARKETING_STOPPED_STATUSES"),
   );
 });

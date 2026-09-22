@@ -765,6 +765,7 @@ export {
   type MarketingConsoleSwitch,
 } from "@/lib/marketingConsoleSections";
 import { type MarketingConsoleSwitch } from "@/lib/marketingConsoleSections";
+import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
  * The generation number every admission-affecting setting change moves by one.
@@ -888,7 +889,11 @@ const readConfigGeneration = (value: string | undefined): number => {
  * bump, so a reader can never see the new value under the old generation.
  */
 export async function writeMarketingAutomationSwitch(
-  client: Pick<PrismaClient, "appSetting">,
+  // The branded transaction, not a raw client. This writes the switch and
+  // moves the configuration generation, and the caller writes a human audit
+  // row beside them; on a plain client each of those is its own autocommit and
+  // a failing generation CAS leaves the switch changed.
+  client: MarketingTransaction,
   input: {
     name: MarketingConsoleSwitch;
     enabled: boolean;

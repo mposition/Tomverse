@@ -66,13 +66,6 @@ const capOverride = (value: string): number | null => {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 };
 
-/** The words the draft actually holds, so an edit starts from them. */
-const envelopeText = (envelope: unknown): string => {
-  if (!envelope || typeof envelope !== "object") return "";
-  const value = (envelope as { renderedText?: unknown }).renderedText;
-  return typeof value === "string" ? value : "";
-};
-
 /** A week out, which is the ordinary answer and still an editable one. */
 const defaultApprovalExpiry = () =>
   localDateTimeValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString());
@@ -176,6 +169,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         switches={view.switches}
         canWrite={view.canWrite}
         configGeneration={view.configGeneration}
+        section={view.section}
         onDone={() => void refresh()}
         m={m}
       />
@@ -190,7 +184,11 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
       ) : (
         <>
           {view.section === "accounts" && view.canWrite ? (
-            <MarketingAccountCreate onDone={() => void refresh()} m={m} />
+            <MarketingAccountCreate
+              section={view.section}
+              onDone={() => void refresh()}
+              m={m}
+            />
           ) : null}
           <p className="mt-4 text-xs text-zinc-500">
             {m.showing.replace("{count}", String(view.pageSize))}
@@ -208,6 +206,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
                   <MarketingRow section={view.section} row={row} m={m} />
                   <MarketingActionRail
                     actions={view.canWrite ? rowActions(view.section, row, m) : []}
+                    section={view.section}
                     onDone={() => void refresh()}
                     m={m}
                   />
@@ -240,12 +239,14 @@ function MarketingSwitchStrip({
   switches,
   canWrite,
   configGeneration,
+  section,
   onDone,
   m,
 }: {
   switches: Record<string, SwitchState>;
   canWrite: boolean;
   configGeneration: number | null;
+  section: string;
   onDone: () => void;
   m: Record<string, string>;
 }) {
@@ -298,6 +299,18 @@ function MarketingSwitchStrip({
                 switchLabel(control.name)
               ),
               path: "/api/admin/marketing/settings",
+              // The route exports PATCH. Sending POST answered 405, which
+              // reached the operator as "that did not go through" -- three
+              // switches that looked broken rather than misaddressed.
+              method: "PATCH",
+              // Turning publishing on cannot succeed before the publisher
+              // exists: the writer answers `publisher_capability_unavailable`
+              // every time. Drawn disabled with the reason rather than hidden,
+              // because someone looking for this switch should find out why.
+              unavailable:
+                turningOn && control.name === "publish"
+                  ? m.switchPublishUnavailable
+                  : undefined,
               confirm: turningOn ? m.switchConfirmOn : undefined,
               body: () => ({
                 switch: control.name,
@@ -338,7 +351,12 @@ function MarketingSwitchStrip({
       {canWrite && configGeneration === null ? (
         <p className="mt-2 text-[11px] text-amber-300">{m.switchNoGeneration}</p>
       ) : null}
-      <MarketingActionRail actions={toggles} onDone={onDone} m={m} />
+      <MarketingActionRail
+        actions={toggles}
+        section={section}
+        onDone={onDone}
+        m={m}
+      />
     </div>
   );
 }
@@ -350,9 +368,11 @@ function MarketingSwitchStrip({
  * and the row says so until a person confirms the connection separately.
  */
 function MarketingAccountCreate({
+  section,
   onDone,
   m,
 }: {
+  section: string;
   onDone: () => void;
   m: Record<string, string>;
 }) {
@@ -430,7 +450,12 @@ function MarketingAccountCreate({
         {m.createAccountTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.createAccountNote}</p>
-      <MarketingActionRail actions={[action]} onDone={onDone} m={m} />
+      <MarketingActionRail
+        actions={[action]}
+        section={section}
+        onDone={onDone}
+        m={m}
+      />
     </div>
   );
 }
@@ -501,20 +526,19 @@ function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
           name: "renderedText",
           label: m.fieldRenderedText,
           kind: "textarea",
-          initial: envelopeText(row.envelope),
+          initial: str(row.renderedText),
           hint: m.hintGuardReruns,
         },
       ],
-      // Only the words change. Everything else the envelope holds -- the
-      // claims, the assets, the channel and locale it was written for -- is
-      // carried through, because an edit is a correction to the copy and not
-      // a new draft wearing the old one's history.
+      // Only the words go up. Everything else the envelope holds -- the
+      // claims, the assets, the channel and locale it was written for -- stays
+      // where it is, and the route merges against the stored row: an edit is a
+      // correction to the copy, not a new draft wearing the old one's history.
+      // The earlier shape sent a whole envelope the console never had, so
+      // every edit was a 400 against the strict schema.
       body: (values) => ({
         ...postCas(row),
-        envelope: {
-          ...((row.envelope as Record<string, unknown> | null) ?? {}),
-          renderedText: values.renderedText,
-        },
+        renderedText: values.renderedText,
       }),
     });
     actions.push({
@@ -531,6 +555,20 @@ function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
 }
 
 const TEMPLATE_SOURCE = new Set(["approved", "scheduled", "published", "verified"]);
+
+/**
+ * The account states in which the publisher is not taking posts.
+ *
+ * The same set the store's `marketingChannelWasStopped()` uses, and it has to
+ * be: these are exactly the states a resume or reconnect can refuse from for a
+ * backlog, so they are exactly the states where the drain that clears it must
+ * be reachable.
+ */
+const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
+  "paused",
+  "disconnected",
+  "connect_pending",
+]);
 
 function publishedActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const actions: MarketingAction[] = [];
@@ -764,15 +802,32 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
         body: (values) => ({ mode: "autonomous", reasonCode: values.reasonCode }),
       });
     }
-    // Offered on every paused account rather than only on one that is known to
-    // need it: the console does not count due posts, and a control that
-    // appears only once a backlog is visible would be missing exactly when the
-    // resume starts refusing.
+  }
+
+  // Wherever a resume or a reconnect can refuse for a backlog, the drain that
+  // clears it has to be reachable. Offered without first knowing a backlog
+  // exists, because the console does not count due posts -- a control that
+  // appeared only once one was visible would be missing exactly when the
+  // refusals start. A disconnected account with a backlog and no drain had no
+  // way back at all: there is no edge from `disconnected` into `paused`.
+  if (MARKETING_STOPPED_ACCOUNT_STATUSES.has(status)) {
     actions.push({
       id: "drain",
       label: m.actDrain,
       path: ACCOUNT(row.id, "drain"),
       body: () => ({}),
+      describe: (result) => {
+        const value = result as
+          | { expiredPostIds?: unknown; remaining?: unknown }
+          | null;
+        const expired = Array.isArray(value?.expiredPostIds)
+          ? value.expiredPostIds.length
+          : 0;
+        return (value?.remaining === true ? m.drainMore : m.drainDone).replace(
+          "{count}",
+          String(expired)
+        );
+      },
     });
   }
 

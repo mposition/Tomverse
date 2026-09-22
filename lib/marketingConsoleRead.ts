@@ -114,6 +114,13 @@ const applyScopeState = (
   return status === "valid" ? "scope-valid" : "scope-invalid";
 };
 
+/** A draft's own words, in full, for the control that edits them. */
+const renderedText = (envelope: unknown): string | null => {
+  if (!envelope || typeof envelope !== "object") return null;
+  const value = (envelope as { renderedText?: unknown }).renderedText;
+  return typeof value === "string" ? value : null;
+};
+
 /** A draft's own words, shortened for a list row. */
 const excerpt = (envelope: unknown): string | null => {
   if (!envelope || typeof envelope !== "object") return null;
@@ -252,6 +259,10 @@ export async function readMarketingConsole(
         guardCodes: post.guardCodes,
         guardRuleIds: post.guardRuleIds,
         excerpt: excerpt(post.envelope),
+        // The words themselves, not only the shortened line above them: the
+        // edit control starts from what is actually there, and an edit box
+        // that opened empty would replace a draft with whatever was typed.
+        renderedText: renderedText(post.envelope),
         approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
         createdAt: post.createdAt.toISOString(),
       })),
@@ -271,6 +282,7 @@ export async function readMarketingConsole(
         envelopeDigest: true,
         historyVersion: true,
         legalHold: true,
+        reusableAsTemplate: true,
         scheduledAt: true,
         externalPostId: true,
         externalUrl: true,
@@ -301,6 +313,9 @@ export async function readMarketingConsole(
         envelopeDigest: post.envelopeDigest,
         historyVersion: post.historyVersion,
         legalHold: post.legalHold,
+        // Without it the console offered "mark reusable" on rows that already
+        // were, and the only outcome was a 409.
+        reusableAsTemplate: post.reusableAsTemplate,
         scheduledAt: post.scheduledAt?.toISOString() ?? null,
         // The id the unpublish writer compares against, not a link: an
         // operator saying a post is gone has to be saying it about the post
