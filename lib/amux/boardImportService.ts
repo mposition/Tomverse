@@ -31,6 +31,7 @@ import {
   boardImportSameOperatorApproval,
   boardImportTransitionAllowed,
   classifyBoardImport,
+  boardImportConflictReasons,
   digestAmuxManifest,
   parseBoardImportManifest,
   boardImportSourceMissing,
@@ -385,11 +386,15 @@ export async function previewBoardImport(raw: string) {
   const presence = await loadBoardImportSourcePresence(prisma, parsed.manifest.items);
   const classification = classifyBoardImport(parsed.manifest, existing);
   const sourceMissing = boardImportSourceMissing(parsed.manifest, presence.rows);
+  const conflictReasons = boardImportConflictReasons(parsed.manifest, existing);
   return {
     classification,
     refusal: boardImportSubmissionRefusal(classification),
     sourceMissingCount: sourceMissing.length,
     sourceMissingTruncated: presence.truncated,
+    sourceDriftCount: conflictReasons.sourceDrift,
+    activeExecutionCount: conflictReasons.activeExecution,
+    otherConflictCount: conflictReasons.otherConflict,
     applyPermitted: boardImportApplyPermitted({
       envValue: process.env[BOARD_IMPORT_APPLY_ENV],
       codeLatch: BOARD_IMPORT_APPLY_CODE_LATCH,
