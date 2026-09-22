@@ -39,6 +39,12 @@
  * Pure: no database, no clock, no network, no model call.
  */
 
+import {
+    partitionByKey,
+    partitionByMetric,
+    refineToRanking,
+} from "@tomverse/router-core";
+
 import type { RouterCandidate } from "@/lib/routerCandidates";
 import {
     ROUTER_COST_TIE_EPSILON_RATIO,
@@ -241,75 +247,6 @@ const partitionByDegraded = (
 };
 
 /**
- * Splits by a measured number, with the epsilon anchored to each bucket.
- *
- * Returns the group whole -- abstains -- unless every member has a finite
- * reading. Equal readings are ordered by model id before bucketing, so the
- * partition does not depend on the order the candidates arrived in.
- */
-const partitionByMetric = (
-    group: Bucket,
-    readingFor: (candidate: ScoredCandidate) => number | undefined,
-    {
-        epsilon,
-        lowerWins,
-        relative,
-    }: { epsilon: number; lowerWins: boolean; relative: boolean }
-): Bucket[] => {
-    const readings = new Map<ScoredCandidate, number>();
-    for (const candidate of group) {
-        const reading = readingFor(candidate);
-        if (typeof reading !== "number" || !Number.isFinite(reading)) {
-            return [group];
-        }
-        readings.set(candidate, reading);
-    }
-    const read = (candidate: ScoredCandidate) =>
-        readings.get(candidate) as number;
-
-    const sorted = [...group].sort((left, right) => {
-        const a = read(left);
-        const b = read(right);
-        if (a !== b) return lowerWins ? a - b : b - a;
-        return left.modelId < right.modelId
-            ? -1
-            : left.modelId > right.modelId
-              ? 1
-              : 0;
-    });
-
-    const withinEpsilon = (reading: number, anchor: number) => {
-        if (!relative) return Math.abs(reading - anchor) <= epsilon;
-        // Relative, because a cent between two cheap models is not a cent
-        // between two expensive ones.
-        const larger = Math.max(Math.abs(reading), Math.abs(anchor));
-        if (larger === 0) return true;
-        return Math.abs(reading - anchor) / larger <= epsilon;
-    };
-
-    const buckets: ScoredCandidate[][] = [];
-    let current: ScoredCandidate[] = [];
-    let anchor = 0;
-    for (const candidate of sorted) {
-        const reading = read(candidate);
-        if (current.length === 0) {
-            anchor = reading;
-            current.push(candidate);
-            continue;
-        }
-        if (withinEpsilon(reading, anchor)) {
-            current.push(candidate);
-            continue;
-        }
-        buckets.push(current);
-        current = [candidate];
-        anchor = reading;
-    }
-    if (current.length > 0) buckets.push(current);
-    return buckets;
-};
-
-/**
  * The last criterion, and the only one that is total on its own.
  *
  * Arbitrary, and deliberately so: what it buys is that two runs over the same
@@ -318,9 +255,7 @@ const partitionByMetric = (
  * listed.
  */
 const partitionByModelId = (group: Bucket): Bucket[] =>
-    [...new Set(group.map((entry) => entry.modelId))]
-        .sort()
-        .map((modelId) => group.filter((entry) => entry.modelId === modelId));
+    partitionByKey(group, (entry) => entry.modelId);
 
 const partitionFor = (
     criterion: RouterTieBreakCriterion,
@@ -340,7 +275,8 @@ const partitionFor = (
                     epsilon: ROUTER_COST_TIE_EPSILON_RATIO,
                     lowerWins: true,
                     relative: true,
-                }
+                },
+                (entry) => entry.modelId
             );
         case "recent_success_rate":
             return partitionByMetric(
@@ -350,7 +286,8 @@ const partitionFor = (
                     epsilon: ROUTER_SUCCESS_RATE_TIE_EPSILON,
                     lowerWins: false,
                     relative: false,
-                }
+                },
+                (entry) => entry.modelId
             );
         case "ttft_p95":
             return partitionByMetric(
@@ -360,7 +297,8 @@ const partitionFor = (
                     epsilon: ROUTER_TTFT_TIE_EPSILON_MS,
                     lowerWins: true,
                     relative: false,
-                }
+                },
+                (entry) => entry.modelId
             );
         case "model_id":
             return partitionByModelId(group);
@@ -368,33 +306,20 @@ const partitionFor = (
 };
 
 /**
- * Whether `buckets` is a partition of `group`: every member once, nothing else.
- *
- * Identity rather than value, because two candidates can carry the same model
- * id and they are still two entries in the ranking.
- */
-const partitions = (buckets: readonly Bucket[], group: Bucket): boolean => {
-    const remaining = new Set(group);
-    if (remaining.size !== group.length) {
-        // The group itself holds the same object twice, which no caller builds
-        // and this check cannot reason about. Abstain rather than guess.
-        return false;
-    }
-    for (const bucket of buckets) {
-        if (bucket.length === 0) return false;
-        for (const candidate of bucket) {
-            if (!remaining.delete(candidate)) return false;
-        }
-    }
-    return remaining.size === 0;
-};
-
-/**
  * Applies `ROUTER_TIE_BREAK_ORDER` and reports which entry decided.
  *
- * One pass rather than a ranking plus a separate explanation, so the order a
- * decision is explained by cannot drift from the order it was made in: the
- * criterion named is the position at which two rank keys first differ.
+ * The construction is `refineToRanking` in `@tomverse/router-core`: partition
+ * refinement, group-scoped abstention, anchored epsilons, and the check that a
+ * partitioner did not lose a member. None of that is about this product, and a
+ * second client would need exactly it.
+ *
+ * What stays here is every product decision -- which criteria there are, what
+ * each one reads, and what its epsilon is.
+ *
+ * `decidedBy` answers `model_id` where the package answers null. Null means two
+ * identical rank keys, which happens only when the same model id appears twice;
+ * naming the last criterion is the honest thing to say about that pair, and it
+ * is a statement about this criteria list rather than about refinement.
  */
 export const rankCandidates = (
     candidates: readonly ScoredCandidate[],
@@ -406,68 +331,18 @@ export const rankCandidates = (
         right: ScoredCandidate
     ) => RouterTieBreakCriterion;
 } => {
-    const keys = new Map<ScoredCandidate, number[]>();
-    for (const candidate of candidates) keys.set(candidate, []);
-
-    let groups: Bucket[] = [candidates];
-    for (const criterion of ROUTER_TIE_BREAK_ORDER) {
-        const refined: Bucket[] = [];
-        for (const group of groups) {
-            // A group of one is already decided. Skipping the partition keeps
-            // every rank key the same length, which is what makes the
-            // lexicographic comparison below well defined.
-            const split =
-                group.length <= 1
-                    ? [group]
-                    : partitionFor(criterion, group, signals);
-            // Equal key lengths are the whole basis of that comparison, so
-            // they are checked rather than assumed. A partitioner that lost a
-            // member -- by grouping on a value that is not equal to itself,
-            // say -- would give that candidate a shorter key, and the final
-            // sort would fall back to input order for it: the exact failure
-            // this ranking exists to remove.
-            //
-            // Counting is not enough. A partition that dropped one candidate
-            // and repeated another has the right total and the wrong keys, so
-            // the check is membership: every candidate of the group appears
-            // exactly once across the buckets, by identity, and nothing else
-            // appears at all. Losing the criterion is the safe direction, so a
-            // partition that fails is treated as an abstention rather than
-            // thrown on -- a chat turn that could still be answered should not
-            // fail over a ranking refinement.
-            const buckets = partitions(split, group) ? split : [group];
-            buckets.forEach((bucket, index) => {
-                for (const candidate of bucket) keys.get(candidate)?.push(index);
-                refined.push(bucket);
-            });
-        }
-        groups = refined;
-    }
-
-    const keyOf = (candidate: ScoredCandidate) => keys.get(candidate) ?? [];
-    const firstDifference = (left: ScoredCandidate, right: ScoredCandidate) => {
-        const a = keyOf(left);
-        const b = keyOf(right);
-        for (let index = 0; index < a.length; index += 1) {
-            if (a[index] !== b[index]) return index;
-        }
-        return -1;
-    };
-
+    const { ranked, decidedBy } = refineToRanking(
+        candidates,
+        ROUTER_TIE_BREAK_ORDER,
+        (criterion) => (group) => partitionFor(criterion, group, signals)
+    );
     return {
-        ranked: [...candidates].sort((left, right) => {
-            const index = firstDifference(left, right);
-            return index === -1 ? 0 : keyOf(left)[index] - keyOf(right)[index];
-        }),
-        decidedBy: (left, right) => {
-            const index = firstDifference(left, right);
-            // Identical keys means the same model id twice. Nothing separated
-            // them, and the last criterion is the honest thing to name.
-            return index === -1 ? "model_id" : ROUTER_TIE_BREAK_ORDER[index];
-        },
+        ranked,
+        decidedBy: (left, right) =>
+            decidedBy(left, right) ??
+            ROUTER_TIE_BREAK_ORDER[ROUTER_TIE_BREAK_ORDER.length - 1],
     };
 };
-
 export function selectRouterModel(input: {
     profile: TaskProfile;
     eligible: readonly RouterCandidate[];
