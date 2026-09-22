@@ -41,39 +41,57 @@ const DARK_TABLES = [
 
 
 /**
- * Columns added to a table that is *not* dark, which nothing may read yet.
+ * Columns on a table that is *not* dark, which nothing may read or write yet.
  *
- * `RoutingRun` is live and written every shadow run. Two columns on it are
- * not: `allocationMode` and `allocationSeedGrain` reserve the allocation axis
- * so that nobody reaches for `mode`, which answers a different question. They
- * are null on every row and a reader that found one would be reading a
- * decision nobody recorded.
+ * Three tables here are live and written on ordinary requests -- `RoutingRun`
+ * every shadow run, `ProviderProbeResult` every probe cycle, `RoutingAttempt`
+ * whenever instrumentation is on -- and some of their columns are not. The
+ * table rule cannot cover those, so they are named.
  *
- * Matched as whole identifiers, because these names are distinctive enough
- * that any occurrence in runtime code is a use. A generic column name could
- * not be protected this way and should not be added to this list.
+ * Each entry carries the files that may name it. `allocationMode` and
+ * `allocationSeedGrain` are distinctive enough that any occurrence is a use;
+ * `providerEndpointId` and `modelDeploymentId` are ordinary foreign key names
+ * that three dark tables already spell in their own vocabulary modules, which
+ * is why the exemption is per column and per file rather than one list. A file
+ * not named here that writes one of these is what this stops.
  *
- * What a name scan cannot see, and this does not claim to: a Prisma read
- * with no `select` returns every scalar, so `scripts/verify-fallback-drill.mjs`
- * and the `create` in `lib/routingDispatchInstrumentation.ts` both receive
- * these columns without naming them. Neither reads the values, and the
- * values are null on every row, so nothing is decided on them -- but the
- * scan is a guard against a use being written, not proof that no row ever
- * reaches a caller. An identifier built by concatenation is invisible to it
- * for the same reason.
+ * What a name scan cannot see, and this does not claim to: a Prisma read with
+ * no `select` returns every scalar, so `scripts/verify-fallback-drill.mjs` and
+ * the `create` in `lib/routingDispatchInstrumentation.ts` both receive columns
+ * without naming them. Neither reads the values and every value is null, so
+ * nothing is decided on them -- but this guards against a use being written,
+ * not against a row reaching a caller. An identifier built by concatenation is
+ * invisible to it for the same reason.
  */
-const DARK_COLUMNS = ["allocationMode", "allocationSeedGrain"];
-
-/**
- * The one file that may name a dark column: the module that defines the
- * vocabulary the column holds.
- *
- * Exempt for the reason this file is exempt from its own table list -- it
- * declares the names rather than reading rows. Narrow on purpose: it excuses
- * the column scan only, so the same file is still checked against every dark
- * table, and it names one file rather than a directory.
- */
-const DARK_COLUMN_VOCABULARY = ["lib/routingAllocation.ts"];
+const DARK_COLUMNS = [
+    {
+        column: "allocationMode",
+        on: "RoutingRun",
+        exempt: ["lib/routingAllocation.ts"],
+    },
+    {
+        column: "allocationSeedGrain",
+        on: "RoutingRun",
+        exempt: ["lib/routingAllocation.ts"],
+    },
+    {
+        column: "providerEndpointId",
+        on: "ProviderProbeResult and RoutingAttempt",
+        exempt: [
+            "lib/availabilityObservation.ts",
+            "lib/deploymentIdentity.ts",
+        ],
+    },
+    {
+        column: "modelDeploymentId",
+        on: "ProviderProbeResult and RoutingAttempt",
+        exempt: [
+            "lib/availabilityObservation.ts",
+            "lib/deploymentCacheAffinity.ts",
+            "lib/deploymentIdentity.ts",
+        ],
+    },
+];
 
 /**
  * The relation fields that reach a dark table from a model that is not dark.
@@ -201,12 +219,10 @@ for (const file of files) {
     }
 
     const normalised = file.split("\\").join("/");
-    for (const column of DARK_COLUMNS) {
-        if (DARK_COLUMN_VOCABULARY.includes(normalised)) break;
-        if (new RegExp(`\\b${column}\\b`).test(source)) {
-            problems.push(
-                `${normalised}: reads RoutingRun.${column}`
-            );
+    for (const entry of DARK_COLUMNS) {
+        if (entry.exempt.includes(normalised)) continue;
+        if (new RegExp(`\\b${entry.column}\\b`).test(source)) {
+            problems.push(`${normalised}: names ${entry.on}.${entry.column}`);
         }
     }
 }

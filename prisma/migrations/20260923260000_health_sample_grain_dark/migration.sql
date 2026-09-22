@@ -1,8 +1,15 @@
 -- The grain columns on the two tables health is actually sampled from. Added
 -- dark.
 --
--- Nothing reads or writes them, and `npm run check:dark-tables` holds that for
--- the four column names as well as for the dark tables beside them.
+-- Nothing reads or writes them. `npm run check:dark-tables` holds that: the
+-- two column names join its dark column list, each with the dark tables'
+-- own vocabulary modules exempted, because these are ordinary foreign key
+-- names that those modules already spell. A file outside that list naming
+-- either one fails the check.
+--
+-- The first version of this comment claimed the check guarded the names
+-- while its list held only the allocation pair, so the schema gap was
+-- closed and the way into it was not.
 --
 -- ---------------------------------------------------------------------------
 -- Why these two tables
@@ -21,8 +28,12 @@
 --
 -- It closes only that. A column with nowhere for a value to come from is not a
 -- sample: the probe scheduler still dispatches one representative model per
--- provider, so every row will carry NULL until a per-deployment canary exists,
--- which is prerequisite 2 and is blocked behind the identity config writer.
+-- provider (`lib/providerProbe.ts`), so every row carries NULL until a
+-- per-deployment canary exists. That canary is prerequisite 2, and it does
+-- not wait on the identity config writer -- section 14 step 5 forbids both
+-- until the A-5 manifest, side by side rather than one behind the other, and
+-- section 8.1 lists prerequisites 1 and 2 as work that can be started.
+--
 -- Adding the columns first is what lets that work be a writer change rather
 -- than a writer change plus a migration on two live tables.
 --
@@ -52,8 +63,25 @@
 -- nothing is indistinguishable from one attributed to something until somebody
 -- joins.
 --
--- Rollback: drop the four columns, the two constraints and the four foreign
--- keys. Nothing reads them.
+-- What this locks, on two tables that are live:
+--
+--   ADD COLUMN        ACCESS EXCLUSIVE, but nullable with no default, so
+--                     there is no rewrite and it is a catalogue change once
+--                     the lock is held;
+--   ADD CONSTRAINT    ACCESS EXCLUSIVE while it scans. Every value is NULL
+--     (the CHECKs)    and both CHECKs pass on NULL, so the scan finds
+--                     nothing to refuse -- but a read of ProviderProbeResult
+--                     waits for it, and the public status page is a reader;
+--   CREATE INDEX      SHARE. Reads continue, writes wait. CONCURRENTLY is
+--                     not available inside a migration transaction;
+--   ADD FOREIGN KEY   SHARE ROW EXCLUSIVE on both sides, so writes to these
+--                     tables and deletes of an endpoint or a deployment wait.
+--
+-- Rollback: drop the two columns on each of ProviderProbeResult and
+-- RoutingAttempt, which takes their CHECKs, their four partial indexes and
+-- four of the six foreign keys with them; then drop the two foreign keys
+-- added to AvailabilityObservation, which sit on columns that already
+-- existed and so are not carried off by anything. Nothing reads them.
 
 -- ---------------------------------------------------------------------------
 -- 1. ProviderProbeResult

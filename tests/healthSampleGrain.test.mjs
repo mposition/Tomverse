@@ -100,10 +100,14 @@ test("deleting a placement cannot delete the record of what it did", () => {
     }
 });
 
-test("no branch of either shape rule can evaluate to NULL", () => {
+test("neither shape rule uses an operator that can evaluate to NULL", () => {
     // A CHECK passes when its expression is TRUE *or NULL* and refuses only on
     // FALSE, so a comparison against a nullable column has to be one that
     // cannot itself be NULL. `IS NULL` and `IS NOT NULL` qualify.
+    //
+    // This refuses six operators by name; it does not evaluate the
+    // expression, and `>`, `BETWEEN` and a function call would pass it. What
+    // holds the current text is the test above, which pins both CHECKs whole.
     const sql = statements();
     for (const match of sql.matchAll(/_deployment_has_endpoint_check"\s*\n\s*CHECK \(([^;]*)\)/g)) {
         for (const operator of ["=", "<>", "!=", " IN ", " ~ ", " LIKE "]) {
@@ -155,11 +159,17 @@ test("the relation fields are named something a scan can protect", () => {
     assert.match(checker, /\(\\\[\\\]\|\\\?\)\?/);
 });
 
-test("nothing writes the four columns", () => {
+test("nothing names the six relation fields", () => {
+    // The relation fields only. The column names themselves are
+    // check-dark-tables' DARK_COLUMNS, which scans `packages` and
+    // `prisma/seed` too and carries a per-column exemption list, because
+    // `providerEndpointId` and `modelDeploymentId` are already spelled by the
+    // dark tables' own vocabulary modules. This test was called "nothing
+    // writes the four columns" and did not look at a column.
     // The columns close a schema gap and nothing else. The probe scheduler
     // still dispatches one representative model per provider, so every row
     // carries null until a per-deployment canary exists.
-    const roots = ["app", "lib", "components", "scripts"];
+    const roots = ["app", "lib", "components", "scripts", "packages"];
     const walk = (directory) =>
         readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
             if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];

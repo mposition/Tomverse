@@ -193,13 +193,22 @@ test("no branch of the shape rule can evaluate to NULL", () => {
 test("nothing reads the two columns", () => {
     // RoutingRun is live, so the table check cannot cover this: the columns
     // are dark on a table that is not. check-dark-tables scans for the two
-    // identifiers, exempting only the module that defines the vocabulary.
+    // identifiers, and each entry carries its own exemption list -- per column
+    // rather than one shared list, because the columns added later are
+    // ordinary foreign key names the dark tables already spell.
     const checker = readFileSync(
         new URL("../scripts/check-dark-tables.mjs", import.meta.url),
         "utf8"
     );
-    assert.match(checker, /const DARK_COLUMNS = \["allocationMode", "allocationSeedGrain"\]/);
-    assert.match(checker, /const DARK_COLUMN_VOCABULARY = \["lib\/routingAllocation\.ts"\]/);
+    for (const column of ["allocationMode", "allocationSeedGrain"]) {
+        assert.match(
+            checker,
+            new RegExp(
+                `column: "${column}",\\s*\\n\\s*on: "RoutingRun",\\s*\\n\\s*exempt: \\["lib/routingAllocation\\.ts"\\]`
+            ),
+            column
+        );
+    }
 });
 
 // ---------------------------------------------------------------------------
