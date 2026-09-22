@@ -255,6 +255,27 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  AvailabilityObservation_source_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_SOURCES",
+    reason:
+      "real_traffic, synthetic_probe, operator_verification -- kept apart for the reason ProviderHealthState already keeps them apart in separate columns: an operator proving the API answers is not the same claim as real user traffic being served, and a synthetic probe is neither. Folding them would let a passing probe cover for traffic that is failing.",
+  },
+  AvailabilityObservation_outcome_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_OUTCOMES",
+    reason:
+      "succeeded or failed. Two values because a rollup divides one by the total; a third would need every consumer to decide which side it counted on, and they would not all decide the same way.",
+  },
+  AvailabilityObservation_errorClass_check: {
+    owner: "list",
+    module: "lib/routingAttemptStore.ts",
+    list: "ROUTING_ATTEMPT_ERROR_CLASSES",
+    reason:
+      "The same closed vocabulary RoutingAttempt.errorClass uses, deliberately not a second list: one table calling a rate limit something the other cannot read is how the two grains of health stopped being joinable in the first place. Nullable because a success has nothing to classify.",
+  },
   RoutingCandidateVerdict_verdict_check: {
     owner: "list",
     module: "lib/routingCandidateVerdict.ts",

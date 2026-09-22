@@ -35,6 +35,7 @@ const DARK_TABLES = [
     "ProviderRegistryEntry",
     "RoutingCandidateVerdict",
     "QuotaCapacityState",
+    "AvailabilityObservation",
 ];
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */

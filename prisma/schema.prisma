@@ -5799,3 +5799,50 @@ model QuotaCapacityState {
   @@index([deprioritizeUntil])
   @@index([retryAfterUntil])
 }
+
+/// One availability observation, written once and never rewritten.
+///
+/// Dark. The canonical record the deployment, endpoint and provider rollups
+/// are derived from -- one event in, three summaries out, all of them
+/// idempotent on `eventId` so a projection that failed half way can be run
+/// again without double-counting.
+///
+/// Today the same fact is written twice in two shapes: real traffic increments
+/// `ProviderHealthState` and a probe inserts a `ProviderProbeResult`, with no
+/// identifier in common. Neither is deleted or changed by this table; it is
+/// the grain the routing work needs and they are the grain the public status
+/// page and the operator recovery path already read.
+model AvailabilityObservation {
+  id      String @id @default(cuid())
+  /// The idempotency key. A projection applies an event at most once.
+  eventId String @unique
+
+  /// real_traffic | synthetic_probe | operator_verification
+  ///
+  /// Three streams, kept apart for the reason `ProviderHealthState` already
+  /// keeps them apart in columns: an operator proving the API answers is not
+  /// the same claim as "real user traffic is being served".
+  source String
+
+  /// Null until deployments route. Nothing is backfilled: a past observation
+  /// genuinely had no deployment, and inventing one would be a claim nobody
+  /// made.
+  modelDeploymentId  String?
+  providerEndpointId String?
+  /// The gateway provider, which is knowable for every observation.
+  provider           String
+
+  /// succeeded | failed
+  outcome    String
+  /// A fixed `RoutingAttemptErrorClass`, or null on success.
+  errorClass String?
+  latencyMs  Int?
+
+  observedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([provider, observedAt])
+  @@index([providerEndpointId, observedAt])
+  @@index([modelDeploymentId, observedAt])
+  @@index([source, observedAt])
+}
