@@ -13,6 +13,7 @@ import {
   isCommercialPath,
   isReleaseNotesLinkId,
   releaseNotesLinkPath,
+  releaseNotesLinkUrl,
   unservedReleaseNotesLinkIds,
 } from "../lib/releaseNotesLinks.ts";
 import {
@@ -108,4 +109,42 @@ test("the table is frozen", () => {
     RELEASE_NOTES_APPROVED_LINKS["release.home"] = "/pricing";
   });
   assert.equal(RELEASE_NOTES_APPROVED_LINKS["release.home"], "/");
+});
+
+test("a query string does not hide a commercial path", () => {
+  // The comment in that file has always said `/pricing?plan=max` is the same
+  // decision as `/pricing`. Until 2026-09-23 the comparison saw the whole
+  // string and answered false; nothing in the table has a query, which is
+  // exactly why it went unnoticed.
+  for (const path of [
+    "/pricing?plan=max",
+    "/pricing#annual",
+    "/billing/invoices?year=2026",
+    "/upgrade?from=free",
+  ]) {
+    assert.ok(isCommercialPath(path), path);
+  }
+  assert.equal(isCommercialPath("/models?sort=new"), false);
+});
+
+test("the URL builder refuses what the table should never hold", () => {
+  // Neither branch can be reached through the table as it stands, which is why
+  // neither had a test. They are the check that would still hold if the table
+  // were wrong, so they are driven directly.
+  assert.throws(
+    () => releaseNotesLinkUrl("//evil.test/x", "probe"),
+    /resolves outside https:\/\/tomverse\.app/
+  );
+  assert.throws(
+    () => releaseNotesLinkUrl("https://evil.test/x", "probe"),
+    /resolves outside https:\/\/tomverse\.app/
+  );
+  assert.throws(
+    () => releaseNotesLinkUrl("/pricing", "probe"),
+    /resolves to a commercial path/
+  );
+  assert.equal(
+    releaseNotesLinkUrl("/models", "probe"),
+    "https://tomverse.app/models"
+  );
 });

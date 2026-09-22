@@ -98,10 +98,17 @@ export const COMMERCIAL_PATH_PREFIXES = Object.freeze([
   "/checkout",
 ] as const);
 
-export const isCommercialPath = (path: string): boolean =>
-  COMMERCIAL_PATH_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
+export const isCommercialPath = (path: string): boolean => {
+  // The query and the fragment come off first. The comment above has said
+  // `/pricing?plan=max` is the same decision as `/pricing` since this file was
+  // written, and until 2026-09-23 it was not: the comparison saw the whole
+  // string and answered false. Nothing in the table has a query today, which
+  // is exactly why it went unnoticed.
+  const pathname = path.split(/[?#]/)[0];
+  return COMMERCIAL_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
+};
 
 /**
  * Any id in this table whose path is a commercial one.

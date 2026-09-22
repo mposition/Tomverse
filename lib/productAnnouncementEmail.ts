@@ -13,17 +13,45 @@ import {
   releaseNotesLinkUrl,
 } from "@/lib/releaseNotesLinks";
 
-export type ProductAnnouncementPayload = {
+/**
+ * A feature as it is written, before anything is resolved.
+ *
+ * The destination is an id and a label; `MarketingFeature.link` is what the
+ * parser builds from them. They were the same type until 2026-09-23 and that
+ * was wrong in three ways at once: a literal declared with this type could not
+ * carry `linkId` at all, because the excess property check refuses it; a
+ * feature carrying an already-resolved `link` type-checked and the parser
+ * silently dropped it, so an approved destination disappeared without an
+ * error; and feeding a parsed payload back through the parser produced a mail
+ * with no feature links and no complaint.
+ */
+export type ProductAnnouncementFeatureInput = {
+  title: string;
+  body: string;
+  linkId?: string;
+  linkLabel?: string;
+};
+
+/** A message as it is written. What the composer holds and the literals below. */
+export type ProductAnnouncementContent = {
   subject: string;
   preheader: string;
   eyebrow: string;
   headline: string;
   intro: string;
   media?: MarketingEmailMedia | null;
-  features: MarketingFeature[];
+  features: ProductAnnouncementFeatureInput[];
   closing?: string | null;
   ctaLabel: string;
   ctaUrl: string;
+};
+
+/** A message as it renders. Every destination resolved to a URL we built. */
+export type ProductAnnouncementPayload = Omit<
+  ProductAnnouncementContent,
+  "features"
+> & {
+  features: MarketingFeature[];
 };
 
 const requiredText = (
@@ -54,6 +82,20 @@ export const parseProductAnnouncementPayload = (
       throw new Error(`features[${index}] must be an object.`);
     }
     const item = feature as Record<string, unknown>;
+
+    // An already-resolved destination is not an input.
+    //
+    // Refused rather than ignored: dropping it produced a feature with no link
+    // and no error, so an approved destination vanished exactly as quietly as
+    // a commercial one would have. The caller that sent it believes the link
+    // went out.
+    for (const resolved of ["link", "url"]) {
+      if (item[resolved] !== undefined) {
+        throw new Error(
+          `features[${index}].${resolved} is a rendered value; write linkId and linkLabel instead.`
+        );
+      }
+    }
 
     // The destination is a path id, never a URL.
     //
@@ -141,7 +183,7 @@ export const buildProductAnnouncementEmail = (
   return { subject: payload.subject, ...rendered };
 };
 
-export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementPayload = {
+export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementContent = {
   subject: "{{subject}}",
   preheader: "{{preheader}}",
   eyebrow: "{{eyebrow}}",
@@ -161,7 +203,7 @@ export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementPayload = {
 /** Starter copy for Tomverse's first product newsletter. */
 export const ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT: Record<
   "ko" | "en" | "zh",
-  ProductAnnouncementPayload
+  ProductAnnouncementContent
 > = {
   ko: {
     subject: "나를 이해하는 AI, 내 지식과 함께 시작하세요",

@@ -235,3 +235,66 @@ test("the destination reaches both halves of the message", () => {
     text.includes("See how it works: https://tomverse.app/compare-ai-models")
   );
 });
+
+test("a rendered destination is not an input", () => {
+  // The input type and the parsed type were the same until 2026-09-23, so a
+  // feature carrying an already-resolved link type-checked and the parser
+  // dropped it: no link, no error, and the caller believing it went out. An
+  // approved destination vanished exactly as quietly as a commercial one.
+  assert.throws(
+    () =>
+      parseProductAnnouncementPayload(
+        withFeatures([
+          {
+            title: "t",
+            body: "b",
+            link: { label: "See how it works", url: "https://tomverse.app/models" },
+          },
+        ])
+      ),
+    /features\[0\]\.link is a rendered value/
+  );
+
+  assert.throws(
+    () =>
+      parseProductAnnouncementPayload(
+        withFeatures([
+          {
+            title: "t",
+            body: "b",
+            link: { label: "Pricing", url: "https://tomverse.app/pricing" },
+          },
+        ])
+      ),
+    /features\[0\]\.link is a rendered value/
+  );
+
+  assert.throws(
+    () =>
+      parseProductAnnouncementPayload(
+        withFeatures([{ title: "t", body: "b", url: "https://tomverse.app/models" }])
+      ),
+    /features\[0\]\.url is a rendered value/
+  );
+});
+
+test("a parsed payload cannot be parsed again", () => {
+  // The round trip the type confusion allowed: parse once, feed the result
+  // back, and get a mail with no feature links and nothing to say so.
+  const once = parseProductAnnouncementPayload(
+    withFeatures([
+      {
+        title: "Compare answers",
+        body: "Ask several models the same question.",
+        linkId: "release.compare-models",
+        linkLabel: "See how it works",
+      },
+    ])
+  );
+  assert.notEqual(once.features[0].link, null);
+
+  assert.throws(
+    () => parseProductAnnouncementPayload(once),
+    /is a rendered value/
+  );
+});
