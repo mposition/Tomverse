@@ -23,11 +23,14 @@
 -- ---------------------------------------------------------------------------
 --
 -- An attempt carries the manifest id *and* the digest it saw. Deliberate
--- redundancy: the foreign key says which row, and the digest says what that
--- row held when the decision was made. If the two ever disagree, the
--- disagreement is the finding -- a manifest was altered after publication,
--- which the append-only trigger is meant to make impossible and which the
--- stored digest lets anybody detect without trusting the trigger.
+-- redundancy: the foreign key says which manifest, and the digest is the
+-- check on that manifest's entries -- the rows that hold the values, added
+-- in the migration after this one. A disagreement between the stored
+-- digest and one recomputed from the entries is the finding: a published
+-- manifest edited after the fact.
+--
+-- The digest is not a reconstruction on its own. It says something moved;
+-- the entries say what it was.
 --
 -- ---------------------------------------------------------------------------
 -- What is deliberately not unique

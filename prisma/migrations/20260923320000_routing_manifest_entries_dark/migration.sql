@@ -82,6 +82,9 @@ CREATE TABLE "RoutingIdentityManifestEntry" (
     -- promise to give back the bytes it was given.
     "capabilities" TEXT NOT NULL,
     "qualityGateStatus" TEXT NOT NULL,
+    -- The digest reads this as an ISO instant, so a row can reproduce the
+    -- digest computed from it. As a free string the same instant spelled
+    -- two ways digested differently and this column kept only one.
     "qualityGateExpiresAt" TIMESTAMP(3),
     "deploymentEnabled" BOOLEAN NOT NULL,
 
@@ -115,9 +118,22 @@ CREATE INDEX "RoutingIdentityManifestEntry_residencyApprovalId_idx"
 
 -- Cascade to the manifest, RESTRICT to everything the entry describes.
 --
--- Cascade is not a way to delete a manifest: the manifest's own trigger
--- refuses DELETE, so it never fires. It is here so the relation says the
--- entries belong to the publication rather than existing beside it.
+-- The cascade does not fire on an ordinary DELETE: the manifest's BEFORE
+-- DELETE trigger raises before the row is removed, so nothing downstream
+-- is reached. It is here so the relation says the entries belong to the
+-- publication rather than sitting beside it.
+--
+-- Three paths are outside that sentence, and only one of them leaves a
+-- half-deleted publication:
+--
+--   parent trigger disabled  the cascade runs, this table's own BEFORE
+--                            DELETE raises, and the whole statement rolls
+--                            back. No manifest without its entries;
+--   replica role             skips user and foreign key triggers alike, so
+--                            the manifest goes and the entries stay. The
+--                            manifest's own migration records the same
+--                            limit;
+--   DROP TABLE ... CASCADE   takes the constraint, not the rows.
 ALTER TABLE "RoutingIdentityManifestEntry"
     ADD CONSTRAINT "RoutingIdentityManifestEntry_manifestId_fkey"
     FOREIGN KEY ("manifestId") REFERENCES "RoutingIdentityManifest"("id")

@@ -4260,11 +4260,14 @@ model RoutingAttempt {
   /// The identity configuration this attempt was decided against. Dark, and
   /// null on every row.
   ///
-  /// The id and the digest together, deliberately: the foreign key says which
-  /// manifest, and the digest says what it held at the time. A disagreement
-  /// between them is the finding -- a manifest altered after publication,
-  /// which the trigger is meant to make impossible and which this lets anybody
-  /// detect without trusting the trigger.
+  /// The id and the digest together, deliberately. The foreign key says
+  /// which manifest; the digest is the check on that manifest's entries,
+  /// which are the rows that hold the values. A disagreement between the
+  /// stored digest and one recomputed from the entries is the finding -- a
+  /// published manifest edited after the fact.
+  ///
+  /// Not a reconstruction on its own. The digest tells you something moved;
+  /// `RoutingIdentityManifestEntry` tells you what it was.
   ///
   /// RESTRICT: an attempt is a historical record, and deleting the manifest it
   /// names must not drop the attribution.
@@ -5677,6 +5680,9 @@ model ModelDeployment {
   /// two placements can honestly share it. Reusing evidence across regions
   /// without that would hide drift.
   qualityGateStatus      String    @default("pending")
+  /// The digest reads this as an ISO instant, so a row can reproduce the
+  /// digest computed from it. As a free string the same instant spelled two
+  /// ways digested differently and this column kept only one of them.
   qualityGateExpiresAt   DateTime?
   /// Capability declarations, as the candidate filter would read them.
   capabilities           Json?
@@ -5723,25 +5729,6 @@ model ModelDeployment {
   @@index([logicalModelId, enabled])
 }
 
-/// Which deployment the turns of a conversation have been landing on.
-///
-/// Dark. Two facts rather than one probability: the ADR asks for
-/// `P(cache_hit | session, deployment)` folded into an effective cost, and
-/// that is both a change to the lexicographic objective and a number nothing
-/// here can compute -- a cache hit needs a byte-identical prefix, and no
-/// table records a prefix or a digest of one.
-///
-/// So this says where turns went and when, and `ModelDeployment` says what
-/// the window is. Together they answer whether the last serve is inside the
-/// window, which is a comparison of clocks and not a prediction.
-///
-/// The logical model is part of the key because a person can switch models
-/// inside one conversation; a single row per conversation would have the
-/// second model overwrite the first and then report it as the place to
-/// return to.
-///
-/// There is no prefix digest and there will not be one. It is derived from
-/// what the person wrote, and it confirms a guess.
 /// One published snapshot of the routing identity configuration.
 ///
 /// Dark. Nothing publishes a manifest and nothing reads one.
@@ -5853,6 +5840,25 @@ model RoutingIdentityManifestEntry {
   @@index([modelDeploymentId])
 }
 
+/// Which deployment the turns of a conversation have been landing on.
+///
+/// Dark. Two facts rather than one probability: the ADR asks for
+/// `P(cache_hit | session, deployment)` folded into an effective cost, and
+/// that is both a change to the lexicographic objective and a number nothing
+/// here can compute -- a cache hit needs a byte-identical prefix, and no
+/// table records a prefix or a digest of one.
+///
+/// So this says where turns went and when, and `ModelDeployment` says what
+/// the window is. Together they answer whether the last serve is inside the
+/// window, which is a comparison of clocks and not a prediction.
+///
+/// The logical model is part of the key because a person can switch models
+/// inside one conversation; a single row per conversation would have the
+/// second model overwrite the first and then report it as the place to
+/// return to.
+///
+/// There is no prefix digest and there will not be one. It is derived from
+/// what the person wrote, and it confirms a guess.
 model DeploymentCacheAffinity {
   id                String   @id @default(cuid())
   conversationId    String

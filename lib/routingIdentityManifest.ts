@@ -52,9 +52,14 @@
  * Deliberately absent, each for a reason rather than an oversight:
  *
  * - `routingPolicyDigest` -- intent, not eligibility (section 4.1);
- * - `region`, `destinationRegions` -- derived from the approval this entry
- *   points at, and copying them would be a second answer to the same
- *   question;
+ * - `region`, `destinationRegions` -- eligibility reads the approval, not
+ *   these (section 15.3), and the binding that would make them derived
+ *   does not exist yet: they are still independent columns on
+ *   `ProviderEndpoint`. Digesting them would create the second answer that
+ *   section is trying to prevent. Where there is no approval, what the
+ *   reconstruction has to say is that there was none -- which
+ *   `residencyApprovalId` being null says -- and section 4.1 already puts
+ *   an endpoint with no enforceable pin outside constrained traffic;
  * - `resourceId`, `cloudAccountId` -- these name the resource and the billing
  *   account. The URL is what routes, and who pays is the layer below;
  * - anything credential, quota or price -- section 2.1 keeps those out of
@@ -94,9 +99,17 @@ export type ManifestDeploymentEntry = {
      */
     capabilities: string;
     qualityGateStatus: string;
-    /** ISO 8601, or null. Two placements whose evidence expires on different
-     * days are not the same manifest. */
-    qualityGateExpiresAt: string | null;
+    /**
+     * The instant the quality evidence expires, or null.
+     *
+     * A `Date` rather than a string, and canonicalised to an ISO instant
+     * before it reaches the digest. As a free string it was the one field
+     * a row could not reproduce: `2026-12-01T00:00:00.000Z` and
+     * `2026-12-01T00:00:00Z` are the same instant and digested
+     * differently, the `TIMESTAMP(3)` column keeps only one of them, and a
+     * string that is not a date at all digested fine and failed to insert.
+     */
+    qualityGateExpiresAt: Date | null;
     deploymentEnabled: boolean;
 
     // --- the endpoint it is served from ------------------------------------
@@ -165,6 +178,21 @@ export const MANIFEST_DIGEST_FIELDS: readonly string[] = MANIFEST_ENTRY_FIELDS;
  */
 export const canonicalCapabilities = (value: unknown): string => {
     const canonical = (node: unknown): unknown => {
+        // `JSON.stringify` turns several distinct values into the same bytes
+        // -- NaN, Infinity and -Infinity all become null, a Date becomes its
+        // ISO string or `{}` depending on where it sits, a nested undefined
+        // disappears. None can arrive from the jsonb column this reads, and
+        // a digest that quietly agreed about two different declarations is
+        // worth refusing rather than documenting.
+        if (typeof node === "number" && !Number.isFinite(node)) {
+            throw new TypeError(`capability value ${node} is not JSON`);
+        }
+        if (typeof node === "bigint" || typeof node === "function" || typeof node === "symbol") {
+            throw new TypeError(`capability value of type ${typeof node} is not JSON`);
+        }
+        if (node instanceof Date) {
+            throw new TypeError("a capability declaration holds no Date");
+        }
         if (Array.isArray(node)) return node.map(canonical);
         if (node && typeof node === "object") {
             return Object.fromEntries(
@@ -189,14 +217,42 @@ const encodeField = (value: string | boolean | null): string => {
     // model version digested the same as one whose version was a single NUL
     // character.
     //
-    // A boolean is tagged, so `true` and the string "1" stay different.
+    // A boolean is `~1` or `~0`. An earlier version wrote `2:b1`, which is
+    // exactly what the string "b1" encodes to -- the per-field types meant
+    // no two well typed entries could collide, but the comment claimed the
+    // three shapes were disjoint and they were not. They are now: a string
+    // begins with a digit, a null is `-`, a boolean is `~`.
     if (value === null) return "-:";
-    if (typeof value === "boolean") return value ? "2:b1" : "2:b0";
+    if (typeof value === "boolean") return value ? "~1" : "~0";
     return `${value.length}:${value}`;
 };
 
+/**
+ * One field's value as the digest sees it.
+ *
+ * Only the expiry needs normalising, and it needs it badly enough to be
+ * worth a function: the column is a `TIMESTAMP(3)` and two spellings of one
+ * instant have to digest the same, or a row cannot reproduce the digest
+ * computed from it.
+ */
+const fieldValue = (
+    entry: ManifestDeploymentEntry,
+    field: (typeof MANIFEST_ENTRY_FIELDS)[number]
+): string | boolean | null => {
+    if (field !== "qualityGateExpiresAt") return entry[field];
+    const expiry = entry.qualityGateExpiresAt;
+    if (expiry === null) return null;
+    // `toISOString()` throws on an invalid Date, and this function has to be
+    // total: `manifestProblems()` computes the digest in order to compare it,
+    // so a throw here would stop the validator reaching its own complaint
+    // about the same value. A fixed marker instead -- distinct from null, so
+    // an unreadable expiry does not digest as no expiry, and never present in
+    // a published digest because publication refuses the entry.
+    return Number.isNaN(expiry.getTime()) ? "not-an-instant" : expiry.toISOString();
+};
+
 const encodeEntry = (entry: ManifestDeploymentEntry): string =>
-    MANIFEST_ENTRY_FIELDS.map((field) => encodeField(entry[field])).join("");
+    MANIFEST_ENTRY_FIELDS.map((field) => encodeField(fieldValue(entry, field))).join("");
 
 /**
  * The digest of a set of deployment entries.
@@ -283,6 +339,14 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
             problems.push(`deployment ${JSON.stringify(entry.modelDeploymentId)} appears twice`);
         }
         ids.add(entry.modelDeploymentId);
+        // An invalid Date digests as nothing and would throw on the way to
+        // the column. Refused here so the publish path says which entry.
+        const expiry = entry.qualityGateExpiresAt;
+        if (expiry !== null && Number.isNaN(expiry.getTime())) {
+            problems.push(
+                `deployment ${JSON.stringify(entry.modelDeploymentId)} has an expiry that is not an instant`
+            );
+        }
     }
 
     if (input.digest !== manifestDigest(input.entries)) {

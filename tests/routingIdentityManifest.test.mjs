@@ -83,12 +83,28 @@ test("the digest covers every column the identity trigger already names", () => 
     // The first field list was smaller than what the repository already calls
     // identity, and `satisfies` could not notice: it checks that each name is
     // a key of the type, not that the type mentioned every column.
-    const trigger =
-        /model_deployment_gate_follows_identity[\s\S]*?IF NEW\."enabled" AND \(([\s\S]*?)\n\s*\) THEN/.exec(
+    // Read from the whole function body and by the comparison itself, not by
+    // slicing at the first `) THEN`: a column added after such a token, or
+    // inside a comment, would have gone unseen while the count floor still
+    // passed.
+    const body =
+        /CREATE OR REPLACE FUNCTION "model_deployment_gate_follows_identity"[\s\S]*?\$\$([\s\S]*?)\$\$/.exec(
             identityMigration()
         );
-    assert.ok(trigger, "the identity trigger is in its migration");
-    const columns = [...trigger[1].matchAll(/NEW\."(\w+)"/g)].map((match) => match[1]);
+    assert.ok(body, "the identity trigger is in its migration");
+    const code = body[1]
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n");
+    const columns = [
+        ...new Set(
+            [
+                ...code.matchAll(
+                    /NEW\."(\w+)" IS DISTINCT FROM OLD\."\1"/g
+                ),
+            ].map((match) => match[1])
+        ),
+    ];
     assert.ok(columns.length >= 9, `found ${columns.length} identity columns`);
     for (const column of columns) {
         assert.ok(
@@ -161,7 +177,7 @@ test("every field in the list changes the digest", () => {
         qualityTier: "standard",
         capabilities: canonicalCapabilities({ vision: false }),
         qualityGateStatus: "passed",
-        qualityGateExpiresAt: "2026-12-01T00:00:00.000Z",
+        qualityGateExpiresAt: new Date("2026-12-01T00:00:00.000Z"),
         deploymentEnabled: false,
         providerEndpointId: "end_2",
         gatewayProvider: "azure",
@@ -175,6 +191,27 @@ test("every field in the list changes the digest", () => {
     for (const [field, value] of Object.entries(changes)) {
         assert.notEqual(manifestDigest([entry({ [field]: value })]), baseline, field);
     }
+});
+
+test("the expiry digests as one instant, however it was spelled", () => {
+    // The one field a row could not reproduce. As a free string,
+    // 2026-12-01T00:00:00.000Z and 2026-12-01T00:00:00Z are the same instant
+    // and digested differently, the TIMESTAMP(3) column kept one of them, and
+    // a string that was not a date at all digested fine and failed to insert.
+    const expiry = new Date("2026-12-01T00:00:00.000Z");
+    assert.equal(
+        manifestDigest([entry({ qualityGateExpiresAt: expiry })]),
+        manifestDigest([entry({ qualityGateExpiresAt: new Date("2026-12-01T00:00:00Z") })])
+    );
+    assert.notEqual(
+        manifestDigest([entry({ qualityGateExpiresAt: expiry })]),
+        manifestDigest([entry({ qualityGateExpiresAt: null })])
+    );
+    // And one that is not an instant is refused rather than digested.
+    assert.deepEqual(
+        manifestProblems(manifest([entry({ qualityGateExpiresAt: new Date("nonsense") })])),
+        ['deployment "dep_1" has an expiry that is not an instant']
+    );
 });
 
 test("capabilities canonicalise by key and keep array order", () => {
@@ -195,6 +232,18 @@ test("capabilities canonicalise by key and keep array order", () => {
         canonicalCapabilities({ vision: true, tools: [] })
     );
     assert.equal(canonicalCapabilities(undefined), canonicalCapabilities(null));
+    // JSON.stringify turns several distinct values into the same bytes. None
+    // can arrive from the jsonb column this reads, and a digest that quietly
+    // agreed about two different declarations is worth refusing.
+    for (const value of [
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        new Date("2026-01-01"),
+        { nested: Number.NaN },
+        { at: new Date(0) },
+    ]) {
+        assert.throws(() => canonicalCapabilities(value), TypeError);
+    }
 });
 
 test("null is not any string, including the ones that look like it", () => {
@@ -208,7 +257,18 @@ test("null is not any string, including the ones that look like it", () => {
     }
 });
 
-test("a boolean is not the string that spells it", () => {
+test("the three encoded shapes cannot be confused for each other", () => {
+    // A string begins with its length, so with a digit; a null is `-`; a
+    // boolean is `~`. An earlier version wrote a boolean as `2:b1`, which is
+    // exactly what the string "b1" encodes to -- the per-field types meant no
+    // two well typed entries could collide, but the comment claimed the three
+    // shapes were disjoint and they were not.
+    const source = readFileSync(
+        new URL("../lib/routingIdentityManifest.ts", import.meta.url),
+        "utf8"
+    );
+    assert.match(source, /return value \? "~1" : "~0";/);
+    assert.ok(!source.includes('"2:b1"'));
     const digests = new Set([
         manifestDigest([entry({ deploymentEnabled: true })]),
         manifestDigest([entry({ deploymentEnabled: false })]),
@@ -308,10 +368,12 @@ test("a manifest says when it was published", () => {
     );
 });
 
-test("the entries are stored, not only hashed", () => {
-    // The review's rejection: a digest proves values were not altered while
-    // you still have the values, and ModelDeployment and ProviderEndpoint are
-    // mutable rows that will have moved by the time anybody asks.
+test("every digest field is a column of the entry table", () => {
+    // The review's rejection was that a digest proves values were not altered
+    // while you still have the values, and ModelDeployment and
+    // ProviderEndpoint are mutable rows that will have moved by the time
+    // anybody asks. This checks the DDL declares a column per digest field,
+    // which is what makes the reconstruction possible; it writes no row.
     const sql = statements(migration());
     assert.match(sql, /CREATE TABLE "RoutingIdentityManifestEntry"/);
     for (const field of MANIFEST_DIGEST_FIELDS) {
@@ -350,8 +412,22 @@ test("an entry cannot be rewritten, and there is one per deployment", () => {
     );
     assert.match(sql, /BEFORE TRUNCATE ON "RoutingIdentityManifestEntry"/);
     // RESTRICT to everything it describes; Cascade only to the publication.
-    assert.equal((sql.match(/ON DELETE RESTRICT/g) ?? []).length, 3);
-    assert.equal((sql.match(/ON DELETE CASCADE/g) ?? []).length, 1);
+    // By parent rather than by count -- moving the cascade onto the
+    // deployment and the restrict onto the manifest would keep the counts.
+    for (const [column, parent, action] of [
+        ["manifestId", "RoutingIdentityManifest", "CASCADE"],
+        ["modelDeploymentId", "ModelDeployment", "RESTRICT"],
+        ["providerEndpointId", "ProviderEndpoint", "RESTRICT"],
+        ["residencyApprovalId", "EndpointResidencyApproval", "RESTRICT"],
+    ]) {
+        assert.match(
+            sql,
+            new RegExp(
+                `FOREIGN KEY \\("${column}"\\) REFERENCES "${parent}"\\("id"\\)\\s*\\n\\s*ON DELETE ${action}`
+            ),
+            `${column} -> ${parent} ${action}`
+        );
+    }
 });
 
 test("the module holds no I/O and imports only node:crypto", () => {
