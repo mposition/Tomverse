@@ -297,17 +297,31 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_ov
 -- `a->>'authority'` would find nothing in it, so no evidence could ever be
 -- attached to a verdict shaped that way. Every element has to be an object
 -- carrying an authority the list knows.
-ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_json_shape_check"
-    CHECK (
-        jsonb_typeof("authorities") = 'array'
-        AND jsonb_typeof("blockers") = 'array'
-        AND NOT EXISTS (
+--
+-- As a function, because a CHECK may not contain a subquery: Postgres refuses
+-- `NOT EXISTS (SELECT ...)` there with 0A000, and the whole migration would
+-- have rolled back at apply time. The function is IMMUTABLE over its argument
+-- and reads no table, which is what a constraint may call.
+CREATE FUNCTION "email_permission_authorities_valid"(authorities JSONB)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT jsonb_typeof(authorities) = 'array'
+       AND NOT EXISTS (
             SELECT 1
-              FROM jsonb_array_elements("authorities") AS a
+              FROM jsonb_array_elements(authorities) AS a
              WHERE jsonb_typeof(a) <> 'object'
                 OR a->>'authority' IS NULL
                 OR a->>'authority' NOT IN ('recipient', 'au_sender')
-        )
+       );
+$$;
+
+ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_json_shape_check"
+    CHECK (
+        jsonb_typeof("blockers") = 'array'
+        AND "email_permission_authorities_valid"("authorities")
     );
 
 -- allowed is derived, so it is computed here too. Two places saying it is the
@@ -395,15 +409,6 @@ ALTER TABLE "EmailPermissionDecisionEvidence" ADD CONSTRAINT "EmailPermissionDec
 -- value, nothing else moving -- is exactly the anonymisation the registry
 -- records, so it is the only one allowed.
 
-CREATE FUNCTION "email_ledger_only_detach"(old_value TEXT, new_value TEXT)
-RETURNS BOOLEAN
-LANGUAGE sql
-IMMUTABLE
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT old_value IS NOT NULL AND new_value IS NULL;
-$$;
-
 CREATE FUNCTION "email_permission_event_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -415,7 +420,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    IF NOT "email_ledger_only_detach"(OLD."userId", NEW."userId") THEN
+    IF NOT (OLD."userId" IS NOT NULL AND NEW."userId" IS NULL) THEN
         RAISE EXCEPTION 'EmailPermissionEvent is append-only (UPDATE).'
             USING ERRCODE = 'check_violation';
     END IF;
@@ -462,10 +467,10 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT a."sealedAt" INTO sealed
-        FROM public."EmailSendApproval" a
-        WHERE a."id" = NEW."approvalId"
-        FOR SHARE;
+    EXECUTE pg_catalog.format(
+        'SELECT a."sealedAt" FROM %I."EmailSendApproval" a WHERE a."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING NEW."approvalId";
 
     IF sealed IS NULL THEN
         RAISE EXCEPTION 'EmailSendApproval % is not sealed, so there is nothing to withdraw.',
@@ -564,10 +569,10 @@ DECLARE
 BEGIN
     approval_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."approvalId" ELSE NEW."approvalId" END;
 
-    SELECT a."sealedAt" INTO sealed
-        FROM public."EmailSendApproval" a
-        WHERE a."id" = approval_id
-        FOR SHARE;
+    EXECUTE pg_catalog.format(
+        'SELECT a."sealedAt" FROM %I."EmailSendApproval" a WHERE a."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING approval_id;
 
     IF sealed IS NOT NULL THEN
         RAISE EXCEPTION 'EmailSendApproval % is sealed; its membership cannot change (%).',
@@ -605,9 +610,10 @@ AS $$
 DECLARE
     approval_type TEXT;
 BEGIN
-    SELECT a."approvalType" INTO approval_type
-        FROM public."EmailSendApproval" a
-        WHERE a."id" = NEW."approvalId";
+    EXECUTE pg_catalog.format(
+        'SELECT a."approvalType" FROM %I."EmailSendApproval" a WHERE a."id" = $1',
+        TG_TABLE_SCHEMA
+    ) INTO approval_type USING NEW."approvalId";
 
     IF approval_type <> 'risk_accepted' THEN
         RAISE EXCEPTION 'EmailSendApproval % is a % and is scoped by rule rather than by cohort.',
@@ -634,9 +640,10 @@ DECLARE
 BEGIN
     approval_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."approvalId" ELSE NEW."approvalId" END;
 
-    SELECT a."sealedAt" INTO sealed
-        FROM public."EmailSendApproval" a
-        WHERE a."id" = approval_id;
+    EXECUTE pg_catalog.format(
+        'SELECT a."sealedAt" FROM %I."EmailSendApproval" a WHERE a."id" = $1',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING approval_id;
 
     IF sealed IS NOT NULL THEN
         RAISE EXCEPTION 'EmailSendApproval % was sealed by this statement; its membership cannot change (%).',
@@ -676,8 +683,11 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    detaching := "email_ledger_only_detach"(OLD."userId", NEW."userId");
-    detaching_delivery := "email_ledger_only_detach"(OLD."deliveryId", NEW."deliveryId");
+    -- Inlined rather than a helper call: search_path is pinned to
+    -- pg_catalog and pg_temp, so a sibling function named without its schema
+    -- is not found (42883).
+    detaching := OLD."userId" IS NOT NULL AND NEW."userId" IS NULL;
+    detaching_delivery := OLD."deliveryId" IS NOT NULL AND NEW."deliveryId" IS NULL;
     sealing := OLD."sealedAt" IS NULL AND NEW."sealedAt" IS NOT NULL;
     submitting := OLD."providerSubmittedAt" IS NULL AND NEW."providerSubmittedAt" IS NOT NULL;
 
@@ -790,10 +800,10 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    SELECT a."sealedAt" INTO sealed
-        FROM public."EmailSendApproval" a
-        WHERE a."id" = NEW."overrideApprovalId"
-        FOR SHARE;
+    EXECUTE pg_catalog.format(
+        'SELECT a."sealedAt" FROM %I."EmailSendApproval" a WHERE a."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING NEW."overrideApprovalId";
 
     IF sealed IS NULL THEN
         RAISE EXCEPTION 'EmailSendApproval % is not sealed and cannot override a send.',
@@ -836,10 +846,10 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT d."sealedAt" INTO sealed
-        FROM public."EmailPermissionDecision" d
-        WHERE d."id" = NEW."decisionId"
-        FOR SHARE;
+    EXECUTE pg_catalog.format(
+        'SELECT d."sealedAt" FROM %I."EmailPermissionDecision" d WHERE d."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING NEW."decisionId";
 
     IF sealed IS NOT NULL THEN
         RAISE EXCEPTION 'EmailPermissionDecision % is sealed; its evidence cannot grow.', NEW."decisionId"
@@ -891,12 +901,13 @@ DECLARE
     s_scope TEXT;
     s_occurred TIMESTAMP(3);
 BEGIN
-    SELECT d."userId", lower(d."emailAddress"), d."purpose", d."classification",
-           d."authorities", d."evaluatedAt"
-      INTO d_user, d_address, d_purpose, d_classification, d_authorities, d_evaluated
-      FROM public."EmailPermissionDecision" d
-     WHERE d."id" = NEW."decisionId"
-       FOR SHARE;
+    EXECUTE pg_catalog.format(
+        'SELECT d."userId", lower(d."emailAddress"), d."purpose", d."classification", ' ||
+        'd."authorities", d."evaluatedAt" FROM %I."EmailPermissionDecision" d ' ||
+        'WHERE d."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO d_user, d_address, d_purpose, d_classification, d_authorities, d_evaluated
+      USING NEW."decisionId";
 
     IF NOT EXISTS (
         SELECT 1
@@ -909,10 +920,11 @@ BEGIN
     END IF;
 
     IF NEW."eventId" IS NOT NULL THEN
-        SELECT e."userId", lower(e."emailAddress"), e."scopeKey", e."occurredAt"
-          INTO s_user, s_address, s_scope, s_occurred
-          FROM public."EmailPermissionEvent" e
-         WHERE e."id" = NEW."eventId";
+        EXECUTE pg_catalog.format(
+            'SELECT e."userId", lower(e."emailAddress"), e."scopeKey", e."occurredAt" ' ||
+            'FROM %I."EmailPermissionEvent" e WHERE e."id" = $1',
+            TG_TABLE_SCHEMA
+        ) INTO s_user, s_address, s_scope, s_occurred USING NEW."eventId";
 
         IF s_scope <> '*' AND s_scope <> d_purpose AND s_scope <> d_classification THEN
             RAISE EXCEPTION 'Permission event % is scoped to %, which the verdict did not decide.',
@@ -920,10 +932,11 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
     ELSE
-        SELECT c."userId", lower(c."emailAddress"), c."purpose", c."occurredAt"
-          INTO s_user, s_address, s_scope, s_occurred
-          FROM public."ConsentRecord" c
-         WHERE c."id" = NEW."consentRecordId";
+        EXECUTE pg_catalog.format(
+            'SELECT c."userId", lower(c."emailAddress"), c."purpose", c."occurredAt" ' ||
+            'FROM %I."ConsentRecord" c WHERE c."id" = $1',
+            TG_TABLE_SCHEMA
+        ) INTO s_user, s_address, s_scope, s_occurred USING NEW."consentRecordId";
 
         IF s_scope <> d_purpose THEN
             RAISE EXCEPTION 'Consent record % is about %, which the verdict did not decide.',
@@ -966,9 +979,10 @@ AS $$
 DECLARE
     sealed TIMESTAMP(3);
 BEGIN
-    SELECT d."sealedAt" INTO sealed
-        FROM public."EmailPermissionDecision" d
-        WHERE d."id" = NEW."decisionId";
+    EXECUTE pg_catalog.format(
+        'SELECT d."sealedAt" FROM %I."EmailPermissionDecision" d WHERE d."id" = $1',
+        TG_TABLE_SCHEMA
+    ) INTO sealed USING NEW."decisionId";
 
     IF sealed IS NOT NULL THEN
         RAISE EXCEPTION 'EmailPermissionDecision % was sealed by this statement; its evidence cannot grow.', NEW."decisionId"
@@ -1009,7 +1023,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    IF NOT "email_ledger_only_detach"(OLD."userId", NEW."userId") THEN
+    IF NOT (OLD."userId" IS NOT NULL AND NEW."userId" IS NULL) THEN
         RAISE EXCEPTION 'ConsentRecord is append-only (UPDATE).'
             USING ERRCODE = 'check_violation';
     END IF;
