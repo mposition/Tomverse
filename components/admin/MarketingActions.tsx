@@ -89,8 +89,13 @@ const localDateTimeValue = (value: unknown): string => {
   if (typeof value !== "string") return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  // `datetime-local` wants no zone and no seconds.
-  return date.toISOString().slice(0, 16);
+  // `datetime-local` has no zone, and the browser reads what is in it as
+  // local wall-clock time. Slicing the ISO string handed it the UTC hour and
+  // the browser read that as local, so in UTC+10 a seven-day default was
+  // stored as six days and fourteen hours -- a shorter approval window than
+  // the one shown, which is the direction that silently expires things.
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 };
 
 /** What the operator typed, as the instant they meant. */

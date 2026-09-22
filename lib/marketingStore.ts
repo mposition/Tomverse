@@ -578,7 +578,7 @@ const requireOne = (count: number, code: string, message: string): void => {
 };
 
 export async function confirmMarketingChannelConnection(
-  database: MarketingDatabase,
+  database: MarketingTransaction,
   rawInput: { id: string; expectedConnectionGeneration: number },
 ) {
   const input = {
@@ -595,6 +595,27 @@ export async function confirmMarketingChannelConnection(
       "The account is no longer the connection that was confirmed",
     );
   }
+  // The last edge out of a stopped state that did not pay for it.
+  // `connect_pending` is in the stopped set and is drainable, so a post can be
+  // sitting there due -- nothing in the post writers checks the channel's
+  // status -- and this walks the account straight into `approval_mode`, where
+  // the publisher can take it. The rule is the edge, not the name of the
+  // state it starts in.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  await expireDueApprovals(database, input.id, now, {
+    refuseIfMore: true,
+    trigger: "identity_change",
+  });
+
   const updated = await database.marketingChannel.updateMany({
     where: {
       id: input.id,
@@ -1090,7 +1111,7 @@ async function expireDueApprovals(
 export async function drainDueMarketingApprovals(
   database: MarketingTransaction,
   rawInput: { id: string },
-): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
+): Promise<{ status: string; expiredPostIds: string[]; remaining: boolean }> {
   const input = { id: String(rawInput.id) };
   const channel = await lockMarketingChannel(database, input.id);
   if (!marketingChannelWasStopped(channel.status)) {
@@ -1114,10 +1135,11 @@ export async function drainDueMarketingApprovals(
       "The database clock did not return a timestamp",
     );
   }
-  return expireDueApprovals(database, input.id, now, {
+  const drained = await expireDueApprovals(database, input.id, now, {
     refuseIfMore: false,
     trigger: "drain",
   });
+  return { status: channel.status, ...drained };
 }
 
 export async function resumeMarketingChannelToApproval(

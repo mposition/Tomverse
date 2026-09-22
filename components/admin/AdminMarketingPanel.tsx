@@ -303,14 +303,24 @@ function MarketingSwitchStrip({
               // reached the operator as "that did not go through" -- three
               // switches that looked broken rather than misaddressed.
               method: "PATCH",
-              // Turning publishing on cannot succeed before the publisher
-              // exists: the writer answers `publisher_capability_unavailable`
-              // every time. Drawn disabled with the reason rather than hidden,
-              // because someone looking for this switch should find out why.
-              unavailable:
-                turningOn && control.name === "publish"
+              // Two switches the writer is certain to refuse, each drawn
+              // disabled with its reason rather than hidden: someone looking
+              // for a switch should find out why it is not theirs to move,
+              // and a control whose only outcome is a 409 teaches them that
+              // this screen's buttons are guesses.
+              //
+              // Publishing cannot go on before the publisher exists (S2c);
+              // the writer answers `publisher_capability_unavailable`.
+              // Autonomous cannot go on while drafts or publishing are off;
+              // the writer answers `autonomous_needs_drafts_and_publish`.
+              unavailable: !turningOn
+                ? undefined
+                : control.name === "publish"
                   ? m.switchPublishUnavailable
-                  : undefined,
+                  : control.name === "autonomous" &&
+                      (switches.drafts !== "on" || switches.publish !== "on")
+                    ? m.switchAutonomousNeedsBoth
+                    : undefined,
               confirm: turningOn ? m.switchConfirmOn : undefined,
               body: () => ({
                 switch: control.name,
@@ -564,6 +574,17 @@ const TEMPLATE_SOURCE = new Set(["approved", "scheduled", "published", "verified
  * backlog, so they are exactly the states where the drain that clears it must
  * be reachable.
  */
+/**
+ * Whether the publisher has a cap to lower on this channel.
+ *
+ * Read from the same table the store reads, through a guard rather than an
+ * index expression: the row’s channel arrives as a `string` from a payload,
+ * and indexing a closed record with it is the shape that needs a cast.
+ */
+const channelHasCaps = (channel: string): boolean =>
+  Object.hasOwn(MARKETING_CHANNEL_CAPS, channel) &&
+  MARKETING_CHANNEL_CAPS[channel as keyof typeof MARKETING_CHANNEL_CAPS] !== null;
+
 const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
   "paused",
   "disconnected",
@@ -836,6 +857,13 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
       id: "lower-caps",
       label: m.actLowerCaps,
       path: ACCOUNT(row.id, "caps"),
+      // A manual channel has no publisher cap to override, so the writer
+      // answers `manual_channel_has_no_caps` every time. The channel is in
+      // the payload, so the screen can say so before the click instead of
+      // after it.
+      unavailable: channelHasCaps(str(row.channel))
+        ? undefined
+        : m.capsManualChannel,
       fields: [
         {
           name: "dailyCapOverride",

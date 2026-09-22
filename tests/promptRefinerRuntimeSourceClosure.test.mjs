@@ -117,12 +117,23 @@ const compilerOptions = parsedConfig.options;
 // access below it moves down. The new function has no element access of its
 // own. The count is still 228 and the position-free inventory still hashes to
 // the value above, so this is a repin and not a review.
+//
+// 2026-09-23, S2b1 on top: the marketing switch writer left
+// `lib/appSettings.ts` for `lib/marketingSwitchWriter.ts`, so everything below
+// where it used to sit moves up. It went because `lib/appSettings.ts` is in
+// this closure and the writer had come to need the branded marketing
+// transaction -- importing it from here would have added a file to a set a
+// database CHECK is bound to, and the count did move to 179 before the writer
+// was moved out. The new module is not in the closure, nothing in the closure
+// imports it, and the writer's own computed accesses went with it. The count
+// is back to 228 and the position-free inventory still hashes to the value
+// above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "bc9ba0e4ae2f6a30bb1f9720ba5b85da",
-  "db1b05e706e3196c4828feafe0808e87",
+  "fc7e3fbdffd61feaf3d75fb01b9f2a7b",
+  "a148d28a86ef034202b54ba009db1e44",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

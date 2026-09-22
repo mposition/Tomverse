@@ -786,20 +786,68 @@ const marketingRouteOffenders = (relative, source) => {
             offenders.push(
               `${relative}: ${name} does not end by returning the shared predicate`
             );
+            continue;
+          }
+          // JavaScript evaluates the argument before it enters the function.
+          // A call sitting directly in one of the spec's properties therefore
+          // runs outside every check the wrapper performs, and the sweep saw
+          // only the callee's name.
+          //
+          // The spec's properties are values and functions:
+          // `action`, `summary`, `gate`, `targetId` and `metadata` are
+          // literals or arrows, `run` is an arrow. A property whose value is
+          // called or awaited where it sits is not one of those.
+          let argument = statement.expression;
+          while (ts.isAwaitExpression(argument) || ts.isParenthesizedExpression(argument)) {
+            argument = argument.expression;
+          }
+          const [spec] = ts.isCallExpression(argument) ? argument.arguments : [];
+          if (!spec || !ts.isObjectLiteralExpression(spec)) {
+            offenders.push(
+              `${relative}: ${name} does not pass the predicate a literal specification`
+            );
+            continue;
+          }
+          for (const property of spec.properties) {
+            const value = ts.isPropertyAssignment(property)
+              ? property.initializer
+              : null;
+            if (!value) continue;
+            let inner = value;
+            while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+            if (ts.isCallExpression(inner) || ts.isAwaitExpression(inner)) {
+              offenders.push(
+                `${relative}: ${name} evaluates ${property.name.getText(tree)} before the predicate runs`
+              );
+            }
           }
           continue;
         }
 
-        // `const { postId } = await context.params;` and nothing else: every
-        // declaration awaits, so no statement before the answer can call a
-        // store, read a session or write a row.
+        // `const { postId } = await context.params;` and nothing else.
+        //
+        // "Awaits something" was not enough: `const row = await
+        // pauseMarketingChannel(...)` awaits too, and it is a write running
+        // before the permission check, the step-up check and the audit
+        // transaction. What is awaited has to be a property read -- no call
+        // anywhere inside it -- which is what unwrapping a dynamic segment is
+        // and what a store call is not.
         const unwrapsParams =
           ts.isVariableStatement(statement) &&
-          statement.declarationList.declarations.every(
-            (declaration) =>
-              declaration.initializer &&
-              ts.isAwaitExpression(declaration.initializer)
-          );
+          statement.declarationList.declarations.every((declaration) => {
+            const initializer = declaration.initializer;
+            if (!initializer || !ts.isAwaitExpression(initializer)) return false;
+            let awaited = initializer.expression;
+            while (ts.isParenthesizedExpression(awaited)) awaited = awaited.expression;
+            if (!ts.isPropertyAccessExpression(awaited)) return false;
+            let calls = false;
+            const look = (inner) => {
+              if (ts.isCallExpression(inner) || ts.isNewExpression(inner)) calls = true;
+              ts.forEachChild(inner, look);
+            };
+            look(awaited);
+            return !calls;
+          });
         if (!unwrapsParams) {
           offenders.push(
             `${relative}: ${name} does something before answering`
@@ -885,6 +933,21 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "export const { POST } = handlers;\n",
     ],
     ["a whole module re-exported", imports + 'export * from "@/lib/elsewhere";\n'],
+    [
+      "a store call disguised as unwrapping the dynamic segment",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  const row = await pauseMarketingChannel(req, {});\n" +
+        "  return runMarketingAdminMutation({ row });\n" +
+        "}\n",
+    ],
+    [
+      "a store call inside the specification, which is evaluated first",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ row: await pauseMarketingChannel(req, {}) });\n" +
+        "}\n",
+    ],
     [
       "a handler that reads the session itself",
       'import { getServerSession } from "next-auth/next";\n' +
@@ -986,11 +1049,16 @@ test("nothing in the marketing code casts its way past a type", () => {
     }
   };
   walk(join(process.cwd(), "app", "api", "admin", "marketing"));
+  // Every file that handles the branded transaction, found by what it
+  // mentions rather than by what it is called. Matching `lib/marketing*.ts`
+  // left out `lib/appSettings.ts`, which is one of the writers.
   for (const entry of readdirSync(join(process.cwd(), "lib"), {
     withFileTypes: true,
   })) {
-    if (entry.isFile() && /^marketing.*\.ts$/u.test(entry.name)) {
-      files.push(join(process.cwd(), "lib", entry.name));
+    if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+    const path = join(process.cwd(), "lib", entry.name);
+    if (readFileSync(path, "utf8").includes("MarketingTransaction")) {
+      files.push(path);
     }
   }
   assert.ok(files.length >= 12, `the sweep found only ${files.length} files`);
@@ -1011,6 +1079,57 @@ test("nothing in the marketing code casts its way past a type", () => {
     visit(tree);
   }
   assert.deepEqual(escapes, []);
+});
+
+test("no helper mints a type from nothing", () => {
+  // `const cast = <T>(value: unknown): T => value as T` produces a
+  // `MarketingTransaction` without the words ever appearing at the call site,
+  // so both checks above miss it. There is no legitimate use of such a helper
+  // in this code, and one would undo the brand entirely.
+  const files = [];
+  const walk = (at) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const next = join(at, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+        files.push(next);
+      }
+    }
+  };
+  walk(join(process.cwd(), "app", "api", "admin", "marketing"));
+  for (const entry of readdirSync(join(process.cwd(), "lib"), { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".ts")) {
+      const path = join(process.cwd(), "lib", entry.name);
+      if (readFileSync(path, "utf8").includes("MarketingTransaction")) files.push(path);
+    }
+  }
+
+  const minters = [];
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    const visit = (node) => {
+      const parameters = node.typeParameters;
+      if (parameters && parameters.length > 0) {
+        const names = new Set(parameters.map((parameter) => parameter.name.text));
+        const look = (inner) => {
+          if (
+            (ts.isAsExpression(inner) || ts.isTypeAssertionExpression(inner)) &&
+            ts.isTypeReferenceNode(inner.type) &&
+            ts.isIdentifier(inner.type.typeName) &&
+            names.has(inner.type.typeName.text)
+          ) {
+            minters.push(`${file}: ${inner.getText(tree).slice(0, 50)}`);
+          }
+          ts.forEachChild(inner, look);
+        };
+        ts.forEachChild(node, look);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+  assert.deepEqual(minters, []);
 });
 
 /** A paused channel row, in the shape `lockMarketingChannel` returns. */
@@ -1128,7 +1247,10 @@ test("the drain does not resume the account it drains", async () => {
     !body.includes("marketingChannel.update"),
     "the drain writes the channel row",
   );
-  assert.ok(!body.includes("status:"), "the drain names a status to write");
+  // No `data:` at all, which is the shape every Prisma write takes. Reporting
+  // the status it locked is not writing one, and the earlier version of this
+  // assertion could not tell the two apart.
+  assert.ok(!body.includes("data:"), "the drain writes something");
 });
 
 test("the console switch controls name switches the writer accepts", () => {
@@ -1261,7 +1383,14 @@ test("the drain reaches every state a resume can refuse from", async () => {
       { $queryRaw, marketingPost: { updateMany: async () => ({ count: 1 }) } },
       { id: "channel-1" },
     );
-    assert.deepEqual(result, { expiredPostIds: [], remaining: false }, status);
+    // The state it locked travels back, so the answer names it rather than
+    // leaving a reader to infer it from a summary that used to say "paused"
+    // whatever it had actually run against.
+    assert.deepEqual(
+      result,
+      { status, expiredPostIds: [], remaining: false },
+      status,
+    );
     // The row, the clock, and the due query: it looked.
     assert.equal(reads.total, 3, status);
   }

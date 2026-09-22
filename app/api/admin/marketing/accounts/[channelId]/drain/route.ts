@@ -43,16 +43,21 @@ export async function POST(req: Request, context: RouteContext) {
     action: MARKETING_S2B1_ACTIONS.accountDrainDueApprovals,
     targetType: "MarketingChannel",
     targetId: channelId,
-    summary: "Expired a batch of due approvals on a paused brand account.",
+    // Not "a paused brand account": the drain covers every state in which
+    // nothing is publishing, and on a disconnected one that sentence was
+    // simply false. The human row says what was done; the per-post system
+    // rows say what it was done to.
+    summary: "Expired a batch of due approvals on a stopped brand account.",
     gate: "operator_restriction",
     bucket: "admin-marketing-account-drain",
     schema,
     metadata: () => ({}),
     run: async (tx) => {
-      const { expiredPostIds, remaining } = await drainDueMarketingApprovals(tx, {
-        id: channelId,
-      });
-      return { id: channelId, expiredPostIds, remaining };
+      const { status, expiredPostIds, remaining } =
+        await drainDueMarketingApprovals(tx, { id: channelId });
+      // The status this actually ran against, so the answer names the state
+      // rather than leaving the reader to infer it from the summary.
+      return { id: channelId, status, expiredPostIds, remaining };
     },
   });
 }

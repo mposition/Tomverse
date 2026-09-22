@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
+import { MARKETING_CONSOLE_SWITCH_NAMES } from "@/lib/marketingConsoleSections";
 import {
-  MARKETING_CONSOLE_SWITCH_NAMES,
   MarketingSwitchRefusedError,
   writeMarketingAutomationSwitch,
-} from "@/lib/appSettings";
+} from "@/lib/marketingSwitchWriter";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import { MARKETING_S2B1_ACTIONS } from "@/lib/marketingStore";
 

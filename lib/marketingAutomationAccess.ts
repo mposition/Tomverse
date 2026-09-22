@@ -227,9 +227,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * columns and a new attempt check to the same schema. Those additions do not
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
+ *
+ * 2026-09-23, S2b1: `MARKETING_PAUSE_REASON_CODES` and its type moved into
+ * the watched schema module from `lib/marketingStore.ts`, which is server-only
+ * and therefore unreadable by the console that has to offer the list. The
+ * store re-exports the same names, so no caller changed and no value changed.
+ * Webhook admission reads none of it -- the pause reasons are not an input to
+ * any webhook decision -- but the file is watched whole, so the digest moves
+ * and the move is recorded here rather than absorbed.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "a12131378b46a7f0c0c088dfac2538c97435c0ffa0db95666fe1c8c72315225d";
+  "9760b7a0b52335b50fc0c9b571ce5e0146d7f6a14ef039bbf6480ea76388b7dd";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

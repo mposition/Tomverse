@@ -1,10 +1,8 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import {
-  marketingConfigGenerationFromValue,
-  readMarketingAutomationSettings,
-} from "@/lib/appSettings";
+import { readMarketingAutomationSettings } from "@/lib/appSettings";
+import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
 import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
 import {
   MARKETING_READ_PAGE_SIZE,

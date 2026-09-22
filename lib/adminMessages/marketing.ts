@@ -20,6 +20,10 @@ export const adminMarketingMessages = defineAdminMessages({
       "The configuration version could not be read, so no switch can be changed from here right now.",
     switchPublishUnavailable:
       "The publisher is built in stage S2c. Until it exists the writer refuses this, so the switch is shown rather than hidden and left where it is.",
+    switchAutonomousNeedsBoth:
+      "Autonomous publishing needs drafts and publishing on first. The writer refuses it while either is off.",
+    capsManualChannel:
+      "This channel is posted by hand, so there is no publisher cap to lower.",
     drainDone: "Expired {count}. Nothing else is due.",
     drainMore: "Expired {count}. More are still due -- run it again.",
     actApprove: "Approve",
@@ -166,6 +170,10 @@ export const adminMarketingMessages = defineAdminMessages({
       "설정 버전을 읽지 못해 지금은 여기서 스위치를 바꿀 수 없습니다.",
     switchPublishUnavailable:
       "publisher는 S2c 단계에서 만듭니다. 그때까지는 writer가 거절하므로, 숨기는 대신 이유를 적고 그대로 둡니다.",
+    switchAutonomousNeedsBoth:
+      "자율 게시는 초안과 게시가 먼저 켜져 있어야 합니다. 둘 중 하나라도 꺼져 있으면 writer가 거절합니다.",
+    capsManualChannel:
+      "이 채널은 사람이 직접 올리므로 내릴 publisher 상한이 없습니다.",
     drainDone: "{count}건 만료했습니다. 더 남은 것은 없습니다.",
     drainMore: "{count}건 만료했습니다. 아직 남아 있으니 한 번 더 실행하세요.",
     actApprove: "승인",
