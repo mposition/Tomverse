@@ -11,12 +11,34 @@ const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-import");
 type PreviewBody = {
   classification?: { create: string[]; noOp: string[]; conflict: string[]; exclude: string[] };
   refusal?: string | null;
+  sourceMissingCount?: number;
+  sourceMissingTruncated?: boolean;
   applyPermitted?: boolean;
   approvalId?: string;
   status?: string;
   error?: string;
   code?: string;
 };
+
+function sourceMissingSentence(
+  messages: {
+    sourceMissingScanStopped: string;
+    sourceMissingAllPresent: string;
+    sourceMissing: (count: number) => string;
+    sourceMissingTruncated: (count: number) => string;
+  },
+  result: PreviewBody,
+): string | null {
+  if (typeof result.sourceMissingCount !== "number") return null;
+  if (result.sourceMissingTruncated && result.sourceMissingCount === 0) {
+    return messages.sourceMissingScanStopped;
+  }
+  if (result.sourceMissingTruncated) {
+    return messages.sourceMissingTruncated(result.sourceMissingCount);
+  }
+  if (result.sourceMissingCount === 0) return messages.sourceMissingAllPresent;
+  return messages.sourceMissing(result.sourceMissingCount);
+}
 
 export function AmuxBoardImportPanel() {
   const messages = useAdminMessages(adminAmuxBoardImportMessages);
@@ -45,6 +67,8 @@ export function AmuxBoardImportPanel() {
 
   const refusedForStepUp = result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
   const classification = result?.classification;
+
+  const missingSentence = result ? sourceMissingSentence(messages, result) : null;
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-import-panel">
@@ -156,6 +180,7 @@ export function AmuxBoardImportPanel() {
               )}
             </p>
           ) : null}
+          {missingSentence ? <p>{missingSentence}</p> : null}
         </div>
       ) : null}
     </section>

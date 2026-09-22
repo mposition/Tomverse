@@ -620,6 +620,55 @@ export const classifyBoardImport = (
   };
 };
 
+/**
+ * Cards of this catalog's source systems whose keys are absent from the
+ * manifest. The report does not delete, archive, or refuse the import.
+ * Cards of any other source system are ignored.
+ */
+export const boardImportSourceMissing = (
+  manifest: BoardImportManifest,
+  existing: readonly { sourceSystem: string; sourceKey: string }[],
+): string[] => {
+  const systems = new Set(manifest.items.map((item) => item.sourceSystem));
+  const present = new Set(manifest.items.map((item) => boardImportIdentityKey(item)));
+  const missing = new Set<string>();
+  for (const card of existing) {
+    if (!systems.has(card.sourceSystem)) continue;
+    const key = boardImportIdentityKey(card);
+    if (!present.has(key)) missing.add(key);
+  }
+  return [...missing].sort();
+};
+
+/** The bounded presence read. `take` is one past the cap so a full page can be told from a stopped scan. */
+export const boardImportSourcePresenceQuery = (
+  items: readonly { sourceSystem: string }[],
+  cap: number,
+) => {
+  const systems = [...new Set(items.map((item) => item.sourceSystem))];
+  if (systems.length === 0) return null;
+  return {
+    where: { sourceSystem: { in: systems }, sourceKey: { not: null } },
+    select: { sourceSystem: true, sourceKey: true },
+    orderBy: [{ sourceSystem: "asc" as const }, { sourceKey: "asc" as const }],
+    take: cap + 1,
+  };
+};
+
+export const boardImportSourcePresenceFromRows = (
+  rows: readonly { sourceSystem: string | null; sourceKey: string | null }[],
+  cap: number,
+): { rows: { sourceSystem: string; sourceKey: string }[]; truncated: boolean } => ({
+  truncated: rows.length > cap,
+  rows: rows
+    .flatMap((row) =>
+      row.sourceSystem && row.sourceKey
+        ? [{ sourceSystem: row.sourceSystem, sourceKey: row.sourceKey }]
+        : [],
+    )
+    .slice(0, cap),
+});
+
 export const boardImportSubmissionRefusal = (
   classification: BoardImportClassification,
 ): string | null => {
