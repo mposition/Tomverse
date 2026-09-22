@@ -129,7 +129,7 @@ export type MarketingMutationSpec<TBody, TResult> = {
   targetType: "MarketingPost" | "MarketingChannel" | "AppSetting";
   /** Absent for a create, where the id does not exist until the write. */
   targetId?: string | ((body: TBody) => string);
-  summary: string;
+  summary: string | ((body: TBody) => string);
   gate: MarketingMutationGate | ((body: TBody) => MarketingMutationGate);
   /** Distinguishes the rate-limit bucket; the buckets are per action. */
   bucket: string;
@@ -183,6 +183,11 @@ export async function runMarketingAdminMutation<TBody, TResult>(
       );
     }
 
+    // An explicit budget rather than Prisma default. The audit chain takes a
+    // process-wide advisory lock and it is taken first, so every other audit
+    // write in the process queues behind this transaction -- lib/adminAudit.ts
+    // says so in as many words. A resume that expires a long queue of due
+    // posts is the one that can run long, and it is bounded separately.
     const result = await prisma.$transaction(async (tx) => {
       const auditLogId = await writeAdminAuditLog({
         session,
@@ -191,12 +196,13 @@ export async function runMarketingAdminMutation<TBody, TResult>(
         targetType: spec.targetType,
         targetId:
           typeof spec.targetId === "function" ? spec.targetId(body) : spec.targetId,
-        summary: spec.summary,
+        summary:
+          typeof spec.summary === "function" ? spec.summary(body) : spec.summary,
         metadata: { ...spec.metadata(body), actorHadMarketingWrite: true },
         tx,
       });
       return spec.run(tx, { body, auditLogId, session });
-    });
+    }, { maxWait: 5_000, timeout: 20_000 });
 
     return NextResponse.json({ ok: true, result });
   } catch (error) {

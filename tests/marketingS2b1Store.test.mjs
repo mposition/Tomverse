@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -563,4 +564,37 @@ test("the mutation gate reads the kill switch by the name the resolver uses", ()
     /process\.env\.[A-Z_]*KILL_SWITCH/,
     "the environment variable's name belongs to the resolver, not to a second copy"
   );
+});
+
+test("every marketing admin mutation route goes through the one predicate", () => {
+  // The permission and step-up checks live in `runMarketingAdminMutation`
+  // rather than in each route, which is only equivalent to checking them in
+  // the route while every route actually goes through it. Nothing enforced
+  // that, so a route added later could quietly have neither.
+  const dir = fileURLToPath(new URL("../app/api/admin/marketing", import.meta.url));
+  const files = [];
+  const walk = (at) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const next = join(at, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name === "route.ts") files.push(next);
+    }
+  };
+  walk(dir);
+  assert.ok(files.length >= 10, `expected the marketing routes, saw ${files.length}`);
+
+  const offenders = [];
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    const mutates = /export async function (POST|PATCH|PUT|DELETE)\b/.test(source);
+    if (!mutates) continue;
+    const relative = file.slice(file.indexOf("app" + sep));
+    if (!source.includes("runMarketingAdminMutation")) {
+      offenders.push(`${relative}: mutates without the shared predicate`);
+    }
+    if (source.includes("getServerSession")) {
+      offenders.push(`${relative}: reads the session itself`);
+    }
+  }
+  assert.deepEqual(offenders, []);
 });

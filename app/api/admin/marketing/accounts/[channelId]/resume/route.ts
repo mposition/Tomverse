@@ -33,10 +33,11 @@ const schema = z
  * audit actions because they are different decisions, and a record that called
  * both "resume" could not tell them apart afterwards.
  *
- * Resuming into approval mode also expires the approvals that fell due while
- * the account was stopped, in this same transaction, each with its own system
- * audit row. There is no window in which a post approved before the pause is
- * both due and still approved.
+ * Resuming into approval mode also expires, in this same transaction and each
+ * with its own system audit row, the posts whose approval window closed or
+ * whose scheduled time passed while the account was stopped (policy 8.2).
+ * Nothing goes out the moment an account comes back because its slot arrived
+ * while it was off.
  */
 export async function POST(req: Request, context: RouteContext) {
   const { channelId } = await context.params;
@@ -48,7 +49,10 @@ export async function POST(req: Request, context: RouteContext) {
         : MARKETING_S2B1_ACTIONS.accountResumeApproval,
     targetType: "MarketingChannel",
     targetId: channelId,
-    summary: "Resumed a paused brand account.",
+    summary: (body) =>
+      body.mode === "autonomous"
+        ? "Resumed a brand account into autonomous mode."
+        : "Resumed a brand account into approval mode.",
     gate: "account_control",
     bucket: "admin-marketing-account-resume",
     schema,

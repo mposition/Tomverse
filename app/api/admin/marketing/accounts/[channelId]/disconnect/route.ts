@@ -35,7 +35,10 @@ export async function POST(req: Request, context: RouteContext) {
     gate: "operator_restriction",
     bucket: "admin-marketing-account-disconnect",
     schema,
-    metadata: (body) => ({ expectedStatus: body.expectedStatus }),
+    metadata: (body) => ({
+      expectedStatus: body.expectedStatus,
+      expectedConnectionGeneration: body.expectedConnectionGeneration,
+    }),
     run: async (tx, { body }) => {
       await disconnectMarketingChannel(tx, {
         id: channelId,

@@ -184,6 +184,7 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
     resume_evidence_reused: 409,
+    resume_expiry_batch_too_large: 409,
     schedule_conflict: 409,
     scopes_change_conflict: 409,
     unpublish_conflict: 409,
@@ -216,6 +217,16 @@ export const MARKETING_S2B1_ACTIONS = Object.freeze({
   settingPublishChanged: "marketing_setting.publish_changed",
   settingAutonomousChanged: "marketing_setting.autonomous_changed",
 } as const);
+
+/**
+ * How many due approvals one resume may expire.
+ *
+ * Each one is a conditional update plus a system audit entry, and they happen
+ * inside the transaction that holds the audit chain lock. A number rather than
+ * no limit so that a long queue is a refusal an operator can read instead of a
+ * transaction timeout that leaves the account stuck.
+ */
+export const MARKETING_RESUME_EXPIRY_BATCH = 100;
 
 export const MARKETING_PAUSE_REASON_CODES = Object.freeze([
   "operator_requested",
@@ -805,10 +816,32 @@ export async function resumeMarketingChannelToApproval(
     FROM "MarketingPost"
     WHERE "channelId" = ${input.id}
       AND "status" IN ('approved', 'scheduled')
-      AND "approvalExpiresAt" <= ${now}
+      AND (
+        "approvalExpiresAt" <= ${now}
+        -- Policy section 8.2: a schedule that came due while the account was
+        -- stopped becomes an expired approval rather than a post that goes out
+        -- the moment it resumes. The approval window and the scheduled time
+        -- expire independently, and only reading the first left a post whose
+        -- slot had passed both due and still approved -- which the plan missed
+        -- and the policy does not allow.
+        OR ("scheduledAt" IS NOT NULL AND "scheduledAt" <= ${now})
+      )
     ORDER BY "id"
+    LIMIT ${MARKETING_RESUME_EXPIRY_BATCH + 1}
     FOR UPDATE
   `);
+  if (due.length > MARKETING_RESUME_EXPIRY_BATCH) {
+    // Deterministic rather than slow: this runs inside a transaction that holds
+    // the audit chain lock, and an unbounded queue of due posts would take the
+    // transaction past its budget and roll the resume back -- leaving an
+    // account that cannot be resumed at all, because expiring them is what
+    // resuming requires. A refusal that names the number is something an
+    // operator can act on.
+    throw new MarketingStoreRefusedError(
+      "resume_expiry_batch_too_large",
+      `This account has more than ${MARKETING_RESUME_EXPIRY_BATCH} approvals to expire; they have to be cleared before it resumes`,
+    );
+  }
   for (const post of due) {
     const expired = await database.marketingPost.updateMany({
       where: {

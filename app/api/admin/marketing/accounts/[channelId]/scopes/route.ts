@@ -36,7 +36,11 @@ export async function POST(req: Request, context: RouteContext) {
     gate: "operator_restriction",
     bucket: "admin-marketing-account-scopes",
     schema,
-    metadata: () => ({}),
+    metadata: (body) => ({
+      expectedScopesDigest: body.expectedScopesDigest,
+      scopesDigest: body.scopesDigest,
+      expectedGraduationEpoch: body.expectedGraduationEpoch,
+    }),
     run: async (tx, { body }) => {
       await changeMarketingChannelScopes(tx, {
         id: channelId,
