@@ -8,6 +8,10 @@ import {
   assistantKnowledgeGuideUrl,
   ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL,
 } from "@/lib/assistantKnowledgeGuide";
+import {
+  releaseNotesLinkPath,
+  releaseNotesLinkUrl,
+} from "@/lib/releaseNotesLinks";
 
 export type ProductAnnouncementPayload = {
   subject: string;
@@ -50,9 +54,38 @@ export const parseProductAnnouncementPayload = (
       throw new Error(`features[${index}] must be an object.`);
     }
     const item = feature as Record<string, unknown>;
+
+    // The destination is a path id, never a URL.
+    //
+    // A validator over a URL somebody wrote can only answer "does this look
+    // acceptable"; the question section 8 asks is "is this one of the places
+    // we decided to send people", and only a table can answer that. The
+    // commercial paths are the ones it must not contain, and
+    // lib/releaseNotesLinks.ts holds that rule with its own test.
+    let link: { label: string; url: string } | null = null;
+    if (item.linkId !== undefined && item.linkId !== null) {
+      const path = releaseNotesLinkPath(String(item.linkId));
+      if (path === null) {
+        throw new Error(
+          `features[${index}].linkId is not an approved release-notes destination.`
+        );
+      }
+      link = {
+        label: requiredText(item.linkLabel, `features[${index}].linkLabel`, 80),
+        url: releaseNotesLinkUrl(path, `features[${index}].linkId`),
+      };
+    } else if (item.linkLabel !== undefined && item.linkLabel !== null) {
+      // A label with nowhere to go renders as text that looks like a link and
+      // is not one, which is worse than no label at all.
+      throw new Error(
+        `features[${index}].linkLabel needs a linkId to go with it.`
+      );
+    }
+
     return {
       title: requiredText(item.title, `features[${index}].title`, 100),
       body: requiredText(item.body, `features[${index}].body`, 500),
+      link,
     };
   });
 
