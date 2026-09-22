@@ -110,6 +110,7 @@ CREATE TABLE "ModelDeployment" (
     "modelRevision" TEXT,
     "quantization" TEXT,
     "tokenizerRevision" TEXT,
+    "qualityTier" TEXT,
     "qualityGateStatus" TEXT NOT NULL DEFAULT 'pending',
     "qualityGateExpiresAt" TIMESTAMP(3),
     "capabilities" JSONB,
@@ -142,3 +143,132 @@ ALTER TABLE "ModelDeployment"
     ADD CONSTRAINT "ModelDeployment_providerEndpointId_fkey"
     FOREIGN KEY ("providerEndpointId") REFERENCES "ProviderEndpoint"("id")
     ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- ---------------------------------------------------------------------------
+-- The rules the comments above claim, enforced rather than described.
+-- ---------------------------------------------------------------------------
+--
+-- An earlier draft of this file said the approval record was append-only and
+-- left nothing stopping an UPDATE. A comment that claims more than the database
+-- holds is worse than no comment: it is the sentence somebody quotes when
+-- asking whether a past disclosure could have been edited.
+
+-- An identifier list is a list of identifiers. The array checks above allow
+-- [null], [{}], [""] and duplicates, each of which reads as a recipient or a
+-- region to anything that iterates it and is none.
+CREATE OR REPLACE FUNCTION "is_identifier_array"(value jsonb)
+RETURNS boolean AS $$
+    SELECT jsonb_typeof(value) = 'array'
+        AND jsonb_array_length(value) > 0
+        AND NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(value) AS element
+            WHERE jsonb_typeof(element) <> 'string'
+               OR btrim(element #>> '{}') = ''
+        )
+        AND (
+            SELECT count(DISTINCT element #>> '{}') FROM jsonb_array_elements(value) AS element
+        ) = jsonb_array_length(value);
+$$ LANGUAGE sql IMMUTABLE;
+
+ALTER TABLE "EndpointResidencyApproval"
+    DROP CONSTRAINT "EndpointResidencyApproval_recipients_present_check";
+ALTER TABLE "EndpointResidencyApproval"
+    DROP CONSTRAINT "EndpointResidencyApproval_regions_present_check";
+ALTER TABLE "EndpointResidencyApproval"
+    ADD CONSTRAINT "EndpointResidencyApproval_recipients_present_check"
+    CHECK ("is_identifier_array"("allowedRecipients"));
+ALTER TABLE "EndpointResidencyApproval"
+    ADD CONSTRAINT "EndpointResidencyApproval_regions_present_check"
+    CHECK ("is_identifier_array"("allowedRegions"));
+
+-- Append-only, with one exception that has to exist: an approval left open
+-- needs a way to end. Setting `effectiveTo` once, forward, is that way. Making
+-- the row wholly immutable would leave a permission nobody could withdraw,
+-- which is the opposite of the property this record is for.
+CREATE OR REPLACE FUNCTION "endpoint_residency_approval_is_append_only"()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW."id" IS DISTINCT FROM OLD."id"
+        OR NEW."providerEndpointId" IS DISTINCT FROM OLD."providerEndpointId"
+        OR NEW."evidenceRef" IS DISTINCT FROM OLD."evidenceRef"
+        OR NEW."allowedRecipients" IS DISTINCT FROM OLD."allowedRecipients"
+        OR NEW."allowedRegions" IS DISTINCT FROM OLD."allowedRegions"
+        OR NEW."enforcementMechanism" IS DISTINCT FROM OLD."enforcementMechanism"
+        OR NEW."effectiveFrom" IS DISTINCT FROM OLD."effectiveFrom"
+        OR NEW."approvedBy" IS DISTINCT FROM OLD."approvedBy"
+        OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt"
+    THEN
+        RAISE EXCEPTION
+            'EndpointResidencyApproval % is append-only; supersede it with a new row', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF OLD."effectiveTo" IS NOT NULL AND NEW."effectiveTo" IS DISTINCT FROM OLD."effectiveTo" THEN
+        RAISE EXCEPTION
+            'EndpointResidencyApproval % has already been ended', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "endpoint_residency_approval_is_append_only_trigger"
+    BEFORE UPDATE ON "EndpointResidencyApproval"
+    FOR EACH ROW
+    EXECUTE FUNCTION "endpoint_residency_approval_is_append_only"();
+
+-- Deleting an approval would remove the answer to what was permitted when a
+-- request ran, which is the one question it exists to answer.
+CREATE OR REPLACE FUNCTION "endpoint_residency_approval_is_not_deletable"()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION
+        'EndpointResidencyApproval % cannot be deleted; end it with effectiveTo', OLD."id"
+        USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "endpoint_residency_approval_is_not_deletable_trigger"
+    BEFORE DELETE ON "EndpointResidencyApproval"
+    FOR EACH ROW
+    EXECUTE FUNCTION "endpoint_residency_approval_is_not_deletable"();
+
+-- A passed gate is about a particular thing. Change the thing and the evidence
+-- no longer describes it, so an enabled deployment cannot have its identity or
+-- its capabilities edited underneath a pass: `enabled = false` and a gate reset
+-- come first, in the same statement or an earlier one.
+CREATE OR REPLACE FUNCTION "model_deployment_gate_follows_identity"()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW."enabled" AND (
+        NEW."logicalModelId" IS DISTINCT FROM OLD."logicalModelId"
+        OR NEW."providerEndpointId" IS DISTINCT FROM OLD."providerEndpointId"
+        OR NEW."upstreamDeploymentName" IS DISTINCT FROM OLD."upstreamDeploymentName"
+        OR NEW."modelVersion" IS DISTINCT FROM OLD."modelVersion"
+        OR NEW."modelRevision" IS DISTINCT FROM OLD."modelRevision"
+        OR NEW."quantization" IS DISTINCT FROM OLD."quantization"
+        OR NEW."tokenizerRevision" IS DISTINCT FROM OLD."tokenizerRevision"
+        OR NEW."qualityTier" IS DISTINCT FROM OLD."qualityTier"
+        OR NEW."capabilities" IS DISTINCT FROM OLD."capabilities"
+    ) THEN
+        RAISE EXCEPTION
+            'ModelDeployment % cannot change what it is while enabled; disable and re-gate it', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "model_deployment_gate_follows_identity_trigger"
+    BEFORE UPDATE ON "ModelDeployment"
+    FOR EACH ROW
+    EXECUTE FUNCTION "model_deployment_gate_follows_identity"();
+
+-- Expiry is part of being gated, not a separate report. A gate that expired is
+-- evidence that no longer applies, and an enabled row resting on one is the
+-- same state as an ungated row.
+ALTER TABLE "ModelDeployment"
+    ADD CONSTRAINT "ModelDeployment_enabled_requires_expiry_check"
+    CHECK ("enabled" = false OR "qualityGateExpiresAt" IS NOT NULL);

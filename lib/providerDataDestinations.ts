@@ -120,14 +120,25 @@ export const providerDataDestination = (
     null;
 
 /**
- * Whether a provider may serve a request that carries a residency constraint.
+ * Whether this provider's destination is established at all.
  *
- * Fail-closed by construction: an absent entry and an unproven one both answer
- * no, and they answer it for the same reason -- nobody can say where the data
- * would go.
+ * **Not a routing permission.** Whether a request may be served is decided by
+ * `endpointMayServeConstrainedTraffic` in `lib/deploymentIdentity.ts`, from an
+ * approval in force at that moment. Two functions answering "may this go
+ * here?" from different sources is how a notice and a gate come to disagree,
+ * and the disagreement is only discovered after somebody has been told.
+ *
+ * What this answers is the prior question: is there a recorded fact about
+ * where this provider takes data. An approval is an act performed *on* such a
+ * fact, so a provider that has none cannot be approved -- but a provider that
+ * has one is not thereby approved either.
+ *
+ * Fail-closed: an absent entry and an unproven one both answer no, for the
+ * same reason -- nobody can say where the data would go.
  */
-export const mayServeConstrainedTraffic = (provider: AiProvider): boolean =>
-    providerDataDestination(provider)?.status === "proven";
+export const providerDestinationIsEstablished = (
+    provider: AiProvider
+): boolean => providerDataDestination(provider)?.status === "proven";
 
 /**
  * The entries a user-facing notice may print.

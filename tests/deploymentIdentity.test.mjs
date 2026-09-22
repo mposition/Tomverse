@@ -31,10 +31,55 @@ const migration = () =>
 const schema = () =>
     readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 
+const at = new Date("2026-09-23T00:00:00.000Z");
+const live = [{ effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), effectiveTo: null }];
+
+test("a proven class is not on its own a permission", () => {
+    // Three places could answer this question -- the provider registry, the
+    // endpoint column, and the approval rows -- and a legal question with
+    // three answers has none. The approval is the authority; the class is a
+    // summary that can go stale.
+    assert.equal(
+        endpointMayServeConstrainedTraffic({ residencyClass: "proven", approvals: [], at }),
+        false,
+        "proven with no live approval is a stale summary, not a permission"
+    );
+    assert.equal(
+        endpointMayServeConstrainedTraffic({ residencyClass: "proven", approvals: live, at }),
+        true
+    );
+});
+
 test("residency fails closed for everything that is not proven", () => {
-    assert.equal(endpointMayServeConstrainedTraffic("proven"), true);
     for (const value of ["unproven", "", null, undefined, "PROVEN", "probably"]) {
-        assert.equal(endpointMayServeConstrainedTraffic(value), false, String(value));
+        assert.equal(
+            endpointMayServeConstrainedTraffic({ residencyClass: value, approvals: live, at }),
+            false,
+            String(value)
+        );
+    }
+});
+
+test("an approval outside its window permits nothing", () => {
+    const cases = [
+        { effectiveFrom: new Date("2026-12-01T00:00:00.000Z"), effectiveTo: null },
+        {
+            effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+            effectiveTo: new Date("2026-06-01T00:00:00.000Z"),
+        },
+        // Ends exactly now: a window that closed is closed.
+        { effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), effectiveTo: at },
+    ];
+    for (const approval of cases) {
+        assert.equal(
+            endpointMayServeConstrainedTraffic({
+                residencyClass: "proven",
+                approvals: [approval],
+                at,
+            }),
+            false,
+            JSON.stringify(approval)
+        );
     }
 });
 
@@ -78,17 +123,80 @@ test("the database holds the same two rules", () => {
     assert.match(sql, /"effectiveTo" IS NULL OR "effectiveTo" > "effectiveFrom"/);
 });
 
-test("an approval cannot be reassigned or deleted out from under a request", () => {
-    // RESTRICT rather than CASCADE: the record answers what was allowed when a
-    // request ran, and an endpoint being tidied up must not remove the answer.
+
+test("the approval record is append-only in the database, not only in a comment", () => {
+    // An earlier draft said "append-only" in a comment and left nothing
+    // stopping an UPDATE. A comment that claims more than the database holds
+    // is the sentence somebody quotes when asking whether a past disclosure
+    // could have been edited.
+    const sql = migration();
+    assert.match(sql, /CREATE TRIGGER "endpoint_residency_approval_is_append_only_trigger"/);
+    assert.match(sql, /BEFORE UPDATE ON "EndpointResidencyApproval"/);
+    assert.match(sql, /CREATE TRIGGER "endpoint_residency_approval_is_not_deletable_trigger"/);
+    assert.match(sql, /BEFORE DELETE ON "EndpointResidencyApproval"/);
+
+    // Every field that says what was approved is named in the immutability
+    // check. A field left out is a field somebody can change afterwards.
+    for (const column of [
+        "providerEndpointId",
+        "evidenceRef",
+        "allowedRecipients",
+        "allowedRegions",
+        "enforcementMechanism",
+        "effectiveFrom",
+        "approvedBy",
+    ]) {
+        assert.match(
+            sql,
+            new RegExp(`NEW\."${column}" IS DISTINCT FROM OLD\."${column}"`),
+            column
+        );
+    }
+});
+
+test("an open approval can be ended exactly once", () => {
+    // Wholly immutable would leave a permission nobody could withdraw, which
+    // is the opposite of what this record is for. Setting `effectiveTo` once,
+    // forward, is the one edit allowed.
     const sql = migration();
     assert.match(
         sql,
-        /EndpointResidencyApproval_providerEndpointId_fkey[\s\S]*?ON DELETE RESTRICT ON UPDATE RESTRICT/
+        /OLD\."effectiveTo" IS NOT NULL AND NEW\."effectiveTo" IS DISTINCT FROM OLD\."effectiveTo"/
     );
+    assert.match(sql, /has already been ended/);
+});
+
+test("a passed gate cannot be carried onto a different thing", () => {
+    // A gate passes for a particular model version, quantization and set of
+    // capabilities. Editing those while enabled keeps the pass and changes
+    // what it was about.
+    const sql = migration();
+    assert.match(sql, /CREATE TRIGGER "model_deployment_gate_follows_identity_trigger"/);
+    for (const column of [
+        "logicalModelId",
+        "providerEndpointId",
+        "upstreamDeploymentName",
+        "modelVersion",
+        "modelRevision",
+        "quantization",
+        "tokenizerRevision",
+        "qualityTier",
+        "capabilities",
+    ]) {
+        assert.match(
+            sql,
+            new RegExp(`NEW\."${column}" IS DISTINCT FROM OLD\."${column}"`),
+            column
+        );
+    }
+});
+
+test("an enabled deployment carries an expiry", () => {
+    // Expiry is part of being gated. A gate that expired is evidence that no
+    // longer applies, and an enabled row resting on one is an ungated row.
     assert.match(
-        sql,
-        /ModelDeployment_providerEndpointId_fkey[\s\S]*?ON DELETE RESTRICT ON UPDATE RESTRICT/
+        migration(),
+        /ModelDeployment_enabled_requires_expiry_check[\s\S]*?CHECK \("enabled" = false OR "qualityGateExpiresAt" IS NOT NULL\)/
     );
 });
 
@@ -101,39 +209,36 @@ test("nothing is switched on by omission", () => {
 
 test("a logical model id is not a foreign key", () => {
     // The catalogue is partly static, and a registry edit must not delete a
-    // deployment. It is also what keeps a user's saved model a product model
+    // deployment. It is also what keeps a person's saved model a product model
     // rather than an infrastructure identifier.
     const sql = migration();
     assert.ok(
         !/FOREIGN KEY \("logicalModelId"\)/.test(sql),
         "logicalModelId must not carry a foreign key"
     );
-    // It is indexed, which is a different thing: the lookup is by model.
     assert.match(sql, /ModelDeployment_logicalModelId_enabled_idx/);
     assert.match(schema(), /logicalModelId\s+String/);
 });
 
-test("the identity tables are dark", () => {
-    // The claim the commit makes: nothing routes from these yet. When that
-    // stops being true, this test is the thing that has to be updated
-    // deliberately rather than a fact nobody noticed changing.
-    const models = ["providerEndpoint", "modelDeployment", "endpointResidencyApproval"];
-    const readers = [
-        "lib/routerCandidates.ts",
-        "lib/routerSelection.ts",
-        "lib/routerDecision.ts",
-        "lib/routerRuntimeSignals.ts",
-        "lib/routingShadow.ts",
-        "lib/routingAttemptStore.ts",
-        "app/api/chat/route.ts",
-    ];
-    for (const reader of readers) {
-        const source = readFileSync(new URL(`../${reader}`, import.meta.url), "utf8");
-        for (const model of models) {
-            assert.ok(
-                !source.includes(`prisma.${model}`),
-                `${reader} reads ${model}; the identity tables are supposed to be dark`
-            );
-        }
+test("darkness is checked by a gate, not by this test", () => {
+    // The first version of this grepped seven named files for
+    // `prisma.<delegate>`, which a new route, a cron, `tx.modelDeployment` or
+    // raw SQL would all have walked past. `npm run check:dark-tables` reads
+    // every runtime source instead; what is asserted here is that the gate
+    // exists and knows about all three tables.
+    const gate = readFileSync(
+        new URL("../scripts/check-dark-tables.mjs", import.meta.url),
+        "utf8"
+    );
+    for (const table of [
+        "ModelDeployment",
+        "ProviderEndpoint",
+        "EndpointResidencyApproval",
+    ]) {
+        assert.ok(gate.includes(`"${table}"`), `${table} is covered by the gate`);
     }
+    const packageJson = JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf8")
+    );
+    assert.equal(packageJson.scripts["check:dark-tables"], "node scripts/check-dark-tables.mjs");
 });

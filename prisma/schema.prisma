@@ -5494,6 +5494,8 @@ model ProviderEndpoint {
   endpointUrl         String?
   /// The cloud account or resource this endpoint belongs to.
   resourceId          String?
+  /// The cloud account or project this resource belongs to.
+  cloudAccountId      String?
   /// proven | unproven
   ///
   /// `unproven` is the honest default and not a gap: it says nobody has read a
@@ -5573,6 +5575,8 @@ model ModelDeployment {
   modelRevision          String?
   quantization           String?
   tokenizerRevision      String?
+  /// The quality tier this placement claims. Curation, never a measurement.
+  qualityTier            String?
   /// Quality evidence is per-deployment until an attestation survey shows that
   /// two placements can honestly share it. Reusing evidence across regions
   /// without that would hide drift.

@@ -151,6 +151,7 @@
     "check:locale-translation": "node --import tsx scripts/check-locale-translation.mjs",
     "check:api-cache-control": "node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs",
     "check:enum-constraints": "node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs",
+    "check:dark-tables": "node scripts/check-dark-tables.mjs",
     "check:sending-identity": "node --import tsx scripts/check-sending-identity.mjs",
     "check:email-provider-port": "node --import tsx scripts/check-email-provider-port.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",

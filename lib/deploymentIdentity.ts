@@ -61,12 +61,48 @@ export const deploymentMayBeEnabled = (
 ): boolean => qualityGateStatus === "passed";
 
 /**
+ * An approval, as much of one as this decision needs.
+ *
+ * The regions and recipients are not read here. Whether a *particular*
+ * destination is acceptable is the caller's question and depends on the
+ * request; this answers the prior one, which is whether there is a live
+ * approval at all.
+ */
+export type ResidencyApprovalFact = {
+    effectiveFrom: Date;
+    effectiveTo: Date | null;
+};
+
+/**
  * Whether an endpoint may carry a request that names a residency constraint.
  *
- * Fail-closed by construction: anything that is not `proven` answers no, and
- * an endpoint nobody recorded answers no for the same reason -- nobody can say
- * where the data would go.
+ * **One authority, and it is the approval.** An earlier draft answered this
+ * from `ProviderEndpoint.residencyClass` alone, which made three places able
+ * to answer one question -- the provider registry in
+ * `lib/providerDataDestinations.ts`, the endpoint's own column, and the
+ * approval rows -- and nothing kept them agreeing. A legal question with three
+ * answers has none.
+ *
+ * So `residencyClass` is a cached summary for querying and reporting, not a
+ * permission. It has to say `proven` *and* there has to be an approval in
+ * force at the moment asked. A class that says `proven` with no live approval
+ * is a stale summary, and it is refused rather than believed.
+ *
+ * Fail-closed throughout: no approval, an expired one, one that has not
+ * started, or a class that is anything but `proven` all answer no. An endpoint
+ * nobody recorded answers no for the same reason as one recorded and unproven
+ * -- nobody can say where the data would go.
  */
-export const endpointMayServeConstrainedTraffic = (
-    residencyClass: string | null | undefined
-): boolean => residencyClass === "proven";
+export const endpointMayServeConstrainedTraffic = (input: {
+    residencyClass: string | null | undefined;
+    approvals: readonly ResidencyApprovalFact[];
+    at: Date;
+}): boolean => {
+    if (input.residencyClass !== "proven") return false;
+    return input.approvals.some(
+        (approval) =>
+            approval.effectiveFrom.getTime() <= input.at.getTime() &&
+            (approval.effectiveTo === null ||
+                approval.effectiveTo.getTime() > input.at.getTime())
+    );
+};

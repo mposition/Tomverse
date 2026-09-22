@@ -5,7 +5,7 @@ import test from "node:test";
 import {
     PROVIDER_DATA_DESTINATIONS,
     disclosableDataDestinations,
-    mayServeConstrainedTraffic,
+    providerDestinationIsEstablished,
     providerDataDestination,
     provenDestinationProblems,
 } from "../lib/providerDataDestinations.ts";
@@ -65,18 +65,18 @@ test("a destination cannot be claimed without something that says so", () => {
     );
 });
 
-test("an unproven provider serves no constrained request", () => {
+test("an unproven provider has no established destination", () => {
     for (const entry of PROVIDER_DATA_DESTINATIONS) {
         if (entry.status === "proven") continue;
-        assert.equal(mayServeConstrainedTraffic(entry.provider), false, entry.provider);
+        assert.equal(providerDestinationIsEstablished(entry.provider), false, entry.provider);
     }
 });
 
-test("a provider nobody enrolled also serves none", () => {
+test("a provider nobody enrolled has none either", () => {
     // Absent and unproven answer the same way, and for the same reason: nobody
     // can say where the data would go.
     assert.equal(providerDataDestination("not-a-provider"), null);
-    assert.equal(mayServeConstrainedTraffic("not-a-provider"), false);
+    assert.equal(providerDestinationIsEstablished("not-a-provider"), false);
 });
 
 test("nothing is disclosable until something is proven", () => {
