@@ -150,22 +150,29 @@ const errorClassForCategory = (
  * come from the runtime's `AbortSignal`, from undici, or from the AI SDK
  * wrapping one of those, and only one of those three is a `DOMException` here.
  */
-const isAbortShaped = (error: unknown): boolean => {
+const isClientAbort = (error: unknown): boolean => {
   const metadata = safeErrorMetadata(error);
-  if (
-    metadata.name === "AbortError" ||
-    metadata.name === "TimeoutError" ||
-    metadata.code === "ABORT_ERR" ||
-    metadata.code === "ECONNRESET"
-  ) {
-    // TimeoutError and ECONNRESET are deliberately in this list even though
-    // they are not user cancellations: both mean the connection ended without
-    // an answer about the model, and a stream that died mid-flight is not
-    // evidence that a *different* model would have answered. They are
-    // conservative members of the "do not substitute" set, not precise ones.
-    return true;
-  }
-  return false;
+  return metadata.name === "AbortError" || metadata.code === "ABORT_ERR";
+};
+
+/**
+ * The connection ended without an answer, and nobody asked it to.
+ *
+ * These share the *verdict* with a client abort -- a stream that died
+ * mid-flight is not evidence that a different model would have answered, so
+ * neither is substituted -- and they share nothing else. They are not user
+ * cancellations, and until they had a name of their own the attempt record
+ * said they were: `client_gone` asserts a cause, and this is the case where
+ * that cause is not known to be true.
+ *
+ * `classifyProviderFailure` calls the same event `NETWORK`, and provider
+ * health records it as one. Two subsystems disagreeing about one event is the
+ * thing this work keeps finding, so the attempt record uses the same category
+ * rather than a second word for it.
+ */
+const isConnectionLost = (error: unknown): boolean => {
+  const metadata = safeErrorMetadata(error);
+  return metadata.name === "TimeoutError" || metadata.code === "ECONNRESET";
 };
 
 const isClosedController = (error: unknown): boolean => {
@@ -234,13 +241,25 @@ export const classifyStreamFailure = (
     };
   }
 
-  if (isAbortShaped(error) || isClosedController(error)) {
+  if (isClientAbort(error) || isClosedController(error)) {
     return {
       outcome: "cancelled",
       failureLayer: "stream",
       providerRefusal: null,
       errorClass: "client_gone",
       reason: "The turn was aborted or its response controller was already closed.",
+    };
+  }
+
+  // Same verdict as an abort -- do not substitute -- and a different cause.
+  // See `isConnectionLost`.
+  if (isConnectionLost(error)) {
+    return {
+      outcome: "cancelled",
+      failureLayer: "stream",
+      providerRefusal: null,
+      errorClass: "provider_network",
+      reason: "The connection ended before the provider answered.",
     };
   }
 

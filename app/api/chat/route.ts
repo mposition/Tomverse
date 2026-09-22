@@ -4756,13 +4756,24 @@ async function handleChatPost(
          * the only place a rate limit is told apart from an outage, and a row
          * written without it cannot be reanalysed later.
          *
-         * Only the class travels. The outcome does not: `classifyStreamFailure`
-         * answers "may this be substituted", and calls a provider timeout
-         * `cancelled` for that purpose, while `DISPATCH_OUTCOMES_COUNTED`
-         * excludes `cancelled` because it means the person changed their mind.
-         * Moving the outcome would take provider timeouts out of the Router's
-         * success-rate denominator, which is a scoring change and not a
-         * naming one.
+         * The class and the layer travel; the outcome does not.
+         *
+         * The layer has to, or the row contradicts itself: a rate limit would
+         * be stored as `errorClass: "provider_rate_limited"` beside the
+         * generic mapping's `failureLayer: "stream"`, which says the failure
+         * was this process or this connection. Nothing branches on the stored
+         * layer -- `decideFallback` reads the in-memory classification, and
+         * the success rate reads the outcome -- so making it accurate costs
+         * nothing.
+         *
+         * The outcome does not travel, because `classifyStreamFailure` answers
+         * "may this be substituted" and calls a lost connection `cancelled`
+         * for that purpose, while `DISPATCH_OUTCOMES_COUNTED` excludes
+         * `cancelled` because it means the person changed their mind. Moving
+         * it would take those turns out of the Router's success-rate
+         * denominator: a scoring change wearing a naming change's clothes.
+         * That one value answers two questions is a defect in its own right,
+         * recorded in the deployment identity design rather than fixed here.
          */
         let lastStreamFailure: StreamFailureClassification | null = null;
 
@@ -5940,10 +5951,13 @@ async function handleChatPost(
                     await settleSafely(
                         "failed",
                         { searchQueriesObserved: false },
-                        // The class only. See `lastStreamFailure` for why the
-                        // outcome stays with the generic mapping.
+                        // The class and the layer. See `lastStreamFailure`
+                        // for why the outcome stays with the generic mapping.
                         lastStreamFailure
-                            ? { errorClass: lastStreamFailure.errorClass }
+                            ? {
+                                  failureLayer: lastStreamFailure.failureLayer,
+                                  errorClass: lastStreamFailure.errorClass,
+                              }
                             : undefined
                     );
                     errorSafely(controller, error);

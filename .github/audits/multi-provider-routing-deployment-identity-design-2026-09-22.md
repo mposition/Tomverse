@@ -1,9 +1,10 @@
 # 멀티 공급자 라우팅 — deployment identity 설계 (v2.1 ADR 개정안)
 
 - 작성일: 2026-09-22
-- **개정 4** (같은 날). 개정 1·2·3 모두 독립 검토에서 `reject`. 이 판은 3차 검토의
-  blocker 2건·major 3건과 **사실 오류 2건**을 반영한 것입니다. 변경 요약은 §13.
-- 상태: **제안. 4차 독립 검토 대기.**
+- **개정 5** (2026-09-23). 개정 1–4 모두 독립 검토에서 `reject`. 이 판은 4차 검토의
+  blocker 1건·major 3건과 **사실 오류 2건**, 그리고 개정 4가 스스로 만든 결함
+  1건을 반영한 것입니다. 변경 요약은 §13.
+- 상태: **제안. 5차 독립 검토 대기.**
 - 선행 문서
   - [`.github/audits/multi-provider-routing-adr-gap-analysis-2026-09-22.md`](./multi-provider-routing-adr-gap-analysis-2026-09-22.md)
   - [`docs/policy/tomverse-multi-provider-routing-v2.1.md`](../../docs/policy/tomverse-multi-provider-routing-v2.1.md) (ADR, 미채택)
@@ -16,7 +17,7 @@
 것인가?" — 에 소유자가 **전면 도입**으로 답했고, 이어서 identity 형태에 대한 결정이
 내려졌습니다. 이 문서는 그 결정과, 결정에 딸려 나오는 기존 코드 영향을 기록합니다.
 
-**이 문서의 사실 주장은 세 차례 독립 검토에서 각각 5·5·2건 정정됐습니다.** 그 이력은
+**이 문서의 사실 주장은 네 차례 독립 검토에서 각각 5·5·2·2건 정정됐습니다.** 그 이력은
 §9와 §13에 남깁니다 — 무엇이 틀렸는지가 무엇이 맞는지만큼 중요합니다.
 
 ## 1. 소유자 결정
@@ -126,7 +127,7 @@ credential.endpointOverride / regionOverride / residencyOverride
 
 만들지 않습니다. 강제 수단은 §12.
 
-## 4. Broker 경로와 residency (개정 4에서 다시 바뀜)
+## 4. Broker 경로와 residency
 
 개정 2는 `routingPolicyDigest`를 routing-eligible의 증거로 썼고, 거부됐습니다 —
 digest는 **우리가 보낸 설정**을 증명할 뿐 broker가 어디서 실행했는지를 증명하지
@@ -178,7 +179,34 @@ Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사
 관측 사실: `regionBlockedModelIds`는 현재 입력만 존재하고 **production producer가
 없습니다**(`app/api/chat/route.ts`). residency는 아직 아무것도 막고 있지 않습니다.
 
-### 4.4 S1의 답: 검증된 공급자 없음
+### 4.4 승인 자체가 저장돼야 합니다 (개정 5에서 추가)
+
+§4.1은 "승인된 계약"에 eligibility를 걸었지만, **그 계약이 어디 사는지를 정하지
+않았습니다.** `ProviderEndpoint`에는 가변 region·destination·digest만 있고,
+`servingProvider`는 null일 수 있으며, 허용 recipient 집합이 없습니다. 그 상태로는
+한 attempt에 대해 **"어떤 계약 버전과 recipient·destination 집합 때문에 dispatch가
+허용됐는가"를 immutable join으로 재구성할 수 없습니다** — 법적 판정의 근거를 사후에
+복원할 수 없다는 뜻이고, 그것이 §3이 막으려던 바로 그 상태입니다.
+
+**`EndpointResidencyApproval`을 둡니다. append-only immutable version입니다.**
+
+| 필드 | 의미 |
+|---|---|
+| `evidenceRef` | 승인 근거 (계약서·DPA·공급자 문서의 고정 식별자) |
+| `allowedRecipients` | 허용된 recipient/provider 집합 |
+| `allowedRegions` | 허용된 destination region 집합 |
+| `enforcementMechanism` | 무엇으로 강제하는가 (endpoint URL, 요청 옵션, 계정 설정) |
+| `effectiveFrom` / `effectiveTo` | 유효기간 |
+| `approver` | 승인한 사람 |
+
+- **운영자가 destination을 수정할 수 없습니다.** 바꾸려면 새 version입니다.
+- **published manifest는 승인 version만 참조합니다.**
+- **A-5와 attempt snapshot이 그 id와 digest를 결속합니다.**
+
+가변 행으로 두면 "그때 무엇이 허용돼 있었나"에 답할 수 없고, 답할 수 없는 것에
+법적 판정을 얹는 구조가 됩니다.
+
+### 4.5 S1의 답: 검증된 공급자 없음
 
 3차 검토 시점에 **serving attestation을 제공한다고 확인된 공급자는 0개**입니다.
 이 저장소가 읽는 것은 OpenAI의 `serviceTier` 하나뿐이고(`lib/servedProcessingTier.ts`),
@@ -351,12 +379,20 @@ type QuotaScope =
 
 ### 8.3 BYOK 비용 배선 (개정 3에서 크게 바뀜)
 
-**같은 `reservedCost`가 사용자 operational guardrail과 Tomverse provider hold 양쪽에
-쓰입니다**(`lib/chatSecurity.ts`). 그러므로 BYOK에서 이 값을 0으로 만들면 **사용자
-guardrail까지 함께 꺼집니다.** 개정 2는 이것을 보지 못했습니다.
+`reservedCost`에는 소비자가 **셋**입니다(`lib/chatSecurity.ts`) — 사용자 operational
+guardrail, Tomverse provider hold, 그리고 구매 크레딧의 `fundedCostMicroUsd` 배분.
+개정 2는 하나도 못 봤고, 개정 3은 둘만 찾았습니다.
 
-- 사용자 guardrail에는 `providerChargeEstimate`를 전달합니다.
-- Tomverse budget에는 `tomverseMarginalCost`를 전달합니다.
+**배선은 §7의 표 하나가 정하며 여기서 다시 정하지 않습니다.** 개정 4는 이 절에
+`providerChargeEstimate`를 남겨 두어 §7·§13과 정면으로 모순됐습니다. 확정:
+
+- 사용자 guardrail · Tomverse budget · 구매 크레딧 funded allowance →
+  **`tomverseMarginalCost`**
+- tie-break → `providerChargeEstimate`
+- BYOK 외부 지출 → **별도 `byok-spend-*` namespace** (한도 주체는 T2)
+
+그 위에 배선 작업 둘:
+
 - `providerBudgetAccountId`를 **attempt cost snapshot에도 저장**합니다. settlement가
   bucket key에서 provider를 다시 파싱하고(`lib/chatSecurity.ts`),
   `ChatAttemptUsage`에는 provider account identity가 없습니다.
@@ -375,6 +411,25 @@ deployment는 같은 tie-break 값을 가지므로 전순서를 만들지 못합
 dual-write는 가능하지만 두 grain이 동시에 라우팅해서는 안 됩니다 — 공존시키면 두
 deployment가 modelId 하나로 합쳐져 health·비용이 오염되고 전순서를 잃습니다.
 
+#### 두 identity는 남습니다 (개정 5에서 추가)
+
+"전부 `deploymentId`로 바꾼다"는 잘못된 요약입니다. **사용자가 보고 고르는 것은
+계속 logical model입니다.** `RoutingRun.selectedModelId`, sticky state, 사용자
+설정, 메시지 badge, entitlement가 모두 제품 모델 ID이고, 그것을 deployment ID로
+덮으면 사용자 설정 자리에 인프라 식별자가 저장됩니다. 반대로 놔두면 여러
+deployment가 다시 하나로 합쳐집니다.
+
+| 무엇 | 어느 identity |
+|---|---|
+| candidate identity | **`{ logicalModelId, deploymentId }` 쌍** |
+| 사용자 설정 · 메시지 badge · entitlement | logical model |
+| health · cost · endpoint tie-break · attempt | deployment |
+| `RoutingRun` · `RoutingAttempt` | **둘 다, 별도 snapshot** |
+
+그리고 **지속 상태 둘이 logical grain입니다** — `Conversation`의 sticky·recovery
+model ID와 `ROUTER_SCORE_SNAPSHOT`. 백필하지 않습니다. resolver와 deployment-key
+score snapshot 전환이 grain cutover의 **선행 작업**입니다(§14).
+
 ### 8.5 후보 판정 동결: `RoutingCandidateVerdict`
 
 후보는 가변 런타임 DB 레지스트리에서 옵니다(`runtimeModels.filter(...)`). `enabled`·
@@ -386,8 +441,20 @@ catalogue information a reader can reconstruct"는 자기 전제에서 틀렸습
 열어 두었습니다.
 
 - **`RoutingCandidateVerdict` 자식 테이블.** run당 후보마다 한 행.
-- 컬럼: `routingRunId`, `deploymentId`, 고정 `reason` 식별자, 판정 입력의 snapshot id.
 - 원문·잔액·오류 문구는 저장하지 않습니다 — content-free가 유지됩니다.
+
+개정 4의 필드(`deploymentId` + `reason` + `snapshotId`)는 **탈락한 후보만 표현할 수
+있었습니다.** eligible 후보에는 rejection reason이 없고, 통과했는데 안 뽑힌 후보가
+왜 밀렸는지도 담을 곳이 없습니다 — 그런데 "왜 이게 안 뽑혔나"는 애초에 이 테이블을
+만든 질문입니다. 정정된 컬럼:
+
+| 컬럼 | 의미 |
+|---|---|
+| `routingRunId`, `logicalModelId`, `deploymentId` | 누구에 대한 판정인가 (§8.4) |
+| `verdict` | **`eligible` \| `rejected`** |
+| `reason` | 고정 식별자. `eligible`이면 null — **nullable CHECK로 강제** |
+| `rankBucket`, `rank` | 통과한 후보가 몇 번째였는가 |
+| `decisionInputSnapshotId` | 그 순간의 health·cost 값. **config snapshot만으로는 재구성되지 않습니다** |
 
 **run당 상한은 두지 않습니다** (S5, 개정 4에서 정정). 개정 3은 행 크기를 위해 상한을
 두자고 했습니다. 어떤 절단선을 잡아도 **버려지는 것은 하위 순위이거나 특정 rejection
@@ -472,9 +539,10 @@ A-4a가 분류를 보존하도록 고쳤지만, 그 절반만 고쳤던 것입�
 ### 갭 5 — 출력이 못 쓸 때의 분류
 
 DB CHECK가 `succeeded`에 `failureLayer = 'none'`을 강제하고, 공통 writer가 성공 시
-`errorClass`를 지웁니다(`lib/routingAttemptStore.ts`). **정정**: `errorClass` 컬럼
-자체에는 CHECK가 없습니다. 정확한 서술은 **"현재 writer와 failure-layer CHECK가
-`succeeded + model_output` 표현을 막는다"** 입니다.
+`errorClass`를 지웁니다(`lib/routingAttemptStore.ts`). `errorClass` 컬럼에도 이제
+CHECK가 있습니다 — A-3b가 닫힌 vocabulary를 `NOT VALID`로 배포했으므로 신규·갱신
+행에는 적용되고 과거 행만 미검증입니다. 정확한 서술은 **"writer와 failure-layer
+CHECK가 `succeeded + model_output` 표현을 막는다"** 입니다.
 
 원칙은 라우팅 밖에서 이미 구현돼 있었습니다 — `AI_EMPTY_RESPONSE` →
 `MODEL_TRANSIENT` → `scope: "model"`, `PROVIDER_SCOPED`에서 제외. **A-3a에서 그
@@ -488,11 +556,11 @@ DB CHECK가 `succeeded`에 `failureLayer = 'none'`을 강제하고, 공통 write
 
 | # | 항목 | 상태 |
 |---|---|---|
-| A-1 | comparator 전순서 수정 | 구현·검증 완료, 2차 검토 진행 중 |
+| A-1 | comparator 전순서 수정 | **구현·검증 완료. 2차 검토 `approve_with_changes` → 지적 5건 반영 완료** |
 | A-2 | 빈 200 오분류 | 구현·검증 완료 |
 | A-3a | `model_output` failure layer | 구현·검증 완료 |
-| A-3b | `errorClass` 닫힌 vocabulary + CHECK | 미착수 |
-| A-4a | `RATE_LIMIT` 등 분류 보존 | 미착수 |
+| A-3b | `errorClass` 닫힌 vocabulary + CHECK | **writer 구현, `NOT VALID` CHECK 배포. production 조사 후 별도 `VALIDATE` 대기** |
+| A-4a | `RATE_LIMIT` 등 분류 보존 | **구현 완료.** fallback 거절 경로까지 도달(개정 4), 연결 손실 오분류 수정(개정 5) |
 | A-4b | capacity state·token bucket | C 이후 |
 | A-5 | 원자적 config manifest | **C 이후로 이동** (§14) |
 
@@ -519,10 +587,27 @@ dispatched attempt 최대 2회를 유지합니다. 첫 fallback이 신뢰성 이
 
 **이 표는 아직 구현할 수 없습니다** (개정 4에서 추가). `classifyStreamFailure`는
 scope를 반환하지 않고, `classifyProviderFailure().scope`를 읽고 나서 버립니다
-(`lib/routingStreamFailure.ts`). `PROVIDER_SCOPED`는 이미 provider-scoped와
-model-scoped를 구분하고 있으므로 **없는 것을 만드는 일이 아니라 또 한 번 버려지는
-것을 살리는 일**입니다 — A-4a가 `errorClass`에 대해 한 것과 같은 모양입니다.
-scope 보존이 §11 표의 선행 조건이고, 그 전까지 fallback 규칙은 현행 그대로입니다.
+(`lib/routingStreamFailure.ts`).
+
+**그리고 scope를 살리는 것만으로는 부족합니다**(개정 5에서 정정). 연결 실패는
+`classifyProviderFailure`를 **부르기 전에** 반환되므로 그 함수의 scope를 보존해도
+답이 없습니다. 게다가 새 모델에는 `gatewayProvider`와 `servingProvider`가 둘 다
+있는데, generic `provider` scope는 **어느 쪽인지 말하지 못합니다.**
+
+필요한 것은 **canonical classifier 하나**가 다음을 함께 내는 것입니다.
+
+```
+scopeKind  (gateway | serving_endpoint | deployment | model | local)
+scopeId    (그 scope의 식별자)
+category   (ProviderFailureCategory)
+version    (분류 규칙의 버전)
+```
+
+그리고 **user abort와 upstream timeout을 서로 다른 provenance로 판정**해야 합니다 —
+개정 5가 `client_gone`/`provider_network`로 쪼갠 것이 그 첫 조각입니다.
+
+canonical classification이 §11 표의 선행 조건이고, 그 전까지 fallback 규칙은 현행
+그대로입니다.
 
 그리고 **fallback 대상은 class 소속이 아니라 자기 gate를 통과한 deployment**입니다
 (§6.1). class 부재가 fallback을 금지하지 않습니다.
@@ -554,69 +639,107 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 
 과거 행은 추측 백필하지 않고 legacy/null로 남깁니다.
 
-## 13. 개정 3에서 바뀐 것
+## 13. 개정 4에서 바뀐 것
 
-| 항목 | 개정 3 | 개정 4 |
+| 항목 | 개정 4 | 개정 5 |
 |---|---|---|
-| broker 판정 | 응답별 attestation이 판정 | **계약·강제 가능한 pin이 사전 판정.** attestation은 사후 감사와 이후 quarantine — 데이터는 이미 나간 뒤 도착하므로 게이트가 될 수 없음 |
-| OpenRouter | 제약 트래픽 제외 가능성 | **attestation 공급자 0개 확인. 제약 트래픽에 대해 ADR §14의 역할 불성립**을 명시 |
-| residency 전환 | 열린 질문(S2) | **4단계 순서 확정.** 라벨이 아니라 기한·소유자·만료를 가진 승인된 예외 |
-| equivalence group | "당분간 deployment 동일성"으로 읽음 | **철회.** §11의 다른 endpoint 요구와 모순돼 fallback이 사라짐. class는 **품질 증거 재사용 전용**, fallback 대상은 자기 gate를 통과한 deployment |
-| guardrail 비용 | `providerChargeEstimate` | **`tomverseMarginalCost`.** `reservedCost`의 **세 번째** 소비자(구매 크레딧 funded allowance)를 놓쳤음. BYOK는 별도 `byok-spend-*` namespace |
-| health cutover | atomic cutover | + **표본 전제 5건.** 표본 없음은 `unknown`이 아니라 **`unproven` = routing-ineligible** |
-| 후보 동결 | run당 상한 | **상한 없음.** 자르면 신규 deployment의 판정부터 사라짐. **활성 registry ceiling을 config publish에서** 강제 |
-| §11 fallback 표 | 실패 scope가 정함 | 유지 + **지금은 구현 불가**를 명시. `classifyStreamFailure`가 scope를 버림 |
-| 갭 4 서술 | attempt 기록은 분리함 | **거짓이었음.** fallback 거절 시 분류가 행에 도달하지 않았음(F1). 고쳤고, `errorClass`만 전달 |
-| `ECONN` | 넓게 서술 | **`ECONNRESET` 하나**로 정정 |
+| residency 승인 | "승인된 계약"에 의존 | **`EndpointResidencyApproval`** — append-only immutable version. evidence·recipient·region·enforcement·유효기간·approver를 저장하고 attempt snapshot이 결속 (§4.4) |
+| BYOK guardrail | §7은 `tomverseMarginalCost`, §8.3은 `providerChargeEstimate` — **모순** | **§7 표 하나가 정함.** guardrail·budget·funded allowance는 전부 `tomverseMarginalCost` |
+| identity grain | "decision plane 전체를 deploymentId로" | **둘 다 남음.** candidate는 `{logicalModelId, deploymentId}` 쌍, 사용자 설정·badge·entitlement는 logical (§8.4) |
+| failure scope | `classifyProviderFailure().scope`를 살리면 됨 | **부족함.** 연결 실패는 그 함수 이전에 반환되고, generic `provider`는 gateway/serving을 구분 못 함. **canonical classifier**가 `scopeKind + scopeId + category + version`을 냄 |
+| candidate verdict | `deploymentId + reason + snapshotId` | **`verdict` 컬럼 추가.** eligible 후보와 통과했는데 밀린 후보를 표현 못 했음. rank·decision-input snapshot 포함 |
+| sticky·score snapshot | 언급 없음 | **logical grain임을 명시.** 백필 없이 resolver 전환이 cutover 선행 작업 |
+| §9 `errorClass` CHECK | "없음" | **있음.** A-3b가 `NOT VALID`로 배포. 과거 행만 미검증 |
+| §10 A-3b·A-4a | "미착수" | **구현 완료.** A-4a는 fallback 거절 경로까지 도달하고 연결 손실 오분류도 수정 |
 
-## 14. 권장 작업 순서 (3차 검토 반영)
+## 13.1 개정 5가 고친 자기 결함
 
-1. **S1·S2, workspace/account 소유권, BYOK namespace, §6/§11 관계를 먼저 결정** —
-   대부분 소유자·Privacy Owner의 승인 행위입니다
-2. 현재 stream 분류 결과가 settlement와 attempt 행까지 도달하게 고침 —
-   **개정 4와 함께 완료** (§10)
-3. A-3b/A-4a는 하나의 vocabulary로 설계하되 **한 migration으로 뭉개지 않음**:
-   expand CHECK → writer 배포 → 운영값 조사 → **별도 validation**
-4. C identity schema를 **additive/nullable**로 도입. 과거 행 추측 백필 없음
-5. **C 직후 A-5 config manifest** — multi-deployment decision 전환보다 **반드시
-   먼저**여야 합니다
-6. canonical observation journal과 deployment canary 구축, 표본 축적
+개정 4의 F1 수정이 **틀린 증거를 저장하고 있었습니다.** `TimeoutError`와
+`ECONNRESET`은 `isAbortShaped` 분기에서 조기 반환되는데, 개정 4는 그 분기 전체에
+`client_gone`이라는 이름을 붙였습니다. 그런데 그 코드의 주석이 바로 옆에서
+**"they are not user cancellations"** 라고 적고 있습니다.
+
+이름을 붙이기 전에는 그 분기에 class가 아예 없어서 부정확함이 보이지 않았습니다.
+이름을 붙이는 순간 **보수적인 fallback 판정이 기록 속 거짓 주장이 됐습니다.**
+그리고 provider health는 같은 사건을 `NETWORK`라고 부르므로, 두 하위 시스템이 한
+사건에 대해 서로 다른 말을 하는 상태가 하나 더 생긴 것이었습니다 — 이 문서가 갭 4
+에서 문제라고 지적한 바로 그 모양입니다.
+
+`client_gone`(진짜 abort)과 `provider_network`(연결 손실)로 쪼갰습니다. 판정
+(`cancelled`/`stream`)은 그대로입니다 — 바뀐 것은 이름뿐이고, 이름이 틀렸던 것이
+문제였습니다.
+
+`failureLayer`도 함께 전달하게 고쳤습니다. 그러지 않으면 rate limit이
+`errorClass: provider_rate_limited` 옆에 generic 매핑의 `failureLayer: stream`을
+달고 저장돼 **행 자체가 모순**됩니다.
+
+## 14. 권장 작업 순서 (4차 검토 반영)
+
+1. **T1·T2와 workspace/account 소유권 결정** — Privacy Owner·Backend owner의 승인
+   행위이며 제가 할 수 없습니다
+2. **canonical failure classification과 scope identity 확정** (§11) — 여러 항목이
+   여기에 걸려 있습니다
+3. versioned **residency approval과 recipient/destination 계약을 C schema에 포함**
+4. 기존 A-3b CHECK를 **운영값 조사 후 별도 migration으로 `VALIDATE`**
+5. C를 **additive/dark**로 배포하고 **즉시 A-5 manifest** 배포. A-5 이전에는
+   identity config writer 활성화·canary 기록·eligibility 판정·deployment
+   decision을 **모두 금지**
+6. residency-safe **canary lane**과 canonical observation journal 구축
 7. BYOK 비용·funded allowance·bucket key를 **versioned dual-read/write**로 전환
-8. 모든 후보 verdict 저장과 **registry ceiling** 구현
-9. shadow 비교 후 decision grain을 한 번에 `deploymentId`로 전환
-10. failure scope와 capacity state가 갖춰진 뒤 2-attempt fallback 활성화
-11. provider attestation이 재사용 가능성을 입증한 뒤 equivalence class 재검토
+8. 완전한 candidate verdict와 **routing-snapshot ceiling** 구현
+9. **sticky·score snapshot grain 전환** (선행), 그 뒤 shadow 검증
+10. decision grain을 `deploymentId`로 **원자 전환**
+11. scope·capacity가 준비된 뒤 2-attempt fallback 활성화
+12. provider attestation이 입증되면 equivalence class 재검토
 
 ## 15. 되돌릴 수 없는 것
 
-3차 검토의 판정을 그대로 받습니다. 비가역적인 것은 셋입니다.
-
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.
-2. **요청 당시 저장하지 않은 증거** — serving·config·candidate 판정. 나중에
-   재구성할 수 없습니다.
-3. **근거 없이 백필해 오염시킨 과거 identity** — 틀린 값을 지운 자리에 진짜 값이
-   없습니다.
+2. **요청 당시 저장하지 않은 증거** — serving·config·candidate 판정.
+3. **근거 없이 백필해 오염시킨 과거 identity.**
 
-비용·순위·fallback 정책 자체는 **수정 배포로 되돌릴 수 있으므로** 같은 수준의
-릴리스 차단으로 취급하지 않습니다. 이것이 AGENTS.md "검증 범위는 되돌릴 수 없는
-것에 비례합니다"의 적용입니다.
+비용·순위·fallback 정책 자체는 수정 배포로 되돌릴 수 있으므로 같은 수준의 릴리스
+차단으로 취급하지 않습니다.
 
-## 15.1 4차 검토에 올리는 열린 질문
+## 15.1 T1–T5의 답
 
-- **T1** — §4.1의 "계약상 보장되고 요청 옵션으로 강제 가능한 region pin"을 실제로
-  제공하는 공급자는 어디인가? Azure·Vertex·Bedrock은 그럴 것으로 보이지만
-  확인되지 않았습니다. 확인되지 않으면 §4는 또 실행 불가입니다.
-- **T2** — §8.3의 `byok-spend-*` namespace에 한도를 정하는 주체는 누구인가?
-  workspace가 자기 한도를 정한다면 그것은 abuse 방어가 아니고, Tomverse가 정한다면
-  왜 남의 돈에 한도를 거는지 답해야 합니다.
-- **T3** — §8.1의 `unproven`이 routing-ineligible이면, deployment 도입 직후 **모든
-  deployment가 ineligible**입니다. 첫 표본은 어떻게 얻는가 — canary가 ineligible
-  deployment로 트래픽을 보내야 하는데 그것이 허용되는가?
-- **T4** — §8.5의 registry ceiling을 넘는 config를 거절하면, 공급자가 모델을
-  늘릴 때 **승인 없이는 카탈로그가 멈춥니다.** 의도한 것인가?
-- **T5** — §14의 5번(A-5를 C 직후)은 A-5가 deployment·endpoint·routing policy
-  digest를 함께 동결해야 한다는 뜻입니다. 그러면 A-5 이전의 C 작업은 **동결되지
-  않은 config 위에서** 이루어집니다. 그 구간의 재현성은 포기하는가?
+- **T1 (region pin 공급자)** — **확인된 공급자 0개.** Azure·Vertex·Bedrock을
+  추정 승인하지 않습니다. 공식 계약·endpoint enforcement 증거가 capability
+  register에 들어오기 전까지 `unproven`입니다. OpenRouter constrained fallback은
+  계속 불가.
+- **T2 (BYOK 한도 주체)** — **workspace/account admin이 정합니다.** Tomverse의 abuse
+  방어는 concurrency·rate·token 한도로 별도 집행합니다. 한도 없이 BYOK binding을
+  활성화하는 것은 거부 — 탈취된 credential의 무제한 지출이 됩니다. **Workspace
+  모델이 현재 schema에 없으므로** account와 workspace 중 소유권 결정이 선행입니다.
+- **T3 (`unproven` bootstrap)** — **별도 synthetic canary lane만** 우회합니다.
+  residency는 먼저 proven, 사용자 콘텐츠 없음, 별도 credential quota와 provider
+  budget, 정상 routing candidate 아님, 최소 표본·관측 window 통과 후에만 eligible.
+  사용자 트래픽 bootstrap과 `unknown` 임시 허용은 기각.
+- **T4 (registry ceiling)** — **published routing deployment snapshot에만** 적용.
+  새 모델은 staging registry에 들어갈 수 있고, 승인 snapshot을 넘으면 Auto에
+  활성화되지 않을 뿐입니다. 전체 catalogue 중단은 routing과 무관한 기능까지
+  막으므로 기각.
+- **T5 (C와 A-5 순서)** — **C를 additive dark schema로만** 먼저 배포하면 허용.
+  A-5 이전 금지 항목은 §14의 5번. 가능하면 **같은 release train**에 넣고 A-5가
+  residency approval version까지 동결합니다.
+
+## 15.2 5차 검토에 올리는 열린 질문
+
+- **U1** — §4.4의 `EndpointResidencyApproval`을 누가 씁니까? 소유자 승인이
+  선행인데, 승인 UI가 없는 상태에서 첫 행은 어떻게 생기는가?
+- **U2** — §11의 canonical classifier가 `scopeKind`를 내려면 실패 시점에
+  gateway/serving을 구분해야 합니다. broker 경로에서 serving이 null이면 scope는
+  무엇인가?
+- **U3** — §8.4의 `{logicalModelId, deploymentId}` 쌍이 tie-break 최종 기준이
+  되면, 같은 logical model의 두 deployment는 무엇으로 갈립니까? deployment id는
+  임의값이라 `model_id`가 그랬듯 안정성만 삽니다.
+- **U4** — T3의 canary lane이 "정상 routing candidate 아님"이면 그 표본은 실제
+  사용자 트래픽과 분포가 다릅니다. 그 표본으로 얻은 health가 사용자 트래픽에 대해
+  유효하다고 말할 근거는 무엇인가?
+- **U5** — Perplexity는 모든 모델이 search-backed라 기존 probe 대상에서 제외됩니다
+  (`lib/providerProbe.ts`). 기존 probe 계약을 재사용하면 **Perplexity deployment는
+  영구 `unproven`** 이고 Auto에서 영구 제외됩니다. canary가 별도 계약·예산을
+  가져야 한다는 뜻인데, 그 비용은 누가 승인하는가?
 
 ## 16. 검토 이력
 
@@ -627,4 +750,7 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
   round 1 findings 중 `closed` 2건, `partially closed` 3건, `not closed` 3건.
 - 개정 3: Cursor 독립 검토 → **`reject`**. blocker 2, major 3, 사실 오류 2.
   round 2 findings 중 `not closed` 1건, `partially closed` 5건.
-- 개정 4: 4차 독립 검토 대기.
+- 개정 4: Cursor 독립 검토 → **`reject`**. blocker 1, major 3, 사실 오류 2.
+  round 3 findings 중 `closed` 1건, `partially closed` 3건, `not closed` 1건.
+  그리고 개정 4의 수정 자체가 틀린 증거를 저장하고 있었습니다(§13.1).
+- 개정 5: 5차 독립 검토 대기.

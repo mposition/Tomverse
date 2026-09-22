@@ -241,3 +241,46 @@ test("a client that went away is not filed as a provider failure", () => {
     assert.equal(gone.failureLayer, "stream");
     assert.ok(!gone.errorClass.startsWith("provider_"));
 });
+
+/**
+ * A lost connection is not a person changing their mind.
+ *
+ * `TimeoutError` and `ECONNRESET` share the *verdict* with a client abort --
+ * neither is substituted -- and the module says in as many words that they are
+ * not user cancellations. Filing them under `client_gone` would put a cause in
+ * the record that nobody observed, and would contradict provider health, which
+ * classifies the same event as `NETWORK`.
+ */
+test("a lost connection is not recorded as the client going away", () => {
+    for (const error of [
+        Object.assign(new Error("x"), { name: "TimeoutError" }),
+        Object.assign(new Error("x"), { code: "ECONNRESET" }),
+    ]) {
+        const classification = classifyStreamFailure({
+            error,
+            phase: "read",
+            visibleTokenEmitted: false,
+            downstreamOpen: true,
+        });
+        assert.equal(classification.errorClass, "provider_network");
+        // The verdict it shares with an abort is unchanged.
+        assert.equal(classification.outcome, "cancelled");
+        assert.equal(classification.failureLayer, "stream");
+    }
+});
+
+test("a real client abort still says so", () => {
+    for (const error of [
+        Object.assign(new Error("x"), { name: "AbortError" }),
+        Object.assign(new Error("x"), { code: "ABORT_ERR" }),
+    ]) {
+        const classification = classifyStreamFailure({
+            error,
+            phase: "read",
+            visibleTokenEmitted: false,
+            downstreamOpen: true,
+        });
+        assert.equal(classification.errorClass, "client_gone");
+        assert.equal(classification.outcome, "cancelled");
+    }
+});
