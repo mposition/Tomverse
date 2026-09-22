@@ -22,6 +22,7 @@ import {
   boardImportAuditEntryHashMatches,
   boardImportCardData,
   boardImportCardWrites,
+  boardImportConflictReasons,
   boardImportContentTypeAccepted,
   boardImportFailureIsAmbiguous,
   boardImportItemBindingsDigest,
@@ -190,6 +191,44 @@ test("classification separates create, no-op, conflict and exclude, and a refusa
   assert.deepEqual(classification.conflict, ["example_board:CHAT-03"]);
   assert.deepEqual(classification.exclude, ["example_board:CHAT-04"]);
   assert.equal(boardImportSubmissionRefusal(classification), "excluded_item");
+  assert.deepEqual(boardImportCardWrites(manifest, classification), []);
+});
+
+test("drift and an active execution are counted apart and do not change the refusal", () => {
+  const manifest = parsed([item("CHAT-01"), item("CHAT-02"), item("CHAT-03"), item("CHAT-04")]).manifest;
+  const matched = (sourceKey, itemIndex, patch) => ({
+    sourceSystem: "example_board",
+    sourceKey,
+    sourceVersion: COMMIT,
+    sourceDigest: manifest.items[itemIndex].sourceDigest,
+    sourceSnapshot: boardImportSourceSnapshot(manifest.items[itemIndex], manifest),
+    status: "backlog",
+    owner: null,
+    claimedAt: null,
+    attemptCount: 0,
+    deliveryCount: 0,
+    routeDecisionCount: 0,
+    ...patch,
+  });
+  const existing = [
+    matched("CHAT-01", 0, { sourceDigest: "a".repeat(64), sourceSnapshot: null }),
+    matched("CHAT-02", 1, { claimedAt: "2026-09-22T00:00:00.000Z", attemptCount: 1 }),
+    matched("CHAT-03", 2, { status: "todo", owner: "someone" }),
+    matched("CHAT-04", 3, {
+      sourceDigest: "b".repeat(64),
+      sourceSnapshot: null,
+      claimedAt: "2026-09-22T00:00:00.000Z",
+      attemptCount: 1,
+    }),
+  ];
+  assert.deepEqual(boardImportConflictReasons(manifest, existing), {
+    sourceDrift: 2,
+    activeExecution: 2,
+    otherConflict: 1,
+  });
+  const classification = classifyBoardImport(manifest, existing);
+  assert.equal(classification.conflict.length, 4);
+  assert.equal(boardImportSubmissionRefusal(classification), "conflict");
   assert.deepEqual(boardImportCardWrites(manifest, classification), []);
 });
 
@@ -386,6 +425,8 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   assert.match(service, /sourceMissingCount: sourceMissing.length/);
   const applyBody = service.slice(service.indexOf("export async function applyBoardImport"));
   assert.equal(applyBody.includes("boardImportSourceMissing"), false);
+  assert.equal(applyBody.includes("boardImportConflictReasons"), false);
+  assert.match(service, /sourceDriftCount: conflictReasons.sourceDrift/);
   assert.equal(applyBody.includes("findUnique"), false);
   assert.match(service, /boardImportItemBindingsDigest\(bindings\)/);
   assert.match(service, /digestAmuxManifest\(manifest\)/);

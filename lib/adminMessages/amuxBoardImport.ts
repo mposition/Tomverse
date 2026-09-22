@@ -30,6 +30,12 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
       `This catalog does not include at least ${count} stored source row(s). The scan stopped at its cap, and nothing was deleted.`,
     sourceMissingScanStopped:
       "The scan stopped at its cap before it could finish. Nothing was deleted.",
+    sourceDrift: (count: number) =>
+      `Source drift: ${count}. Nothing was overwritten.`,
+    activeExecution: (count: number) =>
+      `Active execution: ${count}. Nothing was overwritten.`,
+    otherConflict: (count: number) =>
+      `Other catalog conflict: ${count}. Nothing was overwritten.`,
   },
   ko: {
     title: "AMUX 카탈로그 이관",
@@ -60,5 +66,11 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
       `이 카탈로그에 없는 저장된 원본 행이 최소 ${count}건입니다. 조회가 상한에서 멈췄고, 아무것도 지우지 않았습니다.`,
     sourceMissingScanStopped:
       "조회가 상한에서 끝나기 전에 멈췄습니다. 아무것도 지우지 않았습니다.",
+    sourceDrift: (count: number) =>
+      `원본 차이 ${count}건입니다. 아무것도 덮어쓰지 않았습니다.`,
+    activeExecution: (count: number) =>
+      `실행 중 ${count}건입니다. 아무것도 덮어쓰지 않았습니다.`,
+    otherConflict: (count: number) =>
+      `그 밖의 카탈로그 충돌 ${count}건입니다. 아무것도 덮어쓰지 않았습니다.`,
   },
 });

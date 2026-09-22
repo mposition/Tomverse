@@ -13,6 +13,9 @@ type PreviewBody = {
   refusal?: string | null;
   sourceMissingCount?: number;
   sourceMissingTruncated?: boolean;
+  sourceDriftCount?: number;
+  activeExecutionCount?: number;
+  otherConflictCount?: number;
   applyPermitted?: boolean;
   approvalId?: string;
   status?: string;
@@ -181,6 +184,15 @@ export function AmuxBoardImportPanel() {
             </p>
           ) : null}
           {missingSentence ? <p>{missingSentence}</p> : null}
+          {typeof result.sourceDriftCount === "number" ? (
+            <p>{messages.sourceDrift(result.sourceDriftCount)}</p>
+          ) : null}
+          {typeof result.activeExecutionCount === "number" ? (
+            <p>{messages.activeExecution(result.activeExecutionCount)}</p>
+          ) : null}
+          {typeof result.otherConflictCount === "number" ? (
+            <p>{messages.otherConflict(result.otherConflictCount)}</p>
+          ) : null}
         </div>
       ) : null}
     </section>

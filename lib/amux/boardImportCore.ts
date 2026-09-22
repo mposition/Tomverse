@@ -573,6 +573,20 @@ const snapshotsMatch = (
   stored.manifestDigest === expected.manifestDigest &&
   stored.policyVersion === expected.policyVersion;
 
+const BOARD_IMPORT_FRESH_LIFECYCLE = {
+  status: BOARD_IMPORT_CARD_STATUS,
+  owner: null,
+  claimedAt: null,
+  attemptCount: 0,
+  deliveryCount: 0,
+  routeDecisionCount: 0,
+} as const;
+
+const lifecycleIsFresh = (card: BoardImportExistingCard): boolean =>
+  (Object.keys(BOARD_IMPORT_FRESH_LIFECYCLE) as (keyof typeof BOARD_IMPORT_FRESH_LIFECYCLE)[]).every(
+    (key) => card[key] === BOARD_IMPORT_FRESH_LIFECYCLE[key],
+  );
+
 const freshBacklogMatch = (
   item: BoardImportItem,
   card: BoardImportExistingCard,
@@ -581,12 +595,7 @@ const freshBacklogMatch = (
   card.sourceDigest === item.sourceDigest &&
   card.sourceVersion === item.sourceVersion &&
   snapshotsMatch(card.sourceSnapshot, boardImportSourceSnapshot(item, manifest)) &&
-  card.status === BOARD_IMPORT_CARD_STATUS &&
-  card.owner === null &&
-  card.claimedAt === null &&
-  card.attemptCount === 0 &&
-  card.deliveryCount === 0 &&
-  card.routeDecisionCount === 0;
+  lifecycleIsFresh(card);
 
 export const classifyBoardImport = (
   manifest: BoardImportManifest,
@@ -618,6 +627,44 @@ export const classifyBoardImport = (
     conflict: conflict.sort(),
     exclude: exclude.sort(),
   };
+};
+
+export type BoardImportConflictReasons = {
+  sourceDrift: number;
+  activeExecution: number;
+  otherConflict: number;
+};
+
+/**
+ * Why an in-catalog card is not a fresh backlog match. Drift is that same
+ * match after the shared fresh-lifecycle fields are restored, so a new
+ * source field counts as drift and a new lifecycle field does not. A card
+ * can be both drift and an active execution. The counts do not delete,
+ * overwrite, or change the import refusal.
+ */
+export const boardImportConflictReasons = (
+  manifest: BoardImportManifest,
+  existing: readonly BoardImportExistingCard[],
+): BoardImportConflictReasons => {
+  const existingByKey = new Map(existing.map((card) => [boardImportIdentityKey(card), card]));
+  let sourceDrift = 0;
+  let activeExecution = 0;
+  let otherConflict = 0;
+  for (const item of manifest.items) {
+    if (item.exclude) continue;
+    const card = existingByKey.get(boardImportIdentityKey(item));
+    if (!card || freshBacklogMatch(item, card, manifest)) continue;
+    const drifted = !freshBacklogMatch(item, { ...card, ...BOARD_IMPORT_FRESH_LIFECYCLE }, manifest);
+    const active =
+      card.claimedAt !== null ||
+      card.attemptCount > 0 ||
+      card.deliveryCount > 0 ||
+      card.routeDecisionCount > 0;
+    if (drifted) sourceDrift += 1;
+    if (active) activeExecution += 1;
+    if (!drifted && !active) otherConflict += 1;
+  }
+  return { sourceDrift, activeExecution, otherConflict };
 };
 
 /**
