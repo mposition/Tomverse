@@ -86,22 +86,6 @@ const READ_ONLY_KEYS = {
       "operator step in the marketing activation order, recorded by writing " +
       "the row, not a toggle a screen should offer ahead of that order.",
   },
-  MARKETING_DRAFTS_KEY: {
-    reason:
-      "Marketing automation S1 only installs the fail-closed reader and " +
-      "resolver. S2 adds the marketing:write, step-up and same-transaction " +
-      "audit-logged switch route before this key may be changed in-app.",
-  },
-  MARKETING_PUBLISH_KEY: {
-    reason:
-      "S2 owns the audited publishing activation route and verifies adapter, " +
-      "recovery and platform-budget readiness; S1 must not offer a bypassing toggle.",
-  },
-  MARKETING_AUTO_PUBLISH_KEY: {
-    reason:
-      "Autonomous publishing is graduated per account and remains read-only " +
-      "until the S2 permission-checked activation workflow exists.",
-  },
   MARKETING_EXPERIMENTS_KEY: {
     reason:
       "S2 adds the audited experiment activation route after cache and CSP " +

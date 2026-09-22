@@ -134,6 +134,9 @@ export const MARKETING_S2B1_ACTIONS = Object.freeze({
   postLegalHoldReleased: "marketing_post.legal_hold_released",
   postResolveOutcomeUnknown: "marketing_post.resolve_outcome_unknown",
   postUnpublish: "marketing_post.unpublish",
+  settingDraftsChanged: "marketing_setting.drafts_changed",
+  settingPublishChanged: "marketing_setting.publish_changed",
+  settingAutonomousChanged: "marketing_setting.autonomous_changed",
 } as const);
 
 export const MARKETING_PAUSE_REASON_CODES = Object.freeze([

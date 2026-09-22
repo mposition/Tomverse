@@ -729,6 +729,44 @@ export async function readMarketingAutomationSettings(): Promise<
   return readMarketingAutomationSettingsFrom(prisma, !e2eDatabaseDisabled());
 }
 
+/**
+ * The three marketing switches an operator may change from the console.
+ *
+ * Drafts, publishing and autonomous publishing. The webhook shadow switch
+ * belongs to S2e and the apply scope to S2f: both carry evidence this slice
+ * has no way to check, and a writer for them here would be a way to skip that
+ * evidence (docs/policy/marketing-automation.md §6.1, §8.1.1).
+ *
+ * The write takes the caller's transaction so it commits with the audit entry
+ * the route wrote -- that pairing is the only thing that makes the change
+ * answerable afterwards.
+ */
+export const MARKETING_CONSOLE_SWITCH_NAMES = ["drafts", "publish", "autonomous"] as const;
+
+export type MarketingConsoleSwitch = (typeof MARKETING_CONSOLE_SWITCH_NAMES)[number];
+
+export async function writeMarketingAutomationSwitch(
+  client: Pick<PrismaClient, "appSetting">,
+  name: MarketingConsoleSwitch,
+  enabled: boolean,
+): Promise<void> {
+  // The keys are named here rather than read out of a table, so the writer
+  // check can see which key this function writes: it reads the declaration
+  // that names a key, and a table lookup names none of them.
+  const key =
+    name === "drafts"
+      ? MARKETING_DRAFTS_KEY
+      : name === "publish"
+        ? MARKETING_PUBLISH_KEY
+        : MARKETING_AUTO_PUBLISH_KEY;
+  const value = enabled ? "true" : "false";
+  await client.appSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
+}
+
 export class MemoryFeatureDisabledError extends Error {
   constructor() {
     super("Account memory is not enabled.");

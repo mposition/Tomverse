@@ -270,6 +270,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/marketingStore.ts",
+    table: "MarketingChannel",
+    tableMentions: 2,
+    writeVerbs: 7,
+    reason:
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name.",
+  },
+  {
+    path: "lib/marketingStore.ts",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 7,
+    reason:
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under. Every write is a delegate call.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,

@@ -91,6 +91,13 @@ test("S2b1 action names are the exact approved inventory strings", () => {
     "marketing_post.legal_hold_released",
     "marketing_post.resolve_outcome_unknown",
     "marketing_post.unpublish",
+    // The three switches the console may change. The webhook shadow switch and
+    // the apply scope are absent on purpose: they belong to S2e and S2f, and an
+    // action name for them here would be the first half of a route that skips
+    // the evidence those slices exist to collect.
+    "marketing_setting.drafts_changed",
+    "marketing_setting.publish_changed",
+    "marketing_setting.autonomous_changed",
   ]);
 });
 
