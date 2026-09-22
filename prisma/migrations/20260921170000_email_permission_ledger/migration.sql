@@ -9,9 +9,9 @@
 -- because feature.emailMarketingEnabled is off and no country rule exists yet.
 --
 -- One transaction. Prisma does not wrap a migration file for us, and this one
--- is six tables, twenty constraints, nine functions and eight triggers: a
--- failure in the middle would leave a ledger that is half enforced, which is
--- worse than no ledger at all because it looks like one. Nothing here needs to
+-- is six tables, twenty-one constraints, fourteen functions and thirteen
+-- triggers: a failure in the middle would leave a ledger that is half
+-- enforced, which is worse than no ledger at all because it looks like one. Nothing here needs to
 -- run outside a transaction -- no CONCURRENTLY, no database-level statement.
 
 BEGIN;

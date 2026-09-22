@@ -153,11 +153,16 @@ export const APPEND_ONLY_LEDGER_TABLES = [
  * truncates anything -- the scanned set excludes tests/ -- so "none at all" is
  * a rule that costs nothing and has no gap to reason about.
  *
- * Matches the SQL statement, not the CSS class: `TRUNCATE` in upper case
- * followed by TABLE, ONLY, or a quoted identifier. `className="truncate"` and
- * "do not truncate sentences" are neither.
+ * Matches the SQL statement, not the CSS class: `TRUNCATE` followed by TABLE,
+ * ONLY, or a quoted identifier. `className="truncate"` and "do not truncate
+ * sentences" are neither.
+ *
+ * Case-insensitive. This repository writes SQL in upper case, so the first
+ * version only matched that -- and `truncate table "User"` would have passed a
+ * rule whose whole value is that it has no gap to reason about. The suffix is
+ * what keeps the CSS class out, at either case.
  */
-export const SQL_TRUNCATE_PATTERN = /\bTRUNCATE\s+(?:TABLE\b|ONLY\b|")/g;
+export const SQL_TRUNCATE_PATTERN = /\bTRUNCATE\s+(?:TABLE\b|ONLY\b|")/gi;
 
 export const findTruncateStatements = ({ sources }) => {
   const findings = [];
