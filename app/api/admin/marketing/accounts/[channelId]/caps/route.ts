@@ -32,7 +32,7 @@ export async function POST(req: Request, context: RouteContext) {
     targetType: "MarketingChannel",
     targetId: channelId,
     summary: "Lowered a brand account's posting caps.",
-    gate: "account_control",
+    gate: "operator_restriction",
     bucket: "admin-marketing-account-caps",
     schema,
     metadata: (body) => ({

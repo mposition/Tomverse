@@ -112,6 +112,84 @@ export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_auto
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
 /** Exact S2b1 action names. These strings are audit/store contracts. */
+/**
+ * What each refusal means to an HTTP caller.
+ *
+ * Here rather than in the route layer because the route layer had a copy and
+ * three of its keys were misspellings of codes this module throws -- the
+ * conflicts they described went out as 422 instead of 409. A caller that has
+ * to transcribe another module's strings will eventually transcribe one wrong,
+ * so the strings and their meaning live together and a test fails when a new
+ * refusal has no entry.
+ *
+ * A conflict is the default: almost every refusal here is the row not being in
+ * the state the caller decided against, which is exactly what 409 is for.
+ */
+export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
+  Object.freeze({
+    channel_not_found: 404,
+    post_not_found: 404,
+    approval_expiry_invalid: 400,
+    cap_change_is_noop: 400,
+    cap_override_invalid: 400,
+    default_locale_not_allowed: 400,
+    failure_code_invalid: 400,
+    pause_reason_invalid: 400,
+    period_is_backwards: 400,
+    policy_version_invalid: 400,
+    resume_reason_invalid: 400,
+    scopes_digest_unchanged: 400,
+    account_slug_exhausted: 503,
+    database_clock_unavailable: 503,
+    autonomous_creation_not_available: 501,
+    account_already_disconnected: 409,
+    approval_conflict: 409,
+    approval_expiry_conflict: 409,
+    autonomous_mode_not_settable_here: 409,
+    cap_change_conflict: 409,
+    cap_change_raises_limit: 409,
+    channel_changed_under_us: 409,
+    connection_confirmation_conflict: 409,
+    disconnect_conflict: 409,
+    edit_audit_reused: 409,
+    edit_changes_immutable_scope: 409,
+    edit_conflict: 409,
+    edit_guard_binding_mismatch: 409,
+    edited_content_guard_rejected: 409,
+    entry_belongs_to_retention: 409,
+    envelope_account_not_this_channel: 409,
+    envelope_digest_not_of_this_envelope: 409,
+    envelope_digest_without_envelope: 409,
+    envelope_disagrees_with_columns: 409,
+    envelope_schedule_disagrees: 409,
+    envelope_scheduled_at_create: 409,
+    guard_decision_not_about_these_facts: 409,
+    guard_decision_not_about_this_post: 409,
+    guard_decision_not_sealed: 409,
+    legal_hold_conflict: 409,
+    manual_channel_has_no_caps: 409,
+    mark_reusable_conflict: 409,
+    outcome_evidence_invalid: 409,
+    outcome_resolution_conflict: 409,
+    pause_conflict: 409,
+    policy_change_conflict: 409,
+    published_evidence_invalid: 409,
+    reconnect_conflict: 409,
+    rejection_conflict: 409,
+    requeue_conflict: 409,
+    requeue_evidence_missing: 409,
+    requeue_without_failure: 409,
+    resume_approval_conflict: 409,
+    resume_autonomous_conflict: 409,
+    resume_autonomous_not_allowed: 409,
+    resume_evidence_missing: 409,
+    resume_evidence_reused: 409,
+    schedule_conflict: 409,
+    scopes_change_conflict: 409,
+    unpublish_conflict: 409,
+    unpublish_not_confirmed: 409,
+  });
+
 export const MARKETING_S2B1_ACTIONS = Object.freeze({
   accountCreate: "marketing_account.create",
   accountConnectionConfirmed: "marketing_account.connection_confirmed",

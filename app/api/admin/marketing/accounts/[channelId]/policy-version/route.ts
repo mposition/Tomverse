@@ -32,7 +32,7 @@ export async function POST(req: Request, context: RouteContext) {
     targetType: "MarketingChannel",
     targetId: channelId,
     summary: "Recorded a change to a brand account's policy version.",
-    gate: "account_control",
+    gate: "operator_restriction",
     bucket: "admin-marketing-account-policy",
     schema,
     metadata: (body) => ({ policyVersion: body.policyVersion }),

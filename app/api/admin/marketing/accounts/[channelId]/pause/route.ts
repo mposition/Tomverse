@@ -34,7 +34,7 @@ export async function POST(req: Request, context: RouteContext) {
     targetType: "MarketingChannel",
     targetId: channelId,
     summary: "Paused a brand account.",
-    gate: "account_control",
+    gate: "operator_restriction",
     bucket: "admin-marketing-account-pause",
     schema,
     metadata: (body) => ({ reasonCode: body.reasonCode, pausedFromMode: body.expectedStatus }),

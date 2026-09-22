@@ -32,7 +32,7 @@ export async function POST(req: Request, context: RouteContext) {
     targetType: "MarketingChannel",
     targetId: channelId,
     summary: "Disconnected a brand account.",
-    gate: "account_control",
+    gate: "operator_restriction",
     bucket: "admin-marketing-account-disconnect",
     schema,
     metadata: (body) => ({ expectedStatus: body.expectedStatus }),

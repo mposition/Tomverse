@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   adminAuditEntryHashVariants,
@@ -11,6 +13,7 @@ import {
   lowerMarketingChannelCaps,
   markMarketingPostReusable,
   MarketingStoreRefusedError,
+  MARKETING_REFUSAL_STATUS,
   MARKETING_S2B1_ACTIONS,
   requeueMarketingPostAfterFailure,
   resumeMarketingChannelToAutonomous,
@@ -513,4 +516,51 @@ test("lower-caps refuses an effective increase before issuing UPDATE", async () 
       error.code === "cap_change_raises_limit",
   );
   assert.equal(updates, 0);
+});
+
+test("every refusal the store can raise has an HTTP meaning", () => {
+  // The route layer used to keep its own copy of this table and three of its
+  // keys were misspellings -- `cap_change_is_a_no_op` for `cap_change_is_noop`,
+  // `reject_conflict` for `rejection_conflict`, and one that matched nothing at
+  // all -- so those conflicts went out as 422 instead of 409. Transcription is
+  // what failed, so nothing transcribes any more and this fails when a new
+  // refusal arrives without a status.
+  const source = readFileSync(
+    fileURLToPath(new URL("../lib/marketingStore.ts", import.meta.url)),
+    "utf8"
+  );
+  const codes = new Set();
+  for (const [, code] of source.matchAll(
+    /MarketingStoreRefusedError\(\s*"([a-z_]+)"/g
+  )) {
+    codes.add(code);
+  }
+  for (const [, code] of source.matchAll(
+    /requireOne\(\s*[A-Za-z0-9_.]+\s*,\s*"([a-z_]+)"/g
+  )) {
+    codes.add(code);
+  }
+  assert.ok(codes.size > 40, `expected the store to raise many refusals, saw ${codes.size}`);
+  const missing = [...codes].filter((code) => !(code in MARKETING_REFUSAL_STATUS)).sort();
+  assert.deepEqual(missing, [], "refusals with no HTTP meaning");
+  const unused = Object.keys(MARKETING_REFUSAL_STATUS)
+    .filter((code) => !codes.has(code))
+    .sort();
+  assert.deepEqual(unused, [], "statuses for refusals nothing raises");
+});
+
+test("the mutation gate reads the kill switch by the name the resolver uses", () => {
+  // It read `MARKETING_AUTOPUBLISH_KILL_SWITCH`, which nothing in this
+  // repository sets or reads. The only gate the slice had therefore did
+  // nothing: turning the real switch on left every marketing mutation open.
+  const source = readFileSync(
+    fileURLToPath(new URL("../lib/marketingAdminMutations.ts", import.meta.url)),
+    "utf8"
+  );
+  assert.match(source, /process\.env\[MARKETING_AUTOMATION_KILL_SWITCH_ENV\]/);
+  assert.doesNotMatch(
+    source,
+    /process\.env\.[A-Z_]*KILL_SWITCH/,
+    "the environment variable's name belongs to the resolver, not to a second copy"
+  );
 });

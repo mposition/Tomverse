@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
 import type { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
@@ -14,7 +15,11 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { MarketingStoreRefusedError } from "@/lib/marketingStore";
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_REFUSAL_STATUS,
+  MarketingStoreRefusedError,
+} from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -35,53 +40,54 @@ import { prisma } from "@/lib/prisma";
  * nothing leaves no audit row behind.
  */
 
-export type MarketingMutationGate = "manual_approval" | "account_control";
+export type MarketingMutationGate =
+  /** A person deciding about a draft: the draft switch, and no kill switch. */
+  | "manual_approval"
+  /** Anything that starts or restarts a publishing surface: no kill switch. */
+  | "account_control"
+  /**
+   * An operator stopping or narrowing something: gated on nothing at all.
+   *
+   * Pausing, disconnecting, lowering a cap, turning a switch off, and the
+   * scope and policy-version changes that send an account back to approval
+   * mode. None of them make publishing more possible, so none of them is
+   * something the kill switch needs to refuse -- and refusing them under it
+   * would leave an operator unable to stop or narrow anything while it is on.
+   */
+  | "operator_restriction";
 
 export type MarketingMutationRefusal = { code: string; status: number; message: string };
 
-/** What the refusal codes the store raises mean to an HTTP caller. */
-const STORE_REFUSAL_STATUS: Record<string, number> = {
-  approval_conflict: 409,
-  approval_expiry_invalid: 400,
-  requeue_conflict: 409,
-  requeue_without_failure: 409,
-  mark_reusable_conflict: 409,
-  legal_hold_conflict: 409,
-  cap_override_invalid: 400,
-  cap_change_raises_limit: 409,
-  cap_change_is_a_no_op: 409,
-  manual_channel_has_no_caps: 409,
-  resume_reason_invalid: 400,
-  resume_autonomous_not_allowed: 409,
-  resume_evidence_reused: 409,
-  edit_conflict: 409,
-  reject_conflict: 409,
-  schedule_conflict: 409,
-  unpublish_conflict: 409,
-  outcome_resolution_conflict: 409,
-  channel_conflict: 409,
-};
-
-const refusalStatus = (code: string) =>
-  STORE_REFUSAL_STATUS[code] ?? (code.startsWith("resume_evidence_") ? 409 : 422);
+const refusalStatus = (code: string) => MARKETING_REFUSAL_STATUS[code] ?? 422;
 
 /**
  * Whether the capability behind this action is switched on.
  *
- * Only the gate §6.1 actually names for these actions. Manual approval needs
- * the draft switch and no kill switch; it is explicitly independent of the LLM
- * budget. Account controls -- pausing, disconnecting, lowering a cap, holding a
- * post -- are gated on *nothing*, because they are how an operator stops
- * things, and a stop that a switch can refuse is not a stop.
+ * Three gates, because "an account control" turned out to cover two opposite
+ * things. Pausing an account and turning a switch off are an operator stopping
+ * something; creating an account, confirming a connection, resuming one and
+ * turning a switch on all start or restart a publishing surface, and the kill
+ * switch has to reach those.
  *
  * The full `resolveMarketingAutomationAccess()` composition is not assembled
  * here. It needs publishing, webhook and graduation inputs that later slices
  * own, and half-building it would leave a decision function that answers about
- * capabilities nothing has yet.
+ * capabilities nothing has yet. What is shared with it is the environment
+ * variable's name, which is why that is imported rather than written out.
  */
-async function gateRefusal(gate: MarketingMutationGate): Promise<MarketingMutationRefusal | null> {
-  if (gate === "account_control") return null;
-  const killSwitch = process.env.MARKETING_AUTOPUBLISH_KILL_SWITCH;
+async function gateRefusal(
+  gate: MarketingMutationGate
+): Promise<MarketingMutationRefusal | null> {
+  // Stopping and narrowing are never refused: they are how an operator makes
+  // something stop, and a stop a switch can refuse is not a stop.
+  if (gate === "operator_restriction") return null;
+
+  // The kill switch stops everything but reading the record
+  // (docs/policy/marketing-automation.md §6.1), and §8.2 makes it an event that
+  // pauses an account -- so a route that resumed one under it would undo the
+  // switch's own effect. Read from the constant that names it: this checked a
+  // name nothing sets, so the only gate this slice had did nothing at all.
+  const killSwitch = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
   if (typeof killSwitch === "string" && killSwitch.trim() !== "") {
     return {
       code: "MARKETING_KILL_SWITCH",
@@ -89,6 +95,8 @@ async function gateRefusal(gate: MarketingMutationGate): Promise<MarketingMutati
       message: "Marketing automation is stopped by the kill switch.",
     };
   }
+  if (gate === "account_control") return null;
+
   const settings = await readMarketingAutomationSettings();
   if (!settings.draftsEnabled.ok) {
     return {
@@ -122,12 +130,20 @@ export type MarketingMutationSpec<TBody, TResult> = {
   /** Absent for a create, where the id does not exist until the write. */
   targetId?: string | ((body: TBody) => string);
   summary: string;
-  gate: MarketingMutationGate;
+  gate: MarketingMutationGate | ((body: TBody) => MarketingMutationGate);
   /** Distinguishes the rate-limit bucket; the buckets are per action. */
   bucket: string;
   schema: z.ZodType<TBody>;
   /** Audit metadata. `actorHadMarketingWrite` is added here, not by callers. */
   metadata: (body: TBody) => Record<string, unknown>;
+  /**
+   * A route's own refusals, for errors the store does not raise.
+   *
+   * Returning null leaves the error to the generic handler, which is a 500 --
+   * so a route that can refuse for its own reasons has to say so here rather
+   * than let its refusal read as a fault.
+   */
+  refusal?: (error: unknown) => MarketingMutationRefusal | null;
   run: (
     tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
     context: { body: TBody; auditLogId: string; session: Session }
@@ -155,15 +171,17 @@ export async function runMarketingAdminMutation<TBody, TResult>(
       day: 200,
     });
 
-    const refusal = await gateRefusal(spec.gate);
+    const body = await readLimitedJson(spec.request, 16 * 1024, spec.schema);
+
+    const refusal = await gateRefusal(
+      typeof spec.gate === "function" ? spec.gate(body) : spec.gate
+    );
     if (refusal) {
       return NextResponse.json(
         { error: refusal.message, code: refusal.code },
         { status: refusal.status }
       );
     }
-
-    const body = await readLimitedJson(spec.request, 16 * 1024, spec.schema);
 
     const result = await prisma.$transaction(async (tx) => {
       const auditLogId = await writeAdminAuditLog({
@@ -184,6 +202,18 @@ export async function runMarketingAdminMutation<TBody, TResult>(
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    // A sign-in that aged out is 428 with the remedy, not a 500. Without this
+    // the console cannot tell a gated control from a broken one, which the
+    // Admin IA contract calls a defect and says has been got wrong three times.
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
+    const routeRefusal = spec.refusal?.(error);
+    if (routeRefusal) {
+      return NextResponse.json(
+        { error: routeRefusal.message, code: routeRefusal.code },
+        { status: routeRefusal.status }
+      );
+    }
     if (error instanceof MarketingStoreRefusedError) {
       // The store's own words, which name the state that refused rather than
       // the action that was attempted.

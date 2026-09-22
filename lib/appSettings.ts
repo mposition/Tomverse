@@ -745,26 +745,141 @@ export const MARKETING_CONSOLE_SWITCH_NAMES = ["drafts", "publish", "autonomous"
 
 export type MarketingConsoleSwitch = (typeof MARKETING_CONSOLE_SWITCH_NAMES)[number];
 
+/**
+ * The generation number every admission-affecting setting change moves by one.
+ *
+ * S2b2's autonomous insert binds it, so a setting that changed between a
+ * decision and the write it authorised is something the insert can see rather
+ * than something it has to re-read and hope about (S2 plan, the admission
+ * AppSettings row). It is introduced here because this is the first writer of
+ * an admission-affecting setting; nothing consumes it yet.
+ */
+export const MARKETING_CONFIG_GENERATION_KEY = "marketingAutomation.configGeneration";
+
+export class MarketingSwitchRefusedError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "MarketingSwitchRefusedError";
+    this.code = code;
+  }
+}
+
+const switchKey = (name: MarketingConsoleSwitch) =>
+  // Named here rather than read from a table so the writer check can see which
+  // keys this function writes: it reads the declaration that names a key, and
+  // a table lookup names none of them.
+  name === "drafts"
+    ? MARKETING_DRAFTS_KEY
+    : name === "publish"
+      ? MARKETING_PUBLISH_KEY
+      : MARKETING_AUTO_PUBLISH_KEY;
+
+/**
+ * Turns one of the three marketing switches on or off, under compare-and-set.
+ *
+ * The caller says what it believed the switch was, and a change that no longer
+ * matches is refused rather than applied: two consoles open on the same screen
+ * would otherwise have the later save silently undo the earlier one, with both
+ * audit entries reading "changed". A save that would change nothing is refused
+ * too, because an audit row for a change nobody made is worse than no row.
+ *
+ * Turning one *on* is also checked against what it depends on. Autonomous
+ * publishing needs drafts and publishing already on -- enabling it alone would
+ * write an audit entry saying autonomous publishing was switched on when
+ * nothing can publish. Publishing itself is refused outright: the publisher
+ * arrives in S2c, and the plan requires its capability to be available before
+ * this switch may be enabled, so until it exists the honest answer is no.
+ *
+ * Everything commits with the caller's transaction, including the generation
+ * bump, so a reader can never see the new value under the old generation.
+ */
 export async function writeMarketingAutomationSwitch(
   client: Pick<PrismaClient, "appSetting">,
-  name: MarketingConsoleSwitch,
-  enabled: boolean,
-): Promise<void> {
-  // The keys are named here rather than read out of a table, so the writer
-  // check can see which key this function writes: it reads the declaration
-  // that names a key, and a table lookup names none of them.
-  const key =
-    name === "drafts"
-      ? MARKETING_DRAFTS_KEY
-      : name === "publish"
-        ? MARKETING_PUBLISH_KEY
-        : MARKETING_AUTO_PUBLISH_KEY;
+  input: {
+    name: MarketingConsoleSwitch;
+    enabled: boolean;
+    expectedEnabled: boolean;
+  },
+): Promise<{ configGeneration: number }> {
+  const name = input.name;
+  const enabled = Boolean(input.enabled);
+  const expectedEnabled = Boolean(input.expectedEnabled);
+
+  if (enabled === expectedEnabled) {
+    throw new MarketingSwitchRefusedError(
+      "switch_change_is_noop",
+      "That switch is already in the state this change would set",
+    );
+  }
+
+  const rows = await client.appSetting.findMany({
+    where: {
+      key: {
+        in: [
+          MARKETING_DRAFTS_KEY,
+          MARKETING_PUBLISH_KEY,
+          MARKETING_AUTO_PUBLISH_KEY,
+          MARKETING_CONFIG_GENERATION_KEY,
+        ],
+      },
+    },
+    select: { key: true, value: true },
+  });
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+  const on = (key: string) => marketingAutomationEnabledFromValue(stored.get(key));
+
+  const key = switchKey(name);
+  if (on(key) !== expectedEnabled) {
+    throw new MarketingSwitchRefusedError(
+      "switch_conflict",
+      "That switch changed since the screen read it",
+    );
+  }
+
+  if (enabled && name === "publish") {
+    throw new MarketingSwitchRefusedError(
+      "publisher_capability_unavailable",
+      "Publishing cannot be switched on until the publisher exists",
+    );
+  }
+  if (
+    enabled &&
+    name === "autonomous" &&
+    !(on(MARKETING_DRAFTS_KEY) && on(MARKETING_PUBLISH_KEY))
+  ) {
+    throw new MarketingSwitchRefusedError(
+      "autonomous_needs_drafts_and_publish",
+      "Autonomous publishing needs drafts and publishing switched on first",
+    );
+  }
+
   const value = enabled ? "true" : "false";
   await client.appSetting.upsert({
     where: { key },
     update: { value },
     create: { key, value },
   });
+
+  const previousGeneration = Number.parseInt(
+    stored.get(MARKETING_CONFIG_GENERATION_KEY) ?? "0",
+    10,
+  );
+  if (!Number.isInteger(previousGeneration) || previousGeneration < 0) {
+    throw new MarketingSwitchRefusedError(
+      "config_generation_unreadable",
+      "The marketing configuration generation is not a number",
+    );
+  }
+  const configGeneration = previousGeneration + 1;
+  await client.appSetting.upsert({
+    where: { key: MARKETING_CONFIG_GENERATION_KEY },
+    update: { value: String(configGeneration) },
+    create: { key: MARKETING_CONFIG_GENERATION_KEY, value: String(configGeneration) },
+  });
+
+  return { configGeneration };
 }
 
 export class MemoryFeatureDisabledError extends Error {
