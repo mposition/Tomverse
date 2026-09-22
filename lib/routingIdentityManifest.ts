@@ -82,11 +82,24 @@ const MANIFEST_ENTRY_FIELDS = [
 export const MANIFEST_DIGEST_FIELDS: readonly string[] = MANIFEST_ENTRY_FIELDS;
 
 const encodeField = (value: string | boolean | null): string => {
-    // `null` and the string "null" are different facts about a deployment, so
-    // they are encoded differently rather than both becoming four characters.
-    const encoded =
-        value === null ? "\u0000" : typeof value === "boolean" ? (value ? "1" : "0") : value;
-    return `${encoded.length}:${encoded}`;
+    // Three disjoint shapes, and the disjointness is the whole job.
+    //
+    // A string is `<length>:<value>`, so it always begins with a digit and a
+    // boundary cannot be moved between two adjacent fields.
+    //
+    // `null` is `-:`, which no string can produce. An earlier version encoded
+    // it as U+0000 and length-prefixed that, so a deployment declaring no
+    // model version digested the same as one whose version was a single NUL
+    // character. Exotic, and exactly the kind of thing a digest is supposed to
+    // tell apart.
+    //
+    // A boolean is tagged, so `true` and the string "1" stay different. The
+    // field order is fixed, so today only `enabled` is ever a boolean and the
+    // two could not meet -- but that is a property of the list rather than of
+    // the encoding, and the encoding should not depend on it.
+    if (value === null) return "-:";
+    if (typeof value === "boolean") return value ? "2:b1" : "2:b0";
+    return `${value.length}:${value}`;
 };
 
 /**
