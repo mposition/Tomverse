@@ -1,105 +1,36 @@
 export const dynamic = "force-dynamic";
 
-import { z } from "zod";
-import { readLimitedJson } from "@/lib/apiSecurity";
+import { ApiSecurityError, readLimitedJson } from "@/lib/apiSecurity";
+import {
+  amuxClaimRequestSchema,
+  type AmuxClaimRequest,
+  type AmuxRoutingEvidence,
+} from "@/lib/amux/claimContract";
+import {
+  AMUX_CLAIM_ROUTE_BUDGET_MS,
+  anchorAmuxClaimDeadline,
+} from "@/lib/amux/claimDeadline";
+import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
 import {
   scoreAmuxWorkers,
   type AmuxRoutingScoreResult,
 } from "@/lib/amux/workerRouterCore";
-import { claimUnownedTodo } from "@/lib/amux/store";
+import { claimUnownedTodo, recordAmuxClaimRefusal } from "@/lib/amux/store";
+import { amuxInternalErrorResponse } from "@/lib/amux/internalRoute";
 
-const schedulerSignalsSchema = z
-  .object({
-    pin: z.number().int().min(0).max(10_000),
-    age_hours: z.number().int().min(0).max(1_000_000),
-    type_weight: z.number().int().min(0).max(40),
-    priority_weight: z.number().int().min(0).max(40),
-    dependents: z.number().int().min(0).max(1_000_000),
-    dependent_weight: z.number().int().min(0).max(5_000_000),
-    drag: z.number().int().min(0).max(8),
-  })
-  .strict();
+const noStoreHeaders = { "Cache-Control": "no-store" } as const;
 
-const unitScore = z.number().min(0).max(1);
+const jsonNoStore = (body: unknown, status: number = 200) =>
+  Response.json(body, { status, headers: noStoreHeaders });
 
-const metricSchema = z
-  .object({
-    value: unitScore,
-    observed: z.boolean(),
-  })
-  .strict();
-
-const taskFitSchema = z
-  .object({
-    role_fit: unitScore,
-    provider_fit: unitScore,
-    combined: unitScore,
-    large_task: z.boolean(),
-  })
-  .strict();
-
-const candidateSchema = z
-  .object({
-    worker_name: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[A-Za-z0-9._:-]+$/),
-    provider: z.string().trim().min(1).max(80),
-    breakdown: z
-      .object({
-        task_fit: taskFitSchema,
-        predicted_success: metricSchema,
-        quota_remaining: metricSchema,
-        expected_speed: metricSchema,
-        low_rework: metricSchema,
-        low_human_attention: metricSchema,
-        cost_efficiency: metricSchema,
-        selected_score: unitScore,
-        intrinsic_score: unitScore,
-        operationally_allowed: z.boolean(),
-        provider_exhausted: z.boolean(),
-        selected_eligible: z.boolean(),
-      })
-      .strict(),
-  })
-  .strict();
-
-const routingEvidenceSchema = z
-  .object({
-    scoring_version: z.literal("amux-worker-router-v1"),
-    preferred_worker: z.string().trim().min(1).max(120).nullable(),
-    selected_worker: z.string().trim().min(1).max(120).nullable(),
-    preferred_score: unitScore.nullable(),
-    selected_score: unitScore.nullable(),
-    candidates: z.array(candidateSchema).min(1).max(128),
-  })
-  .strict();
-
-const signalsSchema = z
-  .object({
-    scheduler: schedulerSignalsSchema,
-    routing: routingEvidenceSchema,
-  })
-  .strict();
-
-const requestSchema = z
-  .object({
-    task_id: z.string().trim().min(1).max(120),
-    worker: z.string().trim().min(1).max(120),
-    expected_revision: z.number().int().min(0),
-    decision: z
-      .object({
-        scheduler_score: z.number().int(),
-        scoring_version: z.literal("amux-global-priority-v1"),
-        signals: signalsSchema,
-      })
-      .strict(),
-  })
-  .strict();
+const isClaimInputError = (error: unknown): error is ApiSecurityError =>
+  error instanceof ApiSecurityError &&
+  ["INVALID_JSON", "INVALID_REQUEST", "REQUEST_BODY_TOO_LARGE"].includes(
+    error.code,
+  );
 
 const scoreEqual = (left: number, right: number) =>
   Math.abs(left - right) <= 1e-12;
@@ -116,11 +47,9 @@ const workerNameCompare = (
 
 const validateRoutingEvidence = (
   worker: string,
-  routing: z.infer<typeof routingEvidenceSchema>,
+  routing: AmuxRoutingEvidence,
 ) => {
-  const names = routing.candidates.map(
-    (candidate) => candidate.worker_name,
-  );
+  const names = routing.candidates.map((candidate) => candidate.worker_name);
 
   if (new Set(names).size !== names.length) {
     return false;
@@ -152,52 +81,37 @@ const validateRoutingEvidence = (
 
     if (
       breakdown.selected_eligible &&
-      (!breakdown.operationally_allowed ||
-        breakdown.provider_exhausted)
+      (!breakdown.operationally_allowed || breakdown.provider_exhausted)
     ) {
       return false;
     }
   }
 
   const preferred = [...routing.candidates]
-    .filter(
-      (candidate) =>
-        candidate.breakdown.operationally_allowed,
-    )
+    .filter((candidate) => candidate.breakdown.operationally_allowed)
     .sort(
       (left, right) =>
-        right.breakdown.intrinsic_score -
-          left.breakdown.intrinsic_score ||
+        right.breakdown.intrinsic_score - left.breakdown.intrinsic_score ||
         workerNameCompare(left, right),
     )[0];
 
   if (!preferred) {
-    if (
-      routing.preferred_worker !== null ||
-      routing.preferred_score !== null
-    ) {
+    if (routing.preferred_worker !== null || routing.preferred_score !== null) {
       return false;
     }
   } else if (
     routing.preferred_worker !== preferred.worker_name ||
     routing.preferred_score === null ||
-    !scoreEqual(
-      routing.preferred_score,
-      preferred.breakdown.intrinsic_score,
-    )
+    !scoreEqual(routing.preferred_score, preferred.breakdown.intrinsic_score)
   ) {
     return false;
   }
 
   const selected = [...routing.candidates]
-    .filter(
-      (candidate) =>
-        candidate.breakdown.selected_eligible,
-    )
+    .filter((candidate) => candidate.breakdown.selected_eligible)
     .sort(
       (left, right) =>
-        right.breakdown.selected_score -
-          left.breakdown.selected_score ||
+        right.breakdown.selected_score - left.breakdown.selected_score ||
         workerNameCompare(left, right),
     )[0];
 
@@ -206,10 +120,7 @@ const validateRoutingEvidence = (
     routing.selected_worker !== worker ||
     routing.selected_worker !== selected.worker_name ||
     routing.selected_score === null ||
-    !scoreEqual(
-      routing.selected_score,
-      selected.breakdown.selected_score,
-    )
+    !scoreEqual(routing.selected_score, selected.breakdown.selected_score)
   ) {
     return false;
   }
@@ -218,14 +129,12 @@ const validateRoutingEvidence = (
 };
 
 const routingMatchesAuthoritative = (
-  client: z.infer<typeof routingEvidenceSchema>,
+  client: AmuxRoutingEvidence,
   authoritative: AmuxRoutingScoreResult,
 ) => {
   if (
-    client.preferred_worker !==
-      authoritative.preferred_worker ||
-    client.selected_worker !==
-      authoritative.selected_worker
+    client.preferred_worker !== authoritative.preferred_worker ||
+    client.selected_worker !== authoritative.selected_worker
   ) {
     return false;
   }
@@ -233,8 +142,7 @@ const routingMatchesAuthoritative = (
   if (
     (client.preferred_score === null) !==
       (authoritative.preferred_score === null) ||
-    (client.selected_score === null) !==
-      (authoritative.selected_score === null)
+    (client.selected_score === null) !== (authoritative.selected_score === null)
   ) {
     return false;
   }
@@ -242,10 +150,7 @@ const routingMatchesAuthoritative = (
   if (
     client.preferred_score !== null &&
     authoritative.preferred_score !== null &&
-    !scoreEqual(
-      client.preferred_score,
-      authoritative.preferred_score,
-    )
+    !scoreEqual(client.preferred_score, authoritative.preferred_score)
   ) {
     return false;
   }
@@ -253,29 +158,18 @@ const routingMatchesAuthoritative = (
   if (
     client.selected_score !== null &&
     authoritative.selected_score !== null &&
-    !scoreEqual(
-      client.selected_score,
-      authoritative.selected_score,
-    )
+    !scoreEqual(client.selected_score, authoritative.selected_score)
   ) {
     return false;
   }
 
-  if (
-    client.candidates.length !==
-    authoritative.candidates.length
-  ) {
+  if (client.candidates.length !== authoritative.candidates.length) {
     return false;
   }
 
-  for (
-    let index = 0;
-    index < authoritative.candidates.length;
-    index += 1
-  ) {
+  for (let index = 0; index < authoritative.candidates.length; index += 1) {
     const left = client.candidates[index];
-    const right =
-      authoritative.candidates[index];
+    const right = authoritative.candidates[index];
 
     if (!left || !right) {
       return false;
@@ -292,73 +186,32 @@ const routingMatchesAuthoritative = (
     const b = right.breakdown;
 
     if (
-      a.task_fit.large_task !==
-        b.task_fit.large_task ||
-      !scoreEqual(
-        a.task_fit.role_fit,
-        b.task_fit.role_fit,
-      ) ||
-      !scoreEqual(
-        a.task_fit.provider_fit,
-        b.task_fit.provider_fit,
-      ) ||
-      !scoreEqual(
-        a.task_fit.combined,
-        b.task_fit.combined,
-      ) ||
-      !scoreEqual(
-        a.selected_score,
-        b.selected_score,
-      ) ||
-      !scoreEqual(
-        a.intrinsic_score,
-        b.intrinsic_score,
-      ) ||
-      a.operationally_allowed !==
-        b.operationally_allowed ||
-      a.provider_exhausted !==
-        b.provider_exhausted ||
-      a.selected_eligible !==
-        b.selected_eligible
+      a.task_fit.large_task !== b.task_fit.large_task ||
+      !scoreEqual(a.task_fit.role_fit, b.task_fit.role_fit) ||
+      !scoreEqual(a.task_fit.provider_fit, b.task_fit.provider_fit) ||
+      !scoreEqual(a.task_fit.combined, b.task_fit.combined) ||
+      !scoreEqual(a.selected_score, b.selected_score) ||
+      !scoreEqual(a.intrinsic_score, b.intrinsic_score) ||
+      a.operationally_allowed !== b.operationally_allowed ||
+      a.provider_exhausted !== b.provider_exhausted ||
+      a.selected_eligible !== b.selected_eligible
     ) {
       return false;
     }
 
     const metricPairs = [
-      [
-        a.predicted_success,
-        b.predicted_success,
-      ],
-      [
-        a.quota_remaining,
-        b.quota_remaining,
-      ],
-      [
-        a.expected_speed,
-        b.expected_speed,
-      ],
-      [
-        a.low_rework,
-        b.low_rework,
-      ],
-      [
-        a.low_human_attention,
-        b.low_human_attention,
-      ],
-      [
-        a.cost_efficiency,
-        b.cost_efficiency,
-      ],
+      [a.predicted_success, b.predicted_success],
+      [a.quota_remaining, b.quota_remaining],
+      [a.expected_speed, b.expected_speed],
+      [a.low_rework, b.low_rework],
+      [a.low_human_attention, b.low_human_attention],
+      [a.cost_efficiency, b.cost_efficiency],
     ] as const;
 
     for (const [clientMetric, serverMetric] of metricPairs) {
       if (
-        clientMetric.observed !==
-          serverMetric.observed ||
-        !scoreEqual(
-          clientMetric.value,
-          serverMetric.value,
-        )
+        clientMetric.observed !== serverMetric.observed ||
+        !scoreEqual(clientMetric.value, serverMetric.value)
       ) {
         return false;
       }
@@ -370,194 +223,201 @@ const routingMatchesAuthoritative = (
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
-    return Response.json(
-      { error: "Unauthorized" },
-      {
-        status: 401,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
+    return jsonNoStore({ error: "Unauthorized" }, 401);
   }
 
-  try {
-    const body = await readLimitedJson(
-      request,
-      256 * 1_024,
-      requestSchema,
-    );
+  return withAmuxRouteBudget(async () => {
+    try {
+      await anchorAmuxClaimDeadline();
+      if (!isAmuxExecutionApiEnabled()) {
+        await recordAmuxClaimRefusal("execution_api_disabled");
 
-    const scheduler = body.decision.signals.scheduler;
+        return jsonNoStore(
+          { claimed: false, reason: "execution_api_disabled" },
+          409,
+        );
+      }
 
-    if (
-      scheduler.dependent_weight !==
-      scheduler.dependents * 5
-    ) {
-      return Response.json(
-        { error: "Invalid decision signals." },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      let body: AmuxClaimRequest;
+      try {
+        body = await readLimitedJson(
+          request,
+          256 * 1_024,
+          amuxClaimRequestSchema,
+        );
+      } catch (error) {
+        if (!isClaimInputError(error)) {
+          throw error;
+        }
 
-    const recomputedSchedulerScore =
-      scheduler.pin +
-      scheduler.age_hours +
-      scheduler.type_weight +
-      scheduler.priority_weight +
-      scheduler.dependent_weight +
-      scheduler.drag;
+        // Do not retain body bytes or parser/schema detail in the audit row.
+        await recordAmuxClaimRefusal("invalid_request");
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
 
-    if (
-      recomputedSchedulerScore !==
-      body.decision.scheduler_score
-    ) {
-      return Response.json(
-        { error: "Invalid scheduler score." },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      const scheduler = body.decision.signals.scheduler;
 
-    /*
-     * Re-read server-owned task/catalog facts immediately before ownership.
-     * The later store mutation performs the authoritative revision CAS again.
-     */
-    const authoritativeSnapshot =
-      await buildAmuxRoutingSnapshot(
+      if (scheduler.dependent_weight !== scheduler.dependents * 5) {
+        await recordAmuxClaimRefusal("dependent_weight_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
+
+      const recomputedSchedulerScore =
+        scheduler.pin +
+        scheduler.age_hours +
+        scheduler.type_weight +
+        scheduler.priority_weight +
+        scheduler.dependent_weight +
+        scheduler.drag;
+
+      if (recomputedSchedulerScore !== body.decision.scheduler_score) {
+        await recordAmuxClaimRefusal("scheduler_score_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
+
+      /*
+       * Re-read server-owned task/catalog facts immediately before ownership.
+       * The later store mutation performs the authoritative revision CAS again.
+       */
+      const authoritativeSnapshot = await buildAmuxRoutingSnapshot(
         body.task_id,
         body.expected_revision,
       );
 
-    if (!authoritativeSnapshot.eligible) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: authoritativeSnapshot.reason,
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      if (!authoritativeSnapshot.eligible) {
+        await recordAmuxClaimRefusal(authoritativeSnapshot.reason, {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
 
-    const authoritativeRouting =
-      scoreAmuxWorkers(
+        return jsonNoStore(
+          {
+            claimed: false,
+            reason: authoritativeSnapshot.reason,
+          },
+          409,
+        );
+      }
+
+      const authoritativeRouting = scoreAmuxWorkers(
         authoritativeSnapshot.task,
         authoritativeSnapshot.candidates,
       );
 
-    if (
-      authoritativeRouting.selected_worker === null
-    ) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "no_authoritative_worker",
+      if (authoritativeRouting.selected_worker === null) {
+        await recordAmuxClaimRefusal("no_authoritative_worker", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore(
+          {
+            claimed: false,
+            reason: "no_authoritative_worker",
+          },
+          409,
+        );
+      }
+
+      if (authoritativeRouting.selected_worker !== body.worker) {
+        await recordAmuxClaimRefusal("authoritative_worker_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore(
+          {
+            claimed: false,
+            reason: "authoritative_worker_mismatch",
+          },
+          409,
+        );
+      }
+
+      if (
+        !validateRoutingEvidence(body.worker, body.decision.signals.routing) ||
+        !routingMatchesAuthoritative(
+          body.decision.signals.routing,
+          authoritativeRouting,
+        )
+      ) {
+        await recordAmuxClaimRefusal("invalid_routing_evidence", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore(
+          {
+            claimed: false,
+            reason: "invalid_routing_evidence",
+          },
+          409,
+        );
+      }
+
+      /*
+       * Critical pre-lifecycle guard.
+       *
+       * A stopped worker is intentionally scoreable for upstream parity, but
+       * Tomverse must not leave ownership on it until startup + delivery +
+       * execution-attempt lifecycle actually exists.
+       */
+      if (!authoritativeSnapshot.execution_ready) {
+        await recordAmuxClaimRefusal("execution_lifecycle_unavailable", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+
+        return jsonNoStore(
+          {
+            claimed: false,
+            reason: "execution_lifecycle_unavailable",
+          },
+          409,
+        );
+      }
+
+      const claim = await claimUnownedTodo({
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+        schedulerScore: body.decision.scheduler_score,
+        scoringVersion: body.decision.scoring_version,
+        signals: {
+          scheduler: body.decision.signals.scheduler,
+          routing: {
+            scoring_version: "amux-worker-router-v1",
+            ...authoritativeRouting,
+          },
         },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
+      });
+
+      return jsonNoStore(
+        claim
+          ? {
+              claimed: true,
+              revision: claim.revision,
+              decision_id: claim.decisionId,
+            }
+          : { claimed: false },
       );
+    } catch (error) {
+      return amuxInternalErrorResponse("claim", error);
     }
-
-    if (
-      authoritativeRouting.selected_worker !==
-      body.worker
-    ) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "authoritative_worker_mismatch",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    if (
-      !validateRoutingEvidence(
-        body.worker,
-        body.decision.signals.routing,
-      ) ||
-      !routingMatchesAuthoritative(
-        body.decision.signals.routing,
-        authoritativeRouting,
-      )
-    ) {
-      return Response.json(
-        {
-          error:
-            "Routing evidence does not match authoritative server scoring.",
-        },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    /*
-     * Critical pre-lifecycle guard.
-     *
-     * A stopped worker is intentionally scoreable for upstream parity, but
-     * Tomverse must not leave ownership on it until startup + delivery +
-     * execution-attempt lifecycle actually exists.
-     */
-    if (!authoritativeSnapshot.execution_ready) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "execution_lifecycle_unavailable",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    const claim = await claimUnownedTodo({
-      taskId: body.task_id,
-      worker: body.worker,
-      expectedRevision: body.expected_revision,
-      schedulerScore: body.decision.scheduler_score,
-      scoringVersion: body.decision.scoring_version,
-      signals: {
-        scheduler:
-          body.decision.signals.scheduler,
-        routing: {
-          scoring_version:
-            "amux-worker-router-v1",
-          ...authoritativeRouting,
-        },
-      },
-    });
-
-    return Response.json(
-      claim
-        ? {
-            claimed: true,
-            revision: claim.revision,
-            decision_id: claim.decisionId,
-          }
-        : { claimed: false },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch {
-    return Response.json(
-      { error: "Invalid request." },
-      {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
+  }, AMUX_CLAIM_ROUTE_BUDGET_MS);
 }

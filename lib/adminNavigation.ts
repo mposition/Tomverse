@@ -41,7 +41,8 @@ export type AdminNavBadgeKey =
   | "automation"
   | "alerts"
   | "modelLifecycle"
-  | "emailCampaigns";
+  | "emailCampaigns"
+  | "marketing";
 
 export type AdminNavTab = {
   id: string;
@@ -453,6 +454,59 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "suppressions",
         label: "Suppressions",
         description: "Addresses we will not mail, and why",
+      },
+    ],
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    href: "/admin/marketing",
+    description:
+      "Draft queue, published posts, brand accounts, and what the automation reported",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "marketing",
+    aliases: [
+      "social",
+      "posts",
+      "linkedin",
+      "zernio",
+      "campaign",
+      "brand account",
+      "draft queue",
+      "guard",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Queue",
+        description: "Drafts waiting on a person, and what the Guard said about each",
+      },
+      {
+        id: "published",
+        label: "Publish state",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
+      },
+      {
+        id: "accounts",
+        label: "Accounts",
+        description: "Brand accounts, their mode, and why a paused one is paused",
+      },
+      {
+        id: "experiments",
+        label: "Experiments",
+        description: "Landing copy experiments and their results",
+      },
+      {
+        id: "reports",
+        label: "Reports",
+        description: "Weekly summaries, competitor facts, and retention runs",
+      },
+      {
+        id: "comments",
+        label: "Comments",
+        description: "Comment alerts the monitor raised and nobody has answered",
       },
     ],
   },

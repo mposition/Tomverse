@@ -5,7 +5,7 @@ canonical checklist다.
 
 이 문서는 template이며 실행 결과를 직접 기록하지 않는다.
 
-- **template revision**: `2026-09-20`
+- **template revision**: `2026-09-21`
 - 실행 기록:
   `docs/ops/amux/staging-verification-records/`
 - 기록 template:
@@ -18,8 +18,13 @@ canonical checklist다.
 
 - staging이 실제로 서빙하는 전체 40자리 deploy SHA를 확보한다.
 - deploy SHA는 현재 로컬 `HEAD`를 추측해서 쓰지 않는다.
+- [ ] PR 병합 전에 `Credit Finance DB Integration`의 `routing` lane이 정확한
+      head SHA에서 통과했는지 별도 확인한다. 이 lane은 required branch-protection
+      context가 아니므로 `PR Fast Gate`의 성공만으로 생략하지 않는다.
 - 배포 artifact의 source identity를 다시 확인할 수 있어야 한다.
 - staging verification 시작 시 AMUX activation은 off다.
+- Phase A production build에서는 execution API가 코드에서 hard-disabled다.
+  flag 변경만으로 D의 future lifecycle을 시험하거나 활성화할 수 없다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
 - secret/token 값은 기록에 복사하지 않는다.
 - execution(Stage 2)으로 갈 회차라면 `docs/ops/amux/executor-protocol.md`의
@@ -33,6 +38,8 @@ canonical checklist다.
 - [ ] `TOMVERSE_AMUX_EXECUTE`가 unset 또는 `1` 이외 값이다.
 - [ ] `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 unset 또는 `1` 이외 값이다.
 - [ ] worker catalog와 executor command 설정이 activation 없이 주입되지 않았다.
+- [ ] production local executor가 flag/configuration과 무관하게 hard-disabled이며
+      실제 child process는 test fixture에서만 가능한 상태임을 확인한다.
 - [ ] server routing 응답의 lifecycle gate가 `execution_ready=false`다.
 
 ## B. 완전 비활성 상태
@@ -61,12 +68,17 @@ AMUX orchestrator가 완전히 꺼진 상태를 먼저 검증한다.
 
 ## D. Fencing과 durable execution contract
 
-이 구획은 execution activation 전 staging evidence를 확인하는 항목이다.
-실행을 허용하지 않은 deployment에서는 `n/a`로 기록하고 이유를 적는다.
+이 구획은 future isolated-worker execution activation 전 계약을 위한 항목이다.
+Phase A deployment에서는 local execution을 허용할 수 없으므로 `n/a`로 기록하고
+그 근거(하드 비활성, server `execution_ready=false`)를 적는다. DB final fence와
+COMMIT 사이 경합, 불명확한 commit read-back, 실제 DB 통합 회귀가 해결되기
+전에는 D를 통과로 올리거나 execution code gate를 해제하지 않는다.
 
 - [ ] worker runtime identity가 instance id + generation으로 fenced된다.
 - [ ] stale/replacement generation은 heartbeat/settlement 권한을 잃는다.
 - [ ] execution start와 durable delivery가 하나의 atomic commit이다.
+- [ ] execution heartbeat의 attempt lease 연장과 canonical audit가 같은
+      transaction에서 함께 commit되거나 함께 rollback된다.
 - [ ] live delivery receipt retry는 같은 receipt를 유지한다.
 - [ ] receipt lease 만료 뒤 pull은 새 receipt를 발급한다.
 - [ ] 만료되거나 교체된 receipt의 ACK는 거절된다.

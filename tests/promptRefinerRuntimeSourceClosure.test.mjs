@@ -97,6 +97,11 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// 2026-09-22, merging develop into S3 again: both sides moved positions in
+// this closure and neither is taken -- the value below is computed over the
+// merged tree. The position-free inventory is unchanged on both sides, so
+// this is a repin and not a review of new computed access.
+//
 // 2026-09-21, merging develop into S3: develop moved this closure and so did
 // S3, and neither side is taken -- the value below is computed over the merged
 // tree, the only one that will exist. The position-free inventory is still 228
@@ -125,12 +130,23 @@ const compilerOptions = parsedConfig.options;
 // `MarketingPost.factsDigest`, which moves the positions once more in the
 // same file. The count is still 228 and the position-free inventory still
 // hashes to the value above, so this is a repin and not a review.
+//
+// 2026-09-22: the AMUX-only Prisma schema change repins the marketing pipeline
+// fingerprint, and its review note moves subsequent source positions in
+// `lib/marketingAutomationAccess.ts`. The count and position-free inventory
+// still match, so no computed access was added, removed, or changed.
+//
+// 2026-09-22, S2a on top: `lib/marketingAutomationAccess.ts` gains
+// `marketingWebhookApplyScopeStatus()` partway up the file, so every computed
+// access below it moves down. The new function has no element access of its
+// own. The count is still 228 and the position-free inventory still hashes to
+// the value above, so this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "4d58d40b2c8c4c8342ce9de5ded7a064",
-  "623f08adc53f5c274a1d14540beb039d",
+  "9804ab3482d14c3724dbe22f5509607",
+  "05514c32c3d4f9173aec203c234c3b03a",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -228,18 +228,22 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
  *
+ * 2026-09-22: AMUX backlog default and source-provenance columns change only
+ * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
+ * admission decision; the whole-schema fingerprint moves by design.
+ *
  * 2026-09-21, the permission ledger (S3): six more tables on the same watched
  * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
  * revocations, EmailPermissionDecision and its evidence. None is a marketing
  * model, none changes the descriptor, the config snapshot or an admission
  * decision, and nothing this pipeline stores or reads is different. The one
- * shared edge is ConsentRecord, which gains a back-relation and no column. The
- * digest moves because schema bytes moved, which is what this constant is for:
- * it asks for a look rather than deciding for itself what is material. This
- * was the look, and the value below was computed over the merged tree rather
- * than taken from either side of the conflict.
+ * shared edge is ConsentRecord, which gains a back-relation and no column.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side of
+ * the conflict -- the merged tree is the only one that will exist.
  */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "d76a14eef1b5a001c316c231b66ca1c5258250e0e35b7492e588709e9f72797d";
+export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "a3936dc7b4bb797f938ff57b6a940c69a64383b0770f2f9b147ba9855d95002a";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -415,6 +419,37 @@ export const marketingWebhookApplyScopeSchema = z
     scope: uniqueScope(marketingWebhookScopeEntrySchema),
   })
   .strict();
+
+/**
+ * What a stored apply-scope value is, judged exactly as `readJson` judges it.
+ *
+ * Exported so a screen can report the document's state without arriving at a
+ * different answer from the decision. The Admin console's switch strip got
+ * this wrong twice by reading the raw string: an empty string is a *stored*
+ * document this module refuses, and a BOM-prefixed document is one it accepts,
+ * so "non-empty" and "parses as JSON" are both the wrong test.
+ *
+ * `absent` is the only state the decision does not distinguish -- it refuses a
+ * missing value and a malformed one alike -- and it is the distinction an
+ * operator needs, because one of the two is somebody's mistake sitting in a
+ * row that nothing else would mention.
+ */
+export type MarketingWebhookApplyScopeStatus = "absent" | "valid" | "invalid";
+
+export const marketingWebhookApplyScopeStatus = (
+  value: string | null | undefined
+): MarketingWebhookApplyScopeStatus => {
+  if (typeof value !== "string") return "absent";
+  try {
+    return marketingWebhookApplyScopeSchema.safeParse(
+      JSON.parse(canonicalMarketingWebhookFileText(value))
+    ).success
+      ? "valid"
+      : "invalid";
+  } catch {
+    return "invalid";
+  }
+};
 
 type WebhookScopeEntry = z.infer<typeof marketingWebhookScopeEntrySchema>;
 

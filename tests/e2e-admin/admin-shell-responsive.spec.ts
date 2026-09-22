@@ -33,6 +33,7 @@ const NAV_LABELS = [
   "Infrastructure",
   "Automation",
   "Alerts",
+  "Marketing",
   "Platform settings",
   "Audit log",
   "Retention",
@@ -91,17 +92,75 @@ test.describe("admin console on a narrow viewport", () => {
         // scroll that lands between the two calls invalidate the coordinates,
         // which produces a failure about the wrong element rather than about
         // reachability.
-        const topmost = await link.evaluate((element) => {
+        //
+        // The report says what was found instead, because "covered by another
+        // element" on its own is not actionable: a zero-sized box, a centre
+        // point outside the viewport and a genuine overlay all produced the
+        // same null, and telling them apart took a trace download and a
+        // screenshot. The assertion is unchanged -- only what it can say when
+        // it fails.
+        const probe = await link.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          if (box.width === 0 || box.height === 0) return null;
-          return (
-            document
-              .elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-              ?.closest("a")
-              ?.textContent?.trim() ?? null
-          );
+          const where = {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+          };
+          if (box.width === 0 || box.height === 0) {
+            return { topmost: null, why: "zero-sized box", where };
+          }
+          const centreX = box.x + box.width / 2;
+          const centreY = box.y + box.height / 2;
+          const hit = document.elementFromPoint(centreX, centreY);
+          if (!hit) {
+            return { topmost: null, why: "centre point hits nothing", where };
+          }
+          const anchor = hit.closest("a");
+          const describe = (node: Element | null) =>
+            node
+              ? `<${node.tagName.toLowerCase()}${
+                  node.className ? ` class="${String(node.className).slice(0, 60)}"` : ""
+                }>`
+              : "none";
+          const widthOf = (selector: string) => {
+            const node = element.closest(selector);
+            return node ? Math.round(node.getBoundingClientRect().width) : null;
+          };
+          Object.assign(where, {
+            chain: {
+              aside: widthOf("aside"),
+              scroller: widthOf("div.overflow-y-auto"),
+              nav: widthOf("nav"),
+              row: Math.round(
+                element.parentElement?.getBoundingClientRect().width ?? 0
+              ),
+              document: document.documentElement.scrollWidth,
+            },
+            href: element.getAttribute("href"),
+            insideDrawer: Boolean(element.closest("aside.relative")),
+            ancestor: describe(element.parentElement),
+            hitChain: [hit, hit.parentElement].map(describe).join(" in "),
+          });
+          return {
+            topmost: anchor?.textContent?.trim() ?? null,
+            why: anchor
+              ? "another link is on top"
+              : `covered by <${hit.tagName.toLowerCase()}${
+                  hit.className ? ` class="${String(hit.className).slice(0, 80)}"` : ""
+                }>`,
+            where,
+          };
         });
-        expect(topmost, `${label} is covered by another element`).toContain(label);
+        // Asserted on a string, never on null: `toContain(null)` is a matcher
+        // error rather than an assertion failure, and Playwright prints no
+        // custom message for a matcher error -- which is how the first attempt
+        // at this diagnostic reported nothing at all.
+        expect(
+          probe.topmost ?? `nothing (${probe.why})`,
+          `${label} is not reachable at ${JSON.stringify(probe.where)}`
+        ).toContain(label);
       }
     });
   }
