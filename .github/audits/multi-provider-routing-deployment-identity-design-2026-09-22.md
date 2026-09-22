@@ -428,6 +428,31 @@ cutover 전에 필요한 것:
 provider grain에서는 옳았지만, deployment grain에서는 "아직 아무 증거도 없다"가
 기본 상태가 되므로 같은 규칙이 필터를 무효로 만듭니다.
 
+#### C-4·C-5 이후의 상태 (2026-09-23, 독립 검토에서 확인)
+
+`QuotaCapacityState`와 `AvailabilityObservation`이 dark로 들어갔습니다. 두 커밋의
+독립 검토가 물은 것은 **그래서 cutover에 얼마나 가까워졌는가**였습니다. 표로
+적습니다 --- 테이블이 늘어난 것을 진척으로 읽는 것이 이 절이 막으려는
+오독입니다.
+
+검토는 다섯 모두 미충족이라 했고, **3번은 그렇지 않습니다.** 확인한 사실은
+아래와 같습니다.
+
+| 선행조건 | 상태 | 무엇이 남았나 |
+|---|---|---|
+| 1. probe·attempt에 nullable endpoint·deployment 컬럼 | 미충족 | `ProviderProbeResult`·`RoutingAttempt` 어느 쪽에도 두 컬럼이 없습니다. `AvailabilityObservation`이 그 컬럼을 갖지만 **아무것도 쓰지 않습니다**. |
+| 2. deployment별 synthetic canary | 미충족 | `lib/providerProbe.ts`는 여전히 provider당 대표 모델 하나입니다. |
+| 3. 분류 결과의 settlement 보존 | **코드상 충족, 4번에 가려짐** | `app/api/chat/route.ts`가 모든 종료 경로를 `completeInstrumentedDispatch()` 하나로 모으고, 거기에 `routingOutcomeForSettlement()`·`routingFailureLayerForSettlement()`의 결과를 넘깁니다. 다만 instrumentation mode가 `off`면 `beginInstrumentedDispatch()`가 `null`을 돌려주므로 **행이 하나도 생기지 않습니다.** 배선은 끝났고 표본이 없는 것입니다. |
+| 4. 계측 활성화 후 최소 한 관측 window | 미충족 | 계측이 꺼져 있고, 켠 뒤에 세는 것이므로 시간이 조건입니다. |
+| 5. 표본 없음 = `unproven` = routing-ineligible | 미충족 | `AVAILABILITY_ROLLUP_GRAINS`가 grain을 이름 대지만 rollup 테이블이 없고, 후보 필터는 그대로 `readProbeHealth`를 읽습니다. |
+
+위 설계 2번의 "멱등 적용"도 아직 아닙니다. `AvailabilityObservation.eventId`의
+unique index가 막는 것은 **같은 관측이 두 번 INSERT되는 것** 하나이고, rollup이
+어떤 event를 이미 반영했는지 기록하는 테이블이 없으므로 **projection 재실행은
+오늘 안전하지 않습니다**. `shouldApply()`는 그 규칙을 projection보다 먼저 적어
+둔 것이지 projection이 아닙니다. grain별 적용 기록은 별도 작업이며, 그것 없이
+2번을 충족했다고 적으면 3번 atomic cutover의 근거가 사라집니다.
+
 ### 8.2 `QuotaScope` registry
 
 ```
