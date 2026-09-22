@@ -276,6 +276,20 @@ const REGISTRY = {
     reason:
       "A subset of ROUTING_ATTEMPT_ERROR_CLASSES, sharing its spelling so an attempt and an observation cannot call a rate limit different things, but not its membership. The first draft admitted the whole vocabulary, which would have counted a rate limit, an empty answer, a client disconnect and our own process stopping as the provider being unavailable -- RoutingAttempt draws those lines with failureLayer and an observation has no layer, so the line is which classes may appear at all. A rate limit counted here would undo QuotaCapacityState in the summary it feeds. Nullable because a success has nothing to classify.",
   },
+  RoutingRun_allocationMode_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_MODES",
+    reason:
+      "deterministic or explore_bounded, nullable because a run written before an allocator existed genuinely recorded neither and a default of deterministic would read as 'we took the top candidate' on runs where nobody chose. A separate column from RoutingRun.mode, which answers whether the decision was acted on rather than how the candidate was picked: a combined value like shadow_explore has to be pulled apart again by every reader, and the first to get it wrong reports exploration rate over the wrong denominator. A third constraint, RoutingRun_allocation_axis_check, binds this to the seed grain and is not a closed list.",
+  },
+  RoutingRun_allocationSeedGrain_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_SEED_GRAINS",
+    reason:
+      "request or session. The ADR's own first risk is that a per-request seed breaks cache affinity: a conversation that re-rolls every turn never returns to the placement holding its prefix, and the saving disappears with nothing reporting a failure. Recorded beside the mode so that DeploymentCacheAffinity (where turns landed) and this (what the allocator was seeded on) can together say whether affinity was broken on purpose. An exploration must name its grain; a deterministic allocation rolled nothing and names none.",
+  },
   ModelDeployment_promptCacheSupport_check: {
     owner: "list",
     module: "lib/deploymentCacheAffinity.ts",

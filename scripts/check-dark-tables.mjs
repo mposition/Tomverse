@@ -39,6 +39,33 @@ const DARK_TABLES = [
     "DeploymentCacheAffinity",
 ];
 
+
+/**
+ * Columns added to a table that is *not* dark, which nothing may read yet.
+ *
+ * `RoutingRun` is live and written every shadow run. Two columns on it are
+ * not: `allocationMode` and `allocationSeedGrain` reserve the allocation axis
+ * so that nobody reaches for `mode`, which answers a different question. They
+ * are null on every row and a reader that found one would be reading a
+ * decision nobody recorded.
+ *
+ * Matched as whole identifiers, because these names are distinctive enough
+ * that any occurrence in runtime code is a use. A generic column name could
+ * not be protected this way and should not be added to this list.
+ */
+const DARK_COLUMNS = ["allocationMode", "allocationSeedGrain"];
+
+/**
+ * The one file that may name a dark column: the module that defines the
+ * vocabulary the column holds.
+ *
+ * Exempt for the reason this file is exempt from its own table list -- it
+ * declares the names rather than reading rows. Narrow on purpose: it excuses
+ * the column scan only, so the same file is still checked against every dark
+ * table, and it names one file rather than a directory.
+ */
+const DARK_COLUMN_VOCABULARY = ["lib/routingAllocation.ts"];
+
 /**
  * The relation fields that reach a dark table from a model that is not dark.
  *
@@ -158,13 +185,24 @@ for (const file of files) {
             problems.push(`${file.split("\\").join("/")}: reads ${table}`);
         }
     }
+
+    const normalised = file.split("\\").join("/");
+    for (const column of DARK_COLUMNS) {
+        if (DARK_COLUMN_VOCABULARY.includes(normalised)) break;
+        if (new RegExp(`\\b${column}\\b`).test(source)) {
+            problems.push(
+                `${normalised}: reads RoutingRun.${column}`
+            );
+        }
+    }
 }
 
 console.log("");
 console.log("Dark table check");
 console.log("----------------");
 console.log(
-    `${files.length} runtime source file(s) scanned for ${DARK_TABLES.length} dark table(s).`
+    `${files.length} runtime source file(s) scanned for ${DARK_TABLES.length} dark table(s) ` +
+        `and ${DARK_COLUMNS.length} dark column(s).`
 );
 
 if (problems.length > 0) {
