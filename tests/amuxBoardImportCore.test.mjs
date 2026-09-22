@@ -9,6 +9,7 @@ import { computeAdminAuditEntryHash } from "../lib/adminAuditIntegrityCore.ts";
 import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
 import {
   BOARD_IMPORT_APPLY_CODE_LATCH,
+  BOARD_IMPORT_MAX_ITEMS,
   BOARD_IMPORT_APPROVAL_STATUSES,
   BOARD_IMPORT_PREVIEW_LIMIT,
   BOARD_IMPORT_PREVIEW_WINDOW_MS,
@@ -27,6 +28,9 @@ import {
   boardImportItemBindings,
   boardImportItemsFromBindings,
   boardImportSameOperatorApproval,
+  boardImportSourceMissing,
+  boardImportSourcePresenceFromRows,
+  boardImportSourcePresenceQuery,
   boardImportSourceSnapshot,
   boardImportSubmissionRefusal,
   boardImportTransitionAllowed,
@@ -209,6 +213,43 @@ test("a clean create is a backlog card with a placeholder title and a closed sna
   assert.equal(again.title, card.title);
 });
 
+test("the presence read stops one past the cap, and a full page is not a stopped scan", async () => {
+  const cap = BOARD_IMPORT_MAX_ITEMS;
+  const query = boardImportSourcePresenceQuery([{ sourceSystem: "example_board" }], cap);
+  assert.ok(query);
+  assert.equal(query.take, cap + 1);
+  const stored = (count) =>
+    Array.from({ length: count }, (_, index) => ({
+      sourceSystem: "example_board",
+      sourceKey: `K${String(index).padStart(4, "0")}`,
+    }));
+  const read = async (count) => {
+    const rows = await Promise.resolve(stored(count).slice(0, query.take));
+    return boardImportSourcePresenceFromRows(rows, cap);
+  };
+  const over = await read(cap + 1);
+  assert.equal(over.truncated, true);
+  assert.equal(over.rows.length, cap);
+  const exact = await read(cap);
+  assert.equal(exact.truncated, false);
+  assert.equal(exact.rows.length, cap);
+  assert.equal(boardImportSourcePresenceQuery([], cap), null);
+});
+
+test("a stored row the catalog omits is reported and is not a refusal or a delete", () => {
+  const manifest = parsed([item("CHAT-01")]).manifest;
+  const missing = boardImportSourceMissing(manifest, [
+    { sourceSystem: "example_board", sourceKey: "CHAT-01" },
+    { sourceSystem: "example_board", sourceKey: "CHAT-09" },
+    { sourceSystem: "example_board", sourceKey: "CHAT-09" },
+    { sourceSystem: "other_board", sourceKey: "CHAT-08" },
+  ]);
+  assert.deepEqual(missing, ["example_board:CHAT-09"]);
+  const classification = classifyBoardImport(manifest, []);
+  assert.equal(boardImportSubmissionRefusal(classification), null);
+  assert.deepEqual(boardImportCardWrites(manifest, classification).map((card) => card.sourceKey), ["CHAT-01"]);
+});
+
 test("item bindings round-trip into the same items without a title", () => {
   const manifest = parsed([item("CHAT-01")]).manifest;
   const bindings = boardImportItemBindings(manifest);
@@ -321,6 +362,18 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   assert.equal(preview.includes("writeAdminAuditLog"), false);
   assert.equal(preview.includes("amuxBoardImportApproval"), false);
   assert.equal(preview.includes("$transaction"), false);
+  assert.equal(preview.includes("loadBoardImportSourcePresence"), true);
+  assert.equal(preview.includes("boardImportSourcePresenceQuery"), true);
+  assert.equal(preview.includes("boardImportSourcePresenceFromRows"), true);
+  assert.equal(preview.includes("rows.length >"), false);
+  const messages = read("lib/adminMessages/amuxBoardImport.ts");
+  const panel = read("components/admin/AmuxBoardImportPanel.tsx");
+  assert.equal(messages.includes("sourceMissingScanStopped"), true);
+  assert.equal(messages.includes("sourceMissingAllPresent"), true);
+  assert.equal(panel.includes("sourceMissingAllPresent"), true);
+  assert.equal(panel.includes("sourceMissingCount === 0"), true);
+  assert.equal(preview.includes("deleteMany"), false);
+  assert.equal(preview.includes(".delete("), false);
   const service = read("lib/amux/boardImportService.ts");
   assert.equal(service.includes("dbBoundary"), false);
   assert.equal(service.includes("withAmuxDbBoundary"), false);
@@ -330,12 +383,14 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   assert.equal(service.includes("systemActor"), false);
   assert.equal(service.includes("writeBoardImportExpiryAudit"), false);
   assert.equal(service.includes("expected.marker"), false);
+  assert.match(service, /sourceMissingCount: sourceMissing.length/);
+  const applyBody = service.slice(service.indexOf("export async function applyBoardImport"));
+  assert.equal(applyBody.includes("boardImportSourceMissing"), false);
+  assert.equal(applyBody.includes("findUnique"), false);
   assert.match(service, /boardImportItemBindingsDigest\(bindings\)/);
   assert.match(service, /digestAmuxManifest\(manifest\)/);
   assert.match(service, /signedManifest !== row\.manifestDigest/);
   assert.equal(service.includes("applyLatch"), false);
-  const applyBody = service.slice(service.indexOf("export async function applyBoardImport"));
-  assert.equal(applyBody.includes("findUnique"), false);
   assert.equal(service.includes("boardImportTransitionAllowed"), true);
   const core = read("lib/amux/boardImportCore.ts");
   const commentAt = core.indexOf("Ten requests a minute");
@@ -367,7 +422,6 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   const altered = [{ ...bindings[0], sourceDigest: "d".repeat(64) }];
   assert.equal(digest, boardImportItemBindingsDigest(bindings));
   assert.notEqual(digest, boardImportItemBindingsDigest(altered));
-  const panel = read("components/admin/AmuxBoardImportPanel.tsx");
   assert.equal(panel.includes("adminRecentAuthenticationHref"), true);
   assert.equal(panel.includes("ADMIN_REAUTHENTICATION_REQUIRED"), true);
   const page = resolveAdminPageMeta("/admin/amux-board-import");

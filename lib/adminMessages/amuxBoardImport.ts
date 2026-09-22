@@ -23,6 +23,13 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
     applyPermitted: (permitted: string) => `Apply permitted: ${permitted}`,
     counts: (create: number, noOp: number, conflict: number, exclude: number) =>
       `Create ${create}, no-op ${noOp}, conflict ${conflict}, exclude ${exclude}.`,
+    sourceMissingAllPresent: "This catalog includes every stored source row.",
+    sourceMissing: (count: number) =>
+      `This catalog does not include ${count} stored source row(s). They stay in place.`,
+    sourceMissingTruncated: (count: number) =>
+      `This catalog does not include at least ${count} stored source row(s). The scan stopped at its cap, and nothing was deleted.`,
+    sourceMissingScanStopped:
+      "The scan stopped at its cap before it could finish. Nothing was deleted.",
   },
   ko: {
     title: "AMUX 카탈로그 이관",
@@ -46,5 +53,12 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
     applyPermitted: (permitted: string) => `적용 허용: ${permitted}`,
     counts: (create: number, noOp: number, conflict: number, exclude: number) =>
       `생성 ${create}, 변경 없음 ${noOp}, 충돌 ${conflict}, 제외 ${exclude}.`,
+    sourceMissingAllPresent: "이 카탈로그는 저장된 원본 행을 모두 포함합니다.",
+    sourceMissing: (count: number) =>
+      `이 카탈로그에 없는 저장된 원본 행이 ${count}건입니다. 그 행은 그대로 둡니다.`,
+    sourceMissingTruncated: (count: number) =>
+      `이 카탈로그에 없는 저장된 원본 행이 최소 ${count}건입니다. 조회가 상한에서 멈췄고, 아무것도 지우지 않았습니다.`,
+    sourceMissingScanStopped:
+      "조회가 상한에서 끝나기 전에 멈췄습니다. 아무것도 지우지 않았습니다.",
   },
 });

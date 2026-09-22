@@ -33,9 +33,10 @@ import {
   classifyBoardImport,
   digestAmuxManifest,
   parseBoardImportManifest,
+  boardImportSourceMissing,
   boardImportSubmissionRefusal,
 } from "@/lib/amux/boardImportCore";
-import { loadBoardImportExistingCards } from "@/lib/amux/boardImportPreview";
+import { loadBoardImportExistingCards, loadBoardImportSourcePresence } from "@/lib/amux/boardImportPreview";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -381,10 +382,14 @@ export async function previewBoardImport(raw: string) {
   const parsed = parseBoardImportManifest(raw);
   if (!parsed.ok) throw new BoardImportError(parsed.code, 400);
   const existing = await loadBoardImportExistingCards(prisma, parsed.manifest.items);
+  const presence = await loadBoardImportSourcePresence(prisma, parsed.manifest.items);
   const classification = classifyBoardImport(parsed.manifest, existing);
+  const sourceMissing = boardImportSourceMissing(parsed.manifest, presence.rows);
   return {
     classification,
     refusal: boardImportSubmissionRefusal(classification),
+    sourceMissingCount: sourceMissing.length,
+    sourceMissingTruncated: presence.truncated,
     applyPermitted: boardImportApplyPermitted({
       envValue: process.env[BOARD_IMPORT_APPLY_ENV],
       codeLatch: BOARD_IMPORT_APPLY_CODE_LATCH,
