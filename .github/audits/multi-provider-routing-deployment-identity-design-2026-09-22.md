@@ -787,6 +787,42 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 11. scope·capacity가 준비된 뒤 2-attempt fallback 활성화
 12. provider attestation이 입증되면 equivalence class 재검토
 
+## 14.1 이 모듈이 어디에 있어야 하는가 (2026-09-23)
+
+운영자 질문: **Tomverse Chat에서도 재활용할 수 있도록 repo 위치를 정할 것.**
+
+답은 "라우터를 옮긴다"가 아닙니다. 다른 client가 실제로 필요로 하는 것은
+라우터보다 작고, 그 경계는 **제품 결정이 있느냐 없느냐**입니다.
+
+| 무엇 | 어디 | 이유 |
+|---|---|---|
+| 순위 정련 구성 — 분할 정련, group-scoped 기권, anchored epsilon, partitioner가 멤버를 잃지 않았는지 검사 | `packages/router-core` | 이 제품에 관한 것이 하나도 없습니다. 기권하는 기준들로 전순서를 만드는 문제는 어느 client에나 같습니다. |
+| 어떤 기준이 있고, 각각 무엇을 읽고, epsilon이 얼마인가 | `lib/routerScorePolicy.ts` | 제품 결정입니다. package가 import하는 순간 그것은 `packages/`에 사는 Tomverse Chat package이고, 다음 client는 자기가 내리지 않은 결정을 물려받습니다. |
+| 카탈로그 enrolment(`ROUTER_SCORE_SNAPSHOT`), `AiProvider` | `lib/routerScorePolicy.ts` | 제품 데이터입니다. |
+| deployment identity, quota scope, capacity, availability, cache affinity, allocation 축 | 앱 DB + `lib/` | 전부 Tomverse의 운영 사실이며 스키마를 가집니다. package는 스키마를 갖지 않습니다. |
+| tie 안 배분(`allocateWithinTie`) | `lib/routingAllocation.ts` | 지금은 앱입니다. 순위와 seed만 받으므로 옮길 수 있지만, 옮길 근거는 두 번째 client가 생길 때 생깁니다. |
+
+`4b0fefb02`이 첫 줄을 실행했습니다. re-export shim은 두지 않았습니다 —
+`docs/policy/shared-packages.md` §7이 금지하며, shim이 있으면 옛 import 경로가
+계속 동작해 경계를 강제하는 것이 아무것도 없게 됩니다.
+
+**PACKAGE-01의 승인은 이 package를 덮지 않습니다.** 그 승인이 덮는 범위는
+2026-08-12 한 commit에서 package 둘이 framework-neutral했다는 것까지이고
+(AGENTS.md), 세 번째는 새 사실입니다. `npm run check:shared-packages`가
+셋 모두에 대해 통과하는 것이 기계적인 절반이고, 나머지 절반은 소유자의
+서명입니다.
+
+## 14.2 남은 것은 소유자 결정입니다 (2026-09-23)
+
+이 시점에서 저장소가 스스로 진행할 수 있는 항목이 남아 있지 않습니다.
+
+| 남은 것 | 막는 것 | 누가 |
+|---|---|---|
+| exploration 켜기 (D-3) | `allocateWithinTie`는 tie 안에서만 배분하므로 품질/비용 trade는 필요 없지만, **어느 모델이 답하는지가 바뀝니다.** 켜는 것은 제품 결정입니다. | 소유자 |
+| PACKAGE-01 재승인 | 세 번째 package가 새 사실입니다. | 소유자 |
+| Privacy 페이지 공급자별 데이터 이동 고지 (F-2) | 공급자 계약 조사 결과. `lib/providerDataDestinations.ts`의 12개 공급자가 전부 `unproven`이고, `providerDestinationIsEstablished()`가 fail-closed입니다. | 소유자 (조사 중) |
+| §8.1 cutover 선행조건 1·2·4·5 | probe·attempt 컬럼, deployment별 canary, 계측 활성화 후 관측 window, `unproven` = routing-ineligible 규칙. 1·2는 착수 가능하지만 4가 시간 조건이라 순서상 뒤입니다. | 혼합 |
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.
