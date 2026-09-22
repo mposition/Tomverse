@@ -276,6 +276,13 @@ const REGISTRY = {
     reason:
       "A subset of ROUTING_ATTEMPT_ERROR_CLASSES, sharing its spelling so an attempt and an observation cannot call a rate limit different things, but not its membership. The first draft admitted the whole vocabulary, which would have counted a rate limit, an empty answer, a client disconnect and our own process stopping as the provider being unavailable -- RoutingAttempt draws those lines with failureLayer and an observation has no layer, so the line is which classes may appear at all. A rate limit counted here would undo QuotaCapacityState in the summary it feeds. Nullable because a success has nothing to classify.",
   },
+  ModelDeployment_promptCacheSupport_check: {
+    owner: "list",
+    module: "lib/deploymentCacheAffinity.ts",
+    list: "PROMPT_CACHE_SUPPORT_STATES",
+    reason:
+      "unproven is the default and a third answer, not a synonym for either of the others: a deployment nobody has checked is not no-cache, which would write off a saving nobody measured, and it is not a cache either. verified_absent is a finding. The last two split on who sends what -- a provider caching a repeated prefix on its own, versus one where the request must carry a marker and the write costs a premium -- because a ranking that could not tell them apart would be assuming a marker either is or is not needed. These values do not decide whether a request carries a marker; that is lib/anthropicPromptCaching.ts, which gates on provider identity.",
+  },
   RoutingCandidateVerdict_verdict_check: {
     owner: "list",
     module: "lib/routingCandidateVerdict.ts",

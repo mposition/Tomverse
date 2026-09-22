@@ -377,6 +377,7 @@ model Conversation {
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
+  cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -5593,11 +5594,70 @@ model ModelDeployment {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  endpoint    ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  quotaScopes QuotaScope[]
+  /// What this placement is known to do with a repeated prefix.
+  ///
+  /// `unproven` is the default and a third answer, not a synonym for either
+  /// of the others: a deployment nobody has checked is not no-cache, and it
+  /// is not a cache. The figures beside it stay null until a verification
+  /// produces them, which the database holds.
+  ///
+  /// These columns do not decide whether a request carries a cache marker.
+  /// That is lib/anthropicPromptCaching.ts, gating on provider identity
+  /// because createAnthropic() also builds the MiniMax client. A dispatcher
+  /// reading this instead would be a second answer to the same question.
+  promptCacheSupport         String    @default("unproven")
+  promptCacheMinPrefixTokens Int?
+  promptCacheTtlSeconds      Int?
+  promptCacheVerifiedAt      DateTime?
+  promptCacheEvidenceRef     String?
+
+  endpoint        ProviderEndpoint          @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaScopes     QuotaScope[]
+  cacheAffinities DeploymentCacheAffinity[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
+}
+
+/// Which deployment the turns of a conversation have been landing on.
+///
+/// Dark. Two facts rather than one probability: the ADR asks for
+/// `P(cache_hit | session, deployment)` folded into an effective cost, and
+/// that is both a change to the lexicographic objective and a number nothing
+/// here can compute -- a cache hit needs a byte-identical prefix, and no
+/// table records a prefix or a digest of one.
+///
+/// So this says where turns went and when, and `ModelDeployment` says what
+/// the window is. Together they answer whether the last serve is inside the
+/// window, which is a comparison of clocks and not a prediction.
+///
+/// The logical model is part of the key because a person can switch models
+/// inside one conversation; a single row per conversation would have the
+/// second model overwrite the first and then report it as the place to
+/// return to.
+///
+/// There is no prefix digest and there will not be one. It is derived from
+/// what the person wrote, and it confirms a guess.
+model DeploymentCacheAffinity {
+  id                String   @id @default(cuid())
+  conversationId    String
+  /// The catalogue model the person chose, not the placement that served it.
+  logicalModelId    String
+  modelDeploymentId String
+  lastServedAt      DateTime
+  servedTurns       Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  /// Cascade on both sides, for the same reason and not by default. Without
+  /// the conversation the row is an affinity for a thread that is gone and
+  /// still names its id, which is a half-anonymisation after a person
+  /// deletes; without the deployment it points at a placement that is gone.
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  deployment   ModelDeployment @relation(fields: [modelDeploymentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([conversationId, logicalModelId])
+  @@index([modelDeploymentId, lastServedAt])
 }
 
 /// A provider Tomverse can reach, as a row.

@@ -36,7 +36,53 @@ const DARK_TABLES = [
     "RoutingCandidateVerdict",
     "QuotaCapacityState",
     "AvailabilityObservation",
+    "DeploymentCacheAffinity",
 ];
+
+/**
+ * The relation fields that reach a dark table from a model that is not dark.
+ *
+ * Only those. A relation field declared on a dark model is reached by
+ * querying that model, and the delegate pattern already catches it -- adding
+ * it here would mean matching `approvals:` and `scope:`, which ordinary admin
+ * and email code uses for its own purposes, and the check would fail on files
+ * that never touch these tables.
+ *
+ * What is left is the case the delegate pattern genuinely misses:
+ * `include: { cacheAffinities: true }` on a Conversation query reaches
+ * DeploymentCacheAffinity without ever naming it. The names are read out of
+ * the schema rather than guessed from the model name, because a Prisma
+ * back-relation is named by whoever wrote it -- appending `s` would walk
+ * straight past `cacheAffinities`.
+ */
+const RELATION_FIELDS = (() => {
+    const schema = readFileSync(join(root, "prisma/schema.prisma"), "utf8");
+    const byTable = Object.fromEntries(
+        DARK_TABLES.map((table) => [
+            table,
+            [table.charAt(0).toLowerCase() + table.slice(1)],
+        ])
+    );
+
+    let host = null;
+    for (const line of schema.split("\n")) {
+        const opening = /^model\s+(\w+)\s*\{/.exec(line);
+        if (opening) {
+            host = opening[1];
+            continue;
+        }
+        if (line.startsWith("}")) {
+            host = null;
+            continue;
+        }
+        if (host === null || DARK_TABLES.includes(host)) continue;
+
+        const field = /^\s+(\w+)\s+(\w+)(\[\])?\s*(@|$)/.exec(line);
+        if (field && byTable[field[2]]) byTable[field[2]].push(field[1]);
+    }
+
+    return byTable;
+})();
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */
 const ROOTS = ["app", "lib", "components", "scripts", "packages", "prisma/seed"];
@@ -95,9 +141,13 @@ for (const file of files) {
 
         // A relation field reaches the same rows without ever naming the
         // delegate: `include: { credentialBindings: true }` on a user query,
-        // or a nested `create`. Prisma pluralises a one-to-many back-relation,
-        // so both spellings are matched.
-        const relation = new RegExp(`\\b${delegate}s?\\s*:\\s*(true|\\{)`);
+        // or a nested `create`. The field names come from the schema rather
+        // than from pluralising the model name, because a Prisma back-relation
+        // is named by whoever wrote it. An earlier version appended `s` and so
+        // would have walked straight past `cacheAffinities`.
+        const relation = new RegExp(
+            `\\b(${RELATION_FIELDS[table].join("|")})\\s*:\\s*(true|\\{)`
+        );
 
         if (
             dotted.test(source) ||
