@@ -4,6 +4,9 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import {
+  BOARD_IMPORT_MAX_ITEMS,
+  boardImportSourcePresenceFromRows,
+  boardImportSourcePresenceQuery,
   boardImportStoredSnapshot,
   type BoardImportExistingCard,
   type BoardImportItem,
@@ -18,6 +21,22 @@ type CardDb = Prisma.TransactionClient | typeof prisma;
  * and delivery payloads are not loaded. This module does not open a
  * transaction and does not write.
  */
+
+/**
+ * Presence of every card in the catalog's source systems, capped one past
+ * the import item limit. A truncated read is reported. This read does not
+ * remove a row.
+ */
+export async function loadBoardImportSourcePresence(
+  db: CardDb,
+  items: readonly BoardImportItem[],
+): Promise<{ rows: { sourceSystem: string; sourceKey: string }[]; truncated: boolean }> {
+  const query = boardImportSourcePresenceQuery(items, BOARD_IMPORT_MAX_ITEMS);
+  if (!query) return { rows: [], truncated: false };
+  const rows = await db.amuxWorkItem.findMany(query);
+  return boardImportSourcePresenceFromRows(rows, BOARD_IMPORT_MAX_ITEMS);
+}
+
 export async function loadBoardImportExistingCards(
   db: CardDb,
   items: readonly BoardImportItem[],
