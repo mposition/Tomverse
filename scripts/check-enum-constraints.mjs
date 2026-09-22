@@ -255,6 +255,27 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  QuotaScope_scopeKind_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "QUOTA_SCOPE_KINDS",
+    reason:
+      "What a capacity limit is counted against: credential, endpoint_credential, deployment_credential, account, provider. The first design was one `(scopeKind, scopeId)` pair of strings, and an independent review rejected it because nothing would stop a scope id matching no row -- a limit counted against nothing is indistinguishable from no limit until somebody spends against it. So each kind names its own typed columns behind a foreign key, and `QuotaScope_shape_check` says which ones the kind requires and which it forbids. 'account' rather than 'workspace' because BYOK ownership is the account and no workspace entity exists to point at.",
+  },
+  CredentialBinding_billingOwner_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BILLING_OWNERS",
+    reason:
+      "tomverse or account. It decides which budget a call draws down, and they are separate namespaces on purpose: an account's own spend must not consume an allowance Tomverse funded. Two further CHECKs bind the funding columns to it, because without them 'who is paying for this call' has two possible answers and the settlement takes whichever column happens to be set.",
+  },
+  CredentialBinding_status_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BINDING_STATUSES",
+    reason:
+      "disabled, active, revoked. 'revoked' is separate from 'disabled' because they are different facts -- one was switched off and can be switched back on, the other was withdrawn and the secret behind it should be assumed gone. Collapsing them would let a withdrawn credential be re-enabled by somebody who read the row as merely paused.",
+  },
   ProviderEndpoint_residencyClass_check: {
     owner: "list",
     module: "lib/deploymentIdentity.ts",

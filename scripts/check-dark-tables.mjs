@@ -26,7 +26,14 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 /** The Prisma delegate names, and the table names raw SQL would use. */
-const DARK_TABLES = ["ModelDeployment", "ProviderEndpoint", "EndpointResidencyApproval"];
+const DARK_TABLES = [
+    "ModelDeployment",
+    "ProviderEndpoint",
+    "EndpointResidencyApproval",
+    "CredentialBinding",
+    "QuotaScope",
+    "ProviderRegistryEntry",
+];
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */
 const ROOTS = ["app", "lib", "components", "scripts", "prisma/seed"];

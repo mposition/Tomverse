@@ -108,6 +108,8 @@ model User {
   mobileTokenFamilies                  MobileTokenFamily[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
+  quotaScopes                          QuotaScope[]
+  credentialBindings                   CredentialBinding[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -5515,8 +5517,9 @@ model ProviderEndpoint {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  deployments ModelDeployment[]
-  approvals   EndpointResidencyApproval[]
+  deployments        ModelDeployment[]
+  approvals          EndpointResidencyApproval[]
+  credentialBindings CredentialBinding[]
 
   @@index([gatewayProvider, enabled])
   @@index([residencyClass])
@@ -5592,4 +5595,91 @@ model ModelDeployment {
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
+}
+
+/// A provider Tomverse can reach, as a row.
+///
+/// Dark. The catalogue's `AiProvider` union stays the product's list; this
+/// exists so that a quota scope can name a provider with a foreign key rather
+/// than a string nothing checks. A scope pointing at a provider that was
+/// renamed or removed is a limit applying to nothing, which reads as no limit.
+model ProviderRegistryEntry {
+  id        String   @id
+  /// Display name for operators. Never used to match anything.
+  name      String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotaScopes QuotaScope[]
+}
+
+/// What a capacity limit is counted against.
+///
+/// Dark. Five kinds, and each names exactly the columns its kind needs -- the
+/// database holds that, so a row cannot be a `workspace` scope carrying a
+/// credential or a `provider` scope carrying nothing. A single opaque string
+/// would have allowed a scope id that matched no row, and a limit on nothing
+/// is indistinguishable from no limit until somebody spends against it.
+///
+/// `account` rather than `workspace`: BYOK ownership is the account, so there
+/// is no workspace entity for a scope to point at.
+model QuotaScope {
+  id        String @id @default(cuid())
+  /// credential | endpoint_credential | deployment_credential | account | provider
+  scopeKind String
+
+  /// Set on `credential`, `endpoint_credential` and `deployment_credential`.
+  credentialBindingId String?
+  /// Set on `endpoint_credential`.
+  providerEndpointId  String?
+  /// Set on `deployment_credential`.
+  modelDeploymentId   String?
+  /// Set on `account`.
+  accountId           String?
+  /// Set on `provider`.
+  providerId          String?
+
+  createdAt DateTime @default(now())
+
+  credentialBinding CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  account           User?                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider          ProviderRegistryEntry? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scopeKind])
+}
+
+/// A credential's access to an endpoint, and who pays for it.
+///
+/// Dark. Deliberately not part of deployment identity: one deployment is
+/// reachable by several credentials -- Tomverse's own and an account's -- and
+/// folding the credential in would split quality, version and health samples
+/// by key count, which is a measurement problem rather than a modelling one.
+///
+/// The secret itself is never here. `secretRef` names where it lives.
+model CredentialBinding {
+  id                      String   @id @default(cuid())
+  providerEndpointId      String
+  /// Where the secret actually lives. Never the secret.
+  secretRef               String
+  /// tomverse | account
+  billingOwner            String
+  /// Set when `billingOwner` is `account`. The account whose key this is.
+  accountId               String?
+  /// Which Tomverse provider-budget account this spends against.
+  ///
+  /// Stable across key rotation, which a credential id is not: rotating a key
+  /// must not reset a spend total.
+  providerBudgetAccountId String?
+  status                  String   @default("disabled")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  endpoint ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  account  User?            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  quotaScopes QuotaScope[]
+
+  @@index([providerEndpointId, status])
+  @@index([accountId])
 }
