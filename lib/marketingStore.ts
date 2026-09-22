@@ -1845,6 +1845,22 @@ export async function editMarketingPost(
   requireOne(updated.count, "edit_conflict", "The post changed before the edit committed");
 }
 
+/**
+ * The states a post can be marked reusable from.
+ *
+ * The same four `loadApprovedTemplate` accepts (S1 plan r4 amendment 5). It is
+ * not just `published`: verification is the publisher confirming the post is
+ * publicly visible, and it happens on its own, so a narrower list would let a
+ * post pass out of reach before anyone marked it -- and a template nobody can
+ * mark is an autonomy path nothing can reach.
+ */
+export const MARKETING_TEMPLATE_SOURCE_STATUSES = [
+  "approved",
+  "scheduled",
+  "published",
+  "verified",
+] as const;
+
 export async function markMarketingPostReusable(
   database: MarketingDatabase,
   rawInput: {
@@ -1862,7 +1878,7 @@ export async function markMarketingPostReusable(
   };
   const row = await lockMarketingPost(database, input.id);
   if (
-    row.status !== "published" ||
+    !(MARKETING_TEMPLATE_SOURCE_STATUSES as readonly string[]).includes(row.status) ||
     row.reusableAsTemplate ||
     row.envelopeDigest !== input.expectedEnvelopeDigest ||
     row.approvedDigest !== input.expectedEnvelopeDigest ||
@@ -1872,7 +1888,7 @@ export async function markMarketingPostReusable(
   ) {
     throw new MarketingStoreRefusedError(
       "mark_reusable_conflict",
-      "Only unchanged published approved content can become reusable",
+      "Only unchanged approved content in a template-eligible state can become reusable",
     );
   }
   await requireMarketingAudit(database, {
@@ -1887,7 +1903,11 @@ export async function markMarketingPostReusable(
   const updated = await database.marketingPost.updateMany({
     where: {
       id: input.id,
-      status: "published",
+      // The state it was read in, not the list. The row was locked and checked
+      // against the list above; pinning the exact value is what makes a
+      // transition between the read and the write a refusal rather than a
+      // write against a post that has moved on.
+      status: row.status,
       reusableAsTemplate: false,
       envelopeDigest: input.expectedEnvelopeDigest,
       approvedDigest: input.expectedEnvelopeDigest,

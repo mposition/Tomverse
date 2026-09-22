@@ -283,32 +283,52 @@ test("a reusable marking whose post moved underneath it loses the CAS", async ()
   });
 });
 
-test("mark reusable refuses every wrong state before reading an audit row", async () => {
-  for (const status of ["approved", "scheduled", "verified", "failed"]) {
-    const row = {
-      ...pendingPost(),
-      status,
-      approvedDigest: DIGEST,
-      envelopeDigest: DIGEST,
-      historyVersion: 3,
-    };
-    await assert.rejects(
-      markMarketingPostReusable(
-        {
-          $queryRaw: async () => [row],
-          adminAuditLog: {
-            findUnique: async () => {
-              throw new Error("wrong-state writes must not reach audit verification");
-            },
+test("mark reusable accepts every template-eligible state and refuses the rest", async () => {
+  // The four `loadApprovedTemplate` accepts, and one it does not. An earlier
+  // version of this pinned `published` alone as the only markable state, which
+  // would have left a post that reached `verified` -- which the publisher does
+  // on its own -- permanently unmarkable, and a template nobody can mark is an
+  // autonomy path nothing can reach.
+  const attempt = (status, onAudit) =>
+    markMarketingPostReusable(
+      {
+        $queryRaw: async () => [
+          {
+            ...pendingPost(),
+            status,
+            approvedDigest: DIGEST,
+            envelopeDigest: DIGEST,
+            historyVersion: 3,
           },
-        },
-        {
-          id: row.id,
-          expectedEnvelopeDigest: DIGEST,
-          expectedHistoryVersion: 3,
-          auditLogId: "audit-mark",
-        },
-      ),
+        ],
+        adminAuditLog: { findUnique: onAudit },
+      },
+      {
+        id: "post-1",
+        expectedEnvelopeDigest: DIGEST,
+        expectedHistoryVersion: 3,
+        auditLogId: "audit-mark",
+      },
+    );
+
+  for (const status of ["approved", "scheduled", "published", "verified"]) {
+    let reached = false;
+    await assert.rejects(
+      attempt(status, async () => {
+        reached = true;
+        return null;
+      }),
+      () => true,
+      status,
+    );
+    assert.equal(reached, true, `${status} should have reached audit verification`);
+  }
+
+  for (const status of ["drafted", "pending_approval", "failed", "deleted"]) {
+    await assert.rejects(
+      attempt(status, async () => {
+        throw new Error("wrong-state writes must not reach audit verification");
+      }),
       (error) =>
         error instanceof MarketingStoreRefusedError &&
         error.code === "mark_reusable_conflict",
