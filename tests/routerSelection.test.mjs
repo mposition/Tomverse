@@ -400,3 +400,165 @@ test("a model nothing has probed is not demoted for being unprobed", () => {
     assert.equal(result.selectedModelId, "model-b");
 });
 
+
+/**
+ * The cycle a pairwise comparator produced, and the order that replaced it.
+ *
+ * Criterion 3 is cost and criterion 6 is the model id. Give two candidates a
+ * cost and the third none, and a pairwise comparator answers three questions
+ * with two different criteria:
+ *
+ *   model-c vs model-a -> both priced  -> cost      -> model-c (cheaper)
+ *   model-a vs model-b -> b unpriced   -> model id  -> model-a
+ *   model-b vs model-c -> b unpriced   -> model id  -> model-b
+ *
+ * which is `model-c > model-a > model-b > model-c`. `Array.prototype.sort`
+ * meets that with an implementation-defined order rather than an error, so the
+ * winner depended on the order the filters happened to emit.
+ *
+ * The partition refinement answers it once: cost cannot speak for every member
+ * of the group, so it abstains for the group rather than for two of its three
+ * pairs, and the model id -- which is total -- decides.
+ */
+test("a criterion one candidate cannot answer no longer cycles", () => {
+    const signals = {
+        expectedTotalCostUsdByModelId: { "model-c": 0.1, "model-a": 0.5 },
+    };
+    const eligible = candidates("model-c", "model-a", "model-b");
+    const result = selectRouterModel({ profile: plainTurn, eligible, signals });
+
+    assert.equal(result.selectedModelId, "model-a");
+    assert.equal(result.decidedBy, "model_id");
+    assert.deepEqual(result.rankedModelIds, ["model-a", "model-b", "model-c"]);
+});
+
+/**
+ * Permutation invariance, which is the observable half of transitivity.
+ *
+ * A comparator that is not a total preorder does not announce itself; it just
+ * returns a different winner for a different input order. So the property is
+ * checked over every permutation rather than over one reversal, and with
+ * signals deliberately missing for some candidates -- a complete snapshot is
+ * the case that was never in doubt.
+ */
+const permutations = (items) =>
+    items.length <= 1
+        ? [items]
+        : items.flatMap((item, index) =>
+              permutations([
+                  ...items.slice(0, index),
+                  ...items.slice(index + 1),
+              ]).map((rest) => [item, ...rest])
+          );
+
+test("the ranking is the same for every order the filters could emit", () => {
+    const cases = [
+        {
+            name: "one candidate unpriced",
+            modelIds: ["model-a", "model-b", "model-c"],
+            signals: {
+                expectedTotalCostUsdByModelId: { "model-c": 0.1, "model-a": 0.5 },
+            },
+        },
+        {
+            name: "success rate known for some",
+            modelIds: ["model-a", "model-b", "model-c", "model-d"],
+            signals: {
+                expectedTotalCostUsdByModelId: {
+                    "model-a": 1,
+                    "model-b": 1,
+                    "model-c": 1,
+                    "model-d": 1,
+                },
+                recentSuccessRateByModelId: { "model-a": 0.99, "model-c": 0.5 },
+            },
+        },
+        {
+            name: "latency and degradation together",
+            modelIds: ["model-a", "model-b", "model-c", "model-d"],
+            signals: {
+                degradedModelIds: ["model-a"],
+                expectedTotalCostUsdByModelId: {
+                    "model-b": 2,
+                    "model-c": 2.05,
+                    "model-d": 4,
+                },
+                ttftP95MsByModelId: { "model-b": 900, "model-c": 100 },
+            },
+        },
+    ];
+
+    for (const { name, modelIds, signals } of cases) {
+        const orders = permutations(modelIds).map(
+            (order) =>
+                selectRouterModel({
+                    profile: plainTurn,
+                    eligible: candidates(...order),
+                    signals,
+                }).rankedModelIds
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], name);
+        }
+    }
+});
+
+/**
+ * The epsilon chain, which is intransitive on its own.
+ *
+ * At a 5% ratio 100 ties 104 and 104 ties 108, while 100 beats 108 outright,
+ * so "within epsilon is the same value" cannot be evaluated per pair. Each
+ * bucket is anchored to its own first value instead: 104 is within 5% of 100
+ * and joins it, 108 is not and starts the next bucket.
+ */
+test("an epsilon chain buckets deterministically rather than per pair", () => {
+    const costs = { "model-b": 100, "model-c": 104, "model-a": 108 };
+    assert.ok(Math.abs(104 - 100) / 104 <= ROUTER_COST_TIE_EPSILON_RATIO);
+    assert.ok(Math.abs(108 - 104) / 108 <= ROUTER_COST_TIE_EPSILON_RATIO);
+    assert.ok(Math.abs(108 - 100) / 108 > ROUTER_COST_TIE_EPSILON_RATIO);
+
+    for (const order of permutations(["model-a", "model-b", "model-c"])) {
+        const result = selectRouterModel({
+            profile: plainTurn,
+            eligible: candidates(...order),
+            signals: { expectedTotalCostUsdByModelId: costs },
+        });
+        // model-b and model-c share the cheapest bucket and the model id
+        // separates them; model-a is a bucket of its own and ranks last
+        // despite tying its neighbour pairwise.
+        assert.deepEqual(result.rankedModelIds, [
+            "model-b",
+            "model-c",
+            "model-a",
+        ]);
+    }
+});
+
+test("the criterion named as deciding is one that actually separates", () => {
+    const signals = {
+        degradedModelIds: ["model-d"],
+        expectedTotalCostUsdByModelId: {
+            "model-a": 1,
+            "model-b": 3,
+            "model-c": 1,
+            "model-d": 1,
+        },
+        recentSuccessRateByModelId: {
+            "model-a": 0.99,
+            "model-b": 0.99,
+            "model-c": 0.5,
+            "model-d": 0.99,
+        },
+    };
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-b", "model-c", "model-d"),
+        signals,
+    });
+    // model-d is degraded and loses at criterion 2; model-b is dearer and
+    // loses at 3; model-a and model-c share a price, so the success rate they
+    // both carry is what separates the top two.
+    assert.equal(result.selectedModelId, "model-a");
+    assert.equal(result.decidedBy, "recent_success_rate");
+    assert.equal(result.rankedModelIds[3], "model-d");
+});

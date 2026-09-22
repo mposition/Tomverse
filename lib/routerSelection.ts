@@ -45,8 +45,8 @@ import {
     ROUTER_SCORE_POLICY_VERSION,
     ROUTER_STICKY_SWITCH_MARGIN_BANDS,
     ROUTER_SUCCESS_RATE_TIE_EPSILON,
+    ROUTER_TIE_BREAK_ORDER,
     ROUTER_TTFT_TIE_EPSILON_MS,
-    compareRouterScoreCells,
     getRouterScoreCell,
     rankingKindFor,
     stickyHysteresisTurnsFor,
@@ -57,7 +57,7 @@ import {
 import type { TaskProfile } from "@/lib/taskProfileCore";
 
 /** Bump with any change to the rule or the tie-break. */
-export const ROUTER_SELECTION_VERSION = "router-selection-v2";
+export const ROUTER_SELECTION_VERSION = "router-selection-v3";
 
 export const SELECTION_REASONS = [
     /** Nothing survived the filters. The caller must not invent a model. */
@@ -138,97 +138,288 @@ type ScoredCandidate = {
 };
 
 /**
- * Compares one measured signal, and abstains when it cannot.
+ * Ranks candidates by refining a partition, one criterion at a time.
  *
- * Two rules, both about not inventing information. A signal absent for either
- * model is unknown rather than zero, so the criterion abstains and the next
- * one decides -- otherwise a model nobody has ever called would outrank one
- * with a measured record. And two values within the policy's epsilon are the
- * same value, so the Router does not reshuffle itself over a rounding
- * difference while reporting a confident reason for it.
+ * ## Why this is not a pairwise comparator
+ *
+ * Two of this policy's rules are stated per pair, and each of them on its own
+ * makes a pairwise comparator intransitive -- which `Array.prototype.sort`
+ * answers with an implementation-defined order rather than with an error.
+ *
+ * A criterion *abstains* when either side has no value, so that an unmeasured
+ * model neither wins nor loses on a number it does not have. Pairwise, that
+ * means one criterion decides one pair and is skipped for another, and a cycle
+ * follows directly. With A and B both carrying a quality interval, C carrying
+ * none, and costs C < B < A: quality says A beats B, cost says B beats C (they
+ * abstained on quality), and cost says C beats A (likewise). A > B > C > A.
+ *
+ * And two values within an epsilon are "the same value", which is not
+ * transitive either: at a 5% ratio 100 ties 104 and 104 ties 108, while 100
+ * beats 108 outright.
+ *
+ * So the order is built rather than compared. Every candidate starts in one
+ * group; each criterion in `ROUTER_TIE_BREAK_ORDER` splits each surviving
+ * group into ordered buckets, and a criterion that cannot speak for *every*
+ * member of a group leaves that group whole. The bucket indices a candidate
+ * collects are its rank key, and the ranking is the lexicographic order of
+ * those keys -- total and transitive by construction, being integer vectors of
+ * equal length.
+ *
+ * ## What this changes about the rules themselves
+ *
+ * Abstention becomes a property of the group rather than of the pair: one
+ * unmeasured member silences the criterion for everybody it is still tied
+ * with, rather than only for the pairs that include it. That is the reading
+ * which keeps "an unknown value never wins and never loses" true without also
+ * letting the result depend on the order the filter happened to emit.
+ *
+ * Epsilon becomes anchored rather than pairwise: a bucket holds the values
+ * within epsilon of that bucket's own first value, so the chain above splits
+ * into {100, 104} and {108} every time instead of into whatever the comparison
+ * order produced.
  */
-const compareSignal = (
-    left: number | undefined,
-    right: number | undefined,
-    { epsilon, lowerWins }: { epsilon: number; lowerWins: boolean }
-): number => {
-    if (typeof left !== "number" || typeof right !== "number") return 0;
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return 0;
-    if (Math.abs(left - right) <= epsilon) return 0;
-    return lowerWins ? left - right : right - left;
+
+type Bucket = readonly ScoredCandidate[];
+
+/** Splits by quality band, then refines one band by its interval. */
+const partitionByQuality = (group: Bucket): Bucket[] => {
+    const bands = [...new Set(group.map((entry) => entry.cell.qualityBand))].sort(
+        (left, right) => right - left
+    );
+    const buckets: Bucket[] = [];
+    for (const band of bands) {
+        const inBand = group.filter((entry) => entry.cell.qualityBand === band);
+        // The interval refines the order inside one band, and only while every
+        // cell in that band carries one. The band stays a strict primary key:
+        // an interval never reaches across bands, because that would make the
+        // comparison non-transitive on a partly-measured snapshot.
+        if (
+            inBand.length > 1 &&
+            inBand.every((entry) => entry.cell.qualityCi95Lower !== null)
+        ) {
+            const bounds = [
+                ...new Set(
+                    inBand.map((entry) => entry.cell.qualityCi95Lower as number)
+                ),
+            ].sort((left, right) => right - left);
+            for (const bound of bounds) {
+                buckets.push(
+                    inBand.filter((entry) => entry.cell.qualityCi95Lower === bound)
+                );
+            }
+            continue;
+        }
+        buckets.push(inBand);
+    }
+    return buckets;
 };
 
-/** Relative, because a cent between two cheap models is not a cent between two expensive ones. */
-const compareCost = (left: number | undefined, right: number | undefined) => {
-    if (typeof left !== "number" || typeof right !== "number") return 0;
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return 0;
-    const larger = Math.max(Math.abs(left), Math.abs(right));
-    if (larger === 0) return 0;
-    if (Math.abs(left - right) / larger <= ROUTER_COST_TIE_EPSILON_RATIO) return 0;
-    return left - right;
+/**
+ * Splits the models something is reporting problems with from the rest.
+ *
+ * Never abstains. Absence from the set is "not known to be degraded", which
+ * covers a healthy model and an unprobed one alike, so there is no missing
+ * value here to abstain on.
+ */
+const partitionByDegraded = (
+    group: Bucket,
+    degraded: readonly string[] | undefined
+): Bucket[] => {
+    if (degraded === undefined || degraded.length === 0) return [group];
+    const flagged = new Set(degraded);
+    const healthy = group.filter((entry) => !flagged.has(entry.modelId));
+    const unhealthy = group.filter((entry) => flagged.has(entry.modelId));
+    if (healthy.length === 0 || unhealthy.length === 0) return [group];
+    return [healthy, unhealthy];
+};
+
+/**
+ * Splits by a measured number, with the epsilon anchored to each bucket.
+ *
+ * Returns the group whole -- abstains -- unless every member has a finite
+ * reading. Equal readings are ordered by model id before bucketing, so the
+ * partition does not depend on the order the candidates arrived in.
+ */
+const partitionByMetric = (
+    group: Bucket,
+    readingFor: (candidate: ScoredCandidate) => number | undefined,
+    {
+        epsilon,
+        lowerWins,
+        relative,
+    }: { epsilon: number; lowerWins: boolean; relative: boolean }
+): Bucket[] => {
+    const readings = new Map<ScoredCandidate, number>();
+    for (const candidate of group) {
+        const reading = readingFor(candidate);
+        if (typeof reading !== "number" || !Number.isFinite(reading)) {
+            return [group];
+        }
+        readings.set(candidate, reading);
+    }
+    const read = (candidate: ScoredCandidate) =>
+        readings.get(candidate) as number;
+
+    const sorted = [...group].sort((left, right) => {
+        const a = read(left);
+        const b = read(right);
+        if (a !== b) return lowerWins ? a - b : b - a;
+        return left.modelId < right.modelId
+            ? -1
+            : left.modelId > right.modelId
+              ? 1
+              : 0;
+    });
+
+    const withinEpsilon = (reading: number, anchor: number) => {
+        if (!relative) return Math.abs(reading - anchor) <= epsilon;
+        // Relative, because a cent between two cheap models is not a cent
+        // between two expensive ones.
+        const larger = Math.max(Math.abs(reading), Math.abs(anchor));
+        if (larger === 0) return true;
+        return Math.abs(reading - anchor) / larger <= epsilon;
+    };
+
+    const buckets: ScoredCandidate[][] = [];
+    let current: ScoredCandidate[] = [];
+    let anchor = 0;
+    for (const candidate of sorted) {
+        const reading = read(candidate);
+        if (current.length === 0) {
+            anchor = reading;
+            current.push(candidate);
+            continue;
+        }
+        if (withinEpsilon(reading, anchor)) {
+            current.push(candidate);
+            continue;
+        }
+        buckets.push(current);
+        current = [candidate];
+        anchor = reading;
+    }
+    if (current.length > 0) buckets.push(current);
+    return buckets;
+};
+
+/**
+ * The last criterion, and the only one that is total on its own.
+ *
+ * Arbitrary, and deliberately so: what it buys is that two runs over the same
+ * inputs answer the same way, which the old fallback -- position in a
+ * six-model curated order -- could not do for the models that order never
+ * listed.
+ */
+const partitionByModelId = (group: Bucket): Bucket[] =>
+    [...new Set(group.map((entry) => entry.modelId))]
+        .sort()
+        .map((modelId) => group.filter((entry) => entry.modelId === modelId));
+
+const partitionFor = (
+    criterion: RouterTieBreakCriterion,
+    group: Bucket,
+    signals: RouterTieBreakSignals
+): Bucket[] => {
+    switch (criterion) {
+        case "quality_band":
+            return partitionByQuality(group);
+        case "health_degraded":
+            return partitionByDegraded(group, signals.degradedModelIds);
+        case "expected_total_cost":
+            return partitionByMetric(
+                group,
+                (entry) => signals.expectedTotalCostUsdByModelId?.[entry.modelId],
+                {
+                    epsilon: ROUTER_COST_TIE_EPSILON_RATIO,
+                    lowerWins: true,
+                    relative: true,
+                }
+            );
+        case "recent_success_rate":
+            return partitionByMetric(
+                group,
+                (entry) => signals.recentSuccessRateByModelId?.[entry.modelId],
+                {
+                    epsilon: ROUTER_SUCCESS_RATE_TIE_EPSILON,
+                    lowerWins: false,
+                    relative: false,
+                }
+            );
+        case "ttft_p95":
+            return partitionByMetric(
+                group,
+                (entry) => signals.ttftP95MsByModelId?.[entry.modelId],
+                {
+                    epsilon: ROUTER_TTFT_TIE_EPSILON_MS,
+                    lowerWins: true,
+                    relative: false,
+                }
+            );
+        case "model_id":
+            return partitionByModelId(group);
+    }
 };
 
 /**
  * Applies `ROUTER_TIE_BREAK_ORDER` and reports which entry decided.
  *
- * One function rather than a comparator plus a separate explanation, so the
- * order a decision is explained by cannot drift from the order it was made in.
+ * One pass rather than a ranking plus a separate explanation, so the order a
+ * decision is explained by cannot drift from the order it was made in: the
+ * criterion named is the position at which two rank keys first differ.
  */
-const compareCandidates = (
-    left: ScoredCandidate,
-    right: ScoredCandidate,
+const rankCandidates = (
+    candidates: readonly ScoredCandidate[],
     signals: RouterTieBreakSignals
-): { order: number; decidedBy: RouterTieBreakCriterion } => {
-    const byQuality = compareRouterScoreCells(left.cell, right.cell);
-    if (byQuality !== 0) return { order: byQuality, decidedBy: "quality_band" };
+): {
+    ranked: ScoredCandidate[];
+    decidedBy: (
+        left: ScoredCandidate,
+        right: ScoredCandidate
+    ) => RouterTieBreakCriterion;
+} => {
+    const keys = new Map<ScoredCandidate, number[]>();
+    for (const candidate of candidates) keys.set(candidate, []);
 
-    // A degraded model is still a candidate -- refusal is a hard filter, and
-    // this is not one -- but it loses to a model nothing is reporting problems
-    // with, before price is even asked about. Absence from the set is "not
-    // known to be degraded", so an unprobed model is not demoted for being
-    // unprobed.
-    const degraded = signals.degradedModelIds;
-    if (degraded !== undefined && degraded.length > 0) {
-        const leftDegraded = degraded.includes(left.modelId);
-        const rightDegraded = degraded.includes(right.modelId);
-        if (leftDegraded !== rightDegraded) {
-            return {
-                order: leftDegraded ? 1 : -1,
-                decidedBy: "health_degraded",
-            };
+    let groups: Bucket[] = [candidates];
+    for (const criterion of ROUTER_TIE_BREAK_ORDER) {
+        const refined: Bucket[] = [];
+        for (const group of groups) {
+            // A group of one is already decided. Skipping the partition keeps
+            // every rank key the same length, which is what makes the
+            // lexicographic comparison below well defined.
+            const buckets =
+                group.length <= 1
+                    ? [group]
+                    : partitionFor(criterion, group, signals);
+            buckets.forEach((bucket, index) => {
+                for (const candidate of bucket) keys.get(candidate)?.push(index);
+                refined.push(bucket);
+            });
         }
+        groups = refined;
     }
 
-    const byCost = compareCost(
-        signals.expectedTotalCostUsdByModelId?.[left.modelId],
-        signals.expectedTotalCostUsdByModelId?.[right.modelId]
-    );
-    if (byCost !== 0) return { order: byCost, decidedBy: "expected_total_cost" };
+    const keyOf = (candidate: ScoredCandidate) => keys.get(candidate) ?? [];
+    const firstDifference = (left: ScoredCandidate, right: ScoredCandidate) => {
+        const a = keyOf(left);
+        const b = keyOf(right);
+        for (let index = 0; index < a.length; index += 1) {
+            if (a[index] !== b[index]) return index;
+        }
+        return -1;
+    };
 
-    const bySuccess = compareSignal(
-        signals.recentSuccessRateByModelId?.[left.modelId],
-        signals.recentSuccessRateByModelId?.[right.modelId],
-        { epsilon: ROUTER_SUCCESS_RATE_TIE_EPSILON, lowerWins: false }
-    );
-    if (bySuccess !== 0) {
-        return { order: bySuccess, decidedBy: "recent_success_rate" };
-    }
-
-    const byLatency = compareSignal(
-        signals.ttftP95MsByModelId?.[left.modelId],
-        signals.ttftP95MsByModelId?.[right.modelId],
-        { epsilon: ROUTER_TTFT_TIE_EPSILON_MS, lowerWins: true }
-    );
-    if (byLatency !== 0) return { order: byLatency, decidedBy: "ttft_p95" };
-
-    // Arbitrary, stable, and total. Not a quality judgement: what it buys is
-    // that two runs over the same inputs answer the same way, which the old
-    // fallback -- position in a six-model curated order -- could not do for
-    // the models that order never listed.
-    if (left.modelId === right.modelId) return { order: 0, decidedBy: "model_id" };
     return {
-        order: left.modelId < right.modelId ? -1 : 1,
-        decidedBy: "model_id",
+        ranked: [...candidates].sort((left, right) => {
+            const index = firstDifference(left, right);
+            return index === -1 ? 0 : keyOf(left)[index] - keyOf(right)[index];
+        }),
+        decidedBy: (left, right) => {
+            const index = firstDifference(left, right);
+            // Identical keys means the same model id twice. Nothing separated
+            // them, and the last criterion is the honest thing to name.
+            return index === -1 ? "model_id" : ROUTER_TIE_BREAK_ORDER[index];
+        },
     };
 };
 
@@ -261,21 +452,19 @@ export function selectRouterModel(input: {
     // A kind nothing supported does not steer the ranking; it falls back to
     // the general column. See `rankingKindFor`.
     const kind = rankingKindFor(input.profile);
-    const ranked = [...input.eligible]
-        .map((candidate) => ({
-            modelId: candidate.modelId,
-            cell: getRouterScoreCell(candidate.modelId, kind),
-        }))
-        .sort((left, right) => compareCandidates(left, right, signals).order);
+    const scored = input.eligible.map((candidate) => ({
+        modelId: candidate.modelId,
+        cell: getRouterScoreCell(candidate.modelId, kind),
+    }));
+    const ranking = rankCandidates(scored, signals);
+    const ranked = ranking.ranked;
 
     const rankedModelIds = ranked.map((candidate) => candidate.modelId);
     const winner = ranked[0];
     const runnerUp = ranked[1];
     const bandOf = (candidate: ScoredCandidate) => candidate.cell.qualityBand;
     const margin = runnerUp ? bandOf(winner) - bandOf(runnerUp) : 0;
-    const decidedBy = runnerUp
-        ? compareCandidates(winner, runnerUp, signals).decidedBy
-        : null;
+    const decidedBy = runnerUp ? ranking.decidedBy(winner, runnerUp) : null;
 
     const naturalReason: SelectionReason = !runnerUp
         ? "only_candidate"

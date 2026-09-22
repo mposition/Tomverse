@@ -146,9 +146,9 @@ The counted outcomes are fixed so that a rate means one thing across models:
 reached a provider, `cancelled` is the person changing their mind, `pending` has
 not ended, and `unknown_after_dispatch` is a crash that is evidence neither way.
 
-A signal missing for either side means *unknown*. The criterion abstains and
-the next one decides. Treating an absent success rate as a perfect one would
-rank a model nobody has ever called above one with a measured record.
+A signal missing means *unknown*. The criterion abstains and the next one
+decides. Treating an absent success rate as a perfect one would rank a model
+nobody has ever called above one with a measured record.
 
 Two values within these thresholds are the same value:
 
@@ -171,6 +171,49 @@ twenty points is simply the largest of them.
 Without them the cost criterion decides every tie on the fourth decimal place
 of a price, and the Router reshuffles itself over a rounding difference while
 reporting a confident reason for it.
+
+### The order is built, not compared
+
+Both rules above are stated per pair, and each of them on its own makes a
+pairwise comparator intransitive. Abstention does it because the same criterion
+then decides one pair and is skipped for another: with two candidates carrying
+a quality interval, a third carrying none, and costs ranked against them, the
+first pair is decided on quality and the other two on cost, and
+`A > B > C > A` follows. The epsilons do it without any missing data at all,
+because "within 5%" is not transitive — 100 ties 104 and 104 ties 108, while
+100 beats 108 outright.
+
+An intransitive comparator is not an error `Array.prototype.sort` reports. It
+is an implementation-defined order, which would have made §6's promise that
+"two runs over the same inputs answer the same way" true only while the filters
+kept emitting candidates in the same order.
+
+So `lib/routerSelection.ts` builds the ranking instead of comparing pairs.
+Every candidate starts in one group, each criterion above splits each surviving
+group into ordered buckets, and the ranking is the lexicographic order of the
+bucket indices a candidate collects. That is total and transitive by
+construction. Two consequences are worth stating because they are changes to
+the rules and not only to the mechanism:
+
+- **Abstention is a property of the group.** A criterion that cannot speak for
+  *every* member of a group leaves that group whole, so one unmeasured
+  candidate silences the criterion for everybody it is still tied with rather
+  than only for the pairs containing it. That is the reading that keeps "an
+  unknown value never wins and never loses" true without letting the answer
+  depend on emission order.
+- **The epsilon is anchored.** Within a group a bucket holds the values within
+  epsilon of that bucket's own first value, so the chain above splits into
+  {100, 104} and {108} every time.
+
+This is the comparator changing, not the numbers, so it moved
+`ROUTER_SELECTION_VERSION` and not `ROUTER_SCORE_POLICY_VERSION` — §7's own
+division. The thresholds, the tie-break order, the band scale, the switch
+margin and the hysteresis turns are all unchanged.
+
+`tests/routerSelection.test.mjs` pins the cycle above, checks the ranking over
+every permutation of its inputs rather than over one reversal, and fixes the
+epsilon chain's buckets. Two candidates cannot expose intransitivity, which is
+why the older order-independence test did not.
 
 ## 6. Stickiness, in the units of this scale
 

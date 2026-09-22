@@ -31,9 +31,19 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // and re-deriving reproduces the previous pair exactly
   // ("1465b4ca…639c63" and "0e480ddd…63621a"). No row, selection, price or
   // catalogue value moved, and no v1 corpus case changed profile.
+  //
+  // Re-baselined again for `router-selection-v3`, which is the tie-break
+  // becoming a partition refinement rather than a pairwise comparator. Checked
+  // the same way and with the same result: with the new ranking code in place
+  // and only the version string held at "router-selection-v2", the plan
+  // re-derives the previous pair exactly ("c27c6a83…35f561" and
+  // "64e628f3…1a0a4b3a"). So the comparator rewrite moves no row of this plan
+  // -- old and new agree on every ranking the v1 corpus produces -- and the
+  // version string is the whole of the difference.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
-  assert.equal(legacy.planDigest, "c27c6a833b7fc6a41956098d8a967a9c5224545c2de7d74f90d72cf1339afc4b");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "64e628f3ac59ee52283991f2a58a4a71b8b028b793451cc6012229971a0a4b3a");
+  assert.equal(legacy.versions.router.selection, "router-selection-v3");
+  assert.equal(legacy.planDigest, "c14508c26c6921be8ca47bddf97010a82dd30b169c1246d01cdff5bd8935f561");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "19a5ce891a90919bd3c47c9a80db465629ee5a3ebc145e8667ebff85ab4ca3c7");
   assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
   assert.throws(() => validateDevelopmentPlan(plan, { ...common, corpus: oldCorpus }), /plan:unexpected_or_missing_fields/);
