@@ -290,8 +290,25 @@ ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_ov
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_override_keeps_refusal_check"
     CHECK ("overrideApprovalId" IS NULL OR "legalAllowed" = FALSE);
 
+-- "is an array" was not enough for `authorities`.
+--
+-- A verdict could seal with `["au_sender"]` -- strings rather than the
+-- objects every reader expects -- and the evidence trigger's lookup for
+-- `a->>'authority'` would find nothing in it, so no evidence could ever be
+-- attached to a verdict shaped that way. Every element has to be an object
+-- carrying an authority the list knows.
 ALTER TABLE "EmailPermissionDecision" ADD CONSTRAINT "EmailPermissionDecision_json_shape_check"
-    CHECK (jsonb_typeof("authorities") = 'array' AND jsonb_typeof("blockers") = 'array');
+    CHECK (
+        jsonb_typeof("authorities") = 'array'
+        AND jsonb_typeof("blockers") = 'array'
+        AND NOT EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements("authorities") AS a
+             WHERE jsonb_typeof(a) <> 'object'
+                OR a->>'authority' IS NULL
+                OR a->>'authority' NOT IN ('recipient', 'au_sender')
+        )
+    );
 
 -- allowed is derived, so it is computed here too. Two places saying it is the
 -- point: the application can be wrong about one row, and this refuses to store
@@ -382,6 +399,7 @@ CREATE FUNCTION "email_ledger_only_detach"(old_value TEXT, new_value TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
 IMMUTABLE
+SET search_path = pg_catalog, pg_temp
 AS $$
     SELECT old_value IS NOT NULL AND new_value IS NULL;
 $$;
@@ -389,6 +407,7 @@ $$;
 CREATE FUNCTION "email_permission_event_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -433,6 +452,7 @@ CREATE TRIGGER "email_permission_event_append_only"
 CREATE FUNCTION "email_send_approval_revocation_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     sealed TIMESTAMP(3);
@@ -443,7 +463,7 @@ BEGIN
     END IF;
 
     SELECT a."sealedAt" INTO sealed
-        FROM "EmailSendApproval" a
+        FROM public."EmailSendApproval" a
         WHERE a."id" = NEW."approvalId"
         FOR SHARE;
 
@@ -476,6 +496,7 @@ CREATE TRIGGER "email_send_approval_revocation_append_only"
 CREATE FUNCTION "email_send_approval_seal"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -535,6 +556,7 @@ CREATE TRIGGER "email_send_approval_seal"
 CREATE FUNCTION "email_send_approval_member_seal"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     approval_id TEXT;
@@ -543,7 +565,7 @@ BEGIN
     approval_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."approvalId" ELSE NEW."approvalId" END;
 
     SELECT a."sealedAt" INTO sealed
-        FROM "EmailSendApproval" a
+        FROM public."EmailSendApproval" a
         WHERE a."id" = approval_id
         FOR SHARE;
 
@@ -578,12 +600,13 @@ CREATE TRIGGER "email_send_approval_member_seal"
 CREATE FUNCTION "email_send_approval_member_is_override"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     approval_type TEXT;
 BEGIN
     SELECT a."approvalType" INTO approval_type
-        FROM "EmailSendApproval" a
+        FROM public."EmailSendApproval" a
         WHERE a."id" = NEW."approvalId";
 
     IF approval_type <> 'risk_accepted' THEN
@@ -603,6 +626,7 @@ CREATE TRIGGER "email_send_approval_member_is_override"
 CREATE FUNCTION "email_send_approval_member_seal_final"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     approval_id TEXT;
@@ -611,7 +635,7 @@ BEGIN
     approval_id := CASE WHEN TG_OP = 'DELETE' THEN OLD."approvalId" ELSE NEW."approvalId" END;
 
     SELECT a."sealedAt" INTO sealed
-        FROM "EmailSendApproval" a
+        FROM public."EmailSendApproval" a
         WHERE a."id" = approval_id;
 
     IF sealed IS NOT NULL THEN
@@ -638,6 +662,7 @@ CREATE CONSTRAINT TRIGGER "email_send_approval_member_seal_final"
 CREATE FUNCTION "email_permission_decision_immutable"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     detaching BOOLEAN;
@@ -734,6 +759,7 @@ CREATE TRIGGER "email_permission_decision_immutable"
 CREATE FUNCTION "email_permission_decision_needs_delivery"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
     IF NEW."deliveryId" IS NULL THEN
@@ -743,6 +769,51 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+-- The seal is a database invariant, not a verdict-path one.
+--
+-- Revocation, scope and cohort belong to the path S9 builds, under the locks
+-- it holds. Whether the approval was ever closed does not: an unsealed
+-- approval is a draft being assembled, and a verdict that overrode one
+-- recorded a decision nobody had finished making. The ordering matters for
+-- the same reason -- an approval sealed after the send was not in force when
+-- the message went out.
+CREATE FUNCTION "email_permission_decision_override_is_sealed"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    sealed TIMESTAMP(3);
+BEGIN
+    IF NEW."overrideApprovalId" IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT a."sealedAt" INTO sealed
+        FROM public."EmailSendApproval" a
+        WHERE a."id" = NEW."overrideApprovalId"
+        FOR SHARE;
+
+    IF sealed IS NULL THEN
+        RAISE EXCEPTION 'EmailSendApproval % is not sealed and cannot override a send.',
+            NEW."overrideApprovalId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF sealed > NEW."evaluatedAt" THEN
+        RAISE EXCEPTION 'EmailSendApproval % was sealed after this verdict was taken.',
+            NEW."overrideApprovalId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_permission_decision_override_is_sealed"
+    BEFORE INSERT ON "EmailPermissionDecision"
+    FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_override_is_sealed"();
 
 CREATE TRIGGER "email_permission_decision_needs_delivery"
     BEFORE INSERT ON "EmailPermissionDecision"
@@ -755,6 +826,7 @@ CREATE TRIGGER "email_permission_decision_needs_delivery"
 CREATE FUNCTION "email_permission_decision_evidence_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     sealed TIMESTAMP(3);
@@ -765,7 +837,7 @@ BEGIN
     END IF;
 
     SELECT d."sealedAt" INTO sealed
-        FROM "EmailPermissionDecision" d
+        FROM public."EmailPermissionDecision" d
         WHERE d."id" = NEW."decisionId"
         FOR SHARE;
 
@@ -805,6 +877,7 @@ CREATE TRIGGER "email_permission_decision_evidence_append_only"
 CREATE FUNCTION "email_permission_decision_evidence_consistent"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     d_user TEXT;
@@ -812,14 +885,16 @@ DECLARE
     d_purpose TEXT;
     d_classification TEXT;
     d_authorities JSONB;
+    d_evaluated TIMESTAMP(3);
     s_user TEXT;
     s_address TEXT;
     s_scope TEXT;
+    s_occurred TIMESTAMP(3);
 BEGIN
     SELECT d."userId", lower(d."emailAddress"), d."purpose", d."classification",
-           d."authorities"
-      INTO d_user, d_address, d_purpose, d_classification, d_authorities
-      FROM "EmailPermissionDecision" d
+           d."authorities", d."evaluatedAt"
+      INTO d_user, d_address, d_purpose, d_classification, d_authorities, d_evaluated
+      FROM public."EmailPermissionDecision" d
      WHERE d."id" = NEW."decisionId"
        FOR SHARE;
 
@@ -834,9 +909,9 @@ BEGIN
     END IF;
 
     IF NEW."eventId" IS NOT NULL THEN
-        SELECT e."userId", lower(e."emailAddress"), e."scopeKey"
-          INTO s_user, s_address, s_scope
-          FROM "EmailPermissionEvent" e
+        SELECT e."userId", lower(e."emailAddress"), e."scopeKey", e."occurredAt"
+          INTO s_user, s_address, s_scope, s_occurred
+          FROM public."EmailPermissionEvent" e
          WHERE e."id" = NEW."eventId";
 
         IF s_scope <> '*' AND s_scope <> d_purpose AND s_scope <> d_classification THEN
@@ -845,9 +920,9 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
     ELSE
-        SELECT c."userId", lower(c."emailAddress"), c."purpose"
-          INTO s_user, s_address, s_scope
-          FROM "ConsentRecord" c
+        SELECT c."userId", lower(c."emailAddress"), c."purpose", c."occurredAt"
+          INTO s_user, s_address, s_scope, s_occurred
+          FROM public."ConsentRecord" c
          WHERE c."id" = NEW."consentRecordId";
 
         IF s_scope <> d_purpose THEN
@@ -855,6 +930,12 @@ BEGIN
                 NEW."consentRecordId", s_scope
                 USING ERRCODE = 'check_violation';
         END IF;
+    END IF;
+
+    IF s_occurred > d_evaluated THEN
+        RAISE EXCEPTION 'Evidence for decision % happened after the verdict was taken.',
+            NEW."decisionId"
+            USING ERRCODE = 'check_violation';
     END IF;
 
     IF s_address IS DISTINCT FROM d_address THEN
@@ -880,12 +961,13 @@ CREATE TRIGGER "email_permission_decision_evidence_consistent"
 CREATE FUNCTION "email_permission_decision_evidence_seal_final"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     sealed TIMESTAMP(3);
 BEGIN
     SELECT d."sealedAt" INTO sealed
-        FROM "EmailPermissionDecision" d
+        FROM public."EmailPermissionDecision" d
         WHERE d."id" = NEW."decisionId";
 
     IF sealed IS NOT NULL THEN
@@ -903,50 +985,80 @@ CREATE CONSTRAINT TRIGGER "email_permission_decision_evidence_seal_final"
     FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_evidence_seal_final"();
 
 
--- Append-only means TRUNCATE too.
+-- ConsentRecord, which this ledger now cites.
 --
--- The row triggers above refuse UPDATE and DELETE, and TRUNCATE is neither:
--- it fires no row trigger, takes no row lock, and empties the table. On a
--- ledger whose whole value is that it cannot be rewritten, that is the
--- remaining verb -- and `TRUNCATE ... CASCADE` on one of these tables reaches
--- the others through their foreign keys, so it is the one statement that can
--- remove a sealed verdict and the event it rested on together.
+-- Its own comment has said "append-only: never updated, never deleted with
+-- the account" since 20260821090000, and nothing enforced it. That was
+-- survivable while it only described itself; it stopped being survivable
+-- when a sealed verdict began citing it as evidence, because an UPDATE to a
+-- cited row's address or purpose changes what that verdict rested on, after
+-- the verdict was closed against exactly that possibility.
 --
--- Statement-level, because TRUNCATE has no rows to be per-row about.
+-- The one update it accepts is the same one the ledger accepts: the foreign
+-- key's SET NULL when the account goes, which the registry records as this
+-- table's anonymisation.
 
-CREATE FUNCTION "email_ledger_no_truncate"()
+CREATE FUNCTION "consent_record_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
-    RAISE EXCEPTION 'TRUNCATE is refused on %: the permission ledger is append-only.',
-        TG_TABLE_NAME
-        USING ERRCODE = 'check_violation';
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'ConsentRecord is append-only (DELETE).'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NOT "email_ledger_only_detach"(OLD."userId", NEW."userId") THEN
+        RAISE EXCEPTION 'ConsentRecord is append-only (UPDATE).'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF ROW(NEW."id", NEW."emailAddress", NEW."purpose", NEW."action",
+           NEW."occurredAt", NEW."jurisdiction", NEW."jurisdictionSource",
+           NEW."policyVersionId", NEW."capturedVia", NEW."evidence",
+           NEW."ipHash", NEW."userAgentHash", NEW."createdAt")
+       IS DISTINCT FROM
+       ROW(OLD."id", OLD."emailAddress", OLD."purpose", OLD."action",
+           OLD."occurredAt", OLD."jurisdiction", OLD."jurisdictionSource",
+           OLD."policyVersionId", OLD."capturedVia", OLD."evidence",
+           OLD."ipHash", OLD."userAgentHash", OLD."createdAt") THEN
+        RAISE EXCEPTION 'ConsentRecord accepts no change but detaching its account.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionEvent"
-    BEFORE TRUNCATE ON "EmailPermissionEvent"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+CREATE TRIGGER "consent_record_append_only"
+    BEFORE UPDATE OR DELETE ON "ConsentRecord"
+    FOR EACH ROW EXECUTE FUNCTION "consent_record_append_only"();
 
-CREATE TRIGGER "email_ledger_no_truncate_EmailSendApproval"
-    BEFORE TRUNCATE ON "EmailSendApproval"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
-
-CREATE TRIGGER "email_ledger_no_truncate_EmailSendApprovalMember"
-    BEFORE TRUNCATE ON "EmailSendApprovalMember"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
-
-CREATE TRIGGER "email_ledger_no_truncate_EmailSendApprovalRevocation"
-    BEFORE TRUNCATE ON "EmailSendApprovalRevocation"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
-
-CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionDecision"
-    BEFORE TRUNCATE ON "EmailPermissionDecision"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
-
-CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionDecisionEvidence"
-    BEFORE TRUNCATE ON "EmailPermissionDecisionEvidence"
-    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+-- TRUNCATE, and why there is no trigger for it.
+--
+-- The row triggers above refuse UPDATE and DELETE. TRUNCATE is neither: it
+-- fires no row trigger, and `TRUNCATE ... CASCADE` on a table these point
+-- at reaches them through their foreign keys. That is a real gap and this
+-- migration does not close it, because the two ways to close it are both
+-- wrong here.
+--
+-- A `BEFORE TRUNCATE` trigger was written and removed. `EmailPermissionEvent`
+-- and `EmailPermissionDecision` carry foreign keys to `User`, and
+-- `EmailPermissionDecision` one to `EmailDelivery`, so a cascade from either
+-- reaches this ledger -- and 84 of the 138 DB integration suites reset
+-- themselves by truncating exactly those two tables. The trigger broke all
+-- of them. Converting every suite to DELETE is a change to how this
+-- repository's tests are built, which is not a feature slice's to make.
+--
+-- Revoking TRUNCATE from the runtime role is the lever that actually fits,
+-- and it reaches every table in the schema, so it belongs with whoever owns
+-- the database roles. `AdminAuditLog`, which has the same append-only claim
+-- and the same exposure, has no TRUNCATE trigger either
+-- (20260918090000_admin_audit_log_append_only).
+--
+-- What is closed here is the reachable vector: no code in this repository
+-- may issue a TRUNCATE against these tables outside a fixture, and
+-- `npm run check:protected-table-writers` refuses one.
 
 COMMIT;

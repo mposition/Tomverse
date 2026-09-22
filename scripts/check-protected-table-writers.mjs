@@ -53,6 +53,60 @@ const sources = paths.map((path) => ({
 
 const findings = checkProtectedTableWriters({ sources });
 
+// TRUNCATE against the permission ledger.
+//
+// The ledger's row triggers refuse UPDATE and DELETE and cannot see TRUNCATE:
+// it fires no row trigger, and a cascade from `User` or `EmailDelivery`
+// reaches these tables through their foreign keys
+// (prisma/migrations/20260921170000_email_permission_ledger). A BEFORE
+// TRUNCATE trigger would have closed it and would also have broken 84 of the
+// 138 DB integration suites, which reset themselves by truncating exactly
+// those two tables; revoking the privilege is the lever that fits and it
+// reaches every table in the schema, so it belongs with whoever owns the
+// database roles.
+//
+// What is closed here is the vector this repository controls: none of its own
+// code may issue the statement. A fixture may, and says so by living under
+// tests/ -- `selectScannedPaths` already excludes those.
+const LEDGER_TABLES = [
+  "EmailPermissionEvent",
+  "EmailSendApproval",
+  "EmailSendApprovalMember",
+  "EmailSendApprovalRevocation",
+  "EmailPermissionDecision",
+  "EmailPermissionDecisionEvidence",
+];
+
+// One statement, however it is spelled: the table may be quoted or not, may be
+// schema-qualified, and may be the second or tenth name in the list.
+const TRUNCATE_STATEMENT = /\bTRUNCATE\b[\s\S]{0,400}?;/gi;
+
+const truncateFindings = [];
+for (const { path, text } of sources) {
+  TRUNCATE_STATEMENT.lastIndex = 0;
+  let match;
+  while ((match = TRUNCATE_STATEMENT.exec(text)) !== null) {
+    for (const table of LEDGER_TABLES) {
+      if (new RegExp(`\\b${table}\\b`).test(match[0])) {
+        truncateFindings.push({ path, table });
+      }
+    }
+  }
+}
+
+if (truncateFindings.length > 0) {
+  console.error(
+    "Protected table writer check failed: the permission ledger is append-only " +
+      "and TRUNCATE is the one verb its triggers cannot refuse.\n" +
+      truncateFindings
+        .map(({ path, table }) => `  - ${path} truncates ${table}`)
+        .join("\n") +
+      "\n\nIf a fixture needs this, it belongs under tests/. If production " +
+      "code does, the ledger is not append-only and that is a contract change."
+  );
+  process.exit(1);
+}
+
 if (findings.length > 0) {
   console.error(describeFindings(findings));
   process.exit(1);
@@ -63,5 +117,5 @@ console.log(
     PROTECTED_TABLES.map(
       (entry) => `no direct ${entry.table} write found outside ${entry.writers.join(", ")}`
     ).join("; ") +
-    "."
+    `; no TRUNCATE of the permission ledger's ${LEDGER_TABLES.length} table(s) outside tests.`
 );

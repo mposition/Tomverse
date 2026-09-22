@@ -26,15 +26,17 @@ import {
 /**
  * Clears what this suite builds around the ledger, and nothing of the ledger.
  *
- * The six ledger tables refuse TRUNCATE -- that is the third verb append-only
- * has to refuse, after UPDATE and DELETE, and `TRUNCATE ... CASCADE` on one of
- * them reaches the others through their foreign keys. So the rows stay, and
- * every assertion in this file is scoped by a `where` that names the row it
- * made: a `count` over an approval id, a source event key, a decision id.
- * Leftovers from an earlier case are invisible to all of them.
+ * The ledger rows stay, and every assertion in this file is scoped by a
+ * `where` that names the row it made: a `count` over an approval id, a source
+ * event key, a decision id. Leftovers from an earlier case are invisible to
+ * all of them, and the run has a database of its own
+ * (scripts/run-db-integration-tests.mjs), so nothing outside this file sees
+ * them either.
  *
- * The run has a database of its own (scripts/run-db-integration-tests.mjs), so
- * nothing outside this file sees them either.
+ * Truncating them would work -- there is no TRUNCATE trigger, for the reason
+ * the migration records -- and it is left undone deliberately: a suite that
+ * relies on an append-only table being empty is a suite that would pass on a
+ * database where the append-only claim had quietly stopped holding.
  */
 const resetData = () =>
   prisma.$executeRawUnsafe(
@@ -449,7 +451,7 @@ test("sealing and adding a member in one statement is still refused", async () =
        INSERT INTO "EmailSendApprovalMember"
          ("id", "approvalId", "userId", "addressDigest",
           "addressNormalizationVersion", "noticeAnchorAt", "noticeAnchorSource")
-       SELECT $2, s."id", $3, $4, 'v1', $5::timestamp, 'signup' FROM s`,
+       SELECT $2, s."id", $3, $4, 'v1', $5::timestamp, 'signup_date_deemed' FROM s`,
       approval.id,
       `m-${randomUUID()}`,
       user.id,
@@ -1095,26 +1097,6 @@ test("evidence has to be about the person the verdict is about", async () => {
   );
 });
 
-test("the ledger refuses TRUNCATE", async () => {
-  // The third verb. The row triggers refuse UPDATE and DELETE; TRUNCATE fires
-  // no row trigger and takes no row lock, and CASCADE from one of these tables
-  // reaches the rest through their foreign keys -- so it is the one statement
-  // that could remove a sealed verdict and the event it rested on together.
-  for (const table of [
-    "EmailPermissionEvent",
-    "EmailSendApproval",
-    "EmailSendApprovalMember",
-    "EmailSendApprovalRevocation",
-    "EmailPermissionDecision",
-    "EmailPermissionDecisionEvidence",
-  ]) {
-    await assert.rejects(
-      prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE`),
-      /append-only/,
-      table
-    );
-  }
-});
 
 test("sealing a verdict and adding evidence in one statement is refused", async () => {
   // A matching subject, because the consistency trigger fires first now and a
@@ -1227,4 +1209,118 @@ test("every purpose/classification pair, and only the six", async () => {
     refused,
     EMAIL_PURPOSES.length * EMAIL_CLASSIFICATIONS.length - EMAIL_PURPOSES.length
   );
+});
+
+test("evidence cannot cite a fact from after the verdict", async () => {
+  // A verdict rests on what was known when it was taken. A later notice is a
+  // reason to take another verdict, not a basis for one already sealed.
+  const { decision, emailAddress, user } = await seedSubject();
+  const afterwards = await seedEvent({
+    userId: user.id,
+    emailAddress,
+    occurredAt: at(60_000),
+    sourceEventKey: `notice:${randomUUID()}`,
+  });
+
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: decision.id,
+        eventId: afterwards.id,
+        authority: "au_sender",
+      },
+    }),
+    /happened after the verdict/
+  );
+});
+
+test("the consent ledger a sealed verdict cites cannot be rewritten", async () => {
+  // ConsentRecord has claimed to be append-only since it was created and
+  // nothing enforced it. That was survivable while it only described itself;
+  // it stopped being so when a sealed verdict began citing it, because an
+  // update to a cited row's address or purpose changes what that verdict
+  // rested on after it was closed against exactly that.
+  const { consent, user } = await seedSubject();
+
+  await assert.rejects(
+    prisma.consentRecord.update({
+      where: { id: consent.id },
+      data: { purpose: "promotions" },
+    }),
+    /append-only/
+  );
+  await assert.rejects(
+    prisma.consentRecord.delete({ where: { id: consent.id } }),
+    /append-only/
+  );
+
+  // The one update it accepts is the account going, which is the registry's
+  // anonymisation for this table.
+  await prisma.user.delete({ where: { id: user.id } });
+  const kept = await prisma.consentRecord.findUnique({ where: { id: consent.id } });
+  assert.equal(kept?.userId, null);
+  assert.equal(kept?.purpose, "product_updates");
+});
+
+test("an override names an approval that was actually given", async () => {
+  // Revocation, scope and cohort belong to the verdict path S9 builds, under
+  // the locks it holds. Whether the approval was ever closed does not: an
+  // unsealed one is a draft being assembled, and a verdict overriding it
+  // recorded a decision nobody had finished making.
+  const draft = await seedApproval();
+  const delivery = await seedDelivery();
+
+  await assert.rejects(
+    seedDecision({
+      deliveryId: delivery.id,
+      legalAllowed: false,
+      overrideApprovalId: draft.id,
+      overrideType: "risk_accepted",
+      allowed: true,
+    }),
+    /is not sealed and cannot override/
+  );
+
+  // And one sealed after the send was not in force when it went out.
+  await prisma.emailSendApproval.update({
+    where: { id: draft.id },
+    data: { sealedAt: at(60_000) },
+  });
+  await assert.rejects(
+    seedDecision({
+      deliveryId: await seedDelivery().then((d) => d.id),
+      legalAllowed: false,
+      overrideApprovalId: draft.id,
+      overrideType: "risk_accepted",
+      allowed: true,
+      evaluatedAt: at(1000),
+    }),
+    /sealed after this verdict/
+  );
+});
+
+test("authorities is a list of authorities, not of strings", async () => {
+  // "is an array" let a verdict seal with ["au_sender"], and the evidence
+  // trigger's lookup for a->>'authority' finds nothing in a string -- so no
+  // evidence could ever be attached to a verdict shaped that way, and nothing
+  // would have said why.
+  for (const authorities of [
+    ["au_sender"],
+    [{ verdict: "allowed" }],
+    [{ authority: "third", verdict: "allowed" }],
+    [{ authority: null }],
+  ]) {
+    await assert.rejects(
+      seedDecision({ authorities }),
+      /json_shape_check/,
+      JSON.stringify(authorities)
+    );
+  }
+
+  await seedDecision({
+    authorities: [
+      { authority: "recipient", verdict: "allowed" },
+      { authority: "au_sender", verdict: "allowed" },
+    ],
+  });
 });
