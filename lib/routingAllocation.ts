@@ -137,3 +137,131 @@ export const mayBreakCacheAffinity = (
     if (mode === "deterministic") return false;
     return (input.allocationSeedGrain ?? null) === "request";
 };
+
+/**
+ * The exploration the router is allowed to do, and what it was told to do it
+ * with.
+ *
+ * `enabled` has no default anywhere. The caller passes it or exploration does
+ * not happen, which is the fail-closed direction: an allocator that explored
+ * because a configuration key was missing would be changing which model
+ * answers a person's turn on the strength of an omission.
+ */
+export type TieExplorationPolicy = {
+    enabled: boolean;
+    /** What the pick is seeded on. Recorded on the run beside the mode. */
+    seedGrain: RoutingAllocationSeedGrain;
+    /**
+     * The seed itself. A string, hashed here, so the caller decides what it is
+     * derived from -- a conversation id for `session`, a request id for
+     * `request` -- and this module never reaches for one.
+     */
+    seed: string;
+};
+
+export type TieAllocation<T> = {
+    chosen: T;
+    /** The candidates the ranking could not separate, in ranked order. */
+    tied: readonly T[];
+    allocationMode: RoutingAllocationMode;
+    /** Null exactly when the mode is `deterministic`. */
+    allocationSeedGrain: RoutingAllocationSeedGrain | null;
+};
+
+/**
+ * A 32-bit FNV-1a hash, written out rather than imported.
+ *
+ * Not a security primitive and not asked to be one: what it has to do is turn
+ * a seed into the same bucket every time, including in a replay months later.
+ * Written here so this module keeps no imports at all, which is what lets it
+ * be read as the pure thing it claims to be.
+ */
+const hash32 = (value: string): number => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        // The FNV prime, as shifts, because `hash * 16777619` loses precision
+        // once the product passes 2^53.
+        hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+    }
+    return hash >>> 0;
+};
+
+/**
+ * Picks one candidate, optionally spreading across the ones the ranking could
+ * not separate.
+ *
+ * ## Why the tie and not a near-best set
+ *
+ * The routing ADR allocates with a softmax over a `routing_penalty`: a single
+ * scalar the criteria are folded into, with a temperature deciding how far
+ * from the best the traffic spreads. This does not do that, and the reason is
+ * not implementation effort.
+ *
+ * Folding the criteria into one number is a change to the objective function,
+ * which is lexicographic by decision. Making it a weighted sum means stating
+ * how much quality a dollar is worth, and that trade has not been decided by
+ * anyone. A softmax over it would be that decision arriving as a temperature
+ * constant.
+ *
+ * What a lexicographic ranking gives instead is a set that needs no such
+ * trade: the candidates its real criteria could not separate. Under partition
+ * refinement those land in one bucket and are told apart only by the last
+ * criterion, which the policy describes as arbitrary. Spreading across them
+ * costs nothing the policy can name, because the policy has already said they
+ * are equivalent.
+ *
+ * So this explores inside a tie and never outside one. Exploring outside would
+ * need the trade.
+ *
+ * ## What it still is not
+ *
+ * Spreading across a tie is a change to which model answers a turn, so it is
+ * off unless a caller says otherwise. A tie of one is deterministic whatever
+ * the policy says -- there is nothing to spread across.
+ *
+ * The pick is a hash of the seed, so a replay of the same run picks the same
+ * candidate. Ordering the tie by `keyFor` before the modulo is what makes that
+ * true: the ranked order within a bucket already comes from the last
+ * criterion, but a caller that re-ranked with one more candidate would shift
+ * every index after it.
+ */
+export const allocateWithinTie = <T>(
+    ranked: readonly T[],
+    isTiedWithTop: (candidate: T) => boolean,
+    keyFor: (candidate: T) => string,
+    exploration: TieExplorationPolicy | null
+): TieAllocation<T> | null => {
+    if (ranked.length === 0) return null;
+
+    const tied = ranked.filter(isTiedWithTop);
+    // The top is tied with itself. A predicate that excludes it has been given
+    // the wrong comparison, and taking its word would drop the winner.
+    const candidates = tied.includes(ranked[0]) ? tied : [ranked[0], ...tied];
+
+    const deterministic: TieAllocation<T> = {
+        chosen: ranked[0],
+        tied: candidates,
+        allocationMode: "deterministic",
+        allocationSeedGrain: null,
+    };
+
+    if (!exploration?.enabled) return deterministic;
+    if (candidates.length <= 1) return deterministic;
+    // A seed nobody supplied is not a seed. Refusing rather than reaching for
+    // a clock or a random source is what keeps a replay honest.
+    if (!exploration.seed.trim()) return deterministic;
+
+    const ordered = [...candidates].sort((left, right) => {
+        const a = keyFor(left);
+        const b = keyFor(right);
+        return a < b ? -1 : a > b ? 1 : 0;
+    });
+
+    return {
+        chosen: ordered[hash32(exploration.seed) % ordered.length],
+        tied: candidates,
+        allocationMode: "explore_bounded",
+        allocationSeedGrain: exploration.seedGrain,
+    };
+};

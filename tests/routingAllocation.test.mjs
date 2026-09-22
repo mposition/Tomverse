@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
     ROUTING_ALLOCATION_MODES,
+    allocateWithinTie,
     ROUTING_ALLOCATION_SEED_GRAINS,
     mayBreakCacheAffinity,
     routingAllocationProblems,
@@ -165,4 +166,162 @@ test("nothing reads the two columns", () => {
     );
     assert.match(checker, /const DARK_COLUMNS = \["allocationMode", "allocationSeedGrain"\]/);
     assert.match(checker, /const DARK_COLUMN_VOCABULARY = \["lib\/routingAllocation\.ts"\]/);
+});
+
+// ---------------------------------------------------------------------------
+// Allocation inside a tie
+// ---------------------------------------------------------------------------
+
+const candidate = (id) => ({ id });
+const keyFor = (entry) => entry.id;
+const tiedWith = (...ids) => (entry) => ids.includes(entry.id);
+
+const exploring = (seed, seedGrain = "session") => ({
+    enabled: true,
+    seedGrain,
+    seed,
+});
+
+test("no exploration policy means the top of the ranking", () => {
+    // Fail-closed. An allocator that spread traffic because a configuration
+    // key was missing would be changing which model answers a turn on the
+    // strength of an omission.
+    const ranked = [candidate("a"), candidate("b"), candidate("c")];
+    for (const policy of [
+        null,
+        { enabled: false, seedGrain: "session", seed: "s" },
+    ]) {
+        const result = allocateWithinTie(ranked, tiedWith("a", "b"), keyFor, policy);
+        assert.equal(result.chosen.id, "a");
+        assert.equal(result.allocationMode, "deterministic");
+        assert.equal(result.allocationSeedGrain, null);
+    }
+});
+
+test("a tie of one is deterministic whatever the policy says", () => {
+    // There is nothing to spread across.
+    const ranked = [candidate("a"), candidate("b")];
+    const result = allocateWithinTie(ranked, tiedWith("a"), keyFor, exploring("s"));
+    assert.equal(result.chosen.id, "a");
+    assert.equal(result.allocationMode, "deterministic");
+});
+
+test("a seed nobody supplied is not a seed", () => {
+    // Refusing rather than reaching for a clock or a random source is what
+    // keeps a replay honest.
+    const ranked = [candidate("a"), candidate("b")];
+    for (const seed of ["", "   "]) {
+        const result = allocateWithinTie(
+            ranked,
+            tiedWith("a", "b"),
+            keyFor,
+            exploring(seed)
+        );
+        assert.equal(result.allocationMode, "deterministic", JSON.stringify(seed));
+    }
+});
+
+test("exploration stays inside the tie and records its grain", () => {
+    const ranked = [candidate("a"), candidate("b"), candidate("c")];
+    const chosen = new Set();
+    for (let index = 0; index < 200; index += 1) {
+        const result = allocateWithinTie(
+            ranked,
+            tiedWith("a", "b"),
+            keyFor,
+            exploring(`seed-${index}`)
+        );
+        assert.equal(result.allocationMode, "explore_bounded");
+        assert.equal(result.allocationSeedGrain, "session");
+        chosen.add(result.chosen.id);
+    }
+    // Never the candidate the ranking actually separated. Exploring outside
+    // the tie would need a trade between quality and cost that nobody has
+    // made.
+    assert.deepEqual([...chosen].sort(), ["a", "b"]);
+});
+
+test("the same seed picks the same candidate", () => {
+    // A replay of the same run answers the same way, months later.
+    const ranked = [candidate("a"), candidate("b"), candidate("c")];
+    const pick = () =>
+        allocateWithinTie(ranked, tiedWith("a", "b", "c"), keyFor, exploring("fixed"))
+            .chosen.id;
+    const first = pick();
+    for (let index = 0; index < 10; index += 1) assert.equal(pick(), first);
+});
+
+test("the pick does not move when an unrelated candidate is added", () => {
+    // The tie is ordered by key before the modulo. Without that, a rerank that
+    // added one candidate would shift every index after it and a conversation
+    // would leave the placement holding its prefix for no reason.
+    const withoutExtra = allocateWithinTie(
+        [candidate("a"), candidate("b")],
+        tiedWith("a", "b"),
+        keyFor,
+        exploring("fixed")
+    );
+    const withExtra = allocateWithinTie(
+        [candidate("a"), candidate("b"), candidate("z")],
+        tiedWith("a", "b"),
+        keyFor,
+        exploring("fixed")
+    );
+    assert.equal(withExtra.chosen.id, withoutExtra.chosen.id);
+});
+
+test("the top is in its own tie even if the predicate forgets it", () => {
+    // A predicate that excludes the top has been given the wrong comparison,
+    // and taking its word would drop the winner.
+    const ranked = [candidate("a"), candidate("b")];
+    const result = allocateWithinTie(ranked, () => false, keyFor, null);
+    assert.equal(result.chosen.id, "a");
+    assert.deepEqual(result.tied.map(keyFor), ["a"]);
+});
+
+test("an empty ranking allocates nothing", () => {
+    assert.equal(allocateWithinTie([], () => true, keyFor, exploring("s")), null);
+});
+
+test("what the allocator produces is what the columns accept", () => {
+    // The two halves of this axis were written separately, so they are checked
+    // against each other rather than assumed to agree.
+    const ranked = [candidate("a"), candidate("b")];
+    for (const policy of [null, exploring("s", "session"), exploring("s", "request")]) {
+        const result = allocateWithinTie(ranked, tiedWith("a", "b"), keyFor, policy);
+        assert.deepEqual(
+            routingAllocationProblems({
+                allocationMode: result.allocationMode,
+                allocationSeedGrain: result.allocationSeedGrain,
+            }),
+            [],
+            JSON.stringify(policy)
+        );
+    }
+});
+
+test("the allocator does not fold the criteria into a number", () => {
+    // The ADR allocates with a softmax over a routing_penalty: one scalar the
+    // criteria are folded into, with a temperature deciding how far from the
+    // best the traffic spreads. That fold is a change to the objective
+    // function and states how much quality a dollar is worth, which nobody has
+    // decided.
+    const source = readFileSync(
+        new URL("../lib/routingAllocation.ts", import.meta.url),
+        "utf8"
+    );
+    const statements = source
+        .split("\n")
+        .filter((line) => {
+            const trimmed = line.trimStart();
+            return !trimmed.startsWith("*") && !trimmed.startsWith("/*") && !trimmed.startsWith("//");
+        })
+        .join("\n");
+    for (const forbidden of ["softmax", "temperature", "penalty", "weight", "Math.exp"]) {
+        assert.ok(!statements.includes(forbidden), `${forbidden} is absent`);
+    }
+    // And no randomness: the pick comes from the caller's seed, so a replay
+    // answers the same way.
+    assert.ok(!statements.includes("Math.random"), "Math.random is absent");
+    assert.ok(!statements.includes("Date.now"), "Date.now is absent");
 });
