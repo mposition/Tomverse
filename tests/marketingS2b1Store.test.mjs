@@ -808,16 +808,58 @@ const marketingRouteOffenders = (relative, source) => {
             );
             continue;
           }
+          // The whole value, not its outermost node. Asking whether the
+          // property *is* a call caught `row: store()` and missed
+          // `row: cond ? store() : 1`, `row: void store()`,
+          // `row: store() as object`, `row: store() satisfies object`,
+          // `metadata: { row: store() }` and `...{ row: store() }` -- all of
+          // which run before the wrapper is entered, so none of them has a
+          // session, `marketing:write`, a recent sign-in or an audit
+          // transaction around it.
+          //
+          // Functions are where the walk stops. `run`, `action`, `summary`,
+          // `gate` and `metadata` are arrows the wrapper calls *inside* the
+          // transaction; a call in one of their bodies is the point of them.
+          const evaluatesEarly = (node) => {
+            let found = false;
+            const walk = (inner) => {
+              if (found) return;
+              if (
+                ts.isArrowFunction(inner) ||
+                ts.isFunctionExpression(inner) ||
+                ts.isFunctionDeclaration(inner) ||
+                ts.isMethodDeclaration(inner)
+              ) {
+                return;
+              }
+              if (
+                ts.isCallExpression(inner) ||
+                ts.isNewExpression(inner) ||
+                ts.isAwaitExpression(inner) ||
+                ts.isTaggedTemplateExpression(inner)
+              ) {
+                found = true;
+                return;
+              }
+              ts.forEachChild(inner, walk);
+            };
+            walk(node);
+            return found;
+          };
+
           for (const property of spec.properties) {
             const value = ts.isPropertyAssignment(property)
               ? property.initializer
-              : null;
+              : ts.isSpreadAssignment(property)
+                ? property.expression
+                : null;
             if (!value) continue;
-            let inner = value;
-            while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-            if (ts.isCallExpression(inner) || ts.isAwaitExpression(inner)) {
+            if (evaluatesEarly(value)) {
+              const label = ts.isSpreadAssignment(property)
+                ? "a spread"
+                : property.name.getText(tree);
               offenders.push(
-                `${relative}: ${name} evaluates ${property.name.getText(tree)} before the predicate runs`
+                `${relative}: ${name} evaluates ${label} before the predicate runs`
               );
             }
           }
@@ -948,6 +990,23 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "  return runMarketingAdminMutation({ row: await pauseMarketingChannel(req, {}) });\n" +
         "}\n",
     ],
+    // Six more ways to put the same call one node deeper. Every one of them
+    // runs while the argument object is built, which is before the wrapper is
+    // entered.
+    ...[
+      "{ ...{ row: pauseMarketingChannel(req, {}) } }",
+      "{ row: req ? pauseMarketingChannel(req, {}) : 1 }",
+      "{ metadata: { row: pauseMarketingChannel(req, {}) } }",
+      "{ row: void pauseMarketingChannel(req, {}) }",
+      "{ row: pauseMarketingChannel(req, {}) satisfies object }",
+      "{ row: pauseMarketingChannel(req, {}) as object }",
+    ].map((spec) => [
+      `a store call one node deeper: ${spec}`,
+      imports +
+        "export async function POST(req: Request) {\n" +
+        `  return runMarketingAdminMutation(${spec});\n` +
+        "}\n",
+    ]),
     [
       "a handler that reads the session itself",
       'import { getServerSession } from "next-auth/next";\n' +
@@ -959,6 +1018,8 @@ test("the route sweep fails every shape that gets past the predicate", () => {
     ],
   ];
 
+  // Without this the table can shrink to nothing and still pass.
+  assert.ok(bypasses.length >= 14, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);

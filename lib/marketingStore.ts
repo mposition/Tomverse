@@ -1111,7 +1111,11 @@ async function expireDueApprovals(
 export async function drainDueMarketingApprovals(
   database: MarketingTransaction,
   rawInput: { id: string },
-): Promise<{ status: string; expiredPostIds: string[]; remaining: boolean }> {
+): Promise<{
+  status: MarketingChannelStatus;
+  expiredPostIds: string[];
+  remaining: boolean;
+}> {
   const input = { id: String(rawInput.id) };
   const channel = await lockMarketingChannel(database, input.id);
   if (!marketingChannelWasStopped(channel.status)) {
