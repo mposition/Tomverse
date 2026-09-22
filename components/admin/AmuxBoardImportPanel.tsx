@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminAmuxBoardImportMessages } from "@/lib/adminMessages/amuxBoardImport";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-import");
@@ -17,6 +19,7 @@ type PreviewBody = {
 };
 
 export function AmuxBoardImportPanel() {
+  const messages = useAdminMessages(adminAmuxBoardImportMessages);
   const [manifest, setManifest] = useState("");
   const [approvalId, setApprovalId] = useState("");
   const [pending, setPending] = useState(false);
@@ -45,13 +48,10 @@ export function AmuxBoardImportPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-import-panel">
-      <h1 className="text-lg font-semibold text-zinc-900">AMUX catalog import</h1>
-      <p className="text-sm text-zinc-700">
-        Preview reads the catalog and writes nothing. Prepare, approve, reject and expire record an approval.
-        Apply stays off until a separate production approval. This screen cannot turn it on.
-      </p>
+      <h1 className="text-lg font-semibold text-zinc-900">{messages.title}</h1>
+      <p className="text-sm text-zinc-700">{messages.description}</p>
       <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800" htmlFor="amux-board-import-manifest">
-        Catalog manifest
+        {messages.manifestLabel}
         <textarea
           id="amux-board-import-manifest"
           className="min-h-40 w-full rounded-md border border-zinc-300 p-3 text-base text-zinc-900"
@@ -67,7 +67,7 @@ export function AmuxBoardImportPanel() {
           disabled={pending || manifest.trim().length === 0}
           onClick={() => send("preview", manifest)}
         >
-          Preview
+          {messages.preview}
         </button>
         <button
           type="button"
@@ -75,11 +75,11 @@ export function AmuxBoardImportPanel() {
           disabled={pending || manifest.trim().length === 0}
           onClick={() => send("prepare", manifest)}
         >
-          Prepare
+          {messages.prepare}
         </button>
       </div>
       <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800" htmlFor="amux-board-import-approval">
-        Approval id
+        {messages.approvalLabel}
         <input
           id="amux-board-import-approval"
           className="min-h-11 w-full rounded-md border border-zinc-300 px-3 text-base text-zinc-900"
@@ -95,7 +95,7 @@ export function AmuxBoardImportPanel() {
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("approve", JSON.stringify({ approvalId }))}
         >
-          Approve
+          {messages.approve}
         </button>
         <button
           type="button"
@@ -103,7 +103,7 @@ export function AmuxBoardImportPanel() {
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("reject", JSON.stringify({ approvalId }))}
         >
-          Reject
+          {messages.reject}
         </button>
         <button
           type="button"
@@ -111,7 +111,7 @@ export function AmuxBoardImportPanel() {
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("expire", JSON.stringify({ approvalId }))}
         >
-          Expire
+          {messages.expire}
         </button>
         <button
           type="button"
@@ -119,7 +119,7 @@ export function AmuxBoardImportPanel() {
           disabled={pending}
           onClick={() => send("expire-due", "{}")}
         >
-          Expire due
+          {messages.expireDue}
         </button>
         <button
           type="button"
@@ -127,27 +127,33 @@ export function AmuxBoardImportPanel() {
           disabled
           aria-describedby="amux-board-import-apply-reason"
         >
-          Apply
+          {messages.apply}
         </button>
       </div>
       <p id="amux-board-import-apply-reason" className="text-sm text-zinc-700">
-        Apply is disabled. The server refuses it even if this control is bypassed.
+        {messages.applyDisabled}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline" href={STEP_UP_HREF}>
-          Renew administrator sign-in
+          {messages.renewSignIn}
         </a>
       ) : null}
       {result ? (
         <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800" role="status">
-          {result.error ? <p>Error: {result.error}</p> : null}
-          {result.status ? <p>Status: {result.status}</p> : null}
-          {result.refusal ? <p>Refusal: {result.refusal}</p> : null}
-          {typeof result.applyPermitted === "boolean" ? <p>Apply permitted: {String(result.applyPermitted)}</p> : null}
+          {result.error ? <p>{messages.error(result.error)}</p> : null}
+          {result.status ? <p>{messages.status(result.status)}</p> : null}
+          {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}
+          {typeof result.applyPermitted === "boolean" ? (
+            <p>{messages.applyPermitted(String(result.applyPermitted))}</p>
+          ) : null}
           {classification ? (
             <p>
-              Create {classification.create.length}, no-op {classification.noOp.length}, conflict{" "}
-              {classification.conflict.length}, exclude {classification.exclude.length}.
+              {messages.counts(
+                classification.create.length,
+                classification.noOp.length,
+                classification.conflict.length,
+                classification.exclude.length,
+              )}
             </p>
           ) : null}
         </div>

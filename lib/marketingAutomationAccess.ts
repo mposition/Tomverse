@@ -231,9 +231,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-22: AMUX backlog default and source-provenance columns change only
  * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
  * admission decision; the whole-schema fingerprint moves by design.
+ *
+ * 2026-09-22: the catalog-import approval table is another `Amux*` model on
+ * the same watched schema. It does not change a marketing model, webhook
+ * writer, or admission decision. The digest moves because the schema file
+ * is watched as a whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "0dafbff595b521569875b0e87067c48b5a8c83b6aa30b421ecd1ea0663c28272";
+  "c39e0736f7acdfeb5e8ad339ae3737bca5d8846794615f63bd68a5b74dd63bfb";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
