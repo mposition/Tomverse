@@ -901,6 +901,23 @@ DECLARE
     s_scope TEXT;
     s_occurred TIMESTAMP(3);
 BEGIN
+    -- Shape is the constraints' job, and a BEFORE trigger runs first.
+    --
+    -- A row with no source, or with both, is malformed rather than
+    -- inconsistent, and `one_source_check` says so by name. Reaching the
+    -- comparisons below would answer "about a different address" for a row
+    -- that names no address at all -- true, useless, and pointing at the
+    -- wrong rule. The same goes for an authority outside the list, which
+    -- `authority_check` names. Both are passed through for the constraint
+    -- to refuse.
+    IF (NEW."eventId" IS NULL) = (NEW."consentRecordId" IS NULL) THEN
+        RETURN NEW;
+    END IF;
+
+    IF NEW."authority" NOT IN ('recipient', 'au_sender') THEN
+        RETURN NEW;
+    END IF;
+
     EXECUTE pg_catalog.format(
         'SELECT d."userId", lower(d."emailAddress"), d."purpose", d."classification", ' ||
         'd."authorities", d."evaluatedAt" FROM %I."EmailPermissionDecision" d ' ||

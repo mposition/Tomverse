@@ -112,8 +112,8 @@ const seedApproval = (data: Record<string, unknown> = {}) =>
       approvalType: "risk_accepted",
       approvedById: "owner",
       approvedByEmail: "owner@example.test",
-      createdAt: FIXTURE_EPOCH,
-      approvedAt: FIXTURE_EPOCH,
+      createdAt: at(APPROVED_AT),
+      approvedAt: at(APPROVED_AT),
       reason: "78 accounts, all reached through personal contact",
       reviewCondition: "any organic signup, unsubscribe or complaint",
       policyVersionId: policyId,
@@ -125,7 +125,7 @@ const seedApproval = (data: Record<string, unknown> = {}) =>
 const seal = (id: string) =>
   prisma.emailSendApproval.update({
     where: { id },
-    data: { sealedAt: at(1000) },
+    data: { sealedAt: at(SEALED_AT) },
   });
 
 /**
@@ -141,6 +141,14 @@ const seal = (id: string) =>
  */
 const FIXTURE_EPOCH = new Date("2026-09-21T00:00:00.000Z");
 const at = (ms: number) => new Date(FIXTURE_EPOCH.getTime() + ms);
+
+// An approval is given and sealed **before** the epoch, because a verdict may
+// only override one that was already closed when the verdict was taken, and
+// the verdicts here are evaluated at the epoch itself. The first real run of
+// this suite refused three cases on exactly that ordering -- the approval was
+// sealed a second after the verdict it was supposed to authorise.
+const APPROVED_AT = -2_000;
+const SEALED_AT = -1_000;
 
 // Every value a constraint compares comes from `at`, including the ones
 // inside raw SQL -- `now()` there would reintroduce the wall clock into an
