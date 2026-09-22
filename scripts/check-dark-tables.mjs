@@ -38,6 +38,7 @@ const DARK_TABLES = [
     "AvailabilityObservation",
     "DeploymentCacheAffinity",
     "RoutingIdentityManifest",
+    "RoutingIdentityManifestEntry",
 ];
 
 
