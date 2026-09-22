@@ -580,6 +580,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         capturedVia: true,
         jurisdiction: true,
         jurisdictionSource: true,
+        policyVersionId: true,
       },
       take: EXPORT_ROW_CAP,
     }),
@@ -659,6 +660,13 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         ruleVersions: true,
         policyVersionId: true,
         evaluatedAt: true,
+        // When suppression was last read for this verdict, and when the message
+        // was handed to the provider. They are facts about their own message
+        // and the gap between them is what a complaint is usually about; an
+        // export that returns the conclusion and not when it was acted on
+        // tells them less than it has.
+        suppressionCheckedAt: true,
+        providerSubmittedAt: true,
         evidence: {
           select: {
             authority: true,

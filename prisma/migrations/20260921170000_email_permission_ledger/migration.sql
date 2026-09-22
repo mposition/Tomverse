@@ -171,6 +171,26 @@ ALTER TABLE "EmailPermissionDecisionEvidence" ADD CONSTRAINT "EmailPermissionDec
 ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_kind_check"
     CHECK ("kind" IN ('notice_shown', 'objected', 'relationship_started', 'relationship_ended', 'basis_ended'));
 
+-- The anchor the two-year notice counts from, and where the date came from.
+--
+-- The policy names exactly one value: the owner decided that for this cohort
+-- the signup date is *deemed* to be the anchor, and `signup_date_deemed` is
+-- what says so (draft section 7.7). "signup" is not the same claim -- it reads
+-- as a fact about consent rather than as a decision to treat a date as one,
+-- which is precisely the distinction that decision was careful about. Both
+-- fixtures stored it until 2026-09-22 and the column took it.
+--
+-- A second value is a decision, not an addition: a member whose anchor is a
+-- real consent date belongs to a cohort that did not need deeming.
+ALTER TABLE "EmailSendApprovalMember" ADD CONSTRAINT "EmailSendApprovalMember_noticeAnchorSource_check"
+    CHECK ("noticeAnchorSource" IN ('signup_date_deemed'));
+
+-- Which authority cited a row. Two exist: the receiver's and the Australian
+-- sender's (draft section 4.2). An open string here would let a verdict rest
+-- on an authority no rule defines, permanently and unreadably.
+ALTER TABLE "EmailPermissionDecisionEvidence" ADD CONSTRAINT "EmailPermissionDecisionEvidence_authority_check"
+    CHECK ("authority" IN ('recipient', 'au_sender'));
+
 ALTER TABLE "EmailPermissionEvent" ADD CONSTRAINT "EmailPermissionEvent_capturedVia_check"
     CHECK ("capturedVia" IN ('signup_form', 'preference_center', 'unsubscribe_page', 'in_product_notice', 'admin', 'system', 'provider_complaint'));
 
@@ -762,6 +782,101 @@ CREATE TRIGGER "email_permission_decision_evidence_append_only"
     BEFORE INSERT OR UPDATE OR DELETE ON "EmailPermissionDecisionEvidence"
     FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_evidence_append_only"();
 
+-- Evidence has to be about the person the verdict is about.
+--
+-- Until 2026-09-22 the foreign keys and the XOR check were the whole of it,
+-- which meant a verdict for one account could cite another account's notice or
+-- consent and then be sealed -- permanent, unreadable false evidence, in the
+-- one table whose entire value is that it is neither. The fixtures proved it
+-- was reachable: they seeded three different addresses and the insert
+-- succeeded.
+--
+-- What is compared is what the two rows both know: the normalised address, the
+-- account when both rows name one, and -- for a permission event -- that its
+-- scope covers what the verdict decided. The authority has to be one the
+-- verdict actually applied, or the row cites a basis nothing weighed.
+--
+-- What is deliberately *not* compared here is the approval's seal, revocation,
+-- scope and cohort. Those belong to the verdict-taking path (draft section
+-- 7.6) which S9 builds, under the locks that path holds; re-deriving them from
+-- a trigger on this table would be a second implementation of the rule that
+-- could disagree with the first.
+
+CREATE FUNCTION "email_permission_decision_evidence_consistent"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    d_user TEXT;
+    d_address TEXT;
+    d_purpose TEXT;
+    d_classification TEXT;
+    d_authorities JSONB;
+    s_user TEXT;
+    s_address TEXT;
+    s_scope TEXT;
+BEGIN
+    SELECT d."userId", lower(d."emailAddress"), d."purpose", d."classification",
+           d."authorities"
+      INTO d_user, d_address, d_purpose, d_classification, d_authorities
+      FROM "EmailPermissionDecision" d
+     WHERE d."id" = NEW."decisionId"
+       FOR SHARE;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(d_authorities) AS a
+         WHERE a->>'authority' = NEW."authority"
+    ) THEN
+        RAISE EXCEPTION 'EmailPermissionDecision % did not apply authority %.',
+            NEW."decisionId", NEW."authority"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW."eventId" IS NOT NULL THEN
+        SELECT e."userId", lower(e."emailAddress"), e."scopeKey"
+          INTO s_user, s_address, s_scope
+          FROM "EmailPermissionEvent" e
+         WHERE e."id" = NEW."eventId";
+
+        IF s_scope <> '*' AND s_scope <> d_purpose AND s_scope <> d_classification THEN
+            RAISE EXCEPTION 'Permission event % is scoped to %, which the verdict did not decide.',
+                NEW."eventId", s_scope
+                USING ERRCODE = 'check_violation';
+        END IF;
+    ELSE
+        SELECT c."userId", lower(c."emailAddress"), c."purpose"
+          INTO s_user, s_address, s_scope
+          FROM "ConsentRecord" c
+         WHERE c."id" = NEW."consentRecordId";
+
+        IF s_scope <> d_purpose THEN
+            RAISE EXCEPTION 'Consent record % is about %, which the verdict did not decide.',
+                NEW."consentRecordId", s_scope
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    IF s_address IS DISTINCT FROM d_address THEN
+        RAISE EXCEPTION 'Evidence for decision % is about a different address.',
+            NEW."decisionId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF d_user IS NOT NULL AND s_user IS NOT NULL AND s_user <> d_user THEN
+        RAISE EXCEPTION 'Evidence for decision % is about a different account.',
+            NEW."decisionId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_permission_decision_evidence_consistent"
+    BEFORE INSERT ON "EmailPermissionDecisionEvidence"
+    FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_evidence_consistent"();
+
 CREATE FUNCTION "email_permission_decision_evidence_seal_final"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -786,5 +901,52 @@ CREATE CONSTRAINT TRIGGER "email_permission_decision_evidence_seal_final"
     AFTER INSERT ON "EmailPermissionDecisionEvidence"
     DEFERRABLE INITIALLY IMMEDIATE
     FOR EACH ROW EXECUTE FUNCTION "email_permission_decision_evidence_seal_final"();
+
+
+-- Append-only means TRUNCATE too.
+--
+-- The row triggers above refuse UPDATE and DELETE, and TRUNCATE is neither:
+-- it fires no row trigger, takes no row lock, and empties the table. On a
+-- ledger whose whole value is that it cannot be rewritten, that is the
+-- remaining verb -- and `TRUNCATE ... CASCADE` on one of these tables reaches
+-- the others through their foreign keys, so it is the one statement that can
+-- remove a sealed verdict and the event it rested on together.
+--
+-- Statement-level, because TRUNCATE has no rows to be per-row about.
+
+CREATE FUNCTION "email_ledger_no_truncate"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'TRUNCATE is refused on %: the permission ledger is append-only.',
+        TG_TABLE_NAME
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionEvent"
+    BEFORE TRUNCATE ON "EmailPermissionEvent"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailSendApproval"
+    BEFORE TRUNCATE ON "EmailSendApproval"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailSendApprovalMember"
+    BEFORE TRUNCATE ON "EmailSendApprovalMember"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailSendApprovalRevocation"
+    BEFORE TRUNCATE ON "EmailSendApprovalRevocation"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionDecision"
+    BEFORE TRUNCATE ON "EmailPermissionDecision"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
+
+CREATE TRIGGER "email_ledger_no_truncate_EmailPermissionDecisionEvidence"
+    BEFORE TRUNCATE ON "EmailPermissionDecisionEvidence"
+    FOR EACH STATEMENT EXECUTE FUNCTION "email_ledger_no_truncate"();
 
 COMMIT;

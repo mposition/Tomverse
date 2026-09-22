@@ -23,12 +23,23 @@ import {
  * would prove the service agrees with itself and nothing about the ledger.
  */
 
+/**
+ * Clears what this suite builds around the ledger, and nothing of the ledger.
+ *
+ * The six ledger tables refuse TRUNCATE -- that is the third verb append-only
+ * has to refuse, after UPDATE and DELETE, and `TRUNCATE ... CASCADE` on one of
+ * them reaches the others through their foreign keys. So the rows stay, and
+ * every assertion in this file is scoped by a `where` that names the row it
+ * made: a `count` over an approval id, a source event key, a decision id.
+ * Leftovers from an earlier case are invisible to all of them.
+ *
+ * The run has a database of its own (scripts/run-db-integration-tests.mjs), so
+ * nothing outside this file sees them either.
+ */
 const resetData = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "EmailPermissionDecisionEvidence", "EmailPermissionDecision",
-       "EmailSendApprovalRevocation", "EmailSendApprovalMember",
-       "EmailSendApproval", "EmailPermissionEvent", "EmailDelivery", "EmailEvent",
-       "TemplateVersion", "EmailTemplate" RESTART IDENTITY CASCADE`
+    `TRUNCATE TABLE "EmailDelivery", "EmailEvent", "TemplateVersion",
+       "EmailTemplate" RESTART IDENTITY CASCADE`
   );
 
 const createUser = () =>
@@ -332,7 +343,7 @@ test("a cohort belongs to an override, never to a waiver", async () => {
         addressDigest: "a".repeat(64),
         addressNormalizationVersion: "v1",
         noticeAnchorAt: FIXTURE_EPOCH,
-        noticeAnchorSource: "signup",
+        noticeAnchorSource: "signup_date_deemed",
       },
     }),
     /scoped by rule rather than by cohort/
@@ -346,7 +357,7 @@ test("a cohort belongs to an override, never to a waiver", async () => {
       addressDigest: "a".repeat(64),
       addressNormalizationVersion: "v1",
       noticeAnchorAt: FIXTURE_EPOCH,
-      noticeAnchorSource: "signup",
+      noticeAnchorSource: "signup_date_deemed",
     },
   });
   assert.equal(
@@ -376,7 +387,7 @@ test("sealing closes the approval and its whole membership", async () => {
       addressDigest: "a".repeat(64),
       addressNormalizationVersion: "v1",
       noticeAnchorAt: FIXTURE_EPOCH,
-      noticeAnchorSource: "signup",
+      noticeAnchorSource: "signup_date_deemed",
     },
   });
 
@@ -403,7 +414,7 @@ test("sealing closes the approval and its whole membership", async () => {
         addressDigest: "b".repeat(64),
         addressNormalizationVersion: "v1",
         noticeAnchorAt: FIXTURE_EPOCH,
-        noticeAnchorSource: "signup",
+        noticeAnchorSource: "signup_date_deemed",
       },
     }),
     /sealed/
@@ -890,9 +901,48 @@ test("a withdrawal cannot precede the approval it withdraws", async () => {
   );
 });
 
+/**
+ * A decision, an event and a consent that are all about one person.
+ *
+ * Evidence now has to be about the subject the verdict is about, so a fixture
+ * that seeds three different addresses no longer proves anything about
+ * evidence -- it proves the trigger works, which is a different case. This
+ * builds the matching set once.
+ */
+const seedSubject = async (authorities = ["au_sender", "recipient"]) => {
+  const user = await createUser();
+  const emailAddress = `subject-${randomUUID()}@example.test`;
+  const delivery = await seedDelivery();
+
+  const decision = await seedDecision({
+    deliveryId: delivery.id,
+    userId: user.id,
+    emailAddress,
+    authorities: authorities.map((authority) => ({
+      authority,
+      verdict: "allowed",
+    })),
+  });
+  const event = await seedEvent({ userId: user.id, emailAddress });
+  const consent = await prisma.consentRecord.create({
+    data: {
+      userId: user.id,
+      emailAddress,
+      purpose: "product_updates",
+      action: "granted",
+      occurredAt: FIXTURE_EPOCH,
+      jurisdiction: "AU",
+      jurisdictionSource: "self_reported",
+      policyVersionId: policyId,
+      capturedVia: "preference_center",
+    },
+  });
+
+  return { user, emailAddress, decision, event, consent };
+};
+
 test("evidence cites exactly one ledger, and closes with the verdict", async () => {
-  const event = await seedEvent();
-  const decision = await seedDecision();
+  const { decision, event, consent } = await seedSubject();
 
   await assert.rejects(
     prisma.emailPermissionDecisionEvidence.create({
@@ -901,23 +951,33 @@ test("evidence cites exactly one ledger, and closes with the verdict", async () 
     /one_source_check/
   );
 
-  const consent = await prisma.consentRecord.findFirst();
-  if (consent) {
-    await assert.rejects(
-      prisma.emailPermissionDecisionEvidence.create({
-        data: {
-          decisionId: decision.id,
-          eventId: event.id,
-          consentRecordId: consent.id,
-          authority: "au_sender",
-        },
-      }),
-      /one_source_check/
-    );
-  }
+  // Both sources at once. Seeded rather than looked up: an earlier version of
+  // this case read `consentRecord.findFirst()` and skipped the assertion when
+  // there was none, which on a clean database was always.
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: decision.id,
+        eventId: event.id,
+        consentRecordId: consent.id,
+        authority: "au_sender",
+      },
+    }),
+    /one_source_check/
+  );
 
   await prisma.emailPermissionDecisionEvidence.create({
     data: { decisionId: decision.id, eventId: event.id, authority: "au_sender" },
+  });
+  // A consent record backs the receiver's authority, from the ledger that owns
+  // consent. This is the path that had no way to be cited at all until the
+  // second source was added.
+  await prisma.emailPermissionDecisionEvidence.create({
+    data: {
+      decisionId: decision.id,
+      consentRecordId: consent.id,
+      authority: "recipient",
+    },
   });
 
   await assert.rejects(
@@ -946,7 +1006,7 @@ test("evidence cites exactly one ledger, and closes with the verdict", async () 
     await prisma.emailPermissionDecisionEvidence.count({
       where: { decisionId: decision.id },
     }),
-    2
+    3
   );
 
   await prisma.emailPermissionDecision.update({
@@ -956,15 +1016,110 @@ test("evidence cites exactly one ledger, and closes with the verdict", async () 
 
   await assert.rejects(
     prisma.emailPermissionDecisionEvidence.create({
-      data: { decisionId: decision.id, eventId: event.id, authority: "third" },
+      data: { decisionId: decision.id, consentRecordId: consent.id, authority: "au_sender" },
     }),
     /sealed/
   );
 });
 
+test("evidence has to be about the person the verdict is about", async () => {
+  // Until 2026-09-22 a verdict for one account could cite another account's
+  // notice or consent and then be sealed: permanent, unreadable false
+  // evidence, in the one table whose whole value is that it is neither.
+  const mine = await seedSubject();
+  const theirs = await seedSubject();
+
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: mine.decision.id,
+        eventId: theirs.event.id,
+        authority: "au_sender",
+      },
+    }),
+    /different address|different account/
+  );
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: mine.decision.id,
+        consentRecordId: theirs.consent.id,
+        authority: "recipient",
+      },
+    }),
+    /different address|different account/
+  );
+
+  // An authority the verdict never applied is a basis nothing weighed.
+  const oneAuthority = await seedSubject(["au_sender"]);
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: oneAuthority.decision.id,
+        eventId: oneAuthority.event.id,
+        authority: "recipient",
+      },
+    }),
+    /did not apply authority/
+  );
+
+  // And an authority nobody defines cannot be named at all.
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: mine.decision.id,
+        eventId: mine.event.id,
+        authority: "third",
+      },
+    }),
+    /authority_check/
+  );
+
+  // A fact scoped to something the verdict did not decide is not evidence for
+  // it either.
+  const other = await seedEvent({
+    userId: mine.user.id,
+    emailAddress: mine.emailAddress,
+    scopeKey: "promotions",
+    sourceEventKey: `notice:${randomUUID()}`,
+  });
+  await assert.rejects(
+    prisma.emailPermissionDecisionEvidence.create({
+      data: {
+        decisionId: mine.decision.id,
+        eventId: other.id,
+        authority: "au_sender",
+      },
+    }),
+    /scoped to/
+  );
+});
+
+test("the ledger refuses TRUNCATE", async () => {
+  // The third verb. The row triggers refuse UPDATE and DELETE; TRUNCATE fires
+  // no row trigger and takes no row lock, and CASCADE from one of these tables
+  // reaches the rest through their foreign keys -- so it is the one statement
+  // that could remove a sealed verdict and the event it rested on together.
+  for (const table of [
+    "EmailPermissionEvent",
+    "EmailSendApproval",
+    "EmailSendApprovalMember",
+    "EmailSendApprovalRevocation",
+    "EmailPermissionDecision",
+    "EmailPermissionDecisionEvidence",
+  ]) {
+    await assert.rejects(
+      prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE`),
+      /append-only/,
+      table
+    );
+  }
+});
+
 test("sealing a verdict and adding evidence in one statement is refused", async () => {
-  const event = await seedEvent();
-  const decision = await seedDecision();
+  // A matching subject, because the consistency trigger fires first now and a
+  // mismatched one would refuse this for the wrong reason.
+  const { decision, event } = await seedSubject();
 
   await assert.rejects(
     prisma.$executeRawUnsafe(

@@ -43,9 +43,7 @@ const reset = () =>
       "ImageGeneration", "RefundRequest", "PlanChangeRequest",
       "ExternalImport", "ExternalConversation", "ExternalMessage",
       "MemoryEvidence", "MemoryExtractionRun",
-      "EmailPermissionDecisionEvidence", "EmailPermissionDecision",
-      "EmailSendApprovalRevocation", "EmailSendApprovalMember",
-      "EmailSendApproval", "EmailPermissionEvent", "User"
+      "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -622,7 +620,7 @@ const seedUser = async () => {
       addressDigest: sentinel("emailSendApprovalMember-addressDigest"),
       addressNormalizationVersion: "v1",
       noticeAnchorAt: now,
-      noticeAnchorSource: "signup",
+      noticeAnchorSource: "signup_date_deemed",
     },
   });
   await prisma.emailSendApproval.update({
@@ -833,6 +831,7 @@ test("the permission ledger exports what it decided and what it rested on", asyn
   assert.ok(!("reason" in approval), "the approver's reasoning is not theirs");
   assert.ok(!("approvedByEmail" in approval), "the approver's address is not theirs");
 
+  const events = at("email_permission_events");
   const decisions = at("email_permission_decisions") as (Record<string, unknown> & {
     evidence?: Record<string, unknown>[];
   })[];
@@ -841,13 +840,19 @@ test("the permission ledger exports what it decided and what it rested on", asyn
   assert.equal(decisions[0].classification, "marketing");
   assert.notEqual(decisions[0].ruleVersions, null);
   assert.notEqual(decisions[0].policyVersionId, null);
+  // The two timestamps the policy calls the core of a verdict. They are null
+  // on this enqueue fixture and the point is that the keys are returned: an
+  // export that omits them says nothing about when the message was acted on.
+  assert.ok("suppressionCheckedAt" in decisions[0]);
+  assert.ok("providerSubmittedAt" in decisions[0]);
+  assert.ok("policyVersionId" in events[0]);
   assert.equal(decisions[0].evidence?.length, 1);
   assert.equal(decisions[0].evidence[0].authority, "au_sender");
   assert.notEqual(decisions[0].evidence[0].eventId, null);
   assert.ok(!("deliveryId" in decisions[0]));
 
   // The evidence points at a row that is in the export beside it.
-  const events = at("email_permission_events");
+
   assert.equal(events?.length, 1);
   assert.equal(events[0].id, decisions[0].evidence[0].eventId);
   assert.equal(events[0].kind, "notice_shown");

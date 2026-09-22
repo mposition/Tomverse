@@ -835,6 +835,20 @@ const REGISTRY = {
     reason:
       "Which purposes a risk_accepted override may cover: the six, or a star for all of them. It sat inside the composite scope constraint until 2026-09-21, where this checker could not see it -- one closed list per constraint is what it reads -- so the code and the database could have drifted apart silently, which is the failure it exists to catch. A waiver has no purpose scope at all and the column is NULL there.",
   },
+  EmailPermissionDecisionEvidence_authority_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "EMAIL_PERMISSION_AUTHORITIES",
+    reason:
+      "The receiver authority and the Australian sender authority, which is all of them. Evidence names the one that cited it, and the insert trigger requires that the verdict actually applied it -- so an open string here would be a row resting on an authority no rule defines, in a table that cannot be corrected.",
+  },
+  EmailSendApprovalMember_noticeAnchorSource_check: {
+    owner: "list",
+    module: "lib/emailPermissionLedgerCore.ts",
+    list: "NOTICE_ANCHOR_SOURCES",
+    reason:
+      "One value, signup_date_deemed. The owner decided the signup date is deemed to be the two-year notice anchor for this cohort; the word matters because it records a decision to treat a date as one rather than a claim that somebody consented on it. Both fixtures stored the looser signup until 2026-09-22 and the column took it. A second value is a decision, not an addition.",
+  },
   EmailPermissionEvent_scopeKey_check: {
     owner: "list",
     module: "lib/emailPermissionLedgerCore.ts",

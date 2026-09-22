@@ -108,6 +108,32 @@ export type EmailPermissionDecisionPhase =
   (typeof EMAIL_PERMISSION_DECISION_PHASES)[number];
 
 /**
+ * The two authorities a verdict applies.
+ *
+ * The receiver's, which the country rule decides, and the Australian
+ * sender's, which applies over every row of that rule (draft section 4.2).
+ * Closed because evidence names one: an open string would let a verdict rest
+ * on an authority no rule defines, permanently and unreadably.
+ */
+export const EMAIL_PERMISSION_AUTHORITIES = ["recipient", "au_sender"] as const;
+
+export type EmailPermissionAuthority =
+  (typeof EMAIL_PERMISSION_AUTHORITIES)[number];
+
+/**
+ * Where a cohort member's two-year notice anchor came from.
+ *
+ * One value. The owner decided the signup date is *deemed* to be the anchor
+ * for this cohort (draft section 7.7), and this says that rather than
+ * claiming a consent date. A second value is a decision rather than an
+ * addition: a member anchored on a real consent belongs to a cohort that did
+ * not need deeming.
+ */
+export const NOTICE_ANCHOR_SOURCES = ["signup_date_deemed"] as const;
+
+export type NoticeAnchorSource = (typeof NOTICE_ANCHOR_SOURCES)[number];
+
+/**
  * Overrides a verdict may record.
  *
  * One value, and the list exists so that adding a second is a decision rather

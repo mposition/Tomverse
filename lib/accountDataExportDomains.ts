@@ -292,7 +292,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "EmailPermissionEvent",
     state: "included_filtered",
     withheldReason:
-      "The facts other than consent that a sending basis rests on: when a notice was shown to them, when they objected, and when a relationship of ours with them began or ended -- returned with what kind of fact it was, what it was about, when it happened and where it was captured. Held back: the evidence blob, which holds a hash of the notice wording and an internal screen identifier rather than anything they wrote, and the writer key that makes a retried write idempotent, which is an internal handle.",
+      "The facts other than consent that a sending basis rests on: when a notice was shown to them, when they objected, and when a relationship of ours with them began or ended -- returned with what kind of fact it was, what it was about, when it happened and where it was captured. Also returned: the policy version the fact was recorded under, without which a fact read a year later cannot be placed against the rules that applied then. Held back: the evidence blob, which holds a hash of the notice wording and an internal screen identifier rather than anything they wrote, and the writer key that makes a retried write idempotent, which is an internal handle.",
   },
   {
     domain: "emailSendApprovalMember",
@@ -308,7 +308,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "EmailPermissionDecision",
     state: "included_filtered",
     withheldReason:
-      "Why each message to them was or was not permitted: which authorities were applied, how each ended, what refused it, and whether an override was used. Held back: the delivery and approval ids and the display contract hashes, which are internal handles onto a send and onto somebody else's decision, and the normalisation version, which describes how we compared their address rather than anything about them.",
+      "Why each message to them was or was not permitted: which authorities were applied, how each ended, what refused it, and whether an override was used. Also returned: when suppression was last read for the message and when it was handed to the provider, because the gap between them is what a complaint about a late or unwanted send is usually about. Held back: the delivery and approval ids and the display contract hashes, which are internal handles onto a send and onto somebody else's decision, and the normalisation version, which describes how we compared their address rather than anything about them.",
   },
   {
     domain: "emailCampaignRecipient",
