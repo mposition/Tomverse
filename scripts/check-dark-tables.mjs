@@ -37,6 +37,7 @@ const DARK_TABLES = [
     "QuotaCapacityState",
     "AvailabilityObservation",
     "DeploymentCacheAffinity",
+    "RoutingIdentityManifest",
 ];
 
 
@@ -74,12 +75,25 @@ const DARK_COLUMNS = [
         on: "RoutingRun",
         exempt: ["lib/routingAllocation.ts"],
     },
+    // The attempt's binding to a published manifest. Both names are spelled
+    // only by the module that defines the manifest shape.
+    {
+        column: "identityManifestId",
+        on: "RoutingAttempt",
+        exempt: ["lib/routingIdentityManifest.ts"],
+    },
+    {
+        column: "identityManifestDigest",
+        on: "RoutingAttempt",
+        exempt: ["lib/routingIdentityManifest.ts"],
+    },
     {
         column: "providerEndpointId",
         on: "ProviderProbeResult and RoutingAttempt",
         exempt: [
             "lib/availabilityObservation.ts",
             "lib/deploymentIdentity.ts",
+            "lib/routingIdentityManifest.ts",
         ],
     },
     {
@@ -89,6 +103,7 @@ const DARK_COLUMNS = [
             "lib/availabilityObservation.ts",
             "lib/deploymentCacheAffinity.ts",
             "lib/deploymentIdentity.ts",
+            "lib/routingIdentityManifest.ts",
         ],
     },
 ];

@@ -4257,6 +4257,22 @@ model RoutingAttempt {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
+  /// The identity configuration this attempt was decided against. Dark, and
+  /// null on every row.
+  ///
+  /// The id and the digest together, deliberately: the foreign key says which
+  /// manifest, and the digest says what it held at the time. A disagreement
+  /// between them is the finding -- a manifest altered after publication,
+  /// which the trigger is meant to make impossible and which this lets anybody
+  /// detect without trusting the trigger.
+  ///
+  /// RESTRICT: an attempt is a historical record, and deleting the manifest it
+  /// names must not drop the attribution.
+  identityManifestId     String?
+  identityManifestDigest String?
+
+  identityManifest RoutingIdentityManifest? @relation(fields: [identityManifestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
   /// Which placement served this attempt. Dark, and null on every row.
   ///
   /// Routing needs dispatch signals per deployment and this table records
@@ -5723,6 +5739,44 @@ model ModelDeployment {
 ///
 /// There is no prefix digest and there will not be one. It is derived from
 /// what the person wrote, and it confirms a guess.
+/// One published snapshot of the routing identity configuration.
+///
+/// Dark. Nothing publishes a manifest and nothing reads one.
+///
+/// The identity design forbids four things until this exists: enabling the
+/// config writer, recording a canary, judging eligibility, and making a
+/// deployment-level decision. All four share one failure -- a decision made
+/// against configuration that has since moved, with nothing able to say
+/// afterwards what it was made against. Mutable rows cannot answer what was
+/// allowed at the time, and the residency question puts a legal judgement on
+/// top of that answer.
+///
+/// Published once and never edited, held by a trigger. `version` is unique;
+/// `digest` is not, because two versions may publish identical configuration
+/// -- a republish after a stopped rollout -- and that is a different
+/// publication rather than a duplicate.
+///
+/// The entries themselves are not stored here. What the digest covers is the
+/// fixed field list in lib/routingIdentityManifest.ts, so changing what a
+/// manifest commits to is a change to that file rather than a silent effect
+/// of adding a column somewhere.
+model RoutingIdentityManifest {
+  id         String   @id @default(cuid())
+  version    Int
+  /// sha256, lowercase hex. The database checks the shape; that it describes
+  /// the deployments it was computed over is checked where they are visible.
+  digest     String
+  entryCount Int
+  approvedBy String
+  approvedAt DateTime
+  createdAt  DateTime @default(now())
+
+  attempts RoutingAttempt[]
+
+  @@unique([version])
+  @@index([approvedAt])
+}
+
 model DeploymentCacheAffinity {
   id                String   @id @default(cuid())
   conversationId    String
