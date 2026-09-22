@@ -146,9 +146,25 @@ test("revoked is not the same fact as disabled", () => {
 
 test("the database holds the same shape rule, and only one row per scope", () => {
     const sql = migration();
-    // Each kind's required columns are named, and the others forbidden.
+    // Not that the kind appears somewhere, but that its arm of the CHECK names
+    // exactly the columns the application list requires and forbids the rest.
+    // Matching the string alone would survive a column moving between kinds.
+    const shape = sql.match(/QuotaScope_shape_check[\s\S]*?\n    \);/);
+    assert.ok(shape, "the shape CHECK is present");
     for (const kind of QUOTA_SCOPE_KINDS) {
-        assert.match(sql, new RegExp(`"scopeKind" = '${kind}'`), kind);
+        const arm = shape[0].match(
+            new RegExp(`"scopeKind" = '${kind}'([\\s\\S]*?)\\)`)
+        );
+        assert.ok(arm, kind);
+        const required = QUOTA_SCOPE_REQUIRED_FIELDS[kind];
+        for (const field of ALL_FIELDS) {
+            const wanted = required.includes(field);
+            assert.match(
+                arm[1],
+                new RegExp(`"${field}" IS ${wanted ? "NOT NULL" : "NULL"}`),
+                `${kind}.${field} should be ${wanted ? "required" : "forbidden"}`
+            );
+        }
     }
     // Foreign keys, so a scope id cannot point at a row that is not there.
     for (const fk of [
@@ -186,4 +202,99 @@ test("the funding rule is in the database too", () => {
 test("a binding starts disabled", () => {
     assert.match(migration(), /"status" TEXT NOT NULL DEFAULT 'disabled'/);
     assert.match(migration(), /"enabled" BOOLEAN NOT NULL DEFAULT false/);
+});
+
+test("a blank identifier is absent in both rules", () => {
+    // PostgreSQL treats "" as a value and JavaScript truthiness treats it as
+    // missing, so without this the database would accept a row the
+    // application refuses -- a disagreement on the one input nobody tests.
+    assert.deepEqual(
+        credentialBindingFundingProblems({
+            billingOwner: "tomverse",
+            accountId: "   ",
+            providerBudgetAccountId: "budget",
+        }),
+        []
+    );
+    assert.deepEqual(
+        credentialBindingFundingProblems({
+            billingOwner: "tomverse",
+            accountId: null,
+            providerBudgetAccountId: "",
+        }),
+        ["a Tomverse-funded binding names the budget it spends against"]
+    );
+});
+
+test("two rules a CHECK cannot hold are held by triggers", () => {
+    const sql = migration();
+    // A CHECK sees one row, so neither of these could be one.
+    //
+    // A deployment_credential scope pairs a credential with a placement, and
+    // the shape rule forbids it from carrying an endpoint of its own -- which
+    // makes a cross-endpoint pair invisible to every constraint in the file.
+    assert.match(sql, /CREATE TRIGGER "quota_scope_pairs_one_endpoint_trigger"/);
+    assert.match(sql, /BEFORE INSERT OR UPDATE ON "QuotaScope"/);
+    // And what a scope counts against cannot change: an attempt records the
+    // scope id it spent under, so repointing the row moves spend that already
+    // happened onto something else.
+    assert.match(sql, /CREATE TRIGGER "quota_scope_target_is_immutable_trigger"/);
+    for (const column of [
+        "scopeKind",
+        "credentialBindingId",
+        "providerEndpointId",
+        "modelDeploymentId",
+        "accountId",
+        "providerId",
+    ]) {
+        assert.match(
+            sql,
+            new RegExp(`NEW\."${column}" IS DISTINCT FROM OLD\."${column}"`),
+            column
+        );
+    }
+});
+
+test("a quota row cannot refuse an account deletion", () => {
+    // The scope cascades from its binding rather than restricting it.
+    // Operational bookkeeping does not get to outrank a person deleting their
+    // account, and a scope has no meaning without the binding it counts
+    // against.
+    assert.match(
+        migration(),
+        /QuotaScope_credentialBindingId_fkey[\s\S]*?ON DELETE CASCADE/
+    );
+    assert.match(
+        migration(),
+        /CredentialBinding_accountId_fkey[\s\S]*?ON DELETE CASCADE/
+    );
+});
+
+test("the schema declares the same foreign keys the migration creates", () => {
+    // Prisma cannot express a CHECK or a partial unique index, so those live
+    // in SQL alone. A foreign key it can express, and `db push` builds a
+    // database from the schema rather than the migrations -- a key declared in
+    // only one of them is a key that exists in only one environment.
+    const schema = readFileSync(
+        new URL("../prisma/schema.prisma", import.meta.url),
+        "utf8"
+    );
+    const model = schema.match(/model QuotaScope \{[\s\S]*?\n\}/);
+    assert.ok(model, "QuotaScope is in the schema");
+    for (const field of ["credentialBindingId", "providerEndpointId", "modelDeploymentId", "accountId", "providerId"]) {
+        assert.ok(
+            model[0].includes(`@relation(fields: [${field}]`),
+            `${field} has a declared relation`
+        );
+    }
+    // Prisma defaults an optional relation to SetNull, which would silently
+    // disagree with the migration's RESTRICT. Three infrastructure targets
+    // restrict -- deleting an endpoint, a deployment or a provider is not a
+    // thing a quota row should let happen quietly -- and the two that cascade
+    // are the ones a person's own deletion reaches.
+    assert.equal(
+        (model[0].match(/onDelete: Restrict/g) ?? []).length,
+        3,
+        "endpoint, deployment and provider restrict"
+    );
 });

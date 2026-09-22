@@ -139,10 +139,17 @@ export type QuotaScopeKind = (typeof QUOTA_SCOPE_KINDS)[number];
  *
  * The distinction decides which budget a request draws down, and they are
  * different namespaces on purpose: an account's own spend must not consume an
- * allowance Tomverse funded. `lib/chatSecurity.ts` reserves one cost figure
- * for three consumers today -- the account guardrail, the Tomverse provider
- * hold and the purchased-credit funded allowance -- and only the first of
- * those is about the person.
+ * allowance Tomverse funded.
+ *
+ * `lib/chatSecurity.ts` puts one `reservedCost` figure into three places
+ * today, and **all three are Tomverse's** -- the operational guardrail
+ * (`op-cost-*`, which is cost protection for this deployment and not an
+ * entitlement), the Tomverse provider hold, and the funded-cost allowance
+ * carried on a purchased credit lot, which is an allowance Tomverse funded
+ * even though the account bought the credits. So all three take
+ * `tomverseMarginalCost`, and BYOK spend belongs in a fourth namespace of its
+ * own. An earlier draft of this comment said only the first was Tomverse's,
+ * which would have left an account's own spend drawing down two of them.
  */
 export const CREDENTIAL_BILLING_OWNERS = ["tomverse", "account"] as const;
 
@@ -230,19 +237,28 @@ export const credentialBindingFundingProblems = (input: {
     accountId?: string | null;
     providerBudgetAccountId?: string | null;
 }): readonly string[] => {
+    // An empty string is a value to PostgreSQL and absent to JavaScript
+    // truthiness, so a row the database would accept could be refused here and
+    // the two rules would differ on the one input nobody tests. Blank is
+    // treated as absent in both directions instead, which is the stricter
+    // reading and the one an identifier deserves.
+    const accountId = input.accountId?.trim() ? input.accountId : null;
+    const budgetId = input.providerBudgetAccountId?.trim()
+        ? input.providerBudgetAccountId
+        : null;
     if (!(CREDENTIAL_BILLING_OWNERS as readonly string[]).includes(input.billingOwner)) {
         return [`unknown billing owner ${JSON.stringify(input.billingOwner)}`];
     }
     const problems: string[] = [];
     if (input.billingOwner === "account") {
-        if (!input.accountId) problems.push("an account-funded binding names its account");
-        if (input.providerBudgetAccountId) {
+        if (!accountId) problems.push("an account-funded binding names its account");
+        if (budgetId) {
             problems.push("an account-funded binding draws down no Tomverse budget");
         }
         return problems;
     }
-    if (input.accountId) problems.push("a Tomverse-funded binding names no account");
-    if (!input.providerBudgetAccountId) {
+    if (accountId) problems.push("a Tomverse-funded binding names no account");
+    if (!budgetId) {
         problems.push("a Tomverse-funded binding names the budget it spends against");
     }
     return problems;

@@ -37,7 +37,7 @@ const DARK_TABLES = [
 ];
 
 /** Where runtime code lives. Anything outside this cannot serve a request. */
-const ROOTS = ["app", "lib", "components", "scripts", "prisma/seed"];
+const ROOTS = ["app", "lib", "components", "scripts", "packages", "prisma/seed"];
 
 /** Paths that may name a dark table without reading it. */
 const ALLOWED = [
@@ -91,7 +91,18 @@ for (const file of files) {
             "i"
         );
 
-        if (dotted.test(source) || bracketed.test(source) || rawSql.test(source)) {
+        // A relation field reaches the same rows without ever naming the
+        // delegate: `include: { credentialBindings: true }` on a user query,
+        // or a nested `create`. Prisma pluralises a one-to-many back-relation,
+        // so both spellings are matched.
+        const relation = new RegExp(`\\b${delegate}s?\\s*:\\s*(true|\\{)`);
+
+        if (
+            dotted.test(source) ||
+            bracketed.test(source) ||
+            relation.test(source) ||
+            rawSql.test(source)
+        ) {
             problems.push(`${file.split("\\").join("/")}: reads ${table}`);
         }
     }

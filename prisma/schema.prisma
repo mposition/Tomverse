@@ -5521,6 +5521,7 @@ model ProviderEndpoint {
   deployments        ModelDeployment[]
   approvals          EndpointResidencyApproval[]
   credentialBindings CredentialBinding[]
+  quotaScopes        QuotaScope[]
 
   @@index([gatewayProvider, enabled])
   @@index([residencyClass])
@@ -5592,7 +5593,8 @@ model ModelDeployment {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  endpoint ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  endpoint    ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaScopes QuotaScope[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
@@ -5643,7 +5645,9 @@ model QuotaScope {
 
   createdAt DateTime @default(now())
 
-  credentialBinding CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  credentialBinding CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  endpoint          ProviderEndpoint?      @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  deployment        ModelDeployment?       @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   account           User?                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   provider          ProviderRegistryEntry? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -5671,6 +5675,18 @@ model CredentialBinding {
   ///
   /// Stable across key rotation, which a credential id is not: rotating a key
   /// must not reset a spend total.
+  ///
+  /// **No foreign key, because the table it should point at does not exist.**
+  /// Not `User` -- that is `accountId`, and a Tomverse-funded row leaves it
+  /// null. Not `ProviderRegistryEntry` -- that is the provider, not a budget
+  /// account, and the whole reason for this column is to survive a key
+  /// rotation the provider does not know about. So it carries the same hole
+  /// this schema refused for quota scopes: a name that may point at nothing.
+  ///
+  /// It is harmless while the column is unread. The first writer that passes
+  /// this string to `incrementUsage` creates a spend bucket under whatever it
+  /// happens to contain, so a `ProviderBudgetAccount` table and a foreign key
+  /// come before that, not after.
   providerBudgetAccountId String?
   status                  String   @default("disabled")
   createdAt               DateTime @default(now())

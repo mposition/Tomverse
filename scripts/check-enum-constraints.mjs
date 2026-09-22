@@ -288,7 +288,7 @@ const REGISTRY = {
     module: "lib/deploymentIdentity.ts",
     list: "CREDENTIAL_BINDING_STATUSES",
     reason:
-      "disabled, active, revoked. 'revoked' is separate from 'disabled' because they are different facts -- one was switched off and can be switched back on, the other was withdrawn and the secret behind it should be assumed gone. Collapsing them would let a withdrawn credential be re-enabled by somebody who read the row as merely paused.",
+      "disabled, active, revoked. 'revoked' is separate from 'disabled' because they are different facts -- one was switched off and can be switched back on, the other was withdrawn and the secret behind it should be assumed gone. Collapsing them would leave an operator reading a withdrawn credential as merely paused. Nothing in the database prevents a revoked row being set active again -- the values are a vocabulary, not a state machine -- so whatever ends up writing this has to hold that rule itself.",
   },
   ProviderEndpoint_residencyClass_check: {
     owner: "list",

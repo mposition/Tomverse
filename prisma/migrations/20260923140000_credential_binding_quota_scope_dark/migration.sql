@@ -98,6 +98,12 @@ ALTER TABLE "CredentialBinding"
 
 -- Cascade, matching how the rest of the schema treats account deletion: a
 -- person deleting their account takes their own credential binding with them.
+--
+-- Which is why the scope below cascades from the binding rather than
+-- restricting it. A restricting scope would make a quota row able to refuse an
+-- account deletion, and operational bookkeeping does not get to outrank that.
+-- A scope has no meaning without the binding it counts against, the same way a
+-- routing attempt has none without its run.
 ALTER TABLE "CredentialBinding"
     ADD CONSTRAINT "CredentialBinding_accountId_fkey"
     FOREIGN KEY ("accountId") REFERENCES "User"("id")
@@ -188,7 +194,7 @@ CREATE INDEX "QuotaScope_scopeKind_idx" ON "QuotaScope"("scopeKind");
 ALTER TABLE "QuotaScope"
     ADD CONSTRAINT "QuotaScope_credentialBindingId_fkey"
     FOREIGN KEY ("credentialBindingId") REFERENCES "CredentialBinding"("id")
-    ON DELETE RESTRICT ON UPDATE RESTRICT;
+    ON DELETE CASCADE ON UPDATE RESTRICT;
 
 ALTER TABLE "QuotaScope"
     ADD CONSTRAINT "QuotaScope_providerEndpointId_fkey"
@@ -209,3 +215,73 @@ ALTER TABLE "QuotaScope"
     ADD CONSTRAINT "QuotaScope_providerId_fkey"
     FOREIGN KEY ("providerId") REFERENCES "ProviderRegistryEntry"("id")
     ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- ---------------------------------------------------------------------------
+-- Two rules a CHECK cannot hold
+-- ---------------------------------------------------------------------------
+--
+-- A PostgreSQL CHECK sees one row. These both need another.
+
+-- A `deployment_credential` scope pairs a credential with a placement, and the
+-- two have to be on the same endpoint. Nothing above says so: the shape rule
+-- forbids the scope from carrying an endpoint id of its own, so the mismatch
+-- is invisible to every constraint here. That admits a limit on a pair that
+-- cannot happen, which is the failure the typed columns exist to prevent,
+-- arrived at from the other side.
+CREATE OR REPLACE FUNCTION "quota_scope_pairs_one_endpoint"()
+RETURNS TRIGGER AS $$
+DECLARE
+    binding_endpoint TEXT;
+    deployment_endpoint TEXT;
+BEGIN
+    IF NEW."scopeKind" <> 'deployment_credential' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT "providerEndpointId" INTO binding_endpoint
+        FROM "CredentialBinding" WHERE "id" = NEW."credentialBindingId";
+    SELECT "providerEndpointId" INTO deployment_endpoint
+        FROM "ModelDeployment" WHERE "id" = NEW."modelDeploymentId";
+
+    IF binding_endpoint IS DISTINCT FROM deployment_endpoint THEN
+        RAISE EXCEPTION
+            'QuotaScope pairs a credential on endpoint % with a deployment on endpoint %',
+            binding_endpoint, deployment_endpoint
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "quota_scope_pairs_one_endpoint_trigger"
+    BEFORE INSERT OR UPDATE ON "QuotaScope"
+    FOR EACH ROW
+    EXECUTE FUNCTION "quota_scope_pairs_one_endpoint"();
+
+-- What a scope counts against cannot change. An attempt records the scope id
+-- it spent under; repointing the row afterwards moves spend that already
+-- happened onto a different thing, and nothing in the record would show it.
+CREATE OR REPLACE FUNCTION "quota_scope_target_is_immutable"()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW."scopeKind" IS DISTINCT FROM OLD."scopeKind"
+        OR NEW."credentialBindingId" IS DISTINCT FROM OLD."credentialBindingId"
+        OR NEW."providerEndpointId" IS DISTINCT FROM OLD."providerEndpointId"
+        OR NEW."modelDeploymentId" IS DISTINCT FROM OLD."modelDeploymentId"
+        OR NEW."accountId" IS DISTINCT FROM OLD."accountId"
+        OR NEW."providerId" IS DISTINCT FROM OLD."providerId"
+    THEN
+        RAISE EXCEPTION
+            'QuotaScope % cannot be repointed; create a new scope', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "quota_scope_target_is_immutable_trigger"
+    BEFORE UPDATE ON "QuotaScope"
+    FOR EACH ROW
+    EXECUTE FUNCTION "quota_scope_target_is_immutable"();
