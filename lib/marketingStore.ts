@@ -242,6 +242,7 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     resume_approval_conflict: 409,
   resume_drain_required: 409,
   drain_not_stopped: 409,
+  identity_change_needs_connection: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -773,6 +774,18 @@ export async function changeMarketingChannelScopes(
       "The account identity changed before its scopes were saved",
     );
   }
+  if (row.status === "disconnected") {
+    // Leaving `disconnected` takes a new connection generation (the channel
+    // trigger requires it), and these writers do not issue one -- so this
+    // reached the database as a raw exception and came back a 500. Bumping
+    // the generation here would make a scope change a way to reconnect an
+    // account, and reconnecting is a person confirming a connection. Refused
+    // instead, naming the control that does it.
+    throw new MarketingStoreRefusedError(
+      "identity_change_needs_connection",
+      "Reconnect the account before changing its identity",
+    );
+  }
   // An identity change forces the account back to `approval_mode`, which from
   // `paused` is a resume however it is spelled -- so it owes what a resume
   // owes. Without this a scope change on a paused account put a post whose
@@ -854,6 +867,18 @@ export async function changeMarketingChannelPolicyVersion(
     throw new MarketingStoreRefusedError(
       "policy_change_conflict",
       "The account identity changed before its policy version was saved",
+    );
+  }
+  if (row.status === "disconnected") {
+    // Leaving `disconnected` takes a new connection generation (the channel
+    // trigger requires it), and these writers do not issue one -- so this
+    // reached the database as a raw exception and came back a 500. Bumping
+    // the generation here would make a scope change a way to reconnect an
+    // account, and reconnecting is a person confirming a connection. Refused
+    // instead, naming the control that does it.
+    throw new MarketingStoreRefusedError(
+      "identity_change_needs_connection",
+      "Reconnect the account before changing its identity",
     );
   }
   // An identity change forces the account back to `approval_mode`, which from

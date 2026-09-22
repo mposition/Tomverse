@@ -16,6 +16,7 @@ import {
 } from "../lib/marketingConsoleSections.ts";
 import {
   approveMarketingPost,
+  changeMarketingChannelPolicyVersion,
   changeMarketingChannelScopes,
   drainDueMarketingApprovals,
   resumeMarketingChannelToApproval,
@@ -830,6 +831,13 @@ const marketingRouteOffenders = (relative, source) => {
                 ts.isFunctionDeclaration(inner) ||
                 ts.isMethodDeclaration(inner)
               ) {
+                // The body is the function's; the *name* is not. A computed
+                // name is evaluated where the function sits, so stopping at
+                // the boundary without reading it let
+                // `{ inner: { [iife()]() {} } }` through.
+                if (inner.name && ts.isComputedPropertyName(inner.name)) {
+                  walk(inner.name.expression);
+                }
                 return;
               }
               if (
@@ -880,18 +888,27 @@ const marketingRouteOffenders = (relative, source) => {
               continue;
             }
 
+            // A spread copies by reading, so a getter on the spread object
+            // runs during the copy -- before the wrapper is entered. The
+            // spread's own expression is usually an identifier, so walking it
+            // finds nothing, and following it would mean following it into
+            // another module. The specification is this route's own decision
+            // in every field; assembling it from elsewhere is the shape, so
+            // the shape is refused.
+            if (ts.isSpreadAssignment(property)) {
+              offenders.push(
+                `${relative}: ${name} spreads something into the specification`
+              );
+              continue;
+            }
+
             const value = ts.isPropertyAssignment(property)
               ? property.initializer
-              : ts.isSpreadAssignment(property)
-                ? property.expression
-                : null;
+              : null;
             if (!value) continue;
             if (evaluatesEarly(value)) {
-              const label = ts.isSpreadAssignment(property)
-                ? "a spread"
-                : property.name.getText(tree);
               offenders.push(
-                `${relative}: ${name} evaluates ${label} before the predicate runs`
+                `${relative}: ${name} evaluates ${property.name.getText(tree)} before the predicate runs`
               );
             }
           }
@@ -1049,6 +1066,46 @@ test("the route sweep fails every shape that gets past the predicate", () => {
         "}\n",
     ],
     [
+      "a store call in a getter on a spread object, which runs during the copy",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ ...prelude, request: req });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in a nested method's computed name",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        "    metadata: { [(() => pauseMarketingChannel(req, {}))()]() { return 1; } },\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in a getter on a spread object, which runs during the copy",
+      imports +
+        "const prelude = {\n" +
+        "  get bucket() { pauseMarketingChannel(undefined as never, {}); return \"b\"; },\n" +
+        "};\n" +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({ ...prelude, request: req });\n" +
+        "}\n",
+    ],
+    [
+      "a store call in a nested method's computed name",
+      imports +
+        "export async function POST(req: Request) {\n" +
+        "  return runMarketingAdminMutation({\n" +
+        "    request: req,\n" +
+        "    metadata: { [(() => pauseMarketingChannel(req, {}))()]() { return 1; } },\n" +
+        "  });\n" +
+        "}\n",
+    ],
+    [
       "a store call in a getter, which runs when the wrapper reads the field",
       imports +
         "export async function POST(req: Request) {\n" +
@@ -1069,7 +1126,7 @@ test("the route sweep fails every shape that gets past the predicate", () => {
   ];
 
   // Without this the table can shrink to nothing and still pass.
-  assert.ok(bypasses.length >= 16, `only ${bypasses.length} bypass shape(s)`);
+  assert.ok(bypasses.length >= 18, `only ${bypasses.length} bypass shape(s)`);
   const passed = bypasses
     .filter(([, source]) => marketingRouteOffenders("probe/route.ts", source).length === 0)
     .map(([name]) => name);
@@ -1536,4 +1593,66 @@ test("the console offers the drain in exactly those states", () => {
     listed(panel, "MARKETING_STOPPED_ACCOUNT_STATUSES"),
     listed(store, "MARKETING_STOPPED_STATUSES"),
   );
+});
+
+test("an identity change on a disconnected account refuses instead of failing", async () => {
+  // Leaving `disconnected` takes a new connection generation -- the channel
+  // trigger says so -- and these writers do not issue one. Without this the
+  // write reached the database, the trigger raised, and the wrapper answered
+  // 500: a refusal dressed as a fault, which tells an operator nothing about
+  // what to do next.
+  //
+  // Bumping the generation here was the other option and is the wrong one. It
+  // would make a scope change a way to reconnect an account, and reconnecting
+  // is a person confirming a connection.
+  for (const [writer, input] of [
+    [
+      changeMarketingChannelScopes,
+      {
+        id: "channel-1",
+        expectedScopesDigest: DIGEST,
+        expectedPolicyVersion: 1,
+        expectedGraduationEpoch: 2,
+        scopesDigest: "c".repeat(64),
+      },
+    ],
+    [
+      changeMarketingChannelPolicyVersion,
+      {
+        id: "channel-1",
+        expectedScopesDigest: DIGEST,
+        expectedPolicyVersion: 1,
+        expectedGraduationEpoch: 2,
+        policyVersion: 2,
+      },
+    ],
+  ]) {
+    let writes = 0;
+    await assert.rejects(
+      writer(
+        {
+          $queryRaw: async () => [pausedChannel({ status: "disconnected" })],
+          marketingPost: {
+            updateMany: async () => {
+              writes += 1;
+              return { count: 1 };
+            },
+          },
+          marketingChannel: {
+            updateMany: async () => {
+              writes += 1;
+              return { count: 1 };
+            },
+          },
+        },
+        input,
+      ),
+      (error) =>
+        error instanceof MarketingStoreRefusedError &&
+        error.code === "identity_change_needs_connection",
+    );
+    // Refused before the expiry, so a disconnected account is not half-drained
+    // on its way to a refusal.
+    assert.equal(writes, 0);
+  }
 });
