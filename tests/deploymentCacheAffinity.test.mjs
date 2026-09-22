@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -58,6 +58,48 @@ test("an unproven deployment carries no figures and no verification", () => {
         ),
         ["an unproven cache has no verification"]
     );
+    // Present-but-blank counts: the constraint requires the column to be
+    // NULL here, so accepting an empty string would pass a row the database
+    // refuses.
+    for (const evidence of ["", " ", "\t"]) {
+        assert.deepEqual(
+            promptCacheCapabilityProblems(
+                capability({ promptCacheEvidenceRef: evidence })
+            ),
+            ["an unproven cache has no verification"],
+            JSON.stringify(evidence)
+        );
+    }
+});
+
+test("blank means the same six characters on both sides", () => {
+    // `String.trim()` strips every Unicode space and PostgreSQL's `btrim`
+    // strips only U+0020, so a tab-only reference was accepted by the
+    // constraint and refused here. Both now name one character class.
+    for (const evidence of [" ", "\t", "\n", "\r", "\f", "\v"]) {
+        assert.deepEqual(
+            promptCacheCapabilityProblems(verified({ promptCacheEvidenceRef: evidence })),
+            ["a verified cache names its evidence"],
+            JSON.stringify(evidence)
+        );
+    }
+    // A non-breaking space is a character in both, not whitespace.
+    assert.deepEqual(
+        promptCacheCapabilityProblems(verified({ promptCacheEvidenceRef: "\u00a0" })),
+        []
+    );
+    const sql = migration();
+    assert.match(sql, /"promptCacheEvidenceRef" ~ E'\[\^ \\\\t\\\\n\\\\r\\\\f\\\\v\]'/);
+    const statements = sql
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n");
+    assert.ok(
+        !statements.includes("btrim"),
+        "btrim would be the other definition"
+    );
+    // A reference, not a transcript.
+    assert.match(sql, /ModelDeployment_promptCacheEvidenceRef_length_check/);
 });
 
 test("a verified cache says when it was verified and names its evidence", () => {
@@ -149,7 +191,8 @@ test("the window answer abstains wherever nothing is known", () => {
         cacheWindowState({ promptCacheSupport: "unproven", lastServedAt: verifiedAt, now }),
         "unproven"
     );
-    // Checked, and there is no cache. That is a finding, not an abstention.
+    // Checked, and there is no cache. That is a finding, not an abstention,
+    // and only the state that records the finding may produce it.
     assert.equal(
         cacheWindowState({
             promptCacheSupport: "verified_absent",
@@ -158,6 +201,15 @@ test("the window answer abstains wherever nothing is known", () => {
         }),
         "no_cache_here"
     );
+    // An unrecognised state is not a finding. An earlier version answered
+    // `no_cache_here` for one, which reads as somebody having checked.
+    for (const support of ["", "maybe", "VERIFIED_ABSENT", "verified"]) {
+        assert.equal(
+            cacheWindowState({ promptCacheSupport: support, lastServedAt: verifiedAt, now }),
+            "unproven",
+            support
+        );
+    }
     // Verified present, but the row has no window. Refused at write time, so
     // reaching here means the row predates the constraint; the honest answer
     // is that nothing is known, not a window of zero.
@@ -187,15 +239,18 @@ test("the window answer is a comparison of two clocks", () => {
         cacheWindowState({
             ...base,
             lastServedAt: verifiedAt,
-            now: new Date("2026-09-23T00:05:00.000Z"),
+            now: new Date("2026-09-23T00:04:59.999Z"),
         }),
         "within_ttl"
     );
+    // Exclusive at the boundary: at exactly the TTL the window has elapsed,
+    // and `within_ttl` there would be the one point where the name is a
+    // claim the provider would not agree with.
     assert.equal(
         cacheWindowState({
             ...base,
             lastServedAt: verifiedAt,
-            now: new Date("2026-09-23T00:05:00.001Z"),
+            now: new Date("2026-09-23T00:05:00.000Z"),
         }),
         "past_ttl"
     );
@@ -231,15 +286,52 @@ test("the database holds the same rules", () => {
 
 test("no prefix, and no digest of one, is stored", () => {
     // The reason the window answer is not a hit prediction. A digest would
-    // sharpen it and is derived from what the person wrote; it also confirms a
-    // guess, since a candidate prefix can be tested against it.
-    const statements = migration()
-        .split("\n")
-        .filter((line) => !line.trimStart().startsWith("--"))
-        .join("\n");
-    for (const forbidden of ["prefixDigest", "prefixHash", "promptDigest", "promptHash"]) {
-        assert.ok(!statements.includes(forbidden), `${forbidden} is absent`);
+    // sharpen it and is derived from what the person wrote; it also confirms
+    // a guess, since a candidate prefix can be tested against it.
+    //
+    // Read from the schema and by shape, not by four spellings in one
+    // migration: `prefixSha256` and anything a later migration adds have to
+    // appear here too, and an earlier version of this test passed for both.
+    const schema = readFileSync(
+        new URL("../prisma/schema.prisma", import.meta.url),
+        "utf8"
+    );
+    const model = /model DeploymentCacheAffinity \{([\s\S]*?)\n\}/.exec(schema);
+    assert.ok(model, "the model is in the schema");
+    const derived = /digest|hash|sha\d|checksum|fingerprint|prefix|excerpt|snippet/i;
+    for (const line of model[1].split("\n")) {
+        const field = /^\s+(\w+)\s+\w+/.exec(line.startsWith("  ///") ? "" : line);
+        if (!field) continue;
+        assert.ok(
+            !derived.test(field[1]),
+            `${field[1]} names something derived from what the person wrote`
+        );
     }
+});
+
+test("nothing imports this module", () => {
+    // What actually stops a second answer to the marker question, and stops
+    // the shortest wrong path into the objective function: discounting
+    // `expectedTotalCostUsdByModelId` when the window says `within_ttl`.
+    // That needs no new tie-break criterion, so the criteria-list test would
+    // still pass and check:dark-tables does not see a pure function call.
+    // An import is the one thing it cannot do without.
+    const roots = ["app", "lib", "components", "scripts"];
+    const walk = (directory) =>
+        readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+            const path = `${directory}/${entry.name}`;
+            if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];
+            if (entry.isDirectory()) return walk(path);
+            return /\.(ts|tsx|mjs|js)$/.test(entry.name) ? [path] : [];
+        });
+    const importers = walk(new URL("..", import.meta.url).pathname.replace(/^\//, ""))
+        .filter((file) => !file.endsWith("lib/deploymentCacheAffinity.ts"))
+        .filter((file) =>
+            /from\s+["'](@\/lib|\.\.?\/[\w./]*)\/?deploymentCacheAffinity["']/.test(
+                readFileSync(file, "utf8")
+            )
+        );
+    assert.deepEqual(importers, []);
 });
 
 test("the marker decision is left where it already lives", () => {

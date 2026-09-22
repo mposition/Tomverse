@@ -70,6 +70,20 @@
  * - `verified_explicit` -- the request must carry a marker, as Anthropic's
  *   `cache_control` does, and the write costs a premium the plain rate does
  *   not.
+ *
+ * **The word `automatic` means something else two modules over.**
+ * `lib/anthropicPromptCaching.ts` says "Anthropic automatic prompt caching"
+ * about a path that sends a top-level `cache_control` marker. In this list
+ * that is `verified_explicit`. An Anthropic deployment recorded as
+ * `verified_automatic` because of that sentence would be read as one needing
+ * no marker and paying no write premium.
+ *
+ * **Nothing here tells the two apart yet.** Both are in
+ * `VERIFIED_CACHING_SUPPORT_STATES`, so `cacheWindowState()` answers the same
+ * for either, and `promptCacheCapabilityProblems()` judges them together.
+ * They are two stored facts and one behaviour; the split exists so that a
+ * ranking which does need to tell them apart is not first having to work out
+ * which deployments needed a marker.
  */
 export const PROMPT_CACHE_SUPPORT_STATES = [
     "unproven",
@@ -94,7 +108,22 @@ export type PromptCacheCapabilityInput = {
     promptCacheEvidenceRef?: string | null;
 };
 
-const blank = (value: string | null | undefined): boolean => !value?.trim();
+/**
+ * Whether a reference says nothing.
+ *
+ * The character set is written out rather than left to `String.trim()`,
+ * because the database has to reject exactly the same strings and the two
+ * definitions do not match by default: `trim()` strips U+00A0 and every other
+ * Unicode space, while PostgreSQL's `btrim` strips only U+0020. A row whose
+ * evidence was a single tab passed the constraint and failed here.
+ *
+ * So both sides use this list and nothing else. A non-breaking space counts
+ * as a character in both.
+ */
+const BLANK_CHARACTERS = /^[ \t\n\r\f\v]*$/;
+
+const blank = (value: string | null | undefined): boolean =>
+    value === null || value === undefined || BLANK_CHARACTERS.test(value);
 
 /**
  * Why a deployment's cache capability is not well formed, or an empty list.
@@ -131,7 +160,14 @@ export const promptCacheCapabilityProblems = (
         if (ttl !== null || minPrefix !== null) {
             problems.push("an unproven cache has no measured figures");
         }
-        if (input.promptCacheVerifiedAt || !blank(input.promptCacheEvidenceRef)) {
+        // Present-but-blank counts. The constraint requires the column to be
+        // NULL here, so accepting an empty string would be this validator
+        // passing a row the database refuses.
+        if (
+            input.promptCacheVerifiedAt ||
+            input.promptCacheEvidenceRef !== null &&
+                input.promptCacheEvidenceRef !== undefined
+        ) {
             problems.push("an unproven cache has no verification");
         }
         return problems;
@@ -217,8 +253,9 @@ export type CacheWindowState = (typeof CACHE_WINDOW_STATES)[number];
 /**
  * Compare two clocks and say which side of the window the last serve is on.
  *
- * **Not a cache-hit prediction.** `within_ttl` means the provider's window has
- * not elapsed, and nothing more. Whether the prefix is still byte-identical is
+ * **Not a cache-hit prediction.** `within_ttl` means less than the verified
+ * window has passed, and nothing more. The boundary is exclusive: at exactly
+ * the TTL the window has elapsed, so that is `past_ttl`. Whether the prefix is still byte-identical is
  * a question about content, and this module holds none -- a turn that added an
  * attachment or edited the system prompt returns `within_ttl` and would miss.
  *
@@ -230,8 +267,17 @@ export const cacheWindowState = (input: {
     lastServedAt?: Date | null;
     now: Date;
 }): CacheWindowState => {
-    if (!(VERIFIED_CACHING_SUPPORT_STATES as readonly string[]).includes(input.promptCacheSupport)) {
-        return input.promptCacheSupport === "unproven" ? "unproven" : "no_cache_here";
+    // `no_cache_here` is a finding -- somebody dispatched twice and the
+    // provider charged full price both times. Only the state that records
+    // that finding may produce it. An unrecognised string is not a finding,
+    // and an earlier version answered one for it.
+    if (input.promptCacheSupport === "verified_absent") return "no_cache_here";
+    if (
+        !(VERIFIED_CACHING_SUPPORT_STATES as readonly string[]).includes(
+            input.promptCacheSupport
+        )
+    ) {
+        return "unproven";
     }
     if (!input.lastServedAt) return "never_served";
 
@@ -245,5 +291,8 @@ export const cacheWindowState = (input: {
     // A serve in the future is a clock disagreement, not a fresh cache.
     if (elapsedMs < 0) return "unproven";
 
-    return elapsedMs <= ttl * 1000 ? "within_ttl" : "past_ttl";
+    // Exclusive. At exactly the TTL the window has elapsed; calling that
+    // `within_ttl` would be the one boundary where the name is a claim the
+    // provider would not agree with.
+    return elapsedMs < ttl * 1000 ? "within_ttl" : "past_ttl";
 };

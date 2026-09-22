@@ -58,6 +58,12 @@ ALTER TABLE "ModelDeployment"
 -- `verified_automatic` is a provider caching a repeated prefix on its own, and
 -- `verified_explicit` is one where the request must carry a marker and the
 -- write costs a premium.
+--
+-- The word `automatic` means something else in lib/anthropicPromptCaching.ts,
+-- which says "automatic prompt caching" about a path that sends a top-level
+-- cache_control marker. That path is `verified_explicit` here. An Anthropic
+-- deployment written as `verified_automatic` because of that sentence reads as
+-- one needing no marker and paying no write premium.
 ALTER TABLE "ModelDeployment"
     ADD CONSTRAINT "ModelDeployment_promptCacheSupport_check"
     CHECK ("promptCacheSupport" IN (
@@ -74,6 +80,13 @@ ALTER TABLE "ModelDeployment"
         AND ("promptCacheMinPrefixTokens" IS NULL OR "promptCacheMinPrefixTokens" >= 0)
     );
 
+-- The blank test is a character class rather than btrim, because btrim
+-- strips only U+0020 while JavaScript's trim() strips every Unicode space.
+-- The two definitions disagreed: an evidence reference of one tab satisfied
+-- length(btrim(...)) > 0 here and was refused by the validator, so the row
+-- the database accepted was one the application called malformed. Both sides
+-- now name the same six characters.
+--
 -- An unproven deployment carries no figures and no verification, because a
 -- figure is the result of the check that has not happened. A number sitting
 -- beside 'unproven' is one nobody can say the origin of, and it would be read
@@ -101,15 +114,22 @@ ALTER TABLE "ModelDeployment"
             AND "promptCacheTtlSeconds" IS NULL
             AND "promptCacheMinPrefixTokens" IS NULL
             AND "promptCacheVerifiedAt" IS NOT NULL
-            AND length(btrim("promptCacheEvidenceRef")) > 0
+            AND "promptCacheEvidenceRef" ~ E'[^ \\t\\n\\r\\f\\v]'
         )
         OR (
             "promptCacheSupport" IN ('verified_automatic', 'verified_explicit')
             AND "promptCacheTtlSeconds" IS NOT NULL
             AND "promptCacheVerifiedAt" IS NOT NULL
-            AND length(btrim("promptCacheEvidenceRef")) > 0
+            AND "promptCacheEvidenceRef" ~ E'[^ \\t\\n\\r\\f\\v]'
         )
     );
+
+-- The evidence reference is a path or an identifier, not a transcript. The
+-- cap is what stops it becoming somewhere to paste the prefix that was
+-- tested, which is the content this table is built to not hold.
+ALTER TABLE "ModelDeployment"
+    ADD CONSTRAINT "ModelDeployment_promptCacheEvidenceRef_length_check"
+    CHECK ("promptCacheEvidenceRef" IS NULL OR length("promptCacheEvidenceRef") <= 512);
 
 -- ---------------------------------------------------------------------------
 -- 2. Where a conversation has been landing

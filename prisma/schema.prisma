@@ -5629,6 +5629,16 @@ model ModelDeployment {
   /// That is lib/anthropicPromptCaching.ts, gating on provider identity
   /// because createAnthropic() also builds the MiniMax client. A dispatcher
   /// reading this instead would be a second answer to the same question.
+  ///
+  /// The word `automatic` means something else in that module: it says
+  /// "automatic prompt caching" about a path that sends a top-level
+  /// cache_control marker, which in this column is `verified_explicit`. An
+  /// Anthropic deployment written as `verified_automatic` because of that
+  /// sentence reads as one needing no marker and paying no write premium.
+  ///
+  /// The evidence reference is a path or an identifier, capped at 512
+  /// characters by the database. The cap is what stops it becoming somewhere
+  /// to paste the prefix that was tested.
   promptCacheSupport         String    @default("unproven")
   promptCacheMinPrefixTokens Int?
   promptCacheTtlSeconds      Int?
