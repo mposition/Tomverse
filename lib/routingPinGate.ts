@@ -10,9 +10,11 @@
  * unserved. `allow` is the only policy that may leave the pin for the
  * general pool, and only for a candidate the pin itself did not accept.
  *
- * The request path does not call this. The account policy version that has
- * to be frozen when a request starts is not stored yet; `pinPolicyVersionHeld`
- * is the comparison that freeze will use.
+ * The request path does not call this. `freezeRequestPolicy` is the pair a
+ * request holds from the moment it starts (ADR v2.1 §2.1): the control-plane
+ * manifest and the account policy, together. The two columns on RoutingRun
+ * are dark. This module does not write them. There is no workspace in this
+ * product, so the ADR's workspace policy is the account policy.
  */
 
 export const PIN_SCOPES = ["provider", "deployment"] as const;
@@ -44,7 +46,7 @@ export type PinDecision =
           fallbackPolicy: PinFallbackPolicy;
       };
 
-const named = (value: string | null | undefined): value is string =>
+const named = (value: unknown): value is string =>
     typeof value === "string" && value.trim().length > 0;
 
 const fallbackPolicy = (value: string | null | undefined): PinFallbackPolicy =>
@@ -100,3 +102,78 @@ export const pinPolicyVersionHeld = (input: {
 }): boolean =>
     named(input.admittedPolicyVersion) &&
     input.admittedPolicyVersion === input.currentPolicyVersion;
+
+export type RequestPolicyFreeze = {
+    controlPlaneVersion: string;
+    accountPolicyVersion: string;
+};
+
+/**
+ * Capture both versions, or capture nothing.
+ *
+ * One side without the other is not a freeze. A blank version is not the
+ * current one. The strings are kept as read: trimming them would make a
+ * different policy look like the one that was current.
+ */
+export const freezeRequestPolicy = (observed: {
+    controlPlaneVersion: unknown;
+    accountPolicyVersion: unknown;
+}): RequestPolicyFreeze | null => {
+    if (!named(observed.controlPlaneVersion) || !named(observed.accountPolicyVersion)) {
+        return null;
+    }
+    return {
+        controlPlaneVersion: observed.controlPlaneVersion,
+        accountPolicyVersion: observed.accountPolicyVersion,
+    };
+};
+
+/**
+ * The versions a decision may use.
+ *
+ * There is no argument for a later read. The freeze is the only policy this
+ * request has, and a freeze that is missing either side is not one.
+ */
+export const policyVersionsForDecision = (
+    freeze: RequestPolicyFreeze | null | undefined
+): RequestPolicyFreeze | null => {
+    if (!freeze || !named(freeze.controlPlaneVersion) || !named(freeze.accountPolicyVersion)) {
+        return null;
+    }
+    return {
+        controlPlaneVersion: freeze.controlPlaneVersion,
+        accountPolicyVersion: freeze.accountPolicyVersion,
+    };
+};
+
+/**
+ * Whether both frozen versions are still the ones in force.
+ *
+ * False when the freeze is missing, when either current version is missing,
+ * and when either side has moved. Each side uses `pinPolicyVersionHeld`, so
+ * a pin and this freeze cannot disagree about what "the same version" means.
+ */
+export const requestPolicyFreezeHeld = (input: {
+    freeze: RequestPolicyFreeze | null | undefined;
+    currentControlPlaneVersion: unknown;
+    currentAccountPolicyVersion: unknown;
+}): boolean => {
+    const frozen = policyVersionsForDecision(input.freeze);
+    if (!frozen) return false;
+    return (
+        pinPolicyVersionHeld({
+            admittedPolicyVersion: frozen.controlPlaneVersion,
+            currentPolicyVersion:
+                typeof input.currentControlPlaneVersion === "string"
+                    ? input.currentControlPlaneVersion
+                    : null,
+        }) &&
+        pinPolicyVersionHeld({
+            admittedPolicyVersion: frozen.accountPolicyVersion,
+            currentPolicyVersion:
+                typeof input.currentAccountPolicyVersion === "string"
+                    ? input.currentAccountPolicyVersion
+                    : null,
+        })
+    );
+};

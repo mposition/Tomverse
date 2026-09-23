@@ -1014,7 +1014,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 코드 (§14.6). 라우터는 호출하지 않음 |
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
-| §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
+| §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정과 고정 (§14.8, §14.15). 라우터는 열에 쓰지 않음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | 판정 (`lib/quotaCapacity.ts`, §14.13). 라우터는 호출하지 않음 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | 판정 (§14.10). trip 횟수는 호출자. prior는 쓰지 않음 |
 | §8.5 | load guard | 판정 (§14.12). softmax는 없음. 감쇠 계수는 호출자. 완료로 세지 않음 |
@@ -1180,8 +1180,9 @@ import하지 않습니다. 후보를 고르는 코드는 아직 이 함수를 �
 - `pinPolicyVersionHeld()`는 요청 시작 때 잡은 정책 버전과 현재 버전이
   같을 때만 참입니다. 그 버전을 요청에 저장하는 곳은 아직 없습니다.
 
-이 줄은 §14.3의 pin 항목을 완료로 세지 않습니다. 완료 수는 24, **약 48%(추정)**
-그대로입니다.
+이 줄을 쓸 때는 요청 시작 고정을 저장하는 곳이 없어 pin 항목을 세지
+않았습니다. 완료 수는 그때 24, **약 48%(추정)** 그대로였습니다. 그 고정은
+§14.15이고, 거기서 이 항목을 셉니다.
 
 ## 14.9 Quality gate의 만료와 drift 예약 (2026-09-23)
 
@@ -1321,6 +1322,28 @@ BYOK의 비용 배선은 §14 7번이고 이 줄이 아닙니다. 여기 세지 
 
 이 줄이 §14.3의 secret 참조 항목입니다. 직전 보고는 29, 약 58%였습니다.
 §14.3의 약 50단위에서 완료는 30, **약 60%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.15 Request-start policy freeze (2026-09-23)
+
+ADR §2.1의 고정이 `lib/routingPinGate.ts`에 있습니다. 요청 경로는
+import하지 않습니다. 행을 쓰지 않습니다.
+
+- control-plane 버전과 account 정책 버전은 같이 잡히거나 같이 없습니다.
+  한쪽만 있는 고정은 없습니다. 빈 문자열은 현재 정책이 아닙니다.
+- 읽은 문자열을 그대로 둡니다. 앞뒤 공백을 잘라 다른 정책을 같은 것으로
+  만들지 않습니다.
+- 결정이 쓰는 버전은 그 고정뿐입니다. 요청 도중 승격된 버전을 넣는 인자가
+  없습니다.
+- 아직 그 버전인지는 `pinPolicyVersionHeld`를 양쪽에 적용합니다. pin과
+  이 고정이 "같은 버전"을 다르게 말하지 않습니다.
+- `RoutingRun`의 두 열은 nullable이고 기본값이 없습니다. 이미 있는 행은
+  null입니다. null은 지금 활성인 정책이 아닙니다. 이 제품에는 workspace가
+  없으므로 ADR의 workspace 정책은 account 정책입니다.
+
+이 줄이 §14.3의 pin 항목입니다. §14.8의 판정만으로는 세지 않았고, 요청에
+남을 열이 생긴 지금 셉니다. 직전 secret 보고는 30, 약 60%였습니다.
+§14.3의 약 50단위에서 완료는 31, **약 62%(추정)**입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것

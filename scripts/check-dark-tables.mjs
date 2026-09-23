@@ -76,6 +76,19 @@ const DARK_COLUMNS = [
         on: "RoutingRun",
         exempt: ["lib/routingAllocation.ts"],
     },
+    // The versions frozen when a request starts. The module names them
+    // because it is the value those columns will store. It does not write
+    // a row.
+    {
+        column: "controlPlaneVersion",
+        on: "RoutingRun",
+        exempt: ["lib/routingPinGate.ts"],
+    },
+    {
+        column: "accountPolicyVersion",
+        on: "RoutingRun",
+        exempt: ["lib/routingPinGate.ts"],
+    },
     // The attempt's binding to a published manifest. Both names are spelled
     // only by the module that defines the manifest shape.
     {

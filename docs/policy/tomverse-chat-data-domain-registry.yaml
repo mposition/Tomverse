@@ -562,7 +562,10 @@ domains:
     note: >-
       Shadow routing telemetry (docs/policy/tomverse-chat-routing.md §5): the
       model the Router would have chosen, beside the one that actually ran, as
-      versions, labels and counts. Cascade rather than SetNull, deliberately.
+      versions, labels and counts. The request-start control-plane version and
+      account policy version may both be absent; absence is not the policy
+      that is active now, and one without the other is not a freeze. Cascade
+      rather than SetNull, deliberately.
       subjectKey and traceId would still name the person after a null userId,
       so a surviving row would be a half-anonymisation this registry would have
       to carry as a gap -- and a new telemetry table has no claim on outliving

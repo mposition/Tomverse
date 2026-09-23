@@ -279,9 +279,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-23, rotation and expiry instants on CredentialBinding. The table
  * is already dark. Neither column is a marketing model, and neither touches
  * a webhook writer. The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, two nullable version columns on RoutingRun for the versions a
+ * request holds from the moment it starts. The table is already a marketing
+ * neighbour only by living in the same schema file. The columns are not
+ * marketing models and do not touch a webhook writer. The digest moves
+ * because the schema file is watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "df7c63b320a2756b572ee72157bdd5b6271caa6138d40a08346b50c8563928b7";
+  "de53319fb28b59db825cfb8f4cc31d51dc4a1eba2b1f0a7183de20b16cdd68e5";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

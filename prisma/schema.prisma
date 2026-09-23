@@ -3974,6 +3974,16 @@ model RoutingRun {
   /// policy that had not been decided.
   selectionPolicyVersion String?
 
+  /// The control-plane manifest and the account policy, read once when the
+  /// request started (ADR v2.1 §2.1). A promotion during the request is a
+  /// different policy and is not written back here.
+  ///
+  /// Both null, or both set. Null is not the policy that is active now, and
+  /// there is no workspace in this product: the ADR's workspace policy is
+  /// this account's policy. Dark: the request path does not write them yet.
+  controlPlaneVersion  String?
+  accountPolicyVersion String?
+
   /// The task profile, as labels and booleans.
   profileKind             String
   profileConfidence       String
