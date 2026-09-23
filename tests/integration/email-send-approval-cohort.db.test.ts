@@ -277,6 +277,14 @@ const noticeInput = (user: { id: string; email: string | null }) => ({
       copyHash: "sha256:au-device",
     },
   ],
+  // What `resolveEmailJurisdiction()` answered. The writer records this rather
+  // than working one out of the candidates.
+  resolved: {
+    countryCode: "AU",
+    profileKey: "AU",
+    confidence: "high",
+    source: "self_declared",
+  },
 });
 
 test("recording the same render twice leaves one row", async () => {

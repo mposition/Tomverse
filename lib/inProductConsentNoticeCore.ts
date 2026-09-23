@@ -185,63 +185,68 @@ export const noticeObjectionSourceEventKey = (
 ): string => `in-product-notice:objected:${userId}:${addressDigest}`;
 
 /**
- * The signals that can settle which country's rule applied.
+ * What the row's single `jurisdiction` column says, given what the resolver
+ * answered.
  *
- * The approved contract ranks them (docs/policy/email-notifications.md
- * sections 6.1 to 6.3): what the person said about themselves, then the
- * billing country, then the jurisdiction recorded at their last consent. An IP
- * or a browser language is **observational** -- it may not settle a
- * jurisdiction on its own, and a low-confidence resolution holds marketing
- * rather than releasing it.
+ * This function does **not** decide the jurisdiction. It takes the answer
+ * `resolveEmailJurisdiction()` already produced and says how to write it into
+ * two columns that have no room for a confidence or a profile.
  *
- * Draft section 5.3 says the same thing from the other end: `self_declared`
- * replaces the candidate list, and everything else stays a list.
+ * It used to decide, and it was wrong twice. The first version counted
+ * candidates, so two signals agreeing on `AU` came out undetermined. The
+ * second counted countries against a hand-written list of "determinative"
+ * signals, and that list disagreed with the approved contract in four places
+ * at once: it made the consent-time jurisdiction settle a send it is not for,
+ * it ranked self-declaration above the billing country when the contract ranks
+ * billing higher, it took whichever determinative signal came first in the
+ * array, and it called two disagreeing guesses a `conflict` when that word is
+ * reserved for billing and self-declaration disagreeing.
+ *
+ * All four came from the same mistake: writing a second jurisdiction rule
+ * beside the one that already exists, is already reviewed, and is what the
+ * send path itself uses. There is one rule now and this is not it.
+ *
+ * Two guards remain here, because they are about what the *column* can honestly
+ * hold rather than about which country applies:
+ *
+ * - A country with no reviewed profile is `ZZ`. `normalizeCountry()` accepts
+ *   any two letters, so `JP` and `XX` pass it, and
+ *   `profileForCountry()` answers `ZZ` for both. Section 6.3 holds marketing
+ *   without a reviewed profile, but section 5.6's override only refuses the
+ *   literal string `ZZ` -- so writing `JP` would let the override run on an
+ *   account whose display duties were never worked out, permanently.
+ * - A low-confidence resolution is `ZZ`. An inference does not settle a
+ *   jurisdiction (section 6.3), and this row has no confidence column to
+ *   record that it was only a guess.
+ *
+ * The candidates themselves persist in `evidence` either way, which is where
+ * section 5.3 says they follow the person to the send snapshot.
  */
-export const DETERMINATIVE_COUNTRY_SIGNALS: ReadonlySet<string> = new Set([
-  "self_declared",
-  "billing",
-  "consent",
-]);
-
 export type NoticeJurisdiction = {
   country: string;
   source: string;
 };
 
-/**
- * What the row's single `jurisdiction` column says, given the candidates.
- *
- * Counting *countries* was the second version of this and it was still wrong.
- * Two inferences that happen to agree on `AU` are still two inferences, and
- * sealing `AU` off them makes the column claim a settled jurisdiction the
- * approved contract does not let an inference settle. The row has no
- * confidence field and is append-only, so that claim would be permanent -- and
- * it would let section 5.6's override run on an account whose display duties
- * were never actually worked out, which is the exact thing `ZZ` refuses.
- *
- * So: one determinative country settles it. Anything else is `ZZ`, and the
- * source says which kind of nothing it was -- signals that disagree are
- * `conflict`, signals that are merely not determinative are `unresolved`.
- * The candidates themselves persist in the evidence either way, which is where
- * section 5.3 says they follow the person to the send snapshot.
- */
-export const noticeJurisdiction = (
-  candidates: readonly { country: string; signal: string }[]
-): NoticeJurisdiction => {
-  const determinative = candidates.filter((candidate) =>
-    DETERMINATIVE_COUNTRY_SIGNALS.has(candidate.signal)
-  );
-  const settled = new Set(determinative.map((candidate) => candidate.country));
-  if (settled.size === 1) {
-    return {
-      country: determinative[0]!.country,
-      source: determinative[0]!.signal,
-    };
+export const noticeJurisdictionColumns = (resolved: {
+  countryCode: string;
+  profileKey: string;
+  confidence: string;
+  source: string;
+}): NoticeJurisdiction => {
+  const settled =
+    resolved.confidence === "high" &&
+    resolved.countryCode !== "ZZ" &&
+    resolved.profileKey !== "ZZ";
+  if (settled) {
+    return { country: resolved.countryCode, source: resolved.source };
   }
-  if (settled.size > 1) return { country: "ZZ", source: "conflict" };
-
-  const observed = new Set(candidates.map((candidate) => candidate.country));
-  return { country: "ZZ", source: observed.size > 1 ? "conflict" : "unresolved" };
+  // `conflict` is the resolver's word for two high-confidence signals
+  // disagreeing, and it keeps that meaning here. Everything else that failed
+  // to settle is `unresolved`, which is a different fact and reads as one.
+  return {
+    country: "ZZ",
+    source: resolved.source === "conflict" ? "conflict" : "unresolved",
+  };
 };
 
 /**

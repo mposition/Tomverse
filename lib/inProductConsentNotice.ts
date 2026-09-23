@@ -14,14 +14,13 @@ import {
 import {
   canonicalCandidates,
   inProductNoticeOffer,
-  noticeJurisdiction,
+  noticeJurisdictionColumns,
   noticeObjectionSourceEventKey,
   noticePurposes,
   noticeRecordFor,
   noticeShownSourceEventKey,
   type NoticeOffer,
 } from "@/lib/inProductConsentNoticeCore";
-
 
 /**
  * Reading and writing the one-time in-product consent notice.
@@ -60,32 +59,29 @@ import {
  * been permanent: this writer returns the existing row rather than adding a
  * second, so the first write wins for ever.
  *
- * The `jurisdiction` column holds a country only when there is exactly one.
- * With two it holds `ZZ` and the source says `conflict`, which is not a
- * placeholder but the true answer: the country is not determined. Section
- * 5.6's override cannot cross `ZZ` for precisely this reason -- we cannot
- * work out which display duties attach. The candidates themselves persist in
- * `evidence`, which is where section 5.3 says they follow the person from the
- * attempt through to the send snapshot.
+ * The caller also passes the `ResolvedJurisdiction` it worked from -- the
+ * answer `resolveEmailJurisdiction()` gave, which is the same rule the send
+ * path uses. This module does not resolve a jurisdiction of its own;
+ * `noticeJurisdictionColumns()` only says how that answer fits two columns
+ * with no room for a confidence or a profile, and the note there records the
+ * four ways a second rule got it wrong before.
  *
- * Countries go through `normalizeCountry()`. Without it `" AU"`, `"kr"`,
- * `"Korea"` and `"inferred"` were all accepted, stored raw, and compared
- * against later with `===`.
- *
- * Deriving it here was wrong, and the way it was wrong is worth keeping. An
- * account that has never declared a country resolves through language and
- * timezone: `ko` plus `Asia/Seoul` answers `KR` at `low` confidence with
- * source `inferred`. The approved contract
- * (docs/policy/email-notifications.md sections 6.2 and 6.3) does not let an
- * inference decide a jurisdiction, and `EmailPermissionEvent` has no
- * confidence column -- so the row would have said `KR` flatly, for ever, about
- * somebody who was never shown a Korean device. Append-only means there is no
- * later write that corrects it.
+ * Deriving any of it here was wrong, and the way it was wrong is worth
+ * keeping. An account that has never declared a country resolves through
+ * language and timezone: `ko` plus `Asia/Seoul` answers `KR` at `low`
+ * confidence with source `inferred`. `EmailPermissionEvent` has no confidence
+ * column, so the row would have said `KR` flatly, for ever, about somebody who
+ * was never shown a Korean device. Append-only means no later write corrects
+ * it.
  *
  * A comment saying "wait for section 5.3" was not a boundary, because the
  * function wrote the row regardless of whether a screen existed. The signature
  * is the boundary: until something renders a country's device and can say
  * which one, it cannot call this.
+ *
+ * Candidate countries still go through `normalizeCountry()` on the way into
+ * the evidence. Without it `" AU"`, `"kr"`, `"Korea"` and `"inferred"` were
+ * all accepted, stored raw, and compared against later with `===`.
  */
 
 /** What a caller needs before it can decide whether to render anything. */
@@ -209,6 +205,19 @@ type RecordInput = {
    * under, and it can never be corrected.
    */
   candidates: readonly NoticeCandidate[];
+  /**
+   * What `resolveEmailJurisdiction()` answered for this person.
+   *
+   * Passed rather than recomputed, so that the row records the resolution the
+   * caller actually rendered from. There is one jurisdiction rule in this
+   * codebase and it is not in this file.
+   */
+  resolved: {
+    countryCode: string;
+    profileKey: string;
+    confidence: string;
+    source: string;
+  };
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
 };
@@ -260,10 +269,8 @@ const recordNoticeEvent = async (
     };
   });
 
-  // Which country the single column claims, and how sure we are.
-  // `noticeJurisdiction()` owns that rule; see the note there for why
-  // agreeing inferences are still not a settled jurisdiction.
-  const jurisdiction = noticeJurisdiction(candidates);
+  // How the resolver's answer fits two columns. Not a second resolution.
+  const jurisdiction = noticeJurisdictionColumns(input.resolved);
 
   // The two keys are scoped differently, and deliberately: a render is about
   // the person, a refusal is about the mailbox. See the two builders.

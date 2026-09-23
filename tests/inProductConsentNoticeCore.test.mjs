@@ -9,7 +9,7 @@ import test from "node:test";
 import {
   NOTICE_EVENT_KINDS,
   canonicalCandidates,
-  noticeJurisdiction,
+  noticeJurisdictionColumns,
   inProductNoticeOffer,
   noticePurposes,
   noticeObjectionSourceEventKey,
@@ -159,76 +159,89 @@ test("the two keys can never collide with each other", () => {
   );
 });
 
-// --- which country the column claims -------------------------------------
+// --- how the resolver's answer fits two columns --------------------------
+//
+// This function does not decide a jurisdiction. Two earlier versions did and
+// both were wrong; the note in the module records how. These cases are about
+// what the column can honestly hold.
 
-const candidate = (country, signal) => ({ country, signal });
+const resolved = (patch) => ({
+  countryCode: "AU",
+  profileKey: "AU",
+  confidence: "high",
+  source: "self_declared",
+  ...patch,
+});
 
-test("a self-declared country settles it", () => {
+test("a high-confidence country with a reviewed profile is written down", () => {
+  assert.deepEqual(noticeJurisdictionColumns(resolved()), {
+    country: "AU",
+    source: "self_declared",
+  });
   assert.deepEqual(
-    noticeJurisdiction([candidate("AU", "self_declared")]),
-    { country: "AU", source: "self_declared" }
+    noticeJurisdictionColumns(
+      resolved({ countryCode: "DE", profileKey: "EU", source: "billing" })
+    ),
+    { country: "DE", source: "billing" }
   );
 });
 
-test("a billing or consent country settles it too", () => {
-  // The approved contract's order is self-report, then billing, then the
-  // jurisdiction recorded at the last consent.
-  assert.deepEqual(noticeJurisdiction([candidate("SG", "billing")]), {
-    country: "SG",
-    source: "billing",
-  });
-  assert.deepEqual(noticeJurisdiction([candidate("KR", "consent")]), {
-    country: "KR",
-    source: "consent",
-  });
+test("a country with no reviewed profile is ZZ, however it was declared", () => {
+  // `normalizeCountry()` accepts any two letters, so `JP` and `XX` reach here
+  // and `profileForCountry()` answers `ZZ` for both. Section 5.6's override
+  // only refuses the literal string `ZZ`, so writing `JP` would let it run on
+  // an account whose display duties were never worked out -- permanently,
+  // because the row is append-only.
+  for (const countryCode of ["JP", "XX"]) {
+    assert.deepEqual(
+      noticeJurisdictionColumns(resolved({ countryCode, profileKey: "ZZ" })),
+      { country: "ZZ", source: "unresolved" }
+    );
+  }
 });
 
-test("two inferences that agree are still two inferences", () => {
-  // This is the case the previous version got wrong. An IP and a browser
-  // language both answering AU is not a settled jurisdiction: the approved
-  // contract does not let an inference settle one, the row has no confidence
-  // column, and it is append-only -- so sealing AU would be a permanent claim
-  // nobody is entitled to make, and it would let section 5.6's override run on
-  // an account whose display duties were never worked out.
+test("a low-confidence resolution is ZZ even with a real profile", () => {
   assert.deepEqual(
-    noticeJurisdiction([candidate("AU", "inferred"), candidate("AU", "inferred")]),
+    noticeJurisdictionColumns(
+      resolved({
+        countryCode: "KR",
+        profileKey: "KR",
+        confidence: "low",
+        source: "inferred",
+      })
+    ),
     { country: "ZZ", source: "unresolved" }
   );
 });
 
-test("one inference alone does not settle a country either", () => {
-  assert.deepEqual(noticeJurisdiction([candidate("AU", "inferred")]), {
-    country: "ZZ",
-    source: "unresolved",
-  });
-});
-
-test("inferences that disagree are a conflict, not merely unresolved", () => {
+test("the resolver's conflict keeps its own name", () => {
+  // `conflict` means two high-confidence signals disagreeing. Everything else
+  // that failed to settle is `unresolved`, which is a different fact and reads
+  // as one.
   assert.deepEqual(
-    noticeJurisdiction([candidate("KR", "inferred"), candidate("US", "inferred")]),
+    noticeJurisdictionColumns(
+      resolved({
+        countryCode: "ZZ",
+        profileKey: "ZZ",
+        confidence: "conflict",
+        source: "conflict",
+      })
+    ),
     { country: "ZZ", source: "conflict" }
   );
 });
 
-test("a self-declared country replaces the candidate list", () => {
-  // Draft section 5.3 states it from the other end: self_declared replaces the
-  // list, so an inference pointing elsewhere does not turn it into a conflict.
+test("nothing resolved at all is unresolved", () => {
   assert.deepEqual(
-    noticeJurisdiction([
-      candidate("KR", "inferred"),
-      candidate("AU", "self_declared"),
-    ]),
-    { country: "AU", source: "self_declared" }
-  );
-});
-
-test("two determinative signals that disagree are a conflict", () => {
-  assert.deepEqual(
-    noticeJurisdiction([
-      candidate("AU", "self_declared"),
-      candidate("KR", "billing"),
-    ]),
-    { country: "ZZ", source: "conflict" }
+    noticeJurisdictionColumns(
+      resolved({
+        countryCode: "ZZ",
+        profileKey: "ZZ",
+        confidence: "unknown",
+        source: "unresolved",
+      })
+    ),
+    { country: "ZZ", source: "unresolved" }
   );
 });
 
@@ -252,8 +265,8 @@ test("key order does not make two identical lists different", () => {
 test("array order still matters", () => {
   // `jsonb` preserves it, and two lists holding the same candidates in a
   // different order came from different screens.
-  const a = [candidate("AU", "inferred"), candidate("KR", "inferred")];
-  const b = [candidate("KR", "inferred"), candidate("AU", "inferred")];
+  const a = [{ country: "AU", signal: "inferred" }, { country: "KR", signal: "inferred" }];
+  const b = [{ country: "KR", signal: "inferred" }, { country: "AU", signal: "inferred" }];
   assert.notEqual(canonicalCandidates(a), canonicalCandidates(b));
 });
 
