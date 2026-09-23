@@ -40,6 +40,7 @@ const DARK_TABLES = [
     "RoutingIdentityManifest",
     "RoutingIdentityManifestEntry",
     "RoutingSnapshotCeilingApproval",
+    "AvailabilityRollupApplication",
 ];
 
 

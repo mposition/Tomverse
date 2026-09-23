@@ -302,9 +302,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * nothing here touches the descriptor, the config snapshot, a webhook
  * writer or an admission decision. The digest below is the merged schema,
  * not either parent's.
+ *
+ * 2026-09-24, AvailabilityRollupApplication. Dark, no marketing model, no
+ * webhook writer. The digest moves because the schema file is watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "e0c9e8d96a6d952db04ddff287789e9985f14b92438391bc3f56e32a8ce850e5";
+  "9f05de4a1180ab976873086ef4e887ca64f5bcd4fbd2547b7871a12e83f01e32";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

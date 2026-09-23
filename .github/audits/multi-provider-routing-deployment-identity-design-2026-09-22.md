@@ -1541,6 +1541,23 @@ Phase 1 대시보드의 집계가 `lib/routingOpsSummary.ts`에 있습니다. �
 **약 80%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다.
 production 배포는 0%입니다.
 
+## 14.25 Rollup은 grain마다 한 번만 적용됩니다 (2026-09-24)
+
+기록이 `AvailabilityRollupApplication`이고, 판정이
+`lib/availabilityRollupApply.ts`에 있습니다. 요청 경로는 import하지
+않습니다. 행을 쓰지 않습니다.
+
+관측 행의 `eventId`는 같은 관측을 두 번 넣지 못하게 합니다. provider
+rollup을 반영했다고 deployment rollup까지 반영한 것은 아닙니다. 키는
+event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입니다.
+빈 id와 모르는 grain은 이미 적용된 것이 아닙니다. 재실행은 그 셋이 이미
+있을 때만 거절합니다.
+
+이 줄은 §8.1이 관측 저널과 따로 남겨 둔 적용 기록입니다. 관측 테이블을
+다시 세지 않습니다. 직전 capability 보고는 40, 약 80%였습니다. §14.3의
+약 50단위에서 완료는 41, **약 82%(추정)**입니다. 검증·독립 검토·병합·
+배포는 별도입니다. production 배포는 0%입니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

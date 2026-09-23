@@ -6347,9 +6347,10 @@ model QuotaCapacityState {
 /// One availability observation, written once and never rewritten.
 ///
 /// Dark. The canonical record the deployment, endpoint and provider rollups
-/// are derived from -- one event in, three summaries out, all of them
-/// idempotent on `eventId` so a projection that failed half way can be run
-/// again without double-counting.
+/// are derived from. `eventId` stops the same observation being inserted
+/// twice. Which grain has already applied it is
+/// `AvailabilityRollupApplication`, not this row. Nothing writes either
+/// table yet.
 ///
 /// Today the same fact is written twice in two shapes: real traffic increments
 /// `ProviderHealthState` and a probe inserts a `ProviderProbeResult`, with no
@@ -6396,6 +6397,30 @@ model AvailabilityObservation {
   @@index([providerEndpointId, observedAt])
   @@index([modelDeploymentId, observedAt])
   @@index([source, observedAt])
+
+  rollupApplications AvailabilityRollupApplication[]
+}
+
+/// One grain of one observation, applied at most once.
+///
+/// Dark. The observation row stops a second insert of the same event. It does
+/// not say whether the deployment rollup, the endpoint rollup, and the
+/// provider rollup have each been updated. This row is that record. Re-running
+/// a projection is safe only when it refuses a triple already stored here.
+/// Nothing writes it yet.
+model AvailabilityRollupApplication {
+  id        String   @id @default(cuid())
+  /// The observation's event id, not its row id.
+  eventId   String
+  /// deployment | endpoint | provider. The same list as the observation grains.
+  grain     String
+  /// The deployment id, endpoint id, or provider name this grain names.
+  targetId  String
+  appliedAt DateTime @default(now())
+
+  observation AvailabilityObservation @relation(fields: [eventId], references: [eventId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([eventId, grain, targetId])
 }
 
 /// One separately approved, content-free Prompt Refiner staging shadow.

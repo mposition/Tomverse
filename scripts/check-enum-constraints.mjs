@@ -283,6 +283,13 @@ const REGISTRY = {
     reason:
       "succeeded or failed. Two values because a rollup divides one by the total; a third would need every consumer to decide which side it counted on, and they would not all decide the same way.",
   },
+  AvailabilityRollupApplication_grain_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_ROLLUP_GRAINS",
+    reason:
+      "deployment, endpoint, provider -- the same grains an observation can be rolled up to. One list, so a rollup application cannot name a grain the observation module does not. Applying the provider grain does not record that the deployment grain was applied.",
+  },
   AvailabilityObservation_errorClass_check: {
     owner: "list",
     module: "lib/availabilityObservation.ts",
