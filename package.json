@@ -113,6 +113,7 @@
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
     "generate:marketing-admission-code": "node scripts/generate-marketing-admission-code-manifest.mjs",
     "check:marketing-admission-code": "node scripts/check-marketing-admission-code.mjs",
+    "report:marketing-facts-digest": "node --conditions=react-server --import tsx scripts/report-marketing-facts-digest-nulls.mjs",
     "report:product-key-backfill": "node --conditions=react-server --import tsx scripts/report-product-key-backfill.mjs",
     "maintenance:memory-search-terms": "node --import tsx scripts/backfill-memory-search-terms.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
