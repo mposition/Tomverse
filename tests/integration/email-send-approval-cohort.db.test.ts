@@ -75,7 +75,6 @@ const sealFor = async (users: { id: string; email: string | null }[]) =>
     candidates: users.map((user) => ({
       userId: user.id,
       emailAddress: user.email!,
-      signupAt: approvedAt,
     })),
   });
 
@@ -103,11 +102,7 @@ test("an approval dated in the future is refused by name", async () => {
       policyVersionId: await policyVersionId(),
       purposeKey: "*",
       candidates: [
-        {
-          userId: users[0]!.id,
-          emailAddress: users[0]!.email!,
-          signupAt: approvedAt,
-        },
+        { userId: users[0]!.id, emailAddress: users[0]!.email! },
       ],
     }),
     /seals_before_approval/
@@ -160,6 +155,42 @@ test("the address is stored as a digest, never as the address", async () => {
   assert.equal(member.addressDigest, approvalAddressDigest(users[0]!.email!));
   assert.ok(!member.addressDigest.includes("@"));
   assert.equal(member.noticeAnchorSource, "signup_date_deemed");
+});
+
+test("the two-year anchor comes from the account, not from the caller", async () => {
+  // Rule 5 deems the signup date the date Korea's two-year notice counts
+  // from, and the member row is sealed a moment later -- so a date derived
+  // wrongly becomes a statutory reference date nothing can correct. A wrong
+  // address only takes the account out of the cohort and stops the mail; a
+  // wrong anchor sends a notice on the wrong day, silently.
+  const signedUp = new Date("2026-02-14T09:30:00.000Z");
+  const user = await createUser(signedUp);
+  const approval = await sealFor([user]);
+
+  const member = await prisma.emailSendApprovalMember.findFirstOrThrow({
+    where: { approvalId: approval.id },
+  });
+  assert.deepEqual(member.noticeAnchorAt, signedUp);
+  assert.equal(member.noticeAnchorSource, "signup_date_deemed");
+});
+
+test("an approval naming an account that does not exist is refused", async () => {
+  const users = [await createUser()];
+  await assert.rejects(
+    sealRiskAcceptedApproval({
+      approvedById: users[0]!.id,
+      approvedByEmail: users[0]!.email!,
+      approvedAt,
+      reason: "Names a ghost.",
+      reviewCondition: "Never.",
+      policyVersionId: await policyVersionId(),
+      purposeKey: "*",
+      candidates: [
+        { userId: "no-such-account", emailAddress: "ghost@example.test" },
+      ],
+    }),
+    /do not exist/
+  );
 });
 
 test("the same mailbox in a different case is the same member", async () => {
@@ -514,6 +545,129 @@ test("a resolution describing a country the screen never showed is refused", asy
   );
 });
 
+test("a named country the screen never rendered is refused, even unsettled", async () => {
+  // The check used to run after the fold to `ZZ`, so a low-confidence `KR`
+  // rendered against a Singapore device passed: the column said undetermined,
+  // the evidence said a Singapore rule applied, and `KR` appeared nowhere in
+  // the row. Same failure as a settled mismatch, surviving in the one case the
+  // check stopped looking.
+  const user = await createUser();
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [
+        {
+          country: "SG",
+          signal: "inferred",
+          ruleVersion: 1,
+          copyHash: "sha256:sg-device",
+        },
+      ],
+      resolved: {
+        countryCode: "KR",
+        profileKey: "KR",
+        confidence: "low",
+        source: "inferred",
+      },
+    }),
+    /KR is not among the rules this notice rendered/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
+test("a conflict has to name the countries that disagreed, and they have to be on the screen", async () => {
+  // The column folds to `ZZ` either way, so without the pair nothing in the
+  // row says which two countries the conflict was between -- and the display
+  // duties of an unresolved pair are the union of theirs.
+  const user = await createUser();
+  const conflicted = {
+    countryCode: "ZZ",
+    profileKey: "ZZ",
+    confidence: "conflict",
+    source: "conflict",
+  };
+  const twoRules = [
+    {
+      country: "AU",
+      signal: "billing",
+      ruleVersion: 1,
+      copyHash: "sha256:au-device",
+    },
+    {
+      country: "KR",
+      signal: "self_declared",
+      ruleVersion: 2,
+      copyHash: "sha256:kr-device",
+    },
+  ];
+
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: twoRules,
+      resolved: conflicted,
+    }),
+    /must name the countries that disagreed/
+  );
+
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [twoRules[0]!],
+      resolved: { ...conflicted, conflicts: ["AU", "KR"] },
+    }),
+    /KR is not among the rules this notice rendered/
+  );
+
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: twoRules,
+    resolved: { ...conflicted, conflicts: ["AU", "KR"] },
+  });
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "ZZ");
+  assert.equal(row.jurisdictionSource, "conflict");
+});
+
+test("a settled country is the only rule the screen should have rendered", async () => {
+  // Draft section 5.3: two candidates are what an uncertain estimate looks
+  // like, and a determinative signal replaces the list rather than joining it.
+  // A stray candidate beside a settled country matters because the display
+  // duties are the union -- an account settled as Australian with Korea left
+  // in the list gets Korea's (광고) prefix, or is refused when two prefixes
+  // collide. Permanently: the row is written once.
+  const user = await createUser();
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [
+        {
+          country: "AU",
+          signal: "self_declared",
+          ruleVersion: 1,
+          copyHash: "sha256:au-device",
+        },
+        {
+          country: "KR",
+          signal: "inferred",
+          ruleVersion: 2,
+          copyHash: "sha256:kr-device",
+        },
+      ],
+    }),
+    /AU is settled, so it is the only rule/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
 test("a resolution's profile is derived, never taken from the caller", async () => {
   // A caller could pass `{ countryCode: "JP", profileKey: "AU" }`. The profile
   // is computed from the code, so the claim buys nothing.
@@ -825,11 +979,7 @@ test("an approval sealed for one purpose does not cover another", async () => {
     policyVersionId: await policyVersionId(),
     purposeKey: "newsletter",
     candidates: [
-      {
-        userId: users[0]!.id,
-        emailAddress: users[0]!.email!,
-        signupAt: approvedAt,
-      },
+      { userId: users[0]!.id, emailAddress: users[0]!.email! },
     ],
   });
 
@@ -862,11 +1012,7 @@ test("an approval sealed with no reason is refused", async () => {
       policyVersionId: await policyVersionId(),
       purposeKey: "*",
       candidates: [
-        {
-          userId: users[0]!.id,
-          emailAddress: users[0]!.email!,
-          signupAt: approvedAt,
-        },
+        { userId: users[0]!.id, emailAddress: users[0]!.email! },
       ],
     }),
     /no_reason/

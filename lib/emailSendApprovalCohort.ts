@@ -48,8 +48,6 @@ export const approvalAddressDigest = emailAddressDigest;
 export type CohortCandidate = {
   userId: string;
   emailAddress: string;
-  /** When they signed up: what the two-year notice counts from (rule 5). */
-  signupAt: Date;
 };
 
 /**
@@ -124,16 +122,39 @@ export const sealRiskAcceptedApproval = async (input: {
       },
     });
 
+    // The signup dates come from the accounts, not from the caller.
+    //
+    // Rule 5 deems the signup date the date Korea's two-year confirmation
+    // notice counts from, and the member row is sealed a moment later, so a
+    // date somebody typed or derived wrongly becomes a statutory reference
+    // date that can never be corrected. The addresses are different: a wrong
+    // one takes the account out of the cohort at send time and nothing goes
+    // out. A wrong anchor sends a notice on the wrong day, silently.
+    const accounts = await tx.user.findMany({
+      where: { id: { in: input.candidates.map((candidate) => candidate.userId) } },
+      select: { id: true, createdAt: true },
+    });
+    const signupAt = new Map(
+      accounts.map((account) => [account.id, account.createdAt])
+    );
+    const missing = input.candidates
+      .map((candidate) => candidate.userId)
+      .filter((userId) => !signupAt.has(userId));
+    if (missing.length > 0) {
+      throw new Error(
+        `${missing.length} account(s) named by this approval do not exist.`
+      );
+    }
+
     await tx.emailSendApprovalMember.createMany({
       data: input.candidates.map((candidate, index) => ({
         approvalId: approval.id,
         userId: candidate.userId,
         addressDigest: members[index]!.addressDigest,
         addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
-        // Rule 5: the signup date is deemed the date the two-year
-        // confirmation notice counts from. Deemed rather than known, which is
-        // why the source says so rather than leaving a bare date behind.
-        noticeAnchorAt: candidate.signupAt,
+        // Deemed rather than known, which is why the source says so rather
+        // than leaving a bare date behind.
+        noticeAnchorAt: signupAt.get(candidate.userId)!,
         noticeAnchorSource: "signup_date_deemed",
       })),
     });

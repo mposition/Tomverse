@@ -220,6 +220,15 @@ type RecordInput = {
     profileKey: string;
     confidence: string;
     source: string;
+    /**
+     * The high-confidence countries that disagreed, when they did.
+     *
+     * Part of `ResolvedJurisdiction` and required here whenever the
+     * confidence is `conflict`: the column folds to `ZZ` either way, so
+     * without the pair there is nothing left in the row to say which two
+     * countries the conflict was between.
+     */
+    conflicts?: readonly string[];
   };
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
@@ -296,27 +305,81 @@ const recordNoticeEvent = async (
     confidence: input.resolved.confidence,
     source: input.resolved.source,
   };
-  if (resolved.source === "conflict" && resolved.confidence !== "conflict") {
+  // Both directions. A `conflict` confidence with some other source would
+  // fold the column to `ZZ` and throw the country away while the row claimed
+  // a settled source, which reads as a settled answer that is missing.
+  if (
+    (resolved.source === "conflict") !==
+    (resolved.confidence === "conflict")
+  ) {
     throw new Error(
-      "An in-product notice event cannot record a conflict without a conflicting resolution."
+      "An in-product notice event cannot record a conflict on one of the source and the confidence but not the other."
     );
   }
 
   const jurisdiction = noticeJurisdictionColumns(resolved);
 
-  // A settled country has to be one of the rules that was on the screen.
+  // The resolution and the screen have to describe the same countries, and
+  // that is checked **before** the fold to `ZZ` rather than after it.
   //
-  // Two candidates are allowed (draft section 5.3), and a `ZZ` column is
-  // allowed to match none of them -- undetermined, conflicting and inferred
-  // are all answers that differ from every candidate. What cannot happen is a
-  // settled country the person was never shown the rule for.
-  if (
-    jurisdiction.country !== "ZZ" &&
-    !candidates.some((candidate) => candidate.country === jurisdiction.country)
-  ) {
+  // Checking the folded column was not enough, and the gap was exactly where
+  // the fold happens. A resolution of `KR` at `low` confidence rendered
+  // against a Singapore device folded to `ZZ` and passed, with `KR` appearing
+  // nowhere in the row: the column said undetermined and the evidence said a
+  // Singapore rule was applied. That is the same "two halves, two countries"
+  // failure the check was added for, surviving in the one case the check
+  // stopped looking.
+  const candidateCountries = new Set(
+    candidates.map((candidate) => candidate.country)
+  );
+
+  // Any country the resolver named, settled or not, is a country whose rule we
+  // should have rendered.
+  if (resolvedCountry !== null && !candidateCountries.has(resolvedCountry)) {
     throw new Error(
-      `The resolved country ${jurisdiction.country} is not among the rules this notice rendered.`
+      `The resolved country ${resolvedCountry} is not among the rules this notice rendered.`
     );
+  }
+
+  // A conflict names two, and both of them are countries the screen had to
+  // cover -- the display duties of an unresolved pair are the union of theirs
+  // (draft section 5.3).
+  if (resolved.confidence === "conflict") {
+    const conflicts = (input.resolved.conflicts ?? [])
+      .map((country) => normalizeCountry(country))
+      .filter((country): country is string => country !== null);
+    if (conflicts.length === 0) {
+      throw new Error(
+        "A conflicting resolution must name the countries that disagreed."
+      );
+    }
+    for (const country of conflicts) {
+      if (!candidateCountries.has(country)) {
+        throw new Error(
+          `The conflicting country ${country} is not among the rules this notice rendered.`
+        );
+      }
+    }
+  }
+
+  // And a settled country is the *only* rule that should have been rendered.
+  //
+  // Draft section 5.3: two candidates are what an uncertain estimate looks
+  // like, and a determinative signal replaces the list rather than joining it.
+  // Leaving a stray candidate beside a settled country matters because the
+  // display duties are the union of the list -- so an account settled as
+  // Australian, with Korea left in the list, gets Korea's `(광고)` prefix
+  // attached, or is refused as `display_unsatisfiable` when two prefixes
+  // collide. Permanently: this row is written once.
+  if (jurisdiction.country !== "ZZ") {
+    if (
+      candidateCountries.size !== 1 ||
+      !candidateCountries.has(jurisdiction.country)
+    ) {
+      throw new Error(
+        `${jurisdiction.country} is settled, so it is the only rule this notice should have rendered.`
+      );
+    }
   }
 
   // The two keys are scoped differently, and deliberately: a render is about
