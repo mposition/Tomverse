@@ -261,18 +261,20 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
-// Which subsection of section 3 approved each key. A string is checked only
-// against its own subsection, so deleting the approved cell cannot be hidden by
-// the same sentence surviving in some other table of the document.
-const APPROVED_SUBSECTION = {
-  signupOptIn: "### 3.A",
-  signupNotice: "### 3.B",
-  signupRefuse: "### 3.C",
-  noticeTitle: "### 3.D",
-  noticeBody: "### 3.D",
-  noticeAccept: "### 3.D",
-  noticeRefuse: "### 3.D",
-  noticeDismiss: "### 3.D",
+// Where each key's approved cell is: the subsection, the bold label the table
+// follows (null when the subsection holds exactly one table), and for the
+// transposed button table the role row. A string is compared with that one
+// cell and nothing else, so neither a copy of the sentence elsewhere nor a
+// swap between two cells of the same language can stand in for it.
+const APPROVED_CELL = {
+  signupOptIn: { heading: "### 3.A", label: null, role: null },
+  signupNotice: { heading: "### 3.B", label: null, role: null },
+  signupRefuse: { heading: "### 3.C", label: null, role: null },
+  noticeTitle: { heading: "### 3.D", label: "**제목**", role: null },
+  noticeBody: { heading: "### 3.D", label: "**본문**", role: null },
+  noticeAccept: { heading: "### 3.D", label: "**세 버튼**", role: "동의" },
+  noticeRefuse: { heading: "### 3.D", label: "**세 버튼**", role: "거부" },
+  noticeDismiss: { heading: "### 3.D", label: "**세 버튼**", role: "닫기" },
 };
 
 /** The text of one section, from its heading to the next heading of the same or higher level. */
@@ -292,88 +294,109 @@ const sectionOf = (doc, heading) => {
   return lines.slice(from, to).join("\n");
 };
 
-/** Every table cell in a section, grouped by the language column it sits in. */
-const cellsByLanguage = (section) => {
+/**
+ * Every table in a section, each with the last non-blank line before it (its
+ * label) and its rows as trimmed cells, separator rows dropped.
+ */
+const tablesOf = (section) => {
   const clean = (cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1");
-  const rows = section
-    .split("\n")
-    .filter((line) => line.startsWith("|") && !/^\|[-\s|:]+\|$/.test(line))
-    .map((line) => line.split("|").slice(1, -1).map(clean));
-
-  // Two table shapes. Most tables have a language in the first column and the
-  // text in the second. The button table is transposed: its header names the
-  // languages, and each row starts with the button's role.
-  const byLanguage = new Map();
-  const add = (language, text) => {
-    if (!byLanguage.has(language)) byLanguage.set(language, new Set());
-    byLanguage.get(language).add(text);
-  };
-  for (const row of rows) {
-    if (CONSENT_COPY_LANGUAGES.includes(row[0]) && row.length === 2) add(row[0], row[1]);
-  }
-  const header = rows.find(
-    (row) => row.length > 7 && CONSENT_COPY_LANGUAGES.every((l) => row.includes(l))
-  );
-  if (header) {
-    for (const row of rows) {
-      if (row.length !== header.length || row === header) continue;
-      header.forEach((column, index) => {
-        if (CONSENT_COPY_LANGUAGES.includes(column)) add(column, row[index]);
-      });
+  const tables = [];
+  let label = null;
+  let current = null;
+  for (const line of section.split("\n")) {
+    if (line.startsWith("|")) {
+      if (!current) {
+        current = { label, rows: [] };
+        tables.push(current);
+      }
+      if (!/^\|[-\s|:]+\|$/.test(line)) {
+        current.rows.push(line.split("|").slice(1, -1).map(clean));
+      }
+      continue;
     }
+    current = null;
+    if (line.trim() !== "") label = line.trim();
   }
-  return byLanguage;
+  return tables;
 };
 
-test("every approved string sits in its own language's cell of its own subsection", () => {
+/** The one cell a key's approved string must equal. Fails unless it is unique. */
+const approvedCell = (doc, key, language) => {
+  const { heading, label, role } = APPROVED_CELL[key];
+  const tables = tablesOf(sectionOf(doc, heading)).filter(
+    (table) => label === null || table.label === label
+  );
+  assert.equal(tables.length, 1, `${key}: expected exactly one table under ${heading} ${label ?? ""}`);
+  const [header, ...rows] = tables[0].rows;
+
+  if (role === null) {
+    assert.deepEqual(header, ["언어", "문안"], `${key}: not a language table`);
+    const matches = rows.filter((row) => row[0] === language);
+    assert.equal(matches.length, 1, `${key}.${language}: expected exactly one row`);
+    assert.equal(matches[0].length, 2, `${key}.${language}: the row has extra cells`);
+    return matches[0][1];
+  }
+
+  assert.equal(header[0], "역할", `${key}: not the transposed button table`);
+  const column = header.indexOf(language);
+  assert.ok(column > 0 && header.lastIndexOf(language) === column, `${key}: no single ${language} column`);
+  const matches = rows.filter((row) => row[0] === role);
+  assert.equal(matches.length, 1, `${key}: expected exactly one ${role} row`);
+  assert.equal(matches[0].length, header.length, `${key}: the ${role} row is misaligned`);
+  return matches[0][column];
+};
+
+test("every approved string is exactly its own cell of the approved document", () => {
   // The document is what the owner signed. If this file drifts from it, the
   // hash names words nobody approved.
   //
-  // Matched per language, not against every cell at once. Pooling the cells
-  // let a Korean label be swapped for an English sentence that already
-  // appeared elsewhere in the document -- the string was "in the document",
-  // just not in the Korean column. A whole cell rather than a substring, too:
-  // `받지 않겠습니다` is inside `광고성 이메일을 받지 않겠습니다`. And per
-  // subsection: pooling the whole document let the approved cell be deleted
-  // while a copy of the sentence elsewhere kept this test green.
+  // Three earlier versions each left a way through. Pooling every cell let a
+  // Korean label be replaced by an English sentence found elsewhere. Pooling
+  // per language let the approved cell be deleted while a copy of the sentence
+  // survived in another table. Pooling per subsection let the title and body
+  // cells, or two buttons, trade places. Now each key has one cell -- section,
+  // table, role and language -- and must equal it, whole.
   const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
-  const cache = new Map();
   for (const key of CONSENT_COPY_KEYS) {
-    const heading = APPROVED_SUBSECTION[key];
-    assert.ok(heading, `${key} has no approved subsection`);
-    if (!cache.has(heading)) cache.set(heading, cellsByLanguage(sectionOf(doc, heading)));
-    const byLanguage = cache.get(heading);
+    assert.ok(APPROVED_CELL[key], `${key} has no approved cell`);
     for (const language of CONSENT_COPY_LANGUAGES) {
-      const text = consentCopy(key, language);
-      assert.ok(
-        byLanguage.get(language)?.has(text),
-        `${key}.${language} is not in ${heading}'s ${language} cells: ${text.slice(0, 40)}`
+      assert.equal(
+        consentCopy(key, language),
+        approvedCell(doc, key, language),
+        `${key}.${language} differs from its approved cell`
       );
     }
   }
 });
 
-test("the approval section records the digest of each version, on that version's line", () => {
+test("the approval section records the digest of each version, once, on that version's line", () => {
   // Per-string pins stop an approved byte moving on its own, but a commit that
   // changes a string *and* its pin passes them. The whole-version digest is
   // also written into the owner's signed record, so changing an approved byte
   // means editing that record -- which section 10 forbids and which a reviewer
   // sees for what it is.
   //
-  // Only section 8 counts, and only as the digest's own line directly under
-  // the line naming its version. `doc.includes()` was satisfied by the digest
-  // anywhere in the document, or by the prefix of a longer token, so a new
-  // digest written outside the approval left section 8 naming the old one.
+  // Only section 8 counts, only as the digest's own line directly under the
+  // line naming its version, and only once. `doc.includes()` was satisfied by
+  // the digest anywhere; the first line-based version by the first matching
+  // line, so a correct copy placed above the approval hid an edited one.
   const approval = sectionOf(
     readFileSync("docs/policy/email-consent-copy-draft.md", "utf8"),
     "## 8."
   );
   const lines = approval.split("\n");
   const TICK = String.fromCharCode(96); // a backtick
+  const digestLines = lines.filter((line) => /^`sha256:[0-9a-f]*`$/.test(line.trim()));
+  assert.equal(
+    digestLines.length,
+    CONSENT_COPY_VERSIONS.length,
+    "section 8 must hold exactly one digest line per version"
+  );
   for (const { version } of CONSENT_COPY_VERSIONS) {
     const digest = consentCopyVersionDigest(version);
     const at = lines.indexOf(TICK + digest + TICK);
     assert.ok(at >= 0, `version ${version} digest ${digest} is not its own line in section 8`);
+    assert.equal(lines.lastIndexOf(TICK + digest + TICK), at, `version ${version} digest appears twice`);
     const label = lines.slice(0, at).reverse().find((line) => line.trim() !== "");
     assert.ok(
       label?.includes("버전 " + TICK + version + TICK),
