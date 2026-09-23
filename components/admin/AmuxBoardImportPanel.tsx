@@ -164,15 +164,16 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-500"
-          disabled
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          disabled={pending || approvalId.trim().length === 0 || result?.applyPermitted !== true}
           aria-describedby="amux-board-import-apply-reason"
+          onClick={() => send("apply", JSON.stringify({ approvalId }))}
         >
           {messages.apply}
         </button>
       </div>
       <p id="amux-board-import-apply-reason" className="text-sm text-zinc-700">
-        {messages.applyDisabled}
+        {result?.applyPermitted === true ? messages.applyPermitted("true") : messages.applyDisabled}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline" href={STEP_UP_HREF}>

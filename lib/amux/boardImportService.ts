@@ -57,7 +57,7 @@ import { prisma } from "@/lib/prisma";
  * can cover the audit-chain lock.
  *
  * Production apply needs the environment latch and BOARD_IMPORT_APPLY_CODE_LATCH.
- * The constant ships false. applyBoardImport does not accept a caller override.
+ * applyBoardImport does not accept a caller override.
  */
 
 const TARGET_TYPE = "AmuxBoardImportApproval";

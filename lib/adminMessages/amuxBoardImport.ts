@@ -4,7 +4,7 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
   en: {
     title: "AMUX catalog import",
     description:
-      "Preview reads the catalog and writes nothing. Prepare, approve, reject and expire record an approval. Apply stays off until a separate production approval. This screen cannot turn it on.",
+      "Preview reads the catalog and writes nothing. Prepare, approve, reject and expire record an approval. Apply sends the approved catalog only when the server reports that this import is permitted. This screen cannot set that permission.",
     manifestLabel: "Catalog manifest",
     preview: "Preview",
     prepare: "Prepare",
@@ -46,7 +46,7 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
   ko: {
     title: "AMUX 카탈로그 이관",
     description:
-      "미리보기는 카탈로그를 읽고 아무것도 쓰지 않습니다. 준비, 승인, 거절, 만료는 승인 기록만 남깁니다. 적용은 별도의 운영 승인이 있을 때까지 꺼져 있으며, 이 화면에서는 켤 수 없습니다.",
+      "미리보기는 카탈로그를 읽고 아무것도 쓰지 않습니다. 준비, 승인, 거절, 만료는 승인 기록만 남깁니다. 적용은 서버가 이 이관을 허용한다고 보고할 때만 승인된 카탈로그를 보냅니다. 이 화면은 그 허용을 켜지 못합니다.",
     manifestLabel: "카탈로그 매니페스트",
     preview: "미리보기",
     prepare: "준비",

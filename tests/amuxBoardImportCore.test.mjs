@@ -330,8 +330,8 @@ test("item bindings round-trip into the same items without a title", () => {
   assert.equal(parseBoardImportItemBindings([{ ...bindings[0], title: "nope" }]), null);
 });
 
-test("apply stays off unless both latches are on, and the shipped latch is off", () => {
-  assert.equal(BOARD_IMPORT_APPLY_CODE_LATCH, false);
+test("apply stays off unless both latches are on, and the code latch is armed", () => {
+  assert.equal(BOARD_IMPORT_APPLY_CODE_LATCH, true);
   assert.equal(boardImportApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(boardImportApplyPermitted({ envValue: "disabled", codeLatch: true }), false);
   assert.equal(boardImportApplyPermitted({ envValue: undefined, codeLatch: true }), false);
@@ -498,6 +498,8 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   assert.notEqual(digest, boardImportItemBindingsDigest(altered));
   assert.equal(panel.includes("adminRecentAuthenticationHref"), true);
   assert.equal(panel.includes("ADMIN_REAUTHENTICATION_REQUIRED"), true);
+  assert.match(panel, /result\?\.applyPermitted !== true/);
+  assert.match(panel, /send\("apply"/);
   const page = resolveAdminPageMeta("/admin/amux-board-import");
   assert.equal(page.label, "AMUX catalog import");
   assert.equal(page.isKnown, true);
