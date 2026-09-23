@@ -1016,7 +1016,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
-| §7.2·§7.3 | deployment 단위 health와 circuit breaker | provider 단위만 |
+| §7.2·§7.3 | deployment 단위 health와 circuit breaker | 판정 (§14.10). trip 횟수는 호출자. prior는 쓰지 않음 |
 | §8.5 | load guard | 없음 |
 | §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 확인 필요 |
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | `CredentialBinding` dark schema만 |
@@ -1181,6 +1181,24 @@ ADR §3.2와 §9.2의 판정이 `lib/qualityGateOperations.ts`에 있습니다.
 
 이 줄이 §14.3의 quality gate 항목입니다. 직전 보고는 24, 약 48%였습니다.
 §14.3의 약 50단위에서 완료는 25, **약 50%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.10 Deployment availability (2026-09-23)
+
+ADR §7.2와 §7.3의 판정이 `lib/deploymentAvailability.ts`에 있습니다.
+요청 경로는 import하지 않습니다. provider health 카운터를 읽지 않습니다.
+
+- 5xx, 연결 실패, pre-commit timeout, transport corruption만 availability입니다.
+  429와 malformed output은 제외입니다.
+- raw risk는 문서의 가중치 `(1.0 * n5xx + 1.2 * nTimeout + 1.0 * nConnection) / nEligible`입니다.
+  표본이 없거나 수가 성립하지 않으면 `insufficient`입니다. shrinkage prior는
+  쓰지 않습니다.
+- breaker는 `closed → open → half_open → closed`입니다. 몇 번 실패에
+  열리는지는 호출자의 `trip`입니다. 이 모듈은 그 횟수를 정하지 않습니다.
+  open은 probe를 허용하기 전까지 닫히지 않습니다.
+
+이 줄이 §14.3의 deployment health 항목입니다. 직전 quality 보고는 25, 약 50%였습니다.
+§14.3의 약 50단위에서 완료는 26, **약 52%(추정)**입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
