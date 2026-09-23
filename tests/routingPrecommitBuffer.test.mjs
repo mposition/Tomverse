@@ -5,39 +5,39 @@ import test from "node:test";
 
 import {
     heldChunkIsCommitPoint,
-    precommitBufferOpen,
+    precommitBufferDecision,
 } from "../lib/routingPrecommitBuffer.ts";
 
-const startedAt = new Date("2026-09-23T00:00:00.000Z");
+const chunkReadyAt = new Date("2026-09-23T00:00:00.000Z");
 
 test("the first chunk stays withheld until the supplied instant", () => {
     const bufferMs = 40;
     assert.equal(
-        precommitBufferOpen({
+        precommitBufferDecision({
             bufferMs,
-            startedAt,
-            now: new Date(startedAt.getTime() + bufferMs - 1),
+            chunkReadyAt,
+            now: new Date(chunkReadyAt.getTime() + bufferMs - 1),
         }),
-        true
+        "hold"
     );
     assert.equal(
-        precommitBufferOpen({
+        precommitBufferDecision({
             bufferMs,
-            startedAt,
-            now: new Date(startedAt.getTime() + bufferMs),
+            chunkReadyAt,
+            now: new Date(chunkReadyAt.getTime() + bufferMs),
         }),
-        false
+        "release"
     );
     assert.equal(heldChunkIsCommitPoint, false);
 });
 
-test("a missing duration or a bad clock is not a decision to flush or to hold", () => {
-    const now = new Date(startedAt.getTime() + 1);
-    for (const bufferMs of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, "40"]) {
-        assert.equal(precommitBufferOpen({ bufferMs, startedAt, now }), null);
+test("a missing duration or a bad clock is neither a flush nor a hold", () => {
+    const now = new Date(chunkReadyAt.getTime() + 1);
+    for (const bufferMs of [undefined, null, 0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, "40"]) {
+        assert.equal(precommitBufferDecision({ bufferMs, chunkReadyAt, now }), "undecided");
     }
-    assert.equal(precommitBufferOpen({ bufferMs: 40, startedAt: "now", now }), null);
-    assert.equal(precommitBufferOpen({ bufferMs: 40, startedAt, now: "now" }), null);
+    assert.equal(precommitBufferDecision({ bufferMs: 40, chunkReadyAt: "now", now }), "undecided");
+    assert.equal(precommitBufferDecision({ bufferMs: 40, chunkReadyAt, now: "now" }), "undecided");
 });
 
 test("the column is nullable, positive when present, and written by nobody", () => {
@@ -48,7 +48,7 @@ test("the column is nullable, positive when present, and written by nobody", () 
     assert.match(sql, /ADD COLUMN "precommitBufferMs" INTEGER/);
     assert.doesNotMatch(sql, /DEFAULT/);
     assert.match(sql, /"precommitBufferMs" IS NULL OR "precommitBufferMs" > 0/);
-    assert.doesNotMatch(sql, /UPDATE\s+"/i);
+    assert.doesNotMatch(sql, /\bUPDATE\b/i);
 });
 
 test("the request path does not import the buffer", () => {
@@ -65,6 +65,7 @@ test("the request path does not import the buffer", () => {
             const source = readFileSync(path, "utf8");
             if (
                 source.includes("routingPrecommitBuffer") ||
+                source.includes("precommitBufferDecision") ||
                 source.includes("precommitBufferOpen") ||
                 source.includes("precommitBufferMs")
             ) {

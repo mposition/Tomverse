@@ -3991,7 +3991,7 @@ model RoutingRun {
   requestDeadlineMs Int?
 
   /// How long the first chunk may be withheld, in milliseconds, before it
-  /// is flushed. ADR v2.1 §10.2. Null means nobody supplied one. It is not
+  /// is flushed. ADR v2.1 pre-commit buffer. Null means nobody supplied one. It is not
   /// zero and it is not a duration this schema chose. Dark: the request
   /// path does not write it.
   precommitBufferMs Int?
