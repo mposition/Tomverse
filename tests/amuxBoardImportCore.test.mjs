@@ -427,7 +427,7 @@ test("the approval table is registered, inserts no cards, and is not a user rela
   assert.match(sql, /"itemBindingsDigest"/);
 });
 
-test("preview does not write, apply is not latched on, and the worker boundary is not reused", () => {
+test("preview does not write, apply has no caller latch, and the worker boundary is not reused", () => {
   const preview = read("lib/amux/boardImportPreview.ts");
   assert.equal(preview.includes("writeAdminAuditLog"), false);
   assert.equal(preview.includes("amuxBoardImportApproval"), false);
@@ -498,7 +498,9 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   assert.notEqual(digest, boardImportItemBindingsDigest(altered));
   assert.equal(panel.includes("adminRecentAuthenticationHref"), true);
   assert.equal(panel.includes("ADMIN_REAUTHENTICATION_REQUIRED"), true);
-  assert.match(panel, /result\?\.applyPermitted !== true/);
+  assert.match(panel, /const applyReady = result\?\.applyPermitted === true && approvalId\.trim\(\)\.length > 0/);
+  assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
+  assert.match(panel, /applyReady \? messages\.applyPermitted\("true"\) : messages\.applyDisabled/);
   assert.match(panel, /send\("apply"/);
   const page = resolveAdminPageMeta("/admin/amux-board-import");
   assert.equal(page.label, "AMUX catalog import");
