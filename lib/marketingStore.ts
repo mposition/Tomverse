@@ -396,20 +396,29 @@ export type MarketingClaimReleaseReason =
 export const MARKETING_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
 /**
- * What makes a slot spent.
+ * What a slot is.
  *
- * `slotDate` and nothing else. A claim writes it, a release clears it, and
- * nothing in between hands it back -- so the column *is* the record of the
- * account's allowance being used, and counting anything else on top of it is
- * a second opinion that can disagree.
+ * **One row, one slot: the day this post is spending.** The plan counts
+ * `MarketingPost` slot rows without a fifth table, so a row holds at most one
+ * day, and `slotDate` is that day. A claim writes it; a release clears it;
+ * nothing else touches it -- the generic history patch cannot, by type.
  *
- * The first version of this counted a list of statuses and excluded
- * `deletedAt IS NOT NULL`, which made an unpublish give the day back: a post
- * that had gone out, been seen, and then been retracted stopped counting, and
- * the account could spend the same day again. That is exactly the case the
- * caps exist for. A post whose slot was taken and never used gives it back by
- * being released, which is a decision somebody made, not a side effect of a
- * column somewhere else.
+ * Three consequences, each of which an earlier version of this got wrong:
+ *
+ * - **Renewing is not spending.** A worker that dies leaves a claim whose lease
+ *   runs out, and the next worker reclaims the same row for the same day. That
+ *   row is already one of today's spends, so counting it against today's cap
+ *   refused its own renewal -- on a one-a-day channel, the only recovery path
+ *   for a crashed worker never succeeded.
+ * - **Retracting does not refund.** An unpublish leaves `slotDate` where it was,
+ *   so a post that went out and was taken down still counts for its day.
+ * - **A retry on a later day moves the row.** A post that failed and was
+ *   requeued -- which is an operator's audited decision, not something the
+ *   system does to itself -- is claimed again on whatever day it next goes
+ *   out, and that is the day it spends. The earlier attempt's day is released
+ *   by the move. An earlier version kept the old day on the grounds that a
+ *   failure had consumed it, which is a rule the plan never made and which the
+ *   one-row model cannot express without counting one post twice.
  */
 
 /** The caps in force for an account: the policy's, unless an operator lowered them. */
@@ -2043,9 +2052,12 @@ export type MarketingPostPatch = {
   approvalExpiresAt?: Date | null;
   reusableAsTemplate?: boolean;
   scheduledAt?: Date | null;
-  slotDate?: Date | null;
-  claimToken?: string | null;
-  leaseUntil?: Date | null;
+  // `slotDate`, `claimToken` and `leaseUntil` are not here. They are written
+  // by `claimDueMarketingPost` and cleared by `releaseMarketingPostClaim` and by
+  // nothing else: a generic patch that could set them could clear a spent slot
+  // and give an account its day back, which is the thing the caps exist to
+  // stop. A rule stated in a comment and not in the type is a rule the next
+  // caller has to find.
   publishAttempt?: number;
   providerRequestKey?: string | null;
   externalPostId?: string | null;
@@ -2129,9 +2141,6 @@ const postPatchData = (
     data.reusableAsTemplate = patch.reusableAsTemplate;
   }
   if (patch.scheduledAt !== undefined) data.scheduledAt = copyDate(patch.scheduledAt);
-  if (patch.slotDate !== undefined) data.slotDate = copyDate(patch.slotDate);
-  if (patch.claimToken !== undefined) data.claimToken = patch.claimToken;
-  if (patch.leaseUntil !== undefined) data.leaseUntil = copyDate(patch.leaseUntil);
   if (patch.publishAttempt !== undefined) data.publishAttempt = patch.publishAttempt;
   if (patch.providerRequestKey !== undefined) {
     data.providerRequestKey = patch.providerRequestKey;
@@ -2683,11 +2692,16 @@ async function lockDueMarketingPost(
   database: MarketingTransaction,
   channelId: string,
   now: Date,
-): Promise<{ id: string; historyVersion: number } | null> {
+): Promise<{ id: string; historyVersion: number; slotDay: string | null } | null> {
+  // `slotDay` comes back as text, not as a `DATE`: a `DATE` crosses into
+  // JavaScript as a `Date`, and which calendar day that `Date` then names
+  // depends on who reads it. The claim compares it with a day that is also
+  // text, and two strings have no time zone.
   const rows = await database.$queryRaw<
-    Array<{ id: string; historyVersion: number }>
+    Array<{ id: string; historyVersion: number; slotDay: string | null }>
   >(Prisma.sql`
-    SELECT p."id", p."historyVersion"
+    SELECT p."id", p."historyVersion",
+           to_char(p."slotDate", 'YYYY-MM-DD') AS "slotDay"
     FROM "MarketingPost" AS p
     WHERE p."channelId" = ${channelId}
       AND p."status" = 'scheduled'
@@ -2695,7 +2709,13 @@ async function lockDueMarketingPost(
       AND p."scheduledAt" <= ${now}
       AND p."deletedAt" IS NULL
       AND p."contentPurgedAt" IS NULL
-      AND (p."claimToken" IS NULL OR p."leaseUntil" IS NULL OR p."leaseUntil" <= ${now})
+      -- Exactly the two conditions the claim tests, and no third.
+      -- "leaseUntil IS NULL" used to be here too, which selected a row
+      -- holding a token with no lease: locked, handed back, and taken by
+      -- neither claim path, every time. The store sets the two together, so
+      -- that state is not one it makes -- and a query that invites it in is
+      -- how it would go unnoticed if something else ever did.
+      AND (p."claimToken" IS NULL OR p."leaseUntil" <= ${now})
     ORDER BY p."scheduledAt" ASC, p."id" ASC
     LIMIT 1
     FOR UPDATE OF p SKIP LOCKED
@@ -2812,45 +2832,61 @@ export async function claimDueMarketingPost(
     return { claimed: false, reason: "channel_posts_by_hand" };
   }
 
-  // Counted while the channel is held, which is what makes the count worth
-  // anything. The day is the database's, not the process's: a worker in
-  // another time zone must not get a second Tuesday.
-  // Counted while the channel is held, which is what makes the count worth
-  // anything, and counted against the database's own UTC day.
+  // **One definition of today, from one clock read, as text.** `now` is the
+  // database's clock read as UTC in the statement above; its date part is the
+  // UTC calendar day. Everything below -- the renewal test, the count and the
+  // write -- derives from this string.
   //
-  // The day is computed in the statement rather than bound from JavaScript.
-  // A `Date` sent as a parameter arrives as a `timestamptz`, and `::date` on a
-  // `timestamptz` resolves in the *session's* time zone -- so a server whose
-  // `TimeZone` is not UTC would count a different day from the one the claim
-  // is about to write, and at 22:00 UTC the two would be different days. The
-  // expression below is the same one the clock read above uses, so there is
-  // one definition of "today" in this transaction.
-  const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
-    Prisma.sql`
-      SELECT
-        count(*) FILTER (
-          WHERE "slotDate" = (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::date
-        ) AS "today",
-        count(*) FILTER (
-          WHERE "slotDate" > (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::date - 7
-        ) AS "week"
-      FROM "MarketingPost"
-      WHERE "channelId" = ${channelId}
-        AND "slotDate" IS NOT NULL
-    `,
-  );
-  const today = Number(used[0]?.today ?? 0);
-  const week = Number(used[0]?.week ?? 0);
-  if (today >= caps.daily) return { claimed: false, reason: "daily_cap_reached" };
-  if (week >= caps.weekly) return { claimed: false, reason: "weekly_cap_reached" };
+  // Two earlier versions got this wrong in opposite ways. Binding `now` as a
+  // `Date` and casting it in SQL resolved the day in the session's time zone.
+  // Calling `clock_timestamp()` again in the counting statement read a second
+  // clock, which a transaction that straddles midnight sees as the next day:
+  // the count would be about day D+1 and the write about day D. A string cast
+  // to `::date` has no time zone and is read once.
+  const day = now.toISOString().slice(0, 10);
+  const slotDate = new Date(`${day}T00:00:00.000Z`);
+
+  // **Renewing is not spending.** A row that already holds today is a claim
+  // whose worker went away and whose lease ran out; taking it again spends
+  // nothing new. Counting it against today's cap refused its own renewal, and
+  // on a channel allowed one post a day that made the only recovery path for a
+  // crashed worker a permanent refusal.
+  const renewing = due.slotDay === day;
+
+  let usedToday: number | null = null;
+  let usedWeek: number | null = null;
+  if (!renewing) {
+    // Counted while the channel is held, which is what makes the count worth
+    // anything, and without this row: it is about to spend today, and if it
+    // held an earlier day -- a failure somebody requeued -- that day moves
+    // with it rather than being counted twice.
+    const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
+      Prisma.sql`
+        SELECT
+          count(*) FILTER (WHERE "slotDate" = ${day}::date) AS "today",
+          count(*) FILTER (WHERE "slotDate" > ${day}::date - 7) AS "week"
+        FROM "MarketingPost"
+        WHERE "channelId" = ${channelId}
+          AND "slotDate" IS NOT NULL
+          AND "id" <> ${due.id}
+      `,
+    );
+    usedToday = Number(used[0]?.today ?? 0);
+    usedWeek = Number(used[0]?.week ?? 0);
+    if (usedToday >= caps.daily) {
+      return { claimed: false, reason: "daily_cap_reached" };
+    }
+    if (usedWeek >= caps.weekly) {
+      return { claimed: false, reason: "weekly_cap_reached" };
+    }
+  }
 
   const leaseUntil = new Date(now.getTime() + leaseMs);
-  // The same UTC calendar day the count just used. `now` is already the
-  // database's clock read as UTC, so its UTC components are that day; taking
-  // midnight of it keeps Prisma's `@db.Date` serialisation from moving it.
-  const slotDate = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+  // A renewal leaves the day alone; a new spend writes it. Either way the day
+  // is the one the count, if there was one, was about.
+  const data = renewing
+    ? { claimToken, leaseUntil }
+    : { slotDate, claimToken, leaseUntil };
 
   // Conditional on everything the decision to claim was made against. The row
   // is held by `FOR UPDATE` so none of it can have moved, and the predicate is
@@ -2861,27 +2897,17 @@ export async function claimDueMarketingPost(
       id: due.id,
       status: "scheduled",
       historyVersion: due.historyVersion,
-      // Nobody holds it. Deliberately *not* also `slotDate: null`: a post that
-      // failed and was requeued keeps the slot date of the day it spent --
-      // that is what stops a bad afternoon spending a week's allowance -- and
-      // requiring it to be null left such a row matching neither this
-      // predicate nor the expired-lease one below, so it could never be
-      // claimed again at all.
+      // Nobody holds it. Not also `slotDate: null`: a requeued post holds the
+      // day of its earlier attempt, and requiring null made it unclaimable.
       claimToken: null,
       deletedAt: null,
       contentPurgedAt: null,
     },
-    data: {
-      slotDate,
-      claimToken,
-      leaseUntil,
-    },
+    data,
   });
   if (claimed.count !== 1) {
-    // Either the row moved, or it was an expired claim rather than an unclaimed
-    // one. The second is a real case and is taken separately, so the
-    // difference between "nobody had it" and "somebody's lease ran out" is
-    // visible in the predicate rather than folded into one.
+    // Somebody held it and their lease has run out. A separate predicate, so
+    // "nobody had it" and "somebody's lease expired" stay different facts.
     const reclaimed = await database.marketingPost.updateMany({
       where: {
         id: due.id,
@@ -2891,11 +2917,7 @@ export async function claimDueMarketingPost(
         deletedAt: null,
         contentPurgedAt: null,
       },
-      data: {
-        slotDate: now,
-        claimToken,
-        leaseUntil,
-      },
+      data,
     });
     if (reclaimed.count !== 1) {
       return { claimed: false, reason: "claim_conflict" };
@@ -2908,16 +2930,21 @@ export async function claimDueMarketingPost(
     action: MARKETING_S2C_ACTIONS.postClaimed,
     targetType: "MarketingPost",
     targetId: due.id,
-    summary: "Took a publishing slot for a scheduled post.",
+    summary: renewing
+      ? "Renewed the lease on a publishing slot this post already held."
+      : "Took a publishing slot for a scheduled post.",
     metadata: {
       channelId,
       // The token is the claim's identity and the release has to present it,
       // so it is recorded. It identifies a worker's attempt, not a person.
       claimToken,
       leaseUntil: leaseUntil.toISOString(),
-      slotDate: now.toISOString().slice(0, 10),
-      dailyUsedBefore: today,
-      weeklyUsedBefore: week,
+      slotDate: day,
+      renewed: renewing,
+      // Null on a renewal, because nothing was counted: the row already held
+      // the day, and a number here would suggest a cap check that did not run.
+      dailyUsedBefore: usedToday,
+      weeklyUsedBefore: usedWeek,
       dailyCap: caps.daily,
       weeklyCap: caps.weekly,
     },

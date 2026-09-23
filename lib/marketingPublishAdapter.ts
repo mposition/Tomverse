@@ -54,8 +54,25 @@ export type MarketingAdapterCapabilities = {
   readonly canLookupByRequestKey: boolean;
 };
 
+/**
+ * What a health observation is about.
+ *
+ * Two, because the admission resolver asks two different questions:
+ * `adapterHealthy` for publishing and `commentsMonitorHealthy` for autonomy,
+ * and a platform can be able to accept a post while its comment API is down.
+ * The plan's `marketing_provider.health_observed` row is keyed by channel,
+ * connection generation *and* capability, so an adapter that could only
+ * observe "the account" would have to be reopened in S2d2 to say which.
+ */
+export const MARKETING_HEALTH_CAPABILITIES = ["publish", "comments"] as const;
+
+export type MarketingHealthCapability =
+  (typeof MARKETING_HEALTH_CAPABILITIES)[number];
+
 /** One health observation, as the adapter made it just now. */
 export type MarketingAdapterHealth = {
+  /** Which capability this observation answers for. */
+  readonly capability: MarketingHealthCapability;
   readonly healthy: boolean;
   /**
    * Why, when it is not healthy, in words an operator can act on and a
@@ -112,7 +129,10 @@ export type MarketingObjectStatus =
 export type MarketingPublishAdapter = {
   readonly provider: string;
   capabilities(channel: MarketingChannel): Promise<MarketingAdapterCapabilities>;
-  observeHealth(externalAccountRef: string): Promise<MarketingAdapterHealth>;
+  observeHealth(
+    externalAccountRef: string,
+    capability: MarketingHealthCapability,
+  ): Promise<MarketingAdapterHealth>;
   publish(request: MarketingPublishRequest): Promise<MarketingPublishResult>;
   /** The same key that was sent, never an id the failed call returned. */
   lookupByRequestKey(

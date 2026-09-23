@@ -2439,3 +2439,113 @@ test("a release must present the claim it is giving back", async () => {
   });
   assert.equal(still.claimToken, "worker-a");
 });
+
+test("a crashed worker's slot is renewed on a one-a-day channel, not refused", async () => {
+  // The round-two blocker, against a real PostgreSQL. LinkedIn is allowed one
+  // post a day. Worker A claims today's slot and dies; its lease runs out;
+  // worker B reclaims the same row. That row is today's one post, and counting
+  // it against the cap refused its own renewal -- so the only recovery path
+  // for a crashed worker was a permanent refusal.
+  //
+  // Also the proof the day survives the trip: `slotDate` goes in as a `DATE`
+  // and comes back through `to_char` as text, and a renewal is recognised only
+  // if the two strings agree.
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.ok(held.slotDate);
+
+  // Worker A is gone. Its lease is made to have run out -- directly, because
+  // the only other way is to wait fifteen minutes, and a test is allowed to
+  // write a row the store would not.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { leaseUntil: new Date(Date.now() - 60_000) },
+  });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(second.claimed, "a renewal must not be refused by its own slot");
+
+  const renewed = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(renewed.claimToken, "worker-b");
+  assert.deepEqual(
+    renewed.slotDate,
+    held.slotDate,
+    "a renewal leaves the day it already held",
+  );
+
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "marketing_post.claimed", targetId: postId },
+    orderBy: { createdAt: "asc" },
+  });
+  assert.equal(audits.length, 2);
+  assert.equal(
+    (audits[1]?.metadata as { renewed?: unknown } | null)?.renewed,
+    true,
+  );
+});
+
+test("a second post on a one-a-day channel is refused the same day", async () => {
+  // The other half of the same rule: renewal is exempt from the cap, a new
+  // spend is not.
+  const { account } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+
+  // A second approved post on the same account, due now.
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-second",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(second, { claimed: false, reason: "daily_cap_reached" });
+});

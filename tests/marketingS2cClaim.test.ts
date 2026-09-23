@@ -88,6 +88,7 @@ const fakeDatabase = (
     now?: Date;
     isolation?: string;
     dueHistoryVersion?: number;
+    dueSlotDay?: string | null;
   } = {},
 ) => {
   const {
@@ -99,11 +100,18 @@ const fakeDatabase = (
     now = NOW,
     isolation = "serializable",
     dueHistoryVersion = 4,
+    dueSlotDay = null,
   } = options;
-  const seen: { updates: Updated[]; audits: Record<string, unknown>[]; sql: string[] } = {
+  const seen: {
+    updates: Updated[];
+    audits: Record<string, unknown>[];
+    sql: string[];
+    countValues: (readonly unknown[])[];
+  } = {
     updates: [],
     audits: [],
     sql: [],
+    countValues: [],
   };
   let update = 0;
   const database = {
@@ -117,11 +125,16 @@ const fakeDatabase = (
         return [{ level: isolation }];
       }
       if (sql.includes("count(*) FILTER")) {
+        seen.countValues.push(
+          (query as { values?: readonly unknown[] }).values ?? [],
+        );
         return [{ today: BigInt(today), week: BigInt(week) }];
       }
       if (sql.includes("clock_timestamp")) return [{ now, createdAt: now }];
       if (sql.includes("FOR UPDATE OF p SKIP LOCKED")) {
-        return due === null ? [] : [{ id: due, historyVersion: dueHistoryVersion }];
+        return due === null
+          ? []
+          : [{ id: due, historyVersion: dueHistoryVersion, slotDay: dueSlotDay }];
       }
       if (sql.includes("FOR UPDATE")) return channel === null ? [] : [channel];
       throw new Error(`unexpected raw statement: ${sql}`);
@@ -308,6 +321,11 @@ test("the due query is written to pass over what another worker holds", async ()
   // Due means due at the database's clock, and an expired lease is reclaimable.
   assert.match(due, /"scheduledAt" <= /);
   assert.match(due, /"leaseUntil" <= /);
+  // And not a third. A row holding a token with no lease would be selected,
+  // locked, and matched by neither update -- every time.
+  assert.doesNotMatch(due, /"leaseUntil" IS NULL/);
+  // The day the row holds, as text, so it compares without a time zone.
+  assert.match(due, /to_char\(p\."slotDate", 'YYYY-MM-DD'\)/);
   assert.match(due, /"status" = 'scheduled'/);
 });
 
@@ -462,7 +480,13 @@ test("a claim refuses a transaction that is not SERIALIZABLE", async () => {
   }
 });
 
-test("the count is of spent slots, and asks the database for the day", async () => {
+test("the count and the write are about one day, read once, as text", async () => {
+  // Two earlier versions got the day wrong in opposite directions. Binding a
+  // `Date` and casting it in SQL resolved the day in the session's time zone;
+  // calling `clock_timestamp()` again in the count read a second clock, which
+  // a transaction straddling UTC midnight sees as the next day. The day is now
+  // one string, derived from the one clock read, and both the count and the
+  // write come from it.
   const { database, seen } = fakeDatabase();
   await claimDueMarketingPost(asTransaction(database), {
     channelId: CHANNEL_ID,
@@ -471,16 +495,103 @@ test("the count is of spent slots, and asks the database for the day", async () 
   });
   const count = seen.sql.find((sql) => sql.includes("count(*) FILTER"));
   assert.ok(count);
-  // `slotDate` is the whole record of a spent slot. Counting a status list on
-  // top of it made an unpublish give the day back, because a retracted post
-  // left the list -- and a post that went out, was seen and was then retracted
-  // has spent the account's day.
+  assert.doesNotMatch(
+    count,
+    /clock_timestamp/,
+    "a second clock read inside one transaction can be a different day",
+  );
+  assert.match(count, /::date/);
+  // The day handed to the count is the text of the clock read's UTC date.
+  assert.ok(
+    (seen.countValues[0] ?? []).includes("2026-09-23"),
+    "the count must be told the day as text, not as a timestamp",
+  );
+  // And the write names the same day.
+  const [write] = seen.updates;
+  assert.ok(write);
+  assert.deepEqual(write.data.slotDate, new Date("2026-09-23T00:00:00.000Z"));
+});
+
+test("the count is of spent slots, and leaves out the row being claimed", async () => {
+  const { database, seen } = fakeDatabase();
+  await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  const count = seen.sql.find((sql) => sql.includes("count(*) FILTER"));
+  assert.ok(count);
+  // `slotDate` is the whole record. A status list on top of it made an
+  // unpublish give the day back.
   assert.match(count, /"slotDate" IS NOT NULL/);
   assert.doesNotMatch(count, /"status" IN/);
   assert.doesNotMatch(count, /"deletedAt"/);
-  // The day comes from the statement, not from a bound parameter: `::date` on
-  // a bound `timestamptz` resolves in the session's time zone.
-  assert.match(count, /clock_timestamp\(\) AT TIME ZONE 'UTC'\)::date/);
+  // Without this row: it is about to spend today, and if it held an earlier
+  // day that day moves with it rather than being counted twice.
+  assert.match(count, /"id" <> /);
+  assert.ok((seen.countValues[0] ?? []).includes(POST_ID));
+});
+
+test("renewing a slot the post already holds is not a new spend", async () => {
+  // The blocker in round two. A worker dies holding today's slot on a channel
+  // allowed one post a day; its lease runs out; the next worker reclaims the
+  // same row. That row *is* today's one post. Counting it against the cap
+  // refused its own renewal, so the only recovery path for a crashed worker
+  // never succeeded.
+  const policy = MARKETING_CHANNEL_CAPS.linkedin;
+  assert.ok(policy);
+  const { database, seen } = fakeDatabase({
+    dueSlotDay: "2026-09-23",
+    // The day is already at its cap -- with this very row in it.
+    today: policy.daily,
+    week: policy.weekly,
+    // Held by a worker whose lease has expired: the first update misses, the
+    // expired-lease one takes it.
+    updates: [0, 1],
+  });
+  const result = await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: "worker-2:attempt-1",
+    resolveAdmission: admits,
+  });
+  assert.ok(result.claimed, "a renewal must not be refused by its own slot");
+
+  assert.equal(
+    seen.countValues.length,
+    0,
+    "nothing is counted on a renewal: nothing new is being spent",
+  );
+  for (const write of seen.updates) {
+    assert.ok(
+      !("slotDate" in write.data),
+      "a renewal leaves the day where it is",
+    );
+  }
+  const [audit] = seen.audits;
+  assert.ok(audit);
+  const metadata = audit.metadata as Record<string, unknown>;
+  assert.equal(metadata.renewed, true);
+  assert.equal(
+    metadata.dailyUsedBefore,
+    null,
+    "a number here would suggest a cap check that did not run",
+  );
+});
+
+test("a post held on an earlier day is a new spend today", async () => {
+  // A failure somebody requeued, claimed again on a later day. It spends the
+  // day it next goes out, and its earlier day moves with it.
+  const { database, seen } = fakeDatabase({ dueSlotDay: "2026-09-20" });
+  const result = await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  assert.ok(result.claimed);
+  assert.equal(seen.countValues.length, 1, "a new spend is counted");
+  const [write] = seen.updates;
+  assert.ok(write);
+  assert.deepEqual(write.data.slotDate, new Date("2026-09-23T00:00:00.000Z"));
 });
 
 test("a requeued post keeps its spent day and can still be claimed", async () => {
