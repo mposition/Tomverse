@@ -379,6 +379,8 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
             // This function reports; it does not refuse a write. A publisher
             // that heeds it leaves the last approved snapshot standing, which
             // is section 8.5's behaviour -- but there is no publisher yet.
+            // What the database refuses is an entry in a slot at or beyond
+            // the manifest's `entryCount`, which the ceiling bounds.
             problems.push(
                 `${input.entries.length} deployments is over the approved ceiling of ${approval.ceiling}`
             );

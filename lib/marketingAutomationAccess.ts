@@ -272,12 +272,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * watched whole.
  *
  * 2026-09-23, the routing snapshot ceiling: RoutingSnapshotCeilingApproval,
- * and two columns on RoutingIdentityManifest that cite it. Both dark, neither
- * a marketing model, nothing here touches the descriptor, the config
- * snapshot, a webhook writer or an admission decision.
+ * two columns on RoutingIdentityManifest that cite it, a `slot` column on
+ * RoutingIdentityManifestEntry and an index the migration already created.
+ * All dark, none a marketing model, nothing here touches the descriptor, the
+ * config snapshot, a webhook writer or an admission decision.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "e7a3ba9f4c6db9b1410431195b4f542f9b17536b210c2355f65203f948811f5e";
+  "efc9c6b69e4d18d018e997455e98dea50930486943cc668c9d294bf15eb1f808";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

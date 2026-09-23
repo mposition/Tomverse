@@ -191,13 +191,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-23, the routing snapshot ceiling: another review note above the
 // watched-schema fingerprint in `lib/marketingAutomationAccess.ts`, comment
 // only, and the accesses below it move down. Count 228, position-free hash
-// unchanged. A repin.
+// unchanged. A repin. Its second review round lengthened the same note by two
+// lines (the entry slot); again comment only, count and position-free hash
+// unchanged, so again a repin.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "99cdb3506d9912046ef875a42b72c717",
-  "f2bd3f035419f52685991983301cd8fa",
+  "a36caed185dbcb22f9cddff79462b24e",
+  "7e37da7b9d3a277e1666179c9e4ccf8e",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

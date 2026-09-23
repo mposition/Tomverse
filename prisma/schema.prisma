@@ -5946,6 +5946,7 @@ model RoutingIdentityManifest {
 
   @@unique([version])
   @@index([approvedAt])
+  @@index([ceilingApprovalId])
 }
 
 /// What one published manifest held about one deployment.
@@ -5968,6 +5969,11 @@ model RoutingIdentityManifest {
 model RoutingIdentityManifestEntry {
   id         String @id @default(cuid())
   manifestId String
+  /// This entry's place in its manifest: unique within the manifest and below
+  /// its `entryCount`, so the entries cannot outnumber the count the
+  /// approved ceiling bounds. A trigger in
+  /// 20260923340000_routing_manifest_ceiling_dark enforces the upper bound.
+  slot       Int
 
   /// The placement, as it stood.
   modelDeploymentId      String
@@ -6012,6 +6018,7 @@ model RoutingIdentityManifestEntry {
   // Prisma cannot express.
 
   @@unique([manifestId, modelDeploymentId])
+  @@unique([manifestId, slot])
   @@index([modelDeploymentId])
 }
 

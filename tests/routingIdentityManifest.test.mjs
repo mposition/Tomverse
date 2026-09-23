@@ -461,7 +461,8 @@ test("a ceiling approved after the publication cannot be cited", () => {
     );
 });
 
-test("the database refuses a copy that does not match the cited approval", () => {
+test("the migration installs a refusal of a copy that does not match the cited approval", () => {
+    // This reads the migration text; it is not a PostgreSQL run.
     // This is the part that makes the ceiling an approval: without it the
     // stored copy could be written to fit whatever was being published.
     const sql = ceilingMigration();
@@ -490,6 +491,28 @@ test("the stored count check is about two integers on one row", () => {
         /RoutingIdentityManifest_within_ceiling_check"\s*\n\s*CHECK \("entryCount" <= "approvedCeiling"\)/
     );
     assert.ok(!/approvedCeiling" INTEGER NOT NULL DEFAULT/.test(sql));
+});
+
+test("the migration holds the entry rows under the count, by slot rather than by count", () => {
+    // Two integers on the manifest row were bounded and the entry rows were
+    // not: a third entry inserted after a manifest of two passed every check.
+    // A count is a race; a unique slot below an immutable entryCount is not.
+    // This reads the migration text; it is not a PostgreSQL run.
+    const sql = ceilingMigration();
+    assert.match(sql, /ALTER TABLE "RoutingIdentityManifestEntry"\s*\n\s*ADD COLUMN "slot" INTEGER NOT NULL;/);
+    assert.match(sql, /CHECK \("slot" >= 0\)/);
+    assert.match(
+        sql,
+        /CREATE UNIQUE INDEX "RoutingIdentityManifestEntry_manifestId_slot_key"\s*\n\s*ON "RoutingIdentityManifestEntry"\("manifestId", "slot"\);/
+    );
+    const trigger = /FUNCTION "routing_identity_manifest_entry_fits_its_manifest"\(\)([\s\S]*?)\$\$ LANGUAGE plpgsql;/.exec(
+        sql
+    );
+    assert.ok(trigger, "the slot trigger is in the migration");
+    assert.match(trigger[1], /NEW\."slot" >= manifest_entry_count/);
+    assert.match(trigger[1], /IF NOT FOUND THEN/);
+    assert.ok(!/COUNT\(/.test(trigger[1]), "no counting: a count is a race");
+    assert.match(sql, /BEFORE INSERT ON "RoutingIdentityManifestEntry"/);
 });
 
 test("an approved ceiling cannot be rewritten", () => {
