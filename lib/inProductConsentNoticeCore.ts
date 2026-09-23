@@ -151,13 +151,35 @@ export const noticeRecordFor = (action: NoticeAction): NoticeRecord => {
 };
 
 /**
- * The idempotency key for a rendered or refused notice.
+ * The idempotency key for a rendered notice.
  *
- * One per account per kind, so a re-render or a double-click adds nothing.
- * The account id rather than the address: the notice is a thing that happened
- * to a person in a session, and an address change does not make it unhappen.
+ * One per account. A re-render or a double-click adds nothing, and the account
+ * id rather than the address because the notice is a thing that happened to a
+ * person in a session: changing address later does not make it unhappen, and
+ * keying on the address would show the notice again.
  */
-export const noticeSourceEventKey = (
-  action: Exclude<NoticeAction, "opt_in">,
-  userId: string
-): string => `in-product-notice:${action}:${userId}`;
+export const noticeShownSourceEventKey = (userId: string): string =>
+  `in-product-notice:shown:${userId}`;
+
+/**
+ * The idempotency key for a refusal.
+ *
+ * Account **and** address, which is the opposite of the rule above, because a
+ * refusal is a different kind of fact: it attaches to the mailbox, the same
+ * way a suppression does, and `objected` rows are looked up by address.
+ *
+ * Keying it by account alone was wrong and the failure was silent. Somebody
+ * who refused at one address, changed address and refused again would collide
+ * with their own earlier row; the write would return that row and report
+ * success, and the new address would have no refusal on it at all. The screen
+ * would show the notice again on the next load, with the refusal button
+ * apparently working every time.
+ *
+ * The digest rather than the address: the address is already a column on the
+ * row, so this adds nothing a reader could not see, and a key is a string that
+ * gets copied into logs and error messages.
+ */
+export const noticeObjectionSourceEventKey = (
+  userId: string,
+  addressDigest: string
+): string => `in-product-notice:objected:${userId}:${addressDigest}`;

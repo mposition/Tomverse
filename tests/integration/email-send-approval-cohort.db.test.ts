@@ -52,14 +52,12 @@ const policyVersionId = async () => {
 };
 
 const approvedAt = new Date("2026-09-16T00:00:00.000Z");
-const sealedAt = new Date("2026-09-16T00:05:00.000Z");
 
 const sealFor = async (users: { id: string; email: string | null }[]) =>
   sealRiskAcceptedApproval({
     approvedById: users[0]!.id,
     approvedByEmail: users[0]!.email!,
     approvedAt,
-    sealedAt,
     reason:
       "Owner decision 2026-09-16: send to the existing accounts with no basis.",
     reviewCondition:
@@ -72,6 +70,48 @@ const sealFor = async (users: { id: string; email: string | null }[]) =>
       signupAt: approvedAt,
     })),
   });
+
+test("the seal is the row's own instant, not a date the caller picked", async () => {
+  // `sealedAt >= createdAt` where createdAt is the transaction's start on the
+  // database's clock. Every value a caller could reasonably pass -- the day
+  // the owner decided, or a `new Date()` read just before the transaction
+  // opened -- is earlier than that, so the caller does not pass one at all.
+  const users = [await createUser()];
+  const approval = await sealFor(users);
+
+  assert.deepEqual(approval.sealedAt, approval.createdAt);
+  assert.ok(approval.sealedAt! >= approval.approvedAt);
+});
+
+test("an approval dated in the future is refused by name", async () => {
+  const users = [await createUser()];
+  await assert.rejects(
+    sealRiskAcceptedApproval({
+      approvedById: users[0]!.id,
+      approvedByEmail: users[0]!.email!,
+      approvedAt: new Date(Date.now() + 86_400_000),
+      reason: "Dated tomorrow.",
+      reviewCondition: "Never.",
+      policyVersionId: await policyVersionId(),
+      purposeKey: "*",
+      candidates: [
+        {
+          userId: users[0]!.id,
+          emailAddress: users[0]!.email!,
+          signupAt: approvedAt,
+        },
+      ],
+    }),
+    /seals_before_approval/
+  );
+  // Refused by name rather than by a raw CHECK violation, and nothing landed.
+  assert.equal(
+    await prisma.emailSendApprovalMember.count({
+      where: { userId: users[0]!.id },
+    }),
+    0
+  );
+});
 
 test("a sealed approval carries its exact membership", async () => {
   const users = [await createUser(), await createUser()];
@@ -147,6 +187,51 @@ test("changing the address after the seal takes the delivery out", async () => {
     inCohort: false,
     reason: "current_address_changed",
   });
+});
+
+test("a withdrawn approval covers nobody, including its own members", async () => {
+  // Section 5.6 rule 6. Reading membership alone would keep sending to the
+  // same addresses after the decision had been reversed, with the admin
+  // screen's "revoked" sitting next to a send that ignored it.
+  const users = [await createUser()];
+  const approval = await sealFor(users);
+
+  const before = await cohortStanding({
+    approvalId: approval.id,
+    userId: users[0]!.id,
+    deliveryEmailAddress: users[0]!.email!,
+  });
+  assert.equal(before.inCohort, true);
+
+  await prisma.emailSendApprovalRevocation.create({
+    data: {
+      approvalId: approval.id,
+      revokedById: users[0]!.id,
+      revokedByEmail: users[0]!.email!,
+      revokedAt: new Date(),
+      reason: "An organic signup arrived, which is the review condition.",
+    },
+  });
+
+  assert.deepEqual(
+    await cohortStanding({
+      approvalId: approval.id,
+      userId: users[0]!.id,
+      deliveryEmailAddress: users[0]!.email!,
+    }),
+    { inCohort: false, reason: "revoked" }
+  );
+});
+
+test("an approval that does not exist is not a missing account", async () => {
+  assert.deepEqual(
+    await cohortStanding({
+      approvalId: "no-such-approval",
+      userId: null,
+      deliveryEmailAddress: null,
+    }),
+    { inCohort: false, reason: "no_approval" }
+  );
 });
 
 test("an account that joined after the seal is in no cohort", async () => {
@@ -230,6 +315,42 @@ test("a notice event cannot say which words were on the screen later", async () 
       data: { evidence: { surface: "elsewhere", copyHash: "different" } },
     }),
     /append-only|accepts no change/
+  );
+});
+
+test("refusing again at a new address records a refusal for that address", async () => {
+  // The key was the account alone, and this was the silent failure: the second
+  // write collided with the first, returned it, and reported success, leaving
+  // the new address with no refusal on it at all.
+  const user = await createUser();
+  await recordNoticeObjection(noticeInput(user));
+
+  const movedTo = `moved-${randomUUID()}@example.test`;
+  await prisma.user.update({ where: { id: user.id }, data: { email: movedTo } });
+  await recordNoticeObjection({ ...noticeInput(user), emailAddress: movedTo });
+
+  const objections = await prisma.emailPermissionEvent.findMany({
+    where: { userId: user.id, kind: "objected" },
+    select: { emailAddress: true },
+  });
+  assert.equal(objections.length, 2);
+  assert.ok(objections.some((row) => row.emailAddress === movedTo));
+});
+
+test("a render is still recorded once however the address moves", async () => {
+  // The opposite scoping, and on purpose: the notice happened to a person.
+  const user = await createUser();
+  await recordNoticeShown(noticeInput(user));
+
+  const movedTo = `moved-${randomUUID()}@example.test`;
+  await prisma.user.update({ where: { id: user.id }, data: { email: movedTo } });
+  await recordNoticeShown({ ...noticeInput(user), emailAddress: movedTo });
+
+  assert.equal(
+    await prisma.emailPermissionEvent.count({
+      where: { userId: user.id, kind: "notice_shown" },
+    }),
+    1
   );
 });
 

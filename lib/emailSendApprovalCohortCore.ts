@@ -170,3 +170,28 @@ export const sealRefusal = (input: {
   }
   return null;
 };
+
+/**
+ * Why an approval does not authorise anything, whoever is in its cohort.
+ *
+ * These are facts about the approval rather than about the recipient, and they
+ * are checked before membership because membership in a withdrawn approval is
+ * not a smaller version of being covered -- it is not being covered.
+ *
+ * `not_sealed` because a row without a seal is a draft being assembled
+ * (section 5.6: the approval exists before the send, and it is the seal that
+ * makes it exist). `revoked` because section 5.6's rule 6 says withdrawing an
+ * approval adds an `EmailSendApprovalRevocation` event and later verdicts are
+ * taken without the override. The sends it already authorised stand; the next
+ * one does not.
+ */
+export type ApprovalStandingRefusal = "not_sealed" | "revoked";
+
+export const approvalStandingRefusal = (input: {
+  sealedAt: Date | null;
+  revocationCount: number;
+}): ApprovalStandingRefusal | null => {
+  if (input.sealedAt === null) return "not_sealed";
+  if (input.revocationCount > 0) return "revoked";
+  return null;
+};

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  approvalStandingRefusal,
   overrideBlockers,
   overrideNeeded,
   sealRefusal,
@@ -229,5 +230,40 @@ test("a rule change is never reported as an address the recipient changed", () =
       query({ addressNormalizationVersion: "v2" })
     ),
     "normalization_version_changed"
+  );
+});
+
+// --- the approval itself -------------------------------------------------
+
+test("a sealed approval with no withdrawal authorises", () => {
+  assert.equal(
+    approvalStandingRefusal({ sealedAt, revocationCount: 0 }),
+    null
+  );
+});
+
+test("an unsealed approval is a draft, not a weak approval", () => {
+  assert.equal(
+    approvalStandingRefusal({ sealedAt: null, revocationCount: 0 }),
+    "not_sealed"
+  );
+});
+
+test("a withdrawn approval covers nobody", () => {
+  // Section 5.6 rule 6: the sends it already authorised stand, the next one
+  // does not. Being a member of it is not a smaller form of being covered.
+  assert.equal(
+    approvalStandingRefusal({ sealedAt, revocationCount: 1 }),
+    "revoked"
+  );
+});
+
+test("an unsealed approval is reported as unsealed even if withdrawn", () => {
+  // A withdrawal cannot exist against an unsealed row -- the database refuses
+  // it -- so reaching this state means something else is wrong, and naming the
+  // seal is what points at it.
+  assert.equal(
+    approvalStandingRefusal({ sealedAt: null, revocationCount: 1 }),
+    "not_sealed"
   );
 });

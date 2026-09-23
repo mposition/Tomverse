@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { emailAddressDigest } from "@/lib/emailAddressDigest";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { suppressionCheck } from "@/lib/emailSuppression";
@@ -12,11 +13,13 @@ import {
 } from "@/lib/emailSuppressionCore";
 import {
   inProductNoticeOffer,
+  noticeObjectionSourceEventKey,
   noticePurposes,
   noticeRecordFor,
-  noticeSourceEventKey,
+  noticeShownSourceEventKey,
   type NoticeOffer,
 } from "@/lib/inProductConsentNoticeCore";
+
 
 /**
  * Reading and writing the one-time in-product consent notice.
@@ -39,6 +42,17 @@ import {
  * `recordNoticeShown()` takes the copy hash from its caller and refuses
  * without one: a `notice_shown` row that cannot say which words were on the
  * screen is a record that we asked, with no way to ever show what we asked.
+ *
+ * ## Before a screen is wired to this
+ *
+ * Section 5.3's existing-account country recording is not built yet, and it
+ * has to be before anything renders. `recordNoticeShown()` pins whatever
+ * `jurisdictionForUser()` answers at the time, and for an account that has
+ * never declared a country that is `ZZ` / `unresolved`. The row is
+ * append-only, so a `notice_shown` written today would permanently fail to
+ * say which country's rule the person was shown -- which is the one thing
+ * section 5.3 requires it to carry. The evidence would need the applied
+ * country, its source and the rule version alongside the copy hash.
  */
 
 /** What a caller needs before it can decide whether to render anything. */
@@ -69,7 +83,7 @@ export const noticeStateForUser = async (input: {
   // The three states are read separately because they are three facts. An
   // account can have been shown the notice, not consented and not objected,
   // and that combination is the ordinary one -- somebody who closed it.
-  const [consent, shown, objected, suppression] = await Promise.all([
+  const [consent, shown, objected, suppressions] = await Promise.all([
     db.consentRecord.findFirst({
       where: { emailAddress, purpose: { in: purposes }, action: "granted" },
       select: { id: true },
@@ -82,11 +96,24 @@ export const noticeStateForUser = async (input: {
       where: { emailAddress, kind: "objected" },
       select: { id: true },
     }),
-    suppressionCheck({
-      emailAddress,
-      classification: "marketing",
-      ...(input.client ? { client: input.client } : {}),
-    }),
+    // Once per purpose, not once for the classification.
+    //
+    // An unsubscribe writes a purpose-scope cause, and a check with no
+    // purpose sees only the global and classification scopes
+    // (lib/emailSuppression.ts). Asking with the classification alone would
+    // have shown the consent notice to somebody who had turned that exact
+    // mail off -- which is soliciting a resubscription, the one thing every
+    // purpose in the table is marked as never doing.
+    Promise.all(
+      purposes.map((purpose) =>
+        suppressionCheck({
+          emailAddress,
+          classification: "marketing",
+          purpose,
+          ...(input.client ? { client: input.client } : {}),
+        })
+      )
+    ),
   ]);
 
   return inProductNoticeOffer({
@@ -96,7 +123,9 @@ export const noticeStateForUser = async (input: {
     // Keyed by address rather than by account: a refusal follows the mailbox,
     // for the same reason a suppression does.
     hasObjected: objected !== null,
-    suppressed: !suppression.allowed,
+    // Any one of them. The notice asks about the set, so a refusal anywhere
+    // in the set is a refusal of the question being put.
+    suppressed: suppressions.some((verdict) => !verdict.allowed),
   });
 };
 
@@ -129,19 +158,38 @@ const recordNoticeEvent = async (
   }
 
   const emailAddress = normalizeEmailAddress(input.emailAddress);
-  const jurisdiction = await jurisdictionForUser({ userId: input.userId });
-  const policyVersionId = await ensureBootstrapPolicyVersion();
 
-  const sourceEventKey = noticeSourceEventKey(action, input.userId);
+  // The two keys are scoped differently, and deliberately: a render is about
+  // the person, a refusal is about the mailbox. See the two builders.
+  const sourceEventKey =
+    action === "shown"
+      ? noticeShownSourceEventKey(input.userId)
+      : noticeObjectionSourceEventKey(
+          input.userId,
+          emailAddressDigest(emailAddress)
+        );
   const where = {
     kind_sourceEventKey: { kind: record.kind, sourceEventKey },
   } as const;
 
-  // Idempotent by (kind, sourceEventKey), and written as insert-or-return
-  // rather than an upsert on purpose. The table refuses every UPDATE except
-  // the one that detaches a deleted account, so an upsert's second branch
-  // would raise a check violation the first time a render was repeated -- the
-  // exact case idempotency is for.
+  // Look first, then insert. Written as insert-or-return rather than an
+  // upsert because the table refuses every UPDATE except the one detaching a
+  // deleted account, so an upsert's second branch would raise the append-only
+  // trigger the first time a render repeated -- the exact case idempotency is
+  // for.
+  //
+  // The read comes before the write rather than after a caught conflict
+  // because this may be running inside a caller's transaction. A unique
+  // violation there aborts the whole transaction, so the recovery read would
+  // fail too and take the caller's work with it. The catch below still exists
+  // for the genuine race, which on the root client is recoverable and inside
+  // a transaction is a real conflict the caller has to resolve.
+  const existing = await db.emailPermissionEvent.findUnique({ where });
+  if (existing) return existing;
+
+  const jurisdiction = await jurisdictionForUser({ userId: input.userId });
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+
   try {
     return await db.emailPermissionEvent.create({
       data: {
@@ -160,17 +208,16 @@ const recordNoticeEvent = async (
       },
     });
   } catch (error) {
-    // The unique index is the idempotency key, so losing the race means the
-    // fact is already recorded. Any other failure is not ours to swallow.
     if (
+      input.client ||
       !(error instanceof Prisma.PrismaClientKnownRequestError) ||
       error.code !== "P2002"
     ) {
       throw error;
     }
-    const existing = await db.emailPermissionEvent.findUnique({ where });
-    if (!existing) throw error;
-    return existing;
+    const raced = await db.emailPermissionEvent.findUnique({ where });
+    if (!raced) throw error;
+    return raced;
   }
 };
 

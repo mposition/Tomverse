@@ -10,8 +10,9 @@ import {
   NOTICE_EVENT_KINDS,
   inProductNoticeOffer,
   noticePurposes,
+  noticeObjectionSourceEventKey,
   noticeRecordFor,
-  noticeSourceEventKey,
+  noticeShownSourceEventKey,
 } from "../lib/inProductConsentNoticeCore.ts";
 import {
   CONSENT_REQUIRED_PURPOSES,
@@ -114,22 +115,44 @@ test("the two recorded kinds are kinds the ledger knows", () => {
 
 test("a re-render or a double click adds nothing", () => {
   assert.equal(
-    noticeSourceEventKey("shown", "u1"),
-    noticeSourceEventKey("shown", "u1")
+    noticeShownSourceEventKey("u1"),
+    noticeShownSourceEventKey("u1")
   );
   assert.notEqual(
-    noticeSourceEventKey("shown", "u1"),
-    noticeSourceEventKey("object", "u1")
-  );
-  assert.notEqual(
-    noticeSourceEventKey("shown", "u1"),
-    noticeSourceEventKey("shown", "u2")
+    noticeShownSourceEventKey("u1"),
+    noticeShownSourceEventKey("u2")
   );
 });
 
-test("the key follows the account, not the address", () => {
+test("a render is keyed by the account, so moving address does not re-ask", () => {
   // The notice happened to a person in a session. Changing address later does
-  // not make it unhappen, and keying on the address would show it again.
-  assert.ok(noticeSourceEventKey("shown", "u1").endsWith("u1"));
-  assert.ok(!noticeSourceEventKey("shown", "u1").includes("@"));
+  // not make it unhappen.
+  assert.ok(noticeShownSourceEventKey("u1").endsWith("u1"));
+  assert.ok(!noticeShownSourceEventKey("u1").includes("@"));
+});
+
+test("a refusal is keyed by the account and the address it was about", () => {
+  // The opposite scoping, and the reason is that a refusal attaches to the
+  // mailbox. Keying it by the account alone made the second refusal collide
+  // with the first: the write returned the old row and reported success, and
+  // the new address ended up with no refusal on it at all.
+  assert.notEqual(
+    noticeObjectionSourceEventKey("u1", "digest-a"),
+    noticeObjectionSourceEventKey("u1", "digest-b")
+  );
+  assert.equal(
+    noticeObjectionSourceEventKey("u1", "digest-a"),
+    noticeObjectionSourceEventKey("u1", "digest-a")
+  );
+  assert.notEqual(
+    noticeObjectionSourceEventKey("u1", "digest-a"),
+    noticeObjectionSourceEventKey("u2", "digest-a")
+  );
+});
+
+test("the two keys can never collide with each other", () => {
+  assert.notEqual(
+    noticeShownSourceEventKey("u1"),
+    noticeObjectionSourceEventKey("u1", "digest-a")
+  );
 });
