@@ -39,6 +39,17 @@ const PACKAGE = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 
+/**
+ * The report with its comments removed.
+ *
+ * Its header quotes the filter that broke it, in order to explain why the
+ * filter is not there -- so a check that read the whole file would fail on the
+ * sentence explaining the fix.
+ */
+const REPORT_CODE = REPORT.split("\n")
+  .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+  .join("\n");
+
 test("the migration counts the rows it would break before it breaks them", () => {
   const count = MIGRATION.indexOf('FROM "MarketingPost"');
   const alter = MIGRATION.indexOf("ALTER COLUMN \"factsDigest\" SET NOT NULL");
@@ -99,6 +110,32 @@ test("the report is reachable by the name the plan and the migration use", () =>
   );
 });
 
+test("the report can ask about the state it exists to report on", () => {
+  // The blocker the first independent review found, made into a test.
+  //
+  // The report's whole job is to count rows in a database that has *not* had
+  // this migration applied -- where the column is still nullable and may hold
+  // nulls. The Prisma Client is generated from the schema in this same commit,
+  // where the field is required, so `where: { factsDigest: null }` is a filter
+  // it refuses before it opens a connection: "Argument factsDigest must not be
+  // null." The report died on its first count, and the migration's failure
+  // message pointed at it as the way to recover.
+  //
+  // So the filter has to be SQL. This is not a style preference: it is the
+  // only way to ask a question the generated types say is impossible.
+  assert.ok(
+    !REPORT_CODE.includes("factsDigest: null"),
+    "a client-side null filter on a required field is refused before it runs",
+  );
+  assert.ok(
+    REPORT_CODE.includes('"factsDigest" IS NULL'),
+    "the report has to ask in SQL",
+  );
+  // And it says why, because the next person to tidy this will reach for the
+  // client.
+  assert.match(REPORT, /Why raw SQL and not the Prisma Client/);
+});
+
 test("the report reads and never writes", () => {
   // The plan says to present the counts to the operator and not to backfill,
   // delete or waive anything. A report with a flag that writes is a report
@@ -116,12 +153,37 @@ test("the report reads and never writes", () => {
       `the report must not be able to ${verb}`,
     );
   }
-  // And it prints categories, not contents: no envelope, no rendered text, no
-  // fact snapshot reaches the terminal.
-  for (const column of ["renderedText", "envelope", "factSnapshot"]) {
-    assert.ok(
-      !REPORT.includes(`console.log(${column}`),
-      `the report must not print ${column}`,
+  // Every statement is a SELECT. Checked on the statements rather than on
+  // the `console.log` calls: the first version of this test looked for
+  // `console.log(envelope` and would have passed a report that dumped rows
+  // through a template string.
+  const statements = [...REPORT.matchAll(/\$queryRaw`([^`]*)`/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(statements.length >= 4, "the report asks fewer questions than it prints");
+  for (const statement of statements) {
+    assert.match(
+      statement.trim(),
+      /^SELECT\b/i,
+      `not a read: ${statement.trim().slice(0, 60)}`,
     );
+    // No column that holds what a post says. `SELECT *` would pull all of
+    // them, and naming one would pull that one. `count(*)` is neither.
+    assert.doesNotMatch(
+      statement,
+      /SELECT\s+\*/i,
+      "the report must not select every column",
+    );
+    for (const column of [
+      "renderedText",
+      "envelope",
+      "factSnapshot",
+      "history",
+    ]) {
+      assert.ok(
+        !statement.includes(column),
+        `the report must not select ${column}`,
+      );
+    }
   }
 });

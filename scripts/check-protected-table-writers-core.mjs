@@ -538,7 +538,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 3,
     writeVerbs: 2,
     reason:
-      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER COLUMN itself, and the count in the error message. The write verbs are UPDATE and DELETE inside the prose above the statements, naming what this migration deliberately does not do -- the disposition of such rows is an operator's decision, carried out separately.",
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER TABLE that follows it, and the count in the error message. Both write verbs are that one statement's own ALTER TABLE and ALTER COLUMN -- this migration issues no UPDATE and no DELETE, because the disposition of a row with no digest is an operator's decision carried out separately.",
   },
 ];
 
