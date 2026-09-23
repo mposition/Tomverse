@@ -16,7 +16,6 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { databaseErrorMetadata } from "@/lib/databaseError";
 
 import {
   MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
@@ -36,8 +35,41 @@ import {
 export const MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE = "TMDL1";
 export const MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE = "TMDL2";
 
+/**
+ * Whether a database error was raised with this SQLSTATE, wherever Prisma put it.
+ *
+ * Not `databaseErrorMetadata(error).driverCode`, which reads `error.cause`.
+ * For a code the pg adapter does not map -- and a trigger's own code is one --
+ * Prisma throws a `PrismaClientKnownRequestError` (`P2039`) that has **no
+ * `cause` at all**; the adapter's error, carrying the code, is at
+ * `meta.driverAdapterError.cause.originalCode`. That was checked by building
+ * the error with Prisma's own class, not assumed. The version this replaces
+ * read `cause`, matched nothing in production, and had a unit test that built
+ * an error with a `cause` Prisma never produces -- so the test passed and the
+ * path was dead.
+ *
+ * Walked structurally, the way `isStatementTimeout` in
+ * lib/conversationSearchResults.ts already does for 57014 -- through `cause`,
+ * `meta` and `driverAdapterError` -- so a change in how deeply the adapter
+ * wraps it does not hide the code.
+ */
+const hasSqlstate = (error: unknown, wanted: string): boolean => {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (record.code === wanted || record.originalCode === wanted) return true;
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return false;
+};
+
+/** The SQLSTATE first; the message only if no code could be found anywhere. */
 const raisedWith = (error: unknown, sqlstate: string, fallback: RegExp): boolean => {
-  if (databaseErrorMetadata(error).driverCode === sqlstate) return true;
+  if (hasSqlstate(error, sqlstate)) return true;
   return error instanceof Error && fallback.test(error.message);
 };
 

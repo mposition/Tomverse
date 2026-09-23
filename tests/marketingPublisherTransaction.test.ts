@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   finishMarketingPublisherRun,
@@ -189,11 +189,37 @@ test("the work cannot open a transaction inside its budget", async () => {
 // Opening and closing the run row
 // ---------------------------------------------------------------------------
 
-/** An error shaped the way the Prisma driver adapter surfaces a RAISE. */
+/**
+ * The error Prisma actually throws for a trigger's own SQLSTATE.
+ *
+ * Built with Prisma's own class, the way its runtime builds it: `P2039`, the
+ * code at `meta.driverAdapterError.cause.originalCode`, and **no `cause`**.
+ * The helper this replaces attached a `cause` -- a shape Prisma never
+ * produces -- and so proved a code path that was dead in production.
+ *
+ * The message deliberately says nothing about a deadline and carries no code,
+ * so the only way a test using it can pass is by finding the SQLSTATE where
+ * Prisma really puts it.
+ */
 const raised = (sqlstate: string, message: string) =>
-  Object.assign(new Error(message), {
-    cause: { kind: "QueryError", originalCode: sqlstate, originalMessage: message },
+  new Prisma.PrismaClientKnownRequestError(message, {
+    code: "P2039",
+    clientVersion: "test",
+    meta: {
+      driverAdapterError: {
+        name: "DriverAdapterError",
+        cause: { kind: "postgres", originalCode: sqlstate, originalMessage: message },
+      },
+    },
   });
+
+test("the helper builds the shape Prisma throws, which has no cause", () => {
+  // Pinned, because the fix rests on it: if Prisma starts setting `cause`,
+  // this fails and is worth a look -- the reader would still work.
+  const error = raised("TMDL1", "late");
+  assert.equal("cause" in error, false);
+  assert.equal(error.code, "P2039");
+});
 
 test("a close that closed nothing is not reported as a success", async () => {
   // Round one: the close's row count was ignored, so a run already closed by
