@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -69,25 +71,59 @@ struct ClaimDecision {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimRefusalReason {
+    ExecutionApiDisabled,
+    NotEligible,
+    Unclassified,
+    WorkerCatalogUnavailable,
+    NoAuthoritativeWorker,
+    AuthoritativeWorkerMismatch,
+    IncidentAdmissionBlocked,
+    WipLimitReached,
+    ExecutionLifecycleUnavailable,
+    InvalidRoutingEvidence,
+}
+
+impl ClaimRefusalReason {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExecutionApiDisabled => "execution_api_disabled",
+            Self::NotEligible => "not_eligible",
+            Self::Unclassified => "unclassified",
+            Self::WorkerCatalogUnavailable => "worker_catalog_unavailable",
+            Self::NoAuthoritativeWorker => "no_authoritative_worker",
+            Self::AuthoritativeWorkerMismatch => "authoritative_worker_mismatch",
+            Self::IncidentAdmissionBlocked => "incident_admission_blocked",
+            Self::WipLimitReached => "wip_limit_reached",
+            Self::ExecutionLifecycleUnavailable => "execution_lifecycle_unavailable",
+            Self::InvalidRoutingEvidence => "invalid_routing_evidence",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ClaimResponse {
     pub claimed: bool,
     pub revision: Option<i64>,
     pub decision_id: Option<String>,
-    pub reason: Option<String>,
+    pub reason: Option<ClaimRefusalReason>,
 }
+
+/// The recovery route has a twelve-second server budget. Keep the caller
+/// above it so a client timeout cannot manufacture an ambiguous retry.
+const TOMVERSE_INTERNAL_RECOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl TomverseApi {
     pub fn from_env() -> Result<Self> {
-        let base_url = std::env::var("TOMVERSE_INTERNAL_URL")
-            .context("TOMVERSE_INTERNAL_URL is required")?;
+        let base_url =
+            std::env::var("TOMVERSE_INTERNAL_URL").context("TOMVERSE_INTERNAL_URL is required")?;
 
         let secret = std::env::var("TOMVERSE_AMUX_SYNC_SECRET")
             .context("TOMVERSE_AMUX_SYNC_SECRET is required")?;
 
         if secret.len() < 32 {
-            anyhow::bail!(
-                "TOMVERSE_AMUX_SYNC_SECRET must contain at least 32 characters"
-            );
+            anyhow::bail!("TOMVERSE_AMUX_SYNC_SECRET must contain at least 32 characters");
         }
 
         Ok(Self {
@@ -99,10 +135,7 @@ impl TomverseApi {
 
     pub async fn queue(&self) -> Result<Vec<QueueTask>> {
         self.client
-            .post(format!(
-                "{}/api/internal/amux/queue",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/queue", self.base_url))
             .bearer_auth(&self.secret)
             .json(&QueueRequest {})
             .send()
@@ -145,11 +178,9 @@ impl TomverseApi {
         scoring_version: &str,
         signals: Value,
     ) -> Result<ClaimResponse> {
-        let response = self.client
-            .post(format!(
-                "{}/api/internal/amux/claim",
-                self.base_url
-            ))
+        let response = self
+            .client
+            .post(format!("{}/api/internal/amux/claim", self.base_url))
             .bearer_auth(&self.secret)
             .json(&ClaimRequest {
                 task_id,
@@ -169,14 +200,12 @@ impl TomverseApi {
             response.error_for_status_ref()?;
         }
 
-        response.json()
+        response
+            .json()
             .await
-            .context(
-                "invalid Tomverse AMUX claim response",
-            )
+            .context("invalid Tomverse AMUX claim response")
     }
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OwnedTodoTask {
@@ -324,6 +353,7 @@ pub struct ExecutionRecoveryResponse {
     pub reclaimed: Option<i64>,
     pub reclaimed_claims: Option<i64>,
     pub quota_observations_deleted: Option<i64>,
+    pub more: Option<bool>,
     pub reason: Option<String>,
 }
 
@@ -349,18 +379,14 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
         response
             .json()
             .await
-            .context(
-                "invalid Tomverse AMUX worker-register response",
-            )
+            .context("invalid Tomverse AMUX worker-register response")
     }
 
     pub async fn worker_heartbeat(
@@ -390,18 +416,14 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
         response
             .json()
             .await
-            .context(
-                "invalid Tomverse AMUX worker-heartbeat response",
-            )
+            .context("invalid Tomverse AMUX worker-heartbeat response")
     }
 
     pub async fn delivery_pull(
@@ -412,10 +434,7 @@ impl TomverseApi {
     ) -> Result<DeliveryPullResponse> {
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/delivery/pull",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/delivery/pull", self.base_url))
             .bearer_auth(&self.secret)
             .json(&DeliveryPullRequest {
                 worker,
@@ -427,18 +446,14 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
         response
             .json()
             .await
-            .context(
-                "invalid Tomverse AMUX delivery-pull response",
-            )
+            .context("invalid Tomverse AMUX delivery-pull response")
     }
 
     pub async fn delivery_ack(
@@ -449,39 +464,29 @@ impl TomverseApi {
     ) -> Result<DeliveryAckResponse> {
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/delivery/ack",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/delivery/ack", self.base_url))
             .bearer_auth(&self.secret)
             .json(&DeliveryAckRequest {
-                attempt_id:
-                    &delivery.attempt_id,
-                receipt_id:
-                    &delivery.receipt_id,
+                attempt_id: &delivery.attempt_id,
+                receipt_id: &delivery.receipt_id,
                 worker: &delivery.worker,
                 instance_id,
                 generation,
-                task_revision:
-                    delivery.task_revision,
+                task_revision: delivery.task_revision,
             })
             .send()
             .await?;
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
         response
             .json()
             .await
-            .context(
-                "invalid Tomverse AMUX delivery-ack response",
-            )
+            .context("invalid Tomverse AMUX delivery-ack response")
     }
 
     pub async fn execution_heartbeat(
@@ -498,39 +503,30 @@ impl TomverseApi {
             ))
             .bearer_auth(&self.secret)
             .json(&ExecutionHeartbeatRequest {
-                attempt_id:
-                    &delivery.attempt_id,
+                attempt_id: &delivery.attempt_id,
                 worker: &delivery.worker,
                 instance_id,
                 generation,
-                task_revision:
-                    delivery.task_revision,
+                task_revision: delivery.task_revision,
             })
             .send()
             .await?;
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
         response
             .json()
             .await
-            .context(
-                "invalid Tomverse AMUX execution-heartbeat response",
-            )
+            .context("invalid Tomverse AMUX execution-heartbeat response")
     }
 
     pub async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
         self.client
-            .post(format!(
-                "{}/api/internal/amux/owned-queue",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/owned-queue", self.base_url))
             .bearer_auth(&self.secret)
             .json(&QueueRequest {})
             .send()
@@ -568,9 +564,7 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
@@ -614,9 +608,7 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 
@@ -633,6 +625,7 @@ impl TomverseApi {
                 "{}/api/internal/amux/execution/recover",
                 self.base_url
             ))
+            .timeout(TOMVERSE_INTERNAL_RECOVERY_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&QueueRequest {})
             .send()
@@ -640,9 +633,7 @@ impl TomverseApi {
 
         let status = response.status();
 
-        if !status.is_success()
-            && status != reqwest::StatusCode::CONFLICT
-        {
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             response.error_for_status_ref()?;
         }
 

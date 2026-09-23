@@ -1,7 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
-import { readLimitedJson } from "@/lib/apiSecurity";
+import { ApiSecurityError, readLimitedJson } from "@/lib/apiSecurity";
+import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   compareAmuxRoutingRank,
@@ -21,6 +22,7 @@ import {
 import {
   claimUnownedTodo,
   getAuthoritativeSchedulerFacts,
+  recordAmuxClaimRefusal,
 } from "@/lib/amux/store";
 
 const schedulerSignalsSchema = z
@@ -93,10 +95,7 @@ const routingEvidenceSchema = z
     // Accept the previous client version during a rolling deployment. The
     // persisted decision is always recomputed and stamped with the current
     // server version below.
-    scoring_version: z.enum([
-      "amux-worker-router-v1",
-      "amux-worker-router-v2",
-    ]),
+    scoring_version: z.enum(["amux-worker-router-v1", "amux-worker-router-v2"]),
     preferred_worker: z.string().trim().min(1).max(120).nullable(),
     selected_worker: z.string().trim().min(1).max(120).nullable(),
     preferred_score: unitScore.nullable(),
@@ -332,11 +331,44 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await readLimitedJson(request, 256 * 1_024, requestSchema);
+    if (!isAmuxExecutionApiEnabled()) {
+      await recordAmuxClaimRefusal("execution_api_disabled");
+      return Response.json(
+        { claimed: false, reason: "execution_api_disabled" },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    let body: z.infer<typeof requestSchema>;
+    try {
+      body = await readLimitedJson(request, 256 * 1_024, requestSchema);
+    } catch (error) {
+      if (
+        !(error instanceof ApiSecurityError) ||
+        !["INVALID_JSON", "INVALID_REQUEST", "REQUEST_BODY_TOO_LARGE"].includes(
+          error.code,
+        )
+      ) {
+        throw error;
+      }
+      await recordAmuxClaimRefusal("invalid_request");
+      return Response.json(
+        { error: "Invalid request." },
+        {
+          status: error.status,
+          headers: { "Cache-Control": "no-store" },
+        },
+      );
+    }
 
     const scheduler = body.decision.signals.scheduler;
 
     if (scheduler.dependent_weight !== scheduler.dependents * 5) {
+      await recordAmuxClaimRefusal("dependent_weight_mismatch", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         { error: "Invalid decision signals." },
         {
@@ -363,6 +395,11 @@ export async function POST(request: Request) {
         scheduler.total !== undefined &&
         scheduler.total !== recomputedSchedulerScore)
     ) {
+      await recordAmuxClaimRefusal("scheduler_score_mismatch", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         { error: "Invalid scheduler score." },
         {
@@ -383,10 +420,15 @@ export async function POST(request: Request) {
     ]);
 
     if (!schedulerFacts) {
+      await recordAmuxClaimRefusal("not_eligible", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
-          reason: "scheduler_facts_unavailable",
+          reason: "not_eligible",
         },
         {
           status: 409,
@@ -432,6 +474,11 @@ export async function POST(request: Request) {
     }
 
     if (!authoritativeSnapshot.eligible) {
+      await recordAmuxClaimRefusal(authoritativeSnapshot.reason, {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
@@ -450,6 +497,11 @@ export async function POST(request: Request) {
     );
 
     if (authoritativeRouting.selected_worker === null) {
+      await recordAmuxClaimRefusal("no_authoritative_worker", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
@@ -463,6 +515,11 @@ export async function POST(request: Request) {
     }
 
     if (authoritativeRouting.selected_worker !== body.worker) {
+      await recordAmuxClaimRefusal("authoritative_worker_mismatch", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
@@ -481,10 +538,15 @@ export async function POST(request: Request) {
         body.worker,
       )
     ) {
+      await recordAmuxClaimRefusal("no_authoritative_worker", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
-          reason: "selected_worker_not_ownership_ready",
+          reason: "no_authoritative_worker",
         },
         {
           status: 409,
@@ -504,12 +566,18 @@ export async function POST(request: Request) {
       ),
     });
     if (!evidenceDecision.allowed) {
+      await recordAmuxClaimRefusal("invalid_routing_evidence", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
-          error: "Routing evidence is internally inconsistent.",
+          claimed: false,
+          reason: "invalid_routing_evidence",
         },
         {
-          status: 400,
+          status: 409,
           headers: { "Cache-Control": "no-store" },
         },
       );
@@ -539,6 +607,11 @@ export async function POST(request: Request) {
 
     // Do not claim unless the lifecycle has at least one live specialist path.
     if (!authoritativeSnapshot.execution_ready) {
+      await recordAmuxClaimRefusal("execution_lifecycle_unavailable", {
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+      });
       return Response.json(
         {
           claimed: false,
@@ -577,21 +650,31 @@ export async function POST(request: Request) {
       },
     });
 
+    if (!claim.claimed) {
+      return claim.reason === "cas_lost"
+        ? Response.json(
+            { claimed: false },
+            { headers: { "Cache-Control": "no-store" } },
+          )
+        : Response.json(
+            { claimed: false, reason: claim.reason },
+            { status: 409, headers: { "Cache-Control": "no-store" } },
+          );
+    }
+
     return Response.json(
-      claim
-        ? {
-            claimed: true,
-            revision: claim.revision,
-            decision_id: claim.decisionId,
-          }
-        : { claimed: false },
+      {
+        claimed: true,
+        revision: claim.revision,
+        decision_id: claim.decisionId,
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
     return Response.json(
-      { error: "Invalid request." },
+      { error: "Internal error." },
       {
-        status: 400,
+        status: 500,
         headers: { "Cache-Control": "no-store" },
       },
     );

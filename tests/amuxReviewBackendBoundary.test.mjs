@@ -9,6 +9,8 @@ const general = readFileSync("app/api/admin/amux/escalations/route.ts", "utf8");
 const detail = readFileSync("app/api/admin/amux/escalations/review/route.ts", "utf8");
 const proposal = readFileSync("app/api/admin/amux/escalations/proposals/route.ts", "utf8");
 const statusRoute = readFileSync("app/api/admin/amux/escalations/review/decision-status/route.ts", "utf8");
+const reviewProxy = readFileSync("lib/amux/reviewAdminProxy.ts", "utf8");
+const reviewPanel = readFileSync("components/admin/AdminAmuxRoutingPanel.tsx", "utf8");
 
 test("review API uses its own one-person authorization boundary, never AdminActionApproval", () => {
   for (const source of [service, internal, general, detail, proposal, statusRoute]) {
@@ -111,4 +113,11 @@ test("refusals record safe measured/verdict and never raw review text", () => {
   assert.match(internal, /measured: \{/);
   assert.doesNotMatch(internal, /metadata: \{[^}]*resolution:/s);
   assert.doesNotMatch(internal, /metadata: \{[^}]*description:/s);
+});
+
+test("review transport budgets keep the browser outside the complete server path", () => {
+  assert.match(reviewProxy, /AMUX_REVIEW_PROXY_TIMEOUT_MS = 40_000/);
+  assert.match(reviewProxy, /AbortSignal\.timeout\(AMUX_REVIEW_PROXY_TIMEOUT_MS\)/);
+  assert.match(reviewPanel, /AMUX_REVIEW_CLIENT_TIMEOUT_MS = 45_000/);
+  assert.equal((reviewPanel.match(/timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS/g) ?? []).length, 4);
 });

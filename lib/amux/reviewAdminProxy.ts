@@ -3,6 +3,11 @@ import "server-only";
 import { isAmuxAgentApprovalEnabled } from "@/lib/amux/reviewApprovalCore";
 import { amuxReviewPrivateProxyOrigin } from "@/lib/originProtection";
 
+// Approve can perform three sequential 8s GitHub reads and then a 10s DB
+// transaction. Keep this proxy above that 34s server budget; the browser waits
+// longer still and treats any transport loss as an unknown decision.
+export const AMUX_REVIEW_PROXY_TIMEOUT_MS = 40_000;
+
 const unavailable = () =>
   Response.json(
     {
@@ -119,7 +124,7 @@ export async function forwardAmuxAdminReviewCommand(
       cache: "no-store",
       redirect: "manual",
       // One protected detail may require three bounded GitHub reads (PR, diff, PR).
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(AMUX_REVIEW_PROXY_TIMEOUT_MS),
     });
     if (!response.ok) {
       console.error("AMUX review proxy upstream refused", {

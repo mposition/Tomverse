@@ -53,7 +53,10 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new(api: TomverseApi) -> Self {
-        Self { api, scan_offset: 0 }
+        Self {
+            api,
+            scan_offset: 0,
+        }
     }
 
     pub async fn run(mut self) -> Result<()> {
@@ -66,6 +69,7 @@ impl Scheduler {
                         reclaimed_claims = outcome.reclaimed_claims.unwrap_or(0),
                         quota_observations_deleted =
                             outcome.quota_observations_deleted.unwrap_or(0),
+                        more = outcome.more.unwrap_or(false),
                         "AMUX recovery sweep completed"
                     ),
                     Ok(outcome) => info!(
@@ -101,181 +105,182 @@ impl Scheduler {
             if selection_only { 0 } else { self.scan_offset },
         );
         let queue_len = ranked.len();
-        for (index, (task, score)) in ranked
-            .into_iter()
-            .enumerate()
-            .skip(start)
-            .take(end - start)
-        {
-        // Advance for each attempted candidate, before a fallible request.
-        // Advancing to the end of the window upfront would permanently skip
-        // the remaining candidates after a deterministic API error.
-        self.scan_offset = next_routing_offset(queue_len, index);
-        info!(
-            task_id = %task.id,
-            title = %task.title,
-            priority = %task.priority,
-            kind = %task.kind,
-            dependency_count = task.dependencies.len(),
-            dependent_count = task.dependent_count,
-            scheduler_score = score.total(),
-            server_scheduler_score = task.scheduler_score,
-            scoring_version = %task.scoring_version,
-            "global priority scheduler selected task"
-        );
-
-        // Selection and execution are deliberately separate.
-        if selection_only {
-            self.scan_offset = 0;
+        for (index, (task, score)) in ranked.into_iter().enumerate().skip(start).take(end - start) {
+            // Advance for each attempted candidate, before a fallible request.
+            // Advancing to the end of the window upfront would permanently skip
+            // the remaining candidates after a deterministic API error.
+            self.scan_offset = next_routing_offset(queue_len, index);
             info!(
                 task_id = %task.id,
-                measured = true,
-                verdict = "selection_only",
-                "Tomverse AMUX execution disabled; task was not claimed"
+                title = %task.title,
+                priority = %task.priority,
+                kind = %task.kind,
+                dependency_count = task.dependencies.len(),
+                dependent_count = task.dependent_count,
+                scheduler_score = score.total(),
+                server_scheduler_score = task.scheduler_score,
+                scoring_version = %task.scoring_version,
+                "global priority scheduler selected task"
             );
-            return Ok(());
-        }
 
-        let snapshot = self
-            .api
-            .routing_snapshot(&task.id, task.revision)
-            .await?;
+            // Selection and execution are deliberately separate.
+            if selection_only {
+                self.scan_offset = 0;
+                info!(
+                    task_id = %task.id,
+                    measured = true,
+                    verdict = "selection_only",
+                    "Tomverse AMUX execution disabled; task was not claimed"
+                );
+                return Ok(());
+            }
 
-        if !snapshot.eligible {
-            warn!(
-                task_id = %task.id,
-                reason = ?snapshot.reason,
-                measured = false,
-                verdict = "worker_routing_unavailable",
-                "Tomverse AMUX refused claim because worker routing facts were unavailable"
-            );
-            continue;
-        }
+            let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
 
-        let Some(profile) = snapshot.task else {
-            warn!(
-                task_id = %task.id,
-                measured = false,
-                verdict = "invalid_routing_snapshot",
-                "Tomverse AMUX routing snapshot was eligible but had no task profile"
-            );
-            continue;
-        };
+            if !snapshot.eligible {
+                warn!(
+                    task_id = %task.id,
+                    reason = ?snapshot.reason,
+                    measured = false,
+                    verdict = "worker_routing_unavailable",
+                    "Tomverse AMUX refused claim because worker routing facts were unavailable"
+                );
+                continue;
+            }
 
-        let routing = crate::worker::score_execute_candidates(
-            &profile,
-            &snapshot.candidates,
-        );
+            let Some(profile) = snapshot.task else {
+                warn!(
+                    task_id = %task.id,
+                    measured = false,
+                    verdict = "invalid_routing_snapshot",
+                    "Tomverse AMUX routing snapshot was eligible but had no task profile"
+                );
+                continue;
+            };
 
-        let Some(worker) = routing.selected_worker.clone() else {
-            warn!(
+            let routing = crate::worker::score_execute_candidates(&profile, &snapshot.candidates);
+
+            let Some(worker) = routing.selected_worker.clone() else {
+                warn!(
+                    task_id = %task.id,
+                    preferred_worker = ?routing.preferred_worker,
+                    candidate_count = routing.candidates.len(),
+                    measured = true,
+                    verdict = "no_selected_worker",
+                    "Tomverse AMUX worker router found no eligible worker"
+                );
+                continue;
+            };
+
+            info!(
                 task_id = %task.id,
                 preferred_worker = ?routing.preferred_worker,
+                selected_worker = %worker,
+                preferred_score = ?routing.preferred_score,
+                selected_score = ?routing.selected_score,
                 candidate_count = routing.candidates.len(),
                 measured = true,
-                verdict = "no_selected_worker",
-                "Tomverse AMUX worker router found no eligible worker"
+                verdict = "selected",
+                "Tomverse AMUX worker router selected worker"
             );
-            continue;
-        };
 
-        info!(
-            task_id = %task.id,
-            preferred_worker = ?routing.preferred_worker,
-            selected_worker = %worker,
-            preferred_score = ?routing.preferred_score,
-            selected_score = ?routing.selected_score,
-            candidate_count = routing.candidates.len(),
-            measured = true,
-            verdict = "selected",
-            "Tomverse AMUX worker router selected worker"
-        );
-
-        // Ownership must not be stranded unless a matching live worker can
-        // accept the execution immediately.
-        if !snapshot.execution_ready {
-            warn!(
-                task_id = %task.id,
-                selected_worker = %worker,
-                measured = true,
-                verdict = "execution_lifecycle_unavailable",
-                "Tomverse AMUX refused ownership claim because execution lifecycle is not ready"
-            );
-            continue;
-        }
-
-        let server_v2 = task.scoring_version == SCORING_VERSION;
-        let scheduler_signals = if server_v2 {
-            serde_json::json!(&score)
-        } else {
-            serde_json::json!({
-                "pin": score.pin,
-                "age_hours": score.age_hours,
-                "type_weight": score.type_weight,
-                "priority_weight": score.priority_weight,
-                "dependents": score.dependents,
-                "dependent_weight": score.dependent_weight,
-                "drag": score.drag,
-            })
-        };
-        let worker_router_version = if server_v2 {
-            "amux-worker-router-v2"
-        } else {
-            "amux-worker-router-v1"
-        };
-        let scoring_version = if server_v2 {
-            SCORING_VERSION
-        } else {
-            "amux-global-priority-v1"
-        };
-        let signals = serde_json::json!({
-            "scheduler": scheduler_signals,
-            "routing": {
-                "scoring_version": worker_router_version,
-                "preferred_worker": &routing.preferred_worker,
-                "selected_worker": &routing.selected_worker,
-                "preferred_score": routing.preferred_score,
-                "selected_score": routing.selected_score,
-                "candidates": &routing.candidates,
+            // Ownership must not be stranded unless a matching live worker can
+            // accept the execution immediately.
+            if !snapshot.execution_ready {
+                warn!(
+                    task_id = %task.id,
+                    selected_worker = %worker,
+                    measured = true,
+                    verdict = "execution_lifecycle_unavailable",
+                    "Tomverse AMUX refused ownership claim because execution lifecycle is not ready"
+                );
+                continue;
             }
-        });
 
-        let outcome = self
-            .api
-            .claim(
-                &task.id,
-                &worker,
-                task.revision,
-                score.total(),
-                scoring_version,
-                signals,
-            )
-            .await?;
+            let server_v2 = task.scoring_version == SCORING_VERSION;
+            let scheduler_signals = if server_v2 {
+                serde_json::json!(&score)
+            } else {
+                serde_json::json!({
+                    "pin": score.pin,
+                    "age_hours": score.age_hours,
+                    "type_weight": score.type_weight,
+                    "priority_weight": score.priority_weight,
+                    "dependents": score.dependents,
+                    "dependent_weight": score.dependent_weight,
+                    "drag": score.drag,
+                })
+            };
+            let worker_router_version = if server_v2 {
+                "amux-worker-router-v2"
+            } else {
+                "amux-worker-router-v1"
+            };
+            let scoring_version = if server_v2 {
+                SCORING_VERSION
+            } else {
+                "amux-global-priority-v1"
+            };
+            let signals = serde_json::json!({
+                "scheduler": scheduler_signals,
+                "routing": {
+                    "scoring_version": worker_router_version,
+                    "preferred_worker": &routing.preferred_worker,
+                    "selected_worker": &routing.selected_worker,
+                    "preferred_score": routing.preferred_score,
+                    "selected_score": routing.selected_score,
+                    "candidates": &routing.candidates,
+                }
+            });
 
-        info!(
-            task_id = %task.id,
-            worker = %worker,
-            claimed = outcome.claimed,
-            revision = ?outcome.revision,
-            decision_id = ?outcome.decision_id,
-            reason = ?outcome.reason,
-            measured = true,
-            verdict = if outcome.claimed { "claimed" } else { "claim_lost" },
-            "Tomverse task claim result"
-        );
-        if outcome.claimed {
-            self.scan_offset = 0;
-            return Ok(());
-        }
-        // A claim can lose its revision or hard gate after the queue read.
-        // That task must not make every later runnable task invisible.
+            let outcome = self
+                .api
+                .claim(
+                    &task.id,
+                    &worker,
+                    task.revision,
+                    score.total(),
+                    scoring_version,
+                    signals,
+                )
+                .await?;
+
+            info!(
+                task_id = %task.id,
+                worker = %worker,
+                claimed = outcome.claimed,
+                revision = ?outcome.revision,
+                decision_id = ?outcome.decision_id,
+                reason = ?outcome.reason,
+                measured = true,
+                verdict = if outcome.claimed {
+                    "claimed"
+                } else {
+                    outcome
+                        .reason
+                        .as_ref()
+                        .map(|reason| reason.as_str())
+                        .unwrap_or("claim_lost")
+                },
+                "Tomverse task claim result"
+            );
+            if outcome.claimed {
+                self.scan_offset = 0;
+                return Ok(());
+            }
+            // A claim can lose its revision or hard gate after the queue read.
+            // That task must not make every later runnable task invisible.
         }
         Ok(())
     }
 }
 
 fn next_routing_offset(queue_len: usize, index: usize) -> usize {
-    if index + 1 == queue_len { 0 } else { index + 1 }
+    if index + 1 == queue_len {
+        0
+    } else {
+        index + 1
+    }
 }
 
 fn routing_scan_window(queue_len: usize, offset: usize) -> (usize, usize) {
@@ -283,7 +288,9 @@ fn routing_scan_window(queue_len: usize, offset: usize) -> (usize, usize) {
         return (0, 0);
     }
     let start = if offset >= queue_len { 0 } else { offset };
-    let end = start.saturating_add(MAX_ROUTING_PROBES_PER_TICK).min(queue_len);
+    let end = start
+        .saturating_add(MAX_ROUTING_PROBES_PER_TICK)
+        .min(queue_len);
     (start, end)
 }
 
@@ -311,11 +318,7 @@ fn priority_weight(priority: &str) -> i64 {
 fn age_hours_at(task: &QueueTask, now: DateTime<Utc>) -> i64 {
     DateTime::parse_from_rfc3339(&task.created_at)
         .ok()
-        .map(|created| {
-            (now - created.with_timezone(&Utc))
-                .num_hours()
-                .max(0)
-        })
+        .map(|created| (now - created.with_timezone(&Utc)).num_hours().max(0))
         .unwrap_or(0)
 }
 
@@ -359,8 +362,7 @@ fn rank_global_priority_at(
     let mut ranked: Vec<_> = tasks
         .into_iter()
         .filter(|task| {
-            task.status == "todo"
-                && task.owner.as_deref().unwrap_or("").trim().is_empty()
+            task.status == "todo" && task.owner.as_deref().unwrap_or("").trim().is_empty()
         })
         .map(|task| {
             let score = score_at(&task, now);
@@ -384,12 +386,7 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    fn task(
-        id: &str,
-        kind: &str,
-        priority: &str,
-        created_at: &str,
-    ) -> QueueTask {
+    fn task(id: &str, kind: &str, priority: &str, created_at: &str) -> QueueTask {
         QueueTask {
             id: id.into(),
             title: id.into(),
@@ -459,12 +456,7 @@ mod tests {
 
     #[test]
     fn v2_queue_payload_uses_the_server_authoritative_breakdown_verbatim() {
-        let mut authoritative = task(
-            "SERVER-SCORED",
-            "chore",
-            "p3",
-            "2026-09-01T00:00:00Z",
-        );
+        let mut authoritative = task("SERVER-SCORED", "chore", "p3", "2026-09-01T00:00:00Z");
         authoritative.scoring_version = SCORING_VERSION.into();
         authoritative.scheduler_score = 173;
         authoritative.scheduler_signals = ScoreBreakdown {
@@ -539,30 +531,24 @@ mod tests {
 
     #[test]
     fn dependents_can_lift_critical_path_work() {
-        let mut critical =
-            task("CRITICAL-PATH", "chore", "p3", "2026-09-20T11:00:00Z");
+        let mut critical = task("CRITICAL-PATH", "chore", "p3", "2026-09-20T11:00:00Z");
         critical.dependent_count = 5;
 
-        let ordinary =
-            task("ORDINARY", "code", "p3", "2026-09-20T11:00:00Z");
+        let ordinary = task("ORDINARY", "code", "p3", "2026-09-20T11:00:00Z");
 
-        let selected =
-            select_global_priority_at(vec![ordinary, critical], now()).unwrap();
+        let selected = select_global_priority_at(vec![ordinary, critical], now()).unwrap();
 
         assert_eq!(selected.0.id, "CRITICAL-PATH");
     }
 
     #[test]
     fn pin_dominates_normal_priority_signals() {
-        let mut pinned =
-            task("PINNED", "chore", "p3", "2026-09-20T11:00:00Z");
+        let mut pinned = task("PINNED", "chore", "p3", "2026-09-20T11:00:00Z");
         pinned.pinned = true;
 
-        let p0 =
-            task("P0", "blocker", "p0", "2026-09-20T11:00:00Z");
+        let p0 = task("P0", "blocker", "p0", "2026-09-20T11:00:00Z");
 
-        let selected =
-            select_global_priority_at(vec![p0, pinned], now()).unwrap();
+        let selected = select_global_priority_at(vec![p0, pinned], now()).unwrap();
 
         assert_eq!(selected.0.id, "PINNED");
     }

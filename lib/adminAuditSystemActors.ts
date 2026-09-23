@@ -13,9 +13,9 @@
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
 
-export const SYSTEM_AUDIT_ACTORS = [
-  "tomverse-amux-orchestrator",
-] as const;
+export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
+
+export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR] as const;
 
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

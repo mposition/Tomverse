@@ -1,6 +1,12 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { writeSystemAuditLog } from "@/lib/adminAudit";
+import {
+  AMUX_SYSTEM_AUDIT_ACTOR,
+  type AmuxClaimAuditRefusalReason,
+} from "@/lib/amux/auditContract";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 import {
   scoreAmuxScheduler,
@@ -27,6 +33,7 @@ import {
 
 const satisfiedDependencyStatuses = (): string[] => ["done"];
 const terminalDependentStatuses = (): string[] => ["done", "cancelled"];
+const PRISMA_INT_MAX = 2_147_483_647;
 
 export type AmuxQueueTask = {
   id: string;
@@ -183,6 +190,23 @@ export type AmuxClaimInput = {
   schedulerScore: number;
   scoringVersion: string;
   signals: Prisma.InputJsonValue;
+};
+
+export type AmuxClaimOutcome =
+  | {
+      claimed: true;
+      revision: number;
+      decisionId: string;
+    }
+  | {
+      claimed: false;
+      reason: "cas_lost" | "incident_admission_blocked" | "wip_limit_reached";
+    };
+
+type AmuxClaimRefusalContext = {
+  taskId?: string;
+  worker?: string;
+  expectedRevision?: number;
 };
 
 const runnableDependencyFilter =
@@ -377,13 +401,40 @@ export async function getAuthoritativeSchedulerFacts(
  */
 export async function claimUnownedTodo(
   input: AmuxClaimInput,
-): Promise<{ revision: number; decisionId: string } | null> {
+): Promise<AmuxClaimOutcome> {
   const worker = input.worker.trim();
-  if (!worker) return null;
+  const refusalContext = {
+    taskId: input.taskId,
+    worker,
+    expectedRevision: input.expectedRevision,
+  };
+  if (
+    !worker ||
+    input.expectedRevision < 0 ||
+    input.expectedRevision >= PRISMA_INT_MAX
+  ) {
+    await recordAmuxClaimRefusal("cas_lost", refusalContext);
+    return { claimed: false, reason: "cas_lost" };
+  }
 
-  return prisma.$transaction(async (tx) => {
-    const incident = await lockAmuxAdmissionAndReadIncident(tx);
-    if (incident.blocks_admission) return null;
+  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claim, async (tx, context) => {
+    const incident = await lockAmuxAdmissionAndReadIncident(tx, context.dbNow);
+    if (incident.blocks_admission) {
+      await writeAmuxClaimRefusalAudit(
+        tx,
+        "incident_admission_blocked",
+        refusalContext,
+        {
+          incident_state: incident.state.state,
+          incident_transition_id: incident.state.transition_id,
+          incident_valid: incident.valid,
+        },
+      );
+      return {
+        claimed: false as const,
+        reason: "incident_admission_blocked" as const,
+      };
+    }
 
     const planning = await tx.amuxWorkItem.findFirst({
       where: {
@@ -397,13 +448,30 @@ export async function claimUnownedTodo(
       },
       select: { projectKey: true, teamKey: true },
     });
-    if (!planning) return null;
+    if (!planning) {
+      await writeAmuxClaimRefusalAudit(tx, "cas_lost", refusalContext);
+      return { claimed: false as const, reason: "cas_lost" as const };
+    }
     const policies = await lockAmuxResourcePolicies(
       tx,
       amuxResourceRefs(planning),
     );
     const wip = await evaluateLockedAmuxWip(tx, policies);
-    if (!wip.allowed) return null;
+    if (!wip.allowed) {
+      await writeAmuxClaimRefusalAudit(
+        tx,
+        "wip_limit_reached",
+        refusalContext,
+        {
+          blocked_resource: wip.blocked_resource,
+          wip: wip.evidence,
+        },
+      );
+      return {
+        claimed: false as const,
+        reason: "wip_limit_reached" as const,
+      };
+    }
 
     const claim = await tx.amuxWorkItem.updateMany({
       where: {
@@ -419,7 +487,7 @@ export async function claimUnownedTodo(
       },
       data: {
         owner: worker,
-        claimedAt: new Date(),
+        claimedAt: context.dbNow,
         revision: {
           increment: 1,
         },
@@ -427,7 +495,8 @@ export async function claimUnownedTodo(
     });
 
     if (claim.count !== 1) {
-      return null;
+      await writeAmuxClaimRefusalAudit(tx, "cas_lost", refusalContext);
+      return { claimed: false as const, reason: "cas_lost" as const };
     }
 
     const decision = await tx.amuxRouteDecision.create({
@@ -454,10 +523,71 @@ export async function claimUnownedTodo(
       },
     });
 
+    const revision = input.expectedRevision + 1;
+
+    await writeSystemAuditLog({
+      systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      action: "amux.claim.assigned",
+      targetType: "AmuxWorkItem",
+      targetId: input.taskId,
+      summary: `Claimed AMUX work item ${input.taskId} for ${worker}.`,
+      metadata: {
+        decision_id: decision.id,
+        worker,
+        prior_task_revision: input.expectedRevision,
+        task_revision: revision,
+        scheduler_score: input.schedulerScore,
+        scoring_version: input.scoringVersion,
+        measured: true,
+        verdict: "claimed",
+      },
+      tx,
+    });
+
     return {
-      revision: input.expectedRevision + 1,
+      claimed: true as const,
+      revision,
       decisionId: decision.id,
     };
+  });
+}
+
+/** Record an authenticated claim refusal without retaining request text. */
+export async function recordAmuxClaimRefusal(
+  reason: AmuxClaimAuditRefusalReason,
+  context: AmuxClaimRefusalContext = {},
+): Promise<void> {
+  await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claimRefusal, async (tx) => {
+    await writeAmuxClaimRefusalAudit(tx, reason, context);
+  });
+}
+
+async function writeAmuxClaimRefusalAudit(
+  tx: Prisma.TransactionClient,
+  reason: AmuxClaimAuditRefusalReason,
+  context: AmuxClaimRefusalContext,
+  evidence: Record<string, unknown> = {},
+): Promise<void> {
+  const taskId = context.taskId?.trim() || null;
+  const worker = context.worker?.trim() || null;
+
+  await writeSystemAuditLog({
+    systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+    action: "amux.claim.refused",
+    targetType: taskId ? "AmuxWorkItem" : "AmuxClaimRequest",
+    targetId: taskId,
+    summary: "Refused an authenticated AMUX claim request.",
+    metadata: {
+      ...evidence,
+      reason,
+      ...(worker ? { worker } : {}),
+      ...(context.expectedRevision === undefined
+        ? {}
+        : { expected_revision: context.expectedRevision }),
+      measured: true,
+      verdict: "refused",
+    },
+    tx,
   });
 }
 

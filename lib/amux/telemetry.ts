@@ -7,6 +7,10 @@ import {
   evaluateAmuxQuotaTelemetry,
   type AmuxObservedMetric,
 } from "@/lib/amux/planningCore";
+import {
+  AMUX_DB_BOUNDARIES,
+  withAmuxDbBoundary,
+} from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 
 type WorkerIdentity = { worker_name: string; provider: string };
@@ -221,9 +225,24 @@ export async function getAmuxWorkerTelemetry(
  * remove rows no AMUX decision can consume. The database trigger enforces the
  * same lower bound, so a clock or caller error cannot shorten retention.
  */
+export const AMUX_QUOTA_SWEEP_BATCH_SIZE = 200;
+
 export async function sweepExpiredAmuxQuotaObservations() {
-  return prisma.$executeRaw`
-    DELETE FROM "AmuxQuotaObservation"
-    WHERE "createdAt" <= clock_timestamp() - INTERVAL '90 days'
-  `;
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.quotaObservationSweep,
+    async (tx) =>
+      tx.$executeRaw`
+        WITH expired AS MATERIALIZED (
+          SELECT "id"
+          FROM "AmuxQuotaObservation"
+          WHERE "createdAt" <= clock_timestamp() - INTERVAL '90 days'
+          ORDER BY "createdAt" ASC, "id" ASC
+          LIMIT ${AMUX_QUOTA_SWEEP_BATCH_SIZE}
+          FOR UPDATE SKIP LOCKED
+        )
+        DELETE FROM "AmuxQuotaObservation" AS observation
+        USING expired
+        WHERE observation."id" = expired."id"
+      `,
+  );
 }
