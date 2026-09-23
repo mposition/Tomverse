@@ -1015,10 +1015,10 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
-| §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
+| §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | 판정 (`lib/quotaCapacity.ts`, §14.13). 라우터는 호출하지 않음 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | 판정 (§14.10). trip 횟수는 호출자. prior는 쓰지 않음 |
 | §8.5 | load guard | 판정 (§14.12). softmax는 없음. 감쇠 계수는 호출자. 완료로 세지 않음 |
-| §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 확인 필요 |
+| §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 판정 (§14.13). 행 UPDATE와 알림 발송은 없음 |
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | `CredentialBinding` dark schema만 |
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 일부 |
@@ -1264,6 +1264,40 @@ ADR §8.5의 판정이 `lib/loadGuard.ts`에 있습니다. 요청 경로는 impo
 이 줄은 §14.3의 load guard 항목을 완료로 세지 않습니다. softmax 전후라는
 문장의 계산이 없고, 감쇠 계수도 정해져 있지 않습니다. 완료 수는 27,
 **약 54%(추정)** 그대로입니다. 직전 Sail 보고와 같습니다.
+
+## 14.13 Failure disposition과 capacity 판정 (2026-09-23)
+
+ADR §11.2의 처리가 `lib/routingFailureDisposition.ts`에 있습니다. 요청
+경로는 import하지 않습니다. HTTP status를 새로 분류하지 않습니다. 알림을
+보내지 않고, credential 행을 고치지 않습니다.
+
+- 429는 다음 후보이고 breaker는 아닙니다.
+- 5xx, 연결 실패, pre-commit timeout, transport corruption은 breaker입니다.
+  transport corruption은 §11.2 표의 칸에는 없고 §7.3의 breaker 대상이라
+  그 칸과 같은 처리입니다. 이 줄은 다음 deployment를 주지 않습니다.
+- 400은 blind retry가 없습니다.
+- 401, 403, billing은 credential scope를 `disabled`로 두는 write를
+  **말해 주기만** 합니다. `revoked`는 같은 CHECK의 다른 값이고 이 칸이
+  아닙니다. 알림 플래그는 켜지고, 다음 후보로 갑니다. breaker는 아닙니다.
+- safety 거절은 provider hop이 금지입니다.
+- `malformed_output`은 commit 전에 같은 deployment 재시도를 한 번 허락하고,
+  그 한 번을 쓴 뒤에는 다른 deployment를 허락합니다. 요구하지는 않습니다.
+  commit 뒤에는 자동 reroute가 없습니다. quality drift에는 들어갑니다.
+- post-commit stream 실패는 `finish_reason=upstream_error`이고 자동
+  reroute가 없습니다. commit 전이라고 보고하면 null입니다.
+
+이 줄이 §14.3의 §11.2 항목입니다.
+
+capacity 런타임은 같은 절에서 표를 고칩니다. `lib/quotaCapacity.ts`는
+#1615에 이미 있었고 Retry-After, token bucket, deprioritize를 판정합니다.
+라우터는 호출하지 않습니다. §14.3을 쓸 때 그 파일이 있는데도 칸이
+"schema만"이었습니다. 19에는 이 줄이 들어 있지 않으므로, 지금 기준(판정이
+있으면 세고, 라우터가 안 읽어도 셉니다)으로 한 번 더합니다. 코드를 이
+커밋에서 다시 쓰지 않습니다.
+
+직전 load guard 보고는 27, 약 54%였고 그 줄은 세지 않았습니다. §11.2와
+capacity 판정을 더하면 §14.3의 약 50단위에서 완료는 29, **약 58%(추정)**
+입니다. 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
