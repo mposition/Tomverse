@@ -146,6 +146,27 @@ export const sealRiskAcceptedApproval = async (input: {
       );
     }
 
+    // An account that signed up after the decision is not covered by it.
+    //
+    // Section 5.6: accounts created after the approval do not enter the cohort
+    // by any route -- and sealing is a route. The seal is what makes this
+    // permanent: the trigger refuses to remove a member afterwards, so the
+    // only way to take one account back out is to withdraw the whole approval
+    // and every send it covers with it.
+    //
+    // The decision was taken about the people who existed when it was taken.
+    // Somebody who arrived four days later was not among them, whatever a
+    // list handed to this function says.
+    const tooLate = input.candidates.filter((candidate) => {
+      const createdAt = signupAt.get(candidate.userId)!;
+      return createdAt.getTime() > input.approvedAt.getTime();
+    });
+    if (tooLate.length > 0) {
+      throw new Error(
+        `${tooLate.length} account(s) signed up after this approval was given and cannot be covered by it.`
+      );
+    }
+
     await tx.emailSendApprovalMember.createMany({
       data: input.candidates.map((candidate, index) => ({
         approvalId: approval.id,

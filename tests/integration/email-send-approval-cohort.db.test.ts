@@ -31,11 +31,21 @@ import { noticePurposes } from "@/lib/inProductConsentNoticeCore";
  * refuses.
  */
 
-const createUser = (signupAt?: Date) =>
+const approvedAt = new Date("2026-09-16T00:00:00.000Z");
+
+/**
+ * An account that existed when the approval was given.
+ *
+ * The default date matters: section 5.6 says accounts created after the
+ * approval do not enter its cohort by any route, and sealing is a route. A
+ * fixture user created at `now()` is one of those, so leaving the column to
+ * its default made every seal in this file a case the writer should refuse.
+ */
+const createUser = (signupAt: Date = new Date(approvedAt.getTime() - 86_400_000)) =>
   prisma.user.create({
     data: {
       email: `cohort-${randomUUID()}@example.test`,
-      ...(signupAt ? { createdAt: signupAt } : {}),
+      createdAt: signupAt,
     },
   });
 
@@ -52,8 +62,6 @@ const policyVersionId = async () => {
   });
   return created.id;
 };
-
-const approvedAt = new Date("2026-09-16T00:00:00.000Z");
 
 /** The scope a send is judged under, which every standing query must carry. */
 const scopeFor = async () => ({
@@ -172,6 +180,23 @@ test("the two-year anchor comes from the account, not from the caller", async ()
   });
   assert.deepEqual(member.noticeAnchorAt, signedUp);
   assert.equal(member.noticeAnchorSource, "signup_date_deemed");
+});
+
+test("an account that signed up after the approval cannot be sealed into it", async () => {
+  // Section 5.6: accounts created after the approval do not enter the cohort
+  // by any route, and sealing is one. The seal makes it permanent -- the
+  // trigger refuses to remove a member afterwards, so taking one account back
+  // out means withdrawing the whole approval and every send it covers.
+  const early = await createUser();
+  const late = await createUser(new Date(approvedAt.getTime() + 86_400_000));
+
+  await assert.rejects(sealFor([early, late]), /signed up after this approval/);
+  assert.equal(
+    await prisma.emailSendApprovalMember.count({
+      where: { userId: { in: [early.id, late.id] } },
+    }),
+    0
+  );
 });
 
 test("an approval naming an account that does not exist is refused", async () => {
@@ -499,10 +524,14 @@ test("two candidates leave the country undetermined rather than picking one", as
       },
     ],
     resolved: {
-      countryCode: "ZZ",
-      profileKey: "ZZ",
-      confidence: "unknown",
-      source: "unresolved",
+      // What the resolver actually returns when nothing settles: the sentinel
+      // in the column, and the countries it did see elsewhere. Draft section
+      // 5.3 keeps both candidates in exactly this case.
+      countryCode: "KR",
+      profileKey: "KR",
+      confidence: "low",
+      source: "inferred",
+      observedIpCountry: "US",
     },
   });
 
@@ -515,6 +544,44 @@ test("two candidates leave the country undetermined rather than picking one", as
   assert.deepEqual(
     evidence.candidates.map((candidate) => candidate.country),
     ["KR", "US"]
+  );
+});
+
+test("a rendered rule no signal pointed at is refused", async () => {
+  // The other direction, and the one a settled-only check could not catch: a
+  // low-confidence KR with Singapore also on screen, where nothing named
+  // Singapore. Display duties are the union of the rendered list, so that row
+  // attaches Singapore's prefix to somebody the resolver never placed there.
+  const user = await createUser();
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [
+        {
+          country: "KR",
+          signal: "inferred",
+          ruleVersion: 1,
+          copyHash: "sha256:kr-device",
+        },
+        {
+          country: "SG",
+          signal: "inferred",
+          ruleVersion: 1,
+          copyHash: "sha256:sg-device",
+        },
+      ],
+      resolved: {
+        countryCode: "KR",
+        profileKey: "KR",
+        confidence: "low",
+        source: "inferred",
+      },
+    }),
+    /SG is not a country this resolution involved/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
   );
 });
 
@@ -537,7 +604,7 @@ test("a resolution describing a country the screen never showed is refused", asy
         },
       ],
     }),
-    /is not among the rules this notice rendered/
+    /SG is not a country this resolution involved/
   );
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
@@ -570,7 +637,7 @@ test("a named country the screen never rendered is refused, even unsettled", asy
         source: "inferred",
       },
     }),
-    /KR is not among the rules this notice rendered/
+    /SG is not a country this resolution involved/
   );
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
@@ -583,6 +650,8 @@ test("a conflict has to name the countries that disagreed, and they have to be o
   // row says which two countries the conflict was between -- and the display
   // duties of an unresolved pair are the union of theirs.
   const user = await createUser();
+  // A conflict always carries the sentinel in the column; the two countries
+  // live in `conflicts`, which is where this has to read them.
   const conflicted = {
     countryCode: "ZZ",
     profileKey: "ZZ",
@@ -610,8 +679,20 @@ test("a conflict has to name the countries that disagreed, and they have to be o
       candidates: twoRules,
       resolved: conflicted,
     }),
-    /must name the countries that disagreed/
+    /must name exactly two different countries/
   );
+
+  // One country is not a conflict, and neither is the same one twice.
+  for (const conflicts of [["AU"], ["AU", "AU"], ["AU", "KR", "SG"], ["AU", "ZZ"]]) {
+    await assert.rejects(
+      recordNoticeShown({
+        ...noticeInput(user),
+        candidates: twoRules,
+        resolved: { ...conflicted, conflicts },
+      }),
+      /must name exactly two different countries/
+    );
+  }
 
   await assert.rejects(
     recordNoticeShown({
@@ -619,7 +700,7 @@ test("a conflict has to name the countries that disagreed, and they have to be o
       candidates: [twoRules[0]!],
       resolved: { ...conflicted, conflicts: ["AU", "KR"] },
     }),
-    /KR is not among the rules this notice rendered/
+    /AU is settled, so it is the only rule|KR is not a country|is not a country this resolution involved/
   );
 
   await recordNoticeShown({
@@ -708,14 +789,16 @@ test("a retry that changes only the resolution is refused", async () => {
   const user = await createUser();
   await recordNoticeShown(noticeInput(user));
 
+  // Same candidates, a different resolution. The AU candidate still belongs
+  // to the resolution, so this reaches the comparison rather than a refusal.
   await assert.rejects(
     recordNoticeShown({
       ...noticeInput(user),
       resolved: {
-        countryCode: "ZZ",
-        profileKey: "ZZ",
-        confidence: "unknown",
-        source: "unresolved",
+        countryCode: "AU",
+        profileKey: "AU",
+        confidence: "low",
+        source: "inferred",
       },
     }),
     /describes something else/
@@ -907,6 +990,8 @@ test("a retry carrying different candidates is refused, not silently dropped", a
   const user = await createUser();
   const first = await recordNoticeShown(noticeInput(user));
 
+  // A second candidate the resolution does involve, so the membership checks
+  // pass and the comparison is what refuses it.
   await assert.rejects(
     recordNoticeShown({
       ...noticeInput(user),
@@ -919,6 +1004,13 @@ test("a retry carrying different candidates is refused, not silently dropped", a
           copyHash: "sha256:kr-device",
         },
       ],
+      resolved: {
+        countryCode: "KR",
+        profileKey: "KR",
+        confidence: "low",
+        source: "inferred",
+        observedIpCountry: "AU",
+      },
     }),
     /describes something else/
   );

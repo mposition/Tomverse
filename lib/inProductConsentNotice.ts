@@ -229,6 +229,15 @@ type RecordInput = {
      * countries the conflict was between.
      */
     conflicts?: readonly string[];
+    /**
+     * The IP country the resolver observed and set aside.
+     *
+     * Also part of `ResolvedJurisdiction`. It is not a jurisdiction -- the
+     * approved contract keeps it for measurement -- but it is a country whose
+     * rule a screen may legitimately have rendered, because draft section 5.3
+     * makes it one of the two candidates an uncertain estimate keeps.
+     */
+    observedIpCountry?: string | null;
   };
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
@@ -323,43 +332,63 @@ const recordNoticeEvent = async (
   // that is checked **before** the fold to `ZZ` rather than after it.
   //
   // Checking the folded column was not enough, and the gap was exactly where
-  // the fold happens. A resolution of `KR` at `low` confidence rendered
-  // against a Singapore device folded to `ZZ` and passed, with `KR` appearing
-  // nowhere in the row: the column said undetermined and the evidence said a
-  // Singapore rule was applied. That is the same "two halves, two countries"
-  // failure the check was added for, surviving in the one case the check
-  // stopped looking.
+  // the fold happens: a resolution of `KR` at `low` confidence rendered
+  // against a Singapore device folded to `ZZ` and passed, with `KR`
+  // appearing nowhere in the row.
+  //
+  // `ZZ` is a sentinel, not a country. Treating it as one -- which
+  // `normalizeCountry()` does, because it is two capital letters -- made this
+  // refuse every conflict and every unresolved payload the resolver actually
+  // produces, since both carry `countryCode: "ZZ"` and keep the real
+  // countries elsewhere. An account whose billing country and declaration
+  // disagreed would have been shown both devices and then failed to record
+  // that it had been asked, so the notice returned on every sign-in.
+  const namedCountries = new Set<string>();
+  if (resolved.countryCode !== "ZZ") namedCountries.add(resolved.countryCode);
+
+  // A conflict names exactly two, and they are where the countries live when
+  // the column cannot hold them.
+  if (resolved.confidence === "conflict") {
+    const conflicts = input.resolved.conflicts ?? [];
+    const normalized = conflicts.map((country) => normalizeCountry(country));
+    if (
+      normalized.length !== 2 ||
+      normalized.some((country) => country === null || country === "ZZ") ||
+      normalized[0] === normalized[1]
+    ) {
+      throw new Error(
+        "A conflicting resolution must name exactly two different countries that disagreed."
+      );
+    }
+    for (const country of normalized) namedCountries.add(country!);
+  }
+
+  // The observed IP country is not a jurisdiction, and it is a country whose
+  // rule the screen may have rendered: draft section 5.3 makes it one of the
+  // two candidates an uncertain estimate keeps.
+  const observed = normalizeCountry(input.resolved.observedIpCountry ?? null);
+  if (observed !== null && observed !== "ZZ") namedCountries.add(observed);
+
   const candidateCountries = new Set(
     candidates.map((candidate) => candidate.country)
   );
 
-  // Any country the resolver named, settled or not, is a country whose rule we
-  // should have rendered.
-  if (resolvedCountry !== null && !candidateCountries.has(resolvedCountry)) {
-    throw new Error(
-      `The resolved country ${resolvedCountry} is not among the rules this notice rendered.`
-    );
-  }
-
-  // A conflict names two, and both of them are countries the screen had to
-  // cover -- the display duties of an unresolved pair are the union of theirs
-  // (draft section 5.3).
-  if (resolved.confidence === "conflict") {
-    const conflicts = (input.resolved.conflicts ?? [])
-      .map((country) => normalizeCountry(country))
-      .filter((country): country is string => country !== null);
-    if (conflicts.length === 0) {
+  // Every rendered rule belongs to a country the resolution involved.
+  //
+  // The other direction from the one this started as, and the one that catches
+  // the case a settled-only check could not: a low-confidence `KR` with
+  // Singapore also on screen, where nothing named Singapore. The display
+  // duties are the union of the rendered list, so that row attaches
+  // Singapore's prefix to somebody the resolver never placed there.
+  for (const country of candidateCountries) {
+    if (!namedCountries.has(country)) {
       throw new Error(
-        "A conflicting resolution must name the countries that disagreed."
+        `${country} is not a country this resolution involved, so its rule should not have been rendered.`
       );
     }
-    for (const country of conflicts) {
-      if (!candidateCountries.has(country)) {
-        throw new Error(
-          `The conflicting country ${country} is not among the rules this notice rendered.`
-        );
-      }
-    }
+  }
+  if (namedCountries.size > 0 && candidateCountries.size === 0) {
+    throw new Error("An in-product notice event must render at least one rule.");
   }
 
   // And a settled country is the *only* rule that should have been rendered.
@@ -367,10 +396,10 @@ const recordNoticeEvent = async (
   // Draft section 5.3: two candidates are what an uncertain estimate looks
   // like, and a determinative signal replaces the list rather than joining it.
   // Leaving a stray candidate beside a settled country matters because the
-  // display duties are the union of the list -- so an account settled as
-  // Australian, with Korea left in the list, gets Korea's `(광고)` prefix
-  // attached, or is refused as `display_unsatisfiable` when two prefixes
-  // collide. Permanently: this row is written once.
+  // display duties are the union -- so an account settled as Australian, with
+  // Korea left in the list, gets Korea's `(광고)` prefix attached, or is
+  // refused as `display_unsatisfiable` when two prefixes collide.
+  // Permanently: this row is written once.
   if (jurisdiction.country !== "ZZ") {
     if (
       candidateCountries.size !== 1 ||
