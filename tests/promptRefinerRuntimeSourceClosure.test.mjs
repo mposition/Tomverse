@@ -146,12 +146,36 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` records `AmuxBoardImportApproval`. The
 // count is still 228 and the position-free inventory still hashes to the
 // value above, so this is a repin and not a review.
+//
+// 2026-09-23, S2b1 on top: the marketing switch writer left
+// `lib/appSettings.ts` for `lib/marketingSwitchWriter.ts`, so everything below
+// where it used to sit moves up. It went because `lib/appSettings.ts` is in
+// this closure and the writer had come to need the branded marketing
+// transaction -- importing it from here would have added a file to a set a
+// database CHECK is bound to, and the count did move to 179 before the writer
+// was moved out. The new module is not in the closure, nothing in the closure
+// imports it, and the writer's own computed accesses went with it. The count
+// is back to 228 and the position-free inventory still hashes to the value
+// above, so this is a repin and not a review.
+//
+// 2026-09-23, S7 alongside: the release-notes link table moved into
+// `lib/productAnnouncementEmail.ts` and pushed the access below it down that
+// file. It brought none of its own -- the id lookups ask a `Map`, the rejected
+// field names are written out, and the type predicate asks that `Map` rather
+// than `Object.prototype.hasOwnProperty.call`, which this closure's
+// prototype-capability check refuses outright. The count is still 228 and the
+// position-free inventory still hashes to the value above, so this is a repin
+// and not a review.
+//
+// Both notes stand because both changes are in this tree, and the value below
+// is recomputed over the merged tree rather than taken from either side of the
+// conflict.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e405145a9f6d68d57321a96de4623e4",
-  "d8b9896f638040fdd05adb0259657cdbc",
+  "d6b5de08379a269e937d89ca643e9132",
+  "e9e6c7b9c83267b4c054a9a7265155ec",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

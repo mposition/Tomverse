@@ -228,6 +228,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
  *
+ * 2026-09-23, S2b1: `MARKETING_PAUSE_REASON_CODES` and its type moved into
+ * the watched schema module from `lib/marketingStore.ts`, which is server-only
+ * and therefore unreadable by the console that has to offer the list. The
+ * store re-exports the same names, so no caller changed and no value changed.
+ * Webhook admission reads none of it -- the pause reasons are not an input to
+ * any webhook decision -- but the file is watched whole, so the digest moves
+ * and the move is recorded here rather than absorbed.
+ *
  * 2026-09-22: AMUX backlog default and source-provenance columns change only
  * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
  * admission decision; the whole-schema fingerprint moves by design.
@@ -263,7 +271,8 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
  */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT = "9a87c9776993344a152704a7d79db4d29dadaf9b987a8d3467d4e3b25a991bc4";
+export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
+  "5eb56650762ab88ae15bded9422cadfcdf75162e7b5975f4b61dbea50e5e79a2";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

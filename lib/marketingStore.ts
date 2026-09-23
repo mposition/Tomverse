@@ -45,6 +45,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
+import { writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -65,6 +66,7 @@ import {
   type MarketingHistoryEntry,
   type MarketingLocale,
   type MarketingPausableMode,
+  type MarketingPauseReasonCode,
   type MarketingPostKind,
   type MarketingPostMode,
   type MarketingPostStatus,
@@ -72,8 +74,15 @@ import {
   type MarketingReportKind,
   type MarketingResumeReasonCode,
   type MarketingVerificationMethod,
+  MARKETING_CHANNEL_CAPS,
+  MARKETING_PAUSE_REASON_CODES,
+  MARKETING_NO_AUTONOMY_CHANNELS,
+  MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
-import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
+import {
+  MARKETING_AUDIT_PROBLEMS,
+  verifyMarketingAuditEvidence,
+} from "@/lib/marketingAuditEvidence";
 import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
@@ -88,6 +97,41 @@ import {
  * those outside the transaction that wrote the other.
  */
 export type MarketingDatabase = PrismaClient | Prisma.TransactionClient;
+
+declare const MARKETING_TRANSACTION_BRAND: unique symbol;
+
+/**
+ * A client that is provably inside a transaction.
+ *
+ * `Prisma.TransactionClient` does not prove it: it is `Omit<PrismaClient, …>`,
+ * and a whole `PrismaClient` is assignable to it, so annotating a parameter
+ * with it refuses nothing. `resumeMarketingChannelToAutonomous(prisma, …)`
+ * typechecked, and each of its four writes -- the row locks, the post
+ * expiries, their audit entries, the channel CAS -- went out on its own
+ * autocommit, so a failing CAS at the end left the expiries and their audit
+ * behind.
+ *
+ * The brand is a property no client has, so the only value of this type is one
+ * `runMarketingTransaction()` produced, and that function's argument is a
+ * `$transaction` callback parameter. The single cast below is the whole
+ * surface, and `tests/marketingS2b1Store.test.mjs` fails if a second one
+ * appears anywhere in `lib/`.
+ */
+export type MarketingTransaction = Prisma.TransactionClient & {
+  readonly [MARKETING_TRANSACTION_BRAND]: "marketing";
+};
+
+/** The one place a `MarketingTransaction` comes from. */
+export async function runMarketingTransaction<T>(
+  client: PrismaClient,
+  run: (tx: MarketingTransaction) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number },
+): Promise<T> {
+  return client.$transaction(
+    (tx) => run(tx as unknown as MarketingTransaction),
+    options,
+  );
+}
 
 /** A write refused before it reached the database. */
 export class MarketingStoreRefusedError extends Error {
@@ -106,6 +150,144 @@ const asJson = (value: unknown): Prisma.InputJsonValue =>
 /** The audit actions that authorise the two operator-only movements. */
 export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_autonomous";
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
+
+/** Exact S2b1 action names. These strings are audit/store contracts. */
+/**
+ * What each refusal means to an HTTP caller.
+ *
+ * Here rather than in the route layer because the route layer had a copy and
+ * three of its keys were misspellings of codes this module throws -- the
+ * conflicts they described went out as 422 instead of 409. A caller that has
+ * to transcribe another module's strings will eventually transcribe one wrong,
+ * so the strings and their meaning live together and a test fails when a new
+ * refusal has no entry.
+ *
+ * A conflict is the default: almost every refusal here is the row not being in
+ * the state the caller decided against, which is exactly what 409 is for.
+ */
+/**
+ * The evidence refusals, which are built from a closed list rather than typed.
+ *
+ * Three call sites raise `${prefix}_${problem}` from
+ * `MARKETING_AUDIT_PROBLEMS`, so thirty codes exist that no quoted string in
+ * this file contains. The completeness test read quoted strings, so all thirty
+ * were missing from the table and went out as 422 instead of 409 -- a
+ * structural test with a hole exactly where the codes were not literals.
+ */
+const evidenceRefusalStatuses = (): Record<string, number> => {
+  const statuses: Record<string, number> = {};
+  for (const prefix of ["resume_evidence", "requeue_evidence", "audit_evidence"]) {
+    for (const problem of MARKETING_AUDIT_PROBLEMS) {
+      statuses[`${prefix}_${problem}`] = 409;
+    }
+  }
+  return statuses;
+};
+
+export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
+  Object.freeze({
+    ...evidenceRefusalStatuses(),
+    channel_not_found: 404,
+    post_not_found: 404,
+    approval_expiry_invalid: 400,
+    cap_change_is_noop: 400,
+    cap_override_invalid: 400,
+    default_locale_not_allowed: 400,
+    failure_code_invalid: 400,
+    pause_reason_invalid: 400,
+    period_is_backwards: 400,
+    policy_version_invalid: 400,
+    resume_reason_invalid: 400,
+    scopes_digest_unchanged: 400,
+    account_slug_exhausted: 503,
+    database_clock_unavailable: 503,
+    autonomous_creation_not_available: 501,
+    account_already_disconnected: 409,
+    approval_conflict: 409,
+    approval_expiry_conflict: 409,
+    autonomous_mode_not_settable_here: 409,
+    cap_change_conflict: 409,
+    cap_change_raises_limit: 409,
+    channel_changed_under_us: 409,
+    connection_confirmation_conflict: 409,
+    disconnect_conflict: 409,
+    edit_audit_reused: 409,
+    edit_changes_immutable_scope: 409,
+    edit_conflict: 409,
+    edit_guard_binding_mismatch: 409,
+    edited_content_guard_rejected: 409,
+    entry_belongs_to_retention: 409,
+    envelope_account_not_this_channel: 409,
+    envelope_digest_not_of_this_envelope: 409,
+    envelope_digest_without_envelope: 409,
+    envelope_disagrees_with_columns: 409,
+    envelope_schedule_disagrees: 409,
+    envelope_scheduled_at_create: 409,
+    guard_decision_not_about_these_facts: 409,
+    guard_decision_not_about_this_post: 409,
+    guard_decision_not_sealed: 409,
+    legal_hold_conflict: 409,
+    manual_channel_has_no_caps: 409,
+    mark_reusable_conflict: 409,
+    outcome_evidence_invalid: 409,
+    outcome_resolution_conflict: 409,
+    pause_conflict: 409,
+    policy_change_conflict: 409,
+    published_evidence_invalid: 409,
+    reconnect_conflict: 409,
+    rejection_conflict: 409,
+    requeue_conflict: 409,
+    requeue_evidence_missing: 409,
+    requeue_without_failure: 409,
+    resume_approval_conflict: 409,
+  resume_drain_required: 409,
+  drain_not_stopped: 409,
+  identity_change_needs_connection: 409,
+    resume_autonomous_conflict: 409,
+    resume_autonomous_not_allowed: 409,
+    resume_evidence_missing: 409,
+    resume_evidence_reused: 409,
+    schedule_conflict: 409,
+    scopes_change_conflict: 409,
+    unpublish_conflict: 409,
+    unpublish_not_confirmed: 409,
+  });
+
+export const MARKETING_S2B1_ACTIONS = Object.freeze({
+  accountCreate: "marketing_account.create",
+  accountConnectionConfirmed: "marketing_account.connection_confirmed",
+  accountDisconnect: "marketing_account.disconnect",
+  accountReconnect: "marketing_account.reconnect",
+  accountScopesChanged: "marketing_account.scopes_changed",
+  accountPolicyVersionChanged: "marketing_account.policy_version_changed",
+  accountPause: "marketing_account.pause",
+  accountResumeApproval: "marketing_account.resume_approval",
+  postApprovalExpiredOnResume: "marketing_post.approval_expired_on_resume",
+  accountResumeAutonomous: MARKETING_RESUME_AUTONOMOUS_ACTION,
+  accountDrainDueApprovals: "marketing_account.drain_due_approvals",
+  accountLowerCaps: "marketing_account.lower_caps",
+  postApprove: "marketing_post.approve",
+  postReject: "marketing_post.reject",
+  postEdit: "marketing_post.edit",
+  postMarkReusable: "marketing_post.mark_reusable",
+  postSchedule: "marketing_post.schedule",
+  postRequeueAfterFailure: MARKETING_REQUEUE_ACTION,
+  postLegalHoldSet: "marketing_post.legal_hold_set",
+  postLegalHoldReleased: "marketing_post.legal_hold_released",
+  postResolveOutcomeUnknown: "marketing_post.resolve_outcome_unknown",
+  postUnpublish: "marketing_post.unpublish",
+  settingDraftsChanged: "marketing_setting.drafts_changed",
+  settingPublishChanged: "marketing_setting.publish_changed",
+  settingAutonomousChanged: "marketing_setting.autonomous_changed",
+} as const);
+
+// Defined in the pure schema module, beside the resume codes, because the
+// console offers both and cannot import this one: this file is server-only.
+// Re-exported under its own name so nothing that reads it has to know that.
+export {
+  MARKETING_PAUSE_REASON_CODES,
+  type MarketingPauseReasonCode,
+} from "@/lib/marketingAutomationSchema";
 
 // ---------------------------------------------------------------------------
 // Channels
@@ -134,21 +316,38 @@ async function nextAccountSlug(
   database: MarketingDatabase,
   channel: MarketingChannelName,
 ): Promise<string> {
-  const existing = await database.marketingChannel.count({ where: { channel } });
-  const candidate = existing + 1;
-  if (candidate > 999) {
-    throw new MarketingStoreRefusedError(
-      "account_slug_exhausted",
-      `No free account slug for ${channel}`,
-    );
+  const existing = await database.marketingChannel.findMany({
+    where: { channel },
+    select: { accountSlug: true },
+  });
+  const used = new Set(existing.map((row) => row.accountSlug));
+  for (let candidate = 1; candidate <= 999; candidate += 1) {
+    const slug = `${channel}-${candidate}`;
+    if (!used.has(slug)) return slug;
   }
-  return `${channel}-${candidate}`;
+  throw new MarketingStoreRefusedError(
+    "account_slug_exhausted",
+    `No free account slug for ${channel}`,
+  );
 }
 
 export async function createMarketingChannel(
   database: MarketingDatabase,
-  input: CreateMarketingChannelInput,
+  rawInput: CreateMarketingChannelInput,
 ) {
+  // Materialise before the slug lookup awaits. A caller-owned object must not
+  // answer validation with one account and the insert with another.
+  const rawExternalAccountRef = rawInput.externalAccountRef;
+  const input: CreateMarketingChannelInput = {
+    channel: rawInput.channel,
+    provider: rawInput.provider,
+    externalAccountRef:
+      rawExternalAccountRef === null ? null : String(rawExternalAccountRef),
+    defaultLocale: rawInput.defaultLocale,
+    allowedLocales: [...rawInput.allowedLocales],
+    scopesDigest: String(rawInput.scopesDigest),
+    policyVersion: Number(rawInput.policyVersion),
+  };
   if (!input.allowedLocales.includes(input.defaultLocale)) {
     throw new MarketingStoreRefusedError(
       "default_locale_not_allowed",
@@ -330,6 +529,869 @@ export async function updateMarketingChannel(
     );
   }
   return database.marketingChannel.findUniqueOrThrow({ where: { id } });
+}
+
+type LockedMarketingChannel = {
+  id: string;
+  channel: MarketingChannelName;
+  status: MarketingChannelStatus;
+  connectionGeneration: number;
+  scopesDigest: string;
+  policyVersion: number;
+  graduationEpoch: number;
+  graduatedAt: Date | null;
+  graduationSnapshot: Prisma.JsonValue | null;
+  pausedAt: Date | null;
+  pausedFromMode: MarketingPausableMode | null;
+  pauseReasonCode: string | null;
+  lastResumeAuditLogId: string | null;
+  dailyCapOverride: number | null;
+  weeklyCapOverride: number | null;
+};
+
+/** S2b1 lifecycle writers always take the row lock before deciding. */
+async function lockMarketingChannel(
+  database: MarketingDatabase,
+  id: string,
+): Promise<LockedMarketingChannel> {
+  const rows = await database.$queryRaw<LockedMarketingChannel[]>(Prisma.sql`
+    SELECT
+      "id", "channel", "status", "connectionGeneration", "scopesDigest",
+      "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
+      "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
+      "dailyCapOverride", "weeklyCapOverride"
+    FROM "MarketingChannel"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const row = rows[0];
+  if (!row) {
+    throw new MarketingStoreRefusedError(
+      "channel_not_found",
+      "The marketing account does not exist",
+    );
+  }
+  return row;
+}
+
+const requireOne = (count: number, code: string, message: string): void => {
+  if (count !== 1) throw new MarketingStoreRefusedError(code, message);
+};
+
+export async function confirmMarketingChannelConnection(
+  database: MarketingTransaction,
+  rawInput: { id: string; expectedConnectionGeneration: number },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "connect_pending" ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "connection_confirmation_conflict",
+      "The account is no longer the connection that was confirmed",
+    );
+  }
+  // The last edge out of a stopped state that did not pay for it.
+  // `connect_pending` is in the stopped set and is drainable, so a post can be
+  // sitting there due -- nothing in the post writers checks the channel's
+  // status -- and this walks the account straight into `approval_mode`, where
+  // the publisher can take it. The rule is the edge, not the name of the
+  // state it starts in.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  await expireDueApprovals(database, input.id, now, {
+    refuseIfMore: true,
+    // Its own edge, not an identity change. Nothing identifying moves here --
+    // the connection generation, the scopes digest and the policy version all
+    // stay, and the channel trigger's own `identity_changed` condition does
+    // not include this transition. Recording it as one would have the
+    // hash-chained record name a door that was not used.
+    trigger: "connection_confirmed",
+  });
+
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "connect_pending",
+      connectionGeneration: input.expectedConnectionGeneration,
+    },
+    data: { status: "approval_mode" },
+  });
+  requireOne(
+    updated.count,
+    "connection_confirmation_conflict",
+    "The account changed before connection confirmation committed",
+  );
+}
+
+export async function disconnectMarketingChannel(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: MarketingChannelStatus;
+    expectedConnectionGeneration: number;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  if (input.expectedStatus === "disconnected") {
+    throw new MarketingStoreRefusedError(
+      "account_already_disconnected",
+      "A disconnected account cannot be disconnected again",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== input.expectedStatus ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "disconnect_conflict",
+      "The account is no longer in the expected connection state",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: input.expectedStatus,
+      connectionGeneration: input.expectedConnectionGeneration,
+    },
+    data: { status: "disconnected", pauseReasonCode: null },
+  });
+  requireOne(updated.count, "disconnect_conflict", "The account changed before disconnect");
+}
+
+export async function reconnectMarketingChannel(
+  database: MarketingTransaction,
+  rawInput: { id: string; expectedConnectionGeneration: number },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedConnectionGeneration: Number(rawInput.expectedConnectionGeneration),
+  };
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "disconnected" ||
+    row.connectionGeneration !== input.expectedConnectionGeneration
+  ) {
+    throw new MarketingStoreRefusedError(
+      "reconnect_conflict",
+      "The account is no longer the disconnected connection being resumed",
+    );
+  }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
+
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "disconnected",
+      connectionGeneration: input.expectedConnectionGeneration,
+      graduationEpoch: row.graduationEpoch,
+    },
+    data: {
+      status: "approval_mode",
+      connectionGeneration: input.expectedConnectionGeneration + 1,
+      graduationEpoch: row.graduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "reconnect_conflict", "The account changed before reconnect");
+}
+
+export async function changeMarketingChannelScopes(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    expectedScopesDigest: string;
+    expectedPolicyVersion: number;
+    expectedGraduationEpoch: number;
+    scopesDigest: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedScopesDigest: String(rawInput.expectedScopesDigest),
+    expectedPolicyVersion: Number(rawInput.expectedPolicyVersion),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    scopesDigest: String(rawInput.scopesDigest),
+  };
+  if (input.scopesDigest === input.expectedScopesDigest) {
+    throw new MarketingStoreRefusedError(
+      "scopes_digest_unchanged",
+      "A scope change needs a different digest",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.scopesDigest !== input.expectedScopesDigest ||
+    row.policyVersion !== input.expectedPolicyVersion ||
+    row.graduationEpoch !== input.expectedGraduationEpoch
+  ) {
+    throw new MarketingStoreRefusedError(
+      "scopes_change_conflict",
+      "The account identity changed before its scopes were saved",
+    );
+  }
+  if (row.status === "disconnected") {
+    // Leaving `disconnected` takes a new connection generation (the channel
+    // trigger requires it), and these writers do not issue one -- so this
+    // reached the database as a raw exception and came back a 500. Bumping
+    // the generation here would make a scope change a way to reconnect an
+    // account, and reconnecting is a person confirming a connection. Refused
+    // instead, naming the control that does it.
+    throw new MarketingStoreRefusedError(
+      "identity_change_needs_connection",
+      "Reconnect the account before changing its identity",
+    );
+  }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
+
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      scopesDigest: input.expectedScopesDigest,
+      policyVersion: input.expectedPolicyVersion,
+      graduationEpoch: input.expectedGraduationEpoch,
+    },
+    data: {
+      scopesDigest: input.scopesDigest,
+      status: "approval_mode",
+      graduationEpoch: input.expectedGraduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "scopes_change_conflict", "The account changed before scopes update");
+}
+
+export async function changeMarketingChannelPolicyVersion(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    expectedPolicyVersion: number;
+    expectedScopesDigest: string;
+    expectedGraduationEpoch: number;
+    policyVersion: number;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedPolicyVersion: Number(rawInput.expectedPolicyVersion),
+    expectedScopesDigest: String(rawInput.expectedScopesDigest),
+    expectedGraduationEpoch: Number(rawInput.expectedGraduationEpoch),
+    policyVersion: Number(rawInput.policyVersion),
+  };
+  if (
+    !Number.isInteger(input.policyVersion) ||
+    input.policyVersion <= 0 ||
+    input.policyVersion === input.expectedPolicyVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "policy_version_invalid",
+      "A policy change needs a different positive integer version",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.policyVersion !== input.expectedPolicyVersion ||
+    row.scopesDigest !== input.expectedScopesDigest ||
+    row.graduationEpoch !== input.expectedGraduationEpoch
+  ) {
+    throw new MarketingStoreRefusedError(
+      "policy_change_conflict",
+      "The account identity changed before its policy version was saved",
+    );
+  }
+  if (row.status === "disconnected") {
+    // Leaving `disconnected` takes a new connection generation (the channel
+    // trigger requires it), and these writers do not issue one -- so this
+    // reached the database as a raw exception and came back a 500. Bumping
+    // the generation here would make a scope change a way to reconnect an
+    // account, and reconnecting is a person confirming a connection. Refused
+    // instead, naming the control that does it.
+    throw new MarketingStoreRefusedError(
+      "identity_change_needs_connection",
+      "Reconnect the account before changing its identity",
+    );
+  }
+  // An identity change forces the account back to `approval_mode`, which from
+  // `paused` is a resume however it is spelled -- so it owes what a resume
+  // owes. Without this a scope change on a paused account put a post whose
+  // slot had passed back in front of the publisher, which is the thing policy
+  // section 8.2 exists to stop, reached by a door nobody thought of as a
+  // resume.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  if (marketingChannelWasStopped(row.status)) {
+    // Only from a stopped state. Returning a *running* account to approval
+    // mode is not a resume, and expiring its live schedules would be a
+    // decision policy section 8.2 does not make and nobody has taken.
+    await expireDueApprovals(database, input.id, now, {
+      refuseIfMore: true,
+      trigger: "identity_change",
+    });
+  }
+
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      policyVersion: input.expectedPolicyVersion,
+      scopesDigest: input.expectedScopesDigest,
+      graduationEpoch: input.expectedGraduationEpoch,
+    },
+    data: {
+      policyVersion: input.policyVersion,
+      status: "approval_mode",
+      graduationEpoch: input.expectedGraduationEpoch + 1,
+      graduatedAt: null,
+      graduationSnapshot: Prisma.DbNull,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(updated.count, "policy_change_conflict", "The account changed before policy update");
+}
+
+export async function pauseMarketingChannel(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: MarketingPausableMode;
+    reasonCode: MarketingPauseReasonCode;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    reasonCode: rawInput.reasonCode,
+  };
+  if (!(MARKETING_PAUSE_REASON_CODES as readonly string[]).includes(input.reasonCode)) {
+    throw new MarketingStoreRefusedError(
+      "pause_reason_invalid",
+      "The pause reason is not one of the recorded reason codes",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (row.status !== input.expectedStatus) {
+    throw new MarketingStoreRefusedError(
+      "pause_conflict",
+      "The account is no longer in the mode being paused",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: { id: input.id, status: input.expectedStatus },
+    data: { status: "paused", pauseReasonCode: input.reasonCode },
+  });
+  requireOne(updated.count, "pause_conflict", "The account changed before pause");
+}
+
+type DueApprovalPost = {
+  id: string;
+  status: "approved" | "scheduled";
+  historyVersion: number;
+  /**
+   * Null for an autonomous post, which has no approval window at all.
+   *
+   * It was typed as a `Date` while the query selected only rows whose window
+   * had closed. Widening the query to cover a schedule that came due made the
+   * null reachable, and the audit metadata dereferenced it -- so the resume
+   * that was supposed to expire the post threw instead, and rolled back the
+   * resume with it.
+   */
+  approvalExpiresAt: Date | null;
+  scheduledAt: Date | null;
+};
+
+/**
+ * How many due approvals one transaction may expire.
+ *
+ * Each one is a locked row, a conditional update and an audit append, and the
+ * audit append takes a chain-wide advisory lock -- so this is not only this
+ * account's latency, it is how long every other audit write waits. Fifty is
+ * chosen to stay far inside the wrapper's twenty-second transaction timeout
+ * with the chain lock held; a backlog larger than it is drained rather than
+ * pushed through one transaction.
+ */
+const MARKETING_RESUME_DRAIN_LIMIT = 50;
+
+/**
+ * The states in which the publisher is not taking this account's posts.
+ *
+ * What policy section 8.2 is actually about: a slot that passed while nothing
+ * was publishing must not go out the instant something is. Being paused is the
+ * obvious one, but a disconnected account is not publishing either, and a
+ * reconnect walks it straight back to `approval_mode` -- so it owes the same
+ * expiry. Written as `status === "paused"` that call was dead code, which is
+ * what the compiler pointed at.
+ */
+const MARKETING_STOPPED_STATUSES = [
+  "paused",
+  "disconnected",
+  "connect_pending",
+] as const;
+
+const marketingChannelWasStopped = (status: string): boolean =>
+  (MARKETING_STOPPED_STATUSES as readonly string[]).includes(status);
+
+/**
+ * Default resume path. Due approvals are expired and audited before the
+ * account leaves paused, all under the caller's one transaction.
+ */
+/**
+ * Expires every approval this account has that came due while it was stopped.
+ *
+ * Policy section 8.2 says a schedule that came due during a pause becomes an
+ * expired approval rather than a post that goes out the moment the account is
+ * back, and it does not say that only one kind of resume has to do it. It was
+ * written inside the approval resume, so an account resumed into autonomous
+ * mode kept its stale schedules and the publisher could take them straight
+ * out -- which is the thing the rule exists to stop.
+ *
+ * Two independent reasons a post is due: its approval window closed, or its
+ * slot passed. An autonomous post has no approval window at all, so neither
+ * the row nor the audit entry may assume one.
+ */
+async function expireDueApprovals(
+  database: MarketingTransaction,
+  channelId: string,
+  now: Date,
+  options: {
+    refuseIfMore: boolean;
+    /**
+     * Which door this came through.
+     *
+     * The action name stays the one the S2 inventory names, because it is one
+     * fact -- an approval that came due while the account was stopped -- and
+     * splitting it would mean two names for one thing. But the sentence used
+     * to say "while its account resumed", and a drain is not a resume and an
+     * identity change is not spelled like one, so the record was asserting a
+     * door that had not been used.
+     */
+    trigger:
+      | "resume"
+      | "identity_change"
+      | "connection_confirmed"
+      | "drain";
+  },
+): Promise<{ expiredPostIds: string[]; remaining: boolean }> {
+  // One more row than this transaction will touch, so "is there more" is an
+  // answer this query already has rather than a second scan.
+  const due = await database.$queryRaw<DueApprovalPost[]>(Prisma.sql`
+    SELECT "id", "status", "historyVersion", "approvalExpiresAt", "scheduledAt"
+    FROM "MarketingPost"
+    WHERE "channelId" = ${channelId}
+      AND "status" IN ('approved', 'scheduled')
+      AND (
+        "approvalExpiresAt" <= ${now}
+        OR ("scheduledAt" IS NOT NULL AND "scheduledAt" <= ${now})
+      )
+    ORDER BY "id"
+    LIMIT ${MARKETING_RESUME_DRAIN_LIMIT + 1}
+    FOR UPDATE
+  `);
+  const remaining = due.length > MARKETING_RESUME_DRAIN_LIMIT;
+  if (remaining && options.refuseIfMore) {
+    // Before the first update, so the transaction that cannot succeed has not
+    // also spent the chain lock on fifty audit appends on its way to failing.
+    throw new MarketingStoreRefusedError(
+      "resume_drain_required",
+      "Too many approvals came due during the pause to expire in one resume",
+    );
+  }
+  const expiredPostIds: string[] = [];
+  for (const post of due.slice(0, MARKETING_RESUME_DRAIN_LIMIT)) {
+    const expired = await database.marketingPost.updateMany({
+      where: {
+        id: post.id,
+        status: post.status,
+        historyVersion: post.historyVersion,
+        approvalExpiresAt: post.approvalExpiresAt,
+      },
+      data: { status: "approval_expired" },
+    });
+    requireOne(
+      expired.count,
+      "approval_expiry_conflict",
+      "A due post changed while the account was resuming",
+    );
+    await writeSystemAuditLog({
+      tx: database,
+      systemActor: "marketing-guard",
+      action: MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume,
+      targetType: "MarketingPost",
+      targetId: post.id,
+      summary: "Expired a due marketing approval while its account was stopped.",
+      metadata: {
+        channelId,
+        trigger: options.trigger,
+        historyVersion: post.historyVersion,
+        // Both reasons, not the first true one: a post can be past its slot
+        // *and* out of approval window, and reporting only the window loses
+        // the fact that the schedule had also gone by.
+        dueByApprovalWindow:
+          post.approvalExpiresAt !== null && post.approvalExpiresAt <= now,
+        dueBySchedule: post.scheduledAt !== null && post.scheduledAt <= now,
+        // The instant both were judged against, so the two booleans can be
+        // checked afterwards rather than taken on trust.
+        judgedAt: now.toISOString(),
+        approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
+        scheduledAt: post.scheduledAt?.toISOString() ?? null,
+      },
+    });
+    expiredPostIds.push(post.id);
+  }
+  return { expiredPostIds, remaining };
+}
+
+/**
+ * Expires a bounded batch of due approvals while the account stays paused.
+ *
+ * A resume does its own expiry, but it can only do a bounded amount of it --
+ * so an account that accumulated more due posts than one transaction may touch
+ * could not resume at all, and each attempt burned the same work again under
+ * the audit chain's advisory lock before timing out. Lifting the bound was not
+ * the answer: it only moved the ceiling from a number to a latency.
+ *
+ * This is the other half. It expires up to the same bound and leaves the
+ * account exactly where it was -- in one of the states where the publisher is
+ * not taking its posts, which is what keeps them from going out meanwhile --
+ * and says whether more remain. Called until `remaining` is false, it leaves a resume with nothing
+ * to do but the small final batch, and the resume still verifies that for
+ * itself rather than trusting that this ran.
+ *
+ * It only ever moves posts to `approval_expired`, so there is no state it can
+ * reach in which something goes out; that is why the kill switch does not gate
+ * it. A kill-switched account that could not be drained could not be resumed
+ * afterwards either.
+ *
+ * It accepts every state the resumes refuse from, not just `paused`. A drain
+ * narrower than the refusal is a hole: a disconnected account past the bound
+ * refused to reconnect, could not be drained, and has no edge into `paused`.
+ */
+export async function drainDueMarketingApprovals(
+  database: MarketingTransaction,
+  rawInput: { id: string },
+): Promise<{
+  status: MarketingChannelStatus;
+  expiredPostIds: string[];
+  remaining: boolean;
+}> {
+  const input = { id: String(rawInput.id) };
+  const channel = await lockMarketingChannel(database, input.id);
+  if (!marketingChannelWasStopped(channel.status)) {
+    // The same predicate the resumes use, and it has to be: a drain that
+    // covered fewer states than the refusal did left a hole. A disconnected
+    // account with more than one batch of due posts refused to reconnect, had
+    // no way to be drained, and has no transition into `paused` -- so no
+    // Admin route could reduce the backlog and the account was stuck for good.
+    throw new MarketingStoreRefusedError(
+      "drain_not_stopped",
+      "Only an account that is not publishing has approvals to drain",
+    );
+  }
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const drained = await expireDueApprovals(database, input.id, now, {
+    refuseIfMore: false,
+    trigger: "drain",
+  });
+  return { status: channel.status, ...drained };
+}
+
+export async function resumeMarketingChannelToApproval(
+  database: MarketingTransaction,
+  rawInput: { id: string },
+): Promise<{ expiredPostIds: string[] }> {
+  const input = { id: String(rawInput.id) };
+  const channel = await lockMarketingChannel(database, input.id);
+  if (channel.status !== "paused") {
+    throw new MarketingStoreRefusedError(
+      "resume_approval_conflict",
+      "Only a paused account can resume into approval mode",
+    );
+  }
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const { expiredPostIds } = await expireDueApprovals(database, input.id, now, {
+    // A backlog larger than one transaction's bound refuses here rather than
+    // being half-expired and rolled back. The drain action clears it while
+    // the account stays paused.
+    refuseIfMore: true,
+    trigger: "resume",
+  });
+  const resumed = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "paused",
+      pausedAt: channel.pausedAt,
+      pausedFromMode: channel.pausedFromMode,
+      pauseReasonCode: channel.pauseReasonCode,
+      lastResumeAuditLogId: channel.lastResumeAuditLogId,
+    },
+    data: { status: "approval_mode", pauseReasonCode: null },
+  });
+  requireOne(
+    resumed.count,
+    "resume_approval_conflict",
+    "The account changed before approval-mode resume",
+  );
+  return { expiredPostIds };
+}
+
+export async function resumeMarketingChannelToAutonomous(
+  database: MarketingTransaction,
+  rawInput: {
+    id: string;
+    auditLogId: string;
+    reasonCode: MarketingResumeReasonCode;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    auditLogId: String(rawInput.auditLogId),
+    reasonCode: rawInput.reasonCode,
+  };
+  if (
+    !(MARKETING_RESUME_REASON_CODES as readonly unknown[]).includes(
+      input.reasonCode,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "resume_reason_invalid",
+      "Autonomous resume needs a closed reason code",
+    );
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  if (
+    row.status !== "paused" ||
+    row.pausedFromMode !== "autonomous_mode" ||
+    (MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(row.channel)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "resume_autonomous_not_allowed",
+      "The account cannot resume into autonomous mode",
+    );
+  }
+  if (input.auditLogId === row.lastResumeAuditLogId) {
+    throw new MarketingStoreRefusedError(
+      "resume_evidence_reused",
+      "That audit entry already resumed this account once",
+    );
+  }
+  const verdict = await verifyMarketingAuditEvidence(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_RESUME_AUTONOMOUS_ACTION,
+    targetId: input.id,
+    metadata: { reasonCode: input.reasonCode },
+    notBefore: row.pausedAt ?? undefined,
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `resume_evidence_${verdict.problem}`,
+      `The audit entry for this resume is not evidence of it: ${verdict.problem}`,
+    );
+  }
+  // Policy section 8.2 does not limit this to one kind of resume: a schedule
+  // that came due while the account was stopped is an expired approval either
+  // way. Written only into the approval resume, it left an autonomous account
+  // holding stale schedules the publisher could take out the moment it came
+  // back -- which is the thing the rule exists to stop.
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  const { expiredPostIds } = await expireDueApprovals(database, input.id, now, {
+    // A backlog larger than one transaction's bound refuses here rather than
+    // being half-expired and rolled back. The drain action clears it while
+    // the account stays paused.
+    refuseIfMore: true,
+    trigger: "resume",
+  });
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      status: "paused",
+      pausedFromMode: "autonomous_mode",
+      pausedAt: row.pausedAt,
+      pauseReasonCode: row.pauseReasonCode,
+      lastResumeAuditLogId: row.lastResumeAuditLogId,
+      graduationEpoch: row.graduationEpoch,
+    },
+    data: {
+      status: "autonomous_mode",
+      lastResumeAuditLogId: input.auditLogId,
+      lastResumeReasonCode: input.reasonCode,
+      pauseReasonCode: null,
+    },
+  });
+  requireOne(
+    updated.count,
+    "resume_autonomous_conflict",
+    "The account changed before autonomous resume",
+  );
+  return { expiredPostIds };
+}
+
+export async function lowerMarketingChannelCaps(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    dailyCapOverride: number | null;
+    weeklyCapOverride: number | null;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    dailyCapOverride:
+      rawInput.dailyCapOverride === null ? null : Number(rawInput.dailyCapOverride),
+    weeklyCapOverride:
+      rawInput.weeklyCapOverride === null
+        ? null
+        : Number(rawInput.weeklyCapOverride),
+  };
+  for (const value of [input.dailyCapOverride, input.weeklyCapOverride]) {
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      throw new MarketingStoreRefusedError(
+        "cap_override_invalid",
+        "Posting cap overrides are non-negative integers",
+      );
+    }
+  }
+  const row = await lockMarketingChannel(database, input.id);
+  const policy = MARKETING_CHANNEL_CAPS[row.channel];
+  if (!policy) {
+    throw new MarketingStoreRefusedError(
+      "manual_channel_has_no_caps",
+      "A manual channel has no publisher cap to override",
+    );
+  }
+  const oldDaily = row.dailyCapOverride ?? policy.daily;
+  const oldWeekly = row.weeklyCapOverride ?? policy.weekly;
+  const newDaily = input.dailyCapOverride ?? policy.daily;
+  const newWeekly = input.weeklyCapOverride ?? policy.weekly;
+  if (newDaily > oldDaily || newWeekly > oldWeekly) {
+    throw new MarketingStoreRefusedError(
+      "cap_change_raises_limit",
+      "This action may only lower effective posting caps",
+    );
+  }
+  if (
+    input.dailyCapOverride === row.dailyCapOverride &&
+    input.weeklyCapOverride === row.weeklyCapOverride
+  ) {
+    throw new MarketingStoreRefusedError(
+      "cap_change_is_noop",
+      "At least one cap must change",
+    );
+  }
+  const updated = await database.marketingChannel.updateMany({
+    where: {
+      id: input.id,
+      dailyCapOverride: row.dailyCapOverride,
+      weeklyCapOverride: row.weeklyCapOverride,
+    },
+    data: {
+      dailyCapOverride: input.dailyCapOverride,
+      weeklyCapOverride: input.weeklyCapOverride,
+    },
+  });
+  requireOne(updated.count, "cap_change_conflict", "The caps changed before this update");
 }
 
 // ---------------------------------------------------------------------------
@@ -904,6 +1966,814 @@ export async function appendMarketingPostHistory(
   });
 
   return { appended: updated.count === 1 };
+}
+
+type LockedMarketingPost = {
+  id: string;
+  channelId: string;
+  channel: MarketingChannelName;
+  accountSlug: string;
+  locale: MarketingLocale;
+  status: MarketingPostStatus;
+  envelope: Prisma.JsonValue | null;
+  envelopeDigest: string;
+  approvedDigest: string | null;
+  approvalAuditLogId: string | null;
+  approvedAt: Date | null;
+  approvalExpiresAt: Date | null;
+  reusableAsTemplate: boolean;
+  scheduledAt: Date | null;
+  publishAttempt: number;
+  externalPostId: string | null;
+  publishedAt: Date | null;
+  deletedAt: Date | null;
+  contentPurgedAt: Date | null;
+  legalHold: boolean;
+  history: Prisma.JsonValue;
+  historyVersion: number;
+  claimIds: string[];
+  assetIds: string[];
+  claimRegistryVersion: number;
+  assetRegistryVersion: number;
+  factSnapshot: Prisma.JsonValue;
+  factsDigest: string | null;
+};
+
+async function lockMarketingPost(
+  database: MarketingDatabase,
+  id: string,
+): Promise<LockedMarketingPost> {
+  const rows = await database.$queryRaw<LockedMarketingPost[]>(Prisma.sql`
+    SELECT
+      p."id", p."channelId", c."channel", c."accountSlug", p."locale",
+      p."status", p."envelope", p."envelopeDigest", p."approvedDigest",
+      p."approvalAuditLogId", p."approvedAt", p."approvalExpiresAt",
+      p."reusableAsTemplate", p."scheduledAt", p."publishAttempt",
+      p."externalPostId", p."publishedAt", p."deletedAt", p."contentPurgedAt",
+      p."legalHold", p."history", p."historyVersion", p."claimIds",
+      p."assetIds", p."claimRegistryVersion", p."assetRegistryVersion",
+      p."factSnapshot", p."factsDigest"
+    FROM "MarketingPost" AS p
+    JOIN "MarketingChannel" AS c ON c."id" = p."channelId"
+    WHERE p."id" = ${id}
+    FOR UPDATE OF p
+  `);
+  const row = rows[0];
+  if (!row) {
+    throw new MarketingStoreRefusedError(
+      "post_not_found",
+      "The marketing post does not exist",
+    );
+  }
+  return row;
+}
+
+async function marketingDatabaseNow(database: MarketingDatabase): Promise<Date> {
+  const rows = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = rows[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+  return now;
+}
+
+async function requireMarketingAudit(
+  database: MarketingDatabase,
+  input: {
+    auditLogId: string;
+    action: string;
+    targetId: string;
+    metadata?: Readonly<Record<string, string | number | boolean>>;
+    notBefore?: Date;
+  },
+): Promise<Date> {
+  const verdict = await verifyMarketingAuditEvidence(database, input);
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry is not evidence of this write: ${verdict.problem}`,
+    );
+  }
+  return verdict.createdAt;
+}
+
+export async function approveMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    approvalAuditLogId: string;
+    approvalExpiresAt: Date;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    approvalAuditLogId: String(rawInput.approvalAuditLogId),
+    approvalExpiresAt: new Date(rawInput.approvalExpiresAt.getTime()),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "approval_conflict",
+      "The pending post changed before approval",
+    );
+  }
+  const approvedAt = await requireMarketingAudit(database, {
+    auditLogId: input.approvalAuditLogId,
+    action: MARKETING_S2B1_ACTIONS.postApprove,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+  });
+  if (input.approvalExpiresAt.getTime() <= approvedAt.getTime()) {
+    throw new MarketingStoreRefusedError(
+      "approval_expiry_invalid",
+      "An approval must expire after it was recorded",
+    );
+  }
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: {
+      status: "approved",
+      approvalAuditLogId: input.approvalAuditLogId,
+      approvedDigest: input.expectedEnvelopeDigest,
+      approvedAt,
+      approvalExpiresAt: input.approvalExpiresAt,
+    },
+  });
+  requireOne(updated.count, "approval_conflict", "Another approval won this post");
+}
+
+export async function rejectMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion
+  ) {
+    throw new MarketingStoreRefusedError(
+      "rejection_conflict",
+      "The pending post changed before rejection",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postReject,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: { status: "rejected" },
+  });
+  requireOne(updated.count, "rejection_conflict", "Another decision won this post");
+}
+
+export async function editMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    envelope: MarketingEnvelope;
+    decision: GuardDecision;
+    auditLogId: string;
+  },
+) {
+  const decision = rawInput.decision;
+  const envelope = marketingEnvelopeSchema.parse(rawInput.envelope);
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    envelope,
+    decision,
+    auditLogId: String(rawInput.auditLogId),
+  };
+  if (!marketingGuardDecisionIsSealed(decision)) {
+    throw new MarketingStoreRefusedError(
+      "guard_decision_not_sealed",
+      "An edit records a decision guardDraft() made",
+    );
+  }
+  if (decision.verdict === "reject") {
+    throw new MarketingStoreRefusedError(
+      "edited_content_guard_rejected",
+      "Guard-rejected content cannot remain in the approval queue",
+    );
+  }
+  const digest = marketingEnvelopeDigest(envelope);
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "pending_approval" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.contentPurgedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_conflict",
+      "The post changed before the edit was saved",
+    );
+  }
+  const history = marketingHistorySchema.parse(row.history);
+  if (
+    history.some(
+      (entry) =>
+        entry.type === "edit_revision" && entry.byAuditLogId === input.auditLogId,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_audit_reused",
+      "One audit entry authorises one edit",
+    );
+  }
+  const sameSet = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((value) => right.includes(value));
+  if (
+    envelope.channel !== row.channel ||
+    envelope.accountSlug !== row.accountSlug ||
+    envelope.locale !== row.locale ||
+    !sameSet(envelope.claimIds, row.claimIds) ||
+    !sameSet(
+      envelope.assets.map((asset) => asset.assetId),
+      row.assetIds,
+    )
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_changes_immutable_scope",
+      "An edit cannot move the post to different account, locale, claims or assets",
+    );
+  }
+  const draftDigest = marketingGuardDraftDigest({
+    renderedText: envelope.renderedText,
+    locale: row.locale,
+    channel: row.channel,
+    channelId: row.channelId,
+    claimIds: row.claimIds,
+    assetIds: row.assetIds,
+  });
+  const factSnapshotDigest = createHash("sha256")
+    .update(JSON.stringify(canonicalJson(row.factSnapshot)), "utf8")
+    .digest("hex");
+  const factsScopeDigest = marketingFactsScopeDigest({
+    channelId: row.channelId,
+    channel: row.channel,
+    locale: row.locale,
+    claimIds: row.claimIds,
+    assetIds: row.assetIds,
+    claimRegistryVersion: row.claimRegistryVersion,
+    assetRegistryVersion: row.assetRegistryVersion,
+    factSnapshotDigest,
+  });
+  if (
+    decision.draftDigest !== draftDigest ||
+    decision.factsScopeDigest !== factsScopeDigest
+  ) {
+    throw new MarketingStoreRefusedError(
+      "edit_guard_binding_mismatch",
+      "The Guard decision is not about this edited post and its stored facts",
+    );
+  }
+  const editedAt = await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postEdit,
+    targetId: input.id,
+    metadata: {
+      digest,
+      previousDigest: input.expectedEnvelopeDigest,
+    },
+  });
+  const codes = "codes" in decision ? [...decision.codes] : [];
+  const entries: MarketingHistoryEntry[] = [
+    {
+      at: editedAt.toISOString(),
+      type: "edit_revision",
+      envelopeDigest: digest,
+      previousEnvelopeDigest: input.expectedEnvelopeDigest,
+      byAuditLogId: input.auditLogId,
+    },
+    {
+      at: editedAt.toISOString(),
+      type: "guard_result",
+      decision: decision.verdict,
+      codes,
+      ruleIds: [...decision.ruleIds],
+    },
+  ];
+  entries.forEach((entry) => marketingHistoryEntrySchema.parse(entry));
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "pending_approval",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: {
+      envelope: asJson(envelope),
+      envelopeDigest: digest,
+      guardDecision: decision.verdict,
+      guardCodes: codes,
+      guardRuleIds: [...decision.ruleIds],
+      factsDigest: decision.factsDigest,
+      reusableAsTemplate: false,
+      history: asJson([...history, ...entries]),
+      historyVersion: input.expectedHistoryVersion + 1,
+    },
+  });
+  requireOne(updated.count, "edit_conflict", "The post changed before the edit committed");
+}
+
+/**
+ * The states a post can be marked reusable from.
+ *
+ * The same four `loadApprovedTemplate` accepts (S1 plan r4 amendment 5). It is
+ * not just `published`: verification is the publisher confirming the post is
+ * publicly visible, and it happens on its own, so a narrower list would let a
+ * post pass out of reach before anyone marked it -- and a template nobody can
+ * mark is an autonomy path nothing can reach.
+ */
+export const MARKETING_TEMPLATE_SOURCE_STATUSES = [
+  "approved",
+  "scheduled",
+  "published",
+  "verified",
+] as const;
+
+export async function markMarketingPostReusable(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    !(MARKETING_TEMPLATE_SOURCE_STATUSES as readonly string[]).includes(row.status) ||
+    row.reusableAsTemplate ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.approvedDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.contentPurgedAt !== null ||
+    row.deletedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "mark_reusable_conflict",
+      "Only unchanged approved content in a template-eligible state can become reusable",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postMarkReusable,
+    targetId: input.id,
+    metadata: {
+      digest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      // The state it was read in, not the list. The row was locked and checked
+      // against the list above; pinning the exact value is what makes a
+      // transition between the read and the write a refusal rather than a
+      // write against a post that has moved on.
+      status: row.status,
+      reusableAsTemplate: false,
+      envelopeDigest: input.expectedEnvelopeDigest,
+      approvedDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      contentPurgedAt: null,
+      deletedAt: null,
+    },
+    data: { reusableAsTemplate: true },
+  });
+  requireOne(updated.count, "mark_reusable_conflict", "The post changed before marking");
+}
+
+export async function scheduleMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    scheduledAt: Date;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    scheduledAt: new Date(rawInput.scheduledAt.getTime()),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  const envelope = marketingEnvelopeSchema.safeParse(row.envelope);
+  const now = await marketingDatabaseNow(database);
+  if (
+    row.status !== "approved" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.approvedDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    !envelope.success ||
+    envelope.data.scheduledAt !== input.scheduledAt.toISOString() ||
+    input.scheduledAt.getTime() <= now.getTime()
+  ) {
+    throw new MarketingStoreRefusedError(
+      "schedule_conflict",
+      "The approval or its future envelope schedule no longer matches",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postSchedule,
+    targetId: input.id,
+    metadata: {
+      digest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "approved",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      approvedDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+    },
+    data: { status: "scheduled", scheduledAt: input.scheduledAt },
+  });
+  requireOne(updated.count, "schedule_conflict", "The post changed before scheduling");
+}
+
+export async function requeueMarketingPostAfterFailure(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedEnvelopeDigest: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedEnvelopeDigest: String(rawInput.expectedEnvelopeDigest),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "failed" ||
+    row.envelopeDigest !== input.expectedEnvelopeDigest ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    input.auditLogId === row.approvalAuditLogId
+  ) {
+    throw new MarketingStoreRefusedError(
+      "requeue_conflict",
+      "The failed post changed before re-queue",
+    );
+  }
+  const history = marketingHistorySchema.parse(row.history);
+  const lastFailureAt = history
+    .filter(
+      (entry) =>
+        entry.type === "attempt" &&
+        entry.outcome === "failed" &&
+        entry.attempt === row.publishAttempt,
+    )
+    .map((entry) => new Date(entry.at).getTime())
+    .reduce((latest, at) => Math.max(latest, at), Number.NEGATIVE_INFINITY);
+  if (!Number.isFinite(lastFailureAt)) {
+    throw new MarketingStoreRefusedError(
+      "requeue_without_failure",
+      "The current failed attempt is absent from history",
+    );
+  }
+  const approvedAt = await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_REQUEUE_ACTION,
+    targetId: input.id,
+    metadata: { digest: input.expectedEnvelopeDigest },
+    notBefore: new Date(lastFailureAt),
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "failed",
+      envelopeDigest: input.expectedEnvelopeDigest,
+      historyVersion: input.expectedHistoryVersion,
+      approvalAuditLogId: row.approvalAuditLogId,
+      publishAttempt: row.publishAttempt,
+    },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: input.auditLogId,
+      approvedAt,
+      approvedDigest: input.expectedEnvelopeDigest,
+    },
+  });
+  requireOne(updated.count, "requeue_conflict", "The post changed before re-queue");
+}
+
+async function updateMarketingPostLegalHold(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedHistoryVersion: number;
+    auditLogId: string;
+  },
+  legalHold: boolean,
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.legalHold !== !legalHold
+  ) {
+    throw new MarketingStoreRefusedError(
+      "legal_hold_conflict",
+      "The post or its legal-hold state changed",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: legalHold
+      ? MARKETING_S2B1_ACTIONS.postLegalHoldSet
+      : MARKETING_S2B1_ACTIONS.postLegalHoldReleased,
+    targetId: input.id,
+    metadata: { historyVersion: input.expectedHistoryVersion },
+  });
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      historyVersion: input.expectedHistoryVersion,
+      legalHold: !legalHold,
+    },
+    data: { legalHold },
+  });
+  requireOne(updated.count, "legal_hold_conflict", "The post changed before legal hold update");
+}
+
+export const setMarketingPostLegalHold = (
+  database: MarketingDatabase,
+  input: { id: string; expectedHistoryVersion: number; auditLogId: string },
+) => updateMarketingPostLegalHold(database, input, true);
+
+export const releaseMarketingPostLegalHold = (
+  database: MarketingDatabase,
+  input: { id: string; expectedHistoryVersion: number; auditLogId: string },
+) => updateMarketingPostLegalHold(database, input, false);
+
+export async function resolveMarketingPostOutcomeUnknown(
+  database: MarketingDatabase,
+  rawInput:
+    | {
+        id: string;
+        expectedHistoryVersion: number;
+        resolution: "published";
+        externalPostId: string;
+        externalUrl: string;
+        evidenceRef: string;
+        auditLogId: string;
+      }
+    | {
+        id: string;
+        expectedHistoryVersion: number;
+        resolution: "failed";
+        errorCode: string;
+        evidenceRef: string;
+        auditLogId: string;
+      },
+) {
+  const common = {
+    id: String(rawInput.id),
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    resolution: rawInput.resolution,
+    evidenceRef: String(rawInput.evidenceRef),
+    auditLogId: String(rawInput.auditLogId),
+  };
+  const input =
+    rawInput.resolution === "published"
+      ? {
+          ...common,
+          resolution: "published" as const,
+          externalPostId: String(rawInput.externalPostId),
+          externalUrl: String(rawInput.externalUrl),
+        }
+      : {
+          ...common,
+          resolution: "failed" as const,
+          errorCode: String(rawInput.errorCode),
+        };
+  if (
+    input.evidenceRef.length < 1 ||
+    input.evidenceRef.length > 2048 ||
+    /[\u0000-\u001F\u007F]/u.test(input.evidenceRef)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "outcome_evidence_invalid",
+      "Outcome evidence must be a bounded control-free reference",
+    );
+  }
+  if (
+    input.resolution === "published" &&
+    (input.externalPostId.length < 1 || !input.externalUrl.startsWith("https://"))
+  ) {
+    throw new MarketingStoreRefusedError(
+      "published_evidence_invalid",
+      "Confirmed publication needs an external id and HTTPS URL",
+    );
+  }
+  if (
+    input.resolution === "failed" &&
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u.test(input.errorCode)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "failure_code_invalid",
+      "Confirmed failure needs a bounded error code",
+    );
+  }
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== "outcome_unknown" ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.publishedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "outcome_resolution_conflict",
+      "The unknown outcome changed before resolution",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postResolveOutcomeUnknown,
+    targetId: input.id,
+    metadata: {
+      resolution: input.resolution,
+      evidenceRef: input.evidenceRef,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const now = await marketingDatabaseNow(database);
+  const history = marketingHistorySchema.parse(row.history);
+  const failedEntry: MarketingHistoryEntry | null =
+    input.resolution === "failed"
+      ? {
+          at: now.toISOString(),
+          type: "attempt",
+          attempt: row.publishAttempt,
+          outcome: "failed",
+          errorCode: input.errorCode,
+        }
+      : null;
+  if (failedEntry) marketingHistoryEntrySchema.parse(failedEntry);
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: "outcome_unknown",
+      historyVersion: input.expectedHistoryVersion,
+      publishAttempt: row.publishAttempt,
+      publishedAt: null,
+    },
+    data:
+      input.resolution === "published"
+        ? {
+            status: "published",
+            externalPostId: input.externalPostId,
+            externalUrl: input.externalUrl,
+            publishedAt: now,
+            errorCode: null,
+          }
+        : {
+            status: "failed",
+            errorCode: input.errorCode,
+            history: asJson([...history, failedEntry!]),
+            historyVersion: input.expectedHistoryVersion + 1,
+          },
+  });
+  requireOne(
+    updated.count,
+    "outcome_resolution_conflict",
+    "The unknown outcome changed before resolution committed",
+  );
+}
+
+export async function unpublishMarketingPost(
+  database: MarketingDatabase,
+  rawInput: {
+    id: string;
+    expectedStatus: "published" | "verified";
+    expectedHistoryVersion: number;
+    expectedExternalPostId: string;
+    evidenceRef: string;
+    cancellationSupported: true;
+    removalConfirmed: true;
+    auditLogId: string;
+  },
+) {
+  const input = {
+    id: String(rawInput.id),
+    expectedStatus: rawInput.expectedStatus,
+    expectedHistoryVersion: Number(rawInput.expectedHistoryVersion),
+    expectedExternalPostId: String(rawInput.expectedExternalPostId),
+    evidenceRef: String(rawInput.evidenceRef),
+    cancellationSupported: rawInput.cancellationSupported,
+    removalConfirmed: rawInput.removalConfirmed,
+    auditLogId: String(rawInput.auditLogId),
+  };
+  if (input.cancellationSupported !== true || input.removalConfirmed !== true) {
+    throw new MarketingStoreRefusedError(
+      "unpublish_not_confirmed",
+      "No ledger deletion is written until external removal is confirmed",
+    );
+  }
+  const row = await lockMarketingPost(database, input.id);
+  if (
+    row.status !== input.expectedStatus ||
+    row.historyVersion !== input.expectedHistoryVersion ||
+    row.externalPostId !== input.expectedExternalPostId ||
+    row.deletedAt !== null
+  ) {
+    throw new MarketingStoreRefusedError(
+      "unpublish_conflict",
+      "The published post changed before removal was recorded",
+    );
+  }
+  await requireMarketingAudit(database, {
+    auditLogId: input.auditLogId,
+    action: MARKETING_S2B1_ACTIONS.postUnpublish,
+    targetId: input.id,
+    metadata: {
+      externalPostId: input.expectedExternalPostId,
+      evidenceRef: input.evidenceRef,
+      historyVersion: input.expectedHistoryVersion,
+    },
+  });
+  const now = await marketingDatabaseNow(database);
+  const updated = await database.marketingPost.updateMany({
+    where: {
+      id: input.id,
+      status: input.expectedStatus,
+      historyVersion: input.expectedHistoryVersion,
+      externalPostId: input.expectedExternalPostId,
+      deletedAt: null,
+    },
+    data: {
+      status: "deleted",
+      deletedAt: now,
+      deletionMethod: "api_unpublish",
+    },
+  });
+  requireOne(updated.count, "unpublish_conflict", "The post changed before removal commit");
 }
 
 // ---------------------------------------------------------------------------

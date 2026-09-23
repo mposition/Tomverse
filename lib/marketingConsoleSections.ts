@@ -42,3 +42,32 @@ export function marketingSectionAvailability(
   if (section === "experiments") return { available: false, stage: "S5" };
   return { available: true };
 }
+
+/**
+ * The three switches the console may change, each paired with the name the
+ * settings writer knows it by.
+ *
+ * Two names for one thing, and they are genuinely two: the payload calls the
+ * autonomous switch `autonomous`, and the console's switch strip has always
+ * called it `autoPublish` because that is what it reports. Written out once
+ * here rather than transcribed in the panel, because the panel is a client
+ * component and cannot import `lib/appSettings.ts`, which is server-only --
+ * and a closed list copied across that boundary is a list that drifts.
+ */
+export const MARKETING_CONSOLE_SWITCH_NAMES = [
+  "drafts",
+  "publish",
+  "autonomous",
+] as const;
+
+export type MarketingConsoleSwitch =
+  (typeof MARKETING_CONSOLE_SWITCH_NAMES)[number];
+
+export const MARKETING_CONSOLE_SWITCH_CONTROLS: readonly {
+  readonly state: string;
+  readonly name: MarketingConsoleSwitch;
+}[] = [
+  { state: "drafts", name: "drafts" },
+  { state: "publish", name: "publish" },
+  { state: "autoPublish", name: "autonomous" },
+];

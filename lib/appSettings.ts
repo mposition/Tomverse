@@ -647,6 +647,15 @@ export type MarketingAutomationSettingsRead = {
   webhookShadowEnabled: ReadResult<boolean>;
   webhookShadowStoredValue: ReadResult<string | null>;
   webhookApplyScopeValue: ReadResult<string | null>;
+  /**
+   * The version token a switch change has to send back.
+   *
+   * Read here rather than in its own query so the console shows a generation
+   * from the same snapshot as the values it read: two queries can straddle a
+   * change, and a screen that showed the old values with the new generation
+   * would save against a state nobody saw.
+   */
+  configGenerationValue: ReadResult<string | null>;
 };
 
 export async function readMarketingAutomationSettingsFrom(
@@ -688,6 +697,10 @@ export async function readMarketingAutomationSettingsFrom(
       ok: true as const,
       value: values.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY) ?? null,
     },
+    configGenerationValue: {
+      ok: true as const,
+      value: values.get(MARKETING_CONFIG_GENERATION_KEY) ?? null,
+    },
   });
 
   if (!databaseEnabled) return fromValues(new Map());
@@ -703,6 +716,7 @@ export async function readMarketingAutomationSettingsFrom(
             MARKETING_EXPERIMENTS_KEY,
             MARKETING_WEBHOOK_SHADOW_KEY,
             MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+            MARKETING_CONFIG_GENERATION_KEY,
           ],
         },
       },
@@ -718,6 +732,7 @@ export async function readMarketingAutomationSettingsFrom(
       experimentsEnabled: unreadable,
       webhookShadowEnabled: unreadable,
       webhookShadowStoredValue: unreadable,
+      configGenerationValue: unreadable,
       webhookApplyScopeValue: unreadable,
     };
   }
@@ -728,6 +743,35 @@ export async function readMarketingAutomationSettings(): Promise<
 > {
   return readMarketingAutomationSettingsFrom(prisma, !e2eDatabaseDisabled());
 }
+
+/**
+ * The three marketing switches an operator may change from the console.
+ *
+ * Drafts, publishing and autonomous publishing. The webhook shadow switch
+ * belongs to S2e and the apply scope to S2f: both carry evidence this slice
+ * has no way to check, and a writer for them here would be a way to skip that
+ * evidence (docs/policy/marketing-automation.md §6.1, §8.1.1).
+ *
+ * The write takes the caller's transaction so it commits with the audit entry
+ * the route wrote -- that pairing is the only thing that makes the change
+ * answerable afterwards.
+ */
+
+/**
+ * The generation number every admission-affecting setting change moves by one.
+ *
+ * S2b2's autonomous insert binds it, so a setting that changed between a
+ * decision and the write it authorised is something the insert can see rather
+ * than something it has to re-read and hope about (S2 plan, the admission
+ * AppSettings row).
+ *
+ * The key lives here because the combined reader below reads it. Everything
+ * that *writes* it lives in `lib/marketingSwitchWriter.ts`: this module is
+ * inside the Prompt Refiner runtime source closure, so an import of the
+ * marketing store from here would change a sealed file count that a database
+ * CHECK is bound to.
+ */
+export const MARKETING_CONFIG_GENERATION_KEY = "marketingAutomation.configGeneration";
 
 export class MemoryFeatureDisabledError extends Error {
   constructor() {
