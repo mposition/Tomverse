@@ -1558,6 +1558,24 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 약 50단위에서 완료는 41, **약 82%(추정)**입니다. 검증·독립 검토·병합·
 배포는 별도입니다. production 배포는 0%입니다.
 
+## 14.26 여기서 코드가 멈추는 이유 (2026-09-24)
+
+41 다음에 저장소가 스스로 쓸 수 있는 단위는 없습니다. 남은 것은 아래이고,
+어느 것도 이 절에서 완료로 세지 않습니다. 분모 약 50은 그대로입니다.
+
+| 항목 | 왜 지금 쓰지 않는가 |
+|---|---|
+| A-3b `VALIDATE` | production 조사가 선행입니다. |
+| canary lane | A-5가 어느 환경에도 배포되지 않았고, probe는 여전히 provider당 대표 모델 하나입니다. |
+| BYOK 비용 배선 | A-5 배포와 수요 확인이 선행입니다. 가격 계약도 따로입니다. |
+| load guard의 softmax와 감쇠 계수 | 온도는 품질과 비용의 교환이고, 그 교환은 정해지지 않았습니다. |
+| deployment별 pricing snapshot | `docs/policy/credit-and-cost-limits.md`의 별도 승인입니다. |
+| decision grain 원자 전환 | §8.1 선행조건 2·4·5가 표본과 시간 위에 있습니다. 필터는 아직 probe health를 읽습니다. |
+| 2-attempt fallback 활성화 | scope와 capacity가 준비된 뒤입니다. 판정을 요청 경로에 연결하지 않습니다. |
+| equivalence class | provider attestation이 없습니다. |
+
+DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenAI·Anthropic ZDR 신청, exploration을 켜는 것, Privacy 고지, ADR 원문을 develop으로 가져오는 것은 소유자 결정입니다. 여기서 정하지 않습니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.
