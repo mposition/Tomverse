@@ -87,7 +87,9 @@ import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
+  marketingTemplateWriteConditions,
   type MarketingGuardDecision as GuardDecision,
+  type MarketingTemplateBinding,
 } from "@/lib/marketingGuardCore";
 
 /**
@@ -149,6 +151,17 @@ const asJson = (value: unknown): Prisma.InputJsonValue =>
 
 /** The audit actions that authorise the two operator-only movements. */
 export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_autonomous";
+/**
+ * The one action S2b2 writes.
+ *
+ * Its own constant, not a thirtieth entry in `MARKETING_S2B1_ACTIONS`: that
+ * table is the approved S2b1 inventory and a test compares it whole, so adding
+ * to it would say S2b1 grew an action it was never approved for.
+ */
+export const MARKETING_S2B2_ACTIONS = Object.freeze({
+  postAutonomousScheduled: "marketing_post.autonomous_scheduled",
+} as const);
+
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
 /** Exact S2b1 action names. These strings are audit/store contracts. */
@@ -243,6 +256,21 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   resume_drain_required: 409,
   drain_not_stopped: 409,
   identity_change_needs_connection: 409,
+  autonomous_insert_not_eligible: 409,
+  autonomous_insert_has_codes: 409,
+  autonomous_insert_not_scheduled: 409,
+  autonomous_insert_without_template: 409,
+  autonomous_insert_template_mismatch: 409,
+  autonomous_insert_template_digest_mismatch: 409,
+  autonomous_insert_channel_not_autonomous: 409,
+  autonomous_insert_channel_has_no_autonomy: 409,
+  autonomous_insert_slot_not_future: 409,
+  autonomous_insert_slot_unreadable: 409,
+  autonomous_insert_binding_expired: 409,
+  autonomous_insert_binding_not_sealed: 409,
+  autonomous_insert_template_gone: 409,
+  autonomous_insert_template_changed: 409,
+  autonomous_insert_not_admitted: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -1457,7 +1485,21 @@ export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
     .digest("hex");
 }
 
-export async function createMarketingPost(
+/**
+ * What every marketing post has to satisfy before it is written, whoever is
+ * writing it.
+ *
+ * This was the first half of `createMarketingPost` while there was one
+ * writer. S2b2 adds a second -- the autonomous scheduled insert -- and the two
+ * differ in exactly two places: one refuses a sealed `autonomous_eligible`
+ * decision and a scheduled envelope, the other requires both. Everything
+ * before that is the same question and is asked once, here, because the same
+ * checks written twice are two places to get them right and one place to get
+ * them wrong quietly.
+ *
+ * It reads the channel, so it takes a database. It writes nothing.
+ */
+async function admitMarketingPostInput(
   database: MarketingDatabase,
   rawInput: CreateMarketingPostInput,
 ) {
@@ -1586,16 +1628,6 @@ export async function createMarketingPost(
     );
   }
 
-  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
-  // has a column for one, and a create that set the first and not the second
-  // left two answers to the same question.
-  if (envelopeForDigest.scheduledAt !== null) {
-    throw new MarketingStoreRefusedError(
-      "envelope_scheduled_at_create",
-      "A post is scheduled by an append, not by the envelope it is created with",
-    );
-  }
-
   // The account the envelope names has to be the account being written to.
   // `accountSlug` is what a publisher posts from, and the Guard checked the
   // channel this row belongs to.
@@ -1611,6 +1643,34 @@ export async function createMarketingPost(
     throw new MarketingStoreRefusedError(
       "envelope_account_not_this_channel",
       "The envelope names an account other than the one this post belongs to",
+    );
+  }
+
+  return {
+    input,
+    envelope: envelopeForDigest,
+    verdict,
+    guardCodes,
+    guardRuleIds,
+    factsDigest,
+    account,
+  };
+}
+
+export async function createMarketingPost(
+  database: MarketingDatabase,
+  rawInput: CreateMarketingPostInput,
+) {
+  const { input, envelope: envelopeForDigest, verdict, guardCodes, guardRuleIds, factsDigest } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
+  // has a column for one, and a create that set the first and not the second
+  // left two answers to the same question.
+  if (envelopeForDigest.scheduledAt !== null) {
+    throw new MarketingStoreRefusedError(
+      "envelope_scheduled_at_create",
+      "A post is scheduled by an append, not by the envelope it is created with",
     );
   }
 
@@ -1833,6 +1893,268 @@ export type MarketingRequeueEvidence = { auditLogId: string };
  * arrived some other way would otherwise be carried forward by every later
  * append, with this module's name on the write.
  */
+
+/**
+ * The only writer that may insert a post already scheduled, already
+ * autonomous, with nobody having looked at it.
+ *
+ * Authority: S1 plan r7 amendment 2 and the S2 plan's "Autonomous insert:
+ * complete shape", both approved 2026-09-23. The insert trigger carries the
+ * half of the contract that is a property of the row; this carries the half
+ * that needs other rows, and the two halves are checked in the same
+ * transaction as the write so neither can be true at a different moment than
+ * the other.
+ *
+ * What it does, in the order it matters:
+ *
+ * 1. Locks the channel. It is the per-channel mutex the caps rest on, and it
+ *    is what stops the account changing mode underneath the decision.
+ * 2. Reads the database's clock. The binding's window is judged against that
+ *    clock and no other -- a caller's clock is one nobody agreed on.
+ * 3. Holds the template row with `FOR SHARE` and writes against every
+ *    condition `marketingTemplateWriteConditions()` returns. Autonomy is only
+ *    ever inside an approved template, so a template that has been edited,
+ *    purged, un-marked or moved on a version is not one this may reuse.
+ * 4. Resolves admission *here*, by calling the resolver this function was
+ *    handed, inside this transaction. Taking a resolved answer as an argument
+ *    would let it be resolved anywhere, at any time, against anything.
+ * 5. Inserts, and writes the system audit row in the same transaction.
+ *
+ * The audit metadata is what dispatch compares against later: the code digest,
+ * the configuration generation and the deployment id. A post admitted by one
+ * build is not dispatched by another without being admitted again.
+ */
+export async function insertAutonomousScheduledMarketingPost(
+  database: MarketingTransaction,
+  rawInput: CreateMarketingPostInput & {
+    /** The sealed proof that this template was a template, and when. */
+    readonly binding: MarketingTemplateBinding;
+    /**
+     * Resolved inside this transaction, by this function, rather than handed
+     * in already answered.
+     */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+    ) => Promise<{ autonomousPublish: boolean }>;
+    readonly admissionCodeDigest: string;
+    readonly configGeneration: number;
+    readonly deploymentId: string;
+    readonly commitSha: string;
+  },
+) {
+  const binding = rawInput.binding;
+  const resolveAdmission = rawInput.resolveAdmission;
+  const provenance = {
+    admissionCodeDigest: String(rawInput.admissionCodeDigest),
+    configGeneration: Number(rawInput.configGeneration),
+    deploymentId: String(rawInput.deploymentId),
+    commitSha: String(rawInput.commitSha),
+  };
+
+  const { input, envelope, guardRuleIds, factsDigest, verdict, guardCodes } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // The opposite of the draft path in both directions: this one requires the
+  // verdict a person never saw, and requires the slot the draft path refuses.
+  if (verdict !== "autonomous_eligible") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_eligible",
+      "Only an autonomous-eligible decision may be inserted already scheduled",
+    );
+  }
+  if (guardCodes.length > 0) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_has_codes",
+      "An autonomous-eligible decision carries no codes",
+    );
+  }
+  if (envelope.scheduledAt === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_scheduled",
+      "An autonomous post is inserted with the slot its envelope names",
+    );
+  }
+  if (input.templateId === null || input.templateDigest === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_without_template",
+      "Autonomy is only ever inside an approved template",
+    );
+  }
+  if (input.templateId !== binding.templateId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_mismatch",
+      "The binding proves a different template than the post names",
+    );
+  }
+  if (input.templateDigest !== binding.approvedDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_digest_mismatch",
+      "The binding proves a different approved digest than the post names",
+    );
+  }
+
+  // The per-channel mutex, and the thing that stops the account changing mode
+  // under the decision.
+  const channel = await lockMarketingChannel(database, input.channelId);
+  if (channel.status !== "autonomous_mode") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_not_autonomous",
+      "Only an account in autonomous mode may be written to without a person",
+    );
+  }
+  if (
+    (MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(channel.channel)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_has_no_autonomy",
+      "This channel is posted by hand and has no autonomous path",
+    );
+  }
+
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  // The slot is in the future at the database's clock. A post inserted for an
+  // instant that has already passed is due the moment it exists, which is a
+  // way of publishing now while appearing to schedule.
+  const slot = new Date(envelope.scheduledAt);
+  if (!Number.isFinite(slot.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_unreadable",
+      "The envelope's scheduled instant is not a time",
+    );
+  }
+  if (slot.getTime() <= now.getTime()) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_not_future",
+      "An autonomous post is scheduled for a time that has not happened yet",
+    );
+  }
+
+  // The binding's window is judged against that clock and no other.
+  const conditions = marketingTemplateWriteConditions(binding, now);
+  if (!conditions.ok) {
+    // Two throws, each with its code where the reader and the check both
+    // look for it: immediately after the constructor. Assembling the code
+    // from a fragment made it ungreppable, and putting it behind a ternary
+    // made it invisible to the sweep that gives every refusal an HTTP
+    // meaning -- both of which read, from outside, as a status for a
+    // refusal nothing raises.
+    if (conditions.refusal === "binding_expired") {
+      throw new MarketingStoreRefusedError(
+        "autonomous_insert_binding_expired",
+        "The template binding proof has aged out at the database clock",
+      );
+    }
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_binding_not_sealed",
+      "The template binding is not a write condition at the database's clock",
+    );
+  }
+
+  // Held, not looked at. `FOR SHARE` keeps the template as the binding proved
+  // it until this transaction ends, so an edit or a purge in flight loses the
+  // race rather than winning it silently.
+  const held = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingPost" WHERE "id" = ${binding.templateId} FOR SHARE
+  `);
+  if (held.length !== 1) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_gone",
+      "The template this post reuses no longer exists",
+    );
+  }
+  const template = await database.marketingPost.findFirst({
+    where: conditions.where,
+    select: { id: true },
+  });
+  if (!template) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_changed",
+      "The template no longer matches the binding that proved it",
+    );
+  }
+
+  // Resolved here, inside this transaction, by this function.
+  const admission = await resolveAdmission(database);
+  if (!admission.autonomousPublish) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_admitted",
+      "Autonomous publishing is not admitted right now",
+    );
+  }
+
+  const draftEntry = marketingHistoryEntrySchema.parse({
+    at: input.draftedAt.toISOString(),
+    type: "draft",
+    envelopeDigest: input.envelopeDigest,
+  });
+
+  const created = await database.marketingPost.create({
+    data: {
+      channelId: input.channelId,
+      locale: input.locale,
+      kind: input.kind,
+      logicalKey: input.logicalKey,
+      envelope: asJson(envelope),
+      envelopeDigest: input.envelopeDigest,
+      rendererVersion: input.rendererVersion,
+      templateId: input.templateId,
+      templateDigest: input.templateDigest,
+      claimIds: [...input.claimIds],
+      assetIds: [...input.assetIds],
+      claimRegistryVersion: input.claimRegistryVersion,
+      assetRegistryVersion: input.assetRegistryVersion,
+      factSnapshot: asJson(input.factSnapshot),
+      factsDigest,
+      // Derived from the decision, never from the caller.
+      guardDecision: "autonomous_eligible",
+      guardCodes: [],
+      guardRuleIds: [...guardRuleIds],
+      status: "scheduled",
+      mode: "autonomous",
+      scheduledAt: slot,
+      history: asJson([draftEntry]),
+    },
+    select: { id: true },
+  });
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-guard",
+    action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+    targetType: "MarketingPost",
+    targetId: created.id,
+    summary: "Scheduled a marketing post without a person, inside an approved template.",
+    metadata: {
+      channelId: input.channelId,
+      factsDigest,
+      factsScopeDigest: rawInput.decision.factsScopeDigest,
+      templateId: binding.templateId,
+      templateDigest: binding.approvedDigest,
+      // What dispatch compares against. A post admitted by one build of the
+      // admission code, one configuration generation or one deployment is not
+      // dispatched by another without being admitted again. The commit is
+      // provenance: Git identity alone does not prove what bytes ran.
+      admissionCodeDigest: provenance.admissionCodeDigest,
+      configGeneration: provenance.configGeneration,
+      deploymentId: provenance.deploymentId,
+      commitSha: provenance.commitSha,
+      scheduledAt: slot.toISOString(),
+    },
+  });
+
+  return { id: created.id };
+}
+
 export async function appendMarketingPostHistory(
   database: MarketingDatabase,
   rawInput: {
