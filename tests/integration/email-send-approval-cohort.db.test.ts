@@ -254,6 +254,10 @@ const noticeInput = (user: { id: string; email: string | null }) => ({
   emailAddress: user.email!,
   surface: "in-product-consent-notice",
   copyHash: "sha256:placeholder-until-S2-approves-the-wording",
+  // Reported by the caller that rendered the device, never derived here.
+  appliedCountry: "AU",
+  appliedCountrySource: "self_declared",
+  ruleVersion: 1,
 });
 
 test("recording the same render twice leaves one row", async () => {
@@ -363,5 +367,69 @@ test("a notice event without a copy hash is refused before it is written", async
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
     0
+  );
+});
+
+test("the country on the row is the one the caller says it showed", async () => {
+  // Never derived. An account that has declared nothing resolves through
+  // language and timezone -- `ko` plus `Asia/Seoul` answers `KR` at low
+  // confidence -- and this row has no confidence column, so it would have said
+  // `KR` flatly and for ever about somebody shown no Korean device.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    appliedCountry: "SG",
+    appliedCountrySource: "self_declared",
+    ruleVersion: 4,
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "SG");
+  assert.equal(row.jurisdictionSource, "self_declared");
+  assert.deepEqual(row.evidence, {
+    surface: "in-product-consent-notice",
+    copyHash: "sha256:placeholder-until-S2-approves-the-wording",
+    ruleVersion: 4,
+  });
+});
+
+test("a notice event without an applied country is refused", async () => {
+  const user = await createUser();
+  await assert.rejects(
+    recordNoticeShown({ ...noticeInput(user), appliedCountry: " " }),
+    /country whose rule was shown/
+  );
+  await assert.rejects(
+    recordNoticeShown({ ...noticeInput(user), appliedCountrySource: "" }),
+    /where the applied country came from/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
+test("an approval sealed with no reason is refused", async () => {
+  const users = [await createUser()];
+  await assert.rejects(
+    sealRiskAcceptedApproval({
+      approvedById: users[0]!.id,
+      approvedByEmail: users[0]!.email!,
+      approvedAt,
+      reason: "   ",
+      reviewCondition: "Re-decide on the first organic signup.",
+      policyVersionId: await policyVersionId(),
+      purposeKey: "*",
+      candidates: [
+        {
+          userId: users[0]!.id,
+          emailAddress: users[0]!.email!,
+          signupAt: approvedAt,
+        },
+      ],
+    }),
+    /no_reason/
   );
 });

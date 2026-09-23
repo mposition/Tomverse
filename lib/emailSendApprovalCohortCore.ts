@@ -56,8 +56,15 @@ export type ApprovalCohortMember = NonNullable<CohortQuery["member"]>;
  * approval that crossed one would be the TAB failure -- continuing to send
  * down a channel somebody refused.
  *
- * A suppression is a delivery fact, at the purpose scope or globally, and
- * sending anyway means mailing a hard-bounced or complained-about address.
+ * A suppression is a delivery fact, and it comes at three scopes, not two.
+ * Purpose and global are the obvious ones. The third is the classification,
+ * and leaving it out had a specific consequence: section 7.4 writes a
+ * `marketing` classification suppression when a deletion request is accepted,
+ * and it says why in the same breath -- withdrawing consent alone does not
+ * stop a `risk_accepted` send, so the suppression is what does. With only two
+ * booleans the deletion request mapped to neither and this function answered
+ * "no blockers", so the address of somebody who had asked to be deleted would
+ * have been mailed under the override.
  *
  * An undetermined country (`ZZ`) is refused for a reason that is easy to get
  * backwards: it is not that the country might forbid the send, but that we
@@ -77,6 +84,7 @@ export type OverrideBlocker =
   | "objected"
   | "consent_withdrawn"
   | "suppressed_purpose"
+  | "suppressed_classification"
   | "suppressed_globally"
   | "country_undetermined"
   | "obligation_undecided";
@@ -85,6 +93,8 @@ export type OverrideInput = {
   hasObjected: boolean;
   consentWithdrawn: boolean;
   suppressedForPurpose: boolean;
+  /** Section 7.4's deletion-request suppression arrives at this scope. */
+  suppressedForClassification: boolean;
   suppressedGlobally: boolean;
   country: string;
   obligationsDecided: boolean;
@@ -103,6 +113,9 @@ export const overrideBlockers = (input: OverrideInput): OverrideBlocker[] => {
   if (input.hasObjected) blockers.push("objected");
   if (input.consentWithdrawn) blockers.push("consent_withdrawn");
   if (input.suppressedForPurpose) blockers.push("suppressed_purpose");
+  if (input.suppressedForClassification) {
+    blockers.push("suppressed_classification");
+  }
   if (input.suppressedGlobally) blockers.push("suppressed_globally");
   if (input.country === "ZZ" || input.country.trim().length === 0) {
     blockers.push("country_undetermined");
@@ -124,6 +137,8 @@ export const overrideNeeded = (legalAllowed: boolean): boolean => !legalAllowed;
 
 export type SealRefusal =
   | "already_sealed"
+  | "no_reason"
+  | "no_review_condition"
   | "no_members"
   | "duplicate_user"
   | "mixed_normalization_versions"
@@ -144,14 +159,24 @@ export type SealRefusal =
  * `mixed_normalization_versions` is refused because a cohort built under two
  * rules cannot be compared under either; the mismatch would surface later, at
  * send time, as individual members mysteriously dropping out.
+ *
+ * The reason and the review condition are required to be words. The schema
+ * accepts an empty string for both, and once sealed neither can be corrected,
+ * so an approval could exist permanently without saying why it was given or
+ * what would make us look again -- the pair section 5.6 is built around. A
+ * screen would refuse an empty box; this is also reachable from a script.
  */
 export const sealRefusal = (input: {
   alreadySealed: boolean;
+  reason: string;
+  reviewCondition: string;
   members: readonly ApprovalCohortMember[];
   approvedAt: Date;
   sealedAt: Date;
 }): SealRefusal | null => {
   if (input.alreadySealed) return "already_sealed";
+  if (input.reason.trim().length === 0) return "no_reason";
+  if (input.reviewCondition.trim().length === 0) return "no_review_condition";
   if (input.members.length === 0) return "no_members";
 
   const seen = new Set<string>();

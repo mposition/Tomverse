@@ -5,7 +5,6 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
-import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import {
   EMAIL_ADDRESS_NORMALIZATION_VERSION,
@@ -43,16 +42,27 @@ import {
  * without one: a `notice_shown` row that cannot say which words were on the
  * screen is a record that we asked, with no way to ever show what we asked.
  *
- * ## Before a screen is wired to this
+ * ## The country is reported, not derived
  *
- * Section 5.3's existing-account country recording is not built yet, and it
- * has to be before anything renders. `recordNoticeShown()` pins whatever
- * `jurisdictionForUser()` answers at the time, and for an account that has
- * never declared a country that is `ZZ` / `unresolved`. The row is
- * append-only, so a `notice_shown` written today would permanently fail to
- * say which country's rule the person was shown -- which is the one thing
- * section 5.3 requires it to carry. The evidence would need the applied
- * country, its source and the rule version alongside the copy hash.
+ * This function does not ask `jurisdictionForUser()` anything. The caller
+ * passes the country it actually applied, where that country came from, and
+ * the version of the rule whose device it rendered -- and the write is refused
+ * without all three.
+ *
+ * Deriving it here was wrong, and the way it was wrong is worth keeping. An
+ * account that has never declared a country resolves through language and
+ * timezone: `ko` plus `Asia/Seoul` answers `KR` at `low` confidence with
+ * source `inferred`. The approved contract
+ * (docs/policy/email-notifications.md sections 6.2 and 6.3) does not let an
+ * inference decide a jurisdiction, and `EmailPermissionEvent` has no
+ * confidence column -- so the row would have said `KR` flatly, for ever, about
+ * somebody who was never shown a Korean device. Append-only means there is no
+ * later write that corrects it.
+ *
+ * A comment saying "wait for section 5.3" was not a boundary, because the
+ * function wrote the row regardless of whether a screen existed. The signature
+ * is the boundary: until something renders a country's device and can say
+ * which one, it cannot call this.
  */
 
 /** What a caller needs before it can decide whether to render anything. */
@@ -138,6 +148,17 @@ type RecordInput = {
    */
   surface: string;
   copyHash: string;
+  /**
+   * The country whose rule the person was actually shown, where that country
+   * came from, and which version of the rule it was.
+   *
+   * All three are required and none is derived here. A row that cannot say
+   * which rule applied is a record that we asked with no way to say what we
+   * asked under, and it can never be corrected.
+   */
+  appliedCountry: string;
+  appliedCountrySource: string;
+  ruleVersion: number;
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
 };
@@ -149,6 +170,16 @@ const recordNoticeEvent = async (
   if (input.copyHash.trim().length === 0) {
     throw new Error(
       "An in-product notice event must carry the hash of the words that were on the screen."
+    );
+  }
+  if (input.appliedCountry.trim().length === 0) {
+    throw new Error(
+      "An in-product notice event must carry the country whose rule was shown."
+    );
+  }
+  if (input.appliedCountrySource.trim().length === 0) {
+    throw new Error(
+      "An in-product notice event must carry where the applied country came from."
     );
   }
   const db = input.client ?? prisma;
@@ -187,7 +218,6 @@ const recordNoticeEvent = async (
   const existing = await db.emailPermissionEvent.findUnique({ where });
   if (existing) return existing;
 
-  const jurisdiction = await jurisdictionForUser({ userId: input.userId });
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
   try {
@@ -201,10 +231,14 @@ const recordNoticeEvent = async (
         occurredAt: input.occurredAt ?? new Date(),
         capturedVia: "in_product_notice",
         sourceEventKey,
-        jurisdiction: jurisdiction.countryCode,
-        jurisdictionSource: jurisdiction.source,
+        jurisdiction: input.appliedCountry,
+        jurisdictionSource: input.appliedCountrySource,
         policyVersionId,
-        evidence: { surface: input.surface, copyHash: input.copyHash },
+        evidence: {
+          surface: input.surface,
+          copyHash: input.copyHash,
+          ruleVersion: input.ruleVersion,
+        },
       },
     });
   } catch (error) {

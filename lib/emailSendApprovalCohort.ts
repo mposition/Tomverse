@@ -101,6 +101,8 @@ export const sealRiskAcceptedApproval = async (input: {
   // can say when it was created.
   const shapeRefusal = sealRefusal({
     alreadySealed: false,
+    reason: input.reason,
+    reviewCondition: input.reviewCondition,
     members,
     approvedAt: input.approvedAt,
     sealedAt: input.approvedAt,
@@ -143,6 +145,8 @@ export const sealRiskAcceptedApproval = async (input: {
     const sealedAt = approval.createdAt;
     const refusal = sealRefusal({
       alreadySealed: approval.sealedAt !== null,
+      reason: approval.reason,
+      reviewCondition: approval.reviewCondition,
       members,
       approvedAt: input.approvedAt,
       sealedAt,
@@ -192,12 +196,40 @@ export const cohortStanding = async (input: {
 }): Promise<CohortStanding> => {
   const db = input.client ?? prisma;
 
-  // The approval first, and without the account: whether it still authorises
-  // anything is true or false before anybody is compared against it, and
-  // answering "no account" about a withdrawn approval names the wrong fact.
+  // The approval and its membership come from one statement.
+  //
+  // They were two, and under READ COMMITTED that is a window rather than an
+  // ordering: the first query could see "sealed, nothing withdrawn", a
+  // withdrawal could commit, and the second query would still find a matching
+  // member -- so a send taken immediately after the decision was reversed went
+  // out carrying the override. Opening a transaction earlier does not help,
+  // because READ COMMITTED takes a fresh snapshot per statement rather than
+  // per transaction.
+  //
+  // One statement makes the two facts one instant. It does not make the answer
+  // permanent, and nothing could: section 7.6 is why permission is decided
+  // again immediately before the provider call rather than trusted from
+  // enqueue.
+  //
+  // The approval is still judged before the account, because being a member of
+  // a withdrawn approval is not a weaker form of being covered, and answering
+  // "no account" about a withdrawn approval names the wrong fact.
   const approval = await db.emailSendApproval.findUnique({
     where: { id: input.approvalId },
-    select: { sealedAt: true, _count: { select: { revocations: true } } },
+    select: {
+      sealedAt: true,
+      _count: { select: { revocations: true } },
+      members: input.userId
+        ? {
+            where: { userId: input.userId },
+            select: {
+              userId: true,
+              addressDigest: true,
+              addressNormalizationVersion: true,
+            },
+          }
+        : undefined,
+    },
   });
   if (!approval) return { inCohort: false, reason: "no_approval" };
   const standing = approvalStandingRefusal({
@@ -210,25 +242,11 @@ export const cohortStanding = async (input: {
     return { inCohort: false, reason: "no_account" };
   }
 
-  const [member, user] = await Promise.all([
-    db.emailSendApprovalMember.findUnique({
-      where: {
-        approvalId_userId: {
-          approvalId: input.approvalId,
-          userId: input.userId,
-        },
-      },
-      select: {
-        userId: true,
-        addressDigest: true,
-        addressNormalizationVersion: true,
-      },
-    }),
-    db.user.findUnique({
-      where: { id: input.userId },
-      select: { email: true },
-    }),
-  ]);
+  const member = approval.members?.[0] ?? null;
+  const user = await db.user.findUnique({
+    where: { id: input.userId },
+    select: { email: true },
+  });
 
   const reason = cohortMismatchReason({
     member,

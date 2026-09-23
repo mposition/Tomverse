@@ -21,6 +21,7 @@ const clear = {
   hasObjected: false,
   consentWithdrawn: false,
   suppressedForPurpose: false,
+  suppressedForClassification: false,
   suppressedGlobally: false,
   country: "AU",
   obligationsDecided: true,
@@ -35,6 +36,7 @@ test("each row of section 5.6's right column blocks on its own", () => {
     [{ hasObjected: true }, "objected"],
     [{ consentWithdrawn: true }, "consent_withdrawn"],
     [{ suppressedForPurpose: true }, "suppressed_purpose"],
+    [{ suppressedForClassification: true }, "suppressed_classification"],
     [{ suppressedGlobally: true }, "suppressed_globally"],
     [{ country: "ZZ" }, "country_undetermined"],
     [{ obligationsDecided: false }, "obligation_undecided"],
@@ -82,10 +84,16 @@ const member = (userId, digest = `digest-${userId}`) => ({
   addressNormalizationVersion: "v1",
 });
 
+const decision = {
+  reason: "Owner decision 2026-09-16.",
+  reviewCondition: "Re-decide on the first organic signup.",
+};
+
 test("a coherent membership seals", () => {
   assert.equal(
     sealRefusal({
       alreadySealed: false,
+      ...decision,
       members: [member("u1"), member("u2")],
       approvedAt,
       sealedAt,
@@ -98,6 +106,7 @@ test("an already sealed approval cannot be sealed again", () => {
   assert.equal(
     sealRefusal({
       alreadySealed: true,
+      ...decision,
       members: [member("u1")],
       approvedAt,
       sealedAt,
@@ -110,7 +119,13 @@ test("an empty cohort is refused rather than sealed as covering nobody", () => {
   // An approval covering nobody and one whose member writes failed look the
   // same afterwards, and sealing makes the ambiguity permanent.
   assert.equal(
-    sealRefusal({ alreadySealed: false, members: [], approvedAt, sealedAt }),
+    sealRefusal({
+      alreadySealed: false,
+      ...decision,
+      members: [],
+      approvedAt,
+      sealedAt,
+    }),
     "no_members"
   );
 });
@@ -119,6 +134,7 @@ test("one account cannot appear twice", () => {
   assert.equal(
     sealRefusal({
       alreadySealed: false,
+      ...decision,
       members: [member("u1"), member("u1", "other")],
       approvedAt,
       sealedAt,
@@ -133,6 +149,7 @@ test("a cohort built under two normalisation rules is refused", () => {
   assert.equal(
     sealRefusal({
       alreadySealed: false,
+      ...decision,
       members: [
         member("u1"),
         { ...member("u2"), addressNormalizationVersion: "v2" },
@@ -148,6 +165,7 @@ test("a seal cannot predate the approval it closes", () => {
   assert.equal(
     sealRefusal({
       alreadySealed: false,
+      ...decision,
       members: [member("u1")],
       approvedAt,
       sealedAt: new Date(approvedAt.getTime() - 1),
@@ -265,5 +283,56 @@ test("an unsealed approval is reported as unsealed even if withdrawn", () => {
   assert.equal(
     approvalStandingRefusal({ sealedAt: null, revocationCount: 1 }),
     "not_sealed"
+  );
+});
+
+test("a deletion request's suppression is a blocker, not an unmapped scope", () => {
+  // Section 7.4 writes it at the classification scope precisely because
+  // withdrawing consent alone does not stop a risk_accepted send. With only a
+  // purpose and a global boolean it mapped to neither, and the address of
+  // somebody who had asked to be deleted would have been mailed.
+  assert.deepEqual(
+    overrideBlockers({ ...clear, suppressedForClassification: true }),
+    ["suppressed_classification"]
+  );
+});
+
+test("all three suppression scopes are reported together", () => {
+  assert.deepEqual(
+    overrideBlockers({
+      ...clear,
+      suppressedForPurpose: true,
+      suppressedForClassification: true,
+      suppressedGlobally: true,
+    }),
+    ["suppressed_purpose", "suppressed_classification", "suppressed_globally"]
+  );
+});
+
+test("an approval cannot be sealed without saying why", () => {
+  // The schema accepts an empty string and the seal makes it permanent, so an
+  // approval would exist for ever without the pair section 5.6 is built
+  // around. A screen would refuse an empty box; a script would not.
+  assert.equal(
+    sealRefusal({
+      alreadySealed: false,
+      ...decision,
+      reason: "   ",
+      members: [member("u1")],
+      approvedAt,
+      sealedAt,
+    }),
+    "no_reason"
+  );
+  assert.equal(
+    sealRefusal({
+      alreadySealed: false,
+      ...decision,
+      reviewCondition: "",
+      members: [member("u1")],
+      approvedAt,
+      sealedAt,
+    }),
+    "no_review_condition"
   );
 });
