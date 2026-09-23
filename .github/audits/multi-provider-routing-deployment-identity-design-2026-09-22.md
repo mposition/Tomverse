@@ -1019,7 +1019,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | 판정 (§14.10). trip 횟수는 호출자. prior는 쓰지 않음 |
 | §8.5 | load guard | 판정 (§14.12). softmax는 없음. 감쇠 계수는 호출자. 완료로 세지 않음 |
 | §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 판정 (§14.13). 행 UPDATE와 알림 발송은 없음 |
-| §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | `CredentialBinding` dark schema만 |
+| §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | 참조·시각·resolver (§14.14). 행은 읽지 않음. BYOK 배선은 없음 |
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 일부 |
 | Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
@@ -1298,6 +1298,24 @@ capacity 런타임은 같은 절에서 표를 고칩니다. `lib/quotaCapacity.t
 직전 load guard 보고는 27, 약 54%였고 그 줄은 세지 않았습니다. §11.2와
 capacity 판정을 더하면 §14.3의 약 50단위에서 완료는 29, **약 58%(추정)**
 입니다. 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.14 Credential secret reference (2026-09-23)
+
+ADR §12.1의 남은 시각이 credential 행에 있습니다. `lastRotatedAt`과
+`expiresAt`는 nullable입니다. 비어 있는 시각을 수명으로 바꾸지 않습니다.
+행은 쓰지 않습니다. 요청 경로는 그 테이블을 읽지 않습니다.
+
+resolver는 `lib/credentialSecretRef.ts`입니다. 비밀값은 참조로만 찾고,
+사실 객체에 비밀 필드는 없습니다. `active`가 아니면 vault를 부르지 않습니다.
+만료 시각 자신은 만료입니다. 만료 시각이 없으면 만료가 아닙니다. 회전 시각이
+만료 시각보다 뒤면 거절입니다. billing owner는 이미 있던 `tomverse`와
+`account`입니다.
+
+BYOK의 비용 배선은 §14 7번이고 이 줄이 아닙니다. 여기 세지 않습니다.
+
+이 줄이 §14.3의 secret 참조 항목입니다. 직전 보고는 29, 약 58%였습니다.
+§14.3의 약 50단위에서 완료는 30, **약 60%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

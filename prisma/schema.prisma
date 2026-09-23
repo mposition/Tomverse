@@ -6134,6 +6134,10 @@ model CredentialBinding {
   /// come before that, not after.
   providerBudgetAccountId String?
   status                  String   @default("disabled")
+  /// When the referenced secret was last rotated. Null means not recorded.
+  lastRotatedAt           DateTime?
+  /// When the referenced secret expires. Null is not an invented lifetime.
+  expiresAt               DateTime?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

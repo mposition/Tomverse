@@ -221,12 +221,17 @@ const compilerOptions = parsedConfig.options;
 // `case` in `lib/activeAiModel.ts` and a literal registry entry in
 // `lib/modelRegistryShared.ts`. No computed access. Count 228, position-free
 // hash unchanged. A repin of the position-sensitive digest only.
+//
+// 2026-09-23, credential rotation columns. The dated note above the marketing
+// webhook fingerprint moved later accesses in `lib/marketingAutomationAccess.ts`.
+// The note is comment only. Count 228, position-free hash unchanged. A repin
+// of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ea410e0839b6137ebbe89458e69990fe",
-  "2d1081e78be996e036aa4243522156ac",
+  "f3860eea956ce25c020e2a4fdc43376d",
+  "3620fe272bdd9b4f79042b8e9acadc13",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

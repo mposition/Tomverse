@@ -1345,7 +1345,8 @@ domains:
       a Tomverse-managed key and with a customer's own, and a credential must
       never redefine the endpoint, region, residency, model version or
       capability semantics it is used against. Holds a reference to where the
-      secret lives, never the secret. Cascade rather than SetNull: a binding
+      secret lives, never the secret. Rotation and expiry instants may be
+      absent; absence is not a lifetime. Cascade rather than SetNull: a binding
       whose account is gone still names that account's provider identity in
       its reference, so a surviving row would be a half-anonymisation.
 
