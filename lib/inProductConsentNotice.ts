@@ -41,6 +41,21 @@ import {
  * shape of those rows is settled here: `capturedVia: "in_product_notice"`,
  * scoped to `marketing`, keyed so a re-render adds nothing.
  *
+ * ## The `risk_accepted` cohort is not asked
+ *
+ * The approved wording opens by saying we have not sent product news and will
+ * not unless asked. The approved `risk_accepted` decision sends to the
+ * existing accounts without asking. Both cannot be true of the same person,
+ * and the owner chose on 2026-09-23 to keep the override and leave those
+ * accounts out of this notice (docs/policy/email-consent-copy-draft.md section
+ * 9.1). So `noticeStateForUser()` refuses them with `covered_by_approval`,
+ * and the promise stays truthful because it is only ever made to people it is
+ * true of.
+ *
+ * That refusal is scoped to a **sealed and unwithdrawn** approval. Withdrawing
+ * one puts those accounts back to having no basis at all, which is precisely
+ * who this notice exists for.
+ *
  * ## What is deliberately missing
  *
  * The wording. Section 5.4's copy belongs to S2 and is approved by the owner
@@ -109,6 +124,7 @@ export const noticeStateForUser = async (input: {
       noticeAlreadyShown: false,
       hasObjected: false,
       suppressed: false,
+      coveredByRiskAcceptedApproval: false,
     });
   }
 
@@ -117,7 +133,7 @@ export const noticeStateForUser = async (input: {
   // The three states are read separately because they are three facts. An
   // account can have been shown the notice, not consented and not objected,
   // and that combination is the ordinary one -- somebody who closed it.
-  const [consent, shown, objected, suppressions] = await Promise.all([
+  const [consent, shown, objected, suppressions, covered] = await Promise.all([
     // The newest row per purpose, and only then what it says.
     //
     // `ConsentRecord` is append-only, so somebody who granted and then
@@ -168,6 +184,23 @@ export const noticeStateForUser = async (input: {
         })
       )
     ),
+    // A sealed, unwithdrawn `risk_accepted` membership.
+    //
+    // Sealed, because an unsealed approval is a draft being assembled and
+    // nobody is covered by a draft. Unwithdrawn, because withdrawing is how
+    // the override stops -- and an account whose approval has been withdrawn
+    // is back to having no basis, which is exactly who this notice is for.
+    db.emailSendApprovalMember.findFirst({
+      where: {
+        userId: input.userId,
+        approval: {
+          approvalType: "risk_accepted",
+          sealedAt: { not: null },
+          revocations: { none: {} },
+        },
+      },
+      select: { id: true },
+    }),
   ]);
 
   return inProductNoticeOffer({
@@ -180,6 +213,7 @@ export const noticeStateForUser = async (input: {
     // Any one of them. The notice asks about the set, so a refusal anywhere
     // in the set is a refusal of the question being put.
     suppressed: suppressions.some((verdict) => !verdict.allowed),
+    coveredByRiskAcceptedApproval: covered !== null,
   });
 };
 

@@ -28,6 +28,7 @@ const untouched = {
   noticeAlreadyShown: false,
   hasObjected: false,
   suppressed: false,
+  coveredByRiskAcceptedApproval: false,
 };
 
 test("an existing account with no answer yet is asked", () => {
@@ -53,6 +54,7 @@ test("each answer stops the notice, and says which answer it was", () => {
     [{ hasObjected: true }, "objected"],
     [{ hasExpressConsent: true }, "already_consented"],
     [{ suppressed: true }, "suppressed"],
+    [{ coveredByRiskAcceptedApproval: true }, "covered_by_approval"],
     [{ noticeAlreadyShown: true }, "already_shown"],
     [{ emailAddress: null }, "no_address"],
     [{ emailAddress: "   " }, "no_address"],
@@ -278,5 +280,36 @@ test("a stored value that is not a list is never equal to one", () => {
   assert.notEqual(
     canonicalJson({ country: "AU" }),
     canonicalJson([{ country: "AU" }])
+  );
+});
+
+test("the risk_accepted cohort is not asked, because the wording would be false", () => {
+  // Owner decision 2026-09-23 (option B in
+  // docs/policy/email-consent-copy-draft.md section 9.1). The notice promises
+  // we have not sent and will not unless asked; the override sends to these
+  // accounts without asking. Both cannot be true of one person, so the promise
+  // is only ever made to people it is true of.
+  assert.deepEqual(
+    inProductNoticeOffer({ ...untouched, coveredByRiskAcceptedApproval: true }),
+    { offered: false, refusal: "covered_by_approval" }
+  );
+});
+
+test("what the person decided outranks our reason for not asking", () => {
+  // Somebody in the cohort who consented, refused, or had their address
+  // suppressed is described by that, not by our scoping. The cohort is why we
+  // do not ask; it does not overwrite an answer somebody gave anyway.
+  const covered = { ...untouched, coveredByRiskAcceptedApproval: true };
+  assert.equal(
+    inProductNoticeOffer({ ...covered, hasObjected: true }).refusal,
+    "objected"
+  );
+  assert.equal(
+    inProductNoticeOffer({ ...covered, hasExpressConsent: true }).refusal,
+    "already_consented"
+  );
+  assert.equal(
+    inProductNoticeOffer({ ...covered, suppressed: true }).refusal,
+    "suppressed"
   );
 });

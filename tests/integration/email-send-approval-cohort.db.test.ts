@@ -903,6 +903,48 @@ test("a notice event with no candidate at all is refused", async () => {
   );
 });
 
+test("an account in a sealed cohort is not offered the notice", async () => {
+  // Owner decision 2026-09-23, option B: keep the override and leave these
+  // accounts out of the notice, because its opening sentence would be false
+  // about exactly them.
+  const user = await createUser();
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+
+  await sealFor([user]);
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: false,
+    refusal: "covered_by_approval",
+  });
+});
+
+test("withdrawing the approval puts the notice back", async () => {
+  // A withdrawn approval leaves those accounts with no basis at all, which is
+  // precisely who this notice exists for. Scoping the refusal to a sealed and
+  // unwithdrawn approval is what makes that work without a second decision.
+  const user = await createUser();
+  const approval = await sealFor([user]);
+  assert.equal((await noticeStateForUser({ userId: user.id })).offered, false);
+
+  await prisma.emailSendApprovalRevocation.create({
+    data: {
+      approvalId: approval.id,
+      revokedById: user.id,
+      revokedByEmail: user.email!,
+      revokedAt: new Date(),
+      reason: "An organic signup arrived, which is the review condition.",
+    },
+  });
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
 test("a withdrawn consent does not count as consent", async () => {
   // `ConsentRecord` is append-only, so asking for any `granted` row found the
   // first one and called somebody who had since withdrawn a consenting
