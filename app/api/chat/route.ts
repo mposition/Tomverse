@@ -76,6 +76,7 @@ import type {
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
@@ -1877,7 +1878,19 @@ async function handleChatPost(
                   )
                 : null;
 
-        const activeModel = getActiveAiModel(modelConfig);
+        let activeModel;
+        try {
+            activeModel = getActiveAiModel(modelConfig);
+        } catch (error) {
+            const code = catalogueHostRefusalCode(error);
+            if (!code) throw error;
+            return tracedJsonError(
+                "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
+                code,
+                409,
+                traceId
+            );
+        }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
