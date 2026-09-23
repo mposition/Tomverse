@@ -203,77 +203,81 @@ export const cohortStanding = async (input: {
 }): Promise<CohortStanding> => {
   const db = input.client ?? prisma;
 
-  // The approval is read last, and that ordering is the whole guarantee.
+  // Every fact in one statement, in SQL, because ordering could not do it.
   //
-  // It cannot be one statement. A nested relation read is a single Prisma call
-  // but two SQL statements unless the `relationJoins` preview feature is on,
-  // and this schema does not enable it -- so under READ COMMITTED, which takes
-  // a fresh snapshot per statement, an `include` buys nothing here. Claiming
-  // one instant in a comment would have been worse than the gap it described.
+  // Prisma cannot: `relationLoadStrategy: "join"` is behind the
+  // `relationJoins` preview feature and this schema does not enable it, so a
+  // nested relation read is one Prisma call and two SQL statements. Under READ
+  // COMMITTED each takes its own snapshot.
   //
-  // What makes the order sufficient is that the two facts age differently. A
-  // sealed approval's membership is immutable: the database refuses to change
-  // a member row or add one after the seal. So a membership read taken a
-  // moment ago is as true as one taken now, and the only row that can have
-  // moved underneath us is the approval itself -- which is therefore the one
-  // read last. A withdrawal committed before that read is seen.
+  // Ordering the reads instead got closer and still did not arrive. A sealed
+  // approval's membership is genuinely immutable -- the trigger at
+  // migration.sql line 561 refuses any insert, update or delete on a member row
+  // once `sealedAt` is set -- so reading it early is safe. But two of the three
+  // facts can move, not one: the approval can be withdrawn, and `User.email`
+  // can change, and no ordering makes both of them last. Whichever came second
+  // to last left a window, and for the address that window let a delivery go
+  // out to a mailbox the account had already left.
   //
-  // A withdrawal committed after it is not, and no single read could see it.
-  // That is what section 7.6 is for: permission is decided again immediately
-  // before the provider call rather than carried from enqueue.
-  const member = input.userId
-    ? await db.emailSendApprovalMember.findUnique({
-        where: {
-          approvalId_userId: {
-            approvalId: input.approvalId,
-            userId: input.userId,
-          },
-        },
-        select: {
-          userId: true,
-          addressDigest: true,
-          addressNormalizationVersion: true,
-        },
-      })
-    : null;
-
-  const user = input.userId
-    ? await db.user.findUnique({
-        where: { id: input.userId },
-        select: { email: true },
-      })
-    : null;
-
-  const approval = await db.emailSendApproval.findUnique({
-    where: { id: input.approvalId },
-    select: {
-      approvalType: true,
-      sealedAt: true,
-      policyVersionId: true,
-      ruleKey: true,
-      ruleVersion: true,
-      country: true,
-      obligationKey: true,
-      purposeKey: true,
-      _count: { select: { revocations: true } },
-    },
-  });
+  // One SELECT gives all three from one snapshot. It does not make the answer
+  // permanent, and nothing could: section 7.6 is why permission is decided
+  // again immediately before the provider call rather than carried from
+  // enqueue.
+  const [row] = await db.$queryRaw<
+    {
+      approvalType: string;
+      sealedAt: Date | null;
+      policyVersionId: string | null;
+      ruleKey: string | null;
+      ruleVersion: number | null;
+      country: string | null;
+      purposeKey: string | null;
+      obligationKey: string | null;
+      revocationCount: bigint;
+      memberUserId: string | null;
+      memberAddressDigest: string | null;
+      memberNormalizationVersion: string | null;
+      currentEmail: string | null;
+    }[]
+  >`
+    SELECT
+      a."approvalType"                   AS "approvalType",
+      a."sealedAt"                       AS "sealedAt",
+      a."policyVersionId"                AS "policyVersionId",
+      a."ruleKey"                        AS "ruleKey",
+      a."ruleVersion"                    AS "ruleVersion",
+      a."country"                        AS "country",
+      a."purposeKey"                     AS "purposeKey",
+      a."obligationKey"                  AS "obligationKey",
+      (SELECT COUNT(*) FROM "EmailSendApprovalRevocation" r
+        WHERE r."approvalId" = a."id")   AS "revocationCount",
+      m."userId"                         AS "memberUserId",
+      m."addressDigest"                  AS "memberAddressDigest",
+      m."addressNormalizationVersion"    AS "memberNormalizationVersion",
+      u."email"                          AS "currentEmail"
+    FROM "EmailSendApproval" a
+    LEFT JOIN "EmailSendApprovalMember" m
+      ON m."approvalId" = a."id" AND m."userId" = ${input.userId}
+    LEFT JOIN "User" u
+      ON u."id" = ${input.userId}
+    WHERE a."id" = ${input.approvalId}
+  `;
 
   // The approval is judged before the account: being a member of a withdrawn
   // or out-of-scope approval is not a weaker form of being covered, and
   // answering "no account" about one names the wrong fact.
-  if (!approval) return { inCohort: false, reason: "no_approval" };
+  if (!row) return { inCohort: false, reason: "no_approval" };
   const scope = approvalScopeRefusal(
     {
-      approvalType: approval.approvalType as "risk_accepted" | "obligation_waiver",
-      sealedAt: approval.sealedAt,
-      revoked: approval._count.revocations > 0,
-      policyVersionId: approval.policyVersionId,
-      ruleKey: approval.ruleKey,
-      ruleVersion: approval.ruleVersion,
-      country: approval.country,
-      obligationKey: approval.obligationKey,
-      purposeKey: approval.purposeKey,
+      approvalType: row.approvalType as "risk_accepted" | "obligation_waiver",
+      sealedAt: row.sealedAt,
+      revoked: Number(row.revocationCount) > 0,
+      policyVersionId: row.policyVersionId,
+      ruleKey: row.ruleKey,
+      ruleVersion: row.ruleVersion,
+      country: row.country,
+      obligationKey: row.obligationKey,
+      purposeKey: row.purposeKey,
     },
     {
       approvalType: "risk_accepted",
@@ -286,6 +290,16 @@ export const cohortStanding = async (input: {
   if (!input.userId) {
     return { inCohort: false, reason: "no_account" };
   }
+
+  const member =
+    row.memberUserId && row.memberAddressDigest && row.memberNormalizationVersion
+      ? {
+          userId: row.memberUserId,
+          addressDigest: row.memberAddressDigest,
+          addressNormalizationVersion: row.memberNormalizationVersion,
+        }
+      : null;
+  const user = row.currentEmail ? { email: row.currentEmail } : null;
 
   const reason = cohortMismatchReason({
     member,

@@ -231,7 +231,7 @@ test("a withdrawn approval covers nobody, including its own members", async () =
       deliveryEmailAddress: users[0]!.email!,
       ...(await scopeFor()),
     }),
-    { inCohort: false, reason: "revoked" }
+    { inCohort: false, reason: "approval_revoked" }
   );
 });
 
@@ -557,6 +557,136 @@ test("a withdrawn consent does not count as consent", async () => {
   });
   const after = await noticeStateForUser({ userId: user.id });
   assert.deepEqual(after, { offered: true, purposes: noticePurposes() });
+});
+
+test("two candidates naming one country leave it determined", async () => {
+  // Counting candidates rather than countries sealed `ZZ` for an account whose
+  // IP and language both said Australia. Section 5.6's override cannot cross
+  // `ZZ`, so that account could never be sent to, and the row is append-only.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [
+      {
+        country: "AU",
+        signal: "inferred",
+        ruleVersion: 1,
+        copyHash: "sha256:au-device",
+      },
+      {
+        country: " au ",
+        signal: "self_declared",
+        ruleVersion: 1,
+        copyHash: "sha256:au-device",
+      },
+    ],
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "AU");
+  assert.notEqual(row.jurisdictionSource, "conflict");
+});
+
+test("a retry carrying different candidates is refused, not silently dropped", async () => {
+  // One row per account, append-only, so the first write is permanent.
+  // Returning it for a retry that named a second country discarded that
+  // country while the caller read success -- and the candidate list is exactly
+  // what section 5.3 says must follow the person to the send snapshot.
+  const user = await createUser();
+  const first = await recordNoticeShown(noticeInput(user));
+
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [
+        ...noticeInput(user).candidates,
+        {
+          country: "KR",
+          signal: "inferred",
+          ruleVersion: 2,
+          copyHash: "sha256:kr-device",
+        },
+      ],
+    }),
+    /different candidates/
+  );
+
+  const rows = await prisma.emailPermissionEvent.findMany({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.id, first.id);
+});
+
+test("a retry carrying the same candidates is still idempotent", async () => {
+  const user = await createUser();
+  const first = await recordNoticeShown(noticeInput(user));
+  const second = await recordNoticeShown(noticeInput(user));
+  assert.equal(first.id, second.id);
+});
+
+test("a changed address is seen in the same snapshot as the approval", async () => {
+  // Two of the three facts can move -- the approval can be withdrawn and
+  // `User.email` can change -- and no ordering of separate reads makes both of
+  // them last. Whichever came second to last left a window, and for the address
+  // that window let a delivery go to a mailbox the account had already left.
+  const users = [await createUser()];
+  const approval = await sealFor(users);
+
+  await prisma.user.update({
+    where: { id: users[0]!.id },
+    data: { email: `moved-${randomUUID()}@example.test` },
+  });
+
+  assert.deepEqual(
+    await cohortStanding({
+      approvalId: approval.id,
+      userId: users[0]!.id,
+      deliveryEmailAddress: users[0]!.email!,
+      ...(await scopeFor()),
+    }),
+    { inCohort: false, reason: "current_address_changed" }
+  );
+});
+
+test("an approval sealed for one purpose does not cover another", async () => {
+  // `approvalStandingRefusal()` looked at the seal and the withdrawal only, so
+  // a decision taken about one kind of mail silently covered every other kind.
+  const users = [await createUser()];
+  const approval = await sealRiskAcceptedApproval({
+    approvedById: users[0]!.id,
+    approvedByEmail: users[0]!.email!,
+    approvedAt,
+    reason: "Owner decision, newsletter only.",
+    reviewCondition: "Re-decide on the first organic signup.",
+    policyVersionId: await policyVersionId(),
+    purposeKey: "newsletter",
+    candidates: [
+      {
+        userId: users[0]!.id,
+        emailAddress: users[0]!.email!,
+        signupAt: approvedAt,
+      },
+    ],
+  });
+
+  const query = {
+    approvalId: approval.id,
+    userId: users[0]!.id,
+    deliveryEmailAddress: users[0]!.email!,
+    policyVersionId: await policyVersionId(),
+  };
+
+  assert.deepEqual(
+    await cohortStanding({ ...query, purpose: "newsletter" }),
+    { inCohort: true, approvalId: approval.id }
+  );
+  assert.deepEqual(await cohortStanding({ ...query, purpose: "promotions" }), {
+    inCohort: false,
+    reason: "approval_purpose_mismatch",
+  });
 });
 
 test("an approval sealed with no reason is refused", async () => {
