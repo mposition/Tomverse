@@ -97,6 +97,25 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
+// 2026-09-22, merging develop into S3 again: both sides moved positions in
+// this closure and neither is taken -- the value below is computed over the
+// merged tree. The position-free inventory is unchanged on both sides, so
+// this is a repin and not a review of new computed access.
+//
+// 2026-09-21, merging develop into S3: develop moved this closure and so did
+// S3, and neither side is taken -- the value below is computed over the merged
+// tree, the only one that will exist. The position-free inventory is still 228
+// entries hashing to 9aa7ec49..., so nothing was added, removed or altered on
+// either side; only positions moved.
+//
+// 2026-09-21, the permission ledger (S3): two files in this closure moved
+// lines -- lib/emailPreferenceCore.ts gained the purpose classification table
+// and lib/emailPreferences.ts took its bulk-withdrawal scope from it. Neither
+// added, removed or altered a computed access; the position-free inventory
+// still hashes to 9aa7ec49... over 228 entries, which is what makes this a
+// repin rather than a review. The value below is the same inventory with the
+// new line and column numbers.
+//
 // develop's confirmatory shadow v4 added a reviewed runtime path and its own
 // schema and comment changes. Neither is taken over the other -- the value
 // below is computed over the merged tree, which is the only tree that will
@@ -123,17 +142,40 @@ const compilerOptions = parsedConfig.options;
 // own. The count is still 228 and the position-free inventory still hashes to
 // the value above, so this is a repin and not a review.
 //
-// 2026-09-23, S7: the release-notes link table moved into
-// `lib/productAnnouncementEmail.ts` and pushed the access below it down the
-// file. It brought none of its own. The count is still 228 and the
+// 2026-09-22, catalog import: the watched-schema comment in
+// `lib/marketingAutomationAccess.ts` records `AmuxBoardImportApproval`. The
+// count is still 228 and the position-free inventory still hashes to the
+// value above, so this is a repin and not a review.
+//
+// 2026-09-23, S2b1 on top: the marketing switch writer left
+// `lib/appSettings.ts` for `lib/marketingSwitchWriter.ts`, so everything below
+// where it used to sit moves up. It went because `lib/appSettings.ts` is in
+// this closure and the writer had come to need the branded marketing
+// transaction -- importing it from here would have added a file to a set a
+// database CHECK is bound to, and the count did move to 179 before the writer
+// was moved out. The new module is not in the closure, nothing in the closure
+// imports it, and the writer's own computed accesses went with it. The count
+// is back to 228 and the position-free inventory still hashes to the value
+// above, so this is a repin and not a review.
+//
+// 2026-09-23, S7 alongside: the release-notes link table moved into
+// `lib/productAnnouncementEmail.ts` and pushed the access below it down that
+// file. It brought none of its own -- the id lookups ask a `Map`, the rejected
+// field names are written out, and the type predicate asks that `Map` rather
+// than `Object.prototype.hasOwnProperty.call`, which this closure's
+// prototype-capability check refuses outright. The count is still 228 and the
 // position-free inventory still hashes to the value above, so this is a repin
 // and not a review.
+//
+// Both notes stand because both changes are in this tree, and the value below
+// is recomputed over the merged tree rather than taken from either side of the
+// conflict.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "71d2cdbe455007f121c049923cfd363b",
-  "f31e35b502949cd16a866b90f4971bee",
+  "fa8b16ea4a83762a158ee1d4fd3410c6",
+  "8772c89ca44192de0893f7168ae19b0d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

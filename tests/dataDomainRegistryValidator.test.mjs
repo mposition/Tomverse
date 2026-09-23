@@ -315,3 +315,85 @@ test("an unverified deletion path must be unverified on both axes", () => {
     assert.equal(code, 1);
     assert.match(output, /must both be "unverified" or neither/);
 });
+
+// `child_rows`, added 2026-09-21 for EmailSendApproval: the row is about the
+// accounts in its cohort, and the cohort is a real table with a real foreign
+// key back to it. `none` would have been false and `parent_row` points the
+// wrong way. Existing is not the same as pointing here, so each way the
+// reference can be wrong is refused separately.
+
+test("a child_rows reference through a column that is not the foreign key is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    // EmailSendApprovalMember.userId exists and points at nothing -- there is
+    // no relation on it -- so a reference through it would claim a path back
+    // to the approval that the database does not have.
+    find("emailSendApproval").subjectReference.childColumn = "userId";
+  });
+  assert.notEqual(code, 0);
+  assert.match(output, /is not a foreign key from EmailSendApprovalMember to EmailSendApproval/);
+});
+
+test("a child_rows reference to a column that does not exist is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    find("emailSendApproval").subjectReference.childColumn = "cohortId";
+  });
+  assert.notEqual(code, 0);
+  assert.match(output, /which is not a column of EmailSendApprovalMember/);
+});
+
+test("a child_rows reference to a model that does not exist is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    find("emailSendApproval").subjectReference.childModel = "EmailSendApprovalCohort";
+  });
+  assert.notEqual(code, 0);
+  assert.match(output, /which is not a model/);
+});
+
+test("a child_rows reference to an unregistered model is rejected", () => {
+  // The reference stays exactly as committed; what goes is the child's own
+  // row. An earlier version of this case swapped the child for a different
+  // model and removed an unrelated one, so it passed on a foreign-key error
+  // or on the sweep and never reached the path it claimed to test.
+  const { code, output } = run((registry) => {
+    registry.domains = registry.domains.filter(
+      (row) => row.prismaModel !== "EmailSendApprovalMember"
+    );
+  });
+  assert.notEqual(code, 0);
+  assert.match(
+    output,
+    /subjectReference\.childModel "EmailSendApprovalMember" is not in the registry/
+  );
+});
+
+test("a model holding an operator address cannot leave the registry", () => {
+  // The hole the actor rule was widened to close, driven from the other end:
+  // EmailSendApproval has no User relation at all, so before 2026-09-21 it
+  // passed the sweep as if it held nothing.
+  const { code, output } = run((registry) => {
+    registry.domains = registry.domains.filter(
+      (row) => row.prismaModel !== "EmailSendApproval"
+    );
+  });
+  assert.notEqual(code, 0);
+  assert.match(output, /EmailSendApproval holds user data but is not in the registry/);
+});
+
+test("a table holding an address under any column name cannot escape", () => {
+  // The identifier pattern read `email` or something ending in `Email` until
+  // 2026-09-22, and the suppression tables spell it `emailAddress` -- so the
+  // two tables whose entire purpose is to remember a mailbox after the account
+  // is gone were the ones the sweep could not see. A name is not a reason.
+  for (const model of ["SuppressionCause", "SuppressionEntry"]) {
+    const { code, output } = run((registry) => {
+      registry.domains = registry.domains.filter(
+        (row) => row.prismaModel !== model
+      );
+    });
+    assert.notEqual(code, 0, `${model} escaped the registry`);
+    assert.match(
+      output,
+      new RegExp(`${model} holds user data but is not in the registry`)
+    );
+  }
+});

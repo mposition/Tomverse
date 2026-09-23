@@ -102,6 +102,8 @@ model User {
   emailPreferenceTransitions           EmailPreferenceTransition[]
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
+  emailPermissionEvents                EmailPermissionEvent[]
+  emailPermissionDecisions             EmailPermissionDecision[]
   campaignRecipients                   EmailCampaignRecipient[]
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
@@ -397,7 +399,7 @@ model Conversation {
   /// pinned conversation under 오늘 and tell the reader it was answered today.
   /// `app/api/conversations/[conversationId]/pin/route.ts` writes this column
   /// with raw SQL for exactly that reason.
-  pinnedAt              DateTime?
+  pinnedAt         DateTime?
   /// The sequence of the last pin write this conversation accepted. A write
   /// carries its own sequence and applies only if it is greater, so the last
   /// tap is the last write in whatever order the requests arrive.
@@ -427,9 +429,9 @@ model Conversation {
   ///
   /// Written by the same raw statement as `pinnedAt`, so it moves `updatedAt`
   /// no more than that column does.
-  pinSeq                Float     @default(0)
-  password              String?
-  importedGuestKey      String?
+  pinSeq           Float     @default(0)
+  password         String?
+  importedGuestKey String?
 
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
@@ -1079,15 +1081,15 @@ model ProviderProbeResult {
 // `scopeKey` is either "new" or the conversation id. Attachment references
 // are ordered opaque ids only; route validation owns their exact JSON shape.
 model ChatComposerDraft {
-  id                   String       @id @default(cuid())
+  id                   String   @id @default(cuid())
   userId               String
   scopeKey             String
   conversationId       String?
-  text                  String       @default("")
+  text                 String   @default("")
   attachmentReferences Json
-  revision              Int          @default(1)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  revision             Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1101,7 +1103,7 @@ model ChatComposerDraft {
 // Message because claim must precede provider and reservation work, while the
 // assistant Message is committed only later.
 model ChatResponseAttempt {
-  assistantMessageId  String   @id
+  assistantMessageId  String    @id
   userId              String
   conversationId      String
   sourceUserMessageId String
@@ -1109,16 +1111,16 @@ model ChatResponseAttempt {
   requestedModelId    String
   actualModelId       String?
   provider            String?
-  status              String   @default("claimed")
-  partialContent      String   @default("")
-  checkpointRevision  Int      @default(0)
+  status              String    @default("claimed")
+  partialContent      String    @default("")
+  checkpointRevision  Int       @default(0)
   ownerId             String
   leaseExpiresAt      DateTime
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1951,81 +1953,81 @@ model Feedback {
 /// human -- it never modifies code, never pushes a branch, never opens a PR.
 /// llmConfidence is observational only and stays null in Phase 2.
 model FeedbackAutoFixCase {
-  id                  String    @id @default(cuid())
-  feedbackId          String    @unique
-  feedback            Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  traceId             String
+  id                     String    @id @default(cuid())
+  feedbackId             String    @unique
+  feedback               Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId                String
   /// Trusted occurrence identity from the verified token, when one existed.
-  occurrenceId        String?
+  occurrenceId           String?
   /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
-  fingerprint         String?
-  sourceRelease       String?
+  fingerprint            String?
+  sourceRelease          String?
   /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
   /// written with compare-and-swap conditional updates.
-  state               String    @default("received")
+  state                  String    @default("received")
   /// One of AUTOFIX_CLASSIFICATION once classified.
-  classification      String?
-  ineligibilityReason String?
+  classification         String?
+  ineligibilityReason    String?
   /// Reserved for a future LLM diagnosis pass; observational, never a gate.
-  llmConfidence       Float?
+  llmConfidence          Float?
   /// Bounded technical facts only -- no user text, no prompts, no tokens.
-  diagnosticSummary   Json?
-  attemptCount        Int       @default(0)
-  claimedAt           DateTime?
-  heartbeatAt         DateTime?
+  diagnosticSummary      Json?
+  attemptCount           Int       @default(0)
+  claimedAt              DateTime?
+  heartbeatAt            DateTime?
   /// Doubles as the not-before instant while state = evidence_delayed.
-  leaseExpiresAt      DateTime?
-  terminalReason      String?
-  closedAt            DateTime?
+  leaseExpiresAt         DateTime?
+  terminalReason         String?
+  closedAt               DateTime?
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
-  fixBranch           String?
+  fixBranch              String?
   /// The running fix attempt's server-minted id. Every heartbeat and result
   /// must present it; a claim replaces it and a reclaim or a terminal result
   /// clears it, so a late callback from an expired run matches nothing.
-  fixAttemptId        String?
-  fixPrNumber         Int?
-  fixPrUrl            String?
+  fixAttemptId           String?
+  fixPrNumber            Int?
+  fixPrUrl               String?
   /// Read back from GitHub after the human-approved merge; never inferred
   /// from enabling auto-merge.
-  mergeSha            String?
-  stagingSha          String?
+  mergeSha               String?
+  stagingSha             String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
-  redGreenProof       Json?
+  redGreenProof          Json?
   /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
   /// The develop PR head and its change manifest digest, read from GitHub by
   /// the server (lib/feedbackAutoFixChangeManifest.ts).
-  fixHeadSha          String?
-  fixManifestDigest   String?
+  fixHeadSha             String?
+  fixManifestDigest      String?
   /// The manifest itself: path, base blob and head blob per changed file.
-  fixManifest         Json?
+  fixManifest            Json?
   /// Root cause, fix and test summaries from the fix run: bounded, technical,
   /// derived only from the diagnostic summary -- never the report body.
-  fixReport           Json?
+  fixReport              Json?
   /// --- Owner approval, bound to one head and one manifest --------------------
   /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
   /// here: the case keeps no account identifier of its own.
-  approvedAt          DateTime?
-  approvedHeadSha     String?
+  approvedAt             DateTime?
+  approvedHeadSha        String?
   approvedManifestDigest String?
   /// --- Promotion: every value observed by the server itself -----------------
-  stagingDeploymentId String?
-  stagingFirstSeenAt  DateTime?
-  stagingVerifiedAt   DateTime?
-  productionBranch    String?
-  productionPrNumber  Int?
-  productionPrUrl     String?
-  productionPrHeadSha String?
-  productionMergeSha  String?
+  stagingDeploymentId    String?
+  stagingFirstSeenAt     DateTime?
+  stagingVerifiedAt      DateTime?
+  productionBranch       String?
+  productionPrNumber     Int?
+  productionPrUrl        String?
+  productionPrHeadSha    String?
+  productionMergeSha     String?
   productionDeploymentId String?
   productionFirstSeenAt  DateTime?
   productionVerifiedAt   DateTime?
   /// The last observer pass that read this case and why it did not advance:
   /// what the console shows as "observation delayed".
-  promotionObservedAt DateTime?
-  promotionObservation String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  promotionObservedAt    DateTime?
+  promotionObservation   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([state, leaseExpiresAt])
   @@index([createdAt])
@@ -4373,6 +4375,10 @@ model EmailPolicyVersion {
   consentRecords ConsentRecord[]
   deliveries     EmailDelivery[]
 
+  permissionEvents    EmailPermissionEvent[]
+  permissionDecisions EmailPermissionDecision[]
+  sendApprovals       EmailSendApproval[]
+
   @@index([status, activatedAt])
 }
 
@@ -4869,6 +4875,8 @@ model ConsentRecord {
 
   createdAt DateTime @default(now())
 
+  decisionEvidence EmailPermissionDecisionEvidence[]
+
   @@index([userId, purpose, occurredAt])
   @@index([emailAddress, occurredAt])
   @@index([policyVersionId])
@@ -5171,13 +5179,9 @@ model EmailDelivery {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  permissionDecisions EmailPermissionDecision[]
+
   @@unique([eventId, recipientKey])
-  @@index([status, lane, nextAttemptAt])
-  @@index([eventId, status])
-  @@index([userId, createdAt])
-  @@index([emailAddress, createdAt])
-  @@index([status, snapshotPurgedAt])
-  @@index([unsubscribeKeyVersion, sentAt])
   /// A message id identifies a delivery within an account. Plain rather than
   /// partial: Postgres does not compare nulls, so a delivery that never reached
   /// the provider -- no account, no message id -- conflicts with nothing, which
@@ -5186,6 +5190,12 @@ model EmailDelivery {
   /// and the drift check read this file and not migration SQL; a partial index
   /// is invisible to both (see 20260801190000_plan_change_pending_slot).
   @@unique([providerAccount, providerMessageId], map: "EmailDelivery_providerAccount_providerMessageId_key")
+  @@index([status, lane, nextAttemptAt])
+  @@index([eventId, status])
+  @@index([userId, createdAt])
+  @@index([emailAddress, createdAt])
+  @@index([status, snapshotPurgedAt])
+  @@index([unsubscribeKeyVersion, sentAt])
 }
 
 /// One inert unsubscribe token per key version, minted with that key the first
@@ -5208,7 +5218,7 @@ model EmailUnsubscribeKeyAdoption {
   id          String   @id @default(cuid())
   keyVersions String[]
   adoptedAt   DateTime @default(now())
-  singleton   Boolean  @default(true) @unique
+  singleton   Boolean  @unique @default(true)
 }
 
 /// Raw provider callbacks, stored before they are acted on.
@@ -5613,8 +5623,8 @@ model PromptRefinerShadowRun {
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
-  stage                 PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  attempts              PromptRefinerShadowAttempt[]
+  stage    PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempts PromptRefinerShadowAttempt[]
 
   @@index([stageId, status])
 }
@@ -5656,8 +5666,9 @@ model PromptRefinerShadowAttempt {
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
-  run              PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  reservation      PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run         PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reservation PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
   @@unique([runId, caseId])
   @@unique([runId, caseIndex])
   @@index([status, dispatchIntentAt])
@@ -5819,15 +5830,15 @@ model AiVisibilityRun {
 }
 
 model AmuxWorkerRuntime {
-  workerName    String   @id
-  instanceId    String
-  generation    Int      @default(1)
-  status        String   @default("starting")
-  dispatchReady Boolean  @default(false)
-  heartbeatAt   DateTime
+  workerName     String   @id
+  instanceId     String
+  generation     Int      @default(1)
+  status         String   @default("starting")
+  dispatchReady  Boolean  @default(false)
+  heartbeatAt    DateTime
   leaseExpiresAt DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([leaseExpiresAt])
   @@index([status, dispatchReady, leaseExpiresAt])
@@ -5835,7 +5846,7 @@ model AmuxWorkerRuntime {
 }
 
 model AmuxWorkItem {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   title          String
   description    String?
   /// New rows default to non-dispatchable backlog. This schema imports no
@@ -5847,7 +5858,7 @@ model AmuxWorkItem {
   drag           Int      @default(0)
   owner          String?
   classification Json?
-  revision       Int      @default(0)
+  revision       Int       @default(0)
   claimedAt      DateTime?
   archivedAt     DateTime?
   /// Null together for pre-migration or independently created cards. Imported
@@ -5861,9 +5872,9 @@ model AmuxWorkItem {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  dependencies   AmuxWorkDependency[] @relation("AmuxTaskDependencies")
-  dependents     AmuxWorkDependency[] @relation("AmuxTaskDependents")
-  routeDecisions     AmuxRouteDecision[]
+  dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
+  dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
+  routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
 
   @@index([status, owner, archivedAt, createdAt])
@@ -5886,28 +5897,28 @@ model AmuxWorkDependency {
 
 model AmuxExecutionAttempt {
   /// Server-minted execution fence. A worker never chooses this id.
-  id                 String   @id
-  taskId             String
-  worker             String
-  workerInstanceId   String
-  workerGeneration   Int
+  id               String @id
+  taskId           String
+  worker           String
+  workerInstanceId String
+  workerGeneration Int
   /// Task revision after the atomic todo -> doing transition.
-  taskRevision       Int
+  taskRevision     Int
 
-  heartbeatAt        DateTime
-  leaseExpiresAt     DateTime?
-  startedAt          DateTime
-  endedAt            DateTime?
+  heartbeatAt    DateTime
+  leaseExpiresAt DateTime?
+  startedAt      DateTime
+  endedAt        DateTime?
 
   /// Null while running; succeeded | failed | blocked | expired when terminal.
-  outcome            String?
+  outcome  String?
   /// todo | review | done | blocked | cancelled when terminal.
-  toStatus           String?
-  endedBy            String?
-  reason             String?
+  toStatus String?
+  endedBy  String?
+  reason   String?
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
   delivery AmuxWorkDelivery?
@@ -5935,7 +5946,7 @@ model AmuxWorkDelivery {
 
   /// Minted on pull. Retries while the receipt lease is live reuse it; after
   /// expiry the server rotates to a fresh receipt so stale ACKs are fenced.
-  receiptId      String? @unique
+  receiptId      String?   @unique
   leasedAt       DateTime?
   leaseExpiresAt DateTime?
 
@@ -5953,18 +5964,385 @@ model AmuxWorkDelivery {
 }
 
 model AmuxRouteDecision {
-  id               String   @id @default(cuid())
-  taskId           String
-  worker           String
-  schedulerScore   Int
-  scoringVersion   String
-  taskRevision     Int
-  signals          Json
-  createdAt        DateTime @default(now())
+  id             String   @id @default(cuid())
+  taskId         String
+  worker         String
+  schedulerScore Int
+  scoringVersion String
+  taskRevision   Int
+  signals        Json
+  createdAt      DateTime @default(now())
 
   task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict)
 
   @@index([taskId, createdAt])
   @@index([worker, createdAt])
   @@index([scoringVersion, createdAt])
+}
+
+/// The facts that are neither consent nor a send decision, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 6.
+///
+/// ConsentRecord answers "what did they agree to". This answers everything
+/// else a basis can rest on: that a notice was shown, that somebody objected,
+/// and when a relationship began and ended. Two ledgers never compete for the
+/// same fact -- consent is said once, by ConsentRecord, and nothing here
+/// records a consent.
+///
+/// Australia's inferred consent ends on an event, not on a clock (draft
+/// section 4.4), so the relationship's start and end have to be facts with
+/// times rather than a field somebody recomputes.
+model EmailPermissionEvent {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The address as it was. Kept when the account changes address, for the
+  /// same reason ConsentRecord keeps it: the fact attached to a mailbox.
+  emailAddress String
+
+  /// Which normalisation produced the address above and the digests a cohort
+  /// is compared by. Stored rather than assumed: changing the rule changes
+  /// which rows match, and a ledger that cannot say which rule it used cannot
+  /// be re-derived after the rule moves.
+  addressNormalizationVersion String
+
+  /// notice_shown | objected | relationship_started | relationship_ended
+  ///   | basis_ended
+  kind String
+
+  /// The purpose or classification the fact is about, or "*" when it is about
+  /// the address itself. Not nullable: a null here would make "about
+  /// everything" and "nobody filled it in" the same row.
+  scopeKey String
+
+  /// When it happened, which is not when we wrote it down.
+  occurredAt DateTime
+
+  /// signup_form | preference_center | unsubscribe_page | in_product_notice
+  ///   | admin | system | provider_complaint
+  capturedVia String
+
+  /// Stable per writer so a retried write adds nothing.
+  sourceEventKey String
+
+  /// Resolved at the time and never rewritten when the account later moves
+  /// (docs/policy/email-notifications.md section 6.4).
+  jurisdiction       String?
+  jurisdictionSource String?
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// Screen identifier, notice copy hash, relationship reason. Never the raw
+  /// request and never message content.
+  evidence Json?
+
+  createdAt DateTime @default(now())
+
+  decisionEvidence EmailPermissionDecisionEvidence[]
+
+  @@unique([kind, sourceEventKey], map: "EmailPermissionEvent_kind_source_event_key")
+  @@index([userId, kind, occurredAt])
+  @@index([emailAddress, kind, occurredAt])
+  @@index([policyVersionId])
+}
+
+/// A human decision, written once and never edited.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 5.6
+/// and 7.8.
+///
+/// Two kinds, and they are not variants of one thing. `risk_accepted` is the
+/// owner deciding to send without a basis; `obligation_waiver` is the owner
+/// deciding a display or notice duty will not be performed. Both are business
+/// decisions recorded as themselves -- neither invents a consent, and neither
+/// turns a refusal into a permission. A send verdict references this row; it
+/// never copies it.
+///
+/// The row and its whole membership are written in one transaction and closed
+/// with sealedAt, after which triggers refuse every update, insert and delete.
+/// Withdrawal is an EmailSendApprovalRevocation beside it, because an approval
+/// that can be edited proves nothing about what was approved.
+model EmailSendApproval {
+  id String @id @default(cuid())
+
+  /// risk_accepted | obligation_waiver
+  approvalType String
+
+  /// Who decided, by account and by the address at the time. Both, because an
+  /// account can be renamed and a reader a year later needs the second.
+  approvedById    String
+  approvedByEmail String
+  approvedAt      DateTime
+
+  /// Why, in the approving person's words, and what would make us look again.
+  /// Neither is optional: an approval with no review condition is a permanent
+  /// one nobody decided to make permanent.
+  reason          String
+  reviewCondition String
+
+  /// Scope. Every member is compared exactly; a mismatch on any one of them
+  /// means the approval does not apply (section 7.8). Not nullable: an
+  /// approval that does not say which policy version it was given under
+  /// applies to every later one, which is the opposite of a scope.
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// The country rule and country an obligation_waiver is about.
+  ruleKey       String?
+  ruleVersion   Int?
+  country       String?
+  obligationKey String?
+
+  /// The purpose a risk_accepted approval covers, or "*" for all of them.
+  purposeKey String?
+
+  /// Closes the row and its membership. Nothing may change afterwards.
+  sealedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  members     EmailSendApprovalMember[]
+  revocations EmailSendApprovalRevocation[]
+  decisions   EmailPermissionDecision[]
+
+  /// Carried so a verdict's override can name (id, approvalType) as a
+  /// composite foreign key. Referencing the id alone would let a verdict claim
+  /// a `risk_accepted` override while pointing at an obligation waiver, and
+  /// the CHECK on overrideType would not notice.
+  @@unique([id, approvalType], map: "EmailSendApproval_id_type_key")
+  @@index([approvalType, approvedAt])
+  @@index([policyVersionId])
+}
+
+/// One account inside an approval's cohort.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6.
+///
+/// "78 accounts" is the description; this list is the scope. The address is
+/// held as a digest of the normalised address rather than the address, so the
+/// membership proves what was approved without being a second copy of the
+/// mailing list.
+model EmailSendApprovalMember {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  userId String
+
+  /// SHA-256 of the normalised address at approval time, and which rule
+  /// normalised it. A send compares the delivery's pinned address and the
+  /// account's current address against this; either differing means the
+  /// override does not apply.
+  addressDigest               String
+  addressNormalizationVersion String
+
+  /// The date the two-year confirmation notice counts from for this member,
+  /// and where that date came from (section 5.6 rule 5).
+  noticeAnchorAt     DateTime
+  noticeAnchorSource String
+
+  createdAt DateTime @default(now())
+
+  @@unique([approvalId, userId])
+  @@index([approvalId, addressDigest])
+  @@index([userId])
+}
+
+/// Withdrawal of an approval, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6
+/// rule 6. The approval row is never touched; from the first revocation
+/// onwards every verdict is taken without the override.
+model EmailSendApprovalRevocation {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  revokedById    String
+  revokedByEmail String
+  revokedAt      DateTime
+  reason         String
+
+  createdAt DateTime @default(now())
+
+  @@index([approvalId, revokedAt])
+}
+
+/// What one send decided, and on what.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 6 and
+/// 7.6.
+///
+/// Two rows per delivery, not one: the permission is decided again immediately
+/// before the message is handed to the provider, and a single policyVersionId
+/// cannot describe both moments. phase says which one this is.
+///
+/// legalAllowed stays false when an override was used. Writing true would
+/// erase the only row that can answer "why did this go out", and an admin
+/// screen showing it as allowed is how the next person reads a business
+/// decision as a consent.
+model EmailPermissionDecision {
+  /// The delivery this verdict was taken for. SetNull rather than Restrict:
+  /// a delivery is purged on its own retention schedule and the verdict is
+  /// what outlives it, so losing the message must not take the reason it was
+  /// permitted with it.
+  deliveryId String?
+  delivery   EmailDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  id String @id @default(cuid())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// enqueue | send
+  phase String
+
+  purpose        String
+  classification String
+
+  /// The address the verdict was taken for, and the rule that normalised it.
+  emailAddress                String
+  addressNormalizationVersion String
+
+  /// Every authority applied and how each ended, as
+  /// [{ authority, basis, verdict, reason }]. Evidence ids are rows in
+  /// EmailPermissionDecisionEvidence rather than ids inside this blob, so a
+  /// deleted event cannot leave a dangling reference nobody can resolve.
+  authorities Json
+
+  /// All authorities allowed. Independent of the override.
+  legalAllowed Boolean
+
+  /// Set only when an override was applied; the approval is referenced, never
+  /// copied. The pair is a composite foreign key onto (id, approvalType), so
+  /// the approval this names is necessarily of the type claimed here.
+  overrideApprovalId String?
+  overrideType       String?
+  /// Restrict, not the optional relation's default of SetNull: clearing the
+  /// pair would turn a verdict that used an override into one that did not,
+  /// which is the single fact this row exists to keep. The migration says the
+  /// same, and the schema drift check compares the two.
+  overrideApproval   EmailSendApproval? @relation(fields: [overrideApprovalId, overrideType], references: [id, approvalType], onDelete: Restrict)
+
+  /// Reasons the send is refused regardless of the override, sorted. Empty
+  /// array when there are none -- null would not distinguish "none" from
+  /// "not computed".
+  blockers Json
+
+  /// (legalAllowed || override applied) && blockers is empty.
+  allowed Boolean
+
+  /// The display contract as pinned at enqueue and as required now.
+  pinnedDisplayContractHash   String?
+  requiredDisplayContractHash String?
+  displayContractSatisfied    Boolean?
+
+  /// Country candidates and their rule versions, as resolved for this verdict.
+  countryCandidates Json?
+  ruleVersions      Json?
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// When suppression was last read for this verdict, and when the message was
+  /// handed to the provider. The gap between them is the race section 7.4 is
+  /// about, and it cannot be measured without both.
+  suppressionCheckedAt DateTime?
+  providerSubmittedAt  DateTime?
+
+  /// Closes the evidence set. The verdict and every row it rests on are
+  /// written in one transaction and then sealed; afterwards no evidence may be
+  /// added. Without it a verdict could acquire support after the fact, which
+  /// is the same defect as an editable approval.
+  sealedAt DateTime?
+
+  evaluatedAt DateTime
+  createdAt   DateTime @default(now())
+
+  evidence EmailPermissionDecisionEvidence[]
+
+  @@unique([deliveryId, phase], map: "EmailPermissionDecision_delivery_phase")
+  @@index([userId, evaluatedAt])
+  @@index([emailAddress, evaluatedAt])
+  @@index([overrideApprovalId])
+  @@index([policyVersionId])
+}
+
+/// What a verdict rested on, append-only and sealed with the verdict.
+///
+/// A join table rather than an array of ids inside the verdict: the database
+/// then refuses to lose the row a verdict cites, and "what did this rest on"
+/// is a query rather than a parse.
+///
+/// Two possible sources, exactly one per row. A consent lives in
+/// ConsentRecord and nothing else may hold it, so an express-consent verdict
+/// has to be able to cite that ledger directly rather than through a second
+/// copy of the fact.
+model EmailPermissionDecisionEvidence {
+  id         String                  @id @default(cuid())
+  decisionId String
+  decision   EmailPermissionDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  eventId String?
+  event   EmailPermissionEvent? @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  consentRecordId String?
+  consentRecord   ConsentRecord? @relation(fields: [consentRecordId], references: [id], onDelete: Restrict)
+
+  /// Which authority cited it.
+  authority String
+
+  createdAt DateTime @default(now())
+
+  @@unique([decisionId, authority, eventId], map: "EmailPermissionDecisionEvidence_event_key")
+  @@unique([decisionId, authority, consentRecordId], map: "EmailPermissionDecisionEvidence_consent_key")
+  @@index([eventId])
+  @@index([consentRecordId])
+}
+
+/// Operator evidence for one catalog-import attempt. No User foreign key:
+/// deleting an operator must not rewrite the row. Apply stays off until a
+/// separate latch is enabled; this table existing is not that enablement.
+model AmuxBoardImportApproval {
+  id                           String    @id
+  status                       String
+  actorUserId                  String
+  authorizationAuditLogId      String    @unique
+  manifestDigest               String
+  canonicalizerVersion         String
+  sourceCommit                 String
+  boardDigest                  String
+  sourceVerificationMode       String
+  sourceAttestedAt             DateTime
+  activeItemCount              Int
+  sectionCount                 Int
+  recommendationReferenceCount Int
+  createKeys                   Json
+  noOpKeys                     Json
+  conflictKeys                 Json
+  excludeKeys                  Json
+  executionBriefDigests        Json
+  itemBindings                 Json
+  itemBindingsDigest           String
+  plannerVersion               String
+  validatorVersion             String
+  scannerVersion               String
+  scannerRulesetDigest         String
+  policyVersion                Int
+  rawBodyDigest                String
+  outcomeUnknownAt             DateTime?
+  preparedAt                   DateTime
+  approvedAt                   DateTime?
+  consumedAt                   DateTime?
+  rejectedAt                   DateTime?
+  expiredAt                    DateTime?
+  expiresAt                    DateTime
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
 }

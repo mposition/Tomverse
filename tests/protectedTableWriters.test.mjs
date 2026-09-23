@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import {
+  APPEND_ONLY_LEDGER_TABLES,
   DELEGATE_NAME_ALLOWLIST,
   EXCLUDED_PREFIXES,
   PROTECTED_TABLES,
@@ -14,6 +15,7 @@ import {
   PROTECTED_EXPORT_ALLOWLIST,
   TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST,
   checkProtectedTableWriters,
+  findTruncateStatements,
   selectScannedPaths,
   sourceFingerprint,
   sqlWithoutComments,
@@ -658,5 +660,59 @@ test("a computed key on an unreadable module is refused, and named files are not
       (finding) => finding.rule === "guard-seal" && finding.path === path
     );
     assert.deepEqual(quiet, [], path);
+  }
+});
+
+// TRUNCATE, which no row trigger can refuse.
+//
+// Added 2026-09-23 with the permission ledger. The rule is categorical rather
+// than a search for the seven table names, because `TRUNCATE "User" CASCADE`
+// names none of them and empties four of them.
+
+test("a SQL TRUNCATE anywhere in scanned source is refused", () => {
+  const findings = findTruncateStatements({
+    sources: [
+      { path: "lib/a.ts", text: 'await prisma.$executeRawUnsafe(`TRUNCATE TABLE "User" CASCADE`);' },
+      { path: "lib/b.ts", text: 'const q = `TRUNCATE "EmailPermissionDecision"`;' },
+      { path: "lib/c.ts", text: "const q = `TRUNCATE ONLY \"ConsentRecord\"`;" },
+    ],
+  });
+  assert.equal(findings.length, 3);
+  assert.deepEqual(
+    findings.map((f) => f.path),
+    ["lib/a.ts", "lib/b.ts", "lib/c.ts"]
+  );
+});
+
+test("the CSS class and the English word are not SQL", () => {
+  // `className="truncate"` appears on dozens of components, and the review
+  // prompts talk about truncating sentences.
+  const findings = findTruncateStatements({
+    sources: [
+      { path: "components/x.tsx", text: '<span className="min-w-0 truncate">{name}</span>' },
+      { path: "lib/y.ts", text: '"Do not truncate sentences."' },
+      { path: "lib/z.ts", text: "export const truncateText = (s) => s.slice(0, 10);" },
+    ],
+  });
+  assert.deepEqual(findings, []);
+});
+
+test("every append-only ledger table is one the migration protects", () => {
+  // The list here and the tables the migration makes append-only are the same
+  // decision; a table added to one and not the other is a table whose claim
+  // nothing keeps.
+  const sql = readFileSync(
+    new URL(
+      "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  for (const table of APPEND_ONLY_LEDGER_TABLES) {
+    assert.match(
+      sql,
+      new RegExp(`BEFORE (INSERT OR )?UPDATE( OR DELETE)? ON "${table}"`),
+      `${table} has no append-only trigger in the migration`
+    );
   }
 });

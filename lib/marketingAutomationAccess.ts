@@ -228,12 +228,36 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
  *
+ * 2026-09-23, S2b1: `MARKETING_PAUSE_REASON_CODES` and its type moved into
+ * the watched schema module from `lib/marketingStore.ts`, which is server-only
+ * and therefore unreadable by the console that has to offer the list. The
+ * store re-exports the same names, so no caller changed and no value changed.
+ * Webhook admission reads none of it -- the pause reasons are not an input to
+ * any webhook decision -- but the file is watched whole, so the digest moves
+ * and the move is recorded here rather than absorbed.
+ *
  * 2026-09-22: AMUX backlog default and source-provenance columns change only
  * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
  * admission decision; the whole-schema fingerprint moves by design.
+ *
+ * 2026-09-22: the catalog-import approval table is another `Amux*` model on
+ * the same watched schema. It does not change a marketing model, webhook
+ * writer, or admission decision. The digest moves because the schema file
+ * is watched as a whole.
+ *
+ * 2026-09-21, the permission ledger (S3): six more tables on the same watched
+ * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
+ * revocations, EmailPermissionDecision and its evidence. None is a marketing
+ * model, none changes the descriptor, the config snapshot or an admission
+ * decision, and nothing this pipeline stores or reads is different. The one
+ * shared edge is ConsentRecord, which gains a back-relation and no column.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side of
+ * the conflict -- the merged tree is the only one that will exist.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "0dafbff595b521569875b0e87067c48b5a8c83b6aa30b421ecd1ea0663c28272";
+  "cd0abe25870db017baf9b7d1b995a1a04a4009b301ee8bb10b86652d0d2aaa40";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
