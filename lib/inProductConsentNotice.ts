@@ -196,35 +196,69 @@ const overrideWouldSend = async (input: {
   });
   if (!marketingJurisdictionVerdict(jurisdiction).allowed) return false;
 
-  // Two things an override cannot cross, read from where the send reads them.
+  // Three things an override cannot cross (section 5.6's second table).
   //
-  // A **withdrawal**, per purpose (section 5.6's second table). The send does
-  // not decide consent from the latest `ConsentRecord` action -- it asks
-  // `consentGateVerdict()` about the `EmailPreference` row -- and an earlier
-  // version here read the ledger instead. The two disagree: a
-  // `confirmation_notice_sent` row is live consent to the preference and was
-  // "not a grant" to the ledger query. For the override the distinction that
-  // matters is between *no row*, which is the absence of a basis it exists to
-  // cross, and *a row switched off*, which is a withdrawal it may not.
+  // A **withdrawal**: a confirmed consent the person took back. That is what
+  // the ledger records -- `setPreference()` writes `ConsentRecord(withdrawn)`
+  // only when there was a confirmed consent to withdraw -- so it is read as the
+  // latest action per purpose, by address, which is where consent attaches.
+  //
+  // It is *not* "an `EmailPreference` row switched off", and the difference
+  // is the whole of the last round's finding. `ensureDefaultPreferences()`
+  // creates exactly such rows, `source: "system_default"`, the first time
+  // anybody opens their settings. That is the absence of a decision -- the
+  // thing the override exists to cross -- and treating it as a withdrawal
+  // split the cohort on whether somebody had ever opened a settings page: those
+  // who had fell out of the override, were shown the notice, and were then
+  // blocked from the override for ever by `promised_no_unrequested_send`.
+  //
+  // (Consent *being given* is still read from the preference, through
+  // `consentGateVerdict()`, in `noticeStateForUser()`: that is the send's own
+  // question. Withdrawal is a different fact, and the ledger is where it is.)
+  //
+  // A **suppression** at the purpose, classification or global scope, asked
+  // through `suppressionCheck()` with the purpose -- the same call the offer
+  // makes. A person switching a purpose off through `setPreference()` writes
+  // one alongside the withdrawal.
   //
   // And **the promise itself**. A `notice_shown` means this person has been
   // told we will not send unless asked; `overrideBlockers()` refuses the
   // override from then on (`promised_no_unrequested_send`), and S9 inherits
   // that by calling it.
-  const [preferences, promised] = await Promise.all([
-    input.db.emailPreference.findMany({
-      where: { userId: input.userId, purpose: { in: [...input.purposes] } },
-      select: { purpose: true, enabled: true },
-    }),
+  const [withdrawnRows, promised, suppressions] = await Promise.all([
+    input.db.$queryRaw<{ purpose: string }[]>`
+      SELECT purpose FROM (
+        SELECT DISTINCT ON (purpose) purpose, action
+        FROM "ConsentRecord"
+        WHERE "emailAddress" = ${input.emailAddress}
+          AND purpose = ANY(${[...input.purposes]}::text[])
+        ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
+      ) latest
+      WHERE action = 'withdrawn'
+    `,
     input.db.emailPermissionEvent.findFirst({
       where: { userId: input.userId, kind: "notice_shown" },
       select: { id: true },
     }),
+    Promise.all(
+      input.purposes.map(async (purpose) => ({
+        purpose,
+        verdict: await suppressionCheck({
+          emailAddress: input.emailAddress,
+          classification: "marketing",
+          purpose,
+          ...(input.client ? { client: input.client } : {}),
+        }),
+      }))
+    ),
   ]);
   if (promised) return false;
-  const withdrawn = new Set(
-    preferences.filter((row) => !row.enabled).map((row) => row.purpose)
-  );
+  const withdrawn = new Set([
+    ...withdrawnRows.map((row) => row.purpose),
+    ...suppressions
+      .filter((row) => !row.verdict.allowed)
+      .map((row) => row.purpose),
+  ]);
 
   for (const { approvalId } of memberships) {
     for (const purpose of input.purposes) {

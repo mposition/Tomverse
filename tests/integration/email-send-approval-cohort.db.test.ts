@@ -1094,20 +1094,61 @@ test("a country settled in the same transaction is seen by the refusal", async (
   );
 });
 
-test("a member who withdrew every purpose is offered the notice", async () => {
-  // Section 5.6: an override cannot cross a withdrawal. The offer reads a
-  // latest `withdrawn` as "not consented yet" and asks again, so a member
-  // whose every purpose ends in a withdrawal is not mailed -- and was hidden
-  // from the notice anyway, because the coverage check did not look.
+test("default preference rows do not take a member out of the cohort", async () => {
+  // `ensureDefaultPreferences()` writes `enabled: false` rows with
+  // `source: "system_default"` the first time anybody opens their settings.
+  // That is the absence of a decision, which the override exists to cross.
+  // Reading every switched-off row as a withdrawal split the cohort on whether
+  // somebody had ever opened a settings page -- and those who had were shown
+  // the notice and then blocked from the override for good.
+  const user = await createUser();
+  await settleCountry(user.id, "AU");
+  await sealFor([user]);
+  for (const purpose of noticePurposes()) {
+    await prisma.emailPreference.create({
+      data: {
+        userId: user.id,
+        purpose,
+        enabled: false,
+        source: "system_default",
+      },
+    });
+  }
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: false,
+    refusal: "covered_by_approval",
+  });
+});
+
+test("a member who withdrew a confirmed consent is not mailed under the override", async () => {
+  // The state `setPreference()` leaves behind: a confirmed grant, then a
+  // withdrawal in the ledger. Section 5.6 says the override cannot cross it.
+  // The person is not mailed, so the notice is theirs to see.
   const user = await createUser();
   await settleCountry(user.id, "AU");
   await sealFor([user]);
   const policyId = await policyVersionId();
 
-  // A withdrawal is a preference switched off. The send reads
-  // `EmailPreference`, not the ledger, and so does this.
-  void policyId;
   for (const purpose of noticePurposes()) {
+    for (const [action, at] of [
+      ["granted", "2026-09-01T00:00:00.000Z"],
+      ["withdrawn", "2026-09-02T00:00:00.000Z"],
+    ]) {
+      await prisma.consentRecord.create({
+        data: {
+          userId: user.id,
+          emailAddress: user.email!,
+          purpose,
+          action,
+          occurredAt: new Date(at),
+          jurisdiction: "AU",
+          jurisdictionSource: "self_declared",
+          policyVersionId: policyId,
+          capturedVia: "preference_center",
+        },
+      });
+    }
     await prisma.emailPreference.create({
       data: { userId: user.id, purpose, enabled: false, source: "preference_center" },
     });
