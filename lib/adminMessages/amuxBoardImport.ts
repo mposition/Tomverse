@@ -39,6 +39,7 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
     reasonSourceDrift: "source drift",
     reasonActiveExecution: "active execution",
     reasonOtherConflict: "other catalog conflict",
+    reasonUnknown: "unrecognized reason",
     conflictLedgerLine: (key: string, reasons: string) =>
       `${key}: ${reasons}. Nothing was overwritten.`,
   },
@@ -80,6 +81,7 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
     reasonSourceDrift: "원본 차이",
     reasonActiveExecution: "실행 중",
     reasonOtherConflict: "그 밖의 충돌",
+    reasonUnknown: "알 수 없는 이유",
     conflictLedgerLine: (key: string, reasons: string) =>
       `${key}: ${reasons}. 아무것도 덮어쓰지 않았습니다.`,
   },

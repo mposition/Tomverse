@@ -82,8 +82,8 @@ export function AmuxBoardImportPanel() {
       if (code === "other_conflict") return [messages.reasonOtherConflict];
       return [];
     });
-    if (reasons.length === 0) return [];
-    return [messages.conflictLedgerLine(entry.key, reasons.join(", "))];
+    const rendered = reasons.length === 0 ? messages.reasonUnknown : reasons.join(", ");
+    return [messages.conflictLedgerLine(entry.key, rendered)];
   });
 
   return (

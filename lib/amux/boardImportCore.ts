@@ -673,27 +673,30 @@ export const boardImportConflictLedger = (
       card.attemptCount > 0 ||
       card.deliveryCount > 0 ||
       card.routeDecisionCount > 0;
-    const reasons: BoardImportConflictReasonCode[] = [];
-    if (active) reasons.push("active_execution");
-    if (!drifted && !active) reasons.push("other_conflict");
-    if (drifted) reasons.push("source_drift");
+    const reasons = BOARD_IMPORT_CONFLICT_REASON_CODES.filter((code) => {
+      if (code === "active_execution") return active;
+      if (code === "other_conflict") return !drifted && !active;
+      return drifted;
+    });
     entries.push({ key, reasons });
   }
   return entries.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
 };
 
-/** Counts taken from the ledger, so a key cannot be counted and omitted. */
+/** Counts taken from one ledger, so a key cannot be counted and omitted. */
+export const boardImportConflictReasonCounts = (
+  ledger: readonly BoardImportConflictLedgerEntry[],
+): BoardImportConflictReasons => ({
+  sourceDrift: ledger.filter((entry) => entry.reasons.includes("source_drift")).length,
+  activeExecution: ledger.filter((entry) => entry.reasons.includes("active_execution")).length,
+  otherConflict: ledger.filter((entry) => entry.reasons.includes("other_conflict")).length,
+});
+
 export const boardImportConflictReasons = (
   manifest: BoardImportManifest,
   existing: readonly BoardImportExistingCard[],
-): BoardImportConflictReasons => {
-  const ledger = boardImportConflictLedger(manifest, existing);
-  return {
-    sourceDrift: ledger.filter((entry) => entry.reasons.includes("source_drift")).length,
-    activeExecution: ledger.filter((entry) => entry.reasons.includes("active_execution")).length,
-    otherConflict: ledger.filter((entry) => entry.reasons.includes("other_conflict")).length,
-  };
-};
+): BoardImportConflictReasons =>
+  boardImportConflictReasonCounts(boardImportConflictLedger(manifest, existing));
 
 /**
  * Cards of this catalog's source systems whose keys are absent from the

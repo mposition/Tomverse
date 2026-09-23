@@ -22,6 +22,7 @@ import {
   boardImportAuditEntryHashMatches,
   boardImportCardData,
   boardImportCardWrites,
+  BOARD_IMPORT_CONFLICT_REASON_CODES,
   boardImportConflictLedger,
   boardImportConflictReasons,
   boardImportContentTypeAccepted,
@@ -250,6 +251,12 @@ test("drift and an active execution are counted apart and do not change the refu
     },
   ]);
   assert.equal(omitted.some((entry) => entry.key.endsWith("CHAT-99")), false);
+  const ledger = boardImportConflictLedger(manifest, existing);
+  assert.ok(
+    ledger.every((entry) =>
+      entry.reasons.every((reason) => BOARD_IMPORT_CONFLICT_REASON_CODES.includes(reason)),
+    ),
+  );
   const classification = classifyBoardImport(manifest, existing);
   assert.equal(classification.conflict.length, 4);
   assert.equal(boardImportSubmissionRefusal(classification), "conflict");
