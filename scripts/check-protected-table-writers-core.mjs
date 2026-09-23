@@ -532,6 +532,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
   },
+  {
+    path: "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

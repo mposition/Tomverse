@@ -2797,11 +2797,22 @@ export async function claimDueMarketingPost(
     return { claimed: false, reason: "channel_not_publishing" };
   }
 
-  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  // One evaluation of the clock, returned twice: as the instant, for lease
+  // arithmetic and comparisons, and as the UTC calendar day, as text. The day
+  // used to be taken from the instant with `toISOString()`, which trusts that
+  // the `Date` the driver built from a naive UTC timestamp is UTC -- true
+  // when the process runs in UTC, and not something this function should
+  // depend on. `slotDay` already comes back through `to_char`; this is the
+  // same defence for the other side of the comparison.
+  const clock = await database.$queryRaw<Array<{ now: Date; day: string }>>(Prisma.sql`
+    SELECT t AS "now", to_char(t, 'YYYY-MM-DD') AS "day"
+    FROM (
+      SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS t
+    ) AS clock
   `);
   const now = clock[0]?.now;
-  if (!now) {
+  const clockDay = clock[0]?.day;
+  if (!now || !clockDay) {
     throw new MarketingStoreRefusedError(
       "database_clock_unavailable",
       "The database clock did not return a timestamp",
@@ -2832,10 +2843,10 @@ export async function claimDueMarketingPost(
     return { claimed: false, reason: "channel_posts_by_hand" };
   }
 
-  // **One definition of today, from one clock read, as text.** `now` is the
-  // database's clock read as UTC in the statement above; its date part is the
-  // UTC calendar day. Everything below -- the renewal test, the count and the
-  // write -- derives from this string.
+  // **One definition of today, from one clock read, as text.** The statement
+  // above returned it, formatted in SQL from the same evaluation as `now`.
+  // Everything below -- the renewal test, the count and the write -- derives
+  // from this string.
   //
   // Two earlier versions got this wrong in opposite ways. Binding `now` as a
   // `Date` and casting it in SQL resolved the day in the session's time zone.
@@ -2843,7 +2854,7 @@ export async function claimDueMarketingPost(
   // clock, which a transaction that straddles midnight sees as the next day:
   // the count would be about day D+1 and the write about day D. A string cast
   // to `::date` has no time zone and is read once.
-  const day = now.toISOString().slice(0, 10);
+  const day = clockDay;
   const slotDate = new Date(`${day}T00:00:00.000Z`);
 
   // **Renewing is not spending.** A row that already holds today is a claim
@@ -3163,6 +3174,15 @@ export async function appendMarketingPostHistory(
     data.approvalAuditLogId = input.requeue.auditLogId;
     data.approvedAt = verdict.createdAt;
     data.approvedDigest = digest;
+    // **A requeue ends whatever claim the failed attempt left.** The worker
+    // that dispatched it has concluded -- the outcome is `failed` -- so its
+    // token and lease describe nothing, and leaving them set hid the post
+    // behind a dead lease for up to fifteen minutes after a person had just
+    // re-approved it. The day stays: under one row, one slot, a retry the same
+    // day renews it and a retry on a later day moves it, and both of those are
+    // the claim's decision, made when the claim happens.
+    data.claimToken = null;
+    data.leaseUntil = null;
   }
 
   const updated = await database.marketingPost.updateMany({
@@ -3724,6 +3744,15 @@ export async function requeueMarketingPostAfterFailure(
       approvalAuditLogId: input.auditLogId,
       approvedAt,
       approvedDigest: input.expectedEnvelopeDigest,
+      // **A requeue ends whatever claim the failed attempt left.** The worker
+      // that dispatched it has concluded -- the outcome is `failed` -- so its
+      // token and lease describe nothing, and leaving them set hid the post
+      // behind a dead lease for up to fifteen minutes after a person had just
+      // re-approved it. The day stays: under one row, one slot, a retry the same
+      // day renews it and a retry on a later day moves it, and both of those are
+      // the claim's decision, made when the claim happens.
+      claimToken: null,
+      leaseUntil: null,
     },
   });
   requireOne(updated.count, "requeue_conflict", "The post changed before re-queue");

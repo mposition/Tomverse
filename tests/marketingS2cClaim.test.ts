@@ -89,6 +89,7 @@ const fakeDatabase = (
     isolation?: string;
     dueHistoryVersion?: number;
     dueSlotDay?: string | null;
+    clockDay?: string;
   } = {},
 ) => {
   const {
@@ -101,6 +102,7 @@ const fakeDatabase = (
     isolation = "serializable",
     dueHistoryVersion = 4,
     dueSlotDay = null,
+    clockDay,
   } = options;
   const seen: {
     updates: Updated[];
@@ -130,7 +132,14 @@ const fakeDatabase = (
         );
         return [{ today: BigInt(today), week: BigInt(week) }];
       }
-      if (sql.includes("clock_timestamp")) return [{ now, createdAt: now }];
+      if (sql.includes("clock_timestamp")) {
+        // The claim's clock read returns the UTC day as text beside the
+        // instant. Formatted here from the instant's UTC components, which is
+        // what `to_char` on a UTC timestamp does -- and deliberately not from
+        // `toISOString()` on a shifted clock, so a test can make the two
+        // disagree when it wants to.
+        return [{ now, createdAt: now, day: clockDay ?? now.toISOString().slice(0, 10) }];
+      }
       if (sql.includes("FOR UPDATE OF p SKIP LOCKED")) {
         return due === null
           ? []
@@ -530,6 +539,26 @@ test("the count is of spent slots, and leaves out the row being claimed", async 
   // day that day moves with it rather than being counted twice.
   assert.match(count, /"id" <> /);
   assert.ok((seen.countValues[0] ?? []).includes(POST_ID));
+});
+
+test("the day is the one the database formatted, not one derived in JavaScript", async () => {
+  // The round-three finding. The day used to be `now.toISOString()`, which
+  // trusts that the driver built a UTC `Date` from a naive UTC timestamp.
+  // Here the database says it is the 24th while the instant, read the way a
+  // non-UTC process might read it, still looks like the 23rd -- and the claim
+  // must follow the database.
+  const { database, seen } = fakeDatabase({ clockDay: "2026-09-24" });
+  await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  assert.ok((seen.countValues[0] ?? []).includes("2026-09-24"));
+  const [write] = seen.updates;
+  assert.ok(write);
+  assert.deepEqual(write.data.slotDate, new Date("2026-09-24T00:00:00.000Z"));
+  const clock = seen.sql.find((sql) => sql.includes("to_char(t, 'YYYY-MM-DD')"));
+  assert.ok(clock, "the day is formatted in SQL, from the same evaluation as the instant");
 });
 
 test("renewing a slot the post already holds is not a new spend", async () => {

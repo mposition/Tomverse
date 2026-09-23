@@ -2549,3 +2549,34 @@ test("a second post on a one-a-day channel is refused the same day", async () =>
   );
   assert.deepEqual(second, { claimed: false, reason: "daily_cap_reached" });
 });
+
+test("a claim token and its lease are set together or not at all", async () => {
+  // A row holding a token with no lease is claimed by nobody and reclaimable
+  // by nobody, so it would never go out and nothing would say why. The store
+  // never writes one; the constraint is there for the writer that someday
+  // does, so it fails at the write rather than as a post that quietly stops.
+  const { postId } = await accountWithDuePost();
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: "orphan", leaseUntil: null },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: null, leaseUntil: new Date() },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  // Both, or neither, is fine.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: "held", leaseUntil: new Date(Date.now() + 60_000) },
+  });
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: null, leaseUntil: null },
+  });
+});
