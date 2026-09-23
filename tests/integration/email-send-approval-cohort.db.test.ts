@@ -82,6 +82,30 @@ const policyVersionId = async () => {
   return created.id;
 };
 
+/**
+ * Give an account a self-declared country.
+ *
+ * The override sends only under a settled country with a reviewed profile, so
+ * a fixture account with no country is one the override would never mail --
+ * and the notice is correctly offered to it. The cohort cases below need an
+ * account the override *would* mail, which is what this makes.
+ */
+const settleCountry = (userId: string, country: string) =>
+  prisma.userSettings.upsert({
+    where: { userId },
+    update: {
+      country,
+      countrySource: "self_declared",
+      countryUpdatedAt: new Date(),
+    },
+    create: {
+      userId,
+      country,
+      countrySource: "self_declared",
+      countryUpdatedAt: new Date(),
+    },
+  });
+
 /** The scope a send is judged under, which every standing query must carry. */
 const scopeFor = async () => ({
   purpose: "product_updates",
@@ -930,6 +954,7 @@ test("an account in a sealed cohort is not offered the notice", async () => {
   // accounts out of the notice, because its opening sentence would be false
   // about exactly them.
   const user = await createUser();
+  await settleCountry(user.id, "AU");
   assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
     offered: true,
     purposes: noticePurposes(),
@@ -951,6 +976,7 @@ test("changing address puts the notice back, because the override stopped", asyn
   // the only way back. Section 5.4's consent route closed for exactly the
   // person the override had stopped covering.
   const user = await createUser();
+  await settleCountry(user.id, "AU");
   await sealFor([user]);
   assert.equal((await noticeStateForUser({ userId: user.id })).offered, false);
 
@@ -975,6 +1001,7 @@ test("an approval scoped to one purpose still hides the notice", async () => {
   // remains -- section 5.6 rule 4's path -- and showing a promise we have
   // already broken is worse than not asking here.
   const user = await createUser();
+  await settleCountry(user.id, "AU");
   await sealRiskAcceptedApproval({
     approvedById: user.id,
     approvedByEmail: user.email!,
@@ -992,11 +1019,54 @@ test("an approval scoped to one purpose still hides the notice", async () => {
   });
 });
 
+test("a cohort member with no settled country is offered the notice", async () => {
+  // In the cohort, never mailed -- the override has no country to send under
+  // -- and the wording is true of them. Hiding the notice left no basis, no
+  // route to one, and no mail.
+  const user = await createUser();
+  await sealFor([user]);
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
+test("a cohort member in a country with no reviewed profile is offered the notice", async () => {
+  // Japan resolves at high confidence with no reviewed profile, so the
+  // override's `country_undetermined` stops the send. The preference centre
+  // also refuses Japan, so this notice is the only route there is.
+  const user = await createUser();
+  await settleCountry(user.id, "JP");
+  await sealFor([user]);
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
+test("a render cannot be recorded for somebody the override mails", async () => {
+  // A route that asks `noticeStateForUser()` first never tries this. The
+  // writer refuses anyway, because the row would be permanent evidence that we
+  // showed a promise we had already broken.
+  const user = await createUser();
+  await settleCountry(user.id, "AU");
+  await sealFor([user]);
+  await assert.rejects(
+    recordNoticeShown(noticeInput(user)),
+    /wording would be false for it/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
 test("withdrawing the approval puts the notice back", async () => {
   // A withdrawn approval leaves those accounts with no basis at all, which is
   // precisely who this notice exists for. Scoping the refusal to a sealed and
   // unwithdrawn approval is what makes that work without a second decision.
   const user = await createUser();
+  await settleCountry(user.id, "AU");
   const approval = await sealFor([user]);
   assert.equal((await noticeStateForUser({ userId: user.id })).offered, false);
 

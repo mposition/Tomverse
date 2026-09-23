@@ -5,6 +5,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
 import { cohortStanding } from "@/lib/emailSendApprovalCohort";
+import { overrideBlockers } from "@/lib/emailSendApprovalCohortCore";
+import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import {
   normalizeCountry,
   profileForCountry,
@@ -53,9 +55,16 @@ import {
  * ever made to people it is true of. The wording, and the record of this
  * decision beside it, arrive with S2.
  *
- * That refusal is scoped to a **sealed and unwithdrawn** approval. Withdrawing
- * one puts those accounts back to having no basis at all, which is precisely
- * who this notice exists for.
+ * That refusal follows whether the override would actually **send**, not
+ * whether the account is merely in the cohort -- see `overrideWouldSend()`.
+ * Withdrawing an approval, changing address, or having no settled country all
+ * stop the override, and each puts the notice back.
+ *
+ * The purposes an approval does not cover are left without this route, and
+ * the preference centre is not a full substitute: it refuses marketing for
+ * countries outside the ten it supports (`COUNTRY_UNSUPPORTED`). That cost
+ * is the one decision B accepted, and it is stated here rather than implied
+ * away.
  *
  * ## What is deliberately missing
  *
@@ -67,10 +76,11 @@ import {
  *
  * ## The country is reported, not derived -- and there may be two of them
  *
- * This function does not ask `jurisdictionForUser()` anything. The caller
- * passes the candidates it actually applied: for each one the country, the
- * signal it came from, the version of the rule whose device was rendered, and
- * the hash of that device's words.
+ * The **recorded** jurisdiction is never derived here. The caller passes the
+ * candidates it actually applied: for each one the country, the signal it came
+ * from, the version of the rule whose device was rendered, and the hash of that
+ * device's words. (`overrideWouldSend()` does ask `jurisdictionForUser()`,
+ * but only whether mail would go out, and nothing it learns is written.)
  *
  * A list rather than a single country, because section 5.3 says an uncertain
  * estimate keeps both candidates and evaluates both -- a person who might be
@@ -105,6 +115,96 @@ import {
  * all accepted, stored raw, and compared against later with `===`.
  */
 
+/**
+ * Whether a `risk_accepted` override would actually send marketing to this
+ * address, for at least one purpose the notice asks about.
+ *
+ * Decision B hides the notice from exactly these people, because its wording
+ * promises we have not sent and will not unless asked. Two earlier versions
+ * got the boundary wrong, in opposite directions, and both matter:
+ *
+ * - "is there a member row" was wider than the send, so a member who changed
+ *   address fell out of the override and was still hidden from the notice.
+ *   Membership is now asked the send's way, through `cohortStanding()`.
+ * - "is the member in scope" is still wider than "is mail going out". The
+ *   override does not send when `overrideBlockers()` objects, and the one
+ *   blocker the notice cannot already see is an undetermined country: a
+ *   member in Japan, or with no country at all, is in the cohort, is never
+ *   mailed, and -- outside the ten countries the preference centre accepts --
+ *   is refused there with `COUNTRY_UNSUPPORTED`. Hiding the notice from them
+ *   left no basis, no route to one and no mail, and the wording was true of
+ *   them all along.
+ *
+ * The recipient's own decisions (objected, suppressed, withdrawn) are passed
+ * as false because the offer answers for them earlier and they cannot change
+ * this result. Obligation status is assumed decided: it is the send's gate
+ * (S9), it is not knowable here, and the two mistakes are not symmetrical --
+ * hiding the notice wrongly writes nothing and is undone the moment the
+ * state behind it changes, while showing it wrongly writes a permanent
+ * `copyHash` of a promise we have broken.
+ *
+ * `jurisdictionForUser()` reads on the global client. That is a read in a
+ * different snapshot from a caller's transaction, not a write that escapes
+ * it, and it is the one resolver the send also uses.
+ */
+const overrideWouldSend = async (input: {
+  db: Prisma.TransactionClient | typeof prisma;
+  userId: string;
+  emailAddress: string;
+  purposes: readonly string[];
+  client?: Prisma.TransactionClient;
+}): Promise<boolean> => {
+  const activePolicyVersion = await input.db.emailPolicyVersion.findFirst({
+    where: { status: "active" },
+    select: { id: true },
+  });
+  if (!activePolicyVersion) return false;
+
+  const memberships = await input.db.emailSendApprovalMember.findMany({
+    where: {
+      userId: input.userId,
+      approval: {
+        approvalType: "risk_accepted",
+        sealedAt: { not: null },
+        revocations: { none: {} },
+      },
+    },
+    select: { approvalId: true },
+  });
+  if (memberships.length === 0) return false;
+
+  const jurisdiction = await jurisdictionForUser({ userId: input.userId });
+  const blockers = overrideBlockers({
+    hasObjected: false,
+    consentWithdrawn: false,
+    suppressedForPurpose: false,
+    suppressedForClassification: false,
+    suppressedGlobally: false,
+    // Below high confidence the approved contract holds marketing (sections
+    // 6.2 and 6.3), so the override has no country to send under.
+    country: jurisdiction.confidence === "high" ? jurisdiction.countryCode : "ZZ",
+    obligationsDecided: true,
+  });
+  if (blockers.length > 0) return false;
+
+  for (const { approvalId } of memberships) {
+    for (const purpose of input.purposes) {
+      const standing = await cohortStanding({
+        approvalId,
+        userId: input.userId,
+        deliveryEmailAddress: input.emailAddress,
+        purpose,
+        policyVersionId: activePolicyVersion.id,
+        ...(input.client ? { client: input.client } : {}),
+      });
+      // Any purpose. One going out under the override already makes the
+      // wording false for this person.
+      if (standing.inCohort) return true;
+    }
+  }
+  return false;
+};
+
 /** What a caller needs before it can decide whether to render anything. */
 export const noticeStateForUser = async (input: {
   userId: string;
@@ -130,18 +230,6 @@ export const noticeStateForUser = async (input: {
   }
 
   const purposes = noticePurposes();
-
-  // The active policy version, read where the caller is reading.
-  //
-  // `ensureBootstrapPolicyVersion()` writes on the global client, so calling
-  // it from inside a caller's transaction would activate a version that
-  // survives their rollback, and would not see a version they had just
-  // inserted. Here the read is only a read: if no version is active there is
-  // no approval in scope either, and the answer is the same as a mismatch.
-  const activePolicyVersion = await db.emailPolicyVersion.findFirst({
-    where: { status: "active" },
-    select: { id: true },
-  });
 
   // The three states are read separately because they are three facts. An
   // account can have been shown the notice, not consented and not objected,
@@ -197,66 +285,15 @@ export const noticeStateForUser = async (input: {
         })
       )
     ),
-    // Whether an approval actually covers this person, asked the way a send
-    // asks it.
-    //
-    // Not "is there a member row". That was the first version and it was
-    // wider than the thing it was standing in for: the send also requires the
-    // address digests to match, the purpose to be in scope, and the policy
-    // version to agree (`cohortStanding()`). So somebody in the cohort who
-    // changed their address fell out of the override -- no basis on the new
-    // mailbox -- while the notice went on hiding from them, on every sign-in,
-    // for ever. The only way back was to withdraw the whole approval. Section
-    // 5.4's consent route closed for exactly the person the override had
-    // stopped covering.
-    //
-    // Asking `cohortStanding()` means there is one definition of "covered"
-    // rather than two that drift. The current address stands in for the
-    // delivery address because no delivery exists yet, which is the same
-    // comparison the send makes at enqueue.
-    db.emailSendApprovalMember
-      .findMany({
-        where: {
-          userId: input.userId,
-          approval: {
-            approvalType: "risk_accepted",
-            sealedAt: { not: null },
-            revocations: { none: {} },
-          },
-        },
-        select: { approvalId: true },
-      })
-      .then(async (memberships) => {
-        if (!activePolicyVersion) return false;
-        for (const { approvalId } of memberships) {
-          // **Any** purpose, not all of them.
-          //
-          // This was `every` and it had the rule backwards. The wording says
-          // we have not sent product news and will not unless asked, so one
-          // purpose going out under an override makes that sentence false for
-          // that person -- and decision B is that the sentence is only shown
-          // to people it is true of. Requiring an approval to cover all three
-          // showed the notice to somebody already receiving newsletters under
-          // one, which is exactly the contradiction B was chosen to avoid. It
-          // also matches how a send asks: `approvalScopeRefusal()` wants one
-          // approval covering the purpose in hand, not one covering every
-          // purpose.
-          const covers = await Promise.all(
-            purposes.map((purpose) =>
-              cohortStanding({
-                approvalId,
-                userId: input.userId,
-                deliveryEmailAddress: emailAddress,
-                purpose,
-                policyVersionId: activePolicyVersion.id,
-                ...(input.client ? { client: input.client } : {}),
-              })
-            )
-          );
-          if (covers.some((standing) => standing.inCohort)) return true;
-        }
-        return false;
-      }),
+    // Whether the override would actually mail this person. See
+    // `overrideWouldSend()` for why that is narrower than membership.
+    overrideWouldSend({
+      db,
+      userId: input.userId,
+      emailAddress,
+      purposes,
+      ...(input.client ? { client: input.client } : {}),
+    }),
   ]);
 
   return inProductNoticeOffer({
@@ -594,6 +631,30 @@ const recordNoticeEvent = async (
   };
 
   const existing = await db.emailPermissionEvent.findUnique({ where });
+
+  // A render recorded for somebody the override mails is permanent evidence
+  // that we showed them a promise we had already broken. A route that asks
+  // `noticeStateForUser()` first will never try; this is for the one that
+  // does not, because the row it would write cannot be taken back.
+  //
+  // After the idempotency read, so a retry of a render that was legitimately
+  // recorded before an approval existed still returns its row.
+  if (!existing && action === "shown") {
+    if (
+      await overrideWouldSend({
+        db,
+        userId: input.userId,
+        emailAddress,
+        purposes: noticePurposes(),
+        ...(input.client ? { client: input.client } : {}),
+      })
+    ) {
+      throw new Error(
+        "This account is mailed under a risk_accepted approval, so the notice's wording would be false for it and cannot be recorded as shown."
+      );
+    }
+  }
+
   if (existing) {
     // The same key has to mean the same fact.
     //
