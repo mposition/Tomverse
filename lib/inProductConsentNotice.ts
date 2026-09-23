@@ -130,7 +130,18 @@ export const noticeStateForUser = async (input: {
   }
 
   const purposes = noticePurposes();
-  const policyVersionId = await ensureBootstrapPolicyVersion();
+
+  // The active policy version, read where the caller is reading.
+  //
+  // `ensureBootstrapPolicyVersion()` writes on the global client, so calling
+  // it from inside a caller's transaction would activate a version that
+  // survives their rollback, and would not see a version they had just
+  // inserted. Here the read is only a read: if no version is active there is
+  // no approval in scope either, and the answer is the same as a mismatch.
+  const activePolicyVersion = await db.emailPolicyVersion.findFirst({
+    where: { status: "active" },
+    select: { id: true },
+  });
 
   // The three states are read separately because they are three facts. An
   // account can have been shown the notice, not consented and not objected,
@@ -216,10 +227,20 @@ export const noticeStateForUser = async (input: {
         select: { approvalId: true },
       })
       .then(async (memberships) => {
+        if (!activePolicyVersion) return false;
         for (const { approvalId } of memberships) {
-          // Every purpose the notice asks about. An approval scoped to one of
-          // them leaves the others without a basis, and the notice is how
-          // somebody grants one.
+          // **Any** purpose, not all of them.
+          //
+          // This was `every` and it had the rule backwards. The wording says
+          // we have not sent product news and will not unless asked, so one
+          // purpose going out under an override makes that sentence false for
+          // that person -- and decision B is that the sentence is only shown
+          // to people it is true of. Requiring an approval to cover all three
+          // showed the notice to somebody already receiving newsletters under
+          // one, which is exactly the contradiction B was chosen to avoid. It
+          // also matches how a send asks: `approvalScopeRefusal()` wants one
+          // approval covering the purpose in hand, not one covering every
+          // purpose.
           const covers = await Promise.all(
             purposes.map((purpose) =>
               cohortStanding({
@@ -227,12 +248,12 @@ export const noticeStateForUser = async (input: {
                 userId: input.userId,
                 deliveryEmailAddress: emailAddress,
                 purpose,
-                policyVersionId,
+                policyVersionId: activePolicyVersion.id,
                 ...(input.client ? { client: input.client } : {}),
               })
             )
           );
-          if (covers.every((standing) => standing.inCohort)) return true;
+          if (covers.some((standing) => standing.inCohort)) return true;
         }
         return false;
       }),
@@ -590,7 +611,27 @@ const recordNoticeEvent = async (
     return sameFactOrThrow(existing);
   }
 
-  const policyVersionId = await ensureBootstrapPolicyVersion();
+  // The active policy version, with the same care as the read path.
+  //
+  // `ensureBootstrapPolicyVersion()` writes on the global client, so calling
+  // it from inside a caller's transaction activates a version that survives
+  // their rollback. Outside one it is the right call: a fresh environment has
+  // to get its first version from somewhere. Inside one this refuses instead,
+  // because a ledger row pinned to a version that exists only because we were
+  // asked to write the row is not evidence of the policy that applied.
+  const policyVersionId = input.client
+    ? (
+        await input.client.emailPolicyVersion.findFirst({
+          where: { status: "active" },
+          select: { id: true },
+        })
+      )?.id
+    : await ensureBootstrapPolicyVersion();
+  if (!policyVersionId) {
+    throw new Error(
+      "No email policy version is active, so an in-product notice event has no policy to record itself under."
+    );
+  }
 
   try {
     return await db.emailPermissionEvent.create({

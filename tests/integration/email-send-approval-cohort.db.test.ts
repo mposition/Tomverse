@@ -49,14 +49,33 @@ const createUser = (signupAt: Date = new Date(approvedAt.getTime() - 86_400_000)
     },
   });
 
+/**
+ * The **active** policy version, which is the one a verdict compares against.
+ *
+ * It used to be the earliest row by `createdAt`, whatever its status, and that
+ * quietly broke three cases. The runner shares one database: an earlier suite
+ * truncates `EmailPolicyVersion`, the permission-ledger suite then creates a
+ * **draft** and leaves it, and this file sealed its approvals against that
+ * draft while `noticeStateForUser()` read the active bootstrap version. The
+ * two disagreed, `approvalScopeRefusal()` answered
+ * `approval_policy_version_mismatch`, and every "the cohort is not offered the
+ * notice" assertion saw `offered: true`.
+ *
+ * Section 7.6 is why the comparison exists -- an approval given under an
+ * earlier policy version does not carry forward -- so the fixture has to seal
+ * under the version the verdict will use, the way an operator would.
+ */
 const policyVersionId = async () => {
-  const existing = await prisma.emailPolicyVersion.findFirst({
-    orderBy: { createdAt: "asc" },
+  const active = await prisma.emailPolicyVersion.findFirst({
+    where: { status: "active" },
+    select: { id: true },
   });
-  if (existing) return existing.id;
+  if (active) return active.id;
   const created = await prisma.emailPolicyVersion.create({
     data: {
       version: `cohort-test-${randomUUID()}`,
+      status: "active",
+      activatedAt: new Date(),
       changeSummary: "Created by the send approval cohort integration test.",
     },
   });
@@ -946,10 +965,15 @@ test("changing address puts the notice back, because the override stopped", asyn
   });
 });
 
-test("an approval scoped to one purpose does not hide the notice", async () => {
-  // The notice asks about every consent purpose. An approval covering one of
-  // them leaves the others without a basis, and the notice is how somebody
-  // grants one.
+test("an approval scoped to one purpose still hides the notice", async () => {
+  // The wording says we have not sent product news and will not unless asked.
+  // One purpose going out under an override makes that false for this person,
+  // and decision B is that the sentence is only shown to people it is true of.
+  //
+  // The cost is real and was weighed: the purposes that approval does not
+  // cover have neither a basis nor this route to one. The preference centre
+  // remains -- section 5.6 rule 4's path -- and showing a promise we have
+  // already broken is worse than not asking here.
   const user = await createUser();
   await sealRiskAcceptedApproval({
     approvedById: user.id,
@@ -963,8 +987,8 @@ test("an approval scoped to one purpose does not hide the notice", async () => {
   });
 
   assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
-    offered: true,
-    purposes: noticePurposes(),
+    offered: false,
+    refusal: "covered_by_approval",
   });
 });
 
