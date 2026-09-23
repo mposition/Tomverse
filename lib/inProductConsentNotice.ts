@@ -17,6 +17,7 @@ import {
   EMAIL_ADDRESS_NORMALIZATION_VERSION,
   normalizeEmailAddress,
 } from "@/lib/emailSuppressionCore";
+import { consentGateVerdict } from "@/lib/emailPreferenceCore";
 import {
   DETERMINATIVE_JURISDICTION_SOURCES,
   NOTICE_CANDIDATE_SIGNALS,
@@ -195,28 +196,34 @@ const overrideWouldSend = async (input: {
   });
   if (!marketingJurisdictionVerdict(jurisdiction).allowed) return false;
 
-  // A withdrawal is one of the things an override cannot cross (section 5.6's
-  // second table), per purpose. The offer does not see it -- it reads a
-  // latest `withdrawn` as "not consented yet" and asks again, which is right
-  // -- so without this check a member who had withdrawn one purpose was hidden
-  // from the notice for it while the override refused to send it. Never
-  // asked, never mailed. Today the preference centre also writes a purpose
-  // suppression when somebody turns a purpose off, which the offer does see;
-  // a withdrawal on its own is the state section 5.6 lists separately, and
-  // this is what handles it.
+  // Two things an override cannot cross, read from where the send reads them.
+  //
+  // A **withdrawal**, per purpose (section 5.6's second table). The send does
+  // not decide consent from the latest `ConsentRecord` action -- it asks
+  // `consentGateVerdict()` about the `EmailPreference` row -- and an earlier
+  // version here read the ledger instead. The two disagree: a
+  // `confirmation_notice_sent` row is live consent to the preference and was
+  // "not a grant" to the ledger query. For the override the distinction that
+  // matters is between *no row*, which is the absence of a basis it exists to
+  // cross, and *a row switched off*, which is a withdrawal it may not.
+  //
+  // And **the promise itself**. A `notice_shown` means this person has been
+  // told we will not send unless asked; `overrideBlockers()` refuses the
+  // override from then on (`promised_no_unrequested_send`), and S9 inherits
+  // that by calling it.
+  const [preferences, promised] = await Promise.all([
+    input.db.emailPreference.findMany({
+      where: { userId: input.userId, purpose: { in: [...input.purposes] } },
+      select: { purpose: true, enabled: true },
+    }),
+    input.db.emailPermissionEvent.findFirst({
+      where: { userId: input.userId, kind: "notice_shown" },
+      select: { id: true },
+    }),
+  ]);
+  if (promised) return false;
   const withdrawn = new Set(
-    (
-      await input.db.$queryRaw<{ purpose: string }[]>`
-        SELECT purpose FROM (
-          SELECT DISTINCT ON (purpose) purpose, action
-          FROM "ConsentRecord"
-          WHERE "emailAddress" = ${input.emailAddress}
-            AND purpose = ANY(${[...input.purposes]}::text[])
-          ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
-        ) latest
-        WHERE action = 'withdrawn'
-      `
-    ).map((row) => row.purpose)
+    preferences.filter((row) => !row.enabled).map((row) => row.purpose)
   );
 
   for (const { approvalId } of memberships) {
@@ -268,30 +275,22 @@ export const noticeStateForUser = async (input: {
   // account can have been shown the notice, not consented and not objected,
   // and that combination is the ordinary one -- somebody who closed it.
   const [consent, shown, objected, suppressions, covered] = await Promise.all([
-    // The newest row per purpose, and only then what it says.
+    // Whether consent is live, asked the way the send asks it.
     //
-    // `ConsentRecord` is append-only, so somebody who granted and then
-    // withdrew has both rows -- and asking for any `granted` row found the
-    // first one and called them a consenting subscriber for ever. They would
-    // never be offered the notice again, with the reason recorded as
-    // `already_consented`, and the in-product notice is the only place an
-    // existing account can actually give consent (section 5.4). Any later
-    // reader that treats that refusal as express consent sends marketing to an
-    // address that withdrew.
-    //
-    // `lib/marketingReach.ts` counts the same table the same way, and says so
-    // for the same reason.
-    db.$queryRaw<{ purpose: string }[]>`
-      SELECT purpose FROM (
-        SELECT DISTINCT ON (purpose) purpose, action
-        FROM "ConsentRecord"
-        WHERE "emailAddress" = ${emailAddress}
-          AND purpose = ANY(${[...purposes]}::text[])
-        ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
-      ) latest
-      WHERE action IN ('granted', 'reconfirmed')
-      LIMIT 1
-    `,
+    // The send decides with `consentGateVerdict()` over the `EmailPreference`
+    // row -- enabled and confirmed -- not from the ledger. Two earlier versions
+    // here read `ConsentRecord` instead: the first counted any `granted` row,
+    // so a withdrawal was invisible; the second took the latest action and
+    // counted only `granted` and `reconfirmed`, so the two-year
+    // `confirmation_notice_sent` -- which the approved contract says leaves
+    // consent in place and marketing flowing -- read as "not consented". That
+    // account would have been offered the notice, and its promise that we will
+    // not send unless asked recorded against somebody we were already mailing
+    // on their original grant.
+    db.emailPreference.findMany({
+      where: { userId: input.userId, purpose: { in: [...purposes] } },
+      select: { purpose: true, enabled: true, confirmedAt: true },
+    }),
     db.emailPermissionEvent.findFirst({
       where: { userId: input.userId, kind: "notice_shown" },
       select: { id: true },
@@ -331,7 +330,16 @@ export const noticeStateForUser = async (input: {
 
   return inProductNoticeOffer({
     emailAddress,
-    hasExpressConsent: consent.length > 0,
+    hasExpressConsent: consent.some(
+      (row) =>
+        consentGateVerdict({
+          classification: "marketing",
+          purpose: row.purpose,
+          hasAccount: true,
+          storedEnabled: row.enabled,
+          storedConfirmedAt: row.confirmedAt,
+        }).allowed
+    ),
     noticeAlreadyShown: shown !== null,
     // Keyed by address rather than by account: a refusal follows the mailbox,
     // for the same reason a suppression does.

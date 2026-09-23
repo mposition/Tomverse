@@ -1104,19 +1104,12 @@ test("a member who withdrew every purpose is offered the notice", async () => {
   await sealFor([user]);
   const policyId = await policyVersionId();
 
+  // A withdrawal is a preference switched off. The send reads
+  // `EmailPreference`, not the ledger, and so does this.
+  void policyId;
   for (const purpose of noticePurposes()) {
-    await prisma.consentRecord.create({
-      data: {
-        userId: user.id,
-        emailAddress: user.email!,
-        purpose,
-        action: "withdrawn",
-        occurredAt: new Date(),
-        jurisdiction: "AU",
-        jurisdictionSource: "self_declared",
-        policyVersionId: policyId,
-        capturedVia: "preference_center",
-      },
+    await prisma.emailPreference.create({
+      data: { userId: user.id, purpose, enabled: false, source: "preference_center" },
     });
   }
 
@@ -1168,43 +1161,75 @@ test("withdrawing the approval puts the notice back", async () => {
   });
 });
 
-test("a withdrawn consent does not count as consent", async () => {
-  // `ConsentRecord` is append-only, so asking for any `granted` row found the
-  // first one and called somebody who had since withdrawn a consenting
-  // subscriber for ever -- never offered the notice again, and recorded as
-  // `already_consented`. The in-product notice is the only place an existing
-  // account can actually give consent.
+test("consent is live exactly when the send would say so", async () => {
+  // The send decides consent with `consentGateVerdict()` over the
+  // `EmailPreference` row -- enabled and confirmed. Reading the ledger instead
+  // got it wrong twice: a withdrawal was invisible, and then the two-year
+  // `confirmation_notice_sent` -- which leaves consent in place -- read as
+  // "not consented", so the notice would have promised not to send to
+  // somebody we were already mailing.
   const user = await createUser();
-  const policyId = await policyVersionId();
+  const purpose = noticePurposes()[0]!;
 
-  const before = await noticeStateForUser({ userId: user.id });
-  assert.deepEqual(before, { offered: true, purposes: noticePurposes() });
-
-  const consentRow = (action: string, occurredAt: Date) => ({
-    userId: user.id,
-    emailAddress: user.email!,
-    purpose: noticePurposes()[0]!,
-    action,
-    occurredAt,
-    jurisdiction: "AU",
-    jurisdictionSource: "self_declared",
-    policyVersionId: policyId,
-    capturedVia: "preference_center",
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
   });
 
-  await prisma.consentRecord.create({
-    data: consentRow("granted", new Date("2026-09-01T00:00:00.000Z")),
+  // Switched on but never confirmed: not consent, so still asked.
+  await prisma.emailPreference.create({
+    data: { userId: user.id, purpose, enabled: true, source: "preference_center" },
+  });
+  assert.equal((await noticeStateForUser({ userId: user.id })).offered, true);
+
+  // Confirmed: consent, whatever the ledger's latest action happens to be.
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose } },
+    data: { confirmedAt: new Date() },
   });
   assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
     offered: false,
     refusal: "already_consented",
   });
 
-  await prisma.consentRecord.create({
-    data: consentRow("withdrawn", new Date("2026-09-02T00:00:00.000Z")),
+  // Switched off: a withdrawal, so asked again.
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose } },
+    data: { enabled: false },
   });
-  const after = await noticeStateForUser({ userId: user.id });
-  assert.deepEqual(after, { offered: true, purposes: noticePurposes() });
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
+test("an address round trip cannot turn a kept promise into a broken one", async () => {
+  // Moving off the approved address takes the override away, the notice is
+  // shown and recorded; moving back makes the three digests match again. The
+  // promise still stands, so the override must not.
+  const user = await createUser();
+  await settleCountry(user.id, "AU");
+  await sealFor([user]);
+  const approvedAddress = user.email!;
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { email: `moved-${randomUUID()}@example.test` },
+  });
+  const moved = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+  await recordNoticeShown({ ...noticeInput(user), emailAddress: moved.email! });
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { email: approvedAddress },
+  });
+
+  // Not offered again -- it was already shown -- and the reason given is the
+  // render, not the cohort, because the override no longer applies to them.
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: false,
+    refusal: "already_shown",
+  });
 });
 
 test("two inferences that agree still leave the country undetermined", async () => {

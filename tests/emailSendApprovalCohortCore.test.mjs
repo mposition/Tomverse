@@ -24,6 +24,7 @@ const clear = {
   suppressedGlobally: false,
   country: "AU",
   obligationsDecided: true,
+  shownNoUnrequestedSendPromise: false,
 };
 
 test("an override crosses an absent basis and nothing else", () => {
@@ -39,6 +40,7 @@ test("each row of section 5.6's right column blocks on its own", () => {
     [{ suppressedGlobally: true }, "suppressed_globally"],
     [{ country: "ZZ" }, "country_undetermined"],
     [{ obligationsDecided: false }, "obligation_undecided"],
+    [{ shownNoUnrequestedSendPromise: true }, "promised_no_unrequested_send"],
   ];
   for (const [patch, expected] of cases) {
     assert.deepEqual(overrideBlockers({ ...clear, ...patch }), [expected]);
@@ -278,3 +280,14 @@ test("a rule change is never reported as an address the recipient changed", () =
 // checked those plus the type, the policy version and the purpose -- so having
 // both meant the send used the one that skipped three of the five.
 // `tests/emailPermissionLedgerCore.test.mjs` covers the surviving function.
+
+test("once the notice's promise is made, no override applies", () => {
+  // A cohort member moves off the approved address, falls out of the
+  // override, is shown the notice and dismisses it -- then moves back, and the
+  // three digests match again. Nothing about the membership has changed; the
+  // promise has, and `notice_shown` is written once and cannot be withdrawn.
+  assert.deepEqual(
+    overrideBlockers({ ...clear, shownNoUnrequestedSendPromise: true }),
+    ["promised_no_unrequested_send"]
+  );
+});

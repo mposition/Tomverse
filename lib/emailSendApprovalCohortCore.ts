@@ -83,6 +83,16 @@ export type ApprovalCohortMember = NonNullable<CohortQuery["member"]>;
  * A rule with an obligation whose status nobody has decided (section 7.8) is
  * the same shape of gap, one level down.
  *
+ * And a person who has been shown the in-product notice has been told, in
+ * writing, that we have not sent product news and will not unless asked. From
+ * then on the override cannot apply to them, whatever else is true -- because
+ * `notice_shown` is written once per account and cannot be withdrawn, and an
+ * override after it turns that row into a permanent record of a broken
+ * promise. The case that makes this more than theoretical: a cohort member
+ * moves off the approved address, falls out of the override, is shown the
+ * notice and dismisses it; then moves back, and the three digests match again.
+ * Nothing about the membership has changed. The promise has.
+ *
  * The kill switch, the send flag and readiness are not here: they are not
  * properties of this recipient, they are checked before any of this, and
  * folding them in would let a reader think an approval could be weighed
@@ -95,7 +105,8 @@ export type OverrideBlocker =
   | "suppressed_classification"
   | "suppressed_globally"
   | "country_undetermined"
-  | "obligation_undecided";
+  | "obligation_undecided"
+  | "promised_no_unrequested_send";
 
 export type OverrideInput = {
   hasObjected: boolean;
@@ -106,6 +117,8 @@ export type OverrideInput = {
   suppressedGlobally: boolean;
   country: string;
   obligationsDecided: boolean;
+  /** A `notice_shown` exists for this account (the in-product notice). */
+  shownNoUnrequestedSendPromise: boolean;
 };
 
 /**
@@ -129,6 +142,9 @@ export const overrideBlockers = (input: OverrideInput): OverrideBlocker[] => {
     blockers.push("country_undetermined");
   }
   if (!input.obligationsDecided) blockers.push("obligation_undecided");
+  if (input.shownNoUnrequestedSendPromise) {
+    blockers.push("promised_no_unrequested_send");
+  }
   return blockers;
 };
 
