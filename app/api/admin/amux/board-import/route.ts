@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import {
   assertRecentAdminAuthentication,
@@ -148,6 +149,8 @@ export async function POST(request: Request) {
     const applied = await applyBoardImport({ session: auth.session, request, approvalId });
     return NextResponse.json(applied, { headers: noStoreHeaders });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return withNoStore(approvalResponse);
     if (error instanceof BoardImportError && error.code === "outcome_unknown") {
       const markerId = error.approvalId ?? approvalId;
       if (markerId) {
