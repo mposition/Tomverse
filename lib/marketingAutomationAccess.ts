@@ -235,9 +235,29 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * Webhook admission reads none of it -- the pause reasons are not an input to
  * any webhook decision -- but the file is watched whole, so the digest moves
  * and the move is recorded here rather than absorbed.
+ *
+ * 2026-09-22: AMUX backlog default and source-provenance columns change only
+ * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
+ * admission decision; the whole-schema fingerprint moves by design.
+ *
+ * 2026-09-22: the catalog-import approval table is another `Amux*` model on
+ * the same watched schema. It does not change a marketing model, webhook
+ * writer, or admission decision. The digest moves because the schema file
+ * is watched as a whole.
+ *
+ * 2026-09-21, the permission ledger (S3): six more tables on the same watched
+ * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
+ * revocations, EmailPermissionDecision and its evidence. None is a marketing
+ * model, none changes the descriptor, the config snapshot or an admission
+ * decision, and nothing this pipeline stores or reads is different. The one
+ * shared edge is ConsentRecord, which gains a back-relation and no column.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side of
+ * the conflict -- the merged tree is the only one that will exist.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "9760b7a0b52335b50fc0c9b571ce5e0146d7f6a14ef039bbf6480ea76388b7dd";
+  "cd0abe25870db017baf9b7d1b995a1a04a4009b301ee8bb10b86652d0d2aaa40";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

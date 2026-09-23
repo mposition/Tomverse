@@ -1,0 +1,25 @@
+{
+  "version": "amux-worker-router-v1",
+  "cases": [
+    {
+      "name": "unknown_exhausted_idle_boundary_and_stopped_tie",
+      "task": { "task_kind": "feature", "complexity": 5, "risk": 1, "files_expected": 1 },
+      "candidates": [
+        { "worker": { "worker_name": "codex-b", "provider": "codex", "model": null, "routing_roles": ["feature"], "running": false, "status": "stopped", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": null, "quota_remaining": null, "expected_speed": null, "low_rework": null, "low_human_attention": null, "cost_efficiency": null, "provider_exhausted": false },
+        { "worker": { "worker_name": "codex-a", "provider": "codex", "model": null, "routing_roles": ["feature"], "running": false, "status": "stopped", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": null, "quota_remaining": null, "expected_speed": null, "low_rework": null, "low_human_attention": null, "cost_efficiency": null, "provider_exhausted": false },
+        { "worker": { "worker_name": "codex-exhausted", "provider": "codex", "model": null, "routing_roles": ["feature"], "running": false, "status": "stopped", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": null, "quota_remaining": 1, "expected_speed": null, "low_rework": null, "low_human_attention": null, "cost_efficiency": null, "provider_exhausted": true },
+        { "worker": { "worker_name": "codex-idle-unsafe", "provider": "codex", "model": null, "routing_roles": ["feature"], "running": true, "status": "idle", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": null, "quota_remaining": null, "expected_speed": null, "low_rework": null, "low_human_attention": null, "cost_efficiency": null, "provider_exhausted": false }
+      ],
+      "expected": { "preferred_worker": "codex-a", "selected_worker": "codex-a", "preferred_score": 0.6875, "selected_score": 0.65, "candidate_names": ["codex-a", "codex-b", "codex-exhausted", "codex-idle-unsafe"], "selected_eligible": [true, true, false, false] }
+    },
+    {
+      "name": "large_task_provider_role_and_observed_metrics",
+      "task": { "task_kind": "feature", "complexity": 8, "risk": 2, "files_expected": 20 },
+      "candidates": [
+        { "worker": { "worker_name": "claude-architect", "provider": "claude", "model": "opus", "routing_roles": ["architecture", "reasoning"], "running": false, "status": "stopped", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": 0.9, "quota_remaining": 0.2, "expected_speed": 0.4, "low_rework": 0.9, "low_human_attention": 0.8, "cost_efficiency": 0.2, "provider_exhausted": false },
+        { "worker": { "worker_name": "devin-multifile", "provider": "devin", "model": null, "routing_roles": ["multi_file", "long_running"], "running": false, "status": "stopped", "dispatch_ready": false, "archived": false, "paused": false, "isolated": false, "blocked": false }, "predicted_success": 0.8, "quota_remaining": 0.8, "expected_speed": 0.9, "low_rework": 0.7, "low_human_attention": 0.9, "cost_efficiency": 0.6, "provider_exhausted": false }
+      ],
+      "expected": { "preferred_worker": "devin-multifile", "selected_worker": "devin-multifile", "preferred_score": 0.840625, "selected_score": 0.8325, "candidate_names": ["claude-architect", "devin-multifile"], "selected_eligible": [true, true] }
+    }
+  ]
+}

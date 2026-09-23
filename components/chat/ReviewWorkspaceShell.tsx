@@ -50,6 +50,7 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
@@ -105,6 +106,7 @@ export async function ReviewWorkspaceShell({
   // below, so production cannot offer or call a Refiner yet.
   let promptRefinerAvailableToDeployment = false;
   let promptRefinerFixtureAdapterEnabled = false;
+  let promptRefinerFixtureModeRefreshEnabled = false;
   /*
     Whether the welcome screen offers the starter catalogue at all
     (docs/ui-contracts/chat-starter-catalog.md section 5).
@@ -206,6 +208,8 @@ export async function ReviewWorkspaceShell({
     // helper is still used so PROMPT_REFINER_KILL_SWITCH wins even in tests.
     promptRefinerFixtureAdapterEnabled =
       jar.get("__tomverse_e2e_prompt_refiner")?.value === "1";
+    promptRefinerFixtureModeRefreshEnabled =
+      jar.get("__tomverse_e2e_prompt_refiner_mode_refresh")?.value === "1";
     if (promptRefinerFixtureAdapterEnabled) {
       promptRefinerAvailableToDeployment = promptRefinerAvailable({
         storedFlagValue: "true",
@@ -247,6 +251,7 @@ export async function ReviewWorkspaceShell({
     available: promptRefinerAvailableToDeployment,
     adapterReady: promptRefinerFixtureAdapterEnabled,
   });
+  const promptRefinerMode = promptRefinerOffered ? "e2e_fixture" : "off";
 
   /*
     What the starter catalogue is allowed to promise on this request.
@@ -281,11 +286,14 @@ export async function ReviewWorkspaceShell({
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     >
       <HelpGuideAccessProvider enabledFlagKeys={helpGuideEnabledFlagKeys}>
+      {promptRefinerFixtureModeRefreshEnabled ? (
+        <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
+      ) : null}
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
-        promptRefinerMode={promptRefinerOffered ? "e2e_fixture" : "off"}
+        promptRefinerMode={promptRefinerMode}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This
