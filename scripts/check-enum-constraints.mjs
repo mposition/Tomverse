@@ -390,7 +390,7 @@ const REGISTRY = {
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
-      "The durable board lifecycle: todo, doing, review, done, blocked, cancelled. Tomverse has no generic work-item mutation input; the scheduler and execution boundary write the reachable transitions as literals inside revision-checked updates, while the database is the complete closed vocabulary.",
+      "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",
@@ -416,6 +416,13 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "AmuxExecutionToStatus in lib/amux/execution.ts types the four worker settlement destinations. Cancelled is a board lifecycle state rather than a worker-supplied settlement result, so it remains in the durable constraint but outside the route's union and zod input.",
+  },
+  AmuxBoardImportApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/boardImportCore.ts",
+    list: "BOARD_IMPORT_APPROVAL_STATUSES",
+    reason:
+      "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
   },
   AmuxWorkDelivery_status_check: {
     owner: "database",

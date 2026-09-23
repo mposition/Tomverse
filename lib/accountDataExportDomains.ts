@@ -308,6 +308,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
   },
   {
+    domain: "amuxBoardImportApproval",
+    publicName: "amux_board_import_approvals",
+    prismaModel: "AmuxBoardImportApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for a catalog import, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
     domain: "adminNote",
     publicName: "admin_notes",
     prismaModel: "AdminNote",
