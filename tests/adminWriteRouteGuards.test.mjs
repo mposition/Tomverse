@@ -120,7 +120,7 @@ const writeRoutes = routes.filter((route) =>
 const reachesCanonicalAmuxReviewAudit = (route) =>
   route.name === "amux/escalations/proposals/route.ts" &&
   /forwardAmuxAdminReviewCommand\s*\(\s*request,\s*\{\s*action:\s*"proposal"/.test(route.source) &&
-  amuxReviewProxy.includes('new URL("/api/internal/amux/review"') &&
+  /new URL\s*\(\s*"\/api\/internal\/amux\/review"/.test(amuxReviewProxy) &&
   amuxReviewInternalRoute.includes('action.action === "proposal"') &&
   amuxReviewInternalRoute.includes("createAmuxReviewProposal({") &&
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&

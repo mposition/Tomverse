@@ -319,3 +319,10 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 # point the commit will not be in develop history at all.
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:271
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
+
+# Commit 13b7d2f3 added a long synthetic AMUX sync-secret fixture to a DB
+# integration test. It was generated solely to satisfy the route's minimum
+# length guard and never authenticated any process. The current test now calls
+# makeAmuxSyncSecret(), so this pins only the immutable introducing commit and
+# does not allowlist a path, value shape, or future finding.
+13b7d2f35661cfdcdc8820d31759ee0df8566b78:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1897

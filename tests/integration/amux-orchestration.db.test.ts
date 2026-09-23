@@ -1894,7 +1894,7 @@ test("execution start atomically creates durable delivery and pull ack remain id
   const instanceId = randomUUID();
   const base = new Date();
 
-  const secret = "amux-delivery-test-secret-0123456789-abcdef";
+  const secret = makeAmuxSyncSecret();
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
@@ -2608,7 +2608,7 @@ test("server worker scorer independently reproduces routing weights and determin
 test("claim API persists authoritative routing when consistent client evidence drifts", async () => {
   const taskId = await createTodo("amux-authoritative-routing");
 
-  const secret = "amux-authoritative-routing-secret-0123456789";
+  const secret = makeAmuxSyncSecret();
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
 
