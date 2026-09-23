@@ -1,3 +1,4 @@
+import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 /**
@@ -18,6 +19,7 @@ import { en } from "./en";
  * in review rather than a key quietly going missing.
  */
 export const zh = {
+    emailConsent: consentCopyForLanguage("zh"),
     skipLink: {
         toMainContent: "跳到主要内容",
     },
