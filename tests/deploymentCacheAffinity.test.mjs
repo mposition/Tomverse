@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -316,15 +318,26 @@ test("nothing imports this module", () => {
     // That needs no new tie-break criterion, so the criteria-list test would
     // still pass and check:dark-tables does not see a pure function call.
     // An import is the one thing it cannot do without.
+    // `fileURLToPath`, not `new URL(...).pathname`. On Windows that pathname
+    // is `/C:/…` and stripping the leading slash happens to produce a usable
+    // path; on Linux it produces `home/runner/…`, a relative path that
+    // resolves against the working directory and does not exist. The test
+    // passed locally and could not run in CI.
+    //
+    // It also walked the whole repository rather than the four roots below,
+    // which were declared and never used.
+    const root = fileURLToPath(new URL("..", import.meta.url));
     const roots = ["app", "lib", "components", "scripts"];
     const walk = (directory) =>
         readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-            const path = `${directory}/${entry.name}`;
+            const path = join(directory, entry.name);
             if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];
             if (entry.isDirectory()) return walk(path);
             return /\.(ts|tsx|mjs|js)$/.test(entry.name) ? [path] : [];
         });
-    const importers = walk(new URL("..", import.meta.url).pathname.replace(/^\//, ""))
+    const importers = roots
+        .flatMap((directory) => walk(join(root, directory)))
+        .map((file) => file.split("\\").join("/"))
         .filter((file) => !file.endsWith("lib/deploymentCacheAffinity.ts"))
         .filter((file) =>
             /from\s+["'](@\/lib|\.\.?\/[\w./]*)\/?deploymentCacheAffinity["']/.test(
