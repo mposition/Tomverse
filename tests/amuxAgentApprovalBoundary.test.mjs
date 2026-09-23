@@ -20,5 +20,7 @@ test("human escalation resolution does not borrow the two-person admin approval"
   assert.doesNotMatch(route, /@\/lib\/amux\/approvals/);
   assert.match(route, /forwardAmuxAdminReviewCommand/);
   assert.match(proxy, /AMUX_AGENT_APPROVAL_UNAVAILABLE/);
+  assert.match(proxy, /amuxReviewPrivateProxyOrigin/);
+  assert.match(proxy, /new URL\(request\.url\)\.origin !== publicOrigin\.origin/);
   assert.match(internalRoute, /AMUX_AGENT_APPROVAL_UNAVAILABLE/);
 });

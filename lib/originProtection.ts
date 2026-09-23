@@ -44,6 +44,57 @@ const isLocalHost = (host: string) =>
   host === "[::1]" ||
   host.startsWith("[::1]:");
 
+export type AmuxReviewProxyEnvironment = {
+  TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?: string;
+  RAILWAY_PRIVATE_DOMAIN?: string;
+};
+
+const railwayPrivateDomain = (value: string | undefined) => {
+  const hostname = value?.trim().toLowerCase() ?? "";
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.railway\.internal$/.test(hostname))
+    return null;
+  return hostname;
+};
+
+/**
+ * The optional review proxy carries an administrator cookie and the AMUX sync
+ * credential, so its target is narrower than the application's normal host
+ * allowlist: it must be this exact Railway service, including an explicit
+ * listener port. Sibling services are not part of the trust boundary.
+ */
+export const amuxReviewPrivateProxyOrigin = (
+  env: AmuxReviewProxyEnvironment,
+): string | null => {
+  const raw = env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?.trim();
+  if (!raw) return null;
+
+  const expectedHostname = railwayPrivateDomain(env.RAILWAY_PRIVATE_DOMAIN);
+  if (!expectedHostname) return null;
+
+  try {
+    const url = new URL(raw);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.hostname.toLowerCase() !== expectedHostname ||
+      !url.port ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+export const isAllowedAmuxReviewPrivateHost = (hostHeader: string | null) => {
+  const origin = amuxReviewPrivateProxyOrigin(process.env);
+  const host = hostHeader?.trim().toLowerCase();
+  return Boolean(origin && host && new URL(origin).host.toLowerCase() === host);
+};
+
 export const getAllowedRequestHosts = () => {
   const hosts = new Set<string>([CANONICAL_HOST]);
   for (const origin of [
@@ -77,9 +128,7 @@ const safeEqual = (left: string, right: string) => {
   return diff === 0;
 };
 
-export const hasRequiredOriginSecret = (headers: Headers) => {
-  if (process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET !== "true") return true;
-
+export const hasValidOriginSecret = (headers: Headers) => {
   const expected = process.env.CLOUDFLARE_ORIGIN_SECRET;
   const provided = headers.get(ORIGIN_VERIFY_HEADER);
   return !!(
@@ -89,6 +138,10 @@ export const hasRequiredOriginSecret = (headers: Headers) => {
     safeEqual(provided, expected)
   );
 };
+
+export const hasRequiredOriginSecret = (headers: Headers) =>
+  process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET !== "true" ||
+  hasValidOriginSecret(headers);
 
 export const getPublicReportOrigin = () => {
   for (const value of [
