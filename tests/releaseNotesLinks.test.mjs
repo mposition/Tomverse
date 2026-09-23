@@ -15,7 +15,7 @@ import {
   releaseNotesLinkPath,
   releaseNotesLinkUrl,
   unservedReleaseNotesLinkIds,
-} from "../lib/releaseNotesLinks.ts";
+} from "../lib/productAnnouncementEmail.ts";
 import {
   MARKETING_APPROVED_LINKS,
   MARKETING_LINK_IDS,
