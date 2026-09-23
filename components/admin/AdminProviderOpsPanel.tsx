@@ -68,6 +68,7 @@ const providerLabel: Record<AiProvider, string> = {
   qwen: "Qwen",
   zhipu: "Zhipu",
   perplexity: "Perplexity",
+  deepinfra: "DeepInfra",
 };
 
 const dateLabel = (value: string | null) => {

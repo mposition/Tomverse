@@ -21,6 +21,9 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   qwen: defaultProfile("usage_based", "unknown"),
   zhipu: defaultProfile("usage_based", "prepaid"),
   perplexity: defaultProfile("usage_based", "prepaid"),
+  // Settlement is not established for the account yet; "unknown" rather than
+  // a guess, as for qwen.
+  deepinfra: defaultProfile("usage_based", "unknown"),
 };
 
 function defaultProfile(

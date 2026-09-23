@@ -52,6 +52,7 @@ const providerConsoleHref: Record<AiProvider, string> = {
   zhipu: "https://z.ai/manage-apikey/billing",
   perplexity:
     "https://console.perplexity.ai/group/36f95894-ee38-4751-b4a0-4365e41a3c31/billing",
+  deepinfra: "https://deepinfra.com/dash/billing",
 };
 
 const money = (microUsd: number) =>

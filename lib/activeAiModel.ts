@@ -60,5 +60,12 @@ export const getActiveAiModel = (model: AiModel) => {
       );
     case "zhipu":
       return createOpenAI(configuration).chat(model.apiModel);
+    case "deepinfra":
+      // An inference host for open-weight models (multi-provider routing
+      // ADR v2.1, provider pool). OpenAI-compatible, so the chat adapter; the
+      // generic adapter drops `reasoning_content`, as it does for the direct
+      // DeepSeek route. No catalogue model routes here yet: a hosted copy of
+      // a model is a ModelDeployment, not a new catalogue id.
+      return createOpenAI(configuration).chat(model.apiModel);
   }
 };

@@ -199,6 +199,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   qwen: "Qwen",
   zhipu: "Zhipu GLM",
   perplexity: "Perplexity",
+  deepinfra: "DeepInfra",
 };
 
 /**

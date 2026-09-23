@@ -279,6 +279,7 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
     unproven("qwen"),
     unproven("zhipu"),
     unproven("perplexity"),
+    unproven("deepinfra"),
 ];
 
 export const providerDataDestination = (

@@ -972,6 +972,99 @@ data-domain registry에 없었습니다. **dark라는 것은 면제 사유가 �
 규칙을 얼마나 조심스럽게 넓혀 왔는지 기록하고 있습니다. 그 틈은 누군가 볼
 가치가 있습니다.
 
+## 14.3 ADR 원문 재대조: 이 순서에 빠져 있던 것 (2026-09-23)
+
+§14의 12단계는 갭 분석의 권장 순서를 옮긴 것이고, **ADR v2.1 원문
+(커밋 `2621e051b`, `docs/policy/tomverse-multi-provider-routing-v2.1.md`)의 전 범위는
+아닙니다.** 원문을 다시 읽고 대조한 결과를 적습니다. 원문과 갭 분석은 그 커밋이 있는
+브랜치에만 있고 develop에는 들어오지 않았습니다. ADR의 상태도 여전히 "제안"입니다.
+
+### Provider Pool (원문 §1, §14)
+
+| 모델 계열 | Pool |
+|---|---|
+| OpenAI 호환 / Open-weight | 벤더 Direct, **DeepInfra**, **Sail Research**, **Together**, **OpenRouter** |
+| Claude | Anthropic Direct, **DeepInfra**, **Google Vertex AI** |
+| Gemini | Google Gemini API, **Google Vertex AI**, **DeepInfra** |
+| OpenAI | OpenAI Direct, **Azure OpenAI** |
+
+역할: DeepInfra는 범용 저비용 후보, Sail Research는 background·유연한 작업,
+Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이전 attempt에서
+실패한 공급자를 제외해야 합니다.**
+
+이 여섯 호스트를 onboarding하는 단계가 §14에 없었습니다. D1("multi-deployment 전면
+도입")이 승인한 범위 안의 일입니다.
+
+두 가지를 덧붙입니다.
+
+- **OpenRouter에는 실패 공급자 제외만으로 부족합니다.** open-weight 모델 요청은
+  OpenRouter가 모델 개발사나 다른 관할의 호스트로 보낼 수 있으므로, 수신자
+  allowlist가 함께 있어야 §4.5의 목적지 목록이 거짓말을 하지 않습니다.
+- **DeepInfra의 Claude·Gemini는 재판매입니다.** DeepInfra 문서상 그 두 계열은 해당
+  벤더로 전달되고 학습·공유 조건도 그쪽을 따릅니다. `gatewayProvider`와
+  `servingProvider`가 갈라지는 broker 경로입니다.
+
+### 원문 항목 중 이 순서에 없던 것
+
+| 원문 | 항목 | 현재 |
+|---|---|---|
+| §1·§14 | 호스트 6곳 onboarding | DeepInfra dark 등록부터 착수 (§14.4) |
+| §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 없음 |
+| §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | 필드 없음 |
+| §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 상태·만료 컬럼만 |
+| §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 없음 |
+| §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
+| §7.2·§7.3 | deployment 단위 health와 circuit breaker | provider 단위만 |
+| §8.5 | load guard | 없음 |
+| §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 확인 필요 |
+| §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | `CredentialBinding` dark schema만 |
+| §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
+| §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 일부 |
+| Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
+| 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 없음 (R6은 `lib/failureDomain.ts` 일부) |
+| §10.2 | pre-commit buffer | 없음, 선택 항목 |
+
+의도적으로 제외한 것은 그대로입니다: §5 가중합 목적함수(어휘순 유지), §7.2의 prior
+shrinkage(관측이 부족하면 판단 보류), malformed 같은 deployment 재시도와
+`max_attempts` 3(시도 예산 2회), 두 번째 원장, `RoutingRun.mode` 재사용.
+
+### 진행률에 미치는 영향
+
+지금까지의 보고(구현 19/21)는 착수한 단위만 분모로 셌고, §14의 6·9·10·11·12번과 위
+표가 빠져 있었습니다. 이 절을 분모에 넣으면 약 50단위이고 완료는 19, **약 38%
+(추정)**입니다. 단위의 크기는 고르지 않습니다 — 호스트 하나와 BYOK 전체가 같은 1입니다.
+
+## 14.4 DeepInfra (2026-09-23)
+
+첫 호스트로 고른 이유: 5곳 가운데 가중치가 공개된 세 모델(DeepSeek-V4 Pro·Flash,
+Kimi K3, MiniMax M3)을 **하나의 호스트가 모두** 서빙합니다. 데이터는 개발사에 가지
+않습니다.
+
+이 단계에서 한 것은 **dark 등록**뿐입니다. `AiProvider`에 `deepinfra`, OpenAI 호환
+endpoint와 키 이름, 목적지 목록의 `unproven` 행. **이 공급자로 라우팅되는 카탈로그
+모델은 없습니다** — 호스팅된 사본은 새 카탈로그 id가 아니라 `ModelDeployment`
+행이어야 하고, 그 전환(§14의 10번)이 선행입니다. `/api/ready`의 공급자 예산 검사는
+활성 모델이 있는 공급자만 보므로 이 등록은 readiness를 바꾸지 않습니다.
+
+확인한 사실 (2026-09-23 조회, 증거 목록에는 아직 넣지 않음):
+
+- DeepInfra 문서: 입력은 디스크에 저장하지 않고 출력은 전송 후 삭제, 학습·제3자
+  공유 없음(Google·Anthropic 모델 제외), 요청 본문은 기록하지 않으나 디버깅·보안
+  목적의 일부 기록 권리를 유보. 처리 지역과 DPA는 문서에 없음.
+- 공개 모델 목록(`/v1/openai/models`, 인증 불필요)의 id:
+  `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash`,
+  `moonshotai/Kimi-K3`, `MiniMaxAI/MiniMax-M3`. Kimi는 K2.6까지이고 K2.7은 없음.
+
+**같은 이름이 같은 모델이 아닙니다.** OpenRouter가 표시한 DeepInfra 값 기준(공식 확인
+전): DeepSeek-V4 Pro와 Kimi K3의 최대 출력 16,384, MiniMax M3의 context 524,288
+(카탈로그는 1,000,000), 양자화 fp8(Kimi K3만 bf16). §3.1 capability gate 없이 같은
+모델로 취급하면 긴 답이 잘립니다.
+
+**원가가 오르는 모델이 있습니다.** DeepSeek-V4 Pro는 직접 연결 대비 약 3배(입력 0.435
+→ 1.30, 출력 0.87 → 2.60 USD/1M, OpenRouter 표시 기준)입니다. 가격 profile은
+`lib/modelPricing.ts`의 계약 영역이라 DeepInfra 공식 가격을 확인한 뒤 contract
+역할로 따로 올립니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

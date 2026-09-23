@@ -19,6 +19,7 @@ export const AI_PROVIDERS = [
   "qwen",
   "zhipu",
   "perplexity",
+  "deepinfra",
 ] as const satisfies readonly AiProvider[];
 
 export const PROVIDER_API_CONFIGURATION: Record<
@@ -87,6 +88,11 @@ export const PROVIDER_API_CONFIGURATION: Record<
     apiKeyEnvName: "PERPLEXITY_API_KEY",
     protocol: "openai-compatible",
   },
+  deepinfra: {
+    baseUrl: "https://api.deepinfra.com/v1/openai",
+    apiKeyEnvName: "DEEPINFRA_API_KEY",
+    protocol: "openai-compatible",
+  },
 };
 
 /**
@@ -137,6 +143,7 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
     qwen: ["DASHSCOPE_API_KEY"],
     zhipu: ["ZHIPU_API_KEY"],
     perplexity: ["PERPLEXITY_API_KEY"],
+    deepinfra: ["DEEPINFRA_API_KEY"],
   };
 
 /**
