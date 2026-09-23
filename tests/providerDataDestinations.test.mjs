@@ -182,6 +182,33 @@ test("a location mode must list locations, and an unknown one must not", () => {
     );
 });
 
+test("the two location modes carry locations, and a grouping may be one of them", () => {
+    // The allowing branches, held as well as the refusing ones: a list of
+    // places a provider may use, and "the EU" named as a grouping.
+    const possible = provenRow({
+        processing: {
+            mode: "DISCLOSED_POSSIBLE_LOCATIONS",
+            countryCodes: ["US", "GB"],
+            macroRegions: [],
+            evidenceRef: evidence,
+        },
+    });
+    assert.deepEqual(destinationShapeProblems(possible), []);
+    assert.equal(destinationIsDisclosable(possible), true);
+
+    const grouping = provenRow({
+        customerContentStorage: {
+            mode: "COMMITTED_LOCATIONS",
+            countryCodes: [],
+            macroRegions: ["EU"],
+            evidenceRef: evidence,
+        },
+        destinationRegions: ["EU"],
+    });
+    assert.deepEqual(destinationShapeProblems(grouping), []);
+    assert.equal(destinationIsDisclosable(grouping), true);
+});
+
 test("no place is not a place: NOT_PINNED and NOT_SPECIFIED list nothing", () => {
     // A set of places the provider may use is DISCLOSED_POSSIBLE_LOCATIONS.
     for (const mode of ["NOT_PINNED", "NOT_SPECIFIED"]) {

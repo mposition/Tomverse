@@ -7,8 +7,9 @@
 // a thing to look at before it is a thing to enforce.
 //
 // It becomes a gate when the owner's contract review has supplied destinations
-// to hold. Until then the number worth watching is how many providers can
-// serve a request that carries a residency constraint, and today it is zero.
+// to hold. Until then the number worth watching is how many rows a notice
+// could print -- the only rows a residency approval may be made on. Serving a
+// constrained request is decided by that approval, not here. Today it is zero.
 //
 // Exits non-zero on two conditions, both claims rather than gaps: a row that
 // calls itself proven without what a notice would print, and a row of any
