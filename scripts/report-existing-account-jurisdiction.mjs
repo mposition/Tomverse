@@ -40,23 +40,31 @@
 // bucket holding between 1 and N-1 accounts prints its count, because a row of
 // one is a person. The floor cannot be set below 5.
 //
-// Hiding the small cells is not enough, and two versions showed why. The
+// Hiding the small cells is not enough, and three versions showed why. The
 // population is not a secret -- the draft names 78, and anyone with the
-// database can count addresses -- so every exact number printed is an
-// equation. The first version printed the total and the other cells exactly,
-// and a single hidden cell was the total minus the rest. The second hid the
-// total and one complementary cell, and still: 76 visible and two hidden cells
-// out of a known 78 makes both hidden cells 1, bucket names and all.
+// database can count addresses -- so everything printed is an equation. The
+// first version printed the other cells exactly, and a single hidden cell was
+// the total minus the rest. The second hid one complementary cell too, and
+// 76 visible plus two hidden out of a known 78 made both hidden cells 1. The
+// third printed large cells as lower bounds rounded down to a multiple of N,
+// and a bound that had *not* been lowered was also a ceiling (bound + N - 1):
+// two large cells of 19 printed "at least 10", which with a total of 47 left
+// the small cell exactly 9.
 //
-// So when any cell is small, the report prints **no exact non-zero count**. A
-// small cell prints as "1 to N-1". A large cell prints as a lower bound, its
-// count rounded down to a multiple of N ("at least 70"). And the bounds are
-// lowered further, a multiple of N at a time, until every small cell could be
-// N-1 *at the same time* without the large cells falling below their printed
-// bounds. That is the test that matters: once it holds, every combination of
-// small counts is consistent with the population, so knowing the population
-// excludes none of them, and the total can be printed as it is. If no set of
-// bounds passes, the table is refused like a population below the floor.
+// The lesson of the third is that any printed value that depends on a large
+// cell's count leaks something about it, and through the total, about the
+// small ones. So when any cell is small, what is printed depends on each
+// cell's **category** only -- zero, "1 to N-1", or "N or more" -- and on the
+// total. The table is printed only if every small cell could be N-1 at once
+// while every large cell is still N or more:
+//
+//     total - (small cells) x (N-1) >= (large cells) x N
+//
+// Then every combination of small counts is consistent with the output and
+// the total, because the large cells can absorb any remainder, and nothing
+// printed can tell the combinations apart. Otherwise the table is refused like
+// a population below the floor. With one large cell its size is still
+// readable from the total, to within the small cells' range.
 //
 // Zero stays zero: "nobody is in this state" identifies nobody.
 //
@@ -148,57 +156,50 @@ const REMEDY = {
   jurisdiction_allows:
     "Jurisdiction would not stop the send. Consent, suppression and the risk_accepted override are decided before this and are not counted here.",
   unconfirmed_unknown:
-    "No country signal at all. Released if the person confirms one of the ten allowed countries in the preference centre (section 11.2). What an IP estimate would do cannot be counted: no IP is recorded, and it would release the account only if that country were one of the ten.",
+    "No country signal at all. Released if the person confirms one of the ten allowed countries in the preference centre (section 11.2), or by a billing country later recorded in one of the ten. What an IP estimate would do cannot be counted: no IP is recorded, and it would release the account only if that country were one of the ten.",
   unconfirmed_low_guess_allowed_if_settled:
-    "A language-and-timezone guess naming one of the ten. The S0 IP amendment could release it, provided the IP country -- where it differs from the guess -- is one of the ten as well (draft section 5.3 requires both candidates to pass, not to agree). IP is not recorded, so that cannot be checked here. A confirmed allowed country releases it outright.",
+    "A language-and-timezone guess naming one of the ten. The S0 IP amendment could release it, provided the IP country -- where it differs from the guess -- is one of the ten as well (draft section 5.3 requires both candidates to pass, not to agree). IP is not recorded, so that cannot be checked here. A confirmed allowed country releases it outright, and so does a billing country later recorded in one of the ten, which outranks any guess.",
   unconfirmed_low_guess_not_allowed_if_settled:
     "A guess naming a country outside the ten or without a reviewed profile (JP, CN, ES, PT among them). The S0 amendment does not release it. A settled signal naming one of the ten does: the person declaring that country in the preference centre, or a billing country recorded later, which outranks any guess.",
   unconfirmed_no_reviewed_profile:
     "A settled, high-confidence country with no reviewed profile. The S0 amendment does not release it (an IP estimate ranks below billing and declaration), and confirming the same country does not either. Declaring one of the ten allowed countries in the preference centre does, if that is where the person lives -- the later declaration outranks the billing country. Otherwise the country needs a reviewed profile, its country-level record and a place in MARKETING_ALLOWED_COUNTRY_CODES; a profile alone only moves it to marketing_country_not_allowed.",
   jurisdiction_conflict:
-    "Billing country and declaration disagree. A confirmation settles which is current, and releases the account only if that country is one of the ten: confirming a country outside the ten moves it to marketing_country_not_allowed, and one without a reviewed profile to unconfirmed_no_reviewed_profile.",
+    "Billing country and declaration disagree. A confirmation settles which is current, and releases the account only if that country is one of the ten. Confirming any other country moves it to one of two buckets: unconfirmed_no_reviewed_profile if the country has no reviewed profile (JP, for one), marketing_country_not_allowed if it has a profile but is not in the list (IT, NL).",
   marketing_country_not_allowed:
     "Settled, with a profile, but outside MARKETING_ALLOWED_COUNTRY_CODES. Adding a country needs its own country-level record first, and the verdict changes only when the code is added to that list; the record alone changes nothing here.",
 };
+
+const UNKNOWN_REMEDY =
+  "Not a reason this report knows. marketingJurisdictionVerdict() has grown a case; read it before trusting the table.";
 
 /**
  * The rows as they may be printed beside the exact total, or `null` if no
  * printing leaves the small cells ambiguous.
  *
- * With no small cell, every count is exact. Otherwise no non-zero count is:
- * small cells say "1 to N-1", large cells say "at least" a multiple of N, and
- * those bounds are lowered until
+ * With no small cell, every count is exact. Otherwise each non-zero cell
+ * prints only its category -- "1 to N-1" or "N or more" -- so the output is a
+ * function of the categories and the total and of nothing else about the
+ * counts. It is printed only when
  *
- *     sum of printed bounds + (small cells) x (N-1) <= total
+ *     total - (small cells) x (N-1) >= (large cells) x N
  *
- * -- every small cell could be N-1 at once and the large cells would still
- * reach their bounds. Any smaller small counts leave more for the large
- * cells, which have no printed ceiling, so every combination is consistent
- * with the total and knowing it excludes nothing. That needs at least one
- * large cell to take up the slack; with none, the small cells sum to the
- * total exactly, which is the equation this exists to prevent.
+ * i.e. every small cell could be N-1 at once and every large cell still N or
+ * more. Any smaller small counts leave more for the large cells, which have no
+ * ceiling, so every combination of small counts fits the output and the total
+ * equally. With no large cell the small cells sum to the total exactly, which
+ * is the equation this exists to prevent, so that is refused too.
  */
 const coarsenCells = (rows, floor, total) => {
-  const smallCount = rows.filter((row) => row.accounts > 0 && row.accounts < floor).length;
-  if (smallCount === 0) return rows;
-  const bounds = new Map(
-    rows
-      .filter((row) => row.accounts >= floor)
-      .map((row) => [row.bucket, Math.floor(row.accounts / floor) * floor])
-  );
-  if (bounds.size === 0) return null;
-  const budget = total - smallCount * (floor - 1);
-  let sum = [...bounds.values()].reduce((a, b) => a + b, 0);
-  while (sum > budget) {
-    const [bucket, value] = [...bounds.entries()].sort((a, b) => b[1] - a[1])[0];
-    if (value <= floor) return null;
-    bounds.set(bucket, value - floor);
-    sum -= floor;
-  }
+  const small = rows.filter((row) => row.accounts > 0 && row.accounts < floor).length;
+  if (small === 0) return rows;
+  const large = rows.filter((row) => row.accounts >= floor).length;
+  if (large === 0 || total - small * (floor - 1) < large * floor) return null;
   return rows.map((row) => {
     if (row.accounts === 0) return row;
-    if (bounds.has(row.bucket)) return { ...row, accounts: `at least ${bounds.get(row.bucket)}` };
-    return { ...row, accounts: `1 to ${floor - 1}` };
+    return {
+      ...row,
+      accounts: row.accounts >= floor ? `${floor} or more` : `1 to ${floor - 1}`,
+    };
   });
 };
 
@@ -232,11 +233,14 @@ try {
       counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
     }
     const unexpected = [...counts.keys()].filter((key) => !(key in REMEDY));
+    // An unknown reason is a row like any other. Left out, its accounts would
+    // sit in the total and nowhere else, and the difference would be their
+    // exact count.
     const buckets = coarsenCells(
-      Object.keys(REMEDY).map((bucket) => ({
+      [...Object.keys(REMEDY), ...unexpected].map((bucket) => ({
         bucket,
         accounts: counts.get(bucket) ?? 0,
-        remedy: REMEDY[bucket],
+        remedy: REMEDY[bucket] ?? UNKNOWN_REMEDY,
       })),
       minPopulation,
       accounts.length
