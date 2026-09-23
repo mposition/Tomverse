@@ -482,9 +482,10 @@ test("the migration installs a refusal of a copy that does not match the cited a
 });
 
 test("the stored count check is about two integers on one row", () => {
-    // It does not see the entry rows; `entryCount` is tied to them only by
-    // manifestProblems(), the same limit the digest has. What it adds is
-    // that a row cannot record a ceiling it exceeded.
+    // It does not see the entry rows. The slot trigger holds the rows under
+    // `entryCount`; this check holds `entryCount` under the ceiling; only
+    // making the rows reach `entryCount` is left to manifestProblems(). What
+    // this check adds is that a row cannot record a ceiling it exceeded.
     const sql = ceilingMigration();
     assert.match(
         sql,

@@ -204,7 +204,8 @@ CREATE TRIGGER "routing_identity_manifest_cites_its_ceiling_trigger"
 --
 -- What this does not do: it caps the entries at `entryCount`, it does not
 -- make them reach it. A manifest with fewer entries than it counts is still
--- only reported, by `manifestProblems()` and the digest.
+-- only reported, and only by `manifestProblems()`'s count check: a digest
+-- computed from the entries that are there agrees with them.
 --
 -- `RoutingIdentityManifestEntry` has no rows anywhere, which is why `slot`
 -- can be NOT NULL with no default.
