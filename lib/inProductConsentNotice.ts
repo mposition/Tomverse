@@ -47,10 +47,10 @@ import {
  * not unless asked. The approved `risk_accepted` decision sends to the
  * existing accounts without asking. Both cannot be true of the same person,
  * and the owner chose on 2026-09-23 to keep the override and leave those
- * accounts out of this notice (docs/policy/email-consent-copy-draft.md section
- * 9.1). So `noticeStateForUser()` refuses them with `covered_by_approval`,
- * and the promise stays truthful because it is only ever made to people it is
- * true of.
+ * accounts out of this notice. So `noticeStateForUser()` refuses them with
+ * `covered_by_approval`, and the promise stays truthful because it is only
+ * ever made to people it is true of. The wording, and the record of this
+ * decision beside it, arrive with S2.
  *
  * That refusal is scoped to a **sealed and unwithdrawn** approval. Withdrawing
  * one puts those accounts back to having no basis at all, which is precisely

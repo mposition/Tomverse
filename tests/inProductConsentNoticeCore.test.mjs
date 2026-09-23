@@ -284,11 +284,10 @@ test("a stored value that is not a list is never equal to one", () => {
 });
 
 test("the risk_accepted cohort is not asked, because the wording would be false", () => {
-  // Owner decision 2026-09-23 (option B in
-  // docs/policy/email-consent-copy-draft.md section 9.1). The notice promises
-  // we have not sent and will not unless asked; the override sends to these
-  // accounts without asking. Both cannot be true of one person, so the promise
-  // is only ever made to people it is true of.
+  // Owner decision 2026-09-23, option B. The notice promises we have not sent
+  // and will not unless asked; section 5.6's override sends to these accounts
+  // without asking. Both cannot be true of one person, so the promise is only
+  // ever made to people it is true of.
   assert.deepEqual(
     inProductNoticeOffer({ ...untouched, coveredByRiskAcceptedApproval: true }),
     { offered: false, refusal: "covered_by_approval" }

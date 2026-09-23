@@ -85,10 +85,10 @@ export type NoticeState = {
    * They are in a sealed, unwithdrawn `risk_accepted` cohort.
    *
    * Owner decision, 2026-09-23, on the contradiction recorded in
-   * docs/policy/email-consent-copy-draft.md section 9.1: the approved notice
-   * promises we have not sent product news and will not without being asked,
-   * and the approved `risk_accepted` decision sends to these same accounts
-   * without asking. Both cannot be true of one person.
+   * the approved consent wording (S2) against section 5.6 of the redesign
+   * draft. The wording promises we have not sent product news and will not
+   * without being asked; the `risk_accepted` decision sends to these same
+   * accounts without asking. Both cannot be true of one person.
    *
    * The owner chose to keep the override and not show these accounts the
    * notice. So the promise stays truthful, because it is only ever made to
