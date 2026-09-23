@@ -1,0 +1,84 @@
+{
+  "schema_version": "amux-staging-evidence-v1",
+  "evidence_scope": "observed_facts_only",
+  "generated_at": "2026-09-23T12:11:06.146Z",
+  "deployment_revision": "612b5c12684e038b36188805ca3821481bd73f00",
+  "capture_process_revision_matches_expected": true,
+  "human_judgement": {
+    "result": null,
+    "signature": null,
+    "note": "This capture does not approve, freeze or sign a staging result."
+  },
+  "incident": {
+    "valid": true,
+    "blocks_admission": false,
+    "problem": null,
+    "state": {
+      "version": 1,
+      "state": "normal",
+      "transition_id": null,
+      "changed_at": "2026-09-21T13:28:10.476Z",
+      "reason": "Initial incident-mode rollout state.",
+      "ticket": "migration:20260921123000"
+    },
+    "setting_updated_at": "2026-09-21T13:28:10.476Z"
+  },
+  "tasks": [
+    {
+      "status": "blocked",
+      "due_parse_state": "none",
+      "count": 1
+    },
+    {
+      "status": "blocked",
+      "due_parse_state": "valid",
+      "count": 1
+    },
+    {
+      "status": "done",
+      "due_parse_state": "none",
+      "count": 1
+    },
+    {
+      "status": "todo",
+      "due_parse_state": "valid",
+      "count": 1
+    }
+  ],
+  "route_decisions": [],
+  "execution_attempts": [
+    {
+      "outcome": "blocked",
+      "cost_confirmed": false,
+      "count": 6
+    },
+    {
+      "outcome": "succeeded",
+      "cost_confirmed": false,
+      "count": 2
+    }
+  ],
+  "deliveries": [],
+  "resource_policies": [],
+  "latest_quota_by_worker": [],
+  "human_escalations": [
+    {
+      "status": "open",
+      "specialty": "code-review",
+      "count": 1
+    },
+    {
+      "status": "resolved",
+      "specialty": "code-review",
+      "count": 2
+    },
+    {
+      "status": "resolved",
+      "specialty": "execution-recovery",
+      "count": 3
+    }
+  ],
+  "cost_ledger": [],
+  "stable_state_digest_sha256": "e003262419d7f50bbd1e0d835e0c14b7166912ad21a9abc704ba15333433ff62",
+  "observation_digest_sha256": "99354616538907550baaae5921d64613f5658739fc451c0abb6615fefd24fe39"
+}

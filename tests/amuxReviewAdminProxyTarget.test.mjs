@@ -65,6 +65,76 @@ test("admin review proxy sends credentials only to the validated target", async 
     assert.equal((await wrongHost.json()).code, "AMUX_REVIEW_PROXY_ORIGIN_MISMATCH");
     assert.equal(calls.length, callsBeforeWrongHost);
 
+    const missingHostRequest = new Request(
+      `${publicOrigin}/api/admin/amux/escalations/review`,
+      { headers: { cookie: "__Secure-next-auth.session-token=session" } },
+    );
+    const callsBeforeMissingHost = calls.length;
+    const missingHost = await forwardAmuxAdminReviewCommand(
+      missingHostRequest,
+      { action: "detail" },
+    );
+    assert.equal(missingHost.status, 503);
+    assert.equal((await missingHost.json()).code, "AMUX_REVIEW_PROXY_ORIGIN_MISMATCH");
+    assert.equal(calls.length, callsBeforeMissingHost);
+
+    for (const explicitPort of ["443", "8443"]) {
+      const portMismatchRequest = new Request(
+        `${publicOrigin}/api/admin/amux/escalations/review`,
+        {
+          headers: {
+            cookie: "__Secure-next-auth.session-token=session",
+            host: `${new URL(publicOrigin).host}:${explicitPort}`,
+            "x-forwarded-host": new URL(publicOrigin).host,
+          },
+        },
+      );
+      const callsBeforePortMismatch = calls.length;
+      const portMismatch = await forwardAmuxAdminReviewCommand(
+        portMismatchRequest,
+        { action: "detail" },
+      );
+      assert.equal(portMismatch.status, 503);
+      assert.equal(
+        (await portMismatch.json()).code,
+        "AMUX_REVIEW_PROXY_ORIGIN_MISMATCH",
+      );
+      assert.equal(calls.length, callsBeforePortMismatch);
+    }
+
+    const caseOnlyRequest = new Request(
+      `${publicOrigin}/api/admin/amux/escalations/review`,
+      {
+        headers: {
+          cookie: "__Secure-next-auth.session-token=session",
+          host: new URL(publicOrigin).host.toUpperCase(),
+        },
+      },
+    );
+    assert.equal(
+      (await forwardAmuxAdminReviewCommand(caseOnlyRequest, { action: "detail" })).status,
+      200,
+    );
+    assert.equal(calls.at(-1).url, `${privateOrigin}/api/internal/amux/review`);
+
+    process.env.NEXTAUTH_URL = "http://staging-amux-validation.tomverse.app";
+    const insecurePublicOriginRequest = new Request(
+      `${publicOrigin}/api/admin/amux/escalations/review`,
+      { headers: browserRequest.headers },
+    );
+    const callsBeforeInsecurePublicOrigin = calls.length;
+    const insecurePublicOrigin = await forwardAmuxAdminReviewCommand(
+      insecurePublicOriginRequest,
+      { action: "detail" },
+    );
+    assert.equal(insecurePublicOrigin.status, 503);
+    assert.equal(
+      (await insecurePublicOrigin.json()).code,
+      "AMUX_REVIEW_PROXY_CONFIG_INVALID",
+    );
+    assert.equal(calls.length, callsBeforeInsecurePublicOrigin);
+    process.env.NEXTAUTH_URL = publicOrigin;
+
     process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = "http://127.0.0.1:8080";
     assert.equal((await forwardAmuxAdminReviewCommand(browserRequest, { action: "detail" })).status, 200);
     assert.equal(calls.at(-1).url, "http://127.0.0.1:8080/api/internal/amux/review");
