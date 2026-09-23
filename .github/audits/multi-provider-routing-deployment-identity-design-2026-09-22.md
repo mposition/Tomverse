@@ -1010,7 +1010,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 
 | 원문 | 항목 | 현재 |
 |---|---|---|
-| §1·§14 | 호스트 6곳 onboarding | 4곳 dark: DeepInfra, Together, OpenRouter, Sail (§14.4–§14.6, §14.11). Vertex·Azure는 등록하지 않음 |
+| §1·§14 | 호스트 6곳 onboarding | 4곳 dark: DeepInfra, Together, OpenRouter, Sail (§14.4–§14.6, §14.11). Vertex·Azure는 전역 origin 없음 (§14.20). 카탈로그 연결 없음. residency는 unproven |
 | §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 코드 (§14.6). 라우터는 호출하지 않음 |
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
@@ -1450,6 +1450,22 @@ ADR의 pre-commit buffer 판정이 `lib/routingPrecommitBuffer.ts`에
 검토는 approve였고, 절 번호 인용이 정책 절 검사를 더 실패시키던 것을
 이 줄에서 뺐습니다. 검증·독립 검토·병합·배포는 별도입니다. production
 배포는 0%입니다.
+
+## 14.20 Region-pin hosts (2026-09-23)
+
+ADR 풀의 Vertex AI와 Azure OpenAI가 `lib/regionPinHosts.ts`에 있습니다.
+요청 경로는 import하지 않습니다. 행을 쓰지 않습니다. 클라이언트를
+열지 않습니다.
+
+공식 연결은 프로젝트·로케이션 또는 리소스 이름을 경로에 넣습니다.
+전역 origin 하나를 카탈로그에 넣는 것은 리전을 이 모듈이 고르는 일입니다.
+그래서 두 호스트 모두 `globalOrigin`은 null이고, 카탈로그 공급자 목록에
+없습니다. residency는 `unproven`입니다. 호출자가 준 URL을 연결로
+받아들이는 분기도 없습니다.
+
+이 두 호스트가 §14.3의 남은 호스트 단위입니다. 직전 pre-commit 보고는
+34, 약 68%였습니다. §14.3의 약 50단위에서 완료는 36, **약 72%(추정)**입니다.
+검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
