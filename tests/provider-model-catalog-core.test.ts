@@ -380,6 +380,7 @@ test("each provider's catalogue URL is the one that provider actually serves", (
       zhipu: "https://api.z.ai/api/paas/v4/models",
       perplexity: "https://api.perplexity.ai/v1/models",
       deepinfra: "https://api.deepinfra.com/v1/openai/models",
+      together: "https://api.together.ai/v1/models",
     }
   );
 });

@@ -39,6 +39,7 @@ export const PROVIDER_FALLBACKS: Record<AiProvider, ProviderFallback> = {
   // same model's other deployment, which is the routing layer's job; this
   // list is what a person is offered when that is not enough.
   deepinfra: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  together: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
 };
 
 /**

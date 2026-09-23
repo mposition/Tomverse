@@ -20,6 +20,7 @@ export const AI_PROVIDERS = [
   "zhipu",
   "perplexity",
   "deepinfra",
+  "together",
 ] as const satisfies readonly AiProvider[];
 
 export const PROVIDER_API_CONFIGURATION: Record<
@@ -93,6 +94,13 @@ export const PROVIDER_API_CONFIGURATION: Record<
     apiKeyEnvName: "DEEPINFRA_API_KEY",
     protocol: "openai-compatible",
   },
+  together: {
+    // Together's current OpenAI-compatibility docs (api.together.ai), not the
+    // older api.together.xyz host still named in some support articles.
+    baseUrl: "https://api.together.ai/v1",
+    apiKeyEnvName: "TOGETHER_API_KEY",
+    protocol: "openai-compatible",
+  },
 };
 
 /**
@@ -144,6 +152,7 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
     zhipu: ["ZHIPU_API_KEY"],
     perplexity: ["PERPLEXITY_API_KEY"],
     deepinfra: ["DEEPINFRA_API_KEY"],
+    together: ["TOGETHER_API_KEY"],
   };
 
 /**

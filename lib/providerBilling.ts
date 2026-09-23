@@ -24,6 +24,7 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   // Settlement is not established for the account yet; "unknown" rather than
   // a guess, as for qwen.
   deepinfra: defaultProfile("usage_based", "unknown"),
+  together: defaultProfile("usage_based", "unknown"),
 };
 
 function defaultProfile(

@@ -53,6 +53,8 @@ const providerConsoleHref: Record<AiProvider, string> = {
   perplexity:
     "https://console.perplexity.ai/group/36f95894-ee38-4751-b4a0-4365e41a3c31/billing",
   deepinfra: "https://deepinfra.com/dash/billing",
+  // Documented as Settings → Billing after signing in at api.together.ai.
+  together: "https://api.together.ai/settings/billing",
 };
 
 const money = (microUsd: number) =>

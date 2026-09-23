@@ -13,7 +13,8 @@ export type AiProvider =
     | "qwen"
     | "zhipu"
     | "perplexity"
-    | "deepinfra";
+    | "deepinfra"
+    | "together";
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";

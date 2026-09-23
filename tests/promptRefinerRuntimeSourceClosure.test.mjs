@@ -193,12 +193,16 @@ const compilerOptions = parsedConfig.options;
 // `lib/modelRegistryShared.ts`, both literal. No computed access came with
 // them; the accesses below move down. Count 228, position-free hash
 // unchanged. A repin.
+//
+// 2026-09-23, Together registered the same way: another literal `case` and
+// another literal registry entry. Count 228, position-free hash unchanged.
+// A repin of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "87d44a616cc137af90bbb6e63f0a3a7d",
-  "1be6f09dd7cc4b1e5fc19a627d524fbb",
+  "a54f4d26535dbc0cd60c6aa239b79520",
+  "17cdad29004603afc2318295c73e0e02",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

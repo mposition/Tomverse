@@ -1067,6 +1067,22 @@ endpoint와 키 이름, 목적지 목록의 `unproven` 행. **이 공급자로 �
 `lib/modelPricing.ts`의 계약 영역이라 DeepInfra 공식 가격을 확인한 뒤 contract
 역할로 따로 올립니다.
 
+## 14.5 Together (2026-09-23)
+
+ADR §14.1의 독립 open-weight fallback입니다. DeepInfra와 같은 형태의 dark
+등록만 합니다. 공식 OpenAI 호환 문서의 base는 `https://api.together.ai/v1`이고
+키 이름은 `TOGETHER_API_KEY`입니다. 지원 문서에 남아 있는 `api.together.xyz`는
+쓰지 않습니다.
+
+목적지 행은 `unproven`입니다. 정산 모델은 `unknown`입니다. 카탈로그 모델은
+없고, 호스팅된 사본은 `ModelDeployment`입니다. 가격 profile은 넣지 않습니다.
+운영자 콘솔 링크는 문서가 말하는 Settings → Billing
+(`https://api.together.ai/settings/billing`)입니다.
+
+이 등록이 코드로 들어가면 호스트 onboarding 6곳 중 2곳(DeepInfra, Together)이
+dark로 있습니다. §14.3의 약 50단위 분모에서 완료는 21, **약 42%(추정)**입니다.
+검증·독립 검토·병합·배포는 이 수에 들어 있지 않습니다. production 배포는 0%입니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

@@ -53,6 +53,8 @@ const providers: AiProvider[] = [
   "qwen",
   "zhipu",
   "perplexity",
+  "deepinfra",
+  "together",
 ];
 
 const providerLabel: Record<AiProvider, string> = {
@@ -69,6 +71,7 @@ const providerLabel: Record<AiProvider, string> = {
   zhipu: "Zhipu",
   perplexity: "Perplexity",
   deepinfra: "DeepInfra",
+  together: "Together",
 };
 
 const dateLabel = (value: string | null) => {

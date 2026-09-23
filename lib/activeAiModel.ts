@@ -67,5 +67,10 @@ export const getActiveAiModel = (model: AiModel) => {
       // DeepSeek route. No catalogue model routes here yet: a hosted copy of
       // a model is a ModelDeployment, not a new catalogue id.
       return createOpenAI(configuration).chat(model.apiModel);
+    case "together":
+      // Independent open-weight fallback host (ADR v2.1 provider pool).
+      // Same adapter limit as DeepInfra: reasoning_content is dropped.
+      // No catalogue model routes here; a hosted copy is a ModelDeployment.
+      return createOpenAI(configuration).chat(model.apiModel);
   }
 };

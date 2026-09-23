@@ -58,6 +58,7 @@ const PROVIDER_REPORT_NAMES: Readonly<Record<AiProvider, string>> = {
   zhipu: "Zhipu GLM",
   perplexity: "Perplexity",
   deepinfra: "DeepInfra",
+  together: "Together",
 };
 
 /**
