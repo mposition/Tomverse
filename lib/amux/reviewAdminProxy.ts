@@ -68,7 +68,8 @@ export async function forwardAmuxAdminReviewCommand(
   let internalUrl: URL;
   try {
     const publicOrigin = new URL(configuredPublicOrigin);
-    if (new URL(request.url).origin !== publicOrigin.origin)
+    const requestHost = request.headers.get("host")?.trim().toLowerCase();
+    if (!requestHost || requestHost !== publicOrigin.host.toLowerCase())
       return proxyConfigurationError("AMUX_REVIEW_PROXY_ORIGIN_MISMATCH");
     if (
       publicOrigin.protocol !== "https:" &&

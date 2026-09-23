@@ -33,9 +33,14 @@ test("admin review proxy sends credentials only to the validated target", async 
 
   const browserRequest = new Request(`${publicOrigin}/api/admin/amux/escalations/review`, {
     headers: {
+      host: new URL(publicOrigin).host,
       cookie: "__Secure-next-auth.session-token=session",
       "x-tomverse-origin-verify": "o".repeat(48),
     },
+  });
+
+  const railwayRequest = new Request("http://127.0.0.1:8080/api/admin/amux/escalations/review", {
+    headers: browserRequest.headers,
   });
 
   try {
@@ -44,6 +49,21 @@ test("admin review proxy sends credentials only to the validated target", async 
     assert.equal(calls.at(-1).url, `${privateOrigin}/api/internal/amux/review`);
     assert.equal(calls.at(-1).headers.get("authorization"), `Bearer ${syncSecret}`);
     assert.equal(calls.at(-1).headers.get("cookie"), "__Secure-next-auth.session-token=session");
+
+    assert.equal((await forwardAmuxAdminReviewCommand(railwayRequest, { action: "detail" })).status, 200);
+    assert.equal(calls.at(-1).url, `${privateOrigin}/api/internal/amux/review`);
+
+    const wrongHostRequest = new Request(`${publicOrigin}/api/admin/amux/escalations/review`, {
+      headers: {
+        ...Object.fromEntries(browserRequest.headers),
+        host: "sibling.example.com",
+      },
+    });
+    const callsBeforeWrongHost = calls.length;
+    const wrongHost = await forwardAmuxAdminReviewCommand(wrongHostRequest, { action: "detail" });
+    assert.equal(wrongHost.status, 503);
+    assert.equal((await wrongHost.json()).code, "AMUX_REVIEW_PROXY_ORIGIN_MISMATCH");
+    assert.equal(calls.length, callsBeforeWrongHost);
 
     process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = "http://127.0.0.1:8080";
     assert.equal((await forwardAmuxAdminReviewCommand(browserRequest, { action: "detail" })).status, 200);
