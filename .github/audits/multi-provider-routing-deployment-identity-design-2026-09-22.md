@@ -1013,7 +1013,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §1·§14 | 호스트 6곳 onboarding | DeepInfra dark 등록부터 착수 (§14.4) |
 | §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 없음 |
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
-| §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | benchmark version·마지막 검증 시각은 §14.7. stale 전환과 drift 재검증은 없음 |
+| §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | provider 단위만 |
@@ -1163,6 +1163,25 @@ import하지 않습니다. 후보를 고르는 코드는 아직 이 함수를 �
 
 이 줄은 §14.3의 pin 항목을 완료로 세지 않습니다. 완료 수는 24, **약 48%(추정)**
 그대로입니다.
+
+## 14.9 Quality gate의 만료와 drift 예약 (2026-09-23)
+
+ADR §3.2와 §9.2의 판정이 `lib/qualityGateOperations.ts`에 있습니다.
+요청 경로는 import하지 않습니다. 행을 고치지 않습니다.
+
+- `passed`는 `at`이 만료 시각보다 엄격히 앞일 때만 그대로입니다. 만료 시각
+  자신은 `stale`입니다. `pending`·`failed`·`stale`은 시계로 바뀌지 않습니다.
+- 만료 시각이 없는 pass는 `stale`로 다시 쓰지 않습니다. 만료된 것이 아닙니다.
+  production 자격은 그 행에 없습니다. 자격은 요구 tier와 deployment tier가
+  같고, 유효한 pass일 때입니다.
+- 만료 write는 `qualityGateStatus = stale`과 `enabled = false`를 같이
+  냅니다. 저장된 status가 `passed`가 아니면 그 write는 없습니다.
+- drift는 이름이 있는 신호가 넘었다고 보고될 때 재검증을 예약합니다.
+  모르는 신호 이름도 예약합니다. 임계값 숫자는 이 함수에 없습니다.
+
+이 줄이 §14.3의 quality gate 항목입니다. 직전 보고는 24, 약 48%였습니다.
+§14.3의 약 50단위에서 완료는 25, **약 50%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
