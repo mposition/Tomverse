@@ -2052,12 +2052,14 @@ export type MarketingPostPatch = {
   approvalExpiresAt?: Date | null;
   reusableAsTemplate?: boolean;
   scheduledAt?: Date | null;
-  // `slotDate`, `claimToken` and `leaseUntil` are not here. They are written
-  // by `claimDueMarketingPost` and cleared by `releaseMarketingPostClaim` and by
-  // nothing else: a generic patch that could set them could clear a spent slot
-  // and give an account its day back, which is the thing the caps exist to
-  // stop. A rule stated in a comment and not in the type is a rule the next
-  // caller has to find.
+  // `slotDate`, `claimToken` and `leaseUntil` are not here. The claim writes all
+  // three and the release clears all three. A requeue clears the token and the
+  // lease -- the failed attempt's worker has concluded -- and deliberately leaves
+  // `slotDate`, so the next claim renews or moves the day. Nothing else writes
+  // them: a generic patch that could set them could clear a spent slot and give
+  // an account its day back, which is the thing the caps exist to stop. A rule
+  // stated in a comment and not in the type is a rule the next caller has to
+  // find.
   publishAttempt?: number;
   providerRequestKey?: string | null;
   externalPostId?: string | null;
