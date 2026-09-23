@@ -255,9 +255,24 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * Both notes stand because both changes are in this tree, and the value below
  * is computed over the merged schema rather than taken from either side of
  * the conflict -- the merged tree is the only one that will exist.
+ *
+ * 2026-09-23, the multi-provider routing identity schema: twelve tables --
+ * ProviderEndpoint, EndpointResidencyApproval, ModelDeployment,
+ * RoutingIdentityManifest and its entries, DeploymentCacheAffinity,
+ * ProviderRegistryEntry, QuotaScope, CredentialBinding,
+ * RoutingCandidateVerdict, QuotaCapacityState, AvailabilityObservation --
+ * plus columns on RoutingRun, RoutingAttempt, ProviderProbeResult and
+ * ModelDeployment. Every one of them is dark: `npm run check:dark-tables`
+ * fails if any runtime source reads or writes one.
+ *
+ * None is a marketing model, none touches the descriptor, the config
+ * snapshot, a webhook writer or an admission decision. The shared edges are
+ * back-relations only -- `User` gains two and `Conversation` gains one, and
+ * neither gains a column. The digest moves because the schema file is
+ * watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "34e897e5257f43fb44e8b2824cf75f43257a50d73177d67dc44cbb04b390e9e0";
+  "4b0cd54a34a6309dc790eba7c64eaceb875df95ef68c41a5d21b64c40b486e31";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

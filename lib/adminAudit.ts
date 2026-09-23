@@ -74,6 +74,27 @@ type AuditChainEntry = {
  * `integritySecret` is resolved by the caller before any transaction opens,
  * as it always was, so reading the environment is not part of the locked span.
  */
+/**
+ * Takes the audit chain's transaction-scoped advisory lock.
+ *
+ * `appendAuditChainEntry()` below takes it as its first statement, which is
+ * enough when the append is the first thing a transaction does. It is not
+ * enough when the append is the last: a transaction that locks rows and then
+ * appends takes the two locks in the opposite order from one that appends and
+ * then locks rows, and two of those running at once deadlock.
+ *
+ * So a caller whose audit entry must come last -- because it names a row it is
+ * creating -- calls this first instead. The lock is re-entrant within a
+ * transaction and released at commit, so the append's own request costs
+ * nothing; what it buys is that every writer takes this lock before any row
+ * lock, which is the only ordering there is.
+ */
+export async function takeAuditChainLock(
+  client: Prisma.TransactionClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+}
+
 async function appendAuditChainEntry(
   client: Prisma.TransactionClient,
   entry: AuditChainEntry,

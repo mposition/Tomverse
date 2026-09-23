@@ -47,6 +47,7 @@ import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import type { PricedAttempt } from "@/lib/chatMultiAttemptSettlement";
 import {
     closeAttempt,
+    type RoutingAttemptErrorClass,
     type RoutingAttemptOutcome,
     type RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
@@ -694,7 +695,7 @@ export type AttemptCloseWithCost = {
     firstVisibleTokenAt?: Date | null;
     actualInputTokens?: number | null;
     actualOutputTokens?: number | null;
-    errorClass?: string | null;
+    errorClass?: RoutingAttemptErrorClass | null;
     /** Absent when there is no reservation to charge -- nothing was held. */
     cost?: AttemptCostRecord | null;
     /**

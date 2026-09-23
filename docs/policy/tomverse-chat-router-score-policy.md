@@ -92,11 +92,14 @@ catalogue addition remove a model from Auto silently.
 
 Applied in order, most decisive first:
 
-1. **quality band** — §3. Within one band, and only when both cells carry one,
-   a 95% confidence interval refines the order. The band is a strict primary
-   key: letting an interval outrank a band would make the comparison
-   non-transitive on a partly-measured snapshot, and the sort result would then
-   depend on the order the filters happened to emit.
+1. **quality band** — §3. Within one band, and only when *every* cell still
+   tied at that point carries a finite one, a 95% confidence interval refines
+   the order. The band is a strict primary key: letting an interval outrank a
+   band would make the comparison non-transitive on a partly-measured snapshot,
+   and the answer would then depend on the order the filters happened to emit.
+   "Every cell rather than both" is the group-scoped abstention described in
+   "The order is built, not compared" below; a band holding one cell with an
+   interval and one without keeps its whole membership together.
 2. **health degraded** — the health path reports this model misbehaving. Not a
    refusal: refusal is `unavailable`, and that is a hard filter. It sits above
    cost because "this model is currently misbehaving" is a stronger reason to
@@ -164,11 +167,14 @@ The counted outcomes are fixed so that a rate means one thing across models:
 reached a provider, `cancelled` is the person changing their mind, `pending` has
 not ended, and `unknown_after_dispatch` is a crash that is evidence neither way.
 
-A signal missing for either side means *unknown*. The criterion abstains and
-the next one decides. Treating an absent success rate as a perfect one would
-rank a model nobody has ever called above one with a measured record.
+A signal missing means *unknown*. The criterion abstains and the next one
+decides. Treating an absent success rate as a perfect one would rank a model
+nobody has ever called above one with a measured record.
 
-Two values within these thresholds are the same value:
+These are the thresholds below which two measurements are not treated as
+different. What "the same value" means precisely is in "The order is built, not
+compared" below — it cannot be read pairwise, because at a 5% ratio 100 ties
+104 and 104 ties 108 while 100 beats 108.
 
 | Threshold | Value |
 |---|---|
@@ -190,6 +196,79 @@ Without them the cost criterion decides every tie on the fourth decimal place
 of a price, and the Router reshuffles itself over a rounding difference while
 reporting a confident reason for it.
 
+### The order is built, not compared
+
+Both rules above are stated per pair, and each of them on its own makes a
+pairwise comparator intransitive. Abstention does it because the same criterion
+then decides one pair and is skipped for another: with two candidates carrying
+a quality interval, a third carrying none, and costs ranked against them, the
+first pair is decided on quality and the other two on cost, and
+`A > B > C > A` follows. The epsilons do it without any missing data at all,
+because "within 5%" is not transitive — 100 ties 104 and 104 ties 108, while
+100 beats 108 outright.
+
+An intransitive comparator is not an error `Array.prototype.sort` reports. It
+is an implementation-defined order, which would have made §6's promise that
+"two runs over the same inputs answer the same way" true only while the filters
+kept emitting candidates in the same order.
+
+So `lib/routerSelection.ts` builds the ranking instead of comparing pairs.
+Every candidate starts in one group, each criterion above splits each surviving
+group into ordered buckets, and the ranking is the lexicographic order of the
+bucket indices a candidate collects. That is total and transitive by
+construction. Two consequences are worth stating because they are changes to
+the rules and not only to the mechanism:
+
+- **Abstention is a property of the group.** A criterion that cannot speak for
+  *every* member of a group leaves that group whole, so one unmeasured
+  candidate silences the criterion for everybody it is still tied with rather
+  than only for the pairs containing it. That is the reading that keeps "an
+  unknown value never wins and never loses" true without letting the answer
+  depend on emission order.
+- **The epsilon is anchored.** Within a group a bucket holds the values within
+  epsilon of that bucket's own first value, so the chain above splits into
+  {100, 104} and {108} every time.
+
+This is the comparator changing, not the numbers, so it moved
+`ROUTER_SELECTION_VERSION` and not `ROUTER_SCORE_POLICY_VERSION` — §7's own
+division. The thresholds, the tie-break order, the band scale, the switch
+margin and the hysteresis turns are all unchanged.
+
+`tests/routerSelection.test.mjs` pins the cycle above, checks the ranking over
+every permutation of its inputs rather than over one reversal, and fixes the
+epsilon chain's buckets. Two candidates cannot expose intransitivity, which is
+why the older order-independence test did not.
+
+**What is traded for it.** The ranking is now transitive and independent of the
+order candidates arrive in, and in exchange it depends on *which* candidates
+arrive. A bucket is anchored inside its own group, so 104 shares a bucket with
+108 when 100 is absent and not when it is present; and a criterion abstains for
+a group that one unmeasured member joins. Removing a candidate — a hard filter
+refusing it, a model being disabled — can therefore change the order of the
+rest. The old comparator did not have that property, and had no consistent
+order instead. Only one of the two is available with an epsilon and an
+abstention in the rules.
+
+The full-catalogue diagnostic reports where this happens, as
+`subset_context_reversal`. It was `pairwise_inversion` and was described as
+evidence of non-transitivity, which it no longer is.
+
+**Comparing across the change.** `lib/routingShadowReport.ts` compares runs by
+`selectionPolicyVersion` by default, and this change deliberately did not move
+that version. A before-and-after of the ranking itself must be taken over
+`selectionVersion`, or both sides land in the same bucket.
+
+And the comparison is weaker than it was, for the same reason the ranking is
+better. A shadow row records `eligibleCount` and not which models were
+eligible, so two runs with the same count can have had different membership —
+which, now that the order depends on membership, is a second explanation for
+any difference between them that cannot be told apart from the first. A
+content-free digest of the sorted eligible ids would separate the two, and it
+belongs with the candidate-verdict record that the deployment-identity work
+adds rather than as a column of its own: that record already names the eligible
+set. Until then, a shadow comparison across this version attributes less than
+it appears to.
+
 ## 6. Stickiness, in the units of this scale
 
 `ROUTER_STICKY_SWITCH_MARGIN_BANDS` is 1: a challenger must be a full band
@@ -208,7 +287,7 @@ filter. That is the correct behaviour for a scale with no measurements in it —
 there is no evidence on which to move anyone — and it means the first approved
 evidence record is also the first thing that can make Auto switch mid
 conversation. A cheaper or faster model is a reason to have started somewhere
-else, not a reason to change models mid-conversation, so criteria 2 to 4 rank
+else, not a reason to change models mid-conversation, so criteria 2 to 5 rank
 the first turn and never trigger a switch.
 
 The task profile's own confidence band is used rather than recorded and

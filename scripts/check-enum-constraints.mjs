@@ -269,10 +269,108 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  AvailabilityObservation_source_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_SOURCES",
+    reason:
+      "real_traffic, synthetic_probe, operator_verification -- kept apart for the reason ProviderHealthState already keeps them apart in separate columns: an operator proving the API answers is not the same claim as real user traffic being served, and a synthetic probe is neither. Folding them would let a passing probe cover for traffic that is failing.",
+  },
+  AvailabilityObservation_outcome_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_OUTCOMES",
+    reason:
+      "succeeded or failed. Two values because a rollup divides one by the total; a third would need every consumer to decide which side it counted on, and they would not all decide the same way.",
+  },
+  AvailabilityObservation_errorClass_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_FAILURE_CLASSES",
+    reason:
+      "A subset of ROUTING_ATTEMPT_ERROR_CLASSES, sharing its spelling so an attempt and an observation cannot call a rate limit different things, but not its membership. The first draft admitted the whole vocabulary, which would have counted a rate limit, an empty answer, a client disconnect and our own process stopping as the provider being unavailable -- RoutingAttempt draws those lines with failureLayer and an observation has no layer, so the line is which classes may appear at all. A rate limit counted here would undo QuotaCapacityState in the summary it feeds. Nullable because a success has nothing to classify.",
+  },
+  RoutingRun_allocationMode_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_MODES",
+    reason:
+      "deterministic or explore_bounded, nullable because a run written before an allocator existed genuinely recorded neither and a default of deterministic would read as 'we took the top candidate' on runs where nobody chose. A separate column from RoutingRun.mode, which answers whether the decision was acted on rather than how the candidate was picked: a combined value like shadow_explore has to be pulled apart again by every reader, and the first to get it wrong reports exploration rate over the wrong denominator. A third constraint, RoutingRun_allocation_axis_check, binds this to the seed grain and is not a closed list.",
+  },
+  RoutingRun_allocationSeedGrain_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_SEED_GRAINS",
+    reason:
+      "request or session. The ADR's own first risk is that a per-request seed breaks cache affinity: a conversation that re-rolls every turn never returns to the placement holding its prefix, and the saving disappears with nothing reporting a failure. Recorded beside the mode so that DeploymentCacheAffinity (where turns landed) and this (what the allocator was seeded on) can together say whether affinity was broken on purpose. An exploration must name its grain; a deterministic allocation rolled nothing and names none.",
+  },
+  ModelDeployment_promptCacheSupport_check: {
+    owner: "list",
+    module: "lib/deploymentCacheAffinity.ts",
+    list: "PROMPT_CACHE_SUPPORT_STATES",
+    reason:
+      "unproven is the default and a third answer, not a synonym for either of the others: a deployment nobody has checked is not no-cache, which would write off a saving nobody measured, and it is not a cache either. verified_absent is a finding. The last two split on who sends what -- a provider caching a repeated prefix on its own, versus one where the request must carry a marker and the write costs a premium -- because a ranking that could not tell them apart would be assuming a marker either is or is not needed. These values do not decide whether a request carries a marker; that is lib/anthropicPromptCaching.ts, which gates on provider identity.",
+  },
+  RoutingCandidateVerdict_verdict_check: {
+    owner: "list",
+    module: "lib/routingCandidateVerdict.ts",
+    list: "ROUTING_CANDIDATE_VERDICTS",
+    reason:
+      "eligible or rejected. An earlier draft of this table held only rejections, which left it unable to say why a model that passed every filter still lost -- the question the table exists for. A nullable reason carries both, bound to the verdict by its own CHECK so the two cannot disagree.",
+  },
+  RoutingCandidateVerdict_reason_check: {
+    owner: "list",
+    module: "lib/routerCandidates.ts",
+    list: "CANDIDATE_REJECTIONS",
+    reason:
+      "The eleven reasons the candidate filter can give, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
+  },
+  QuotaScope_scopeKind_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "QUOTA_SCOPE_KINDS",
+    reason:
+      "What a capacity limit is counted against: credential, endpoint_credential, deployment_credential, account, provider. The first design was one `(scopeKind, scopeId)` pair of strings, and an independent review rejected it because nothing would stop a scope id matching no row -- a limit counted against nothing is indistinguishable from no limit until somebody spends against it. So each kind names its own typed columns behind a foreign key, and `QuotaScope_shape_check` says which ones the kind requires and which it forbids. 'account' rather than 'workspace' because BYOK ownership is the account and no workspace entity exists to point at.",
+  },
+  CredentialBinding_billingOwner_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BILLING_OWNERS",
+    reason:
+      "tomverse or account. It decides which budget a call draws down, and they are separate namespaces on purpose: an account's own spend must not consume an allowance Tomverse funded. Two further CHECKs bind the funding columns to it, because without them 'who is paying for this call' has two possible answers and the settlement takes whichever column happens to be set.",
+  },
+  CredentialBinding_status_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BINDING_STATUSES",
+    reason:
+      "disabled, active, revoked. 'revoked' is separate from 'disabled' because they are different facts -- one was switched off and can be switched back on, the other was withdrawn and the secret behind it should be assumed gone. Collapsing them would leave an operator reading a withdrawn credential as merely paused. Nothing in the database prevents a revoked row being set active again -- the values are a vocabulary, not a state machine -- so whatever ends up writing this has to hold that rule itself.",
+  },
+  ProviderEndpoint_residencyClass_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "ENDPOINT_RESIDENCY_CLASSES",
+    reason:
+      "proven and unproven, and deliberately no third value for 'probably'. The question this answers is binary -- may a residency-constrained request be served from here -- and a middle value would be read as a yes by whoever needed one. 'unproven' is the honest default rather than a gap: it says nobody has read a contract naming a recipient entity and a processing region, which is where every provider stands until the contract review lands.",
+  },
+  ModelDeployment_qualityGateStatus_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "DEPLOYMENT_QUALITY_GATE_STATUSES",
+    reason:
+      "pending, passed, failed, stale -- per deployment rather than per equivalence class, because no provider in the pool has been shown to attest the immutable artifact that would let one placement's quality evidence stand for another's. 'stale' is its own value rather than a flavour of 'failed': evidence that expired is not evidence the model got worse, and collapsing them would make an expiry read as a regression.",
+  },
+  RoutingAttempt_errorClass_check: {
+    owner: "list",
+    module: "lib/routingAttemptStore.ts",
+    list: "ROUTING_ATTEMPT_ERROR_CLASSES",
+    reason:
+      "Why an attempt ended, as a fixed identifier. Bare TEXT until now -- five strings written by four call sites, with nothing stopping a sixth, because nothing branches on it and an operator-facing field no code reads has no other guard than a constraint. The provider_* half mirrors ProviderFailureCategory in lib/providerErrorClassification.ts, which the routing layer computed and then dropped: telling a rate limit apart from an outage is a later change and cannot be made from records that never kept the difference. 'provider_pre_token_failure' is in the list although nothing writes it any more, because rows already carry it and a constraint that refuses its own history can never be validated.",
+  },
   RoutingAttempt_failureLayer_check: {
     owner: "type_only",
     reason:
-      "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+      "RoutingFailureLayer in lib/routingAttemptStore.ts. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed. Three of the values exist to keep something out of provider health rather than to describe a provider: 'process' is this host stopping, 'storage' is an object store that no longer holds what the turn needed, and 'model_output' is the provider answering with nothing usable -- the call succeeded, so counting it as an outage would make a quality problem look like one.",
   },
   ModelMigrationRecord_field_check: {
     owner: "database",

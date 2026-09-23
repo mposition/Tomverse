@@ -143,7 +143,7 @@ test("the cost tie-break picks the cheapest, and every loser says which criterio
     assert.equal(row.versusPrimary.wouldBeatPrimary, false);
     assert.ok(row.expectedTotalCostUsd > item.models.find((m) => m.modelId === "cheap").expectedTotalCostUsd);
   }
-  assert.equal(report.summary.pairwiseInversions, 0);
+  assert.equal(report.summary.subsetContextReversals, 0);
 });
 
 test("an unmeasured model is reported at the neutral band with no evidence, never at zero and never promoted", () => {
@@ -298,4 +298,60 @@ test("the report carries nothing derived from a prompt", () => {
   const secret = "PROMPT-TEXT-THAT-MUST-NOT-LEAK";
   const report = diagnoseFullCatalog(base({ items: [{ id: "i-1", prompt: `Explain ${secret} please` }] }));
   assert.ok(!JSON.stringify(report).includes(secret));
+});
+
+/**
+ * A head-to-head reversal that is not an inconsistency.
+ *
+ * The tie-break's cost buckets are anchored to each bucket's own first value
+ * inside the candidate set it is ranking, so removing candidates can move a
+ * boundary. At a 5% ratio, 1.00 / 1.04 / 1.08 split into {1.00, 1.04} and
+ * {1.08} over the whole catalogue, and the model id decides the first bucket;
+ * asked about only the last two, the same rule puts them in one bucket and the
+ * id decides the other way.
+ *
+ * This was `pairwise_inversion`, reported as evidence that the comparator was
+ * non-transitive. `router-selection-v3` builds the ranking by partition
+ * refinement, which is transitive, so a reversal now means the candidate set
+ * changed and nothing else. The finding stays -- it shows where a bucket
+ * boundary rather than a measured difference is deciding -- under a name that
+ * says what it is.
+ */
+test("a subset-context reversal is reported, and is not called an inconsistency", () => {
+  const priced = (id, price) =>
+    model(id, { inputUsdPerMillionTokens: price, outputUsdPerMillionTokens: price });
+  const report = diagnoseFullCatalog(
+    base({
+      models: [priced("model-z", 1.0), priced("model-m", 1.04), priced("model-a", 1.08)],
+      requestedModelId: "model-m",
+    })
+  );
+
+  const item = report.items[0];
+  // {model-z, model-m} share the cheapest bucket and the id decides it.
+  assert.deepEqual(
+    item.models.filter((row) => row.disposition !== "rejected").map((row) => row.modelId).sort(),
+    ["model-a", "model-m", "model-z"]
+  );
+  assert.equal(item.decision.primaryModelId, "model-m");
+
+  const byId = Object.fromEntries(item.models.map((row) => [row.modelId, row]));
+  // Asked about only itself and the primary, the dearest model wins on the id.
+  assert.equal(byId["model-a"].versusPrimary.wouldBeatPrimary, true);
+  assert.equal(byId["model-a"].versusPrimary.decidedBy, "model_id");
+  assert.equal(byId["model-z"].versusPrimary.wouldBeatPrimary, false);
+
+  assert.ok(report.summary.subsetContextReversals > 0);
+  const finding = report.improvementCandidates.find(
+    (entry) => entry.kind === "subset_context_reversal"
+  );
+  assert.ok(finding, "the finding is reported");
+  assert.deepEqual(finding.modelIds, ["model-a"]);
+  // The old wording claimed non-transitivity, which is no longer true of it.
+  assert.ok(!/non-transitive/.test(finding.detail), finding.detail);
+
+  // And the ranking it is reported against still agrees with the product's.
+  for (const entry of report.items) {
+    assert.equal(entry.consistency.agreesWithProduct, true);
+  }
 });

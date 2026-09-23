@@ -561,6 +561,54 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The per-attempt half of the routing record: which model was tried, whether it reached a provider, and how it ended. Operational reliability data about Tomverse's own infrastructure, holding nothing the user wrote. Deleted with the account.",
   },
   {
+    domain: "routingCandidateVerdict",
+    publicName: "routing_candidate_verdicts",
+    prismaModel: "RoutingCandidateVerdict",
+    state: "excluded",
+    exclusionReason:
+      "Which models the Router considered for one turn and why each was ruled out. Operational routing data about Tomverse\u2019s own decision, from a closed list of reasons the database enforces \u2014 no prompt, no answer, no free text. The turn itself is in the conversation the export already carries in full. Deleted with the account.",
+  },
+  {
+    domain: "deploymentCacheAffinity",
+    publicName: "deployment_cache_affinity",
+    prismaModel: "DeploymentCacheAffinity",
+    state: "excluded",
+    exclusionReason:
+      "Which placement a conversation\u2019s turns last went to, and when. Infrastructure routing state, held so a later turn can return to the placement holding its prefix; it carries no digest of that prefix and nothing else the person wrote. Deleted with the account.",
+  },
+  {
+    domain: "endpointResidencyApproval",
+    publicName: "endpoint_residency_approvals",
+    prismaModel: "EndpointResidencyApproval",
+    state: "excluded",
+    exclusionReason:
+      "A named person’s decision that a provider endpoint may receive personal data, and which recipients and regions that covers. The subject of the row is the approver, not any exporting account, and the approval is about an endpoint rather than about the person asking. Retained under legal hold: under APP 8 the disclosure is Tomverse’s to account for.",
+  },
+  {
+    domain: "routingIdentityManifest",
+    publicName: "routing_identity_manifests",
+    prismaModel: "RoutingIdentityManifest",
+    state: "excluded",
+    exclusionReason:
+      "Who published one version of the routing identity configuration, and when. Infrastructure — placements, endpoints and the approvals they run under — with nothing an account wrote. The subject is the publisher, not the exporter.",
+  },
+  {
+    domain: "credentialBinding",
+    publicName: "credential_bindings",
+    prismaModel: "CredentialBinding",
+    state: "excluded",
+    exclusionReason:
+      "Which credential authorises a call and who is billed for it. A BYOK binding names where the customer’s key is kept, never the key itself, and the rest is Tomverse’s own billing wiring. Nothing here is content the person wrote, and returning a reference to their own secret store would be handing back a pointer they already hold. Deleted with the account.",
+  },
+  {
+    domain: "quotaScope",
+    publicName: "quota_scopes",
+    prismaModel: "QuotaScope",
+    state: "excluded",
+    exclusionReason:
+      "What a capacity limit is counted against, and how much room is left. Counters, windows and a scope kind — operational rate-limit state about Tomverse’s own infrastructure, holding nothing the user wrote. Deleted with the account.",
+  },
+  {
     domain: "contextManifest",
     publicName: "context_manifests",
     prismaModel: "ContextManifest",
