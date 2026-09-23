@@ -97,3 +97,37 @@ export const allConsentCopyHashes = (): ReadonlyArray<{
   }
   return rows;
 };
+
+/**
+ * One digest for a whole approved version.
+ *
+ * The per-string pins in `lib/emailConsentCopyDigests.ts` stop an approved
+ * byte from moving on its own -- but a commit that changes the string *and*
+ * its pin passes them, with the version still named `2026-09-23`. Nothing in
+ * a code-only check can tell that commit from a legitimate new version.
+ *
+ * So the version digest is also written into the approved document itself,
+ * beside the approval (docs/policy/email-consent-copy-draft.md section 8).
+ * Changing an approved byte now means editing the owner's signed record, which
+ * is the edit section 10 forbids and the one a reviewer will see for what it
+ * is. That does not make the change impossible; it makes it impossible to make
+ * quietly.
+ */
+export const consentCopyVersionDigest = (version: string): string | null => {
+  const entry = CONSENT_COPY_VERSIONS.find((row) => row.version === version);
+  if (!entry) return null;
+  const canonical = JSON.stringify(
+    Object.keys(entry.copy)
+      .sort()
+      .map((key) => [
+        key,
+        Object.keys(entry.copy[key as ConsentCopyKey])
+          .sort()
+          .map((language) => [
+            language,
+            entry.copy[key as ConsentCopyKey][language as ConsentCopyLanguage],
+          ]),
+      ])
+  );
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+};

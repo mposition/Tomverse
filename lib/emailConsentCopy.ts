@@ -183,15 +183,20 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
  * be evidence that we showed somebody a promise we had already broken, which
  * is the FTC Section 5 exposure section 5.5 cites rather than a wording nit.
  *
- * The owner chose on 2026-09-23: the cohort is not shown this notice, and the
- * override stays. So the promise is only ever made to people it is true of,
- * and the wording needs no change.
+ * The owner chose on 2026-09-23: somebody the override actually mails is not
+ * shown this notice, and the override stays. So the promise is only ever made
+ * to people it is true of, and the wording needs no change.
+ *
+ * "Actually mails" is the send's question, not membership: S8a's
+ * `overrideWouldSend()` requires the approval to be sealed and unwithdrawn,
+ * the current address to match, the jurisdiction to be allowed and the
+ * purpose not withdrawn. Membership alone was the first implementation, and it
+ * left members who had changed address with neither mail nor a way to consent.
+ * And once the notice has been shown, no override applies to that account
+ * again (`promised_no_unrequested_send`).
  *
  * `consentCopyPromisesNoUnrequestedSend()` is how a surface asks whether the
- * version it is about to render carries that promise, so the exclusion is
- * enforced rather than remembered. The refusal itself lives in
- * `noticeStateForUser()`, which answers `covered_by_approval` for a sealed and
- * unwithdrawn membership.
+ * version it is about to render carries that promise.
  *
  * This decided who is shown the wording. It did not make a consent record:
  * section 5.6 rule 1 says we do not write `ConsentRecord(granted)` for these

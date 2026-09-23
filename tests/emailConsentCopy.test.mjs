@@ -18,6 +18,7 @@ import {
   allConsentCopyHashes,
   consentCopyForHash,
   consentCopyHash,
+  consentCopyVersionDigest,
 } from "../lib/emailConsentCopyHash.ts";
 import {
   CONSENT_COPY_DIGESTS,
@@ -189,9 +190,9 @@ test("this wording promises something the override contradicts", () => {
   // same accounts under `risk_accepted`, without consent. One such send makes
   // the promise false and the stored `copyHash` evidence that we showed it.
   //
-  // Only the owner can choose between two decisions they made. Until then the
-  // reading that cannot cause harm is enforced: showing this notice retires
-  // the override for that address.
+  // The owner chose option B on 2026-09-23: the notice is not shown to
+  // somebody the override actually mails (S8a's `overrideWouldSend()`), and
+  // once it has been shown, no override applies to them again.
   assert.equal(consentCopyPromisesNoUnrequestedSend("2026-09-23"), true);
   assert.equal(consentCopyPromisesNoUnrequestedSend("not-a-version"), false);
 });
@@ -260,32 +261,69 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
-test("every approved string is its own cell in the approved document", () => {
+test("every approved string sits in its own language's cell of the approved document", () => {
   // The document is what the owner signed. If this file drifts from it, the
-  // hash names words nobody approved, and nothing else compares them.
+  // hash names words nobody approved.
   //
-  // A whole table cell, not a substring. `받지 않겠습니다` is a substring of
-  // `광고성 이메일을 받지 않겠습니다`, so shortening a label would have left it
-  // findable in the document and the check green.
+  // Matched per language, not against every cell at once. Pooling the cells
+  // let a Korean label be swapped for an English sentence that already
+  // appeared elsewhere in the document -- the string was "in the document",
+  // just not in the Korean column. A whole cell rather than a substring, too:
+  // `받지 않겠습니다` is inside `광고성 이메일을 받지 않겠습니다`.
   const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
-  const cells = new Set(
-    doc
-      .split("\n")
-      .filter((line) => line.startsWith("|"))
-      .flatMap((line) =>
-        line
-          .split("|")
-          .map((cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1"))
-      )
+  const clean = (cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1");
+  const rows = doc
+    .split("\n")
+    .filter((line) => line.startsWith("|") && !/^\|[-\s|]+\|$/.test(line))
+    .map((line) => line.split("|").slice(1, -1).map(clean));
+
+  // Two table shapes. Most tables have a language in the first column and the
+  // text in the second. The button table is transposed: its header names the
+  // languages, and each row starts with the button's role.
+  const byLanguage = new Map();
+  for (const row of rows) {
+    if (CONSENT_COPY_LANGUAGES.includes(row[0]) && row.length === 2) {
+      if (!byLanguage.has(row[0])) byLanguage.set(row[0], new Set());
+      byLanguage.get(row[0]).add(row[1]);
+    }
+  }
+  const header = rows.find(
+    (row) => row.length > 7 && CONSENT_COPY_LANGUAGES.every((l) => row.includes(l))
   );
+  assert.ok(header, "the transposed button table's header was not found");
+  for (const row of rows) {
+    if (row.length !== header.length || row === header) continue;
+    header.forEach((column, index) => {
+      if (!CONSENT_COPY_LANGUAGES.includes(column)) return;
+      if (!byLanguage.has(column)) byLanguage.set(column, new Set());
+      byLanguage.get(column).add(row[index]);
+    });
+  }
+
   for (const key of CONSENT_COPY_KEYS) {
     for (const language of CONSENT_COPY_LANGUAGES) {
       const text = consentCopy(key, language);
       assert.ok(
-        cells.has(text),
-        `${key}.${language} is not a cell in the approved document: ${text.slice(0, 40)}`
+        byLanguage.get(language)?.has(text),
+        `${key}.${language} is not in the approved document's ${language} cells: ${text.slice(0, 40)}`
       );
     }
+  }
+});
+
+test("the approved document records the digest of the version it approved", () => {
+  // Per-string pins stop an approved byte moving on its own, but a commit that
+  // changes a string *and* its pin passes them. The whole-version digest is
+  // also written into the owner's signed record, so changing an approved byte
+  // means editing that record -- which section 10 forbids and which a reviewer
+  // sees for what it is.
+  const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
+  for (const { version } of CONSENT_COPY_VERSIONS) {
+    const digest = consentCopyVersionDigest(version);
+    assert.ok(
+      doc.includes(digest),
+      `version ${version} digest ${digest} is not recorded in the approved document`
+    );
   }
 });
 
