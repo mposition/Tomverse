@@ -183,3 +183,92 @@ export const noticeObjectionSourceEventKey = (
   userId: string,
   addressDigest: string
 ): string => `in-product-notice:objected:${userId}:${addressDigest}`;
+
+/**
+ * The signals that can settle which country's rule applied.
+ *
+ * The approved contract ranks them (docs/policy/email-notifications.md
+ * sections 6.1 to 6.3): what the person said about themselves, then the
+ * billing country, then the jurisdiction recorded at their last consent. An IP
+ * or a browser language is **observational** -- it may not settle a
+ * jurisdiction on its own, and a low-confidence resolution holds marketing
+ * rather than releasing it.
+ *
+ * Draft section 5.3 says the same thing from the other end: `self_declared`
+ * replaces the candidate list, and everything else stays a list.
+ */
+export const DETERMINATIVE_COUNTRY_SIGNALS: ReadonlySet<string> = new Set([
+  "self_declared",
+  "billing",
+  "consent",
+]);
+
+export type NoticeJurisdiction = {
+  country: string;
+  source: string;
+};
+
+/**
+ * What the row's single `jurisdiction` column says, given the candidates.
+ *
+ * Counting *countries* was the second version of this and it was still wrong.
+ * Two inferences that happen to agree on `AU` are still two inferences, and
+ * sealing `AU` off them makes the column claim a settled jurisdiction the
+ * approved contract does not let an inference settle. The row has no
+ * confidence field and is append-only, so that claim would be permanent -- and
+ * it would let section 5.6's override run on an account whose display duties
+ * were never actually worked out, which is the exact thing `ZZ` refuses.
+ *
+ * So: one determinative country settles it. Anything else is `ZZ`, and the
+ * source says which kind of nothing it was -- signals that disagree are
+ * `conflict`, signals that are merely not determinative are `unresolved`.
+ * The candidates themselves persist in the evidence either way, which is where
+ * section 5.3 says they follow the person to the send snapshot.
+ */
+export const noticeJurisdiction = (
+  candidates: readonly { country: string; signal: string }[]
+): NoticeJurisdiction => {
+  const determinative = candidates.filter((candidate) =>
+    DETERMINATIVE_COUNTRY_SIGNALS.has(candidate.signal)
+  );
+  const settled = new Set(determinative.map((candidate) => candidate.country));
+  if (settled.size === 1) {
+    return {
+      country: determinative[0]!.country,
+      source: determinative[0]!.signal,
+    };
+  }
+  if (settled.size > 1) return { country: "ZZ", source: "conflict" };
+
+  const observed = new Set(candidates.map((candidate) => candidate.country));
+  return { country: "ZZ", source: observed.size > 1 ? "conflict" : "unresolved" };
+};
+
+/**
+ * The bytes two candidate lists are compared by.
+ *
+ * Keys sorted, because the stored copy comes back from `jsonb` and PostgreSQL
+ * does not keep object key order -- it stores short keys first. Comparing
+ * `JSON.stringify` of the two therefore said "different" for an identical
+ * retry, which is the opposite of what the comparison is for: a double click
+ * or a replayed request threw instead of returning the row it had already
+ * written, and `notice_shown` is one per account so every later retry threw
+ * too.
+ *
+ * Array order is **not** sorted. `jsonb` preserves it, and two lists holding
+ * the same candidates in a different order came from different screens.
+ */
+export const canonicalCandidates = (value: unknown): string => {
+  const canonical = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(canonical);
+    if (node && typeof node === "object") {
+      return Object.fromEntries(
+        Object.entries(node as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([key, inner]) => [key, canonical(inner)])
+      );
+    }
+    return node;
+  };
+  return JSON.stringify(canonical(value));
+};

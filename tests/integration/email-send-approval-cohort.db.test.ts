@@ -559,10 +559,45 @@ test("a withdrawn consent does not count as consent", async () => {
   assert.deepEqual(after, { offered: true, purposes: noticePurposes() });
 });
 
-test("two candidates naming one country leave it determined", async () => {
-  // Counting candidates rather than countries sealed `ZZ` for an account whose
-  // IP and language both said Australia. Section 5.6's override cannot cross
-  // `ZZ`, so that account could never be sent to, and the row is append-only.
+test("two inferences that agree still leave the country undetermined", async () => {
+  // The column has no confidence field and the row is append-only, so sealing
+  // `AU` off two inferences would be a permanent claim the approved contract
+  // does not let an inference make. The candidates persist in the evidence.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [
+      {
+        country: "AU",
+        signal: "inferred",
+        ruleVersion: 1,
+        copyHash: "sha256:au-device",
+      },
+      {
+        country: " au ",
+        signal: "inferred",
+        ruleVersion: 1,
+        copyHash: "sha256:au-device",
+      },
+    ],
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "ZZ");
+  assert.equal(row.jurisdictionSource, "unresolved");
+  const evidence = row.evidence as { candidates: { country: string }[] };
+  assert.deepEqual(
+    evidence.candidates.map((entry) => entry.country),
+    ["AU", "AU"]
+  );
+});
+
+test("a self-declared country settles the column", async () => {
+  // Draft section 5.3 states it from the other end: self_declared replaces the
+  // candidate list, so an inference sitting alongside it does not make a
+  // conflict. The country is normalised on the way in.
   const user = await createUser();
   await recordNoticeShown({
     ...noticeInput(user),
@@ -586,7 +621,7 @@ test("two candidates naming one country leave it determined", async () => {
     where: { userId: user.id, kind: "notice_shown" },
   });
   assert.equal(row.jurisdiction, "AU");
-  assert.notEqual(row.jurisdictionSource, "conflict");
+  assert.equal(row.jurisdictionSource, "self_declared");
 });
 
 test("a retry carrying different candidates is refused, not silently dropped", async () => {
@@ -621,6 +656,11 @@ test("a retry carrying different candidates is refused, not silently dropped", a
 });
 
 test("a retry carrying the same candidates is still idempotent", async () => {
+  // This is the case that failed before the comparison was made canonical:
+  // the stored candidates come back from `jsonb` with their keys reordered,
+  // so a byte comparison called an identical retry a different fact and threw.
+  // Only a round trip through PostgreSQL shows it -- the unit tests never
+  // store anything.
   const user = await createUser();
   const first = await recordNoticeShown(noticeInput(user));
   const second = await recordNoticeShown(noticeInput(user));

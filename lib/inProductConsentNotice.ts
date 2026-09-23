@@ -12,7 +12,9 @@ import {
   normalizeEmailAddress,
 } from "@/lib/emailSuppressionCore";
 import {
+  canonicalCandidates,
   inProductNoticeOffer,
+  noticeJurisdiction,
   noticeObjectionSourceEventKey,
   noticePurposes,
   noticeRecordFor,
@@ -225,6 +227,14 @@ const recordNoticeEvent = async (
       "An in-product notice event must carry the country whose rule was shown."
     );
   }
+
+  const db = input.client ?? prisma;
+  const record = noticeRecordFor(action);
+  if (record.kind === "consent") {
+    throw new Error("Consent is not recorded as a permission event.");
+  }
+  const emailAddress = normalizeEmailAddress(input.emailAddress);
+
   const candidates = input.candidates.map((candidate) => {
     const country = normalizeCountry(candidate.country);
     if (country === null) {
@@ -250,31 +260,10 @@ const recordNoticeEvent = async (
     };
   });
 
-  // The country is determined when the candidates agree on it, however many
-  // of them there are.
-  //
-  // Counting candidates rather than countries was wrong in a way that only
-  // showed up on the safe-looking side: an IP and a language both answering
-  // `AU` arrive as two candidates, and the row was sealed `ZZ` /
-  // `conflict` -- undetermined, for an account whose country two signals
-  // agreed on. Section 5.6's override cannot cross `ZZ`, so that account
-  // could never be sent to, and the row is append-only so nothing corrects it.
-  //
-  // Two different countries really are undetermined, and `ZZ` with
-  // `conflict` is the honest pair rather than a placeholder. That also
-  // matches the approved contract (docs/policy/email-notifications.md
-  // sections 6.2 and 6.3), which holds marketing when high-confidence signals
-  // disagree rather than combining two countries' display rules. The draft's
-  // "evaluate both" is written against an S0 amendment that has not landed.
-  const countries = new Set(candidates.map((candidate) => candidate.country));
-  const single = countries.size === 1 ? candidates[0]! : null;
-  const db = input.client ?? prisma;
-  const record = noticeRecordFor(action);
-  if (record.kind === "consent") {
-    throw new Error("Consent is not recorded as a permission event.");
-  }
-
-  const emailAddress = normalizeEmailAddress(input.emailAddress);
+  // Which country the single column claims, and how sure we are.
+  // `noticeJurisdiction()` owns that rule; see the note there for why
+  // agreeing inferences are still not a settled jurisdiction.
+  const jurisdiction = noticeJurisdiction(candidates);
 
   // The two keys are scoped differently, and deliberately: a render is about
   // the person, a refusal is about the mailbox. See the two builders.
@@ -301,6 +290,32 @@ const recordNoticeEvent = async (
   // fail too and take the caller's work with it. The catch below still exists
   // for the genuine race, which on the root client is recoverable and inside
   // a transaction is a real conflict the caller has to resolve.
+  const wanted = canonicalCandidates(candidates);
+  const sameFactOrThrow = <T extends { evidence: unknown }>(row: T): T => {
+    // The same key has to mean the same fact.
+    //
+    // This row is append-only and one per account, so the first write is
+    // permanent -- and returning it for a call that carried different
+    // candidates discards them silently while the caller reads success. A
+    // first call naming Australia and a retry adding Korea would leave Korea
+    // nowhere in the ledger, which is precisely the candidate list section 5.3
+    // says must follow the person from the attempt through to the send
+    // snapshot.
+    //
+    // Refused rather than merged: the recorded row says what was on the screen
+    // when we asked, and a second set of candidates means a different screen,
+    // not more detail about the same one.
+    const recorded = canonicalCandidates(
+      (row.evidence as { candidates?: unknown } | null)?.candidates ?? null
+    );
+    if (recorded !== wanted) {
+      throw new Error(
+        `An in-product ${record.kind} is already recorded for this account with different candidates; it cannot be rewritten.`
+      );
+    }
+    return row;
+  };
+
   const existing = await db.emailPermissionEvent.findUnique({ where });
   if (existing) {
     // The same key has to mean the same fact.
@@ -316,15 +331,7 @@ const recordNoticeEvent = async (
     // Refused rather than merged: the recorded row says what was on the screen
     // when we asked, and a second set of candidates means a different screen,
     // not more detail about the same one.
-    const recorded = JSON.stringify(
-      (existing.evidence as { candidates?: unknown } | null)?.candidates ?? null
-    );
-    if (recorded !== JSON.stringify(candidates)) {
-      throw new Error(
-        `An in-product ${record.kind} is already recorded for this account with different candidates; it cannot be rewritten.`
-      );
-    }
-    return existing;
+    return sameFactOrThrow(existing);
   }
 
   const policyVersionId = await ensureBootstrapPolicyVersion();
@@ -340,8 +347,8 @@ const recordNoticeEvent = async (
         occurredAt: input.occurredAt ?? new Date(),
         capturedVia: "in_product_notice",
         sourceEventKey,
-        jurisdiction: single ? single.country : "ZZ",
-        jurisdictionSource: single ? single.signal : "conflict",
+        jurisdiction: jurisdiction.country,
+        jurisdictionSource: jurisdiction.source,
         policyVersionId,
         evidence: {
           surface: input.surface,
@@ -360,7 +367,11 @@ const recordNoticeEvent = async (
     }
     const raced = await db.emailPermissionEvent.findUnique({ where });
     if (!raced) throw error;
-    return raced;
+    // The same comparison as the read-first path. Without it, two concurrent
+    // requests that both missed the row left the loser reading success while
+    // its candidates went nowhere -- the sequential retry was refused and the
+    // overlapping one was not.
+    return sameFactOrThrow(raced);
   }
 };
 

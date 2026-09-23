@@ -8,6 +8,8 @@ import test from "node:test";
 
 import {
   NOTICE_EVENT_KINDS,
+  canonicalCandidates,
+  noticeJurisdiction,
   inProductNoticeOffer,
   noticePurposes,
   noticeObjectionSourceEventKey,
@@ -154,5 +156,111 @@ test("the two keys can never collide with each other", () => {
   assert.notEqual(
     noticeShownSourceEventKey("u1"),
     noticeObjectionSourceEventKey("u1", "digest-a")
+  );
+});
+
+// --- which country the column claims -------------------------------------
+
+const candidate = (country, signal) => ({ country, signal });
+
+test("a self-declared country settles it", () => {
+  assert.deepEqual(
+    noticeJurisdiction([candidate("AU", "self_declared")]),
+    { country: "AU", source: "self_declared" }
+  );
+});
+
+test("a billing or consent country settles it too", () => {
+  // The approved contract's order is self-report, then billing, then the
+  // jurisdiction recorded at the last consent.
+  assert.deepEqual(noticeJurisdiction([candidate("SG", "billing")]), {
+    country: "SG",
+    source: "billing",
+  });
+  assert.deepEqual(noticeJurisdiction([candidate("KR", "consent")]), {
+    country: "KR",
+    source: "consent",
+  });
+});
+
+test("two inferences that agree are still two inferences", () => {
+  // This is the case the previous version got wrong. An IP and a browser
+  // language both answering AU is not a settled jurisdiction: the approved
+  // contract does not let an inference settle one, the row has no confidence
+  // column, and it is append-only -- so sealing AU would be a permanent claim
+  // nobody is entitled to make, and it would let section 5.6's override run on
+  // an account whose display duties were never worked out.
+  assert.deepEqual(
+    noticeJurisdiction([candidate("AU", "inferred"), candidate("AU", "inferred")]),
+    { country: "ZZ", source: "unresolved" }
+  );
+});
+
+test("one inference alone does not settle a country either", () => {
+  assert.deepEqual(noticeJurisdiction([candidate("AU", "inferred")]), {
+    country: "ZZ",
+    source: "unresolved",
+  });
+});
+
+test("inferences that disagree are a conflict, not merely unresolved", () => {
+  assert.deepEqual(
+    noticeJurisdiction([candidate("KR", "inferred"), candidate("US", "inferred")]),
+    { country: "ZZ", source: "conflict" }
+  );
+});
+
+test("a self-declared country replaces the candidate list", () => {
+  // Draft section 5.3 states it from the other end: self_declared replaces the
+  // list, so an inference pointing elsewhere does not turn it into a conflict.
+  assert.deepEqual(
+    noticeJurisdiction([
+      candidate("KR", "inferred"),
+      candidate("AU", "self_declared"),
+    ]),
+    { country: "AU", source: "self_declared" }
+  );
+});
+
+test("two determinative signals that disagree are a conflict", () => {
+  assert.deepEqual(
+    noticeJurisdiction([
+      candidate("AU", "self_declared"),
+      candidate("KR", "billing"),
+    ]),
+    { country: "ZZ", source: "conflict" }
+  );
+});
+
+// --- the bytes two candidate lists are compared by ------------------------
+
+test("key order does not make two identical lists different", () => {
+  // The stored copy comes back from `jsonb`, which does not keep object key
+  // order -- it stores short keys first. Comparing raw JSON.stringify said
+  // "different" for an identical retry, so a double click threw instead of
+  // returning the row it had already written.
+  const written = [
+    { country: "AU", signal: "self_declared", ruleVersion: 1, copyHash: "h" },
+  ];
+  const readBack = [
+    { signal: "self_declared", country: "AU", copyHash: "h", ruleVersion: 1 },
+  ];
+  assert.notEqual(JSON.stringify(written), JSON.stringify(readBack));
+  assert.equal(canonicalCandidates(written), canonicalCandidates(readBack));
+});
+
+test("array order still matters", () => {
+  // `jsonb` preserves it, and two lists holding the same candidates in a
+  // different order came from different screens.
+  const a = [candidate("AU", "inferred"), candidate("KR", "inferred")];
+  const b = [candidate("KR", "inferred"), candidate("AU", "inferred")];
+  assert.notEqual(canonicalCandidates(a), canonicalCandidates(b));
+});
+
+test("a stored value that is not a list is never equal to one", () => {
+  assert.notEqual(canonicalCandidates(null), canonicalCandidates([]));
+  assert.notEqual(
+    canonicalCandidates({ country: "AU" }),
+    canonicalCandidates([{ country: "AU" }])
   );
 });
