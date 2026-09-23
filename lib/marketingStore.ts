@@ -138,14 +138,19 @@ export async function runMarketingTransaction<T>(
     /**
      * The isolation the work needs, when the default is not enough.
      *
-     * The autonomous insert reads rows that must still be there when it
-     * writes. It asks whether this account has already published each claim
-     * the decision named, and an autonomous decision named only claims that
-     * had been -- so what `SERIALIZABLE` exists to stop here is the answer
-     * disappearing: a concurrent unpublish, delete or retention purge of the
-     * last row carrying one, committed between the read and the write. Read
-     * committed would let that transaction commit underneath this one and the
-     * post would be scheduled on evidence that no longer exists.
+     * Stated narrowly, because it is easy to claim more than it gives. The
+     * autonomous admission asks four questions in four statements -- the
+     * switches, the channel, the template, the prior use -- and under read
+     * committed each is answered as of the moment it runs. A decision could be
+     * admitted against switches read before an operator turned publishing off
+     * and prior use read after, which is an answer that was never true at any
+     * single instant.
+     *
+     * `SERIALIZABLE` makes the four one instant, or the transaction does not
+     * commit. It does not make a concurrent unpublish impossible: this
+     * transaction committing before that one is a legal order, and the post is
+     * then scheduled on evidence that was true at its serialization point,
+     * which is the right answer. What it removes is the mixture.
      */
     isolationLevel?: Prisma.TransactionIsolationLevel;
   },

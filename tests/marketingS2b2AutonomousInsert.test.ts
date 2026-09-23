@@ -493,6 +493,38 @@ test("the autonomous insert writes one scheduled row and its system audit", asyn
   assert.equal(metadata.templateId, TEMPLATE_ID);
 });
 
+test("the admission is resolved against the row this transaction locked", async () => {
+  // The callback takes the channel rather than reading one, and the row it is
+  // handed is the one held `FOR UPDATE`. Without this assertion a regression
+  // that passed the caller's own copy -- or nothing at all -- would leave every
+  // other test green, because they all stub the resolver and a stub ignores its
+  // arguments.
+  const locked = channelRow({ connectionGeneration: 4 });
+  const { database } = fakeDatabase({ channel: locked });
+  let seen: unknown = null;
+  await insertAutonomousScheduledMarketingPost(
+    asTransaction(database),
+    insertInput({
+      resolveAdmission: (async (_database: unknown, channel: unknown) => {
+        seen = channel;
+        return {
+          autonomousPublish: true,
+          admissionCodeDigest: CODE_DIGEST,
+          configGeneration: GENERATION,
+          deploymentId: DEPLOYMENT_ID,
+        };
+      }) as InputOverrides["resolveAdmission"],
+    }),
+  );
+
+  assert.deepEqual(seen, {
+    id: locked.id,
+    channel: locked.channel,
+    status: locked.status,
+    connectionGeneration: 4,
+  });
+});
+
 test("the action name is its own constant, not an S2b1 entry", () => {
   assert.deepEqual(Object.values(MARKETING_S2B2_ACTIONS), [
     "marketing_post.autonomous_scheduled",
@@ -551,9 +583,21 @@ test("the switches and the budget are what the resolver actually reads", async (
   // The resolver's half. A fake AppSetting read stands in for the `FOR SHARE`
   // statement, and the answer is checked against the input that produced it --
   // so a switch turned off is a named reason rather than a bare false.
+  // The fake reads the statement before answering it. One that returned the
+  // map whatever it was asked would pass with the `FOR SHARE` dropped, the
+  // wrong table named or the keys unbound -- and that lock is the whole reason
+  // this read is a raw statement rather than a Prisma call.
   const settings = (values: Record<string, string>) =>
     ({
-      async $queryRaw() {
+      async $queryRaw(query: unknown) {
+        const sql = statementText(query);
+        assert.match(sql, /FROM "AppSetting"/);
+        assert.match(sql, /FOR SHARE/);
+        assert.doesNotMatch(
+          sql,
+          /FOR UPDATE/,
+          "a share lock, not an exclusive one: these rows are only read here",
+        );
         return Object.entries(values).map(([key, value]) => ({ key, value }));
       },
     }) as unknown as MarketingTransaction;

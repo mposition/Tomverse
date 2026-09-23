@@ -267,14 +267,16 @@ type AutonomousInsertInput = Parameters<
 /**
  * The whole admission and the insert, in one `SERIALIZABLE` transaction.
  *
- * `SERIALIZABLE` because of one question: whether a claim this account has
- * published is still one it has published. An autonomous decision names only
- * claims and assets used before -- `guardDraft()` refuses autonomy otherwise
- * -- so the answer that can change is that one going away: a concurrent
- * unpublish, delete or retention purge of the last row carrying the claim,
- * none of which touches the channel or the template this transaction holds.
- * The prior-use read inside the store is what gives PostgreSQL something to
- * detect that conflict against.
+ * `SERIALIZABLE` so that the admission has a single serialization point.
+ * The switches, the channel, the template and the prior use are four
+ * statements, and the answer is only meaningful if all four were true at one
+ * instant; read committed answers each as of when it ran. It is not a claim
+ * that a concurrent unpublish cannot commit -- this transaction going first is
+ * a legal order and the post is then correct as of that point.
+ *
+ * The prior-use read inside the store is what makes the isolation level able
+ * to see the dependency at all: SSI detects a conflict only against a read a
+ * transaction actually performed.
  *
  * Retries are bounded and happen here, which is the only place they may: this
  * function has made no external call, so running it again repeats nothing but
