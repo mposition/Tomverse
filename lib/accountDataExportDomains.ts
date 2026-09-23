@@ -97,6 +97,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxResourcePolicy",
+    publicName: "amux_resource_policies",
+    prismaModel: "AmuxResourcePolicy",
+    state: "unverified",
+  },
+  {
+    domain: "amuxHumanEscalation",
+    publicName: "amux_human_escalations",
+    prismaModel: "AmuxHumanEscalation",
+    state: "unverified",
+  },
+  {
     domain: "privacyRequest",
     publicName: "privacy_requests",
     prismaModel: "PrivacyRequest",

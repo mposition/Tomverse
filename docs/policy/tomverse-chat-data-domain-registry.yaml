@@ -1071,6 +1071,42 @@ domains:
       review; it is distinct from the approved retention period.
       The linked AdminAuditLog is separately retained under the same schedule.
 
+  - domain: amuxResourcePolicy
+    prismaModel: AmuxResourcePolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The current project or team capacity and cost policy records who last
+      changed it by operator id and address. Registered on 2026-09-24 because
+      the actor-data sweep correctly detected those columns. Deletion,
+      retention, subject linkage and export remain unverified until privacy
+      owners decide whether mutable operator attribution is anonymised or
+      retained; this row deliberately makes no policy decision by inference.
+
+  - domain: amuxHumanEscalation
+    prismaModel: AmuxHumanEscalation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      A task escalation can name acknowledging and resolving operators by id
+      and address and can retain bounded operational reason text. Registered
+      on 2026-09-24 when the actor-data sweep detected those identities. The
+      approved immutable review-decision ledger policy does not automatically
+      decide this separate mutable table, so every privacy axis stays
+      unverified instead of extending that approval beyond its scope.
+
   - domain: promptRefinerReservationStage
     prismaModel: PromptRefinerReservationStage
     userLinkageRole: actor

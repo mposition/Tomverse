@@ -532,6 +532,7 @@ test("AMUX backlog is excluded by authenticated queue and routing APIs", async (
       reason: "not_eligible",
       task: null,
       candidates: [],
+      telemetry: {},
     });
 
     const ownedResponse = await ownedQueuePost(
@@ -1487,6 +1488,7 @@ test("routing snapshot rejects worker names outside the response machine-id cont
         reason: "worker_catalog_unavailable",
         task: null,
         candidates: [],
+        telemetry: {},
       });
     }
   } finally {
@@ -3726,9 +3728,13 @@ test("claim API persists authoritative routing when consistent client evidence d
 
   const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
 
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+
   const worker = `a-codex-${randomUUID()}`;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
   process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
     {
@@ -3867,6 +3873,11 @@ test("claim API persists authoritative routing when consistent client evidence d
       delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
     } else {
       process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
+    }
+    if (previousExecutionApi === undefined) {
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    } else {
+      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
     // The successful claim created an append-only route decision. Keep its
     // task in this disposable test database rather than deleting evidence.
