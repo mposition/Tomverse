@@ -25,6 +25,7 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   // a guess, as for qwen.
   deepinfra: defaultProfile("usage_based", "unknown"),
   together: defaultProfile("usage_based", "unknown"),
+  openrouter: defaultProfile("usage_based", "unknown"),
 };
 
 function defaultProfile(

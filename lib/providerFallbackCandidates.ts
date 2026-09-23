@@ -40,6 +40,7 @@ export const PROVIDER_FALLBACKS: Record<AiProvider, ProviderFallback> = {
   // list is what a person is offered when that is not enough.
   deepinfra: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
   together: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  openrouter: { reason: "Emergency aggregator fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
 };
 
 /**

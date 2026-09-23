@@ -201,6 +201,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   perplexity: "Perplexity",
   deepinfra: "DeepInfra",
   together: "Together",
+  openrouter: "OpenRouter",
 };
 
 /**

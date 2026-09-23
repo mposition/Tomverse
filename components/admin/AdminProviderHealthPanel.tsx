@@ -55,6 +55,7 @@ const providerConsoleHref: Record<AiProvider, string> = {
   deepinfra: "https://deepinfra.com/dash/billing",
   // Documented as Settings → Billing after signing in at api.together.ai.
   together: "https://api.together.ai/settings/billing",
+  openrouter: "https://openrouter.ai/settings/credits",
 };
 
 const money = (microUsd: number) =>

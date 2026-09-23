@@ -294,6 +294,7 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
     unproven("perplexity"),
     unproven("deepinfra"),
     unproven("together"),
+    unproven("openrouter"),
 ];
 
 export const providerDataDestination = (

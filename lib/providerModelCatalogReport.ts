@@ -59,6 +59,7 @@ const PROVIDER_REPORT_NAMES: Readonly<Record<AiProvider, string>> = {
   perplexity: "Perplexity",
   deepinfra: "DeepInfra",
   together: "Together",
+  openrouter: "OpenRouter",
 };
 
 /**

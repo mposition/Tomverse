@@ -1083,6 +1083,31 @@ ADR §14.1의 독립 open-weight fallback입니다. DeepInfra와 같은 형태�
 dark로 있습니다. §14.3의 약 50단위 분모에서 완료는 21, **약 42%(추정)**입니다.
 검증·독립 검토·병합·배포는 이 수에 들어 있지 않습니다. production 배포는 0%입니다.
 
+## 14.6 OpenRouter (2026-09-23)
+
+ADR §14.1의 최종 emergency fallback입니다. dark 등록에 더해, 수신자
+allowlist와 실패 공급자 제외가 호출 조건입니다. 둘 다
+`lib/modelRegistryShared.ts`에 있습니다. 채팅 어댑터는 그 파일을 이미
+import하므로, Prompt Refiner runtime closure에 파일을 더하지 않고 admission
+없이 클라이언트를 만들지 않습니다.
+
+허용 목록이 비어 있으면 거절입니다. 저장소는 수신자 목록을 지어 넣지 않습니다.
+통과한 요청의 본문에는 OpenRouter가 문서화한 `provider.only`(수신자 하나)와
+`allow_fallbacks: false`가 실리며, 이미 있던 `provider` 객체는 합치지 않고
+바꿉니다. 문서의 Azure 예는 `only: ["azure"]`이고, fallback을 끄지 않으면
+그 목록 밖의 호스트로 넘어갈 수 있으므로 둘을 같이 겁니다. 앞선 attempt가
+쓴 호스트는 `ignore`에 실리고, 그 호스트를 수신자로 고르면 거절입니다.
+계정 설정의 허용·무시 목록은 요청 목록과 합쳐져 더 좁아질 수 있습니다.
+base slug는 그 공급자의 region variant까지 맞습니다. 지역을 고정하려면
+variant slug 자체가 allowlist에 있어야 합니다.
+
+목적지 행은 `unproven`, 정산은 `unknown`, 카탈로그 모델은 없습니다. base는
+문서의 `https://openrouter.ai/api/v1`, 키는 `OPENROUTER_API_KEY`입니다.
+
+이 등록까지가 호스트 6곳 중 3곳이고, 빠져 있던 OpenRouter 제외·allowlist
+항목이 코드로 있습니다. §14.3의 약 50단위에서 완료는 23, **약 46%(추정)**입니다.
+검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

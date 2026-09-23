@@ -21,6 +21,7 @@ export const AI_PROVIDERS = [
   "perplexity",
   "deepinfra",
   "together",
+  "openrouter",
 ] as const satisfies readonly AiProvider[];
 
 export const PROVIDER_API_CONFIGURATION: Record<
@@ -101,6 +102,11 @@ export const PROVIDER_API_CONFIGURATION: Record<
     apiKeyEnvName: "TOGETHER_API_KEY",
     protocol: "openai-compatible",
   },
+  openrouter: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKeyEnvName: "OPENROUTER_API_KEY",
+    protocol: "openai-compatible",
+  },
 };
 
 /**
@@ -153,6 +159,7 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
     perplexity: ["PERPLEXITY_API_KEY"],
     deepinfra: ["DEEPINFRA_API_KEY"],
     together: ["TOGETHER_API_KEY"],
+    openrouter: ["OPENROUTER_API_KEY"],
   };
 
 /**
@@ -605,3 +612,148 @@ export const staticModelRegistryReconciliationRows = () =>
         },
       };
     });
+
+/**
+ * OpenRouter is an aggregator. Left unset, a chat completion is load-balanced
+ * across whoever hosts the model, and `allow_fallbacks` defaults to true, so
+ * a failure hops to another host. That is how a Kimi or DeepSeek request
+ * reaches the model developer or some other host the destination row does
+ * not name.
+ *
+ * The pin is the wire object OpenRouter documents (`provider.only` plus
+ * `allow_fallbacks: false`). `only: ["azure"]` is their example of a request
+ * that uses Azure alone. Account-wide privacy settings can narrow that
+ * further; this module does not know them and does not invent a default
+ * recipient list. An empty allowlist is a refusal, not "anywhere".
+ *
+ * This lives beside the provider connection table, not in its own module.
+ * `lib/activeAiModel.ts` is inside the Prompt Refiner runtime source closure,
+ * and a new local import would add a file to that sealed list. The chat
+ * adapter therefore calls these functions through the import it already has.
+ *
+ * No catalogue model calls this yet. The adapter refuses an OpenRouter model
+ * that arrives without an admission, so growing `AiProvider` cannot send a
+ * body until a caller names one allowlisted recipient and the providers
+ * already failed on this logical response.
+ */
+
+const OPENROUTER_PROVIDER_SLUG = /^[a-z0-9](?:[a-z0-9_-]{0,63})$/;
+
+export type OpenRouterAdmission = {
+  /** The single upstream host this request may reach. */
+  recipient: string;
+  /** Operator-approved host slugs. Empty refuses every recipient. */
+  allowlist: readonly string[];
+  /** Hosts already used by an earlier attempt of this logical response. */
+  failedProviders: readonly string[];
+};
+
+export type OpenRouterPin = {
+  only: readonly [string];
+  allow_fallbacks: false;
+  ignore?: readonly string[];
+};
+
+export type OpenRouterRefusalCode =
+  | "OPENROUTER_ADMISSION_REQUIRED"
+  | "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED"
+  | "OPENROUTER_RECIPIENT_INVALID"
+  | "OPENROUTER_RECIPIENT_NOT_ALLOWED"
+  | "OPENROUTER_FAILED_PROVIDER_EXCLUDED"
+  | "OPENROUTER_FAILED_PROVIDER_INVALID"
+  | "OPENROUTER_BODY_NOT_PINNABLE";
+
+export class OpenRouterDispatchError extends Error {
+  readonly code: OpenRouterRefusalCode;
+
+  constructor(code: OpenRouterRefusalCode) {
+    super(code);
+    this.name = "OpenRouterDispatchError";
+    this.code = code;
+  }
+}
+
+const isOpenRouterSlug = (value: string) => OPENROUTER_PROVIDER_SLUG.test(value);
+
+export const decideOpenRouterDispatch = (
+  admission: OpenRouterAdmission | undefined
+): { ok: true; pin: OpenRouterPin } | { ok: false; code: OpenRouterRefusalCode } => {
+  if (!admission) return { ok: false, code: "OPENROUTER_ADMISSION_REQUIRED" };
+  if (admission.allowlist.length === 0) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  if (admission.failedProviders.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_FAILED_PROVIDER_INVALID" };
+  }
+  if (!isOpenRouterSlug(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_INVALID" };
+  }
+  if (!admission.allowlist.includes(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_NOT_ALLOWED" };
+  }
+  if (admission.failedProviders.includes(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_FAILED_PROVIDER_EXCLUDED" };
+  }
+  const pin: OpenRouterPin = {
+    only: [admission.recipient],
+    allow_fallbacks: false,
+  };
+  if (admission.failedProviders.length > 0) {
+    pin.ignore = [...admission.failedProviders];
+  }
+  return { ok: true, pin };
+};
+
+/**
+ * Replace any `provider` object already on the body. Merging would let a
+ * caller-supplied `only` or a default `allow_fallbacks: true` widen the pin.
+ * The body is user content; a refusal names a code and not the body.
+ */
+export const pinOpenRouterChatBody = (
+  body: string,
+  pin: OpenRouterPin
+): { ok: true; body: string } | { ok: false; code: "OPENROUTER_BODY_NOT_PINNABLE" } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+  const [recipient] = pin.only;
+  const provider: {
+    only: [string];
+    allow_fallbacks: false;
+    ignore?: string[];
+  } = {
+    only: [recipient],
+    allow_fallbacks: false,
+  };
+  if (pin.ignore && pin.ignore.length > 0) {
+    provider.ignore = [...pin.ignore];
+  }
+  try {
+    return {
+      ok: true,
+      body: JSON.stringify({ ...parsed, provider }),
+    };
+  } catch {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+};
+
+export const openRouterPinnedFetch = (
+  pin: OpenRouterPin,
+  baseFetch: typeof fetch
+): typeof fetch => {
+  return async (input, init) => {
+    if (typeof init?.body !== "string") {
+      throw new OpenRouterDispatchError("OPENROUTER_BODY_NOT_PINNABLE");
+    }
+    const pinned = pinOpenRouterChatBody(init.body, pin);
+    if (!pinned.ok) throw new OpenRouterDispatchError(pinned.code);
+    return baseFetch(input, { ...init, body: pinned.body });
+  };
+};

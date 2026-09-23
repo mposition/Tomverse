@@ -14,7 +14,8 @@ export type AiProvider =
     | "zhipu"
     | "perplexity"
     | "deepinfra"
-    | "together";
+    | "together"
+    | "openrouter";
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";

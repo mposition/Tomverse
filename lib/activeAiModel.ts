@@ -6,8 +6,12 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { AiModel } from "@/lib/models";
 import {
+  decideOpenRouterDispatch,
+  openRouterPinnedFetch,
+  OpenRouterDispatchError,
   PROVIDER_API_CONFIGURATION,
   resolveProviderApiKey,
+  type OpenRouterAdmission,
 } from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
@@ -27,7 +31,10 @@ const runtimeConfiguration = (model: AiModel) => {
   };
 };
 
-export const getActiveAiModel = (model: AiModel) => {
+export const getActiveAiModel = (
+  model: AiModel,
+  openRouterAdmission?: OpenRouterAdmission
+) => {
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
     case "openai":
@@ -72,5 +79,16 @@ export const getActiveAiModel = (model: AiModel) => {
       // Same adapter limit as DeepInfra: reasoning_content is dropped.
       // No catalogue model routes here; a hosted copy is a ModelDeployment.
       return createOpenAI(configuration).chat(model.apiModel);
+    case "openrouter": {
+      // Emergency aggregator. The pin is applied inside the fetch, and a
+      // missing admission throws before any client is built. The gate lives
+      // in lib/modelRegistryShared.ts, which this file already imports.
+      const decision = decideOpenRouterDispatch(openRouterAdmission);
+      if (!decision.ok) throw new OpenRouterDispatchError(decision.code);
+      return createOpenAI({
+        ...configuration,
+        fetch: openRouterPinnedFetch(decision.pin, fetch),
+      }).chat(model.apiModel);
+    }
   }
 };

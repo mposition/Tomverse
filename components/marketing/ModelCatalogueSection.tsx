@@ -52,6 +52,7 @@ const PROVIDER_LABELS: Record<AiProvider, string> = {
   perplexity: "Perplexity",
   deepinfra: "DeepInfra",
   together: "Together",
+  openrouter: "OpenRouter",
 };
 
 export function ModelCatalogueBlock() {

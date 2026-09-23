@@ -197,12 +197,19 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-23, Together registered the same way: another literal `case` and
 // another literal registry entry. Count 228, position-free hash unchanged.
 // A repin of the position-sensitive digest only.
+//
+// 2026-09-23, OpenRouter registered with a dispatch gate. The new `case`
+// calls decideOpenRouterDispatch before createOpenAI. The functions live in
+// lib/modelRegistryShared.ts, which this file already imports, so the sealed
+// runtime closure does not gain a file. That call is an ordinary call, not a
+// computed element access. Count 228, position-free hash unchanged. A repin
+// of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a54f4d26535dbc0cd60c6aa239b79520",
-  "17cdad29004603afc2318295c73e0e02",
+  "f53cf735edd89fa18706bafe222cfdda",
+  "f3aabbbdb29a051160b2d2b865a5c62a",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
