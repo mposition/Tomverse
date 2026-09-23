@@ -74,8 +74,9 @@ export function AmuxBoardImportPanel() {
 
   const missingSentence = result ? sourceMissingSentence(messages, result) : null;
   const ledgerLines = (result?.conflictLedger ?? []).flatMap((entry) => {
-    if (typeof entry.key !== "string" || !Array.isArray(entry.reasons)) return [];
-    const reasons = entry.reasons.flatMap((code) => {
+    if (typeof entry?.key !== "string" || entry.key.length === 0) return [];
+    const codes = Array.isArray(entry.reasons) ? entry.reasons : [];
+    const reasons = codes.flatMap((code) => {
       if (code === "source_drift") return [messages.reasonSourceDrift];
       if (code === "active_execution") return [messages.reasonActiveExecution];
       if (code === "other_conflict") return [messages.reasonOtherConflict];
