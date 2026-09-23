@@ -1017,7 +1017,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | 판정 (§14.10). trip 횟수는 호출자. prior는 쓰지 않음 |
-| §8.5 | load guard | 없음 |
+| §8.5 | load guard | 판정 (§14.12). softmax는 없음. 감쇠 계수는 호출자. 완료로 세지 않음 |
 | §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 확인 필요 |
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | `CredentialBinding` dark schema만 |
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
@@ -1122,6 +1122,19 @@ DeepInfra와 Together는 카탈로그 어댑터에서 클라이언트를 만들�
 이 등록까지가 호스트 6곳 중 3곳이고, 빠져 있던 OpenRouter 제외·allowlist
 항목이 코드로 있습니다. §14.3의 약 50단위에서 완료는 23, **약 46%(추정)**입니다.
 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+2026-09-23 재검토는 Windows Claude Code CLI(opus, commit `b7b52d6e3`)가
+approve로 돌려줬습니다. blocker와 major는 없습니다. minor 넷은 기록만
+합니다. 완료 수는 바꾸지 않습니다.
+
+- `failedProviders`는 slug를 그대로 비교합니다. base slug가 variant를
+  포함한다는 주석과 어긋나, 실패한 `deepinfra` 뒤에 `deepinfra/turbo`를
+  고르면 로컬 거절 대신 `only`와 `ignore`가 같이 나갑니다.
+- 관리자 모델 폼의 select는 `AI_PROVIDERS` 전체를 그리고, 거절은 저장 뒤
+  Zod 문장으로 옵니다.
+- 거절 코드를 409로 매핑하는 곳은 채팅 route뿐입니다. 다른
+  `getActiveAiModel` 호출은 Zod가 행을 막는 동안 닿지 않습니다.
+- 카탈로그 거절 테스트는 update schema의 실패 이유까지 확인하지 않습니다.
 
 ## 14.7 Model version gate (2026-09-23)
 
@@ -1228,6 +1241,29 @@ Azure는 리소스마다 base가 다릅니다. T1은 region-pin 공급자가 확
 Sail)이 dark로 있습니다. §14.3의 약 50단위 분모에서 완료는 27, **약 54%(추정)**
 입니다. 직전 availability 보고는 26, 약 52%였습니다. 검증·독립 검토·병합·
 배포는 이 수에 들어 있지 않습니다. production 배포는 0%입니다.
+
+## 14.12 Load guard (2026-09-23)
+
+ADR §8.5의 판정이 `lib/loadGuard.ts`에 있습니다. 요청 경로는 import하지
+않습니다. softmax를 계산하지 않습니다.
+
+- 포화 신호는 credential capacity와 deployment load 둘입니다. 둘 다 꺼져
+  있으면 weight는 그대로입니다.
+- 하나라도 켜져 있으면 호출자가 넘긴 감쇠 계수를 곱합니다. 계수는 (0, 1)
+  안의 유한한 수여야 합니다. 0은 후보를 지우고, 1은 감쇠가 아닙니다. 이
+  모듈은 계수를 고르지 않습니다. 쓸 수 없는 계수면 null이고, 0으로 바꾸지
+  않습니다.
+- `allocationHerds`는 양수이던 provider가 둘 이상인데 남은 양수 몫이
+  provider 하나로 모이고, 빠지는 provider의 weight가 0이 된 경우입니다.
+  감쇠만 하고 양수를 유지하면 이 판정이 아닙니다.
+- phase 이름은 `before_softmax`와 `after_softmax` 둘 다 있어야 확인된
+  것입니다. 이름만 있고 softmax 계산은 없습니다. `lib/routingAllocation.ts`가
+  softmax를 두지 않는 이유는 온도가 품질과 비용의 교환이고, 그 교환은
+  정해지지 않았기 때문입니다. 그 온도를 여기 넣지 않습니다.
+
+이 줄은 §14.3의 load guard 항목을 완료로 세지 않습니다. softmax 전후라는
+문장의 계산이 없고, 감쇠 계수도 정해져 있지 않습니다. 완료 수는 27,
+**약 54%(추정)** 그대로입니다. 직전 Sail 보고와 같습니다.
 
 ## 15. 되돌릴 수 없는 것
 
