@@ -39,9 +39,14 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
+    -- One draft entry, and it says which envelope was drafted. The digest
+    -- was checked by the store and not by this trigger, so a row inserted any
+    -- other way could carry a first entry that named nothing -- and the first
+    -- entry is what every later append is compared against.
     IF pg_catalog.jsonb_array_length(NEW."history") <> 1
-        OR NEW."history" -> 0 ->> 'type' IS DISTINCT FROM 'draft' THEN
-        RAISE EXCEPTION 'MarketingPost % must start with one draft history entry', NEW."id"
+        OR NEW."history" -> 0 ->> 'type' IS DISTINCT FROM 'draft'
+        OR NEW."history" -> 0 ->> 'envelopeDigest' IS DISTINCT FROM NEW."envelopeDigest" THEN
+        RAISE EXCEPTION 'MarketingPost % must start with one draft history entry naming its envelope', NEW."id"
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -69,9 +74,15 @@ BEGIN
         -- verdict that reaches here without a person, so it is the only one
         -- that may arrive already scheduled, and it carries no codes: codes
         -- belong to the two verdicts that have something to say.
+        --
+        -- `guardRuleIds` is deliberately not required to be non-empty. An
+        -- empty list is what `guardDraft()` actually returns for an
+        -- autonomous decision -- the rule ids it collects are the ones that
+        -- had something to say, and a decision that reaches autonomy has none.
+        -- Requiring one refused every legitimate row this exception exists
+        -- for, and the integration fixture that wrote a rule id hid it.
         IF NEW."guardDecision" <> 'autonomous_eligible'
             OR pg_catalog.array_length(NEW."guardCodes", 1) IS NOT NULL
-            OR pg_catalog.array_length(NEW."guardRuleIds", 1) IS NULL
             OR NEW."factsDigest" IS NULL THEN
             RAISE EXCEPTION 'MarketingPost % must carry a sealed autonomous decision', NEW."id"
                 USING ERRCODE = 'check_violation';

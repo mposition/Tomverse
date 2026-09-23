@@ -50,14 +50,12 @@ import {
   MARKETING_PRIOR_USE_STATUSES,
   MARKETING_REFUSAL_STATUS,
   MARKETING_S2B2_ACTIONS,
+  marketingHealthIsFresh,
+  MARKETING_HEALTH_FRESHNESS_SECONDS,
   MARKETING_SERIALIZATION_RETRIES,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
-import {
-  marketingConfigGeneration,
-  marketingHealthIsFresh,
-  MARKETING_HEALTH_FRESHNESS_SECONDS,
-} from "@/lib/marketingAutonomousAdmission";
+import { marketingConfigGeneration } from "@/lib/marketingAutonomousAdmission";
 
 /**
  * The one cast in this file.
@@ -429,6 +427,11 @@ test("the autonomous insert writes one scheduled row and its system audit", asyn
   assert.equal(post.mode, "autonomous");
   assert.equal(post.guardDecision, "autonomous_eligible");
   assert.deepEqual(post.guardCodes, []);
+  // Empty, and that is the normal case rather than an accident of the
+  // fixture. `guardDraft()` collects the ids of rules that had something to
+  // say, and a decision that reaches autonomy has none -- so a trigger or a
+  // check requiring a rule id refuses every legitimate row this writer makes.
+  assert.deepEqual(post.guardRuleIds, []);
   assert.equal(scheduledAt.getTime(), SLOT.getTime());
   assert.equal(post.templateId, TEMPLATE_ID);
   assert.equal(post.templateDigest, APPROVED_DIGEST);
@@ -619,6 +622,26 @@ test("refuses a code digest that is not this build's", async () => {
   );
 });
 
+test("refuses when there is no deployment identity to fence to", async () => {
+  // Two empty strings compare equal, so an unset `RAILWAY_DEPLOYMENT_ID` on
+  // both sides passed the fence every time and wrote an audit entry recording
+  // a fence that was never one.
+  assert.equal(
+    await refusal(
+      {},
+      {
+        resolveAdmission: admission({ deploymentId: "" }),
+        input: { deploymentId: "" },
+      },
+    ),
+    "autonomous_insert_deployment_unknown",
+  );
+  assert.equal(
+    await refusal({}, { resolveAdmission: admission({ deploymentId: "" }) }),
+    "autonomous_insert_deployment_unknown",
+  );
+});
+
 test("refuses a deployment fence that no longer matches", async () => {
   assert.equal(
     await refusal(
@@ -711,9 +734,41 @@ test("prior use is a question about publication, not about intent", () => {
   );
 });
 
-test("a serialization failure is recognised and bounded", () => {
-  assert.equal(marketingSerializationFailure({ code: "40001" }), true);
-  assert.equal(marketingSerializationFailure({ code: "23505" }), false);
+test("a serialization failure is recognised in the shape Prisma raises it", () => {
+  // The shape that actually arrives. A caller never sees SQLSTATE 40001 from
+  // an interactive transaction: Prisma raises `P2034` with a
+  // `TransactionWriteConflict` cause, and a predicate that compared
+  // `error.code` to "40001" was false for every conflict that happens -- so
+  // the bounded retry would never have run once.
+  assert.equal(
+    marketingSerializationFailure(
+      Object.assign(new Error("write conflict"), { code: "P2034" }),
+    ),
+    true,
+    "P2034 is what Prisma raises for a serialization conflict",
+  );
+  assert.equal(
+    marketingSerializationFailure(
+      Object.assign(new Error("write conflict"), {
+        cause: { kind: "TransactionWriteConflict", originalCode: "40001" },
+      }),
+    ),
+    true,
+    "the driver cause carries the kind and the original SQLSTATE",
+  );
+  assert.equal(
+    marketingSerializationFailure({
+      cause: { kind: "QueryError", originalCode: "40P01" },
+    }),
+    true,
+    "a deadlock is the other way two transactions cannot both be true",
+  );
+  assert.equal(
+    marketingSerializationFailure({
+      cause: { kind: "UniqueConstraintViolation", originalCode: "23505" },
+    }),
+    false,
+  );
   assert.equal(marketingSerializationFailure(new Error("deadlock")), false);
   assert.equal(marketingSerializationFailure(null), false);
   assert.ok(MARKETING_SERIALIZATION_RETRIES > 0);

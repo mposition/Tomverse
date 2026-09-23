@@ -1991,7 +1991,11 @@ const autonomousScheduledRow = (
   factsDigest: DIGEST,
   guardDecision: "autonomous_eligible",
   guardCodes: [] as string[],
-  guardRuleIds: ["rule.template"],
+  // Empty, because that is what `guardDraft()` returns for an autonomous
+  // decision: the rule ids it collects are the ones that had something to say.
+  // The fixture used to write `["rule.template"]`, and that one value hid a
+  // trigger clause that refused every legitimate row.
+  guardRuleIds: [] as string[],
   status: "scheduled",
   mode: "autonomous",
   scheduledAt: slot,
@@ -2025,6 +2029,30 @@ test("an autonomous scheduled row of the right shape is accepted", async () => {
   // widens which statuses may be inserted; it does not hand the caller the
   // clock.
   assert.ok(Math.abs(created.createdAt.getTime() - Date.now()) < 60_000);
+  assert.deepEqual(created.guardRuleIds, []);
+
+  // A decision that did collect a rule id is accepted too. The clause is about
+  // the decision being autonomous, not about how much it had to say.
+  const withRule = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot, {
+      guardRuleIds: ["rule.template"],
+    }) as never,
+  });
+  assert.deepEqual(withRule.guardRuleIds, ["rule.template"]);
+});
+
+test("the first history entry names the envelope the row stores", async () => {
+  // The store checks the digest; a row inserted another way does not go
+  // through it, and the first entry is what every later append is compared
+  // against.
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft", { envelopeDigest: OTHER_DIGEST })],
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft")],
+  });
 });
 
 test("the exception is exactly scheduled-and-autonomous, not either half", async () => {
@@ -2103,6 +2131,8 @@ test("a scheduled autonomous row arrives unclaimed and without an outcome", asyn
     { errorCode: "provider_rejected" },
     { outcomeUnknownAt: new Date() },
     { deletedAt: new Date() },
+    { deletionMethod: "operator_unpublish" },
+    { contentPurgedAt: new Date() },
     { legalHold: true },
     // The clauses outside the exception still apply to it.
     { publishedAt: new Date() },

@@ -45,7 +45,8 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { databaseErrorMetadata } from "@/lib/databaseError";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -160,12 +161,28 @@ export async function runMarketingTransaction<T>(
  * but only before anything has left the database, which for the autonomous
  * insert means before any vendor call exists at all (that is S2d2). Retrying
  * after an external effect would repeat the effect.
+ *
+ * Read through `databaseErrorMetadata()` rather than off `error.code`,
+ * because a caller never sees SQLSTATE 40001 here: Prisma turns a serialization
+ * conflict in an interactive transaction into `P2034` with a
+ * `TransactionWriteConflict` driver cause, and the raw code survives only as
+ * the cause's `originalCode`. A predicate that compared `error.code` to
+ * "40001" was false for every conflict that actually happens, so the bounded
+ * retry the plan requires would never have run once.
+ *
+ * A deadlock (40P01) counts too, and for the same reason: it is the other way
+ * two transactions taking the same locks can fail to both be true, nothing
+ * was wrong with either, and neither has made an external call.
  */
-export const marketingSerializationFailure = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  (error as { code?: unknown }).code === "40001";
+export const marketingSerializationFailure = (error: unknown): boolean => {
+  const metadata = databaseErrorMetadata(error);
+  return (
+    metadata.errorCode === "P2034" ||
+    metadata.driverKind === "TransactionWriteConflict" ||
+    metadata.driverCode === "40001" ||
+    metadata.driverCode === "40P01"
+  );
+};
 
 /** How many times a serialization failure may be retried before it is an answer. */
 export const MARKETING_SERIALIZATION_RETRIES = 3;
@@ -228,6 +245,58 @@ export type MarketingAutonomousAdmission = {
   readonly configGeneration: number;
   /** The Railway deployment this process belongs to. */
   readonly deploymentId: string;
+};
+
+/**
+ * How recently a health observation must have been made to count.
+ *
+ * Sixty seconds, and positive by construction. Health is the one admission
+ * input that is about the outside world rather than about a row, so an old
+ * observation is not a weaker answer -- it is an answer about a different
+ * moment.
+ *
+ * Here rather than beside the composition that reads it, because it decides an
+ * admission and therefore belongs to the bytes `admissionCodeDigest` covers.
+ * This module is a manifest root; the composition cannot be one, since it
+ * carries the digest itself. It is also not in the Prompt Refiner's runtime
+ * source closure, which `lib/marketingAutomationAccess.ts` -- the other
+ * obvious home -- is, and a sealed snapshot there is repinned by a person.
+ */
+export const MARKETING_HEALTH_FRESHNESS_SECONDS = 60;
+
+export type MarketingHealthObservation = {
+  readonly channelId: string;
+  readonly connectionGeneration: number;
+  readonly healthy: boolean;
+  readonly observedAt: Date;
+};
+
+/**
+ * Whether an observation may be used as this channel's health, at this clock.
+ *
+ * Missing, stale, future-dated or about another channel or connection
+ * generation is false -- each for the same reason, that it is not an
+ * observation of the thing being asked about now. A future-dated row is not
+ * "very fresh": it is a clock disagreement, and treating it as the freshest
+ * answer would make a broken clock look like a healthy adapter.
+ */
+export const marketingHealthIsFresh = (
+  observation: MarketingHealthObservation | null,
+  now: Date,
+  expect: { readonly channelId: string; readonly connectionGeneration: number },
+  thresholdSeconds: number = MARKETING_HEALTH_FRESHNESS_SECONDS,
+): boolean => {
+  if (observation === null) return false;
+  if (!(thresholdSeconds > 0)) return false;
+  if (observation.channelId !== expect.channelId) return false;
+  if (observation.connectionGeneration !== expect.connectionGeneration) {
+    return false;
+  }
+  const age = now.getTime() - observation.observedAt.getTime();
+  if (!Number.isFinite(age)) return false;
+  if (age < 0) return false;
+  if (age > thresholdSeconds * 1000) return false;
+  return observation.healthy;
 };
 
 export const MARKETING_PRIOR_USE_STATUSES = [
@@ -352,6 +421,7 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   autonomous_insert_code_digest_changed: 409,
   autonomous_insert_config_generation_changed: 409,
   autonomous_insert_deployment_changed: 409,
+  autonomous_insert_deployment_unknown: 503,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -2040,12 +2110,42 @@ export async function insertAutonomousScheduledMarketingPost(
 ) {
   const binding = rawInput.binding;
   const resolveAdmission = rawInput.resolveAdmission;
+  // Copied field by field, here, for the reason everything else in this module
+  // is: a property can be an accessor. `marketingFactsDigest()` reads
+  // `claims` and the prior-use check below reads it again, and an object whose
+  // getter answered one list to the digest and another to the check would have
+  // its digest verified against facts that were never used. There is one list
+  // from here on and the argument is not read again.
+  const facts: MarketingGuardFacts = {
+    channelId: String(rawInput.facts.channelId),
+    channel: String(rawInput.facts.channel),
+    locale: String(rawInput.facts.locale),
+    claims: [...rawInput.facts.claims].map((claim) => ({ ...claim })),
+    assets: [...rawInput.facts.assets].map((asset) => ({ ...asset })),
+    claimRegistryVersion: Number(rawInput.facts.claimRegistryVersion),
+    assetRegistryVersion: Number(rawInput.facts.assetRegistryVersion),
+    factSnapshotDigest:
+      rawInput.facts.factSnapshotDigest === null
+        ? null
+        : String(rawInput.facts.factSnapshotDigest),
+  };
   const provenance = {
     admissionCodeDigest: String(rawInput.admissionCodeDigest),
     configGeneration: Number(rawInput.configGeneration),
     deploymentId: String(rawInput.deploymentId),
     commitSha: String(rawInput.commitSha),
   };
+
+  // **The audit chain lock, before any row lock.** `lib/adminAudit.ts` takes
+  // this lock inside every append, and `lib/marketingAdminMutations.ts` takes
+  // it first in its transaction and says so: every other audit write in the
+  // process queues behind it. This function writes its audit entry last,
+  // because it needs the id of the row it creates -- so without this line it
+  // would take the channel's row lock first and the chain lock last, the exact
+  // reverse of the admin path, and two of them running at once would deadlock.
+  // Taking it here costs an ordering, not a second lock: it is the same
+  // transaction-scoped advisory lock the append will ask for again.
+  await takeAuditChainLock(database);
 
   const { input, envelope, guardRuleIds, factsDigest, verdict, guardCodes } =
     await admitMarketingPostInput(database, rawInput);
@@ -2182,7 +2282,6 @@ export async function insertAutonomousScheduledMarketingPost(
   // **The facts are the ones the decision was sealed over.** The decision
   // records two digests and nothing else, so this is where a facts object
   // stops being an argument and starts being the thing the Guard read.
-  const facts = rawInput.facts;
   // One comparison, not two. `marketingFactsDigest()` covers the account, the
   // channel, the locale, every claim and asset answer, both registry versions
   // and the snapshot digest -- so a facts object that passes it is the one the
@@ -2301,6 +2400,16 @@ export async function insertAutonomousScheduledMarketingPost(
     throw new MarketingStoreRefusedError(
       "autonomous_insert_config_generation_changed",
       "A setting that affects admission changed after this decision was made",
+    );
+  }
+  // Refused before the comparison, because an empty deployment id compares
+  // equal to an empty deployment id: with the variable unset on both sides the
+  // fence passes every time and the audit records a fence that was never one.
+  // "We do not know which deployment this is" is not a match.
+  if (provenance.deploymentId === "" || admission.deploymentId === "") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_unknown",
+      "There is no deployment identity to fence this decision to",
     );
   }
   if (admission.deploymentId !== provenance.deploymentId) {

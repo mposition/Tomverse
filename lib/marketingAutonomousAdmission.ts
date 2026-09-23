@@ -53,63 +53,17 @@ import {
 } from "@/lib/marketingAutomationSchema";
 import {
   insertAutonomousScheduledMarketingPost,
-  runMarketingTransaction,
+  marketingHealthIsFresh,
   marketingSerializationFailure,
+  runMarketingTransaction,
   MARKETING_SERIALIZATION_RETRIES,
   type MarketingAutonomousAdmission,
+  type MarketingHealthObservation,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
 
 /** The digest of the code that decides an admission, as this build was built. */
 export const MARKETING_ADMISSION_CODE_DIGEST: string = manifest.digest;
-
-/**
- * How recently a health observation must have been made to count.
- *
- * Sixty seconds, and positive by construction. Health is the one input that is
- * about the outside world rather than about a row, so an old observation is not
- * a weaker answer -- it is an answer about a different moment. The rule is
- * written here as a pure function because the observation row itself is S2d2's;
- * the threshold and the comparison can be settled and tested now, and the
- * reader below can start returning something other than "unreadable" without
- * any of this changing.
- */
-export const MARKETING_HEALTH_FRESHNESS_SECONDS = 60;
-
-export type MarketingHealthObservation = {
-  readonly channelId: string;
-  readonly connectionGeneration: number;
-  readonly healthy: boolean;
-  readonly observedAt: Date;
-};
-
-/**
- * Whether an observation may be used as this channel's health, at this clock.
- *
- * Missing, stale, future-dated or about another channel or connection
- * generation is false -- each for the same reason, that it is not an
- * observation of the thing being asked about now. A future-dated row is not
- * "very fresh": it is a clock disagreement, and treating it as the freshest
- * answer would make a broken clock look like a healthy adapter.
- */
-export const marketingHealthIsFresh = (
-  observation: MarketingHealthObservation | null,
-  now: Date,
-  expect: { readonly channelId: string; readonly connectionGeneration: number },
-  thresholdSeconds: number = MARKETING_HEALTH_FRESHNESS_SECONDS,
-): boolean => {
-  if (observation === null) return false;
-  if (!(thresholdSeconds > 0)) return false;
-  if (observation.channelId !== expect.channelId) return false;
-  if (observation.connectionGeneration !== expect.connectionGeneration) {
-    return false;
-  }
-  const age = now.getTime() - observation.observedAt.getTime();
-  if (!Number.isFinite(age)) return false;
-  if (age < 0) return false;
-  if (age > thresholdSeconds * 1000) return false;
-  return observation.healthy;
-};
 
 /** The strict shape of `marketingAutomation.configGeneration`. */
 export const marketingConfigGeneration = (
@@ -174,8 +128,26 @@ export type AutonomousAdmissionSubject = {
   readonly status: MarketingChannelStatus;
 };
 
+/**
+ * The two answers this module decides that the shared resolver does not.
+ *
+ * They are named here rather than added to `MarketingAutomationAccessReason`
+ * because `lib/marketingAutomationAccess.ts` is inside the Prompt Refiner's
+ * sealed runtime source closure: adding lines to it moves the reviewed
+ * position snapshot, which a person repins. Neither of these is a question the
+ * shared resolver asks anyway -- both are about the interval between a Guard
+ * sealing a decision and this transaction writing it, and a person in the
+ * console has no such interval.
+ */
+export type MarketingAutonomousAdmissionReason =
+  | "config_generation_unreadable"
+  | "deployment_unknown";
+
 export type AutonomousAdmissionResolution = MarketingAutonomousAdmission & {
-  readonly reasons: readonly MarketingAutomationAccessReason[];
+  readonly reasons: readonly (
+    | MarketingAutomationAccessReason
+    | MarketingAutonomousAdmissionReason
+  )[];
 };
 
 /**
@@ -269,23 +241,32 @@ export const resolveAutonomousAdmission = async (
     webhookSignatureAuditEvidence: unreadable,
     webhookConfigSnapshot: unreadable,
     webhookEvent: unreadable,
-    configGeneration:
-      generation === null ? unreadable : { ok: true, value: generation },
   });
 
   const autonomous = decisions.autonomousPublish;
+  const reasons: (
+    | MarketingAutomationAccessReason
+    | MarketingAutonomousAdmissionReason
+  )[] = [...autonomous.reasons];
 
-  // Zero when it could not be read, and zero is a number no writer can have
-  // stored: the setting starts at one and only ever increments. So a caller
-  // holding any real generation disagrees with it, and the store refuses --
-  // but the resolver has already said no by then, naming the input, which is
-  // the answer that tells an operator what to look at.
+  // Both of these are the same question asked twice, and both have to be
+  // asked. The store refuses a generation or a deployment that disagrees with
+  // what the decision was sealed under; these refuse the case where there is
+  // nothing to disagree with. Zero and the empty string are not values any
+  // writer stores -- the setting starts at one and Railway always names its
+  // deployment -- so the store's comparison would refuse them too, but it
+  // would refuse them as a mismatch, and "mismatch" sends an operator looking
+  // for a change that never happened.
+  if (generation === null) reasons.push("config_generation_unreadable");
+  const deploymentId = String(process.env.RAILWAY_DEPLOYMENT_ID ?? "").trim();
+  if (deploymentId === "") reasons.push("deployment_unknown");
+
   return {
-    autonomousPublish: autonomous.enabled,
+    autonomousPublish: reasons.length === 0,
     admissionCodeDigest: MARKETING_ADMISSION_CODE_DIGEST,
     configGeneration: generation ?? 0,
-    deploymentId: String(process.env.RAILWAY_DEPLOYMENT_ID ?? ""),
-    reasons: autonomous.reasons,
+    deploymentId,
+    reasons,
   };
 };
 
@@ -297,11 +278,13 @@ type AutonomousInsertInput = Parameters<
  * The whole admission and the insert, in one `SERIALIZABLE` transaction.
  *
  * `SERIALIZABLE` because of one question: whether a claim this account has
- * never published is still one it has never published. Nothing this transaction
- * locks can answer that -- a concurrent publish of a different post makes it
- * false without touching the channel or the template -- so the protection has
- * to come from the isolation level, and the prior-use read inside the store is
- * what gives PostgreSQL something to detect the conflict against.
+ * published is still one it has published. An autonomous decision names only
+ * claims and assets used before -- `guardDraft()` refuses autonomy otherwise
+ * -- so the answer that can change is that one going away: a concurrent
+ * unpublish, delete or retention purge of the last row carrying the claim,
+ * none of which touches the channel or the template this transaction holds.
+ * The prior-use read inside the store is what gives PostgreSQL something to
+ * detect that conflict against.
  *
  * Retries are bounded and happen here, which is the only place they may: this
  * function has made no external call, so running it again repeats nothing but

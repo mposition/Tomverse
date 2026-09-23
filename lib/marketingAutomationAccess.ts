@@ -502,18 +502,6 @@ export type MarketingAutomationAccessInputs = {
   webhookSignatureAuditEvidence: ReadResult<MarketingWebhookSignatureAuditEvidence>;
   webhookConfigSnapshot: ReadResult<MarketingWebhookConfigSnapshot>;
   webhookEvent: ReadResult<WebhookScopeEntry>;
-  /**
-   * `marketingAutomation.configGeneration`, as stored right now.
-   *
-   * An input rather than a fence the caller applies afterwards, because a
-   * decision sealed under one generation and written under another was not
-   * made against the configuration it is being written into -- and that is a
-   * statement about admission, not about bookkeeping. Every writer that changes
-   * an admission-affecting setting increments it by exactly one in the same
-   * transaction, so "unchanged" is the only reading of "the settings this
-   * decision saw are the settings in force".
-   */
-  configGeneration: ReadResult<number>;
 };
 
 const add = (
@@ -811,19 +799,6 @@ export const resolveMarketingAutomationAccess = (
   );
   requireTrue(autonomousReasons, "o4Eligible", input.o4Eligible);
   requireNonO15(autonomousReasons, input.o15Channel);
-  // Only on this branch. The approval paths have a person in front of the
-  // screen at the moment they act, so "the settings have not changed since"
-  // is a question about a gap that does not exist there. Here the gap is the
-  // whole shape of the thing: a Guard sealed a decision, and something else
-  // writes it later.
-  if (!input.configGeneration.ok) {
-    add(autonomousReasons, "input_unreadable:configGeneration");
-  } else if (
-    !Number.isSafeInteger(input.configGeneration.value) ||
-    input.configGeneration.value < 1
-  ) {
-    add(autonomousReasons, "input_invalid:configGeneration");
-  }
   result.autonomousPublish = decision(autonomousReasons);
 
   const graduateReasons: MarketingAutomationAccessReason[] = [];
