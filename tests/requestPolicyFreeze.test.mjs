@@ -110,15 +110,28 @@ const nonBlank = (value) => {
     return /[^\t\n\r\f\v ]/.test(value);
 };
 
-// The replacement CHECK. A regex on NULL is NULL, and a CHECK passes on
-// NULL, so the positive branch has to be FALSE when either column is null.
-const pairCheckHolds = (controlPlaneVersion, accountPolicyVersion) => {
+// A CHECK stores the row when the expression is TRUE or NULL. NULL is not a
+// rejection. The first check's positive branch was only the two regexes, so
+// a half pair was NULL and was stored. The replacement is FALSE for that row.
+const checkWouldStore = (expression) => expression !== false;
+
+const firstPairExpression = (controlPlaneVersion, accountPolicyVersion) => {
     const bothAbsent = controlPlaneVersion === null && accountPolicyVersion === null;
-    const positive = sqlAnd(
-        sqlAnd(controlPlaneVersion !== null, accountPolicyVersion !== null),
+    return sqlOr(
+        bothAbsent,
         sqlAnd(nonBlank(controlPlaneVersion), nonBlank(accountPolicyVersion))
     );
-    return sqlOr(bothAbsent, positive) === true;
+};
+
+const replacementPairExpression = (controlPlaneVersion, accountPolicyVersion) => {
+    const bothAbsent = controlPlaneVersion === null && accountPolicyVersion === null;
+    return sqlOr(
+        bothAbsent,
+        sqlAnd(
+            sqlAnd(controlPlaneVersion !== null, accountPolicyVersion !== null),
+            sqlAnd(nonBlank(controlPlaneVersion), nonBlank(accountPolicyVersion))
+        )
+    );
 };
 
 test("a returned freeze cannot be overwritten with a later version", () => {
@@ -147,11 +160,12 @@ test("the columns are nullable and the pair check rejects a half pair", () => {
     assert.match(replaced, /"controlPlaneVersion" IS NOT NULL/);
     assert.match(replaced, /"accountPolicyVersion" IS NOT NULL/);
     assert.doesNotMatch(replaced, /UPDATE\s+"RoutingRun"/i);
-    assert.equal(pairCheckHolds(null, null), true);
-    assert.equal(pairCheckHolds("manifest-4", "account-policy-2"), true);
-    assert.equal(pairCheckHolds("manifest-4", null), false);
-    assert.equal(pairCheckHolds(null, "account-policy-2"), false);
-    assert.equal(pairCheckHolds("   ", "account-policy-2"), false);
+    assert.equal(checkWouldStore(firstPairExpression("manifest-4", null)), true);
+    assert.equal(replacementPairExpression("manifest-4", null), false);
+    assert.equal(replacementPairExpression(null, "account-policy-2"), false);
+    assert.equal(checkWouldStore(replacementPairExpression(null, null)), true);
+    assert.equal(checkWouldStore(replacementPairExpression("manifest-4", "account-policy-2")), true);
+    assert.equal(replacementPairExpression("   ", "account-policy-2"), false);
 });
 
 test("the request path does not import the freeze", () => {
