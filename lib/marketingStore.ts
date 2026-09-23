@@ -396,23 +396,21 @@ export type MarketingClaimReleaseReason =
 export const MARKETING_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
 /**
- * The statuses that have taken a slot in a day.
+ * What makes a slot spent.
  *
- * A claim counts, because the whole point of taking one is that nobody else
- * takes it; everything from `publishing` onwards counts because it has been
- * used. `failed` counts too: a post that went out and was refused by the
- * platform still consumed the account's attempt for that day, and not counting
- * it would let a bad run spend a week's allowance in an afternoon.
+ * `slotDate` and nothing else. A claim writes it, a release clears it, and
+ * nothing in between hands it back -- so the column *is* the record of the
+ * account's allowance being used, and counting anything else on top of it is
+ * a second opinion that can disagree.
+ *
+ * The first version of this counted a list of statuses and excluded
+ * `deletedAt IS NOT NULL`, which made an unpublish give the day back: a post
+ * that had gone out, been seen, and then been retracted stopped counting, and
+ * the account could spend the same day again. That is exactly the case the
+ * caps exist for. A post whose slot was taken and never used gives it back by
+ * being released, which is a decision somebody made, not a side effect of a
+ * column somewhere else.
  */
-const MARKETING_SLOT_HOLDING_STATUSES = [
-  "scheduled",
-  "publishing",
-  "published",
-  "outcome_unknown",
-  "verified",
-  "removed_by_platform",
-  "failed",
-] as const;
 
 /** The caps in force for an account: the policy's, unless an operator lowered them. */
 export const marketingChannelCaps = (channel: {
@@ -554,6 +552,8 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   claim_token_empty: 500,
   claim_lease_not_positive: 500,
   claim_release_reason_unknown: 500,
+  claim_release_lease_unreadable: 500,
+  transaction_not_serializable: 500,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -2642,6 +2642,30 @@ export async function insertAutonomousScheduledMarketingPost(
 }
 
 /**
+ * Refuse a transaction that is not at the isolation this work needs.
+ *
+ * Asked of the database rather than assumed of the caller. The level is set
+ * where the transaction is opened, which is a different file from the one that
+ * depends on it, and a caller that forgets gets a claim that looks like it
+ * worked.
+ */
+async function requireSerializableTransaction(
+  database: MarketingTransaction,
+  what: string,
+): Promise<void> {
+  const rows = await database.$queryRaw<Array<{ level: string }>>(Prisma.sql`
+    SELECT current_setting('transaction_isolation') AS "level"
+  `);
+  const level = rows[0]?.level ?? "";
+  if (level.toLowerCase() !== "serializable") {
+    throw new MarketingStoreRefusedError(
+      "transaction_not_serializable",
+      `A marketing ${what} runs at SERIALIZABLE, not ${level || "an unknown level"}`,
+    );
+  }
+}
+
+/**
  * One post this account is due to publish, locked, or nothing.
  *
  * `SKIP LOCKED` is what makes several workers useful rather than a queue with
@@ -2659,9 +2683,11 @@ async function lockDueMarketingPost(
   database: MarketingTransaction,
   channelId: string,
   now: Date,
-): Promise<{ id: string } | null> {
-  const rows = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT p."id"
+): Promise<{ id: string; historyVersion: number } | null> {
+  const rows = await database.$queryRaw<
+    Array<{ id: string; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT p."id", p."historyVersion"
     FROM "MarketingPost" AS p
     WHERE p."channelId" = ${channelId}
       AND p."status" = 'scheduled'
@@ -2735,6 +2761,15 @@ export async function claimDueMarketingPost(
   // insert takes it: this function's audit entry names the row it claims, so
   // it is written last, and taking the two locks in the other order from the
   // admin paths is how two of them deadlock.
+  // The plan puts this whole transaction at `SERIALIZABLE`, and the caller is
+  // what sets it -- `runMarketingTransaction` takes the level, this function
+  // takes a transaction. So this asks. A claim that counted an account's
+  // allowance under read committed would be counting rows as of whenever each
+  // statement ran, and the channel lock alone does not fix that: it serialises
+  // the two workers, and the second one still reads its counts from a snapshot
+  // taken before the first committed.
+  await requireSerializableTransaction(database, "claim");
+
   await takeAuditChainLock(database);
 
   const channel = await lockMarketingChannel(database, channelId);
@@ -2780,16 +2815,28 @@ export async function claimDueMarketingPost(
   // Counted while the channel is held, which is what makes the count worth
   // anything. The day is the database's, not the process's: a worker in
   // another time zone must not get a second Tuesday.
+  // Counted while the channel is held, which is what makes the count worth
+  // anything, and counted against the database's own UTC day.
+  //
+  // The day is computed in the statement rather than bound from JavaScript.
+  // A `Date` sent as a parameter arrives as a `timestamptz`, and `::date` on a
+  // `timestamptz` resolves in the *session's* time zone -- so a server whose
+  // `TimeZone` is not UTC would count a different day from the one the claim
+  // is about to write, and at 22:00 UTC the two would be different days. The
+  // expression below is the same one the clock read above uses, so there is
+  // one definition of "today" in this transaction.
   const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
     Prisma.sql`
       SELECT
-        count(*) FILTER (WHERE "slotDate" = (${now})::date) AS "today",
-        count(*) FILTER (WHERE "slotDate" > (${now})::date - 7) AS "week"
+        count(*) FILTER (
+          WHERE "slotDate" = (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::date
+        ) AS "today",
+        count(*) FILTER (
+          WHERE "slotDate" > (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::date - 7
+        ) AS "week"
       FROM "MarketingPost"
       WHERE "channelId" = ${channelId}
         AND "slotDate" IS NOT NULL
-        AND "status" IN (${Prisma.join([...MARKETING_SLOT_HOLDING_STATUSES])})
-        AND "deletedAt" IS NULL
     `,
   );
   const today = Number(used[0]?.today ?? 0);
@@ -2798,6 +2845,12 @@ export async function claimDueMarketingPost(
   if (week >= caps.weekly) return { claimed: false, reason: "weekly_cap_reached" };
 
   const leaseUntil = new Date(now.getTime() + leaseMs);
+  // The same UTC calendar day the count just used. `now` is already the
+  // database's clock read as UTC, so its UTC components are that day; taking
+  // midnight of it keeps Prisma's `@db.Date` serialisation from moving it.
+  const slotDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   // Conditional on everything the decision to claim was made against. The row
   // is held by `FOR UPDATE` so none of it can have moved, and the predicate is
@@ -2807,13 +2860,19 @@ export async function claimDueMarketingPost(
     where: {
       id: due.id,
       status: "scheduled",
+      historyVersion: due.historyVersion,
+      // Nobody holds it. Deliberately *not* also `slotDate: null`: a post that
+      // failed and was requeued keeps the slot date of the day it spent --
+      // that is what stops a bad afternoon spending a week's allowance -- and
+      // requiring it to be null left such a row matching neither this
+      // predicate nor the expired-lease one below, so it could never be
+      // claimed again at all.
       claimToken: null,
-      slotDate: null,
       deletedAt: null,
       contentPurgedAt: null,
     },
     data: {
-      slotDate: now,
+      slotDate,
       claimToken,
       leaseUntil,
     },
@@ -2827,6 +2886,7 @@ export async function claimDueMarketingPost(
       where: {
         id: due.id,
         status: "scheduled",
+        historyVersion: due.historyVersion,
         leaseUntil: { lte: now },
         deletedAt: null,
         contentPurgedAt: null,
@@ -2883,6 +2943,16 @@ export async function releaseMarketingPostClaim(
   rawInput: {
     readonly id: string;
     readonly claimToken: string;
+    /**
+     * The lease this caller believes it holds.
+     *
+     * The token alone is not enough. A worker can be told its token, finish a
+     * long pause, and try to tidy up after a lease that expired while it was
+     * gone -- by which time another worker may hold the same row under a new
+     * lease. Binding the exact instant makes that release match nothing, which
+     * is the right answer.
+     */
+    readonly expectedLeaseUntil: Date;
     readonly expectedHistoryVersion: number;
     readonly reason: MarketingClaimReleaseReason;
   },
@@ -2890,6 +2960,13 @@ export async function releaseMarketingPostClaim(
   const id = String(rawInput.id);
   const claimToken = String(rawInput.claimToken);
   const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const expectedLeaseUntil = new Date(rawInput.expectedLeaseUntil.getTime());
+  if (!Number.isFinite(expectedLeaseUntil.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "claim_release_lease_unreadable",
+      "A release names the lease it is giving back, and that is not a time",
+    );
+  }
   const reason = rawInput.reason;
   if (!(MARKETING_CLAIM_RELEASE_REASONS as readonly string[]).includes(reason)) {
     throw new MarketingStoreRefusedError(
@@ -2905,6 +2982,7 @@ export async function releaseMarketingPostClaim(
       id,
       status: "scheduled",
       claimToken,
+      leaseUntil: expectedLeaseUntil,
       historyVersion: expectedHistoryVersion,
       // Nothing has left. A row holding a request key is one that has been
       // dispatched, and a dispatched post is not released -- its outcome is
@@ -2926,7 +3004,12 @@ export async function releaseMarketingPostClaim(
     targetType: "MarketingPost",
     targetId: id,
     summary: "Gave back a publishing slot without publishing.",
-    metadata: { claimToken, reason, historyVersion: expectedHistoryVersion },
+    metadata: {
+      claimToken,
+      reason,
+      historyVersion: expectedHistoryVersion,
+      leaseUntil: expectedLeaseUntil.toISOString(),
+    },
   });
 
   return { released: true };

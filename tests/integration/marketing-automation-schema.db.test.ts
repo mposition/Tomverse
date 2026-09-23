@@ -2251,12 +2251,15 @@ test("a claim writes only the slot, and the row stays scheduled", async () => {
     where: { id: postId },
   });
 
-  const result = await runMarketingTransaction(prisma, (tx) =>
-    claimDueMarketingPost(tx, {
-      channelId: account.id,
-      claimToken: "worker-a",
-      resolveAdmission: admits,
-    }),
+  const result = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
   );
   assert.ok(result.claimed);
   assert.equal(result.id, postId);
@@ -2288,12 +2291,15 @@ test("two workers race for one slot and exactly one wins", async () => {
   const { account } = await accountWithDuePost();
 
   const claim = (token: string) =>
-    runMarketingTransaction(prisma, (tx) =>
-      claimDueMarketingPost(tx, {
-        channelId: account.id,
-        claimToken: token,
-        resolveAdmission: admits,
-      }),
+    runMarketingTransaction(
+      prisma,
+      (tx) =>
+        claimDueMarketingPost(tx, {
+          channelId: account.id,
+          claimToken: token,
+          resolveAdmission: admits,
+        }),
+      { isolationLevel: "Serializable" },
     ).catch((error: unknown) => error);
 
   const results = await Promise.all([claim("worker-a"), claim("worker-b")]);
@@ -2317,25 +2323,32 @@ test("two workers race for one slot and exactly one wins", async () => {
 
 test("a release gives the slot back and another worker can take it", async () => {
   const { account, postId } = await accountWithDuePost();
-  const first = await runMarketingTransaction(prisma, (tx) =>
-    claimDueMarketingPost(tx, {
-      channelId: account.id,
-      claimToken: "worker-a",
-      resolveAdmission: admits,
-    }),
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
   );
   assert.ok(first.claimed);
 
   const held = await prisma.marketingPost.findUniqueOrThrow({
     where: { id: postId },
   });
-  const released = await runMarketingTransaction(prisma, (tx) =>
-    releaseMarketingPostClaim(tx, {
-      id: postId,
-      claimToken: "worker-a",
-      expectedHistoryVersion: held.historyVersion,
-      reason: "worker_shutdown",
-    }),
+  const released = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
   );
   assert.deepEqual(released, { released: true });
 
@@ -2347,24 +2360,30 @@ test("a release gives the slot back and another worker can take it", async () =>
   assert.equal(free.leaseUntil, null);
   assert.equal(free.status, "scheduled");
 
-  const second = await runMarketingTransaction(prisma, (tx) =>
-    claimDueMarketingPost(tx, {
-      channelId: account.id,
-      claimToken: "worker-b",
-      resolveAdmission: admits,
-    }),
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
   );
   assert.ok(second.claimed);
 });
 
 test("a release must present the claim it is giving back", async () => {
   const { account, postId } = await accountWithDuePost();
-  await runMarketingTransaction(prisma, (tx) =>
-    claimDueMarketingPost(tx, {
-      channelId: account.id,
-      claimToken: "worker-a",
-      resolveAdmission: admits,
-    }),
+  await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
   );
   const held = await prisma.marketingPost.findUniqueOrThrow({
     where: { id: postId },
@@ -2372,24 +2391,47 @@ test("a release must present the claim it is giving back", async () => {
 
   // A worker whose lease expired, trying to tidy up, must not clear the claim
   // of whoever took the slot after it.
-  const wrongToken = await runMarketingTransaction(prisma, (tx) =>
-    releaseMarketingPostClaim(tx, {
-      id: postId,
-      claimToken: "worker-b",
-      expectedHistoryVersion: held.historyVersion,
-      reason: "worker_shutdown",
-    }),
+  const wrongToken = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-b",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
   );
   assert.deepEqual(wrongToken, { released: false });
 
-  const wrongVersion = await runMarketingTransaction(prisma, (tx) =>
-    releaseMarketingPostClaim(tx, {
-      id: postId,
-      claimToken: "worker-a",
-      expectedHistoryVersion: held.historyVersion + 1,
-      reason: "worker_shutdown",
-    }),
+  const wrongVersion = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion + 1,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
   );
+
+  // And a release naming a lease this row no longer has.
+  const wrongLease = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: new Date((held.leaseUntil as Date).getTime() - 1000),
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(wrongLease, { released: false });
   assert.deepEqual(wrongVersion, { released: false });
 
   const still = await prisma.marketingPost.findUniqueOrThrow({

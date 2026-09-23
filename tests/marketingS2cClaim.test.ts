@@ -37,6 +37,7 @@ const CHANNEL_ID = "chn_linkedin_en";
 const POST_ID = "post-due-1";
 const TOKEN = "worker-1:attempt-1";
 const NOW = new Date("2026-09-23T09:00:00.000Z");
+const LEASE_UNTIL = new Date("2026-09-23T09:15:00.000Z");
 
 const asTransaction = (database: unknown): MarketingTransaction =>
   database as MarketingTransaction;
@@ -85,6 +86,8 @@ const fakeDatabase = (
     week?: number;
     updates?: number[];
     now?: Date;
+    isolation?: string;
+    dueHistoryVersion?: number;
   } = {},
 ) => {
   const {
@@ -94,6 +97,8 @@ const fakeDatabase = (
     week = 0,
     updates = [1],
     now = NOW,
+    isolation = "serializable",
+    dueHistoryVersion = 4,
   } = options;
   const seen: { updates: Updated[]; audits: Record<string, unknown>[]; sql: string[] } = {
     updates: [],
@@ -108,14 +113,17 @@ const fakeDatabase = (
     async $queryRaw(query: unknown) {
       const sql = statementText(query);
       seen.sql.push(sql);
-      if (sql.includes("clock_timestamp")) return [{ now, createdAt: now }];
-      if (sql.includes("FOR UPDATE OF p SKIP LOCKED")) {
-        return due === null ? [] : [{ id: due }];
+      if (sql.includes("transaction_isolation")) {
+        return [{ level: isolation }];
       }
-      if (sql.includes("FOR UPDATE")) return channel === null ? [] : [channel];
       if (sql.includes("count(*) FILTER")) {
         return [{ today: BigInt(today), week: BigInt(week) }];
       }
+      if (sql.includes("clock_timestamp")) return [{ now, createdAt: now }];
+      if (sql.includes("FOR UPDATE OF p SKIP LOCKED")) {
+        return due === null ? [] : [{ id: due, historyVersion: dueHistoryVersion }];
+      }
+      if (sql.includes("FOR UPDATE")) return channel === null ? [] : [channel];
       throw new Error(`unexpected raw statement: ${sql}`);
     },
     marketingChannel: { findUnique: async () => channel },
@@ -253,6 +261,12 @@ test("a claim takes a slot and changes nothing else about the post", async () =>
     "leaseUntil",
     "slotDate",
   ]);
+  // Midnight of the database's UTC day, not the instant it happened to be.
+  // The column is a `DATE`, and letting Prisma derive one from a timestamp is
+  // how the written day and the counted day end up different.
+  assert.deepEqual(write.data.slotDate, new Date("2026-09-23T00:00:00.000Z"));
+  // And conditional on the version the decision was made against.
+  assert.equal(write.where.historyVersion, 4);
   // The three that would say a request left for the platform, and the two that
   // would say the post moved on. None of them is written.
   for (const column of [
@@ -275,13 +289,16 @@ test("a claim takes a slot and changes nothing else about the post", async () =>
   assert.equal(audit.targetId, POST_ID);
 });
 
-test("the due query passes over what another worker already holds", async () => {
+test("the due query is written to pass over what another worker holds", async () => {
   const { database, seen } = fakeDatabase();
   await claimDueMarketingPost(asTransaction(database), {
     channelId: CHANNEL_ID,
     claimToken: TOKEN,
     resolveAdmission: admits,
   });
+  // A fake cannot lock anything, so what this checks is the statement. The
+  // behaviour -- two workers, one winner -- is proved against a real
+  // PostgreSQL in tests/integration/marketing-automation-schema.db.test.ts.
   const due = seen.sql.find((sql) => sql.includes("SKIP LOCKED"));
   assert.ok(due, "the due query does not skip locked rows");
   // Locks the post and not the channel joined to it: the channel is locked
@@ -421,6 +438,72 @@ test("an expired lease is reclaimed, by a predicate that says so", async () => {
   assert.deepEqual(seen.updates[1]?.where.leaseUntil, { lte: NOW });
 });
 
+test("a claim refuses a transaction that is not SERIALIZABLE", async () => {
+  // The level is set where the transaction is opened, which is a different
+  // file from the one that depends on it. Under read committed the channel
+  // lock serialises two workers and each still reads its counts from a
+  // snapshot taken before the other committed -- so the account's allowance is
+  // counted twice and spent twice.
+  for (const level of ["read committed", "repeatable read", ""]) {
+    const { database, seen } = fakeDatabase({ isolation: level });
+    await assert.rejects(
+      claimDueMarketingPost(asTransaction(database), {
+        channelId: CHANNEL_ID,
+        claimToken: TOKEN,
+        resolveAdmission: admits,
+      }),
+      (error: unknown) =>
+        error instanceof MarketingStoreRefusedError &&
+        error.code === "transaction_not_serializable",
+    );
+    assert.equal(seen.updates.length, 0);
+    // Asked before anything is locked, so a wrong level costs nothing.
+    assert.equal(seen.audits.length, 0);
+  }
+});
+
+test("the count is of spent slots, and asks the database for the day", async () => {
+  const { database, seen } = fakeDatabase();
+  await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  const count = seen.sql.find((sql) => sql.includes("count(*) FILTER"));
+  assert.ok(count);
+  // `slotDate` is the whole record of a spent slot. Counting a status list on
+  // top of it made an unpublish give the day back, because a retracted post
+  // left the list -- and a post that went out, was seen and was then retracted
+  // has spent the account's day.
+  assert.match(count, /"slotDate" IS NOT NULL/);
+  assert.doesNotMatch(count, /"status" IN/);
+  assert.doesNotMatch(count, /"deletedAt"/);
+  // The day comes from the statement, not from a bound parameter: `::date` on
+  // a bound `timestamptz` resolves in the session's time zone.
+  assert.match(count, /clock_timestamp\(\) AT TIME ZONE 'UTC'\)::date/);
+});
+
+test("a requeued post keeps its spent day and can still be claimed", async () => {
+  // A failed post that was requeued is `scheduled` again with no claim token
+  // and no lease, but it keeps the `slotDate` of the day it spent. Requiring
+  // `slotDate: null` left it matching neither predicate, so it could never be
+  // claimed again at all.
+  const { database, seen } = fakeDatabase();
+  const result = await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  assert.ok(result.claimed);
+  const [write] = seen.updates;
+  assert.ok(write);
+  assert.equal(write.where.claimToken, null);
+  assert.ok(
+    !("slotDate" in write.where),
+    "a spent day is not a reason a post can never be claimed again",
+  );
+});
+
 test("a caller that is broken is told so rather than answered", async () => {
   for (const input of [
     { claimToken: "" },
@@ -448,6 +531,7 @@ test("a release gives back exactly what a claim took", async () => {
   const result = await releaseMarketingPostClaim(asTransaction(database), {
     id: POST_ID,
     claimToken: TOKEN,
+    expectedLeaseUntil: LEASE_UNTIL,
     expectedHistoryVersion: 3,
     reason: "worker_shutdown",
   });
@@ -464,6 +548,9 @@ test("a release gives back exactly what a claim took", async () => {
   // a worker whose lease had already expired clear the new holder's claim.
   assert.equal(write.where.claimToken, TOKEN);
   assert.equal(write.where.historyVersion, 3);
+  // And the exact lease. A worker told its token, back from a long pause,
+  // must not clear a row another worker now holds under a newer lease.
+  assert.deepEqual(write.where.leaseUntil, LEASE_UNTIL);
   assert.equal(write.where.status, "scheduled");
   // And nothing may have left: a row holding a request key was dispatched, and
   // a dispatched post's outcome is recorded, not released.
@@ -484,7 +571,8 @@ test("a release that matches nothing says so instead of pretending", async () =>
     await releaseMarketingPostClaim(asTransaction(database), {
       id: POST_ID,
       claimToken: TOKEN,
-      expectedHistoryVersion: 3,
+      expectedLeaseUntil: LEASE_UNTIL,
+    expectedHistoryVersion: 3,
       reason: "no_longer_admitted",
     }),
     { released: false },
@@ -497,7 +585,8 @@ test("a release says why, from a closed list", async () => {
     releaseMarketingPostClaim(asTransaction(fakeDatabase().database), {
       id: POST_ID,
       claimToken: TOKEN,
-      expectedHistoryVersion: 3,
+      expectedLeaseUntil: LEASE_UNTIL,
+    expectedHistoryVersion: 3,
       reason: "because" as never,
     }),
     (error: unknown) =>
