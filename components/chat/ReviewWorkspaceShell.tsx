@@ -24,6 +24,8 @@ import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
   getPublicAppSettings,
   isChatStarterEnabled,
+  isExternalContinuationEnabledCached,
+  isExternalImportEnabled,
   isImageGenerationEnabled,
   isPromptRefinerEnabled,
   isVoiceInputEnabled,
@@ -48,6 +50,9 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
+import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
+import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -101,6 +106,7 @@ export async function ReviewWorkspaceShell({
   // below, so production cannot offer or call a Refiner yet.
   let promptRefinerAvailableToDeployment = false;
   let promptRefinerFixtureAdapterEnabled = false;
+  let promptRefinerFixtureModeRefreshEnabled = false;
   /*
     Whether the welcome screen offers the starter catalogue at all
     (docs/ui-contracts/chat-starter-catalog.md section 5).
@@ -111,6 +117,23 @@ export async function ReviewWorkspaceShell({
     after an operator pulled the switch. A read failure leaves it false.
   */
   let chatStarterEnabled = false;
+  /*
+    HELP-NAV-01. The flags the guided help reads, resolved here for the reason
+    the props above are: a Client Component cannot read AppSetting rows. Kept
+    out of the try block below so a failure here leaves only these off (the
+    guide then says "not available right now") without touching anything else.
+  */
+  const helpGuideEnabledFlagKeys: string[] = [];
+  try {
+    if (await isExternalImportEnabled()) helpGuideEnabledFlagKeys.push(HELP_FLAG_KEYS.externalImport);
+    if (await isExternalContinuationEnabledCached()) {
+      helpGuideEnabledFlagKeys.push(HELP_FLAG_KEYS.externalContinuation);
+    }
+  } catch (error) {
+    console.error("Failed to load help guide flags for chat:", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
@@ -185,6 +208,8 @@ export async function ReviewWorkspaceShell({
     // helper is still used so PROMPT_REFINER_KILL_SWITCH wins even in tests.
     promptRefinerFixtureAdapterEnabled =
       jar.get("__tomverse_e2e_prompt_refiner")?.value === "1";
+    promptRefinerFixtureModeRefreshEnabled =
+      jar.get("__tomverse_e2e_prompt_refiner_mode_refresh")?.value === "1";
     if (promptRefinerFixtureAdapterEnabled) {
       promptRefinerAvailableToDeployment = promptRefinerAvailable({
         storedFlagValue: "true",
@@ -226,6 +251,7 @@ export async function ReviewWorkspaceShell({
     available: promptRefinerAvailableToDeployment,
     adapterReady: promptRefinerFixtureAdapterEnabled,
   });
+  const promptRefinerMode = promptRefinerOffered ? "e2e_fixture" : "off";
 
   /*
     What the starter catalogue is allowed to promise on this request.
@@ -259,11 +285,15 @@ export async function ReviewWorkspaceShell({
     <GuestVerificationProvider
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     >
+      <HelpGuideAccessProvider enabledFlagKeys={helpGuideEnabledFlagKeys}>
+      {promptRefinerFixtureModeRefreshEnabled ? (
+        <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
+      ) : null}
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
-        promptRefinerMode={promptRefinerOffered ? "e2e_fixture" : "off"}
+        promptRefinerMode={promptRefinerMode}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This
@@ -277,6 +307,7 @@ export async function ReviewWorkspaceShell({
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />
+      </HelpGuideAccessProvider>
     </GuestVerificationProvider>
   );
 }

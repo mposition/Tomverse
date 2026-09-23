@@ -133,6 +133,184 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "When they agreed to what, on which policy version, and how it was captured -- returned in full. Held back: ipHash and userAgentHash, which are salted digests kept to prove a consent event happened and are not readable by the person they describe, and the evidence blob, which holds the consent wording's hash and an internal screen identifier rather than anything they wrote.",
   },
   {
+    domain: "adminActionApproval",
+    publicName: "admin_action_approval",
+    prismaModel: "AdminActionApproval",
+    state: "unverified",
+  },
+  {
+    domain: "adminAlertPolicy",
+    publicName: "admin_alert_policy",
+    prismaModel: "AdminAlertPolicy",
+    state: "unverified",
+  },
+  {
+    domain: "adminNotificationLog",
+    publicName: "admin_notification_log",
+    prismaModel: "AdminNotificationLog",
+    state: "unverified",
+  },
+  {
+    domain: "adminOperationReport",
+    publicName: "admin_operation_report",
+    prismaModel: "AdminOperationReport",
+    state: "unverified",
+  },
+  {
+    domain: "adminOperationalCheckpoint",
+    publicName: "admin_operational_checkpoint",
+    prismaModel: "AdminOperationalCheckpoint",
+    state: "unverified",
+  },
+  {
+    domain: "adminProviderIncident",
+    publicName: "admin_provider_incident",
+    prismaModel: "AdminProviderIncident",
+    state: "unverified",
+  },
+  {
+    domain: "adminRetentionRun",
+    publicName: "admin_retention_run",
+    prismaModel: "AdminRetentionRun",
+    state: "unverified",
+  },
+  {
+    domain: "adminSlackTemplate",
+    publicName: "admin_slack_template",
+    prismaModel: "AdminSlackTemplate",
+    state: "unverified",
+  },
+  {
+    domain: "emailCampaign",
+    publicName: "email_campaign",
+    prismaModel: "EmailCampaign",
+    state: "unverified",
+  },
+  {
+    domain: "emailCampaignAttestation",
+    publicName: "email_campaign_attestation",
+    prismaModel: "EmailCampaignAttestation",
+    state: "unverified",
+  },
+  {
+    domain: "emailLoginAttempt",
+    publicName: "email_login_attempt",
+    prismaModel: "EmailLoginAttempt",
+    state: "unverified",
+  },
+  {
+    domain: "emailPolicyVersion",
+    publicName: "email_policy_version",
+    prismaModel: "EmailPolicyVersion",
+    state: "unverified",
+  },
+  {
+    domain: "infrastructureCreditConfig",
+    publicName: "infrastructure_credit_config",
+    prismaModel: "InfrastructureCreditConfig",
+    state: "unverified",
+  },
+  {
+    domain: "modelLifecycleWorkItem",
+    publicName: "model_lifecycle_work_item",
+    prismaModel: "ModelLifecycleWorkItem",
+    state: "unverified",
+  },
+  {
+    domain: "modelLifecycleWorkItemEvent",
+    publicName: "model_lifecycle_work_item_event",
+    prismaModel: "ModelLifecycleWorkItemEvent",
+    state: "unverified",
+  },
+  {
+    domain: "modelRegistryEntry",
+    publicName: "model_registry_entry",
+    prismaModel: "ModelRegistryEntry",
+    state: "unverified",
+  },
+  {
+    domain: "providerBillingConfig",
+    publicName: "provider_billing_config",
+    prismaModel: "ProviderBillingConfig",
+    state: "unverified",
+  },
+  {
+    domain: "providerCreditConfig",
+    publicName: "provider_credit_config",
+    prismaModel: "ProviderCreditConfig",
+    state: "unverified",
+  },
+  {
+    domain: "providerHealthCheck",
+    publicName: "provider_health_check",
+    prismaModel: "ProviderHealthCheck",
+    state: "unverified",
+  },
+  {
+    domain: "stripeWebhookEventLog",
+    publicName: "stripe_webhook_event_log",
+    prismaModel: "StripeWebhookEventLog",
+    state: "unverified",
+  },
+  {
+    domain: "templateVersion",
+    publicName: "template_version",
+    prismaModel: "TemplateVersion",
+    state: "unverified",
+  },
+  {
+    domain: "suppressionCause",
+    publicName: "email_suppression_causes",
+    prismaModel: "SuppressionCause",
+    state: "unverified",
+  },
+  {
+    domain: "suppressionEntry",
+    publicName: "email_suppression_entries",
+    prismaModel: "SuppressionEntry",
+    state: "unverified",
+  },
+  {
+    domain: "emailSendApproval",
+    publicName: "email_send_approvals",
+    prismaModel: "EmailSendApproval",
+    state: "excluded",
+    exclusionReason:
+      "An owner's decision to send without a legal basis, or to not perform a display duty. The subject of the row is the person who approved it, not the account asking for their data, so returning it would hand one account another person's identity and reasoning. Where an account was inside what was approved, that fact is returned under email_send_approval_membership with the approval's type, scope and dates.",
+  },
+  {
+    domain: "emailSendApprovalRevocation",
+    publicName: "email_send_approval_revocations",
+    prismaModel: "EmailSendApprovalRevocation",
+    state: "excluded",
+    exclusionReason:
+      "Withdrawal of an approval, carrying the identity of the person who withdrew it. Excluded for the same reason as the approval: its subject is an operator. An account reaches the withdrawal through its own membership row, which reports whether the approval covering it was revoked and when.",
+  },
+  {
+    domain: "emailPermissionEvent",
+    publicName: "email_permission_events",
+    prismaModel: "EmailPermissionEvent",
+    state: "included_filtered",
+    withheldReason:
+      "The facts other than consent that a sending basis rests on: when a notice was shown to them, when they objected, and when a relationship of ours with them began or ended -- returned with what kind of fact it was, what it was about, when it happened and where it was captured. Also returned: the policy version the fact was recorded under, without which a fact read a year later cannot be placed against the rules that applied then. Held back: the evidence blob, which holds a hash of the notice wording and an internal screen identifier rather than anything they wrote, and the writer key that makes a retried write idempotent, which is an internal handle.",
+  },
+  {
+    domain: "emailSendApprovalMember",
+    publicName: "email_send_approval_membership",
+    prismaModel: "EmailSendApprovalMember",
+    state: "included_filtered",
+    withheldReason:
+      "That an approved send covered their account, and the date the two-year confirmation notice counts from for them. Held back: the digest of their address at approval time, which is a salted-free SHA-256 kept so a send can be refused to a mailbox the approval was not about and is not readable by them, and the approval id, which is a handle onto a decision whose subject is the person who approved it rather than them.",
+  },
+  {
+    domain: "emailPermissionDecision",
+    publicName: "email_permission_decisions",
+    prismaModel: "EmailPermissionDecision",
+    state: "included_filtered",
+    withheldReason:
+      "Why each message to them was or was not permitted: which authorities were applied, how each ended, what refused it, and whether an override was used. Also returned: when suppression was last read for the message and when it was handed to the provider, because the gap between them is what a complaint about a late or unwanted send is usually about. Held back: the delivery and approval ids and the display contract hashes, which are internal handles onto a send and onto somebody else's decision, and the normalisation version, which describes how we compared their address rather than anything about them.",
+  },
+  {
     domain: "emailCampaignRecipient",
     publicName: "email_campaign_audience",
     prismaModel: "EmailCampaignRecipient",
@@ -340,6 +518,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
+  },
+  {
+    domain: "promptRefinerReservationStage",
+    publicName: "prompt_refiner_stage_approvals",
+    prismaModel: "PromptRefinerReservationStage",
+    state: "excluded",
+    exclusionReason:
+      "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+  },
+  {
+    domain: "promptRefinerShadowRun",
+    publicName: "prompt_refiner_shadow_run_approvals",
+    prismaModel: "PromptRefinerShadowRun",
+    state: "excluded",
+    exclusionReason:
+      "Content-free, immutable staging run approval evidence. It contains deployment/source digests, bounded cost and capacity, lifecycle counters and the approving operator id, but no customer id, prompt, output, credential, provider response or error prose. Operator access requests remain on the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
   },
   {
     domain: "adminNote",
@@ -584,6 +778,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "A sixty-second handshake row that lets a signed-in browser hand the native app one exchange. It holds two digests -- of the grant secret and of the PKCE verifier -- an expiry and a consumed-at, and no content the user wrote. A completed sign-in consumes it and the sweep deletes it, so an export run at any ordinary moment would find nothing to include.",
+  },
+  {
+    domain: "amuxBoardImportApproval",
+    publicName: "amux_board_import_approvals",
+    prismaModel: "AmuxBoardImportApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for a catalog import, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
 ];
 

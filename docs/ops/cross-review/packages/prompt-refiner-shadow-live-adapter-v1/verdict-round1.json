@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-live-adapter-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-19T23:30:47.368Z",
+  "durationMs": 367956,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 64,
+    "cachedInputTokens": 2408993,
+    "outputTokens": 29113,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.0569075000000008,
+    "raw": {
+      "input_tokens": 64,
+      "cache_creation_input_tokens": 110503,
+      "cache_read_input_tokens": 2408993,
+      "output_tokens": 29113,
+      "output_tokens_details": {
+        "thinking_tokens": 20413
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 110503,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3202,
+          "cache_read_input_tokens": 113952,
+          "cache_creation_input_tokens": 1293,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1293
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-19T23:36:55.385Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-live-adapter-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:88f7db404bad94f580c37bb1bdc8062b0f81bd4a48ba98ed596d8ce8eba3091a",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerExecutionContract.ts:60-67",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The frozen preregistration comment still states \"A future adapter must still identify/count with its actual tokenizer\" and \"No runtime adapter consumes it\" about PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE, while lib/promptRefinerShadowLiveAdapter.ts:194-204 consumes that constant at runtime and gates dispatch on a byte bound with no tokenizer, so the contract file asserts something this change falsified.",
+        "reproduction": "Read lib/promptRefinerExecutionContract.ts:63 and :65-67, then lib/promptRefinerShadowLiveAdapter.ts:202 (`+ PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE`) reached from the dispatch gate at :242-247. Note that promptRefinerExecutionContract.ts is outside this task's writableScope, so closing this needs an explicit scope expansion or a follow-up task; the divergence is disclosed in lib/promptRefinerShadowLiveAdapter.ts:186-193 and docs/policy/prompt-refiner-observability.md:362-364, which is why this does not block."
+      },
+      {
+        "location": "tests/promptRefinerShadowLiveAdapter.test.mjs:271-272",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The static-vs-dynamic import guard uses single-line anchored regexes (/^import .* from \"ai\";/m, /^import .*activeAiModel/m), so a multi-line static import — the exact shape the repo's formatting produces for a longer import list — would not be caught while the positive import(\"ai\") assertions still pass.",
+        "reproduction": "In lib/promptRefinerShadowLiveAdapter.ts add `import {\\n    generateText,\\n} from \"ai\";` at the top while leaving `import(\"ai\")` in runPromptRefinerShadowLiveAdapter, then run `npm run test:prompt-refiner-shadow-live-adapter`: all four assertions at :269-272 still pass even though the provider SDK now loads at module load. Matching /from\\s+\"ai\"/ (or `@\\/lib\\/activeAiModel\"`) outside a dynamic-import context instead closes this."
+      },
+      {
+        "location": "tests/promptRefinerShadowLiveAdapter.test.mjs:249",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The repo-wide unreachability scan only matches /\\.(?:ts|tsx|mjs)$/ files, so a future .js/.cjs/.jsx entry point, or a package.json script pointing node directly at the adapter, would not be caught by the guard that is this change's primary safety mechanism.",
+        "reproduction": "Add `scripts/run-refiner.cjs` containing `require(\"../lib/promptRefinerShadowLiveAdapter\")` and run `npm run test:prompt-refiner-shadow-live-adapter`: the \"no shipped entry point imports the live adapter\" test still passes. I confirmed no .js/.cjs/.jsx/.mts files exist today under app, lib, scripts, components, hooks, prisma or .railway, so this is latent rather than current."
+      }
+    ],
+    "nextAction": "Approved as reviewed: the adapter is unreachable from every shipped entry point (only the test, the package.json test script and the task JSON name the module), the pinned model/pricing/reasoning/4096/0-retry/15000ms/no-tools/no-cache and body-retention-false settings and the dispatch-then-generate ordering all hold against the checked-in AI SDK v7 option and usage types, so the author may close the recorded warning and nits in a follow-up or leave them standing with the stated reasons."
+  }
+}

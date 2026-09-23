@@ -49,9 +49,35 @@ export const BOUNDED_TABLES = {
     ProviderDailyUsage:
         "one row per (provider, model, source, day); the day makes it grow, but at a rate set by the catalogue rather than by traffic",
     PromptRefinerReservationStage:
-        "one fixed preregistered shadow stage; the application has no seed or writer that can create further stages",
+        "one fixed create-only staging shadow stage; immutable content-free provenance, DB-clock approval expiry and its authorization audit are retained, with no seed or update/delete path",
     PromptRefinerReservation:
         "at most 100 permanent tombstones under the fixed stage; released and expired rows consume their slot and cannot be deleted or reused",
+    MarketingChannel:
+        "one row per connected marketing account; disconnection is a status, so the ceiling is the number of accounts the programme connects, not the time it runs",
+};
+
+/**
+ * Tables whose retention period is already decided and written down, and whose
+ * purge job has not been built yet.
+ *
+ * A fifth state, and it needs to be separate from the four around it. "Unswept"
+ * says nobody has looked. "Retained" says somebody decided to keep the rows.
+ * "Held" says a decision is open and has an owner and a date. None of those is
+ * true here: the period is settled in an approved policy, and what is missing
+ * is the code. Reporting these as undecided would send somebody to make a
+ * decision that has already been made; reporting them as swept would claim a
+ * job that does not exist.
+ *
+ * Each entry names the period, where it was decided, and the slice that builds
+ * the job.
+ */
+export const RETENTION_DECIDED_PURGE_PENDING = {
+    MarketingPost:
+        "docs/policy/marketing-automation.md §12.2: rejected and expired drafts deleted at 90 days, published rows purged of content at 24 months with digests kept. The triggers already refuse every other deletion; the job that performs these is the retention slice (S3).",
+    MarketingReport:
+        "docs/policy/marketing-automation.md §12.2: 90 days to 36 months depending on the kind, enforced today as an exact retentionUntil on every row and a delete the database refuses before that date. The sweep that reads the column is the retention slice (S3).",
+    AiVisibilityRun:
+        "docs/policy/marketing-automation.md §12.2: 24 months, the same shape as MarketingReport.",
 };
 
 /**
@@ -177,6 +203,7 @@ export function auditUnsweptTables({
     deleted,
     bounded = BOUNDED_TABLES,
     retained = RETAINED_TABLES,
+    purgePending = RETENTION_DECIDED_PURGE_PENDING,
     pending = PENDING_RETENTION_DECISIONS,
     now = new Date(),
 }) {
@@ -185,11 +212,19 @@ export function auditUnsweptTables({
     const errors = [];
     const held = pendingDecisionByTable(pending);
     const heldTables = [];
+    const purgePendingTables = [];
 
     for (const { name, hasUserCascade } of models) {
         if (!created.has(name)) continue;
         if (deleted.has(name)) continue;
         if (name in bounded || name in retained) continue;
+        if (name in purgePending) {
+            // The period is decided; the job is not written. Neither "unswept"
+            // nor "swept" is true, and saying either one sends somebody to do
+            // the wrong thing.
+            purgePendingTables.push(name);
+            continue;
+        }
         if (held.has(name)) {
             // Not `unswept`. A table with an owner and a date is a different
             // state from one nobody has looked at, and merging them loses the
@@ -207,6 +242,7 @@ export function auditUnsweptTables({
     for (const name of [
         ...Object.keys(bounded),
         ...Object.keys(retained),
+        ...Object.keys(purgePending),
         ...held.keys(),
     ]) {
         if (!models.some((model) => model.name === name)) {
@@ -218,6 +254,13 @@ export function auditUnsweptTables({
     for (const name of Object.keys(bounded)) {
         if (name in retained) {
             errors.push(`${name} is registered as both bounded and retained.`);
+        }
+    }
+    for (const name of Object.keys(purgePending)) {
+        if (name in bounded || name in retained) {
+            errors.push(
+                `${name} has a decided retention period and is also registered as bounded or retained. Its rows are deleted on a schedule, so neither of those is true of it.`
+            );
         }
     }
     for (const name of held.keys()) {
@@ -241,5 +284,5 @@ export function auditUnsweptTables({
         decisions[overdue ? "overdue" : "open"].push({ ...decision, daysPast });
     }
 
-    return { unswept, cascadeOnly, errors, heldTables, decisions };
+    return { unswept, cascadeOnly, errors, heldTables, purgePendingTables, decisions };
 }

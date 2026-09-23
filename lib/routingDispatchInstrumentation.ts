@@ -622,7 +622,14 @@ export const completeInstrumentedDispatch = async (
         finalModelId: close.outcome === "succeeded" ? instrumentation.modelId : null,
         assistantMessageId: close.assistantMessageId ?? undefined,
         settlementOutcome: close.settlementOutcome ?? undefined,
-        firstTokenMs: close.firstTokenMs ?? undefined,
+        // CHAT-LATENCY-01. Derived from the attempt's first visible token when
+        // the caller passes the moment rather than the duration, measured from
+        // the same start as `totalLatencyMs` so the two can be compared.
+        firstTokenMs:
+            close.firstTokenMs ??
+            (close.firstVisibleTokenAt
+                ? Math.max(0, close.firstVisibleTokenAt.getTime() - instrumentation.startedAt)
+                : undefined),
         totalLatencyMs: Date.now() - instrumentation.startedAt,
         decisionMicros: instrumentation.overheadMs * 1_000,
       },

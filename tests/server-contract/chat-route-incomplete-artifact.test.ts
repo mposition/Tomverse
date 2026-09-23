@@ -79,8 +79,15 @@ const ANSWER = "이 자료를 바탕으로 웹페이지를 만들겠습니다:";
 type StreamScript = {
   /** Tool calls the provider begins, as `tool-input-start` frames. */
   begins: Array<{ toolCallId: string; toolName: string; providerExecuted?: boolean }>;
+  /** Parsed SDK frames, including invalid tool-call and following tool-error. */
+  chunks?: unknown[];
+  /** Hostile callback envelopes, before ordinary parsed frames. */
+  chunkEvents?: unknown[];
+  /** Hostile execution-start envelopes, before ordinary execute events. */
+  executionStartEvents?: unknown[];
   /** Which of those the SDK then actually executes. */
   executes: string[];
+  executeInput?: unknown;
   finishReason: string;
   rawFinishReason: string;
   text: string;
@@ -154,6 +161,13 @@ mock.module("ai", {
           // The delta frames a real provider sends in between are omitted on
           // purpose: nothing in this feature may read a partial tool input.
         }
+        for (const event of script.chunkEvents ?? []) {
+          onChunk?.(event as { chunk: unknown });
+        }
+        for (const chunk of script.chunks ?? []) onChunk?.({ chunk });
+        for (const event of script.executionStartEvents ?? []) {
+          onToolExecutionStart?.(event as { toolCall: { toolCallId: string; toolName: string } });
+        }
         for (const toolCallId of script.executes) {
           const begin = script.begins.find(
             (candidate) => candidate.toolCallId === toolCallId
@@ -163,7 +177,7 @@ mock.module("ai", {
             toolCall: { toolCallId, toolName: begin.toolName },
           });
           await tools[begin.toolName]?.execute?.(
-            {
+            script.executeInput ?? {
               filename: "generated-report.html",
               format: "html",
               content: "<!doctype html><title>ok</title><p>ok</p>",
@@ -241,14 +255,14 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       id: CONVERSATION_ID,
       userId: USER_ID,
       password: null,
-      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID]),
+      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID, "mistral-small-4"]),
       kind: "chat",
     }),
     findFirst: () => ({
       id: CONVERSATION_ID,
       userId: USER_ID,
       password: null,
-      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID]),
+      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID, "mistral-small-4"]),
       kind: "chat",
     }),
   },
@@ -372,6 +386,66 @@ mock.module(mod("lib/chatSecurity.ts"), {
   },
 });
 
+/*
+  Auto's decision, forced (CHAT-ART-01).
+
+  The real selection routes only a conversation in `auto` mode, inside the
+  cohort, past the readiness gates -- none of which is this contract. So the
+  selection is replaced by one that answers exactly what the real one answers
+  (every existing test above leaves `forcedAutoRoute` null and gets the real
+  decision), and a test that needs a routed turn names the model Auto chose.
+  What is under test is everything after the decision: that the tools, the
+  system block and the card follow the model that will actually answer.
+*/
+const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as {
+  selectAutoModel: (input: unknown) => unknown;
+};
+const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
+  ROUTER_VERSIONS: unknown;
+};
+
+let forcedAutoRoute: string | null = null;
+
+const routedSelection = (modelId: string) => ({
+  routed: true,
+  modelId,
+  sticky: { modelId, turnsFavouringChallenger: 0 },
+  fallbackCandidateModelIds: [],
+  versions: ROUTER_VERSIONS,
+  cohort: { eligible: true, bucket: 0, version: "test", salt: "test" },
+  record: {
+    versions: ROUTER_VERSIONS,
+    taskKind: "writing",
+    taskConfidence: "high",
+    needsCurrentInformation: false,
+    expectedOutputLength: "medium",
+    scripts: [],
+    signals: [],
+    reservedInputTokens: 0,
+    requestOutputCapTokens: 0,
+    consideredModelCount: 1,
+    eligibleModelIds: [modelId],
+    rejections: [],
+    selectedModelId: modelId,
+    selectionReason: "only_candidate",
+    selectionMargin: 0,
+    selectionDecidedBy: null,
+    challengerModelId: null,
+    turnsFavouringChallenger: 0,
+    decisionLatencyMs: 0,
+  },
+});
+
+mock.module(mod("lib/autoModelSelection.ts"), {
+  namedExports: {
+    ...realAutoSelection,
+    selectAutoModel: (input: unknown) =>
+      forcedAutoRoute
+        ? routedSelection(forcedAutoRoute)
+        : realAutoSelection.selectAutoModel(input),
+  },
+});
+
 // Constructing a provider client reads API keys and is not what is under test.
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: { getActiveAiModel: () => ({ modelId: MODEL_ID }) },
@@ -413,8 +487,12 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
   },
 });
 
-// Nothing here may reach the network.
-globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch;
+// Nothing here may reach a provider or any other network endpoint.
+let networkCalls = 0;
+globalThis.fetch = (async () => {
+  networkCalls += 1;
+  return new Response(null, { status: 204 });
+}) as typeof fetch;
 
 /* -------------------------------------------------------------------------- */
 /* Driving the route                                                            */
@@ -466,8 +544,12 @@ const loadRoute = async (): Promise<RouteModule> => {
 
 const ask = async (
   next: Partial<StreamScript>,
-  { modelId = MODEL_ID }: { modelId?: string } = {}
+  {
+    modelId = MODEL_ID,
+    autoRoutedTo = null,
+  }: { modelId?: string; autoRoutedTo?: string | null } = {}
 ) => {
+  forcedAutoRoute = autoRoutedTo;
   script = {
     begins: [],
     executes: [],
@@ -480,6 +562,7 @@ const ask = async (
   world.messages = [];
   world.providerContexts = [];
   lastStreamTextOptions = null;
+  networkCalls = 0;
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -538,6 +621,28 @@ const beganTextFile = {
   toolName: "create_text_file",
 };
 
+const captureArtifactRejections = async <T>(run: () => Promise<T>) => {
+  const originalWarn = console.warn;
+  const lines: string[] = [];
+  console.warn = (...args: unknown[]) => {
+    for (const arg of args) {
+      if (typeof arg === "string" && arg.includes('"event":"generated_artifact_tool_rejected"')) {
+        lines.push(arg);
+      }
+    }
+  };
+  let result: T;
+  try {
+    result = await run();
+  } finally {
+    console.warn = originalWarn;
+  }
+  return {
+    result,
+    logs: lines.map((line) => JSON.parse(line) as Record<string, unknown>),
+  };
+};
+
 /* -------------------------------------------------------------------------- */
 /* The contract                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -549,6 +654,117 @@ test("the route wires both lifecycle signals when it registers the artifact tool
   assert.equal(typeof lastStreamTextOptions!.onToolExecutionStart, "function");
   const tools = lastStreamTextOptions!.tools as Record<string, unknown>;
   assert.ok(tools.create_text_file, "the text-file tool was not registered");
+});
+
+test("SDK-invalid artifact call logs safe rejection metadata without executing a tool", async () => {
+  const secret = "SECRET_ARTIFACT_INPUT";
+  const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+    ask({
+      begins: [{ toolCallId: "invalid_1", toolName: "create_text_file" }],
+      chunks: [
+        {
+          type: "tool-call", invalid: true, toolCallId: "invalid_1",
+          toolName: "create_text_file",
+          input: { format: "txt", filename: secret, content: secret },
+          error: new Error(secret),
+        },
+        {
+          type: "tool-error", toolCallId: "invalid_1",
+          toolName: "create_text_file", error: secret,
+        },
+      ],
+      executes: [],
+    })
+  );
+  assert.deepEqual(logs, [{
+    event: "generated_artifact_tool_rejected",
+    toolName: "create_text_file",
+    requestedFormat: "txt",
+    rejectionCode: "input_schema_rejected",
+  }]);
+  assert.doesNotMatch(JSON.stringify(logs), /SECRET_ARTIFACT_INPUT|invalid_1/);
+  assert.equal(trailer?.artifacts, undefined);
+  assert.deepEqual(world.artifactRows, []);
+  assert.equal(networkCalls, 0);
+});
+
+test("a hostile chunk does not prevent the route from logging a later invalid call", async () => {
+  const hostile = new Proxy({}, {
+    get() { throw new Error("hostile chunk getter"); },
+  });
+  const hostileEnvelope = {
+    get chunk() { throw new Error("hostile callback getter"); },
+  };
+  const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+    ask({
+      chunkEvents: [hostileEnvelope],
+      chunks: [hostile, {
+        type: "tool-call", invalid: true, toolCallId: "invalid_after_hostile",
+        toolName: "create_text_file", input: { format: "txt" },
+      }],
+      executes: [],
+    })
+  );
+
+  assert.deepEqual(logs, [{
+    event: "generated_artifact_tool_rejected",
+    toolName: "create_text_file",
+    requestedFormat: "txt",
+    rejectionCode: "input_schema_rejected",
+  }]);
+  assert.equal(trailer?.artifacts, undefined);
+  assert.equal(networkCalls, 0);
+});
+
+test("collector admission logs wrong-kind txt without duplicating the failed card", async () => {
+  const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+    ask({
+      begins: [{ toolCallId: "collector_1", toolName: "create_text_file" }],
+      executes: ["collector_1"],
+      executeInput: {
+        format: "txt", filename: "SECRET_FILENAME", content: "SECRET_CONTENT",
+      },
+    })
+  );
+  assert.deepEqual(logs, [{
+    event: "generated_artifact_tool_rejected",
+    toolName: "create_text_file",
+    requestedFormat: "txt",
+    rejectionCode: "spec_rejected",
+  }]);
+  assert.doesNotMatch(JSON.stringify(logs), /SECRET_/);
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]?.failureCode, "spec_rejected");
+  assert.equal(networkCalls, 0);
+});
+
+test("valid artifact execution emits no rejection diagnostic", async () => {
+  const { logs } = await captureArtifactRejections(() =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.deepEqual(logs, []);
+  assert.equal(world.artifactRows[0]?.status, "ready");
+  assert.equal(networkCalls, 0);
+});
+
+test("hostile execution-start getters do not abort an otherwise valid artifact turn", async () => {
+  const hostileToolCall = {
+    get toolCall() { throw new Error("hostile toolCall getter"); },
+  };
+  const hostileCallId = {
+    toolCall: { get toolCallId() { throw new Error("hostile toolCallId getter"); } },
+  };
+  const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+    ask({
+      begins: [beganTextFile],
+      executionStartEvents: [hostileToolCall, hostileCallId],
+      executes: [beganTextFile.toolCallId],
+    })
+  );
+  assert.deepEqual(logs, []);
+  assert.equal(trailer?.artifacts?.[0]?.status, "ready");
+  assert.equal(world.artifactRows[0]?.status, "ready");
+  assert.equal(networkCalls, 0);
 });
 
 test("a tool call begun and cut off by the output ceiling becomes a turn_incomplete card", async () => {
@@ -716,4 +932,71 @@ test("more begun calls than an answer may attach still yields at most three card
     [0, 1, 2]
   );
   assert.equal(world.artifactRows.length, 3);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Auto chose the model (CHAT-ART-01)                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A model with no verified artifact tool support that every plan can select,
+ * and no reasoning setting, so nothing else about the turn changes with it.
+ */
+const UNVERIFIED_MODEL_ID = "mistral-small-4";
+
+/** The words the provider receives outside the tool definitions. */
+const promptText = () =>
+  JSON.stringify(lastStreamTextOptions ?? {}, (key, value) =>
+    key === "tools" ? undefined : value
+  );
+
+test("Auto routing to a verified model registers the file tools for that model", async () => {
+  // The user's own model is one the tools are off for. If the plan read the
+  // requested model instead of the routed one, no tool would be registered.
+  const { trailer } = await ask(
+    {
+      begins: [beganTextFile],
+      executes: [beganTextFile.toolCallId],
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+    },
+    { modelId: UNVERIFIED_MODEL_ID, autoRoutedTo: MODEL_ID }
+  );
+
+  const tools = lastStreamTextOptions!.tools as Record<string, unknown>;
+  assert.ok(tools.create_text_file, "the routed model's file tool was not registered");
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+  // The card and its row name the model that made the file.
+  assert.equal(trailer?.artifacts?.[0]!.modelId, MODEL_ID);
+  assert.equal(world.artifactRows[0]!.modelId, MODEL_ID);
+});
+
+test("Auto routing to an unverified model registers no file tool and says Auto chose it", async () => {
+  await ask({}, { modelId: MODEL_ID, autoRoutedTo: UNVERIFIED_MODEL_ID });
+
+  const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
+  for (const name of [
+    "create_text_file",
+    "create_document",
+    "create_spreadsheet",
+    "create_presentation",
+    "create_archive",
+  ]) {
+    assert.equal(tools[name], undefined, `${name} was registered for an unverified model`);
+  }
+  // The remedy names what the user can actually change: Auto made this
+  // choice, so "choose a different model" alone would point at a picker the
+  // user did not use.
+  assert.match(promptText(), /instead of Auto/);
+  assert.deepEqual(world.artifactRows, []);
+});
+
+test("a manual turn on an unverified model keeps the plain remedy, with no mention of Auto", async () => {
+  await ask({}, { modelId: UNVERIFIED_MODEL_ID });
+
+  const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
+  assert.equal(tools.create_text_file, undefined);
+  assert.match(promptText(), /choosing a different model/);
+  assert.doesNotMatch(promptText(), /instead of Auto/);
 });

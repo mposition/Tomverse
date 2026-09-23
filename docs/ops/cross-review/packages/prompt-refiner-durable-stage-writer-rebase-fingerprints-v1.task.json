@@ -1,0 +1,22 @@
+{
+  "taskId": "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+  "requirement": "PR #1555가 최신 develop commit b118d2e9을 conflict 없이 merge한 뒤 fail-closed 검사 2개가 의도대로 drift를 감지했다. Marketing webhook pipeline은 이 PR의 prisma/schema.prisma 변경 때문에 fingerprint가 c78e7bb3...에서 재현 가능한 9bcf4eb3...로 바뀌었다. Prompt Refiner closure는 develop의 appSettings.ts가 marketingAutomationAccess.ts를 새 runtime import로 갖게 되어 186개가 아니라 187개여야 한다. 새 파일의 computed element access 7개(env/name, fixed descriptor map lookup, typed feature result lookup)를 각각 검토해 inventory 228과 digest 778c2fc6...을 고정한다. TypeScript 매니페스트와 PostgreSQL 제약을 동일한 정렬 목록으로 갱신하되 runtime 동작, 제품/공급자/비용 경계는 바꾸지 않는다. exact base는 dd60bcbe3f119808f5eaea7c833c4e243facebcc이다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "MARKETING_WEBHOOK_PIPELINE_FINGERPRINT는 선언된 두 pipeline file과 descriptor에서 computeMarketingWebhookPipelineFingerprint가 재현한 9bcf4eb3b861f41bd8508e0e6e772c648c22351e19b58ad8e50bb39705432285와 정확히 일치한다.",
+    "Prompt Refiner runtime closure는 appSettings.ts의 실제 local runtime import closure와 동일한 187개이며 TypeScript와 PostgreSQL의 정렬 목록 및 execution manifest fileCount가 일치한다.",
+    "새 marketingAutomationAccess.ts에서 검토한 7개를 포함해 dynamic element access count는 228이고 SHA-256은 전체 187-file path/line/text snapshot에서 재현한 778c2fc68dc5e77dc584478c007e1f5db930dc321a1b2b6a60dcf19b52a0d627와 정확히 일치한다.",
+    "두 focused fingerprint test와 Prompt Refiner runtime source closure 전체 테스트, typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "변경은 marketing fingerprint, Prompt Refiner source closure의 TypeScript/PostgreSQL 동일 계약, computed-access snapshot, 검토 task/authorization으로 한정되며 product database mutation, provider/model, Railway API, credential, stage mutation, flag/rollout 또는 paid execution을 추가하지 않는다.",
+    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "dd60bcbe3f119808f5eaea7c833c4e243facebcc",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.task.json",
+    "lib/marketingAutomationAccess.ts",
+    "lib/promptRefinerStageAdmissionCore.ts",
+    "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

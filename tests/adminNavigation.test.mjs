@@ -147,6 +147,10 @@ test("detail routes keep their parent breadcrumb and their parent nav entry", ()
   const provider = resolveAdminPageMeta("/admin/providers/openai");
   assert.equal(provider.label, "Provider detail");
   assert.equal(provider.parentHref, "/admin/providers");
+
+  const refiner = resolveAdminPageMeta("/admin/prompt-refiner-shadow");
+  assert.equal(refiner.label, "Prompt Refiner shadow run");
+  assert.equal(refiner.parentHref, "/admin/models");
 });
 
 test("the palette can reach every page, including the unlisted ones", () => {

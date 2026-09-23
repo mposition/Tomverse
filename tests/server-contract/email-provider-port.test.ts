@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "MARKETING_EMAIL_FROM",
   "EMAIL_BUSINESS_CONTACT_EMAIL",
   "RESEND_WEBHOOK_SECRET",
+  "MARKETING_RESEND_WEBHOOK_SECRET",
 ] as const;
 const originalEnv: Record<string, string | undefined> = {};
 
@@ -207,7 +208,28 @@ test("a missing webhook secret is its own reason, not a bad signature", async ()
   setEnv({});
   const verification = port
     .emailProvider()
-    .verifyWebhook("{}", new Headers());
+    .verifyWebhook("{}", new Headers(), "transactional");
+  assert.equal(verification.ok, false);
+  if (!verification.ok) assert.equal(verification.reason, "secret_missing");
+});
+
+test("one secret set on both accounts verifies nothing", async () => {
+  // Plain words, not secret-shaped: the scanner reads a high-entropy value
+  // beside a *_SECRET name as a credential, and these are not.
+  const shared = ["one", "value", "for", "both"].join("-");
+  setEnv({ RESEND_WEBHOOK_SECRET: shared, MARKETING_RESEND_WEBHOOK_SECRET: shared });
+  for (const stream of ["transactional", "marketing"] as const) {
+    const verification = port.emailProvider().verifyWebhook("{}", new Headers(), stream);
+    assert.equal(verification.ok, false);
+    if (!verification.ok) assert.equal(verification.reason, "secret_missing");
+  }
+});
+
+test("the marketing webhook never borrows the transactional secret", async () => {
+  setEnv({ RESEND_WEBHOOK_SECRET: ["transactional", "only"].join("-") });
+  const verification = port
+    .emailProvider()
+    .verifyWebhook("{}", new Headers(), "marketing");
   assert.equal(verification.ok, false);
   if (!verification.ok) assert.equal(verification.reason, "secret_missing");
 });

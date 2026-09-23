@@ -73,14 +73,15 @@ test("every administrator role has only its documented write permissions", () =>
     "support:write",
     "billing:write",
     "ops:write",
+    "marketing:write",
     "user:delete",
   ] as const;
   const expected: Record<AdminRole, boolean[]> = {
-    owner: [true, true, true, true],
-    billing: [false, true, false, false],
-    support: [true, false, false, false],
-    ops: [false, false, true, false],
-    readonly: [false, false, false, false],
+    owner: [true, true, true, true, true],
+    billing: [false, true, false, false, false],
+    support: [true, false, false, false, false],
+    ops: [false, false, true, true, false],
+    readonly: [false, false, false, false, false],
   };
   for (const role of Object.keys(expected) as AdminRole[]) {
     assert.deepEqual(

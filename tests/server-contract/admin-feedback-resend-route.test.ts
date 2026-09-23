@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Contract for POST /api/admin/feedback/{id}/resend-reply.
@@ -84,6 +85,14 @@ async function loadRoute() {
           world.emails.push(input);
           return { sent: true, skipped: false, id: "qa-email" };
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: { to: string; subject: string; text: string }) => {
+          world.emails.push(input);
+          return { ok: true, providerMessageId: "qa-email", from: "support@tomverse.app", senderRole: "support" };
+        },
       },
     });
     const fakePrisma: Record<string, unknown> = {
@@ -150,9 +159,9 @@ async function loadRoute() {
           return row;
         },
       },
-      suppressionEntry: { findMany: async () => [] },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
+      suppressionCause: { findMany: async () => [] },
+      // The address lock the send takes before it submits.
+      ...sendLockPrismaStubs(),
     };
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: fakePrisma } });
   }

@@ -18,6 +18,7 @@ import {
     PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
     PROMPT_REFINER_RESERVATION_REFUSALS,
     PROMPT_REFINER_RESERVATION_STAGE_ID,
+    PROMPT_REFINER_RESERVATION_STAGE_IDS,
     PROMPT_REFINER_RESERVATION_STAGE_STATUSES,
     PROMPT_REFINER_RESERVATION_STATUSES,
     PROMPT_REFINER_RESERVATION_TTL_MS,
@@ -37,22 +38,28 @@ const validStage = (overrides = {}) => ({
     costCeilingMicroUsd: 2_491_600n,
     reservationCount: 0,
     allocatedCostMicroUsd: 0n,
+    approvedAt: new Date("2026-09-17T00:00:00.000Z"),
+    approvalExpiresAt: new Date("2026-09-17T01:00:00.000Z"),
     ...overrides,
 });
 
 test("reservation contract freezes one bounded, content-free authority", () => {
     assert.equal(
         PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
-        "prompt-refiner-reservation-authority-v1"
+        "prompt-refiner-reservation-authority-v2"
     );
-    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v1");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v2");
+    assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_IDS], [
+        "prompt-refiner-shadow-v1",
+        "prompt-refiner-shadow-v2",
+    ]);
     assert.equal(PROMPT_REFINER_RESERVATION_TTL_MS, 300_000);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.perRequestCostMicroUsd, 24_916);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.maxReservations, 100);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.costCeilingMicroUsd, 2_491_600);
     assert.equal(
         PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-        "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f"
+        "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1"
     );
     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_STATUSES], [
         "approved",
@@ -82,6 +89,7 @@ test("stage validation rejects every mutable bound and broken accounting", () =>
         ["costCeilingMicroUsd", 2_491_599n, "stage_cost_mismatch"],
         ["reservationCount", 101, "reservation_count_invalid"],
         ["allocatedCostMicroUsd", 1n, "allocated_cost_invalid"],
+        ["approvalExpiresAt", new Date("2026-09-17T00:59:59.999Z"), "approval_window_invalid"],
     ];
     for (const [field, value, expected] of cases) {
         assert.ok(
@@ -174,21 +182,21 @@ test("authority source stores no prompt/content identity and calls no provider",
     }
 
     const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
-    // The two models this contract is about, and only those. An earlier
-    // version sliced from the first of them to the end of the file, so it read
-    // every model declared below and every word of their prose: a table added
-    // underneath, or a comment saying "prompt caching", failed a test about
-    // the refiner holding no content.
-    const tables = ["PromptRefinerReservationStage", "PromptRefinerReservation"]
-        .map((model) => {
-            const block = new RegExp(`model ${model} \\{([\\s\\S]*?)\\n\\}`).exec(schema);
-            assert.ok(block, model);
-            // Column declarations only. A doc comment is prose about a column,
-            // not a column.
-            return block[1]
-                .split("\n")
-                .filter((line) => !line.trimStart().startsWith("///"))
-                .join("\n");
+    // Keep this content-free authority check scoped to the two reservation
+    // models. Later, unrelated models may legitimately store their own payloads.
+    const reservationModelNames = [
+        "PromptRefinerReservationStage",
+        "PromptRefinerReservation",
+    ];
+    const tables = reservationModelNames
+        .map((modelName) => {
+            const start = schema.indexOf(`model ${modelName} {`);
+            assert.notEqual(start, -1, `${modelName} must exist`);
+
+            const end = schema.indexOf("\n}", start);
+            assert.notEqual(end, -1, `${modelName} must close`);
+
+            return schema.slice(start, end + 2);
         })
         .join("\n");
     for (const forbiddenColumn of [

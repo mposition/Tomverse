@@ -169,6 +169,19 @@ mock.module(mod("lib/operationalMonitoring.ts"), {
     },
   },
 });
+mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
+  namedExports: {
+    sweepPromptRefinerShadowUnknowns: async () => ({
+      observedAt: "2026-09-20T09:00:00.000Z",
+      staleCandidates: 2,
+      closedUnknownAttemptIds: ["attempt-1"],
+      unresolvedStaleAttemptIds: [],
+      consumedWithoutAttempt: [],
+      retryCount: 0,
+      redispatched: 0,
+    }),
+  },
+});
 
 // Every remaining collaborator returns a distinct number, so an assertion can
 // name which step produced which figure rather than matching on a shared 0.
@@ -289,6 +302,15 @@ type CleanupResult = Record<string, unknown> & {
     oldestEligibleMs: number | null;
   } | null;
   costAdjustments: { applied: number; pending: number } | null;
+  promptRefinerShadowUnknowns: {
+    observedAt: string;
+    staleCandidates: number;
+    closedUnknownAttemptIds: string[];
+    unresolvedStaleAttemptIds: string[];
+    consumedWithoutAttempt: string[];
+    retryCount: 0;
+    redispatched: 0;
+  } | null;
 };
 const emptyNoCost = () => ({
   no_reservation: 0,
@@ -383,6 +405,13 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.assistantImportsExpired, 33);
   assert.equal(result.assistantImportsExpiryRefused, 1);
   assert.equal(result.assistantImportUploadClaimsReclaimed, 35);
+  assert.equal(result.promptRefinerShadowUnknowns?.staleCandidates, 2);
+  assert.deepEqual(
+    result.promptRefinerShadowUnknowns?.closedUnknownAttemptIds,
+    ["attempt-1"]
+  );
+  assert.equal(result.promptRefinerShadowUnknowns?.retryCount, 0);
+  assert.equal(result.promptRefinerShadowUnknowns?.redispatched, 0);
 });
 
 test("a clean run reports no failed steps and every count", async () => {
@@ -434,6 +463,10 @@ test("the maintenance run drives the cost ledger's recovery passes", async () =>
   // sweep reports its own: a pass that applied everything it found and left
   // work behind is only visible if the step says so.
   assert.equal(result.costAdjustments?.pending, 0);
+  assert.deepEqual(
+    result.promptRefinerShadowUnknowns?.closedUnknownAttemptIds,
+    ["attempt-1"]
+  );
   assert.deepEqual(reportedIncidents, []);
 });
 

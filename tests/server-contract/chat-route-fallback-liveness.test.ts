@@ -630,6 +630,44 @@ mock.module(mod("lib/activeAiModel.ts"), {
   },
 });
 
+/*
+  CHAT-LATENCY-01. What each attempt's close was told about its first visible
+  token, recorded by wrapping the real function rather than replacing its
+  module: every other export the route uses stays the real one.
+*/
+const dispatchCloses: Array<{ outcome: string; firstVisibleTokenAt: unknown }> = [];
+const realDispatchInstrumentation = require(
+  resolve(ROOT, "lib/routingDispatchInstrumentation.ts")
+) as Record<string, unknown> & {
+  completeInstrumentedDispatch: (...args: unknown[]) => Promise<void>;
+};
+mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
+  namedExports: {
+    ...realDispatchInstrumentation,
+    completeInstrumentedDispatch: async (
+      record: unknown,
+      close: { outcome: string; firstVisibleTokenAt?: unknown }
+    ) => {
+      dispatchCloses.push({
+        outcome: close.outcome,
+        firstVisibleTokenAt: close.firstVisibleTokenAt,
+      });
+      return realDispatchInstrumentation.completeInstrumentedDispatch(record, close);
+    },
+  },
+});
+
+/* The one timing line per turn (lib/chatTurnTiming.ts). */
+const timingLines: Array<Record<string, unknown>> = [];
+const realInfo = console.info.bind(console);
+console.info = (...args: unknown[]) => {
+  if (typeof args[0] === "string" && args[0].includes('"chat_turn_timing"')) {
+    timingLines.push(JSON.parse(args[0]) as Record<string, unknown>);
+    return;
+  }
+  realInfo(...args);
+};
+
 globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch;
 
 /*
@@ -696,6 +734,8 @@ const ask = async (
   injectPrimaryFault = withInjectedPrimaryFault;
   durableClaimMode = claimMode;
   attempts.length = 0;
+  dispatchCloses.length = 0;
+  timingLines.length = 0;
   world.messages = [];
   world.terminals = [];
   ledger.settlements = [];
@@ -789,6 +829,28 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   // The primary's stream is cancelled at the swap, so it is not left open and
   // billing after another model took the turn over.
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
+});
+
+test("the first visible token belongs to the attempt that answered, not the one that died", async () => {
+  await ask("answers");
+  assert.equal(attempts.length, 2);
+
+  // The primary failed before any chunk: its close carries no first token, so
+  // the Router's per-model TTFT signal is never handed a time for it.
+  const primary = dispatchCloses.find((close) => close.outcome === "failed_pre_token");
+  assert.ok(primary, "the failed primary was never closed");
+  assert.equal(primary.firstVisibleTokenAt ?? null, null);
+
+  // The attempt that answered carries the moment its first chunk went out.
+  const answered = dispatchCloses.find((close) => close.outcome === "succeeded");
+  assert.ok(answered, "the answering attempt was never closed");
+  assert.ok(answered.firstVisibleTokenAt instanceof Date);
+
+  // One timing line for the turn, naming the model that answered.
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "completed");
+  assert.equal(timingLines[0].firstVisibleChunkSent, true);
+  assert.equal(timingLines[0].modelId, attempts[1].modelId);
 });
 
 test("an exact durable replay reattaches without reservation or provider dispatch", async () => {

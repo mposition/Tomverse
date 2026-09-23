@@ -4,14 +4,804 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v16 (2026-09-17).** suppression 판정의 기준을 원인(`SuppressionCause`)으로
-  옮길 수 있게 합니다 — 런타임 설정, 전환 fence, 해제 행렬. 0절 참조.
-- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
-  전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
+- 개정: **v29 (2026-09-21).** marketing 권한을 전역 opt-in에서 **국가 rule +
+  호주 발신자 authority의 이중 판정**으로 개정합니다(승인 A·C·F). 0절 참조.
+- **`R1`·`R2`·`R3`은 초안 §13의 미해결 질문 번호입니다.** 20절 위험 표의
+  R1·R2·R3과 **다른 것**이며(그쪽은 위험 항목), 그래서 이 문서에서는 이름을
+  함께 적습니다.
+- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록 중 **아직 열린 것이 막는
+  범위**를 전제로 씁니다 — 2026-09-16 개정(승인 A) 이후 전체 활성화의 선행 조건은
+  **발송 도메인 평판**(초안 §13 R2)과 **싱가포르 수신거부 주소**(초안 §13 R3)이고,
+  **EEA·영국은 그
+  위에 두 가지가 더** 있습니다: soft opt-in을 근거로 쓰는 것은 **G**가, DE·FR·
+  AT·CH 밖 국가로 보내는 것은 **21절 Q1의 잔여 국가별 확인**이 각각 막습니다(15.2).
 
 ---
 
 ## 0. 개정 이력
+
+### v29 (2026-09-21) — marketing 권한은 국가 rule이 정합니다(S0, 승인 A·C·F 반영)
+
+제품 소식 재설계 초안(docs/policy/email-product-news-redesign-draft.md) §11에서
+소유자가 2026-09-16에 승인한 것을 **상위 계약에 반영**합니다. 결정은 그날
+내려졌고, 이 개정은 그 결정을 계약이 말하게 하는 일입니다 — **새로 정하는 것이
+없습니다.**
+
+1. **C1이 바뀝니다.** "marketing은 전역 opt-in"에서 **"수신자 국가 rule + 호주
+   발신자 authority, 둘 다 통과해야 발송"** 으로. 출발 값 표는 5.1.1에 새로
+   넣었습니다. 값의 출처는 초안 §4.3이지만 **정본은 5.1.1의 표**이고, 거기에
+   고정된 것은 **2026-09-16에 승인된 그 시점의 값**(초안 §11 A·C·F)입니다.
+   초안은 문서 전체가 승인되지 않은 상태이므로 **그쪽 편집이 이 계약을 바꾸지
+   못합니다** — 바꾸려면 이 ADR의 새 개정과 승인이 필요합니다. 표를 옮겨 적는
+   것은 두 번째 진실을 만드는 일이므로, **무엇이 정본이고 값이 어디서 왔는지를
+   표 옆에 적었습니다.**
+
+2. **C8이 바뀝니다.** "묵시적 동의 미사용"에서 **"국가 rule이 허용하는 곳에서만"**
+   으로. 실질은 **호주의 추론 동의 하나**입니다(초안 4.4의 관계 lifecycle).
+   **EEA·영국 soft opt-in은 열리지 않았습니다** — G(외부 자문, 초안 §13 R1)가 회원국별로
+   확인하기 전까지 `express_consent`로 닫혀 있습니다.
+
+3. **5.6의 논거는 지우지 않고 범위를 좁혔습니다.** 그 절이 든 이유들 — 취득 맥락을
+   사용자마다 저장해야 한다, 회원국별 해석이 갈린다 — 은 **EEA·영국에 대해서는
+   그대로 유효하고**, 그래서 그곳이 닫혀 있는 이유이자 G의 질문지입니다. 바뀐 것은
+   "전역"이라는 범위뿐입니다. 호주에서는 그 "맥락 저장"이 회피 대상이 아니라
+   **설계 그 자체**(사건을 저장하는 관계 모델)이고, 미국·싱가포르는 원래 그 절의
+   대상이 아니었습니다. **틀린 논거를 지우는 것과 옳은 논거의 적용 범위를 줄이는
+   것은 다른 일이고, 이것은 뒤쪽입니다.**
+
+4. **D4가 개정으로 표시됩니다.** 2026-09-15 승인(v8, Q2 해소)은 **그 시점의
+   결정으로 유효**하고, 2026-09-16 승인 A·C가 그것을 개정했습니다. 21절 Q2는
+   개정 이전 상태에 대한 해소로 남습니다 — 승인 기록을 지우면 "왜 한 번 그렇게
+   정했었나"에 답할 수 없게 됩니다.
+
+5. **`risk_accepted`는 국가 rule의 값이 아닙니다.** 승인 F(기존 78계정 전원 발송)는
+   국가 rule **위에서** 내린 결정이고 초안 5.6에 따라 그렇게 기록됩니다. 근거가
+   아니라 기록이며, **동의 기록을 지어내지 않습니다.** 5.1.1이 이것을 표 밑에
+   적습니다 — 표 안에 한 줄로 넣으면 국가 rule처럼 읽히기 때문입니다.
+
+6. **분류표가 우회로를 닫습니다.** 3.1의 6행(기능 업데이트)이 `service(동의 기반)`
+   으로 적혀 있었습니다. `classification === "marketing"` **하나**가 발송 스트림·
+   kill switch·한국 `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를
+   켜므로, 낮춰 적으면 그 전부가 꺼집니다 — 제품 소식이 새 C1·C8을 지나지 않고
+   나가는 길이 계약 안에 있었다는 뜻입니다. `release_notes`의 classification은
+   **`marketing`**입니다(초안 §3). purpose는 여전히 뉴스레터와 별개이고, 분류가
+   같다는 것과 스위치가 같다는 것은 다른 이야기입니다.
+
+7. **권한 층과 표시·운영 층을 가릅니다.** 5.1의 "가장 엄격한 요건을 전역
+   기본값으로"와 5.2의 "국가별 분기는 일곱 개가 전부"는 **표시·운영에 대해서는
+   그대로 참**이고, 권한에 대해서만 거짓이 됐습니다. 두 절에 그 구분을 적었습니다 —
+   한 표에 섞으면 "수신거부 링크를 어떻게 그리는가"와 "보내도 되는가"가 같은
+   무게로 읽힙니다.
+
+8. **15.2와 21절 Q1이 Q1을 전역 차단으로 말하고 있었습니다.** 전역 차단은
+   아닙니다. 다만 **Q1 안에는 질문이 둘** 있고 개정이 답한 것은 하나뿐입니다 —
+   승인 A/G가 정한 것은 **근거**(EEA·영국에서 soft opt-in을 쓸 수 있는가)이고,
+   Q1이 남긴 **"DE·FR·AT·CH 밖 국가의 첫 캠페인 전 국가별 확인"은 근거가 아니라
+   공통 baseline으로 아직 입증하지 못한 국가별 의무**에 대한 것이라
+   `express_consent`로 보내는 EEA 발송에도 그대로 걸립니다. 활성화 전에 닫아야
+   하는 것은 싱가포르 수신거부 주소(초안 §13 R3)와 발송 도메인 평판(초안 §13 R2)이고, **EEA·영국은
+   그 위에 G와 Q1 잔여를 각각** 닫아야 합니다. 22절 A5는 전제가 사라져 개정 전
+   기록으로 표시했습니다.
+
+9. **A18을 아직 열린 결정으로 말하던 다섯 곳을 정정했습니다.** A18은 2026-09-14에
+   **별도 Resend 계정**으로 결정됐고(22절), 1절 요약 8번·8.1·8.5·8.8·R23은 그
+   전의 문장을 그대로 갖고 있었습니다. marketing 활성화의 선행 조건 목록에서 이것이 빠지므로,
+   15.2의 남은 선행 조건은 발송 도메인 평판·싱가포르 수신거부 주소(초안 §13
+   R2·R3, 그리고 EEA·영국의 G와 Q1 잔여)입니다.
+
+**이 개정은 S0의 전부가 아닙니다.** 초안 §12의 S0 행이 담은 것 중 여기서 한
+것은 **권한 계약(C1·C8·5.1.1·5.6)과 분류표, 그리고 그 둘이 만든 층 구분**입니다.
+나머지는 아래 표에 있고, 각자의 gate와 함께 남습니다. (§12 자체는 일정이라
+5.1.1의 snapshot이 고정하지 않으므로, 그 행이 늘어나면 이 표를 다시 맞춥니다.)
+
+| 남은 S0 항목 | 언제까지 |
+|---|---|
+| **IP 추정 국가** — 6.1·6.2와 `AGENTS.md` | **IP 추정을 구현하기 전에.** 지금 6절은 fail-closed이고 추정 국가를 쓰지 않습니다 |
+| **기록 세 층과 승인 원장** — 10.2의 데이터 모델 | **S3 구현 전에** |
+| **7.7·7.8** 한국 의무와 의무 상태 기록 | 해당 단계(S6) 전에 |
+| **webhook·suppression 절 동기화** — 9.6, 12.3, 12.4, 13.5, 13.7, 14.4 | 해당 단계 전에. 13.2·13.3·10.1·10.2는 v26~v28이 이미 옮겼습니다 |
+
+**코드는 이 개정으로 바뀌지 않습니다.** `CONSENT_REQUIRED_PURPOSES`는 여전히 세
+marketing purpose를 기본 off로 두고, 국가 rule을 읽는 모델(`ReleaseNotesCountryRule`)은
+아직 존재하지 않습니다(초안 §12 S5). 계약이 먼저 바뀌고 구현이 따라옵니다 —
+반대로 하면 구현이 무엇을 구현하는 것인지 적힌 곳이 없습니다.
+
+### v28 (2026-09-21) — 설정 행은 당분간 남깁니다(deploy D-2 보류)
+
+v27 2번은 판정 기준 설정의 `AppSetting` 행을 "그 다음 배포(D-2)"가 지운다고
+적었습니다. 그 문장은 **순서**에 대해서는 맞습니다 — 코드가 먼저고 행이 나중
+입니다. 다만 그보다 앞선 질문에는 답하지 않았습니다: **지울 필요가 있는가.**
+지금은 아니오입니다.
+
+1. **저장된 값이 `causes`이므로 그 행은 지금 안전장치입니다.** 행이 없을 때
+   무슨 일이 일어나는지는 **어느 build가 서비스 중인가에 따라 다르고**, 초안은
+   그것을 "D-1 이전 build"로 뭉뚱그렸습니다. 독립 검토가 갈라서 보라고 했고,
+   갈라 보니 **지금 production이 가장 나쁜 칸에 있습니다.**
+
+   | 서비스 중인 build | 행이 없을 때 |
+   |---|---|
+   | A·B 이전 | key를 모르므로 읽지 않음. cutover 이후 롤백 금지 대상인 것은 그대로 |
+   | **B ~ 현재 main(`9e4fd0c5`)** | send가 **entry로 복귀**. 콘솔은 거절하지 않고 **legacy entry 해제 경로를 실행**. preference 켜기가 purpose 원인을 **전부** 해제할 수 있음. 삭제 접수가 purpose별 사본 생성 |
+   | C-1 | send가 entry로 복귀. 콘솔은 `authority_changed`로 거절. preference의 넓은 해제, privacy 중복 |
+   | C-2 | send는 계속 원인을 읽되 incident. 콘솔 거절, 좁은 preference blocker, privacy 중복 |
+   | D-1 이후 | reader 없음 |
+
+   **초안은 "콘솔이 거절한다"고 적었는데 그것은 C-1·C-2의 이야기이고 현재
+   main에는 틀립니다.** main은 거절하는 대신 legacy 해제 경로를 타므로 더
+   위험합니다.
+
+   **그리고 reader가 셋이 아니라 넷입니다.** B부터 C-2까지는 **cutover 도구**도
+   이 행을 읽습니다. 행이 없으면 `entry`로 판단해 얼어붙은 entry와 원인을
+   대조하고, `--repair`가 **그 사이 해제된 억제를 "빠진 원인"으로 읽어
+   `reconcile:entry:` 출처로 되살립니다**(v26 5번). 누군가 의도적으로 푼
+   주소가 다시 막힙니다.
+
+   **지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다.** 값이 `causes`인
+   것은 cutover가 적용된 환경이라는 뜻이고, v26 6번이 **이 build는 cutover가
+   적용·검증된 환경에만 갈 수 있다**고 못박았으므로 여기서 다루는 환경은 전부
+   그 환경입니다.
+
+2. **지금 특히 그렇습니다 — main에 C-1·C-2·D-1이 하나도 없습니다**(2026-09-21
+   확인, main `9e4fd0c5`). production은 아직 entry 시대 코드이고, 그 build에게
+   이 행은 **"원인을 보라"고 말해 주는 유일한 것**입니다. 지금 지우는 것은
+   production을 *아직 오지도 않은 배포의 롤백 상태*로 만드는 일입니다.
+
+3. **지울 수 있게 되는 조건은 둘이고, 둘 다 관측으로 확인합니다.** 초안은
+   "rollback floor가 올라가 있다"로만 적었는데, v24 12번의 rollback floor는
+   **정책 문장이지 관측값이 아닙니다.** 두 번째 초안은 그것을
+   `.github/RELEASE_CHECKLIST.md`의 `Rollback SHA` 칸으로 바꿨는데 **그것도
+   증거가 아닙니다** — 그 파일은 빈 템플릿이고, 그 칸은 selective release와
+   hotfix 구획에만 있습니다. 평범한 `develop → main` 릴리스는 그 칸을 요구하지
+   않습니다. **템플릿에 칸이 있다는 것은 어떤 릴리스의 rollback 대상을 관측한
+   것이 아닙니다.** 독립 검토가 두 번 짚었고, 두 번 다 제가 "적을 자리"를
+   "적힌 값"으로 착각한 것입니다.
+
+   실제로 물어야 하는 것은 둘입니다.
+
+   - **지금 무엇이 도는가** — `GET /api/build-info`가 보고하는 production의
+     실제 SHA가 설정 reader 없는 트리이다. 관측 시각·deployment id와 함께
+     적습니다.
+   - **되돌리면 무엇이 도는가** — D-1을 production에 넣은 릴리스의 기록
+     (`.github/audits/release-<날짜>__<sha>.md`, 7.9.1이 정한 이름)이 그 답을
+     **채워진 값으로** 갖고 있고, 그 대상 역시 reader 없는 트리이다. 그 기록의
+     rollback 칸이 SHA가 아니라 결정문인 경우도 있습니다(2026-08-16 기록이
+     그렇습니다 — "이 릴리스의 rollback은 SHA가 아니다"). 그때는 **그 결정이
+     D-1보다 오래된 대상을 가리키지 않는다**는 것이 조건입니다.
+
+   그 릴리스 기록에 되돌릴 대상이 아예 적혀 있지 않다면, **D-2를 하기 전에
+   그것부터 적습니다** — 공통 릴리스 머리글에 칸을 더하든 D-2 전용 증거 기록을
+   남기든, 없는 값을 추론으로 메우지는 않습니다.
+
+   **develop의 D-1 commit에 대한 ancestry만으로 판단하지 않습니다.** selective
+   release나 cherry-pick이면 계보가 달라지고, 그때 ancestry는 참인데 서비스
+   중인 코드는 아닐 수 있습니다. 묻는 것은 계보가 아니라 **지금 무엇이 돌고
+   무엇으로 되돌아가는가**입니다.
+
+   둘 다 참이면 이 행은 **어떤 build도 읽지 않는 행**이 되고, 삭제는 비로소
+   정리가 됩니다. 그 전까지는 남깁니다.
+
+4. **정적 gate를 둡니다.** 초안은 "읽는 코드도 지우는 코드도 없으니 막을 기계가
+   없다"고 적었는데, 그것은 **지금 상태**에 대한 말이고 위험은 미래에
+   있습니다 — 원래 계획을 기억한 사람이 D-2 migration을 쓰고, 그것이 D-1과
+   **같은 production release에 실리는 것**입니다. migration은 새 build보다 먼저
+   돌므로 그 순간 서비스 중인 것은 B 시대 build이고, 위 표의 두 번째 줄이
+   그대로 일어납니다 — **send가 entry로 복귀하고, 그만 보내라고 한 사람에게
+   메일이 나갑니다. 그것은 되돌릴 수 없습니다.**
+
+   그래서 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가 **활성
+   migration 전체에 `email.suppressionReadAuthority`가 등장하지 않는다**는 것을
+   고정합니다. 주석에 적힌 key도 거절합니다 — fail-safe 쪽이 맞고, 주석을 골라
+   내는 parser는 이 gate가 막으려는 것보다 큰 물건입니다.
+
+   3번의 조건이 충족되면 **이 테스트를 지우는 것이 D-2의 첫 단계**이고, 그
+   commit이 두 가지를 인용합니다: D-1 릴리스 기록의 경로와 그 안의 되돌릴 대상,
+   그리고 `/api/build-info` 관측값(SHA·deployment id·관측 시각). 테스트를 지우는
+   행위가 곧 "조건을 확인했다"는 선언이 되도록, 그리고 그 선언이 무엇에
+   기대는지가 같은 commit에 남도록.
+
+   행이 남아 있어도 이 build에 아무 효과가 없다는 사실은
+   `tests/integration/email-suppression-authority.db.test.ts`의
+   `a setting row left behind by an earlier deploy changes nothing`이 계속
+   고정합니다.
+
+5. **7.4 설계표와의 차이가 하나 더 늘었습니다.** 표의 D 행은 설정 제거를 한
+   배포로 적었고, v27이 그것을 D-1·D-2로 나눴으며, v28은 D-2를 조건부로
+   미룹니다. 표는 그대로 두고 갈라진 지점을 여기에 적습니다.
+
+### v27 (2026-09-21) — 판정 기준 설정을 없앱니다(deploy D-1)
+
+deploy D의 앞쪽입니다. v26이 send 경로를 설정과 무관하게 만들었고, 이 배포는
+**설정을 읽는 코드를 없앱니다.** 행 자체는 다음 배포(D-2)가 지웁니다.
+
+1. **설정을 읽는 곳이 없어집니다.** `readSuppressionAuthority`,
+   `SUPPRESSION_READ_AUTHORITY_KEY`, `suppressionReadAuthorityFromValue`,
+   `SuppressionReadAuthority`가 사라집니다. v26이 읽기를 남긴 이유는 `entry`로
+   되어 있는 것이 **조용하지 않고 시끄럽도록** 하는 것이었고, 그 경고
+   (`EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR`)가 가리킨 것은 **되돌릴 수 있는
+   상태**였습니다. v26이 배포된 순간 되돌리는 길은 이미 없어졌으므로, 지금 그
+   경고가 하는 일은 **고칠 것이 없는 설정을 고치라고 말하는 것**입니다. 경고도
+   함께 사라집니다.
+2. **행 삭제는 이 배포가 아닙니다.** migration은 새 코드보다 **먼저** 돌므로,
+   D-1의 migration이 행을 지우면 그 사이 서비스 중인 build는 v26입니다.
+
+   **발송은 그 창에서도 안전합니다.** v26의 `suppressionCheck`는 설정과 무관하게
+   원인을 읽습니다. 이 항목의 초안은 그 몇 분을 "그만 보내라고 한 사람에게 메일이
+   나가는 시간"이라고 적었는데 **그것은 틀렸습니다** — 그렇게 되려면 C-1 이전
+   build가 살아 있어야 하고, 배포 순서가 그것을 막습니다. 독립 검토가 잡았고,
+   틀린 근거로 옳은 순서를 지키는 것은 그 순서를 다음에 아무나 바꿀 수 있게
+   두는 일이라 여기 적습니다.
+
+   **실제로 걸리는 것은 v26이 아직 설정을 보는 세 경로**이고, 셋 다 메일이 아니라
+   상태입니다.
+
+   - 콘솔의 해제가 `authority_changed`로 거절합니다. 운영자에게는 화면이 고장 난
+     것으로 보이고, 그동안 어떤 suppression도 해제할 수 없습니다.
+   - `applyPreferenceChange`가 좁은 목록으로 떨어집니다. 그 목록은
+     `privacy_request`만 알아보므로, 전역 complaint나 purpose의 manual hold가
+     있는 사람이 marketing purpose를 **다시 켤 수 있게** 됩니다. 메일은 나가지
+     않지만(발송 판정은 원인을 봅니다) preference 행과 동의 기록이 잘못 쓰입니다.
+   - 삭제 접수가 purpose마다 분류 정지의 사본을 다시 씁니다.
+
+   셋 다 되돌릴 수 있지만 셋 다 **사용자 상태에 대한 잘못된 쓰기이거나 운영자
+   화면의 중단**이고, 창을 만들지 않으면 전부 일어나지 않습니다. 그래서 순서는
+   **코드 먼저, 행은 그 다음 배포(D-2)**입니다.
+
+   **이것은 7.4 설계표와의 차이이므로 여기 적어 둡니다.** 그 표의 D 행은 설정
+   제거를 한 배포로 적었고, C가 C-1·C-2로 나뉘기 전에 쓰였으므로 위의 세 경로가
+   앞 build에 남는다는 것을 전제하지 않았습니다. 나누는 쪽이 창을 없앱니다.
+
+   행이 남아 있어도 — 그리고 `entry`라고 적혀 있어도 — 이 build에는 아무 효과가
+   없다는 것은 `tests/integration/email-suppression-authority.db.test.ts`가 그
+   키를 문자열로 직접 써 넣고 고정합니다. **그 테스트가 고정하는 것은 한 방향
+   뿐입니다** — 이 build가 서비스 중이면 행이 남아 있어도 무해하다는 것이고,
+   반대 순서를 안전하게 만들어 주지는 않습니다.
+3. **cutover 도구를 지웁니다.** `npm run email:suppression-cutover`와 그것이
+   부르던 module·script, 그리고 그 게이트였던 `suppressionParity`입니다(경로는
+   commit에 있고 여기 적지 않습니다 — 없는 파일을 가리키는 문장은 안내가 아니라
+   오안내입니다). 그 도구가 하던 일은 설정을
+   바꾸는 것 하나였고, 바꿀 설정이 없습니다. parity는 entry와 원인을 비교하는
+   것인데 entry는 2026-09-21 이후로 갱신되지 않으므로, **비교할 두 번째 답이
+   없습니다** — 남겨 두면 그 사이에 해제된 억제를 "빠진 원인"으로 읽는 보고서가
+   됩니다(v26 5번).
+4. **fence도 사라집니다.** `holdSuppressionFence`는 **cutover만이 배타로 잡는**
+   키를 공유 모드로 잡는 것이었습니다. 배타로 잡는 쪽이 없어지면
+   `pg_advisory_xact_lock_shared`는 아무것도 막지 않고 매 획득이 즉시 성공합니다.
+   **없는 보호를 여덟 곳이 주장하는 것은 보호가 없는 것보다 나쁩니다** — 다음에
+   읽는 사람이 suppression 쓰기가 무언가에 대해 직렬화된다고 믿게 됩니다. 실제로
+   직렬화하던 것은 `lockSuppressionAddress`이고, 이제 그것이 첫 번째입니다.
+   잠금이 하나가 되면서 **두 잠금 사이의 순서 계약과 그 순서를 어겨서 생기는
+   교착도 같이 없어집니다.** §9의 "cutover는 in-flight 발송만큼 fence를
+   기다립니다"는 해당 없음이 됩니다.
+5. **해제 거절은 네 상황에서 세 상황이 됩니다.** `authority_changed`가
+   사라집니다 — 판정 기준이 바뀔 수 없으면 "진행 중에 바뀌었다"는 답이 나올 수
+   없습니다. 남는 것은 digest가 달라졌거나 손잡이가 더 이상 활성이 아니면
+   `approval_stale`, 그런 id가 아예 없으면 404, 그리고 `unliftable`입니다
+   (v25 6번).
+6. **preference 켜기의 entry 시대 목록이 사라집니다.** v16 7번은 판정 기준이
+   `entry`일 때도 `privacy_request`면 거절하라는 **좁은 목록**이었고, 그 좁음의
+   이유는 entry 판정이 분류 원인을 볼 수 없다는 것뿐이었습니다. 이제 목록은
+   하나이고 그것이 넓은 쪽입니다 — purpose의 unsubscribe가 아닌 모든 원인,
+   marketing 분류 정지, soft bounce가 아닌 전역 원인.
+7. **삭제 접수가 purpose마다 쓰던 분류 원인의 사본이 사라집니다.** 같은 이유로
+   있던 것이고(entry 판정에 분류 원인이 보이지 않음), 분류 원인 하나가 marketing
+   전부를 막습니다. purpose마다 복제된 privacy request는 보증이 아니라 **나중에
+   질문에 답하기 어려운 기록**입니다.
+8. **모듈 이름은 그대로 둡니다.** `lib/emailSuppressionAuthority.ts`와
+   `lib/emailSuppressionAuthorityCore.ts`에는 더 이상 권위가 없지만, 두 경로는
+   `PROMPT_REFINER_RUNTIME_SOURCE_PATHS`와 20260918130000의 CHECK 제약이 고정하고
+   있습니다 — 이름을 바꾸는 것은 durable approval contract를 바꾸는 일이고, 더 나은
+   이름이 값할 만한 결정이 아닙니다. 두 파일의 머리말이 그 사실을 적습니다.
+9. **되돌리기.** 이 배포의 rollback은 이전 코드를 다시 배포하는 것이고 데이터는
+   건드리지 않으므로 되돌릴 수 있습니다. 원인으로 돌아갈 수 없게 된 것은 v26이며
+   (entry 쓰기가 멈춘 시점), D-1이 새로 만드는 비가역성은 없습니다.
+
+### v26 (2026-09-21) — entry 쓰기가 멈춥니다(deploy C-2)
+
+deploy C의 뒤쪽입니다. 앞쪽(C-1, v25)이 콘솔을 원인 기준으로 옮겼고, 이제
+`SuppressionEntry`를 쓰는 곳이 없어집니다.
+
+1. **보내도 되는지는 원인이, 설정과 무관하게 정합니다.** 이것이 이 배포가
+   send 경로에 가하는 변경이고 단순화가 아닙니다. 아무도 entry를 쓰지 않으므로
+   그 표는 **쓰기가 멈춘 순간의 스냅샷**입니다 — 그 뒤에 기록된 hard bounce,
+   complaint, privacy 요청이 전부 빠져 있고, 그것을 읽으면 **그만 보내라고 한
+   사람에게 메일이 나갑니다.** 그 표를 고르는 설정을 존중하는 것은 틀리라는
+   요청을 존중하는 것입니다.
+   설정은 그래도 읽습니다 — `entry`로 되어 있는 것이 조용하지 않고 시끄럽도록
+   (`EMAIL_SUPPRESSION_AUTHORITY_BELOW_FLOOR`). 설정 자체는 deploy D가 없앱니다.
+2. **entry 쓰기 여덟 곳이 사라집니다.** `recordSuppression`의 upsert,
+   `removeSuppression` 전체, 해제 시 selector 삭제, preference 복구의 삭제,
+   provider 이벤트의 `syncSoftBounceEntry`(생성·수정·삭제), 영구 bounce 복구의
+   생성·수정입니다.
+3. **entry의 병합 규칙도 같이 사라집니다.** `privacy_request`는 덮어쓰지 않는다,
+   영구 사유를 일시 사유로 낮추지 않는다 — 이 규칙들은 **한 행이 여러 사실을
+   대신해야 했기 때문에** 있었습니다. 원인은 각자 한 행이고 판정이 전부를
+   읽으므로, complaint 뒤에 온 soft bounce는 complaint를 **대체하지 않고 옆에
+   섭니다.** 적어야 하는 규칙은 잘못 적을 수 있는 규칙입니다.
+4. **거울을 만들던 trigger를 제거합니다**(20260921090000). 쓰기가 없으면 비출
+   것도 없고, 아무도 하지 않는 쓰기에 걸린 trigger는 **없어진 것을 아무도
+   눈치채지 못하는 장치**입니다. **표는 남깁니다** — 원인이 생기기 전의 억제
+   목록을 담은 유일한 기록이고, 쓰지 않는 표는 싸지만 되살릴 수 없는 표는
+   비싸기 때문입니다.
+5. **cutover 도구는 이미 전환된 환경에서 거절합니다**(`already_cut_over`).
+   그 도구는 entry와 원인을 비교하고 `--repair`로 원인을 **씁니다.** 전환 뒤의
+   entry는 스냅샷이므로, 그 비교는 그 사이에 해제된 억제를 "빠진 원인"으로 읽고
+   복구가 그것을 되돌려 놓습니다 — 누군가 의도적으로 푼 주소가 다시 막히고,
+   출처에는 `reconcile:entry:`가 적힙니다. 던지지 않고 보고로 거절하므로 dry
+   run은 여전히 상태를 답합니다.
+6. **배포 순서가 계약입니다.** 이 build는 cutover가 **적용되고 검증된** 환경에만
+   갈 수 있습니다. staging·production 모두 2026-09-17에 전환했고, 그것이 이
+   배포의 전제입니다. A/B와 같은 promotion에 C를 실을 수 없다는 규칙은 그대로
+   입니다.
+7. **deploy A·B의 거울을 고정하던 테스트는 지웁니다**, 약한 주장으로 고쳐 쓰지
+   않고. trigger가 옮겨 준다는 테스트, 병합 규칙이 거절해도 원인은 남는다는
+   테스트, entry를 해제하면 뒤의 원인이 풀린다는 테스트가 그것입니다. 없어진
+   장치를 계속 시험하는 테스트는 초록색인 채로 아무것도 지키지 않습니다.
+
+### v25 (2026-09-20) — 운영 콘솔이 원인을 읽습니다(deploy C-1)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 deploy C를
+둘로 나눈 앞쪽입니다. 뒤쪽(C-2)은 `SuppressionEntry` 쓰기 전부와 A 단계의
+trigger를 걷습니다.
+
+**왜 나눴는가.** 콘솔이 entry를 읽는 동안 entry 쓰기를 멈추면, 그 순간부터
+새 hard bounce·complaint·privacy 요청이 **화면에 나타나지 않고 해제할 수도 없는**
+창이 생깁니다. 차단은 원인이 하고 있으므로 메일은 멈춰 있는데, 운영자는 왜
+멈췄는지 볼 수 없습니다. 그래서 콘솔을 먼저 옮깁니다 — entry와 원인이 **아직
+일치하는 동안** 하는 이동이라 동작이 바뀌지 않고, 되돌리기도 쉽습니다.
+
+1. **목록은 selector 단위입니다.** 한 줄은 주소·scope·purpose 하나이고, 그 위의
+   **활성 원인 전부**를 함께 보여 줍니다. 차단 효과는 원인들의 합이므로 원인마다
+   한 줄을 그리면 같은 주소가 세 번 나오고, 운영자가 차단의 3분의 1을 해제하도록
+   부추깁니다. 화면은 원인마다 표 행을 그리되 주소와 범위가 그 행들을 `rowSpan`
+   으로 덮습니다 — 한 칸 안에 목록 넷을 세로로 쌓으면 하나가 줄바꿈하는 순간
+   이유와 날짜의 대응이 어긋납니다.
+2. **행 수 상한은 selector에 걸고 DB가 겁니다.** 원인을 `limit × n`개 읽어
+   메모리에서 묶으면 **행이 아니라 행 안이 잘립니다** — 창 경계에 걸친 selector는
+   원인 일부만 가진 채 표시됩니다. 빠진 것이 하필 `privacy_request`면 운영자는
+   **해제 뒤 주소가 깨끗해진다고 믿고** 누르는데 그 원인은 그대로 남고, 빠진 것이
+   `complaint`면 두 번째 관리자가 필요하다는 사실이 누른 뒤에야 나타납니다.
+   해제는 행이 아니라 **행렬이 허용하는 원인들**에 걸리므로, 잘린 행이 만드는 것은
+   예상 밖의 거절이 아니라 예상 밖의 결과입니다. 그래서 selector를 먼저 고르고, 그
+   selector들의 원인은 **상한 없이** 다시 읽습니다.
+3. **만료된 원인은 목록에서 빠집니다.** `expiresAt`가 지난 soft bounce는 아무
+   메일도 막지 않으며, 그것을 계속 보여 주는 화면은 없는 것을 해제하라고 시키는
+   화면입니다. 판정은 읽는 쪽에 있습니다.
+4. **손잡이는 cause id이고, 그 자신이 활성이어야 합니다.** entry id는 C-2가
+   쓰기를 멈추는 행을 가리키므로 그때 콘솔이 눈먼 상태가 됩니다. 다만 해제·만료된
+   cause도 **selector 이름은 계속 맞으므로**, 그것을 따라가면 지금 그 자리에 살아
+   있는 다른 원인을 읽게 됩니다. 열린 채 방치된 화면에서 오래된 soft bounce를
+   해제하면 그 사이 생긴 unsubscribe가 풀리고, 그만 보내라고 한 사람에게 다시
+   메일이 갑니다. 그래서 죽은 손잡이는 아무것도 해석하지 못합니다.
+5. **해제 요청은 화면이 본 원인 집합의 이름을 함께 보냅니다**(`causeSetDigest`,
+   필수). 서버가 그 순간 스스로 읽은 집합은 **정의상 승인된 집합**이라 비교가
+   아무것도 비교하지 않습니다. 목록 조회 뒤에 추가된 원인이 아무도 보지 못한 채
+   해제되는 경로가 바로 그것입니다. 보낸 이름과 현재 집합의 이름이 다르면
+   `approval_stale`이고, **판정은 주소 잠금 안에서 다시 계산한 값으로** 합니다 —
+   route의 이른 거절은 승인을 요청하기 전에 멈추기 위한 것이지 판정이 아닙니다.
+   **id 목록이 아니라 digest입니다.** `SuppressionCause`는 append-only이고 한
+   selector가 가질 수 있는 활성 원인 수에 제한이 없는데(공급자가 soft bounce를
+   재시도할 때마다 행이 늘어납니다) 목록은 그 전부를 돌려줍니다. 그래서 id를
+   실어 보내는 계약은 **본문 한도가 떨어지는 자리에 개수 상한을 만들고**, 그
+   너머의 selector는 보이지만 영원히 해제할 수 없게 됩니다 — 전부 보내면 본문이
+   거절되고, 덜 보내면 집합이 다르며, 그 사이의 요청은 존재하지 않습니다. 한도를
+   올리는 것은 벽을 옮길 뿐입니다. 64자 hex는 움직이지 않습니다.
+   digest는 정렬 후 계산하므로 어느 쪽의 순서에도 기대지 않고, 비밀도 서명도
+   아닙니다 — 집합의 이름일 뿐이고 서버는 DB에서 다시 계산합니다.
+6. **거절 코드는 네 상황을 구분합니다.** 보낸 digest가 현재와 다르면
+   `approval_stale`, 손잡이가 **해석은 됐지만 더 이상 활성이 아니면**도
+   `approval_stale`, 그런 id가 **아예 없으면** 404, authority가 `entry`이면
+   `authority_changed`입니다. 죽은 손잡이를 404로 답하면 화면이 낡았을 뿐인
+   운영자에게 **suppression이 사라졌다**고 말하는 것이 됩니다.
+   네 갈래는 `tests/integration/admin-suppression-lift-route.db.test.ts`가
+   route에서 직접 고정하며, 거절 전후의 **원인·entry·감사·승인 행 전체를 비교**해
+   suppression 상태가 바뀌지 않았음까지 봅니다(개수가 아니라 diff입니다 — 죽은
+   손잡이 사례는 이미 해제된 원인을 갖고 시작합니다). 거절도 rate limit은
+   소비하므로 그 bucket은 이 비교의 **범위 밖**이며, 공짜로 재시도할 수 있는
+   거절은 거절이 아니기 때문에 그렇게 둡니다.
+7. **감사의 대상은 손잡이가 아니라 원인 집합입니다**
+   (`targetType: "SuppressionCauseSet"`, `targetId`는 digest). 손잡이는 목록이
+   맨 앞에 놓은 cause일 뿐이고 해제 행렬은 그것으로 해제하지 않습니다 —
+   `manual`과 나중에 생긴 `privacy_request`를 가진 주소는 manual만 해제되고
+   privacy request는 남는데, **손잡이는 privacy request**입니다. 그것을 대상으로
+   적으면 **법적 기록이 제거된 것처럼 읽히는 불변 기록**이 남습니다.
+   그래서 metadata는 실제로 해제된 것과 남은 것을 나눠 적고, 그 값은 **결정이
+   내려지는 transaction 안에서** 넘어옵니다. 손잡이는 `viaCauseId`로, 운영자가
+   어느 줄에서 눌렀는지로만 남습니다.
+8. **주소 공개(D10)는 활성 원인에만 답합니다.** entry는 해제될 때 삭제되므로 그
+   id는 suppression이 끝나는 순간 주소로 풀리지 않게 됐습니다. cause는 append-only
+   라 영원히 남고, 그대로 두면 화면에 찍혔던 모든 id와 감사 기록 속 id가 **가린
+   주소를 되돌리는 영구 손잡이**가 됩니다. 공개는 지금 화면에 있는 줄을 위한
+   것이고, 해제·만료된 원인은 그 줄이 아니므로 모르는 id처럼 답합니다.
+9. **entry는 selector로 지웁니다**, id가 아니라. C-2 이후에는 지울 행이 없고,
+   0건 삭제는 실패가 아닙니다 — 이 경로가 그 변화를 넘어 계속 동작해야 합니다.
+10. **authority가 `entry`이면 해제를 거절합니다.** 이 build의 콘솔은 cause id를
+   나눠 주므로 entry 경로는 그 id를 해석하지 못하고, 404는 "그 suppression은
+   사라졌다"로 읽힙니다. 실제로 일어난 일은 설정이 이 build의 바닥 아래로
+   되돌아간 것이므로, 그렇게 말하고 아무것도 바꾸지 않습니다.
+   **이 배포의 rollback floor는 원인 전환(2026-09-17)입니다.** 이 조합은 route
+   테스트로 고정돼 있고 readiness가 거부하지는 않습니다 — 그 상태에서 GET은
+   원인을 보여 주고 POST만 거절하므로, 되돌린 운영자는 **권위 없는 목록을 보며
+   해제 수단을 잃습니다.** D 이전에 readiness 판정을 붙이는 것이 남은 일입니다.
+### v24 (2026-09-20) — 계정 분리의 축소(contraction)
+
+v20(S1b-2b)이 확장 전용으로 남긴 비계를 걷습니다. 재설계 초안
+(docs/policy/email-product-news-redesign-draft.md) 7.4의 C56·C72입니다.
+
+**한 migration이 아니라 셋이고, 나눈 기준은 테이블입니다.**
+
+| | 파일 | 대상 |
+|---|---|---|
+| 1 | `20260920100000_email_delivery_message_id_unique` | `EmailDelivery`에 unique 생성 |
+| 2 | `20260920100100_email_webhook_account_contraction` | `ProviderWebhookEvent`의 옛 unique와 default 제거 |
+| 3 | `20260920100200_email_delivery_drop_redundant_index` | `EmailDelivery`의 중복 일반 index 제거 |
+
+1. **한 transaction은 한 테이블만 잠급니다.** 이것이 나눈 이유이고 정리가 아닙니다.
+   webhook 처리는 `ProviderWebhookEvent`를 쓰고 나서 `EmailDelivery`를 갱신합니다.
+   한 migration이 `EmailDelivery`의 SHARE를 commit까지 쥔 채
+   `ProviderWebhookEvent`의 ACCESS EXCLUSIVE를 요청하면 **반대 순서**가 되고, 처리
+   중인 webhook 하나와 정확히 교착합니다. 지는 쪽은 긴 index 빌드가 통째로 버려지거나
+   기록되지 못한 bounce입니다. `lock_timeout`은 이것의 답이 아닙니다 — 보통
+   deadlock detector가 먼저 둘 중 하나를 abort합니다.
+2. **중간 상태는 어느 것도 나쁘지 않습니다.** 1만 적용된 상태는 webhook 비계가
+   그대로인 채 delivery unique만 생긴 것이고, 2만 더해진 상태가 계약이 말하는 끝이며,
+   3은 중복 index 제거일 뿐입니다.
+3. **옛 `(provider, providerEventId)` unique를 제거합니다.** 계정이 다르면 같은
+   provider 사건 id라도 **다른 사건**이고, 그것을 말하는 것이 계정 포함 unique입니다.
+   옛 것은 marketing 사건을 transactional 사건과 충돌한다며 거절할 수 있었습니다.
+   그것은 20260821090000이 `CREATE UNIQUE INDEX`로 만든 **index**이지 constraint가
+   아니므로 `DROP INDEX`가 지우는 문장입니다. migration은 그래도 `DROP CONSTRAINT`를
+   **먼저** 두는데, 만약 어딘가에서 constraint로 존재한다면 `DROP INDEX`는 건너뛰는
+   것이 아니라 dependency 오류로 **실패**하고 `IF EXISTS`는 그것을 덮지 않습니다.
+   **이로써 아래 v20이 적은 동작이 바뀝니다.** 다른 계정에 같은 사건 id가 있을 때
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`으로 실패하고 provider가 재시도하던 경로는
+   더 이상 정상 경로가 아닙니다 — 그 사건은 이제 **자기 행으로 저장됩니다.**
+   handler의 그 분기는 남아 있지만, 이제는 "삽입되지도 않았고 읽히지도 않았다"는,
+   계정 포함 unique 아래에서는 일어날 수 없어야 하는 상태를 시끄럽게 알리는
+   역할입니다. incident 문구도 그렇게 바뀌었습니다.
+4. **`ProviderWebhookEvent.providerAccount`의 default를 제거합니다.** writer는 하나이고
+   항상 계정을 말합니다. default는 그것이 조용히 참이 아니게 되는 경로입니다.
+5. **`EmailDelivery(providerAccount, providerMessageId)`를 unique로 만듭니다.**
+   메시지 id는 **계정 안에서** delivery 하나를 가리키고, S1b-2b의 결속이 그렇게 읽습니다.
+   **부분(partial)이 아니라 일반 unique입니다.** `WHERE 둘 다 NOT NULL` 술어는 일반
+   unique가 이미 보장하는 것과 정확히 같은 것을 말합니다 — Postgres는 NULL을 비교하지
+   않으므로 provider에 닿지 못한 발송은 어차피 아무와도 충돌하지 않습니다. 그리고 그
+   술어는 이 저장소에서 비싼 것 하나를 요구합니다: Prisma는 7.4부터 `partialIndexes`
+   preview로 표현할 수 있지만 이 schema는 preview를 하나도 켜지 않으므로,
+   그대로는 `db push`가 만들지 않고 `migrate diff`가 매번 drift로 보고합니다.
+   20260801190000_plan_change_pending_slot이 같은 교훈이며, 그때는 테스트가 검증한다고
+   믿은 제약이 실제 DB에 없었습니다.
+6. **1번은 눈감고 적용할 수 없습니다.** unique index 빌드는 처음 만나는 중복에서
+   **배포 도중** 실패하고, 답은 파일이 아니라 데이터에 있습니다.
+   `npm run email:check-message-id-duplicates`가 읽기 전용으로 묻고 개수만 출력합니다
+   (주소·메시지 id 없음; `providerAccount`는 `EmailDelivery_provider_account_check`가
+   가두는 닫힌 lane 이름입니다). **그 판독은 멈출 근거이지 가도 된다는 보증이 아닙니다** —
+   읽은 시점과 migration 실행 시점 사이에 잠금이 없으므로, 필드 이름은
+   `noDuplicatesAtReadTime`입니다. 판정하는 것은 index 빌드 자신입니다.
+7. **셋 다 명시적 transaction으로 스스로를 감쌉니다**(`BEGIN`/`COMMIT`).
+   `prisma migrate deploy`는 migration 파일을 transaction으로 감싸지 않으므로, 그냥
+   두면 **절반만 적용된 상태**가 만들어지고 그 상태에서는 좋은 수가 없습니다 —
+   `resolve --rolled-back` 후 재실행은 이미 있는 객체에서 실패하고, `--applied`는
+   **실행되지 않은 문장들을 실행된 것으로** 표시합니다. 모든 문장이 transactional
+   DDL이므로 파일이 직접 말하게 합니다.
+   이 `BEGIN`은 조건을 하나 답니다 — **파일을 transaction으로 감싸지 않는 runner만
+   이것을 재생할 수 있습니다.** 감싸는 runner에서는 안쪽 `BEGIN`이 경고만 내고 안쪽
+   `COMMIT`이 **바깥 transaction을 끝내** 되돌릴 수 있다고 믿은 DDL을 commit합니다.
+   Prisma 8의 경로는 기존 DB를 baseline하지 이 이력을 재생하지 않지만, 재생하는
+   환경은 7.10 runner에 고정합니다.
+8. **실패 후 복구는 가정이 아니라 카탈로그를 보고 정합니다**, 그리고 무엇을 볼지는
+   각 migration 머리말에 SQL로 적혀 있습니다. Prisma는 실패를 `_prisma_migrations`에
+   남기고 다음 deploy가 자동으로 재시도하지 않으며, `COMMIT` 응답 전에 연결이 끊기면
+   결과는 **클라이언트가 모릅니다.**
+   **1번의 판정은 이름이 아니라 index의 모양으로 합니다** — 같은 이름의 INVALID·
+   non-unique·partial·`NULLS NOT DISTINCT`·키가 다른 index가 있는 상태도 "있다"는
+   검사는 통과하며, 그것을 `--applied`로 봉인하면 **없는 보장을 있다고 기록하는 것**
+   입니다. 그래서 `indisunique`·`indisvalid`·`indisready`·`indislive`·
+   `indimmediate`·`indnullsnotdistinct`·키 개수·expression 유무·predicate·access
+   method를 전부 확인하고, 하나라도 어긋나면 **멈춥니다.** 통합 테스트가 검사하는
+   속성과 같은 목록입니다.
+   **3번은 재생이 안전합니다** — `DROP INDEX IF EXISTS`는 멱등이므로 lock timeout으로
+   아무것도 못 지웠든 지우고 응답을 잃었든 `resolve --rolled-back` 후 재배포가 맞습니다.
+   중요하지 않아서가 아니라 문장이 멱등이어서이고, "실패할 리 없는" drop에도
+   `IF EXISTS`를 남기는 이유입니다.
+9. **모든 잠금 대기에 상한을 겁니다**(`SET LOCAL lock_timeout`; 1번 15초, 2·3번 5초).
+   상한이 없으면 잠금 요청은 무한히 기다리고, `ACCESS EXCLUSIVE` 요청은 **새 읽기보다
+   앞에 줄을 서므로** 긴 `SELECT` 하나가 그 테이블을 모두에게 막습니다. 상한은 **잠금을
+   기다리는 시간**만 제한하며 index 빌드 시간의 상한이 아닙니다.
+10. **잠금 종류는 문장마다 다릅니다.** 1번의 빌드는 `EmailDelivery`에 SHARE —
+    읽기는 계속되고 쓰기가 기다립니다. 2번의 두 문장과 3번의 drop은 ACCESS EXCLUSIVE로
+    읽기까지 막지만 카탈로그 편집이라 문장 자체는 순식간입니다. `CONCURRENTLY`는
+    잠금을 피하지만 transaction 안에서 Postgres가 거부하므로 쓸 수 없고, 7번의
+    `BEGIN`이 바로 그 transaction입니다.
+    **`IF NOT EXISTS`는 쓰지 않습니다.** 이름만 같은 index가 빌드를 건너뛰게 하고,
+    그것들을 구분하는 카탈로그 검사는 **정확히 맞아야 하는 두 번째 물건**입니다.
+    이름 충돌에서 시끄럽게 실패하는 쪽이 더 쌉니다.
+11. **index를 지우기 전에 소유 테이블을 확인합니다**(2·3번의 `DO` 블록).
+    `DROP INDEX`는 이름을 relation namespace에서 해석할 뿐 **어느 테이블의 것이어야
+    하는지 말할 방법이 없습니다.** 그리고 이것은 multi-schema 문제가 아닙니다 —
+    한 schema 안에서도 의도한 index가 사라지고 **다른 테이블의 index가 그 이름을
+    가져가면** 충분합니다. 그러면 drop은 그 index를 지우고 **성공하며**, migration은
+    applied로 기록되고, 옛 unique는 남아 있으며, 이상을 알아챌 복구 쿼리를 실행할
+    계기가 아무에게도 생기지 않습니다. **실패한 뒤에만 도는 분기는 실패하지 않는
+    경로를 막지 못합니다.** 그래서 삭제 전에 `pg_index.indrelid`를
+    `to_regclass(대상 테이블)`과 대조하고, 다른 테이블이면 `RAISE EXCEPTION`으로
+    transaction을 중단합니다.
+12. **rollback floor는 20260917180000을 들여온 commit입니다.** 그 아래로 내려가면 이
+    schema는 느려지는 것이 아니라 **일을 거부합니다** — 그 이전 build는 계정을 말하지
+    않고 insert하며 2번이 지운 default에 기댔으므로 모든 `ProviderWebhookEvent`
+    insert가 `NOT NULL`로 실패하고, 충돌 해소는 2번이 지운
+    `(provider, providerEventId)` unique를 지목합니다. 비용은 수신 webhook 전량 거절과
+    bounce·complaint 처리 정지입니다. 더 내려가야 하면 2번을 **먼저** 되돌리며
+    (default 복원 + 옛 unique 재생성), 그 재생성 자체가 계정이 다른 같은 사건 id에서
+    실패할 수 있습니다. 복구 절차이지 일상 경로가 아닙니다.
+
+### v23 (2026-09-18) — 발송 진입점 allowlist와 로그인 방법 안내의 lane 이동(S1b-3b)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C41·C35·C36·C49입니다.
+전체 계약은 9.8에 있고, 여기에는 바뀐 판정만 적습니다.
+
+1. **provider에 닿을 수 있는 파일은 목록 하나입니다.** `deliverEmailOnce`·
+   `sendTransactionalEmail`·`emailProvider().send`를 쓰는 파일은 `lib/email.ts`,
+   helper, `lib/operationalMonitoring.ts`, `lib/providerMonitoring.ts`, 분리된 운영자
+   발송 module, 관리자 테스트 메일뿐입니다. `npm run check:send-entry-points`가 PR
+   Fast Gate에서 강제하며, 항목마다 **왜 허용되는지**를 함께 적습니다.
+2. **검사가 파일 단위라는 것이 코드 모양을 정했습니다.** 파일 단위 목록은 잠금 안의
+   제출과 그 옆의 제출을 구분하지 못합니다. 그래서 (a) lane은 helper에 callback이
+   아니라 **렌더된 메시지**를 넘기고 제출은 helper가 하며, (b) 알림 큐의 운영자
+   경보는 자기 module로 갈라졌습니다 — 두 종류를 담은 파일을 허용하면 같은 파일의
+   고객 발송이 잠금을 건너뛰어도 통과하기 때문입니다.
+3. **알림 큐는 allowlist에 없습니다.** 고객 kind는 helper, 운영자 kind는 분리된
+   module을 부릅니다.
+4. **로그인 방법 변경 안내가 standard lane으로 옮겨졌습니다.** template은 둘
+   (`login_method_linked`·`login_method_unlinked`, 둘 다 transactional·security·
+   purpose 없음)이고, **변경과 enqueue는 같은 transaction**이며 version은 그 앞에서
+   확정합니다. 지금까지는 응답 뒤 `after()`에서 보내고 실패하면 incident만 남겼으므로,
+   **모든 기기에서 로그아웃된 사람이 아무 통보도 받지 못할 수 있었습니다.**
+5. 부수적으로 닫힌 결함 둘 — OAuth callback을 다시 태우면 **이미 연결된 계정에도**
+   "추가됨"을 보냈습니다(이제 실제로 바뀔 때만 큐에 들어갑니다). 그리고 호출자가 없는
+   `sendEmailLoginCodeEmail`이 남아 raw 발송 경로를 하나 더 열어 두고 있었습니다.
+6. **관리자 테스트 메일은 suppression을 보지 않습니다**(7.4 C35). 수신자는 로그인한
+   관리자 자신이고, 막힌 주소에서 "설정은 정상"을 "발송 실패"로 보고하면 시험이 자기가
+   재려는 것을 재지 못합니다.
+7. **운영자 발송 module은 수신자를 스스로 정합니다.** allowlist에 있으면서 호출자가
+   준 주소로 보내 주는 wrapper는 우회를 닫은 것이 아니라 **옮긴 것**입니다 — 어떤
+   고객 경로든 그것을 부르면 잠금을 건너뛰면서 검사는 통과합니다. 설정된 운영자
+   주소가 아니면 거부하고 구조화 로그를 남깁니다.
+8. **검사는 파싱합니다.** 첫 판은 정규식이었고 재export alias·namespace import·
+   동적 `import()`·변수 경유 `provider.send()`·`.mjs`와 저장소 root 파일이 전부
+   통과했습니다. 전부 발송이고 전부 초록이었을 것입니다. 구문의 문제이므로 구문
+   트리로 답합니다. production source의 범위도 한 곳에 정의해 gate와 테스트가
+   다시 어긋나지 않게 합니다.
+9. **큐의 identity refusal은 terminal이 아닙니다.** "기다린다고 환경변수가 생기지
+   않는다"는 기다림에 대해 참이고 **창에 대해서는 거짓**입니다 — 운영자가 설정을
+   고치고 재배포하는 것이 이 큐가 재시도하는 이유입니다. 재시도는 그대로 두고,
+   기록되는 이름만 `unknown`에서 `identity_*`로 바꿉니다.
+10. **로그인 방법 안내는 실제로 바뀐 때만 큐에 들어갑니다.** `update`는 이미 켜져
+    있는 행에도 성공하므로, email 검증을 다시 태우거나 두 요청이 경합하면 아무것도
+    바뀌지 않은 채 "추가됨"이 나갔습니다 — OAuth에서 고친 것과 같은 거짓 보안
+    안내입니다. 조건부 쓰기의 변경 건수가 판정합니다.
+11. **language는 한 번만 읽습니다.** 준비할 때와 큐에 넣을 때 각각 읽으면, 그 사이에
+    언어를 바꾼 사용자 때문에 **준비하지 않은 version**이 필요해지고, 그 등록이
+    로그인 변경 transaction 안으로 들어옵니다 — 미리 준비하는 이유가 사라집니다.
+
+### v22 (2026-09-18) — 발송 직전 주소 잠금(S1b-3a)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C29입니다. 전체
+계약은 9.8에 있고, 여기에는 바뀐 판정만 적습니다.
+
+1. **고객 대상 발송은 `sendWithAddressLock()` 하나를 지납니다.** 주소 전역(→ purpose)
+   잠금 안에서 suppression을 다시 읽고, 같은 범위에서 provider에 제출합니다. 철회·
+   suppression이 렌더링 도중에 커밋돼도 그 메일은 나가지 않습니다.
+2. **잠금 순서는 주소 → purpose 행**이고 앞에 suppression fence(공유)가 옵니다.
+   sender는 writer가 먼저 잡는 `User` 행 잠금을 잡지 않습니다 — 계정을 바꾸지 않고,
+   그 순서만이 교착을 만듭니다.
+3. **시간 예산**(9.8 표) — 잠금 **전체** 대기 2초(credential 300ms), provider
+   10초(credential은 남은 예산 − 100ms), transaction 15초. `lock_timeout`은 잠금마다
+   다시 적용되므로 절대 deadline 하나로 관리하고, **provider 예산은 transaction의 남은
+   수명에서 commit 여유를 뺀 값**을 넘지 않습니다 — transaction timeout은 HTTP 요청을
+   중단시키지 못하므로, 그보다 긴 호출은 잠금이 풀린 뒤의 제출이 됩니다.
+4. **제출하지 못한 것은 시도가 아닙니다.** `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로
+   pending에 남고 기존 backoff로 돌아오며, 알림 큐 행도 시도 횟수를 올리지 않습니다.
+   남의 철회가 이 메일의 포기 예산을 쓰지 않습니다.
+5. **환불 안내도 suppression 판정을 받습니다**(transactional). 지금까지는 아무것도
+   묻지 않아 막힌 주소가 provider 실패로 보였습니다. 운영자 알림은 이 경로를 지나지
+   않습니다.
+6. transactional complaint 경보는 **세 경로 모두** 잠금 안의 재조회 결과로 올립니다 —
+   발송 직전의 판정이 그 메일에 대한 사실이기 때문입니다.
+7. 제출이 성공한 뒤 transaction이 실패해도 그 답을 씁니다. 이 transaction은 아무것도
+   쓰지 않으므로 rollback이 잃는 것이 없고, 버리면 이미 나간 메일을 다시 보냅니다.
+
+### v21 (2026-09-17) — 잘못 분류된 영구 bounce 복구
+
+v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처리되어, 없는 메일함에도
+최대 24시간 뒤 다시 발송했습니다. 원본 사건은 90일 보관되므로 그 안의 것은 복구할 수
+있습니다.
+
+1. **`npm run email:recover-permanent-bounces`** — 기본은 dry run(읽기만)이고 `--apply`가
+   씁니다. 출력은 개수뿐이며 주소·메일 id를 싣지 않습니다.
+2. **대상** — 실행 시각까지 받은(스냅샷) 처리된 `email.bounced` 사건 중 `data.bounce.type`이
+   정확히 **`Permanent`** 인 것만입니다. `hard`는 원래 올바르게 처리됐으므로 대상이 아닙니다.
+   이 사건 키(`webhook:<사건 행 id>`) **또는 같은 메일 id**로 `hard_bounce` 원인이 이미 있으면
+   `alreadyRecorded`입니다. 주소는 사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소,
+   없으면 payload 수신자입니다. 원인은 정정된 handler와 같은 키·출처로 쓰고 `evidence`에
+   `recoveredFrom: permanent_bounce_misclassified_as_soft`를 남깁니다.
+3. **보수적 제외** — 살아 있는 메일함을 막는 것이 이 결함보다 나쁘기 때문입니다.
+   - provider 사건 시각(`created_at`)이 없거나 믿을 수 없는 사건은 쓰지 않습니다
+     (`indeterminateTime`) — 수신 시각으로는 이후 delivery와 선후를 판정할 수 없습니다.
+   - 같은 주소에 **bounce 5분 전 이후** delivered가 보고된 적이 있으면 쓰지 않습니다
+     (`deliveredSince`). 오래된 delivery 시각은 수신 시각이라 그 오차를 여유로 둡니다.
+   - 쓰기는 사건마다 fence와 주소 잠금 안에서 **그 검사를 다시 한 뒤**에만 합니다 —
+     delivered 기록도 같은 잠금을 잡으므로, 실행 중에 들어온 delivery를 봅니다
+     (`deliveredDuringRun`).
+   - 주소가 없는 사건은 `unaddressed`로 셉니다.
+4. **entry** — 원인은 항상 추가하지만 entry는 **없거나 soft bounce일 때만** hard bounce로
+   올립니다(`entriesRaised`). complaint·manual·privacy request·기존 hard bounce entry는 그대로
+   둡니다. 쓰기는 **최신 사건부터** 하므로 한 주소의 entry에는 가장 최근 bounce가 남습니다.
+5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 한 실행 안에서
+   같은 메일 id의 사건이 둘이면 쓰기 직전 재확인으로 하나만 씁니다(`duplicatesInRun`).
+   보고의 개수는 쓰기 전 상태 기준입니다.
+6. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
+   창을 보여 줍니다).
+
+### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"계정이 둘입니다(C56)", "delivery와의 결속(C72)", 계정별 침묵 incident(C67, C94)를
+구현합니다. 운영 절차는 docs/ops/email-sending-domains.md 4.3입니다.
+
+1. **endpoint** — `POST /api/webhooks/email/resend/transactional`과
+   `/api/webhooks/email/resend/marketing`. 각각 `RESEND_WEBHOOK_SECRET`,
+   `MARKETING_RESEND_WEBHOOK_SECRET`으로만 검증하고 서로의 secret을 빌리지 않습니다(없으면
+   503). **두 변수에 같은 secret이 들어 있으면 두 endpoint 모두 503**입니다 — 한 계정용으로
+   서명된 사건을 다른 계정의 것으로 기록할 수 있기 때문입니다. 기존
+   `/api/webhooks/email/resend`는 transactional 계정으로 계속 받습니다. 그 밖의 경로 조각은
+   404입니다. 처리 함수는 계정을 인자로 **반드시** 받습니다.
+2. **저장** — `ProviderWebhookEvent.providerAccount`(CHECK `transactional`·`marketing`,
+   NOT NULL)에 받은 계정을 남기고, 재전송 guard는 새 unique
+   `(provider, providerAccount, providerEventId)`(`ProviderWebhookEvent_account_event_key`)를
+   씁니다. **확장만 하는 배포입니다** — 배포가 겹치는 동안 이전 build는 이 컬럼 없이 쓰고
+   `(provider, providerEventId)`로 충돌을 판정하므로, 그 unique와 컬럼 default
+   `transactional`은 남깁니다(이전 build의 endpoint는 transactional뿐이라 default가 곧
+   사실이고, 기존 행의 backfill이기도 합니다). 옛 unique와 default 제거는 이전 build가 없어진
+   뒤의 별도 migration입니다. 두 unique가 함께 있는 동안 INSERT는 **충돌 대상을 지정하지 않은
+   `ON CONFLICT DO NOTHING`** 입니다 — 대상을 지정하면 다른 unique의 충돌(같은 새 사건의 동시
+   도착 포함)은 예외가 됩니다. 삽입되지 않았으면 그 계정의 행을 찾고, 없으면 **다른 계정에 같은
+   사건 id가 있는 것**이므로 `duplicate`로 응답하지 않고 incident
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`과 함께 실패(provider 재시도)합니다. provider 사건 id는
+   계정을 넘어 고유하므로 실제로는 일어나지 않을 것으로 봅니다.
+3. **결속** — delivery는 `(providerAccount, providerMessageId)`로만 찾습니다. 다른 계정이
+   같은 메일 id를 보고하면 그 발송이 아닙니다 — 15분 대기 뒤 주소 기준으로 확정합니다.
+   **같은 계정에서 한 메일 id로 delivery가 둘 이상**이면 어느 쪽도 고르지 않고 주소 기준으로만
+   적용하며 incident `EMAIL_WEBHOOK_AMBIGUOUS_DELIVERY`를 올립니다. delivery가 없는 사건의
+   원인 `sourceStream`·`providerAccount`는 검증된 계정입니다.
+4. **침묵** — 15분 sweeper가 API key와 webhook secret이 **둘 다** 있는 계정마다, DB 시계
+   기준 지난 24시간에 `EmailDelivery.sentAt`이 있는 그 계정 발송이 **5건 이상**이고 그 계정의
+   Resend webhook 수신이 **0건**이면 계정별 incident `EMAIL_WEBHOOK_SILENT_TRANSACTIONAL`·
+   `EMAIL_WEBHOOK_SILENT_MARKETING`을 올립니다(cooldown이 code 단위라 한 계정이 다른 계정의
+   경보를 가리지 않도록). delivery 행이 없는 발송(운영자 알림, 관리자 테스트 메일)은 세지
+   않습니다.
+5. `(providerAccount, providerMessageId)` **partial unique는 이번에 두지 않습니다.**
+   기존 index로 조회하며, unique는 운영 데이터에 중복이 없음을 읽기 전용으로 확인한 뒤
+   별도 migration으로 둡니다 — 확인 없이 만들면 production migration이 실패할 수 있습니다.
+
+### v19 (2026-09-17) — webhook 재처리 상태기계(S1b-2a)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"webhook 재처리 상태기계"와 "아직 결속되지 않은 사건"을 구현합니다. 이전에는 적용에
+실패한 사건이 `processingError`만 남기고, 재전송은 unique 충돌로 `duplicate`가 되어
+**다시 적용되지 않았습니다.**
+
+1. **claim** — 사건 행은 무작위 `processingLeaseId`·`processingStartedAt`과 시도 횟수
+   +1을 한 조건부 UPDATE로 가져갑니다(새 사건은 행을 만들 때 claim한 상태). 조건은
+   미처리·미포기, 시도 10 미만, lease 없음 또는 60초 지남입니다.
+2. **fenced 기록** — 성공(`processedAt`, lease 비움), 실패(lease 비움, 오류 분류, 10번째면
+   같은 write에서 `abandonedAt`), 대기(아래)는 모두 `processingLeaseId = 내 lease`이고
+   미처리·미포기인 행에만 씁니다. lease를 잃은 worker의 기록은 버려집니다. 적용 자체는
+   원인 키와 사건 순서로 멱등입니다.
+3. **재전송** — 처리됐거나 포기된 사건은 `duplicate`(200). 미처리면 claim해서 다시
+   적용하고, 살아 있는 lease가 있으면 **409**(provider가 다시 보냄)입니다. 시도가 다 됐지만
+   아직 포기가 기록되지 않은 행은 `duplicate`로 흡수합니다.
+4. **delivery 대기** — 사건이 provider message id를 가졌는데 delivery가 없고 수신 후
+   **15분**이 지나지 않았으면 `awaiting_delivery`로 둡니다: lease를 비우고 claim이 올린
+   시도를 되돌리며, provider에는 200입니다. 15분이 지나면 주소 기준 효과로 확정합니다.
+   경계는 `receivedAt`과 DB `now()`이고, 새 행의 `receivedAt`·lease 시작도 DB 시계로
+   씁니다 — 앱 서버 시계가 어긋나도 lease가 곧바로 만료돼 보이거나 새 사건이 15분 지난
+   것으로 보이지 않도록.
+5. **sweeper** — 15분 runner가 시도가 다 됐고 lease가 없거나 만료된 행에 `abandonedAt`을
+   쓰고(오래된 순 최대 50건, incident `EMAIL_WEBHOOK_ABANDONED`), 미처리 행을 오래된
+   수신순으로 최대 50건 claim해 적용합니다. 20초는 **새 사건을 시작하는 기준**이며, 이미 시작한
+   사건은 자기 transaction timeout 안에서 끝까지 갑니다(초과는 사건 하나만큼). 수신 후
+   **1시간** 넘게 미처리인 행이 있으면 incident `EMAIL_WEBHOOK_BACKLOG`입니다.
+   재전송이 claim하지 못하면 행을 DB 시계로 다시 읽어 판정합니다 — 끝났거나 시도가 다
+   됐고 아무도 쥐지 않았으면 200, 살아 있는 lease면 시도 횟수와 무관하게 409입니다.
+   90일 보관 purge는 한 문장으로, 살아 있는 lease가 있는 행은 지우지 않습니다.
+   **효과와 기록은 한 transaction이 아닙니다.** lease가 만료된 뒤 늦게 끝난 worker의 효과는
+   남을 수 있지만(원인 키·사건 순서로 멱등이고 사실은 참), 행의 처리 기록은 먼저 커밋한
+   쪽의 것입니다. 새 index는 두지 않습니다(기존 `processedAt` index, 쓰기 잠금 회피).
+6. **CHECK** — `processedAt`과 `abandonedAt`은 함께 있을 수 없고, lease id와 시작 시각은
+   함께 있거나 함께 없으며, 시도는 0–10입니다.
+7. stream별 endpoint·secret, 계정 기준 delivery 결속, 계정별 침묵 incident는 S1b-2b입니다.
+
+### v18 (2026-09-17) — provider 사건 순서와 만료 기록(S1b-1d)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"사건 순서", "delivered 사건", "만료의 기록"을 구현합니다.
+
+1. **사건 시각** — payload의 `created_at`(ISO 8601, 수신보다 5분 넘게 미래가 아닐 때),
+   아니면 수신 시각입니다. 원인의 `occurredAt`도 이 값입니다.
+2. **순서 키** `(사건 시각, 종류 순위, provider 사건 id)` — 순위는 sent 0, delivered 1,
+   지연·soft bounce 2, hard bounce 3, complaint 4. delivery마다 마지막으로 상태를 바꾼
+   사건의 키(`providerEventAt`·`providerEventRank`·`providerEventId`)를 두고, **더 뒤인
+   사건만** 상태를 바꾸고, 바꿀 때 `lastErrorKind`를 그 상태에 맞게 다시 씁니다(soft
+   bounce면 `soft_bounce`, 아니면 비움). 모든 사건 적용은 주소 잠금 안에서 합니다. 기존
+   delivery의 키·`softBounceAt`·`deliveredAt`·상태는 migration이 보관 중인(90일) 처리된
+   `ProviderWebhookEvent`에서 같은 규칙으로 backfill합니다 — 배포 뒤 늦게 온 오래된 사건이
+   도착 순서로 정해졌던 기존 상태를 덮지 않도록.
+3. **hard bounce·complaint 원인은 순서와 무관하게 기록**합니다. 상태만 순서를 따릅니다.
+4. **soft bounce 원인은 사실에서 계산합니다.** delivery마다 가장 늦은 soft bounce 시각
+   (`softBounceAt`)을, 가장 늦은 delivered 시각(`deliveredAt`, 이제 사건 시각)을 둡니다.
+   연속은 **주소의 가장 늦은 delivered 이후**(같은 시각 포함) soft bounce가 있는 delivery이고,
+   5개 이상이면 시각순(같으면 delivery id순) **5번째가 넘은 시점**이 원인의 `occurredAt`,
+   거기서 24시간이 만료입니다. soft bounce와 delivered 사건마다 주소 잠금 안에서 이 기대
+   원인과 활성 원인을 맞춥니다 — 같은 delivery·같은 시각·같은 만료인 원인만 유지하고, 나머지는
+   해제(`delivered` 또는 `superseded`)한 뒤 기대 원인을 씁니다. 그다음 전역 entry가 soft
+   bounce이면 남은 활성 원인으로 다시 맞춥니다(가장 늦게 만료되는 soft bounce, 없으면 삭제). 처리 시점에 threshold를 넘은 사건으로 원인을 만들면 도착 순서에 따라
+   결과가 달라지기 때문입니다. 그래서 delivered는 **그보다 뒤에 기록된 원인도, 새 delivered
+   기준으로 연속이 모자라면** 해제합니다(설계 초안 C64의 "엄격히 이른 것만"을 순서 무관성
+   요구에 맞춰 좁힌 해석 — 늦게 처리된 오래된 delivered는 가장 늦은 delivered를 바꾸지 않으므로
+   이후 원인을 지우지 않습니다). 전역에 활성 원인이 남지 않으면 `soft_bounce` entry도 지웁니다.
+   이전과 달리 발송 수락(`sent`)은 연속을 끊지 않습니다. **delivery에 결속되지 않은 soft
+   bounce는 원인 계산에 쓰지 않습니다**(결속은 S1b-2의 `awaiting_delivery`).
+5. **만료 sweep** — 15분 runner가 만료된 soft bounce 원인(만료가 있는 유일한 이유)에
+   `releaseKind` `expired`·`releaseEvidence {kind: "expiry"}`를 쓰고, entry를 위와 같은 규칙으로
+   맞춥니다. 한 번에 원인 200행(만료 시각·id순), 주소마다 fence와 주소 잠금 안에서, 연결 대기와
+   실행을 합쳐 남은 20초 예산 안이며 2초 미만이 남으면 멈춥니다.
+6. **배포 중 공존** — 배포가 겹치는 동안 이전 build가 처리한 사건은 순서 키를 남기지 않고
+   delivered 해제도 하지 않습니다. 결과는 soft bounce 원인이 만료(24시간)까지 남는 **과차단**이나
+   관리 화면의 상태 표시 차이이며, 다음 사건에서 기대 원인으로 다시 맞춰집니다.
+7. **hard bounce 판정 정정** — Resend는 hard bounce를 `data.bounce.type` `Permanent`로,
+   soft bounce를 `Transient`, 판정 불가를 `Undetermined`로 보냅니다. 이전 판정은 `hard`만
+   영구로 읽어 **실제 영구 bounce를 모두 soft bounce로 처리**했습니다. 이제 `Permanent`와
+   `hard`가 영구이고 나머지는 soft입니다. 이미 soft로 기록된 과거 영구 bounce를 hard bounce
+   원인으로 되살리는 일은 별도 작업입니다(보관 중인 사건에서만 가능).
+
+### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+privacy request 표와 "complaint는 목적 opt-out도 함께"를 구현합니다.
+
+1. **삭제 요청 접수** — 요청 행을 만드는 transaction 안에서 classification scope
+   `marketing` 원인(`privacy_request`, `privacy:<requestId>:intake`)을 쓰고, 계정의
+   marketing purpose를 모두 끕니다(preference `source`·전이 `source` `privacy_request`).
+   판정 기준이 아직 `entry`이면 entry는 분류 scope를 읽지 못하므로 marketing purpose마다
+   `privacy_request` purpose 원인·entry(`privacy:<requestId>:intake:<purpose>`)도 씁니다.
+2. **삭제 요청 갱신** — 갱신 **후** 상태가 `completed && !legalHold`이면 같은
+   transaction에서 전역 `privacy_request`(`privacy:<requestId>:completed`)를 씁니다.
+   legal hold 해제도 여기에 해당하고, 같은 상태를 다시 저장하면 새 원인이 없습니다.
+3. **entry의 `privacy_request`는 어떤 이유로도 덮어쓰지 않습니다.** 뒤이은 hard bounce는
+   자기 원인만 남깁니다 — entry가 승인으로 풀 수 있는 이유로 바뀌면 요청의 기록이
+   사라지기 때문입니다.
+4. **complaint** — 전역 complaint 원인과 한 transaction에서, delivery의
+   `TemplateVersion.purpose`가 끌 수 있는 purpose(security·billing 제외)이면 purpose
+   `unsubscribe` 원인(`webhook:<eventId>:purpose`)을 씁니다. delivery의 `userId` 계정이
+   있고 **현재 주소가 delivery 주소와 같을 때만** 그 purpose preference를 끄고
+   (`source` `provider_complaint`), 동의 철회 기록은 `capturedVia` `provider_complaint`,
+   delivery가 고정한 `policyVersionId`·`jurisdictionCountry`, `jurisdictionSource`
+   `delivery_pinned`입니다.
+5. **잠금 순서** — `setPreference`가 fence → User 행 → 주소 → preference 행 순서로
+   잡습니다(이전: preference 행 뒤에 주소). CHECK는 `EmailPreference_source_check`에
+   `privacy_request`·`provider_complaint`, `ConsentRecord_captured_via_check`에
+   `provider_complaint`를 더합니다(확장만).
+6. **재전달된 complaint는 preference를 다시 바꾸지 않습니다.** purpose 원인을 먼저 쓰고,
+   그 키가 이미 있으면(같은 사건) 철회를 건너뜁니다 — 사이에 다시 켠 preference를 되돌리지
+   않기 위해서입니다. 기본 preference 행은 transaction 전에 만들고(계정이 없으면 건너뜀),
+   계정 귀속은 User 행 잠금 안에서 판정하므로 삭제된 계정을 가리키는 complaint도 두 원인은
+   기록됩니다. 잠금 안에서 행을 만들면 잠금 없는 기존 생성 경로와 순서가 반대라 교착할 수 있습니다.
+7. **판정 기준이 `entry`여도 preference 켜기는 `privacy_request` 원인이 있으면 거절합니다**
+   (purpose·marketing 분류·전역). 삭제 접수의 분류 원인은 entry 판정에 보이지 않으므로,
+   켜기가 purpose entry를 지우면 발송이 다시 열리기 때문입니다. 그 밖의 이유는 v16과 같습니다.
+8. **끄기의 `ConsentRecord(withdrawn)`는 실제 동의(확인된 켜짐)가 있을 때만** 씁니다.
+   확인 없이 켜져 있던 행을 끄면 전이와 suppression만 남습니다.
+9. 삭제 접수의 요청 주소와 suppression 주소는 **잠근 User 행의 현재 주소**입니다.
 
 ### v16 (2026-09-17) — suppression 판정 기준 전환(배포 B)
 
@@ -350,7 +1140,7 @@ marketing을 포함하지 않는다는 범위 결정.
 앞에 **동의(consent) / 억제(suppression) / 관할권(jurisdiction) 판정 계층**을 세우고,
 큐 밖에서 직접 발송되는 경로들을 outbox로 모으는 일입니다.
 
-여섯 가지 판단:
+여덟 가지 판단:
 
 1. **제공자는 바꾸지 않습니다.** Resend를 유지하고, `lib/email.ts` 자리에 얇은
    provider port를 둡니다. 차선책은 Postmark(transactional/broadcast 스트림이 제품
@@ -370,18 +1160,24 @@ marketing을 포함하지 않는다는 범위 결정.
    그 경계를 8절과 15절에서 명시합니다.
 5. **MVP는 marketing을 포함하지 않습니다.** 1단계는 transactional/service 경로의
    신뢰성(outbox, suppression, 감사 스냅샷)과 preference center의 뼈대까지입니다.
-   marketing 발송은 인프라를 만들되 flag로 잠근 채 법률 검토를 기다립니다.
+   marketing 발송은 인프라를 만들되 flag로 잠급니다. **무엇을 기다리는지는
+   2026-09-16 개정으로 좁아졌습니다** — 법률 검토 전체가 아니라 발송 도메인
+   평판과 싱가포르 수신거부 주소(초안 §13 R2·R3)이고,
+   **EEA·영국은 그 위에 G(근거)와 Q1 잔여(국가별 의무 확인)를 각각** 기다립니다
+   (15.2).
 6. **가장 큰 현재 리스크는 마케팅이 아니라 유실입니다.** 로그인 코드, 환영 메일,
    Stripe 결제 확인 메일이 지금 큐 밖에서 fire-and-forget으로 나갑니다. 실패하면
    사용자는 로그인하지 못하고 아무도 그것을 모릅니다.
 7. **그러나 로그인 코드는 일반 큐로도, 재시도 worker로도 구제되지 않습니다.**
    코드 TTL 상한이 10분인데(`lib/emailLogin.ts:15`) 큐 drain은 15분 주기에 얹혀
-   있고(`railway.credit-reconciliation.json:5`), 더 근본적으로 **DB에는 HMAC만
+   있고(`.railway/scheduled-jobs.ts`의 `Credit Reconciliation`, 2026-09-17 전에는 `railway.credit-reconciliation.json:5`), 더 근본적으로 **DB에는 HMAC만
    있어 worker가 메일을 재구성할 수 없습니다.** 권고는 요청 안 재시도 + 실패를
    숨기지 않는 응답 + 상시 노출되는 "다시 보내기"입니다(9.4a).
 8. **Resend의 suppression은 계정 전체에 걸립니다.** 서브도메인을 나눠도 marketing
-   complaint가 로그인 코드를 막습니다(5.3.1). MVP는 영향받지 않지만(marketing
-   없음), **marketing을 켜기 전에 계정 분리 여부를 결정해야 합니다.**
+   complaint가 로그인 코드를 막습니다(5.3.1). MVP는 영향받지 않고(marketing 없음),
+   ~~marketing을 켜기 전에 계정 분리 여부를 결정해야 합니다~~ — **A18이
+   2026-09-14에 결정했습니다: 별도 Resend 계정**(22절). 활성화 전에 남은 것은
+   결정이 아니라 **그 분리가 실제로 배포됐는지 확인**하는 일입니다.
 
 **즉시 결정이 필요한 항목(22절 상세):** 서비스 유형(B2C/B2B), 우선 국가 확정,
 일본·중국 시장 포함 여부, 예상 발송량, EU 데이터 리전 요구 여부.
@@ -560,11 +1356,30 @@ marketing을 포함하지 않는다는 범위 결정.
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
-| 6 | 사용자가 명시적으로 구독한 기능 업데이트 | service(동의 기반) | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
-| 7 | 신규 기능 소개, 뉴스레터 | marketing | 불가 | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
-| 8 | 프로모션, 할인, 재참여 | marketing | 불가 | 불가 | **필수** | P3 | 관대 | marketing |
+| 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | **조건부**(아래) | 불가 | **필수** | P2 | 표준 | marketing |
+| 7 | 신규 기능 소개, 뉴스레터 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
+| 8 | 프로모션, 할인, 재참여 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대 | marketing |
 | 9 | 관리자 긴급 공지 | 내용에 따라 갈림 | 조건부 | 조건부 | 조건부 | P0 | 공격적 | transactional |
 | 10 | 법정 통지 | legal | 가능 | **가능(필수)** | **금지** | P0 | 공격적 + 대체 채널 | transactional |
+
+**marketing 세 행의 "조건부"** — 2026-09-16 개정(승인 A) 전에는 `불가`였고,
+전역 opt-in이 사라지면서 조건이 생겼습니다. 조건은 하나의 식입니다.
+
+> `(수신자 authority 통과 AND 호주 발신자 authority 통과) OR 유효한 override`,
+> 그리고 `blockers`가 비어 있을 것 (5.1.1, 초안 7.6)
+
+**세 경로를 따로 나열하지 않는 이유**는 그것이 독립된 통과 근거로 읽히기
+때문입니다. 미국의 `opt_out`은 **수신자 authority만** 통과시키고, 호주 발신자
+authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred_consent`는
+관계가 활성일 때 한쪽을 채우는 근거이고, 명시적 동의 하나가 양쪽을 다 채우는
+경우도 있습니다 — 그때는 그 사실이 기록에 남습니다(초안 §4.2).
+
+승인 F의 `risk_accepted`는 **authority를 통과시키지 않습니다.** 판정에는
+`legalAllowed: false`가 그대로 남고 `overrideApplied`가 옆에 붙으며, 위 식의
+`OR` 가지에만 들어갑니다.
+
+**"marketing 거부자에게도" 열은 여전히 `불가`입니다** — 거부는 어느 경로로도
+넘지 못합니다.
 
 ### 3.2 유형별 상세
 
@@ -617,22 +1432,62 @@ marketing을 포함하지 않는다는 범위 결정.
   marketing 거부자에게 못 보내게 되어 **법적 통지 의무를 스스로 깨뜨립니다.**
   이것이 이 문서에서 가장 강조하고 싶은 실패 모드입니다.
 
-#### 6. 사용자가 명시적으로 구독한 기능 업데이트
-- 동의 기반이므로 동의 없이는 불가. **unsubscribe 필수.**
-- 7번(뉴스레터)과 **별개 preference**여야 합니다. "기능 업데이트만 받고 프로모션은
-  안 받겠다"가 가능해야 합니다. 이것이 목적별 opt-in의 핵심 사례입니다.
+#### 6. 기능 업데이트 / 릴리스 노트
+
+이 행은 한때 "사용자가 **명시적으로 구독한** 기능 업데이트"였습니다. 그 이름은
+권한 근거를 유형 이름에 박아 넣은 것이고, 2026-09-16 개정 이후로는 **승인된 수신
+경로를 배제합니다** — 호주의 추론 동의로 받는 사람, 미국의 `opt_out`으로 받는
+사람, 승인 F의 `risk_accepted`로 받는 사람은 어느 쪽도 "명시적으로 구독"하지
+않았습니다. 유형은 **무엇을 보내는가**이고, 누구에게 보내도 되는가는 5.1.1이
+정합니다.
+
+- **classification은 `marketing`입니다**(승인 A, 제품 소식 재설계 초안 §3).
+- **이 행의 purpose identifier는 `product_updates`입니다.** v29를 쓸 때는
+  열려 있었고 — 초안 §3이 `release_notes`를 **새로 만든다**고 적으면서
+  `product_updates`를 언급하지 않았습니다 — **S3의 purpose 분류표가 닫았습니다**
+  (10.2.1). 새 purpose를 만들지 않은 이유는 그쪽이 기존 선택을 데려오지 못하기
+  때문입니다: 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되고, 그것이
+  불변식 5가 막으려는 실패입니다. 초안의 이름은
+  `lib/emailPreferenceCore.ts`의 `draftPurposeName`과 `purposeForDraftName()`이
+  해석합니다. 이 값이 철회 대상을 가르므로 — `withdrawAllMarketing()`이 그 표로
+  대상을 고릅니다 — 정해진 것이 중요하고, 분류가 `marketing`이라는 것은 그와
+  무관하게 참이었습니다.
+  이 표는 한때 `service(동의 기반)`이라고 적었고 그것은 **우회로**였습니다:
+  `classification === "marketing"` **하나**가 발송 스트림·kill switch·한국
+  `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를 켜므로,
+  낮춰 적으면 그 전부가 꺼집니다. 한국 사용자가 동의를 마치고 받은 메일에 라벨이
+  붙지 않는 것이 그 결과입니다.
+- **purpose는 별개입니다.** 7번(뉴스레터)과 **다른 preference**여야 하고,
+  "기능 업데이트만 받고 프로모션은 안 받겠다"가 가능해야 합니다 — 분류가 같다는
+  것과 스위치가 같다는 것은 다른 이야기입니다. 이것이 목적별 opt-in의 핵심
+  사례입니다.
+- **철회의 단일 source는 purpose 표의 classification입니다.**
+  `withdrawAllMarketing()`이 `recordsConsent(purpose)`로 대상을 고르므로
+  (`lib/emailPreferences.ts`), 템플릿 정의와 purpose 표가 어긋나면 철회가 이
+  purpose를 건너뜁니다. 정적 검사가 그 일치를 강제합니다(초안 §3).
 - **국가별 차이:** EU/UK/캐나다/일본/싱가포르에서 이 유형이 CEM/특정전자메일에
   해당하는지는 내용에 따라 갈립니다. 판촉 요소가 없는 순수 릴리스 노트라도
-  **자사 서비스 홍보로 읽히면 광고성**입니다. 보수적으로 marketing 스트림으로
-  보냅니다.
+  **자사 서비스 홍보로 읽히면 광고성**입니다. 그 불확실성을 매 캠페인마다 판정하지
+  않기 위해 분류를 marketing으로 고정합니다.
 
 #### 7. 신규 기능 소개 / 뉴스레터, #8. 프로모션 / 할인 / 재참여
 - **완전한 marketing.** 사전 동의 필요(관할권별 예외는 5절).
 - **반드시 포함:** 발신자 법인명, 유효한 물리적 우편 주소, 명확한 수신거부 방법,
   왜 이 메일을 받는지, 관할권별 광고 표시(한국 `(광고)`, 싱가포르 `<ADV>`).
-- **재참여(re-engagement) 특유의 위험:** 오래 접속하지 않은 사용자에게 보내는
-  것이므로 **동의가 이미 만료된 사람**을 대상으로 하기 쉽습니다. 한국의 2년 재확인,
-  캐나다의 묵시적 동의 만료(2년/6개월)가 정확히 여기서 문제가 됩니다.
+- **재참여(re-engagement) 특유의 위험:** 오래 접속하지 않은 사용자를 대상으로
+  하므로, **근거가 이미 끝난 사람**에게 보내기 쉽습니다. 다만 그 끝나는 방식은
+  관할권마다 다르고, "동의 만료" 하나로 묶으면 세 가지가 섞입니다.
+
+  - **캐나다** — 만료가 없습니다. 5.1.1이 `express_consent`로 두고 해제 조건을
+    주지 않으므로, CASL의 2년/6개월 묵시적 동의 시계는 **적용할 대상이 없습니다**
+    (E6).
+  - **한국** — 2년은 **고지 주기이지 만료가 아닙니다**(5.5, E7). 고지를 보내지
+    않은 것이 문제이지 동의가 사라진 것이 아닙니다.
+  - **호주** — 추론 동의는 시간이 아니라 **관계 종료 사건**으로 끝납니다. 휴면
+    기준 초과가 종료 사건이므로(초안 §4.4), **오래 접속하지 않았다는 사실 자체가
+    근거를 끝낼 수 있습니다.** 재참여에서 실제로 걸리는 것은 여기이고, 그래서
+    판정을 관계 기록으로 다시 물어야 합니다 — 마지막 발송 때 통과했다는 것은
+    근거가 아닙니다.
 
 #### 9. 관리자가 보내는 긴급 공지
 - **분류가 내용으로 결정됩니다.** 시스템이 이것을 판단해서는 안 됩니다.
@@ -826,16 +1681,26 @@ marketing을 포함하지 않는다는 범위 결정.
 국가별 분기를 최소화하는 방법은 **가장 엄격한 요건을 전역 기본값으로 삼는 것**입니다.
 분기가 필요한 곳은 그렇게 해도 남는 곳뿐이고, 그 수는 놀랄 만큼 적습니다.
 
+**단, 2026-09-16 개정(승인 A) 이후 이 원칙은 두 층으로 갈립니다.**
+
+- **권한**(누구에게 보내도 되는가)은 더 이상 전역 기본값이 아닙니다. 국가 rule이
+  정하고 호주 발신자 authority가 함께 걸립니다(C1, 5.1.1).
+- **표시·운영 요건**(C2~C14 — 수신거부 수단과 기한, 표시 항목, 스트림 분리,
+  기록)은 **그대로 전역 최대공배수**입니다. 개정된 것은 C1과 C8뿐입니다.
+
+이 구분이 5.2의 "일곱 개"가 여전히 맞는 이유이기도 합니다 — 그 일곱은 표시·운영
+예외이지 권한 분기가 아닙니다.
+
 | # | 공통 규칙 | 어느 관할권에서 왔는가 |
 |---|---|---|
-| C1 | marketing은 **전역 opt-in**. opt-out 체제 국가(미국, 싱가포르)에도 opt-in 적용 | EU/UK/KR/CA/AU/JP |
+| C1 | marketing 권한은 **수신자 국가 rule**이 정하고, 그 위에 **호주 발신자 authority**가 함께 걸립니다. 둘 다 통과해야 보냅니다. 출발 값은 5.1.1 | 제품 소식 재설계 초안 4.2·4.3, 승인 A(2026-09-16) |
 | C2 | 수신거부는 **로그인 없이, 1클릭 이내**, 추가 정보 요구 없음 | 호주(로그인 요구 금지), 미국(1페이지 원칙) |
 | C3 | 수신거부 반영은 **즉시(동기)**. SLA는 24시간, 상한은 **5 영업일** | 호주 5영업일이 최단 |
 | C4 | 모든 marketing 메일에 **법인명 + 물리적 우편 주소 + 수신거부 링크 + 수신 이유** | 미국(주소), 호주(법인명/ABN), CASL |
 | C5 | `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) 헤더를 **marketing에만** 부착 | Gmail/Yahoo 대량 발신자 요건 + C2 |
 | C6 | 동의는 **시각, 출처, 정책 버전, 관할권, 증거**를 함께 기록 | CASL/호주 입증책임, GDPR 제7조(1) |
 | C7 | 동의 **확인 고지 주기 2년** 전역 적용 (고지 의무이지 만료가 아님) | 한국 제50조제8항 + 시행령 제62조의3 |
-| C8 | 묵시적 동의는 **쓰지 않습니다** (soft opt-in 미사용) | 아래 5.6 |
+| C8 | 묵시적 동의를 **국가 rule이 허용하는 곳에서만** 씁니다 — 호주의 추론 동의(초안 §4.4 관계 lifecycle, 승인 C의 조건 아래). EEA·영국 soft opt-in은 **G(외부 자문, 초안 §13 R1)가 닫힐 때까지 쓰지 않습니다** | 아래 5.6, 5.1.1 |
 | C9 | 발송 수단은 **transactional / marketing 도메인·스트림 분리** (효과 범위는 5.3 참조 — 완전 분리가 아님) | 전 관할권 + deliverability |
 | C10 | transactional에는 unsubscribe 링크도 `List-Unsubscribe` 헤더도 **넣지 않음** | 오분류 방지 |
 | C11 | 모든 메일에 **plain-text 대체본** 제공 | 접근성 + deliverability |
@@ -843,10 +1708,97 @@ marketing을 포함하지 않는다는 범위 결정.
 | C13 | 발신자 정보는 발송 후 **최소 30일간** 유효 | 호주 |
 | C14 | 수신거부 수단은 발송 후 **최소 30일간** 동작 | 미국 |
 
+### 5.1.1 수신자 authority 출발 값
+
+승인 A(2026-09-16)가 C1의 전역 opt-in을 국가 rule로 바꿨습니다. 아래는 **수신자
+authority**이고, 모든 행 위에 **호주 발신자 authority**(명시적 또는 추론 동의)가
+함께 걸립니다 — 둘 다 통과해야 보냅니다.
+
+**이 표가 정본입니다.** 값의 출처는 제품 소식 재설계 초안 §4.3이되, 고정된 것은
+**2026-09-16에 승인된 그 시점의 값**(초안 §11 A·C·F)입니다. 초안은 **문서 전체가
+승인되지 않은 상태**이므로, 그 문서가 나중에 §4.3을 고쳐도 **이 계약은 따라
+바뀌지 않습니다** — 바꾸려면 이 ADR의 새 개정과 그에 대한 승인이 필요합니다.
+이 개정의 첫 초안은 "값이 갈리면 초안이 이긴다"고 적었고 그것은 틀렸습니다 —
+승인되지 않은 문서의 편집이 승인된 권한 계약을 조용히 바꾸는 길을 열어 두는
+것이었습니다.
+
+**표만 고정하는 것으로는 부족합니다.** 이 계약은 초안의 몇 절을 **규범적으로**
+참조하고, 그 절들은 아직 이 문서로 옮겨지지 않았습니다 — 호주 관계 lifecycle
+(§4.4), authority별 판정 기록(§4.2), 기존 계정의 근거 없음(§5.5), `risk_accepted`
+기록 규칙(§5.6), 발송 판정 계약(§7.6). 그래서 **snapshot을 명시합니다.**
+
+> 이 ADR이 참조하는 초안은 blob `6965d519322620c17ea93f2cf680d994a260211f`
+> (`docs/policy/email-product-news-redesign-draft.md`, commit
+> `39d33135b345f75ec2fffc881b9cdee4f4a6fec4`)입니다. **이 snapshot 이후의 초안
+> 편집은 이 ADR의 권한 계약을 바꾸지 않습니다.** 반영하려면 이 문서의 새 개정과
+> 그에 대한 승인이 필요합니다.
+
+승인 시점(2026-09-16, commit `7af2a2a8e288053bcec49eb68c11ee6755cf818d`)과 이
+snapshot 사이에 **§4.3·§4.4·§5.1·§5.5·§5.6·§11은 바이트 단위로 같습니다**
+(section별 SHA-256 대조). §7.6은 한 줄이 달라졌고, 그것은 suppression 입력을
+"주소 전역 + purpose"에서 "활성 원인: 전역 + classification + purpose"로 적은
+주석입니다 — 2026-09-21에 배포한 원인 모델(deploy C)을 따라 적은 것이지 판정
+규칙의 변경이 아닙니다. §12(구현 순서)는 그 뒤로 여러 번 바뀌었습니다
+(승인 시점 3,532바이트 → 지금 5,153바이트). **그것은 일정이지 계약 조건이
+아니며, 이 문서는 §12에서 어떤 권한도 gate도 유도하지 않습니다** — 15.2와 0절이
+§12를 가리키는 것은 "무엇을 먼저 만드는가"를 한 곳에서 관리하기 위해서이고,
+그 포인터는 **일부러 초안의 현재 상태를 따릅니다.** 순서가 바뀌었다고 보내도
+되는 대상이 바뀌지는 않습니다. 권한·gate를 말하는 절(§4.2·§4.3·§4.4·§5.1·
+§5.5·§5.6·§7.6)만 위 snapshot에 고정됩니다.
+
+| 국가 | 수신자 authority 출발 값 | 해제 조건 |
+|---|---|---|
+| **US** | `opt_out` | 수신자 측은 이것으로 충분. 발송 가능 여부는 호주 authority가 정합니다 |
+| **AU** | 초안 §4.4의 관계가 서면 `inferred_consent`. **승인 C의 조건: 초안 §4.4의 관계 모델이 구현되고 E(방침·약관 개정)가 시행된 뒤에 발효합니다** | 초안 §4.4의 여섯 항목 |
+| **SG** | `express_consent` | PDPA가 direct marketing에 opt-in을 요구. SCA의 `<ADV>`·수신거부 이메일 요건은 별도 표시 의무 |
+| **KR** | `express_consent` | 가입 화면 동의 + DOI. 법정 의무는 초안 7.7의 의무별 상태 |
+| **EEA(AT·IE 제외)·GB** | `express_consent` | **G(외부 자문, 초안 §13 R1)** 가 회원국별로 확인하면 soft opt-in |
+| **AT** | `express_consent` | ECG-Liste 대조 없이는 해제 없음. **이번 범위에서 soft opt-in 대상이 아닙니다** |
+| **IE** | `express_consent` | 12개월 창·형사범. **이번 범위에서 soft opt-in 대상이 아닙니다** |
+| **CH·CA** | `express_consent` | CH는 FDPIC, CA는 CASL. 해제 없음 |
+| **ZZ**(국가 미상) | **발송 안 함** | — |
+
+**신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 초안 5.1의 고지를
+본 계정에만 성립합니다. 그 전에 가입한 계정은 초안 5.5·5.6이 다룹니다.
+
+**`risk_accepted`는 이 표의 값이 아닙니다.** 국가 rule은 그대로 두고, 그 위에서
+내린 결정으로 초안 5.6에 따라 기록됩니다 — 승인 F(기존 78계정 전원 발송)가
+그것입니다. 기록이지 근거가 아니며, **동의 기록을 지어내지 않습니다.**
+
+**그리고 "전원"이 무조건이라는 뜻이 아닙니다.** override가 넘는 것은 **authority의
+근거 부족**(동의·관계 없음) **하나뿐**이고, 아래는 넘지 못합니다(초안 5.6).
+
+- **철회·거부(`objected`)**, purpose 또는 주소에 걸린 **전역 suppression**
+- **국가 미확정(`ZZ`)** — 표시 의무를 정할 수 없으므로 보내지 않습니다
+- **의무 상태가 정해지지 않은 rule** — 초안 7.8의 `implemented`·`deferred`·
+  `waived` 중 하나가 없으면 그 국가 rule은 막힙니다
+- **kill switch · send flag · readiness**
+- **cohort 밖** — 범위는 승인 시점의 `userId` + 정규화 주소 digest 쌍이고,
+  **현재 주소의 digest가 목록과 다르면 제외**합니다. 검사는 enqueue와 send
+  **양쪽**에서 하며, enqueue 뒤에 주소를 바꾸면 옛 주소로 고정된 delivery도
+  나가지 않습니다. 계정 삭제·주소 없음·불일치는 전부 차단입니다
+- **승인 이후 가입한 계정**은 어떤 경로로도 들어가지 않습니다
+- **유효하고 철회되지 않은 승인**일 때만 적용됩니다. 승인을 거두면
+  `EmailSendApprovalRevocation` 사건을 **추가**하고 이후 판정은 override 없이
+  합니다 — 승인 행 자체는 고치지 않습니다
+
+**override는 authority 판정을 바꾸지 않습니다.** authority는 거부 그대로 남고,
+발송별 판정이 `legalAllowed: false`와 `overrideApplied: { approvalId, type:
+"risk_accepted" }`를 **따로** 담습니다(초안 4.2·7.6). 판정을 허용으로 덮어쓰면
+"왜 나갔는가"에 답할 수 있는 행이 사라지고, admin 화면에도 그대로 보여야 합니다 —
+숨기면 다음 사람이 그것을 동의로 읽습니다.
+
+동의가 들어오면 덮입니다 — 그 주소가 초안 5.4의 안내나 설정에서 동의하면
+`legalAllowed: true`가 되고 override는 더 이상 쓰이지 않습니다.
+
 ### 5.2 국가별로 남는 진짜 예외 (일곱 개)
 
-C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **이것이 "정말 필요한
-국가별 분기"의 전부입니다.**
+C1~C14를 적용하고 나면 **표시·운영의** 국가별 분기는 일곱 개만 남습니다.
+**이것이 "정말 필요한 표시·운영 분기"의 전부입니다.**
+
+**권한 분기는 이 표에 없습니다.** 2026-09-16 개정 이후 누구에게 보내도 되는가는
+5.1.1의 국가 rule이 정하며, 그것은 이 일곱과 **별개 층**입니다. 한 표에 섞으면
+"수신거부 링크를 어떻게 그리는가"와 "보내도 되는가"가 같은 무게로 읽힙니다.
 
 | # | 예외 | 적용 국가 | 구현 위치 |
 |---|---|---|---|
@@ -855,7 +1807,7 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 | E3 | **footer에 표시할 사업자 정보 집합** (호주: ABN / 기타: 법인명+주소) | AU, 기타 | `JurisdictionProfile.footerBlocks[]`. **한국의 사업자등록번호·통신판매업 신고번호는 2026-09-14에 KR profile에서 제거했습니다** — 시행령 별표 6이 요구하는 것은 명칭·연락처·수신거부 방법이고, 두 번호는 전자상거래법상 통신판매업자의 표시 의무입니다. 발송 주체가 호주 법인이며 한국 통신판매업 신고 대상이 아님을 확인했으므로(2026-09-14) 그 번호가 존재하지 않고, 값을 가질 수 없는 block을 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. renderer는 block을 그대로 들고 있으므로 신고 번호가 생기면 seed 한 줄과 새 policy version으로 되살립니다 |
 | E4 | **수신거부 처리 SLA 표기** (5/10 영업일) | AU=5, US/CA/SG=10 | `JurisdictionProfile.unsubscribeSlaBusinessDays` — 표기용. 실제 처리는 항상 즉시 |
 | E5 | **야간 발송 억제 창** (21:00~08:00 현지) | ~~KR~~ **해당 국가 없음**(Q4 해소 2026-09-16: 시행령 제61조제2항이 전자우편을 야간 제한 대상 매체에서 제외) | `JurisdictionProfile.quietHours`. 창을 읽고 지연시키는 기계는 lane에 그대로 있고, 창은 정책 버전 데이터입니다 — 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version이며 코드 변경이 아닙니다. **이메일 밖 채널(SMS·푸시)은 별개 판정이고 이 표가 답하지 않습니다** |
-| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | C8로 인해 **미사용**. profile에 필드만 남기고 비활성 |
+| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | **미사용.** 근거는 C8이 아니라 **5.1.1이 캐나다를 `express_consent`로 두고 해제 조건을 주지 않는 것**입니다(2026-09-16 개정 이후). profile에 필드만 남기고 비활성 |
 | E7 | **동의 확인 고지 주기** | KR=24개월 | `JurisdictionProfile.consentNoticeIntervalMonths`. 만료가 아니라 고지. 5.5 |
 
 **나머지는 전부 공통입니다.** 템플릿 본문, 레이아웃, 버튼, 언어, 브랜딩은 국가로
@@ -953,10 +1905,13 @@ Azure AD, 그리고 `login-methods` 경로가 마지막 로그인 수단 제거�
 아무도 끄지 못합니다. 목록 위생 목적으로 채택할 수 있으나 그것은 **별도 결정**
 입니다(22절 A14).
 
-캐나다의 묵시적 동의 만료는 진짜 만료지만, C8로 묵시적 동의를 쓰지 않으므로
-충돌하지 않습니다.
+캐나다의 묵시적 동의 만료는 진짜 만료지만, **5.1.1이 캐나다를
+`express_consent`로 두고 해제 조건을 주지 않으므로** 충돌하지 않습니다.
+(2026-09-16 개정 전에는 C8이 그 근거였습니다. 개정된 C8이 허용하는 묵시적 동의는
+호주의 추론 동의 하나이고, 그것은 시간이 아니라 **관계 종료 사건**으로 끝납니다 —
+초안 §4.4.)
 
-### 5.6 soft opt-in을 쓰지 않기로 하는 이유
+### 5.6 EEA·영국에서 soft opt-in을 아직 쓰지 않는 이유
 
 EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건을 정확히 만족시키는
 비용이 얻는 것보다 큽니다.**
@@ -965,13 +1920,28 @@ EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건�
   이들은 판매가 아닙니다. 즉 사용자마다 취득 맥락을 구분해 저장해야 합니다.
 - "자사의 유사한 상품/서비스"의 범위 판정이 매 캠페인마다 필요합니다.
 - 회원국별로 해석이 다릅니다(4.3 EU 주의).
-- **미국·싱가포르를 제외한 나머지 관할권에는 이 예외가 없습니다.** 따라서 soft
-  opt-in을 쓰면 사용자 집합이 관할권별로 갈라지고, 관할권 판정이 틀리면 곧바로
-  위반입니다.
+- **미국·싱가포르를 제외한 나머지 관할권에는 EU/UK식 soft opt-in 예외가
+  없습니다.** 따라서 그것을 쓰면 사용자 집합이 관할권별로 갈라지고, 관할권 판정이
+  틀리면 곧바로 위반입니다. (호주는 EU/UK식 soft opt-in이 아니라 **Spam Act의
+  추론 동의**이고, 별개 제도입니다 — 5.1.1과 초안 §4.4.)
 
-**결론: C8. soft opt-in 미사용.** 전원 명시적 opt-in. 이 결정 하나가 관할권 판정
-오류의 법적 결과를 크게 줄입니다 — 관할권을 틀려도 opt-in한 사람에게만 보내기
-때문입니다. (**단, 이것은 사업적 결정이기도 합니다. 22절 A5.**)
+**이 절의 결론은 2026-09-16에 개정됐습니다.** 위 이유들은 **EEA·영국에 대해서는
+그대로 유효하고**, 그래서 그 두 곳은 G(외부 자문, 초안 §13 R1)가 회원국별로 확인하기 전까지
+`express_consent`로 닫혀 있습니다 — 위 목록이 그 자문의 질문지입니다.
+
+바뀐 것은 **"전역"** 이라는 범위입니다. 호주는 사정이 다릅니다: ACMA가 계정 관계를
+추론 동의의 근거로 인정하고, 그 관계는 **함수로 추론하는 것이 아니라 사건으로
+저장**됩니다(초안 4.4). 즉 위에서 걱정한 "취득 맥락을 사용자마다 구분해 저장해야
+한다"가 호주에서는 회피 대상이 아니라 **설계 그 자체**입니다. 미국·싱가포르는
+원래 이 절의 대상이 아니었습니다.
+
+그래서 C8은 "묵시적 동의 미사용"에서 **"국가 rule이 허용하는 곳에서만 사용"** 이
+됐습니다. 관할권을 틀리면 곧바로 위반이라는 위 지적은 사라지지 않았고, 그것이
+4.2의 **이중 authority**와 `ZZ`(국가 미상 → 발송 안 함)가 존재하는 이유입니다.
+
+승인 A·C(2026-09-16), 제품 소식 재설계 초안 §11. (**사업적 결정이기도 했습니다** —
+22절 A5는 "전역 opt-in의 비용을 감수한다"였고, 전역 opt-in이 사라지면서 그 항목
+자체가 없어졌습니다. 취소선으로 남겨 둡니다.)
 
 ---
 
@@ -1031,9 +2001,20 @@ marketing을 **보내지 않고 보류**합니다.
 
 **규칙 2 — 그래서 marketing opt-in 시점에 국가를 필수로 수집합니다.**
 이것이 규칙 1을 실무적으로 감당 가능하게 만드는 짝입니다. 수신 동의를 받을 때
-국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록하면, **marketing 수신자는
-정의상 항상 확정된 관할권을 가집니다.** 보류는 예외 상황(청구 국가가 나중에
-바뀌어 충돌이 생긴 경우)에만 발생합니다.
+국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록합니다.
+
+**다만 "그래서 marketing 수신자는 정의상 항상 확정된 관할권을 가진다"는 2026-09-16
+개정 이후 참이 아닙니다.** 동의를 받는 경로가 유일한 경로가 아니게 됐기
+때문입니다 — 미국의 `opt_out`, 호주의 추론 동의, 승인 F의 `risk_accepted`로
+받는 사람은 동의 화면을 지나지 않았고, 따라서 그 화면이 묻는 국가도 없습니다.
+
+**그 경로들은 지금 고신뢰 국가 신호가 없으면 fail-closed입니다.** 6.1의 신호
+우선순위에서 확정되지 않으면 marketing은 보류이고(`ZZ`는 발송 안 함), IP 추정
+국가를 근거로 쓰는 계약은 **아직 이 문서에 없습니다** — 초안 §12 S0의 남은 항목
+이며 6.1·6.2와 `AGENTS.md`를 함께 고칠 때 들어옵니다. 그 전까지 동의 없는
+경로의 수신자는 **국가가 확정될 때까지 받지 못합니다.**
+
+보류는 그래서 예외 상황이 아니라 **그 경로들의 기본 상태**입니다.
 
 | confidence | marketing | service | legal | transactional |
 |---|---|---|---|---|
@@ -1060,9 +2041,19 @@ marketing을 **보내지 않고 보류**합니다.
 - 청구 국가가 바뀌면 -> **재동의를 요구하지 않고**, 새 관할권 profile을 다음
   발송부터 적용합니다. 기존 `ConsentRecord`는 그대로 유효하되 `jurisdiction`
   필드는 **동의 당시 값을 보존**합니다(감사 기록이므로 소급 변경 금지).
-- 다만 **새 관할권이 기존 동의로는 부족한 경우**(예: opt-out 체제에서 동의를 받아
-  놓고 opt-in 체제로 이동)는 재동의가 필요합니다. C1(전역 opt-in)을 채택하면 이
-  경우가 발생하지 않습니다 — **C8과 C1이 함께 관할권 이동 문제를 없앱니다.**
+- 다만 **새 관할권이 기존 근거로는 부족한 경우**는 재동의가 필요합니다.
+  **2026-09-16 개정(승인 A) 전에는 이 경우가 발생하지 않았습니다** — C1이 전역
+  opt-in이라 어디로 옮겨도 근거가 더 강했기 때문입니다. **개정 이후에는
+  발생합니다.** 5.1.1이 국가마다 다른 출발 값을 두므로, `US`(`opt_out`)나
+  `AU`(`inferred_consent`)에서 `KR`·`EEA`·`GB`·`CH`·`CA`·`SG`
+  (`express_consent`)로 옮기면 **가지고 있던 근거가 새 관할권에서는 부족합니다.**
+
+  그때 하는 것은 셋입니다 — 다음 발송부터 **새 국가 rule로 판정**하고(근거가
+  모자라면 그 판정은 거부이며 조용히 통과시키지 않습니다), 동의를 받을 수 있으면
+  초안 5.4의 경로로 **요청**하며, 받기 전까지 그 주소에는 **보내지 않습니다.**
+  기존 `ConsentRecord`는 그대로 유효하고 `jurisdiction`은 동의 당시 값을
+  보존합니다 — 그 기록이 "그때는 충분했다"를 말하는 유일한 것이기 때문입니다.
+  판정은 발송 시점 국가로 하고, 기록은 취득 시점 국가로 남습니다.
 
 ### 6.5 기존 analytics 판정과의 관계
 
@@ -1162,11 +2153,13 @@ Braze/Customer.io는 요구사항의 상당 부분(preference center, suppressio
   `eu-central-1`). 단 운영 부담을 감수해야 합니다.
 - **marketing은 별도 도메인으로 시작하되, 그것만으로는 부족합니다(v3 정정).**
   `mail.tomverse.app`(transactional) vs `news.tomverse.app`(marketing)은 도메인
-  평판을 가르지만 **suppression을 가르지 못합니다**(5.3.1). marketing을 켜기
-  전에 **별도 Resend team/region 또는 별도 provider**를 쓸지 결정해야 하며,
-  이는 8절의 "단일 제공자" 권고를 **발송 계정 수준에서는** 완화하는 것입니다.
-  제품 선택은 여전히 하나여도 되고, 계정이 둘이면 우리 코드에는 API 키가 하나
-  더 생길 뿐입니다.
+  평판을 가르지만 **suppression을 가르지 못합니다**(5.3.1). ~~marketing을 켜기
+  전에 별도 Resend team/region 또는 별도 provider를 쓸지 결정해야 하며~~ —
+  **A18이 2026-09-14에 결정했습니다: 별도 Resend 계정**(22절, 5.3.1 결정 2).
+  같은 계정 안의 team 추가는 유료 플랜을 요구해 채택하지 않았고, 로그인이 다른
+  두 번째 계정을 만들었습니다. 이는 8절의 "단일 제공자" 권고를 **발송 계정
+  수준에서는** 완화한 것입니다. 제품 선택은 여전히 하나이고, 우리 코드에는 API
+  키가 하나 더 생겼습니다(`MARKETING_RESEND_API_KEY`).
 - 발송량이 월 수십만 통을 넘거나 세그먼트 기반 여정이 실제로 필요해질 때
   전용 marketing platform을 재검토합니다.
 
@@ -1197,8 +2190,11 @@ EmailProviderPort {
    `EmailEvent` -> `EmailDelivery` 큐로 옮기되, 로그인 코드는 standard lane이 아니라
    **credential synchronous lane**(9.4a)으로 보냅니다. **규제와 무관하게 지금 가장 큰 사용자 피해가
    여기 있습니다.**
-2. **`SuppressionEntry` + Resend webhook 수신** (bounce/complaint). 서명 검증과
-   `svix-id` 기반 replay 방지 포함.
+2. **억제 기록 + Resend webhook 수신** (bounce/complaint). 서명 검증과
+   `svix-id` 기반 replay 방지 포함. 이 항목이 `SuppressionEntry`라고 적혀 있던
+   것은 v1의 한 행짜리 기록을 뜻했습니다. 지금 쓰는 것은 append-only
+   `SuppressionCause`이며(7.4 배포 A~D), 아래 본문에서 억제 기록을 가리키는
+   이름도 전부 그쪽입니다.
 3. **`EmailPreference` + `ConsentRecord`** 스키마와 목적별 opt-in/opt-out.
 4. **로그인 없는 unsubscribe token** + 최소 preference center.
 5. **`JurisdictionProfile` + footer renderer.** transactional footer부터 적용하고
@@ -1214,7 +2210,7 @@ EmailProviderPort {
 | 다중 provider 자동 failover | 구현체가 하나입니다. 16절 |
 | 전용 IP | 월 수십만 통 미만에서는 **오히려 도달률이 나빠집니다**(warm-up 트래픽 부족) |
 | RTL 언어 지원 | ar/he locale이 없습니다. 다만 렌더러가 `dir` 속성을 **받을 수 있게만** 설계 |
-| 국가별 템플릿 본문 분기 | 5.2에서 확인했듯 진짜 분기는 6개뿐이며 전부 footer/제목입니다 |
+| 국가별 템플릿 본문 분기 | 5.2에서 확인했듯 국가별 차이는 **본문이 아니라 제목 접두어·footer·발송 시간·SLA·동의/고지 상태**에 한정됩니다(E1~E7 일곱 개) |
 | SMS/푸시 다채널 | 알림 오케스트레이션은 별도 문제. `EmailPreference`를 `NotificationPreference`로 일반화만 해두고 채널은 이메일만 |
 | 자체 unsubscribe 랜딩의 재구독 유도 UI | 호주 "추가 단계 요구 금지"와 충돌할 수 있습니다 |
 
@@ -1232,8 +2228,8 @@ EmailProviderPort {
 | | transactional/legal | marketing |
 |---|---|---|
 | 발송 도메인 | `mail.tomverse.app` | `news.tomverse.app` |
+| Resend **계정** | 별도 — ~~MVP에서는 하나, marketing 활성화 전 결정~~ **A18이 2026-09-14에 별도 계정으로 결정**(5.3.1, 22절). 같은 계정 안의 team 추가는 유료 플랜을 요구해 채택하지 않았습니다 | 별도 |
 | Resend API 키 | 별도 | 별도 |
-| Resend **계정(team)** | MVP에서는 하나. marketing 활성화 전 결정(5.3.1) | 동일 |
 | suppression 조회 (우리 DB) | hard bounce + 출처가 transactional인 complaint 관측 | hard bounce + complaint + **모든 목적별 opt-out** |
 | unsubscribe 링크 | **없음** | **필수** |
 | `List-Unsubscribe` 헤더 | **없음** | **필수** |
@@ -1283,7 +2279,7 @@ EmailProviderPort {
 
 | 대안 | 기각 사유 |
 |---|---|
-| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 `SuppressionEntry`가 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. Phase 2 착수 시 재평가(A18) |
+| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 억제 기록(`SuppressionCause`)이 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. ~~Phase 2 착수 시 재평가(A18)~~ — **A18은 2026-09-14에 결정됐습니다: 별도 Resend 계정**(22절). 별도 provider를 쓰는 이 선택지는 그 결정이 답한 문제를 이미 해결하므로, 다시 열려면 다른 이유가 필요합니다 |
 | **customer engagement platform 중심** | 7.3의 네 가지 이유. 특히 감사 스냅샷과 정책 이중화 문제 |
 | **자체 abstraction을 둔 multi-provider** | 구현체가 하나인 추상화는 추상화가 아닙니다. 그리고 **중복 발송 없는 provider 전환은 abstraction이 아니라 outbox의 idempotency key가 보장**합니다 — 우리는 그것을 먼저 만듭니다 |
 | **AWS SES로 즉시 이전** | 비용 절감액(월 $15 수준)이 운영 부담을 정당화하지 못합니다. 데이터 위치가 요구사항이 되면 그때 |
@@ -1321,7 +2317,7 @@ EmailProviderPort {
         v
   [6] ProviderWebhookEvent  <- bounce / complaint / delivered / unsubscribe
         |
-        +--> SuppressionEntry 갱신
+        +--> SuppressionCause 추가 (append-only: 사건마다 한 행)
         +--> EmailDelivery 상태 갱신
 ```
 
@@ -1387,7 +2383,7 @@ marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 �
 
 - `lib/emailLogin.ts:15` — `CODE_TTL_MINUTES = clamp(env || 10, 1, 10)`.
   **상한이 10이므로 환경변수로도 10분을 넘길 수 없습니다.**
-- `railway.credit-reconciliation.json:5` — `*/15 * * * *`. 현재 큐 drain이
+- `.railway/scheduled-jobs.ts` `Credit Reconciliation` — `*/15 * * * *`(2026-09-17 전에는 `railway.credit-reconciliation.json:5`). 현재 큐 drain이
   얹혀 있는 유일한 짧은 주기 cron입니다.
 - 따라서 `NOTIFICATION_RETRY_DELAYS_MS`의 첫 지연이 60초여도 **실제로는 최대
   15분 뒤에야 재시도**되고, 그때 코드는 이미 죽어 있습니다. 재시도 곡선이
@@ -1591,7 +2587,7 @@ POST /api/webhooks/email/resend
  1. raw body 보존 (서명은 포맷에 민감)
  2. Svix 서명 검증 -> 실패 시 400, 본문 로그 금지
  3. svix-id 로 ProviderWebhookEvent upsert -> 이미 있으면 200 즉시 반환 (replay 방지)
- 4. 트랜잭션: 이벤트 저장 + EmailDelivery 갱신 + SuppressionEntry 갱신
+ 4. 트랜잭션: 이벤트 저장 + EmailDelivery 갱신 + SuppressionCause 추가
  5. 200
 ```
 
@@ -1616,6 +2612,152 @@ POST /api/webhooks/email/resend
     성공/실패를 응답에 담을 수 있으므로(9.4a-3) 발송 자체에는 쓰지 않습니다.
     관측용 쓰기처럼 응답을 막을 이유가 없는 작업에만 씁니다.
 
+### 9.8 발송 직전 주소 잠금 (S1b-3a)
+
+재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의 C29를 구현합니다.
+
+lane은 suppression을 확인한 뒤 template 조회·렌더링·footer 구성·야간 대기를 거쳐
+provider를 부릅니다. **그 사이에 커밋된 것은 보이지 않았습니다** — 메일이 만들어지는
+동안 수신을 거부했거나, 스팸 신고를 했거나, 삭제를 요청한 사람에게도 발송됐고,
+기록에는 "확인했다"가 남았습니다.
+
+**고객 대상 발송은 모두 `sendWithAddressLock()`(`lib/emailSendLock.ts`) 하나를
+지납니다.** 그 안에서 잠금 → suppression 재조회 → provider 제출이 한 범위에 있습니다.
+
+- **잠금 순서는 주소 → purpose 행**이며, writer가 잡는 순서의 뒷부분과 같습니다
+  (`lib/emailPreferences.ts`). writer가 먼저 잡는 **`User` 행 잠금은 sender가 잡지
+  않습니다** — 발송은 계정을 바꾸지 않고, 주소 뒤에 그것을 잡는 것이 유일하게 교착이
+  되는 순서입니다. v16은 이 앞에 suppression fence를 공유 모드로 한 번 더 잡아
+  판정이 한 권위에서 시작해 다른 권위에서 실행되지 않게 했습니다. **v27이 그
+  fence를 없앴습니다** — 권위가 하나뿐이면 건널 경계가 없고, 배타로 잡는 쪽이
+  사라진 공유 잠금은 아무도 막지 않습니다.
+- **provider 호출은 transaction이 열린 채로 일어납니다.** 제출 전에 푼 잠금은 아무것도
+  지키지 못하기 때문이고, 그래서 예산을 명시합니다. 제출이 성공한 뒤 커밋이 실패하면
+  발송은 유효하고 행은 재시도되며, provider idempotency key가 두 번째 메일을 막습니다.
+- **먼저 커밋한 쪽이 이깁니다.** 철회가 먼저면 재조회가 보고 중단하며, 제출이 먼저면
+  철회 응답은 제출이 끝난 뒤에 돌아갑니다.
+
+**시간 예산**
+
+| 항목 | standard lane·알림 큐 | credential lane |
+|---|---|---|
+| 잠금 대기 — **잠금 전체**(주소, purpose 행) | 2초 | 300ms |
+| provider 호출 timeout | 10초, **transaction 잔여 − 250ms**를 넘지 않음 | 남은 요청 예산 − 100ms, 상한 2.5초, 같은 제한 적용 |
+| transaction timeout | 15초 | 잠금 대기 + 그 시도의 timeout + 여유 (둘 다 요청 예산 안) |
+| 잠금을 못 얻으면 | claim 해제, 기존 backoff로 복귀, **시도 횟수는 올리지 않음** | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
+
+- 제출하지 못한 `EmailDelivery`는 `deferReason = 'send_not_submitted'`으로 pending에
+  남습니다. `lastErrorKind`에 쓰지 않는 이유는 야간 대기와 같습니다 — 기다린 것을
+  오류로 기록하면 이후 발송된 행에 오래된 오류가 남습니다.
+- **저장되는 값은 원인이 아니라 결과를 말합니다.** 세 원인(주소 점유·connection
+  없음·transaction 잔여 부족) 모두 제출하지 않았다는 같은 결과이고, 어느 것이었는지는
+  구조화 로그의 `cause`가 말합니다. 행에 `send_lock`이라고 적으면 예산 때문에 미뤄진
+  발송에 대해 누가 주소를 잡고 있었다는 거짓을 남기게 됩니다.
+- 알림 큐의 `lock_unavailable`도 시도로 세지 않으므로, 남의 철회 때문에 6회 한도가
+  소진되어 포기되는 일이 없습니다.
+- 대기를 실패로 세지 않는다는 것은 **잠금 경합만으로는 포기하지 않는다**는 뜻입니다.
+  경합은 철회 transaction 하나의 길이(밀리초 단위)이므로 이 선택이 맞지만, 한 주소가
+  매 회차 막히는 것은 증상이므로 `email_send_lock_unavailable` 구조화 로그를 남깁니다
+  (수신자는 싣지 않습니다).
+- **잠금 대기는 잠금마다가 아니라 전체에 걸립니다.** Postgres의 `lock_timeout`은
+  **획득 시도마다** 적용되므로 한 번 설정하고 잠금을 여러 개 잡으면 계약이 약속한
+  대기의 그 배수가 됩니다(v27 전까지는 fence를 포함해 셋이었고, 지금은 둘입니다). 그래서 절대 deadline 하나를 두고 **잠금 직전마다 남은 시간으로
+  다시 설정**하며, 남은 시간이 없으면 잡지 않고 `lock_unavailable`입니다. **마지막
+  잠금 뒤에도 한 번 더 검사합니다** — `lock_timeout`은 한 번의 대기만 묶고 그 앞뒤
+  statement는 묶지 않으므로, deadline 직후에 승인된 잠금으로 계속 진행하면 안 됩니다.
+  시계는 `performance.now()`입니다(벽시계 보정이 예산을 늘리거나 줄이면 안 됩니다).
+  잠금을 다 잡은 뒤에는 **그 연결이 원래 갖고 있던 값**(`current_setting`으로 읽어
+  둔 값)으로 되돌립니다 — 이후의 일반 read가 발송 예산 때문에 실패하면 주소 경합이
+  아닌 것을 주소 경합으로 보고하게 됩니다.
+- **connection pool을 못 얻어 transaction이 시작조차 못 한 것도 같은 결과입니다.**
+  아무것도 제출되지 않았으므로 판정은 같고, 로그의 `cause`가 `lock`인지 `pool`인지
+  구분합니다 — 운영자가 봐야 하는 것은 주소가 바쁜지 이 프로세스가 바쁜지입니다.
+  **판정은 오류 문구가 아니라 callback이 시작됐는지로 합니다.** Prisma는 "시작하지
+  못했다"와 "실행 중에 만료됐다"를 같은 `P2028`로 보고하는데 둘은 정반대입니다 —
+  앞은 아무것도 제출하지 않았고 뒤는 다 제출했을 수 있습니다.
+- **credential lane은 모든 대기를 요청 잔여 예산에서 자릅니다.** connection 획득·잠금·
+  provider 호출이 전부 같은 3초에서 나오므로, 상한을 합해 만들면(300 + 2,500 + 100 +
+  250 = 3,150) 묶으려던 예산보다 긴 천장이 됩니다. `credentialSendWindow()`가 남은
+  예산 하나에서 세 값을 유도하고, 예산이 이미 없으면 **connection조차 기다리지
+  않습니다** — 예전 모양은 보낼 것이 없다는 사실을 알기까지 300ms를 기다려 connection을
+  얻고 300ms를 더 기다려 잠금을 시도할 수 있었습니다.
+- **잠금 예산도 transaction deadline을 넘지 못합니다.** connection 대기가 이미 같은
+  deadline에서 나갔으므로, 잠금 단계에서 다시 온전한 대기를 허용하면 한 호출이 자기
+  예산을 두 번 쓰게 됩니다.
+- **provider 예산은 transaction의 남은 수명에서 잘라 냅니다.** 두 시계는 서로를
+  모릅니다 — Prisma의 `timeout`은 transaction을 끝내고 advisory 잠금을 함께 풀지만,
+  이미 떠 있는 `AbortSignal.timeout`은 계속 돕니다. transaction이 6초 남은 시점에
+  10초짜리 호출을 시작하면, **잠금이 풀린 뒤에도 제출이 진행됩니다** — 그 사이 철회가
+  그 잠금을 잡고 커밋해 사용자에게 응답까지 마칠 수 있습니다. 그래서 잠금과 재조회가
+  끝난 시점에 남은 시간에서 **commit 여유 250ms**를 빼고, lane 상한과 비교해 작은 쪽을
+  제출에 줍니다. **남은 것이 없으면 제출하지 않고** `lock_unavailable`(cause
+  `budget`)로 돌아갑니다 — 짧은 발송이 아니라 발송 없음입니다.
+- **잠금 단계가 끝난 뒤의 `55P03`은 주소 경합이 아닙니다.** 복원된
+  `lock_timeout` 아래에서 일반 relation 잠금이 끊긴 것이므로 실패로 다룹니다. 판정은
+  잠금 단계인지 여부로 하고, 오류 문구로 하지 않습니다.
+- **제출이 성공한 뒤 transaction이 실패하면 그 답을 버리지 않습니다.** 이 transaction은
+  아무것도 쓰지 않으므로(원인을 읽고 잠금을 잡을 뿐) rollback이 잃는 것이
+  없고, 답을 버리면 이미 나간 메일을 다시 보내게 됩니다. 이 경우
+  `email_send_lock_lost_after_submit`을 남깁니다 — 일어났다면 예산이 틀린 것입니다.
+- **잠금 때문에 미뤄진 행은 backlog에 셉니다.** 야간 대기와 다릅니다 — 야간 대기는
+  예정대로이고, 이것은 늦은 것입니다. 되돌아오는 대기는 그 행이 실패했다면 기다렸을
+  곡선의 값이고, 곡선이 끝났으면 1분입니다.
+- ~~**cutover는 in-flight 발송만큼 fence를 기다립니다.**~~ **v27에서 해당 없음.**
+  발송이 fence를 공유 모드로 provider 호출 동안(최대 10초) 잡았으므로
+  `email:suppression-cutover`의 배타 획득이 그만큼 늦어졌고, 그 뒤의 발송은
+  `send_not_submitted`으로 미뤄졌다가 cutover가 끝난 뒤 돌아왔습니다. v27이 설정과
+  cutover와 fence를 함께 없앴으므로 이 지연도 없습니다. **발송이 기다리는 advisory
+  잠금은 이제 주소 하나뿐입니다.**
+- **purpose 철회는 그 purpose scope suppression으로 관측합니다.** 철회는 preference
+  행과 purpose scope suppression을 한 transaction에서 쓰므로(7.4의 총잠금 순서),
+  잠금 안의 suppression 재조회가 그것을 봅니다. 그래서 preference 행을 다시 읽지
+  않습니다 — purpose 행 잠금은 순서를 맞추기 위한 것이고, 판정 자료는 suppression
+  한 곳입니다.
+
+**helper를 지나는 경로**
+
+| 경로 | 잠금 |
+|---|---|
+| standard lane (`lib/standardEmailLane.ts`) | 주소 → purpose(템플릿에 purpose가 있고 계정이 있을 때) |
+| credential lane (`lib/credentialEmailLane.ts`) | 주소. **시도마다** 잡습니다 — 이 lane은 3초 안에서 재시도하므로, 그 사이 커밋된 privacy request가 다음 시도를 막아야 합니다 |
+
+| 알림 큐의 고객 대상 kind (`lib/notificationDeliveries.ts`) | 주소 |
+
+- **알림 큐의 고객 대상 kind는 목록입니다**(`CUSTOMER_NOTIFICATION_KINDS`) — 이름
+  접두사로 유도하지 않습니다. 수신자가 누구인지 정하지 않은 채 추가된 kind가 이름만
+  맞아 한쪽 분기를 물려받아서는 안 됩니다.
+- **환불 안내가 이 목록에 들어옵니다.** 지금까지 suppression을 보지 않았으므로 hard
+  bounce·운영자 중단·privacy request가 provider까지 가서 provider 탓처럼 보였습니다.
+  판정은 transactional이므로 complaint로는 막히지 않습니다(13.3).
+- **운영자 알림은 지나지 않습니다.** 팀에게 남의 신고를 알리는 메일이므로, 고객 주소의
+  suppression이 그것을 침묵시켜서는 안 됩니다.
+- 각 lane이 렌더링 전에 하던 suppression 확인은 그대로 둡니다. 막힌 주소에 template
+  조회 이상을 쓰지 않기 위한 것이며, **발송 판정은 잠금 안의 재조회**입니다.
+- **credential lane은 예산이 끝난 뒤에는 제출하지 않습니다.** 잠금을 기다리는 동안
+  예산이 사라졌으면 그 시도는 제출 없이 `budget_exhausted`로 끝냅니다 — 사용자가
+  이미 실패를 통보받은 뒤에 로그인 코드를 발송하지 않기 위해서입니다.
+- **transactional complaint 경보는 세 경로 모두 잠금 안의 판정으로 올립니다.**
+  standard lane뿐 아니라 credential lane과 알림 큐도 같은 `raiseIncident`를 읽습니다.
+  초기 확인 뒤에 생긴 complaint를 한 경로만 보고하면 "발송 직전 판정"이라는 말이
+  거짓이 됩니다.
+
+
+**provider에 닿는 파일은 목록 하나입니다(C41).** 모든 고객 대상 발송이 이 helper를
+지난다는 것은 습관이 아니라 검사로 강제됩니다 — 다른 곳에서 한 발송은 잠금도,
+재조회도, 같은 범위도 건너뛰고 **그 실패는 조용합니다**: 메일은 나가고, 수신자는 철회한
+사람이며, 기록에는 확인했다고 남습니다.
+
+- **allowlist** — `lib/email.ts`(두 진입점을 정의), helper, `lib/operationalMonitoring.ts`,
+  `lib/providerMonitoring.ts`, `lib/operatorNotificationSend.ts`, 관리자 테스트 메일.
+  항목마다 허용 이유를 적습니다(`scripts/check-send-entry-points-core.mjs`).
+- **검사가 파일 단위라는 사실이 코드를 정했습니다.** lane은 callback이 아니라 렌더된
+  메시지를 넘기고 제출은 helper가 합니다. callback이었다면 모든 lane이 진입점을
+  import했을 것이고, 파일 단위 검사는 그것을 raw 발송과 구분하지 못합니다.
+- **알림 큐의 운영자 경보는 자기 module입니다.** 큐 파일은 두 종류를 담으므로 allowlist에
+  넣을 수 없습니다 — 넣으면 같은 파일의 고객 발송이 잠금을 건너뛰어도 통과합니다.
+- allowlist에 있지만 더 이상 발송하지 않는 파일은 **실패가 아니라 경고**로 보고합니다.
+  아무도 정리하지 않는 목록은 곧 아무것도 설명하지 못하게 됩니다.
+
 ---
 
 ## 10. 데이터 모델 초안 (개념 수준)
@@ -1635,11 +2777,14 @@ POST /api/webhooks/email/resend
 | `TemplateVersion` | **필요** | 불변 버전 |
 | `EmailEvent` | **필요** | outbox |
 | `EmailDelivery` | **필요** | 수신자별 발송 |
-| `SuppressionEntry` | **필요** | 전역 + 목적별 억제 |
+| `SuppressionCause` | **필요** | 억제를 만든 사건. 전역·분류·목적 scope, append-only |
+| `SuppressionEntry` | 보존만 | v1의 한 행짜리 억제 기록. **2026-09-21 이후 아무도 쓰지 않습니다**(7.4 배포 C-2). 원인이 생기기 전의 목록을 담은 유일한 기록이라 남겨 둡니다 |
 | `ProviderWebhookEvent` | **필요** | replay 방지 + 원본 보존 |
 | `EmailPolicyVersion` | **필요** | profile 묶음의 버전. 아래 10.4 |
 
-**10개 모두 필요합니다.** 다만 MVP에서 전부 만들지는 않습니다(15절).
+**열 가지 역할이 모두 필요합니다.** 다만 MVP에서 전부 만들지는 않습니다(15절).
+표가 열한 줄인 것은 억제 기록이 이전된 흔적입니다 — 역할은 하나이고, 쓰는 표가
+바뀌었으며, 예전 표는 지우지 않았습니다.
 
 ### 10.2 핵심 엔터티
 
@@ -1705,13 +2850,17 @@ userAgentHash      String?
 id
 profileKey         String   // "KR" | "US" | "CA" | "AU" | "GB" | "SG" | "EU" | "ZZ"
 policyVersionId -> EmailPolicyVersion
-marketingBasis     "opt_in" | "opt_out"     // 우리는 전역 opt_in(C1)이나 기록은 사실대로
+marketingBasis     "opt_in" | "opt_out"     // 그 나라 제도의 사실. 우리 권한 판정은
+                                            // 이 필드가 아니라 5.1.1의 국가 rule과
+                                            // 호주 발신자 authority가 함께 정합니다
+                                            // (승인 A). S5의 ReleaseNotesCountryRule
 subjectPrefix      String?  // "(광고)" | "<ADV> "
 footerBlocks       Json     // ["legal_name","postal_address","business_registration",...]
 unsubscribeSlaBusinessDays Int
 consentNoticeIntervalMonths Int?  // E7. KR=24. 고지 주기이지 만료 기한이 아님
 quietHours         Json?    // { start:"21:00", end:"08:00", tz:"local" }
-impliedConsentDays Json?    // CASL. C8로 비활성
+impliedConsentDays Json?    // CASL. 비활성 — 5.1.1이 CA를 express_consent로 두고
+                            // 해제 조건을 주지 않습니다. 기록만 남깁니다
 notes              String   // 근거 출처와 확인일
 @@unique([profileKey, policyVersionId])
 ```
@@ -1844,7 +2993,16 @@ PostgreSQL의 unique 제약은 **`NULL`을 서로 다른 값으로 취급**하�
 - `emailAddress`와 중복되어 보이지만 별개입니다: `emailAddress`는 발송 시점
   스냅샷(나중에 주소가 바뀌어도 보존), `recipientKey`는 중복 방지 키입니다.
 
-**`SuppressionEntry`**
+**`SuppressionEntry`** — **v1의 형태이고, 지금 쓰는 것이 아닙니다.**
+
+지금의 억제 기록은 `SuppressionCause`이며, 아래 컬럼을 거의 그대로 가져가면서
+셋이 다릅니다: selector(`emailAddress`+`scope`+`purposeKey`)마다 **한 행이 아니라
+사건마다 한 행**이고, `scope`에 `classification`이 있으며(삭제 접수가 marketing
+전체를 한 행으로 막습니다), 해제는 삭제가 아니라 `releasedAt`입니다. 그래서 아래
+블록이 설명하는 **병합 규칙은 더 이상 존재하지 않습니다** — 판정이 활성 원인을
+전부 읽으므로 어느 사건이 어느 사건을 덮을지 정할 일이 없습니다(0절 v26 3번).
+아래는 그 이전이 무엇을 옮긴 것인지 읽을 수 있도록 남깁니다.
+
 ```
 id
 emailAddress       String   // 정규화(소문자)
@@ -1890,6 +3048,176 @@ payload            Json     // 원본 보존
 processingError    String?
 @@unique([provider, providerEventId])
 ```
+
+#### 10.2.1 기록 세 층과 승인 원장
+
+제품 소식 재설계 초안 §6이 정한 것을 이 문서의 엔터티 목록에 반영합니다.
+**S0의 남은 항목 중 "기록 세 층과 승인 원장"이 이것이고, S3 구현의 선행
+조건이었습니다.**
+
+**초안 §3의 `release_notes`는 새 purpose가 아니라 `product_updates`입니다.**
+초안은 "`release_notes` purpose를 만들라"고 적었지만, 그 purpose는 이미
+`product_updates`라는 이름으로 존재합니다 — 같은 메일, 같은 스위치, 7개 언어의
+문구, DB CHECK, 그리고 사용자들이 이미 설정해 둔 행. 두 번째 purpose를 만들면
+**한 종류의 메일에 스위치가 둘**이 되고, 더 나쁘게는 **기존 선택이 따라오지
+않습니다** — 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되며, 그것이 바로
+불변식 5가 막으려는 실패입니다. 그래서 초안의 이름은 이미 그 일을 하는 purpose로
+해석하고, 그 대응을 `lib/emailPreferenceCore.ts`의 `draftPurposeName`과
+`purposeForDraftName()`에 적어 둡니다. 다음 읽는 사람이 이름이 다르다는 이유로
+행을 하나 더 만들지 않도록.
+
+**층이 셋인 이유는 같은 사실을 두 장부가 말하지 않게 하기 위해서입니다.**
+동의는 `ConsentRecord` 하나가 말하고, 고지·거부·관계 같은 나머지 사실은
+`EmailPermissionEvent`가 말하며, 그 둘을 읽어 내린 결론은
+`EmailPermissionDecision`이 말합니다. 한 층이 다른 층의 값을 복사하면
+어느 쪽이 맞는지 물을 수 없게 됩니다.
+
+**`EmailPermissionEvent`** — 동의가 아닌 사실(불변, append-only)
+```
+id, userId -> User (SetNull)
+emailAddress       String   // 당시 주소
+kind               "notice_shown" | "objected" | "relationship_started"
+                   | "relationship_ended" | "basis_ended"
+scopeKey           String   // purpose·classification, 주소 자체면 "*". NULL 불가
+occurredAt         DateTime // 일어난 시각. 쓴 시각이 아님
+capturedVia        "signup_form" | "preference_center" | "unsubscribe_page"
+                   | "in_product_notice" | "admin" | "system"
+                   | "provider_complaint"
+sourceEventKey     String   // writer별 안정 key. 재시도가 행을 늘리지 않음
+addressNormalizationVersion String  // 위 주소를 만든 정규화 rule
+jurisdiction, jurisdictionSource
+policyVersionId    String   // NOT NULL
+evidence           Json?    // 화면 id, 고지 문안 hash. 원본 요청·본문은 금지
+@@unique([kind, sourceEventKey])
+```
+- **`basis_ended`와 `relationship_ended`는 다른 사건입니다.** 국가 rule이 바뀌어
+  근거가 끝나는 것과 그 계정이 관계를 끝내는 것은 같지 않고, "왜 발송을
+  멈췄는가"를 나중에 되짚으려면 둘을 구분해야 합니다.
+- **update·delete는 DB trigger가 거부합니다.** 응용 계층에만 있는 append-only는
+  한 번의 실수로 덮이고, 덮이는 그 행이 발송이 허용됐다는 증거입니다.
+- **예외는 딱 하나, 계정이 떨어져 나가는 전이입니다.** FK의 `ON DELETE SET NULL`은
+  referencing 행의 **UPDATE로 수행**되므로, 통째로 막으면 장부 행이 하나라도
+  있는 계정은 삭제가 실패합니다. `userId`가 값에서 `NULL`로 가고 **다른 컬럼은
+  움직이지 않는** 그 전이만 허용하며, 그것이 data domain registry가 적은
+  anonymisation입니다. 되붙이는 것은 거부합니다.
+- **정규화 rule을 저장합니다.** rule이 바뀌면 어느 행이 일치하는지가 바뀌고,
+  자기가 어느 rule을 썼는지 말하지 못하는 장부는 rule이 움직인 뒤 다시 유도할 수
+  없습니다.
+
+**`EmailSendApproval`** — 사람의 결정(봉인 후 불변)
+```
+id
+approvalType       "risk_accepted" | "obligation_waiver"
+approvedById, approvedByEmail, approvedAt
+reason, reviewCondition            // 둘 다 필수
+policyVersionId    String   // NOT NULL. 어느 policy version 아래 내려진 결정인지
+ruleKey, ruleVersion, country, obligationKey   // obligation_waiver의 범위
+purposeKey                                      // risk_accepted의 범위. "*" 가능
+sealedAt           DateTime?   // 닫히는 시각. 이후 아무것도 바뀌지 않음
+```
+- **두 유형은 한 가지의 변종이 아닙니다.** `risk_accepted`는 근거 없이 보내는
+  결정(초안 5.6), `obligation_waiver`는 표시·고지 의무를 하지 않기로 하는
+  결정(초안 7.8)입니다. 범위 컬럼이 서로 다르고 CHECK가 유형별로 강제하므로,
+  한쪽 범위를 실은 다른 유형의 행은 저장되지 않습니다.
+- **승인 행과 cohort 전체는 한 transaction에서 쓰고 `sealedAt`으로 닫습니다.**
+  봉인 뒤의 update·delete, 그리고 member의 insert·update·delete를 trigger가
+  거부합니다. 봉인하는 그 update도 **다른 컬럼을 함께 바꾸지 못합니다** —
+  그러지 않으면 "닫는다"가 곧 "고치고 닫는다"가 됩니다.
+- **row 수준 BEFORE trigger만으로는 부족합니다.** data-modifying CTE는
+  sub-statement와 main query가 **같은 snapshot**을 보므로,
+  `WITH s AS (UPDATE ... SET sealedAt ... RETURNING id) INSERT member ... FROM s`
+  에서 trigger는 봉인 **전** 값을 읽고 insert를 통과시킵니다. 그래서 statement가
+  끝날 때 부모의 최종 상태를 보는 **constraint trigger**를 함께 겁니다. BEFORE
+  trigger는 평범한 경우를 정확한 메시지와 잠금으로 막고, constraint trigger는
+  snapshot이 가린 것을 막습니다.
+- **`sealedAt`은 `approvedAt`·`createdAt`보다 뒤여야 합니다.** 과거 시각으로
+  봉인하면 봉인이 승인의 일부처럼 보이고, 한 번 잘못 쓴 행을 올바른 행과 구분할
+  수 없게 됩니다.
+- **`policyVersionId`는 NOT NULL입니다.** 어느 policy version 아래 내려진
+  결정인지 말하지 않는 승인은 이후의 모든 version에 적용되며, 그것은 범위의
+  반대입니다.
+- **철회는 `EmailSendApprovalRevocation` 행 추가**입니다. 승인 행은 건드리지
+  않습니다. 고칠 수 있는 승인은 무엇이 승인됐는지 증명하지 못합니다.
+
+**`EmailSendApprovalMember`** — cohort
+```
+id, approvalId -> EmailSendApproval (Restrict)
+userId
+addressDigest      String    // 승인 시점 정규화 주소의 SHA-256
+addressNormalizationVersion String
+noticeAnchorAt, noticeAnchorSource
+@@unique([approvalId, userId])
+```
+- **"78명"은 설명이고 이 목록이 범위입니다.** 주소는 digest로 담습니다 —
+  승인이 무엇을 덮는지 증명하면서 발송 목록의 두 번째 사본이 되지 않게.
+
+**`EmailPermissionDecision`** — 발송별 판정(생성 후 사실상 불변)
+```
+id
+deliveryId?        -> EmailDelivery (SetNull)
+userId?            -> User (SetNull)
+phase              "enqueue" | "send"
+purpose, classification, emailAddress
+addressNormalizationVersion String
+authorities        Json      // [{ authority, basis, verdict, reason }]
+legalAllowed       Boolean
+overrideApprovalId?, overrideType?   // 참조. 승인 내용을 복사하지 않음
+blockers           Json      // 정렬된 배열. 없으면 [] 이며 NULL이 아님
+allowed            Boolean
+pinnedDisplayContractHash?, requiredDisplayContractHash?, displayContractSatisfied?
+countryCandidates?, ruleVersions?
+policyVersionId    String   // NOT NULL
+suppressionCheckedAt?, providerSubmittedAt?
+sealedAt?          // evidence 집합을 닫는 시각
+evaluatedAt
+@@unique([deliveryId, phase])
+```
+- **한 delivery에 판정이 둘입니다**(초안 7.6). enqueue의 판정과 provider 제출
+  직전의 판정이고, `policyVersionId` 하나로 두 시점을 말할 수 없습니다.
+- **override를 썼어도 `legalAllowed`는 `false`로 남습니다.** CHECK가 이것을
+  강제합니다 — `true`로 적으면 "왜 나갔는가"에 답할 행이 사라지고, admin 화면에
+  허용으로 보이는 순간 다음 사람이 사업 결정을 동의로 읽습니다.
+- **`allowed`는 파생값이고 DB도 같은 식을 계산합니다** —
+  `(legalAllowed OR override) AND blockers가 비어 있음`. 두 곳에 있는 것이
+  요점입니다: 하나는 caller가 그 행을 만드는 것을 막고, 하나는 그래도 만들어진
+  행을 막습니다.
+- **override는 `(id, approvalType)` 복합 FK로 결속합니다.** id만 가리키면
+  `overrideType: "risk_accepted"`라고 적힌 판정이 실제로는 의무 면제를 가리킬 수
+  있고, `overrideType`의 CHECK는 그것을 알아채지 못합니다.
+- **insert 뒤에 허용되는 전이는 넷이고 각각 한 번뿐입니다** — 계정이 떨어지는
+  것, delivery가 떨어지는 것, evidence가 닫히는 것(`sealedAt`), provider 제출이
+  기록되는 것. **그 밖의 변경은 조용히 되돌리지 않고 예외를 냅니다** — 아무 일도
+  안 한 쓰기는 성공처럼 보이고, caller는 행이 말하지 않는 것을 말한다고 믿은 채
+  계속 갑니다.
+- **delivery는 Restrict가 아니라 SetNull입니다.** delivery는 자기 보존 주기에
+  따라 지워지고 **판정이 그보다 오래 남습니다.** 메일을 잃는 것이 그것을 허용한
+  이유까지 가져가서는 안 됩니다.
+- **`sealedAt` 전에는 provider에 넘길 수 없습니다.** CHECK가 강제합니다 —
+  evidence가 닫히기 전에 나간 메일은 나중에 근거가 붙을 수 있고, 그것은 고칠 수
+  있는 승인과 같은 결함입니다.
+
+**`EmailPermissionDecisionEvidence`** — 판정이 딛고 선 사건
+```
+id
+decisionId       -> EmailPermissionDecision (Cascade)
+eventId?         -> EmailPermissionEvent (Restrict)
+consentRecordId? -> ConsentRecord (Restrict)
+authority        String
+@@unique([decisionId, authority, eventId])
+@@unique([decisionId, authority, consentRecordId])
+```
+- 판정 안의 id 배열이 아니라 join 표입니다. 그래야 DB가 **판정이 인용한 행을
+  잃지 않고**, "이 판정은 무엇에 근거했나"가 파싱이 아니라 질의가 됩니다.
+  한 사건이 두 authority를 받칠 수 있습니다.
+- **출처는 둘이고 한 행에 정확히 하나입니다.** 동의는 `ConsentRecord` 하나가
+  말하므로 express-consent 판정은 그 장부를 **직접** 인용할 수 있어야 하고, 둘
+  다 가리키는 행은 한 사실이 두 장부에 있는 것이라 이 세 층 구조가 막으려는
+  바로 그것입니다. 둘 다 비면 근거 없는 주장입니다. CHECK가 양쪽을 막습니다.
+- **evidence는 판정과 함께 닫힙니다.** 판정과 그것이 딛고 선 행을 한
+  transaction에서 쓰고 `sealedAt`을 찍으면, 이후 evidence는 더해지지 않습니다.
+  없으면 판정이 **사후에 근거를 얻을 수** 있습니다. 여기에도 cohort와 같은
+  constraint trigger를 걸어 CTE 한 statement가 봉인과 insert를 함께 하는 경우를
+  막습니다.
 
 ### 10.3 발송 내용의 audit snapshot
 
@@ -2149,7 +3477,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    ( ) transactional   ( ) service   ( ) legal   ( ) marketing
 
    -> 선택 즉시 화면 전체가 바뀝니다:
-      marketing:  수신자 = opt-in 사용자만. unsubscribe 강제. 승인 필수.
+      marketing:  수신자 = (수신자 authority 통과 AND 호주 발신자 authority 통과)
+                  OR 유효한 override. 그리고 blockers가 비어 있어야 합니다.
+                  override는 authority를 통과시키지 않습니다 — 판정에는
+                  legalAllowed: false가 그대로 남습니다(5.1.1, 초안 7.6).
+                  unsubscribe 강제. 승인 필수.
       legal:      수신자 = 전원(hard bounce 제외). unsubscribe 없음. 승인 필수.
       service:    수신자 = service_status ON. 승인 필요(단일 승인).
 
@@ -2253,14 +3585,14 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 | 데이터 | 보관 | 근거 |
 |---|---|---|
 | `ConsentRecord` | **동의 철회 후 최소 3년** (잠정) | 입증책임(CASL/호주). **정확한 기간은 21절 Q6** |
-| `SuppressionEntry` (complaint/unsubscribe) | **영구** | 삭제하면 다시 보내게 됨. GDPR 제17조(3)(b) 법적 의무 이행 근거 |
+| `SuppressionCause` (complaint/unsubscribe) | **영구** | 삭제하면 다시 보내게 됨. GDPR 제17조(3)(b) 법적 의무 이행 근거. 해제된 원인도 지우지 않습니다 — 해제는 `releasedAt`이고, "언제 풀렸나"에 답할 수 있는 것이 그 행뿐입니다 |
 | `EmailDelivery` | 13개월 | 분쟁 대응 + deliverability 분석 |
 | `EmailDelivery` (legal 분류, 본문 포함) | **7년** (잠정) | 법정 통지 증명. 21절 Q6 |
 | `ProviderWebhookEvent` | 90일 | replay 방지에 필요한 기간 + 여유 |
 | `EmailEvent` | 13개월 | |
 
 - 기존 `AdminRetentionRun` 배치에 규칙을 추가합니다.
-- **계정 삭제와의 상호작용:** 사용자 계정을 지워도 `SuppressionEntry`는
+- **계정 삭제와의 상호작용:** 사용자 계정을 지워도 `SuppressionCause`는
   **주소 기준으로 남습니다.** 이것은 GDPR 삭제권의 예외(법적 의무 준수)에
   해당한다고 보지만, **21절 Q6에서 확인이 필요합니다.** 개인정보처리방침에
   명시해야 합니다.
@@ -2270,7 +3602,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 **가장 어려운 설계 지점입니다.**
 
 **v1은 complaint를 하나로 뭉뚱그렸습니다.** 어느 스트림에서 신고가 들어왔는지에
-따라 의미가 전혀 다릅니다. 그래서 `SuppressionEntry`에 `sourceStream`,
+따라 의미가 전혀 다릅니다. 그래서 `SuppressionCause`에 `sourceStream`,
 `sourceDomain`, `sourceClassification`, `sourceMessageId`를 기록하고(10.2)
 아래 표는 그것을 읽습니다.
 
@@ -2332,7 +3664,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    IP 풀을 쓸 수 있습니다.
 3. **제공자 계정 수준의 억제와 제재는 분리되지 않습니다** — 이제 추정이 아니라
    확인된 사실입니다(5.3.1).
-4. **우리 `SuppressionEntry`가 gating 판정의 유일한 근거**이고, 제공자 억제는
+4. **우리 `SuppressionCause`가 gating 판정의 유일한 근거**이고, 제공자 억제는
    우리가 통제하지 못하는 **상위 필터**입니다. 2차 방어선이라는 v2의 표현은
    부정확했습니다 — 제공자 억제는 우리 뒤가 아니라 **우리 앞**에 있습니다.
 5. 같은 주소에서 transactional complaint가 반복되면 **critical incident**.
@@ -2583,7 +3915,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **M1b** | **Resend 계정 범위 제약 반영** (5.3.1) | Resend는 transactional 전용. marketing 도메인·API 키를 **만들지 않음**. 계정 suppression에 오른 주소를 탐지해 운영 보고에 올리고, 이메일 외 로그인 수단이 없는 사용자를 식별할 수 있음 |
 | M2 | `EmailTemplate` + `TemplateVersion`, 이메일 카피 통합 | 3개 모듈의 중복 `EmailLanguage`/`normalizeLanguage`/`escapeHtml` 제거. 언어 추가가 한 곳에서 끝남 |
 | M3 | Resend 웹훅 수신 + `ProviderWebhookEvent` | Svix 서명 검증, `svix-id` replay 방지, 중복 전달이 상태를 두 번 바꾸지 않음 |
-| M4 | `SuppressionEntry` + hard bounce/complaint 자동 억제 | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
+| M4 | 억제 기록 + hard bounce/complaint 자동 억제 (당시 `SuppressionEntry`, 지금 `SuppressionCause` — 7.4) | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
 | M5 | `EmailPreference` (6개 목적) + 잠금 규칙 | security/billing은 API로도 끌 수 없음 |
 | M6 | `ConsentRecord` append-only | 모든 preference 변경이 이력을 남김. 원시 IP 미저장 |
 | M7 | `JurisdictionProfile` + `JurisdictionCountryMap` + `EmailPolicyVersion` + footer renderer | **profile 9개**(`KR`/`US`/`CA`/`AU`/`GB`/`SG`/`EU`/`CH`/`ZZ`, `ZZ` 포함) + 국가->profile 매핑(EEA 30개국 -> `EU`, CH는 자체 profile). 6.3의 보류 동작. v5(2026-09-14)에서 8개에서 늘었습니다 |
@@ -2595,19 +3927,25 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | M13 | 분류별 재시도 정책 | 9.4 표대로. legal abandoned가 critical incident |
 | M14 | 감사 로그 + 발송 이력 조회 | 13.7의 모든 항목 |
 
-### 15.2 MVP에 만들되 **비활성**으로 두는 것 (법률 검토 대기)
+### 15.2 MVP에 만들되 **비활성**으로 두는 것
 
-`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **활성화는 법률 검토 완료 후.**
+`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **2026-09-16 개정(승인 A) 전에는
+"법률 검토 완료 후"가 활성화 조건이었습니다.** 지금은 항목마다 다르고, 아래 표가
+그것입니다 — marketing 발송의 선행 조건은 **발송 도메인 평판·싱가포르 수신거부
+주소**(초안 §13 R2·R3)이며, **EEA·영국에는 두 개가
+더** 걸립니다: **G**(soft opt-in을 근거로 쓰는 것)와 **21절 Q1의 잔여**(DE·FR·
+AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하므로
+`express_consent` 발송도 막습니다.
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1** 회신 하나만 남았습니다. Q8·Q12는 2026-09-14, **Q2는 2026-09-15** 해소 |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | **2026-09-16 개정(승인 A) 이후 Q1은 전역 차단이 아닙니다** — G가 막는 것은 **EEA·영국에서 soft opt-in을 근거로 쓰는 것**입니다(초안 §11 G). 그 밖의 국가는 5.1.1의 국가 rule이 정하고, 활성화 전에 닫아야 하는 것은 **싱가포르 수신거부 이메일 주소**(초안 §13 R3)와 **발송 도메인 평판**(초안 §13 R2)입니다. 구현 순서는 초안 §12를 **참고로** 따릅니다 — 일정이지 활성화 조건이 아니고, 5.1.1의 snapshot 고정 대상도 아닙니다. **다만 21절 Q1이 남긴 "그 넷 밖 국가의 첫 캠페인 전 국가별 확인"은 별개 질문이고 없어지지 않았습니다** — 그것은 근거에 대한 것이 아니라 **공통 baseline으로 아직 입증하지 못한 국가별 의무** 전반에 대한 것이라 `express_consent`로 보내는 EEA 발송에도 그대로 걸립니다. EU 지침은 국가법 전환을 요구하고, ePrivacy 제13조도 동의와 **별개로** 발신자 신원과 유효한 거부 주소를 요구합니다. 실제로 읽은 것은 DE·FR·AT·CH 넷뿐입니다. 즉 EEA는 **근거(G)와 국가별 의무 확인(Q1 잔여)** 두 가지가 **각각** 열려야 합니다. Q8·Q12는 2026-09-14, Q2는 2026-09-15 해소(그 뒤 승인 A가 개정) |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
-| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
+| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | **한국 `(광고)`는 면제로 결정됐습니다**(초안 7.7 — 승인 D의 의무별 결정). 싱가포르 `<ADV>`는 **싱가포르 수신거부 주소(초안 §13 R3)와 함께** 확인합니다. ~~Q4~~는 야간 발송 창에 대한 질문이었고 2026-09-16에 해소됐습니다 — 접두어와 무관합니다 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
-| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | Q4 — 회신이 "전자우편은 예외 매체"이면 KR profile의 `quietHours`를 비우는 새 policy version 하나로 끕니다 |
+| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | ~~Q4~~ **해소 (2026-09-16)** — 시행령 제61조제2항이 전자우편을 야간 제한 대상에서 제외하므로 KR profile의 `quietHours`는 비어 있습니다. 기계는 그대로 두고, 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version입니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면
 나중에 급하게 만들게 되고, 급하게 만든 동의 시스템이 정확히 이 문서가 막으려는
@@ -2626,11 +3964,14 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 ## 16. 2단계 및 장기 로드맵
 
-### Phase 2 (법률 검토 완료 후, 약 1~2개월)
+### Phase 2 (약 1~2개월)
+
+**"법률 검토 완료 후"가 이 단계의 조건이었습니다. 2026-09-16 개정(승인 A) 이후
+그렇지 않습니다** — 조건은 항목마다 다르고 15.2의 표가 그것입니다.
 
 | 항목 | 내용 |
 |---|---|
-| marketing 발송 활성화 | **선행 조건: 5.3.1의 결정 2**(별도 Resend team/region 또는 별도 provider, 아니면 한 계정 유지 + 이메일 외 복구 수단 필수화)를 먼저 확정. 그 다음 flag 해제, `news.` 도메인 warm-up 시작(14.6) |
+| marketing 발송 활성화 | ~~5.3.1의 결정 2를 먼저 확정~~ — **A18이 2026-09-14에 해소됐습니다**(별도 Resend 계정, 22절). 남은 전역 선행 조건은 **싱가포르 수신거부 이메일 주소**(초안 §13 R3)·**발송 도메인 평판**(초안 §13 R2)이고, 그 다음 flag 해제와 `news.` 도메인 warm-up(14.6)입니다. **EEA·영국은 그 위에 두 개가 더** 있습니다 — soft opt-in을 근거로 쓰는 것은 **G**, DE·FR·AT·CH 밖 국가로 보내는 것은 **21절 Q1의 잔여**(공통 baseline으로 아직 입증하지 못한 국가별 의무)가 각각 막고, 뒤의 것은 근거와 무관해 `express_consent` 발송에도 걸립니다 |
 | 관리자 캠페인 UI | 12.2의 전체 플로우 + 이중 승인 |
 | 동의 2년 **확인 고지** 배치 | `nextConfirmationNoticeAt` 도래 시 고지 발송 -> `ConsentRecord("confirmation_notice_sent")` + 다음 주기로 이동. **동의는 유지됩니다.** 자동 opt-out은 `feature.emailConsentLapseAutoOptOut`이 켜진 경우에만(기본 OFF, 22절 A14) |
 | DMARC 강화 | `p=none` -> `p=quarantine` -> `p=reject` |
@@ -2745,8 +4086,60 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - **모든 지원 언어에 대해 published `TemplateVersion`이 존재.** 없으면 빌드 실패
   (현재 `normalizeLanguage`가 조용히 `en`으로 떨어지는 문제의 근본 해결).
 
-**gating (단위)**
-- marketing + opt-in 없음 -> `skipped:no_consent`
+**gating (단위)** — 판정은 5.1.1의 국가 rule과 호주 발신자 authority가 함께
+합니다. basis별로 갈립니다.
+
+- marketing + `express_consent` 국가(KR·EEA·GB·CH·CA·SG) + opt-in 없음 ->
+  `skipped:no_consent`
+- marketing + `opt_out` 국가(US) + 거부 없음 -> 수신자 authority 통과.
+  **발송 여부는 호주 발신자 authority가 정합니다**
+- marketing + `inferred_consent`(AU) + 관계 활성 -> 통과. 관계 종료 사건이
+  기록돼 있으면 -> `skipped:no_consent`
+- marketing + 국가 미확정(`ZZ`) -> 발송 안 함
+- marketing + 근거 없음 + 유효한 `risk_accepted` 승인의 cohort -> 발송하되
+  판정에는 `legalAllowed: false`와 `overrideApplied`가 남습니다(5.1.1)
+
+**위 목록만으로는 부족합니다.** 각 basis를 따로 통과시키는 구현은 물론이고,
+**override를 먼저 반환하거나 호주 발신자 authority를 아예 빼먹은 구현도** 그
+목록을 전부 통과합니다. 그래서 **합성과 우선순위를 따로 고정합니다.**
+
+- **US `opt_out` 통과 + 호주 발신자 authority 없음 -> 차단.** 같은 수신자에게
+  호주 authority가 생기면 -> 통과. 이 한 쌍이 "수신자 authority만 보는 구현"을
+  잡습니다
+- **`express_consent` 국가에서 동의가 있을 때도 양쪽을 모두 확인** — 동의 하나가
+  두 authority를 다 충족한다면 **그 사실이 기록에 남아야** 하고, 확인 없이
+  통과시키는 것과 구분됩니다(초안 §4.2)
+- **US + `objected` -> 차단.** `opt_out` 국가에서 거부는 거부입니다
+- **`risk_accepted` 양성 사례는 좁게** — 고신뢰 국가, 의무 상태가 정해진 rule,
+  blocker 없음일 때만 통과합니다
+- **같은 override에 blocker를 하나씩 따로 결합하면 전부 차단**입니다. 묶어서 한
+  번만 시험하면 그중 하나만 구현한 코드가 통과하고, 조기 반환 구현은 목록의
+  앞쪽만 만족시켜도 통과합니다. 초안 7.6의 `blockers` 전체입니다.
+
+  | 결합한 blocker | 기대 |
+  |---|---|
+  | `objected`(철회·거부) | 차단 |
+  | suppression — 전역 · classification · purpose **각각** | 차단 |
+  | 국가 미확정 `ZZ` | 차단 |
+  | `jurisdiction_conflict`(후보 충돌) | 차단 |
+  | 의무 상태 **미결** | 차단 |
+  | 의무 상태 **실패** | 차단 |
+  | kill switch | 차단 |
+  | send flag — `marketing` · `releaseNotes` · `collection` **각각** | 차단 |
+  | readiness 미충족 | 차단 |
+  | `display_unsatisfiable` — 후보의 표시 의무를 합성할 수 없음 | 차단 |
+  | 표시 계약 변경(`display_contract_changed`) | skip + 현재 version으로 재enqueue |
+  | 승인 유형이 `risk_accepted`가 아님 | override 미적용 → 차단 |
+  | 승인 scope 밖 — policy version · rule · country · obligation key **각각** | override 미적용 → 차단 |
+  | 승인 철회(`EmailSendApprovalRevocation`) | override 미적용 → 차단 |
+  | cohort 불일치 — `userId` · delivery에 고정된 주소 · send 시점 현재 주소 **각각** | 차단 |
+  | enqueue 이후 주소 변경 | 차단 |
+  | 계정 삭제 | 차단 |
+  | 주소 없음 | 차단 |
+
+  `allowed`는 `(legalAllowed || overrideApplied) && blockers가 비어 있음`이고,
+  **`blockers`는 override가 넘지 못합니다**(초안 7.6, 5.6의 표). 위 표의 모든
+  행이 그 한 문장을 각각 한 번씩 시험합니다.
 - marketing + `nextConfirmationNoticeAt` 경과 -> **발송됨**(동의는 유지). 별도로
   확인 고지가 큐에 들어감
 - marketing + `feature.emailConsentLapseAutoOptOut` ON + 고지 후 무응답 ->
@@ -2832,8 +4225,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [ ] marketing 도메인·API 키가 MVP 산출물에 존재하지 않음 (M1b, 5.3.1)
 - [ ] `userId`가 `NULL`인 수신자에 대해 fan-out을 두 번 돌려도 `EmailDelivery`가
       한 건만 생김 (`recipientKey`)
-- [ ] `scope="global"` 억제를 두 번 기록해도 `SuppressionEntry`가 한 건만 생김
-      (`purposeKey`)
+- [ ] **같은 사건**을 두 번 기록해도 `SuppressionCause`가 한 건만 생김
+      (`sourceEventKey` — 재전달된 webhook, 재시도된 관리자 요청)
+- [ ] **서로 다른 두 사건**은 같은 selector에서도 두 건이 생기고, 나중 것이 앞선
+      것을 덮지 않음. 한 행짜리 기록이었을 때는 이것이 반대였고, 그 병합이
+      영구 억제를 조용히 낮추던 자리입니다(0절 v26 3번)
 - [ ] 고신뢰 관할권 신호가 충돌하면 marketing이 `skipped:jurisdiction_conflict`로
       **보류**되고 transactional/legal은 정상 발송됨
 - [ ] `nextConfirmationNoticeAt`이 지나도 `EmailPreference.enabled`가 바뀌지 않음
@@ -2896,11 +4292,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | # | 위험 | 영향 | 완화 |
 |---|---|---|---|
 | R1 | **legal/service 메일에 프로모션을 섞어 marketing이 됨** | 법적 통지가 opt-out 사용자에게 도달하지 못함. 이중 위반 | 8.5 타입 분리, 12.2 분류 선점, 18.2 정적 검사 |
-| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 marketing 보류(정렬 시도 폐기), opt-in 시 국가 필수 수집, C1 전역 opt-in, C8 soft opt-in 미사용 |
+| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 marketing 보류(정렬 시도 폐기), opt-in 시 국가 필수 수집, **5.1.1의 국가 rule + 호주 발신자 authority의 이중 판정**(둘 다 통과해야 발송), 국가 미확정(`ZZ`)은 발송 안 함. ~~C1 전역 opt-in, C8 soft opt-in 미사용~~ — 2026-09-16 개정 전의 완화책이었고, **전역 opt-in이 사라지면서 관할권 오판의 비용이 다시 생겼습니다.** 그것을 받는 것이 이중 authority입니다 |
 | R3 | complaint suppression이 로그인 코드를 막음 | 사용자가 계정에서 잠김 | 13.3 출처별 억제(`sourceStream`), 우리 억제 목록이 판정 근거 |
 | R4 | marketing complaint가 transactional 도달률을 깎음 | 로그인 코드 미도달 | C9 **도메인** 평판만 분리. **IP·제공자 계정·suppression은 분리 안 됨**(5.3.1). 14.5 marketing 자동 중단, R23/R25로 이어짐 |
 | R5 | **한국 2년 확인 고지 누락** | 3천만원 이하 과태료 | C7/E7 전역 적용, 배치 자동화, `EmailPreference.nextConfirmationNoticeAt` 인덱스 |
-| R6 | 캐나다 묵시적 동의 만료 후 발송 | CASL 위반 | C8로 묵시적 동의 미사용 |
+| R6 | 캐나다 묵시적 동의 만료 후 발송 | CASL 위반 | **캐나다는 5.1.1에서 `express_consent`이고 해제 조건이 없습니다.** 개정된 C8이 허용하는 묵시적 동의는 **호주의 추론 동의 하나**이며, 그것은 초안 §4.4의 관계 lifecycle이 종료 사건을 기록해 **그 순간부터 발송 불가**로 만듭니다 — 만료를 시간으로 계산하지 않습니다 |
 | R7 | 호주 5영업일 초과 | Spam Act 위반 | C3 즉시 처리(SLA 24시간) |
 | R8 | unsubscribe token 유출 | 타인 설정 변경 | 11.4 끄기 전용, 범위 제한, URL 로그 마스킹 |
 | R9 | **provider 데이터 리전(미국)이 EU 요구와 충돌** | GDPR 이전 문제 | DPF + SCC 의존. **22절 A2에서 결정.** 필요 시 SES/MailerSend |
@@ -2917,7 +4313,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **R20** | **만료된 로그인 코드가 뒤늦게 도착** | 사용자가 입력해 실패 -> 계정 문제로 오해 | 9.4a — 발송 직전 소스 행 재확인, `skipped:credential_expired` |
 | **R21** | **nullable unique로 중복 발송** | 게스트 수신자에게 같은 메일 반복 | 10.2 `recipientKey`, `purposeKey` non-null |
 | **R22** | **감사 시 발송 본문을 재구성하지 못함** | 입증책임(CASL/호주) 대응 불가 | 10.3 `renderDataSnapshot`, 재현 창/검증 창 분리 |
-| **R23** | **제공자 계정 수준 억제가 transactional을 차단** — 추정이 아니라 **확인된 동작** | marketing을 켠 뒤, 프로모션을 스팸 신고한 사용자가 **이메일로 로그인 불가** | 5.3.1 — MVP는 Resend transactional 전용. marketing 전 계정 분리 결정(A18). 한 계정 유지 시 이메일 외 복구 수단 필수화 + suppression 등재 탐지 |
+| **R23** | **제공자 계정 수준 억제가 transactional을 차단** — 추정이 아니라 **확인된 동작** | marketing을 켠 뒤, 프로모션을 스팸 신고한 사용자가 **이메일로 로그인 불가** | 5.3.1 — **A18이 2026-09-14에 별도 Resend 계정으로 결정**했으므로 이 위험의 경로가 끊깁니다(22절). "한 계정 유지 시 이메일 외 복구 수단 필수화"는 그 선택지를 유지했을 때의 조건이었고, 적용되지 않습니다. 남은 것은 계정 분리가 실제로 배포됐는지 확인하는 일입니다 |
 | **R25** | **이메일이 유일한 로그인 수단인 사용자가 suppression에 오름** | 계정 접근 상실. 도달률 문제가 아니라 접근 문제 | 5.3.1 결정 3. OAuth 연결 유도, `login-methods` 카운터 활용, 지원 경로. **marketing 활성화 전에는 발생 불가**(complaint 원천이 없음) |
 | **R26** | **자격증명 payload를 저장했다가 백업·WAL로 유출** | 로그인 코드/매직링크 노출 | **방식 B 권고(미저장).** 방식 A를 택하면 9.4a-2의 네 조건 전부 + 키를 DB 밖에 보관. 라이브 테이블 밖은 파기되지 않음을 명시 |
 | **R27** | 자격증명이 담긴 본문의 단순 해시가 역산됨 | 6자리 코드 노출(10^6 공간) | 9.4a-4, 10.3 — `renderedHash`를 전 분류 HMAC으로 |
@@ -2929,12 +4325,12 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | # | 질문 | 왜 중요한가 | 막히는 것 |
 |---|---|---|---|
-| **Q1 (부분 해소 2026-09-14)** | **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
+| **Q1 (부분 해소 2026-09-14 · 2026-09-16 이후 근거 부분은 EEA·영국 한정)** | **2026-09-16 개정(승인 A)이 답한 것은 이 질문의 근거 부분입니다** — EEA·영국에서 soft opt-in을 근거로 쓰는 것은 G가 막고(초안 §11 G), 다른 국가는 5.1.1의 국가 rule이 정합니다. **근거가 아닌 부분은 그대로 남습니다**: 이 행의 "남은 것" 칸이 말하는 국가별 확인은 **공통 baseline으로 아직 입증하지 못한 국가별 의무**에 대한 것이고, 근거와 무관하므로 `express_consent`로 보내는 EEA 발송에도 걸립니다. **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
 | ~~Q2~~ | **해소 (2026-09-15 승인, 승인자 `mposition`, 효력일 2026-09-15). 선택지 A — C1 + C8 현행 유지.** 근거는 운영 실측입니다: 계정 78개, 세 marketing purpose 모두 `enabled` **0**, `provable` 0, `unprovable` 0, `sendable` 0(2026-09-15 03:15Z, `GET /api/admin/marketing-reach`). **영향란이 전제한 "크게 줄어들 대상"이 존재하지 않았습니다** — C1·C8이 치르는 것은 지금 잃는 사람이 아니라 앞으로 모으는 속도이고, 대안(soft opt-in, 미국·싱가포르 opt-out)도 소급되지 않아 같은 0에서 시작합니다 | [Q2 도달 범위 결정 기록](../ops/q2-marketing-reach-decision.md) §2.1 | 해소. **코드 변경 없음** — 이미 구현된 상태를 승인한 것입니다. 부수 확인: `unprovable` 0이므로 DOI 도입 시 재동의가 필요한 인구가 없습니다 |
 | Q3 | 약관/개인정보처리방침/가격 변경 시 **사전 통지 기간**이 관할권별로 얼마인가? | 5번 유형의 발송 시점을 정함 | 정책 변경 프로세스 |
 | ~~Q4~~ | **해소 (2026-09-16). 예 — 전자우편은 예외 매체입니다.** 제50조제3항 단서의 "대통령령으로 정하는 매체"를 **시행령 제61조제2항이 전자우편으로 정합니다.** 근거는 방송미디어통신위원회·KISA 「불법스팸 방지를 위한 정보통신망법 안내서」(KISA-GD-2025-0037, 2025.12)이며, 전자우편은 수신 확인의 즉시성이 낮아 이용자 통제가 쉽다는 이유를 적고 있습니다. **따라서 E5는 어느 profile에도 적용되지 않고, KR profile의 `quietHours`를 비웠습니다**(seed 버전 `2026-09-16.jurisdictions.2`). 지연 기계는 lane에 남습니다 — 창은 정책 버전 데이터이고, 필요해지면 seed 한 줄입니다 | 4.3 한국 항목, 5.2 E5 | 해소. **남는 것 둘:** ① 시행령 원문 관보 대조(안내서 재수록과 2차 출처 일치로만 확인) ② **이메일 밖 채널** — 같은 내용을 SMS·푸시·알림톡으로 보내면 그쪽은 여전히 야간 별도 동의 대상이며 이 결론이 덮지 않습니다 |
 | Q5 | 일본 특정전자메일법의 **동의 증명 기록 보존 기간**이 우리 사례에 정확히 어떻게 적용되는가? | 13.2 보관 정책 | 일본 진출 시 |
-| Q6 | `ConsentRecord`와 `SuppressionEntry`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
+| Q6 | `ConsentRecord`와 `SuppressionCause`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
 | Q7 | 영수증에 관할권별 **세무 정보 표시 의무**가 있는가? (한국 부가세, EU VAT) | 3.2의 #3. 이 문서 범위 밖 | 영수증 템플릿 |
 | ~~Q8~~ | **해소 (2026-09-14).** 발송 주체는 **호주 법인 하나**이고, 한국 수신자도 같은 신원을 받습니다. `EMAIL_BUSINESS_*` 값이 ABN 포함 설정됐습니다. **한국의 사업자등록번호·통신판매업 신고번호는 존재하지 않습니다** — 통신판매업 신고 대상이 아님을 확인했고, KR profile에서 두 블록을 제거했습니다(5.2 E3) | — | 해소 |
 | Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
@@ -2961,7 +4357,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **A2** | **EU 데이터 리전이 요구사항이 아니다** | 현재 Resend(미국 저장, DPF+SCC)를 이미 쓰고 있음 | **요구사항이라면 제공자 추천이 SES(`eu-central-1`) 또는 MailerSend로 바뀜. 8절 전체 재작성** |
 | **A3** | **일본은 현재 서비스 대상이 아니다** | `ja` locale 없음, JPY 통화 없음 (2.5, 2.7) | 대상이면 locale 추가 + 특정전자메일법 profile + 동의 기록 보존 규칙(Q5) |
 | **A4** | **중국은 현재 marketing 대상이 아니다** | 조사하지 않음. 그러나 **CNY 통화와 zh locale이 이미 존재** | **CNY 결제 사용자가 중국 거주자라면 PIPL/광고법 대응 없이 마케팅을 보내게 됨. 별도 규제 조사 필수** |
-| **A5** | **전역 opt-in의 사업적 비용을 감수한다** | 5.3의 법적 논거 | 마케팅 도달 가능 사용자가 크게 줄어듦. Q2 |
+| ~~**A5**~~ | ~~**전역 opt-in의 사업적 비용을 감수한다**~~ — **2026-09-16 개정(승인 A)으로 전제가 사라졌습니다.** 권한은 국가 rule이 정하므로 "전역 opt-in의 비용"이라는 항목 자체가 없어졌습니다. 개정 전 기록으로 남깁니다 | 5.3의 법적 논거 | 당시 근거였던 "크게 줄어듦"은 2026-09-15 실측에서 **줄어들 대상이 0**으로 확인됐습니다(Q2) |
 | A6 | 월 발송량 5만 통 미만, 사용자 수 수만 명 규모 | 미제공. 저장소 규모와 단일 Postgres 구성에서 추정 | 10배 이상이면 전용 IP와 발송 인프라 재검토 |
 | A7 | 제공자 가격이 2026-08-21 공개 정보와 일치 | 7.1 주석 | 계약 시 재확인 |
 | A8 | 지원 언어는 현행 7개(en/ko/zh/fr/de/es/pt) | `locales/` 조사 | 언어 추가 시 M2가 그것을 쉽게 만듦 |
@@ -2972,7 +4368,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | ~~A13~~ | **확인 완료(2026-08-21).** Route Handler는 기본 비캐시(`GET`만 opt-in), `after()`는 응답 이후 실행이라 credential lane 발송에는 부적합. 9.7에 기록 | `node_modules/next/dist/docs/` | 해소 |
 | **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
 | ~~A15~~ | **폐기(v3).** 가정이 아니라 확인된 사실이며 반대 방향으로 판명. 5.3.1 참조 | — | — |
-| ~~A18~~ | **결정됨 (2026-09-14).** marketing은 **별도 Resend 계정**을 쓰고 transactional과 suppression 목록을 공유하지 않습니다 | 5.3.1. 결정 시점 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKETING_RESEND_API_KEY`를 별도로 요구합니다 | 가정이 아니라 결정입니다. **§5.3.1 결정 3(비이메일 복구 수단 의무화)은 따라오지 않습니다.** 결정 4(hard bounce 공유)는 계속 유효하며, 이제 `SuppressionEntry`가 유일한 공유 지점입니다 |
+| ~~A18~~ | **결정됨 (2026-09-14).** marketing은 **별도 Resend 계정**을 쓰고 transactional과 suppression 목록을 공유하지 않습니다 | 5.3.1. 결정 시점 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKETING_RESEND_API_KEY`를 별도로 요구합니다 | 가정이 아니라 결정입니다. **§5.3.1 결정 3(비이메일 복구 수단 의무화)은 따라오지 않습니다.** 결정 4(hard bounce 공유)는 계속 유효하며, 이제 `SuppressionCause`가 유일한 공유 지점입니다 |
 | ~~A19~~ | **결정됨(v4).** 방식 B 승인. 자격증명은 저장하지 않습니다 | 검토 승인 2026-08-21 | 가정이 아니라 결정입니다 |
 | ~~A16~~ | **완화(v3).** 방식 B에서는 worker가 재발송하지 않고 정리·관측만 하므로 **상시 프로세스가 필요 없습니다.** 1분 주기 cron으로 충분 | 9.4a-3 | 방식 A를 택하면 다시 제약이 됩니다 |
 | **A17 (갱신 2026-09-14)** | ~~8개로 충분~~ **9개가 필요합니다.** Q1 검토에서 스위스를 `EU`에서 분리하기로 했습니다 | EEA가 아니고 UWG art. 3(1)(o)·revFADP·감독기관·이전 근거가 모두 별개(검토 기록 §4.5) | **구현 완료 (2026-09-14)**: `CH` profile 신설 + resolver·country map 분리 + `EU`·`CH` footer에 `abn` 추가. 값이 같아도 근거가 다르면 행을 나눕니다. `privacy_link` block만 보류(검토 기록 §9-3) |
@@ -3095,10 +4491,15 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 **2026-08-21 승인.** 이 문서는 이 시점부터 **ADR**이며, 아래 결정은 변경하려면
 새 개정과 재승인이 필요합니다.
 
-**v1에서 조건부 승인된 것 (재확인만):**
+**v1(2026-08-21)에서 조건부 승인된 것 — 당시의 기록이며, 그중 하나는 이후
+개정됐습니다:**
 1. 8절의 제공자 결정 (Resend 유지 + 얇은 port)
 2. outbox / consent / suppression / jurisdiction 계층 분리
-3. 5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)
+3. ~~5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)~~ — **2026-09-16 승인 A·C가
+   개정했습니다**(v29, D4). 지금의 C1은 **수신자 국가 rule + 호주 발신자
+   authority의 이중 판정**이고 C8은 **국가 rule이 허용하는 곳에서만 묵시적 동의**
+   입니다(5.1.1). 이 줄을 지우지 않는 이유는 22절의 다른 승인 기록과 같습니다 —
+   한 번 그렇게 정했다는 사실이 없어지면 왜 개정했는지에 답할 수 없습니다
 4. 15절의 MVP 범위와 "만들되 끄는" 항목 목록
 
 ### 확정된 결정
@@ -3108,7 +4509,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D1 | 제공자는 **Resend 유지**, `lib/email.ts` 자리에 얇은 `EmailProviderPort`. 구현체는 하나 | 8.1, 8.2 |
 | D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
-| D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 — **승인됨 (2026-09-15, `mposition`).** 21절 Q2 |
+| D4 | ~~**전역 opt-in(C1)**, **soft opt-in 미사용(C8)**~~ → **국가 rule + 호주 발신자 authority의 이중 판정** | 5.1, 5.1.1, 5.6 — **2026-09-15 승인(`mposition`) 뒤 2026-09-16에 개정됐습니다**(승인 A·C, 제품 소식 재설계 초안 §11). 21절 Q2는 개정 이전 상태에 대한 해소입니다 |
 | D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
@@ -3117,9 +4518,10 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 
 ### 착수 전 남은 것
 
-1. **`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13). 이 문서에서
-   유일하게 남은 미확인 항목입니다. Route Handler 시그니처, `after()` 지원 여부,
-   캐시 기본값을 읽고 9.7의 배치를 확정합니다.
+1. ~~**`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13)~~ — **해소
+   (2026-08-21).** Route Handler는 기본 비캐시이고 `after()`는 응답 이후 실행이라
+   credential lane에 부적합하다는 것을 읽었습니다. 결과는 9.7에, 해소 기록은 22절
+   A13에 있습니다.
 2. **21절 법률 질문 후속.** Q8은 해소됐습니다 — 사업자 정보 실제 값이
    2026-09-14 production에 배포됐고 `/api/ready`의 `emailBusinessIdentity`가
    `true`입니다(`docs/ops/email-sending-domains.md` §1.3). Q11은 Customer 법적 명칭과 확인 가능한 최초 계정·결제일의 내부 기록,
@@ -3129,17 +4531,23 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
    Q18은 production aggregate 확인까지 완료했고 저장된 EEA 신호는 모두 0이었습니다.
    대표는 2026-09-14 **EU 출시 유지 + EU 대리인을 최대한 빠른 시일 내 지정**을
    승인했습니다. 사업 경로 결정은 끝났고 provider·요금제 선택, 서면 위임과
-   `/privacy` 반영이 남았습니다. 이 결정은 EU marketing의 Q1·Q8·Q12와 A18을
-   자동 해소하지 않습니다.
-3. **브랜치 정책 확인.** 현재 브랜치 `claude/saas-email-notification-architecture-764951`은
-   이름에 `to-develop` 경로 조각이 없어 develop 자동 PR 대상이 아닙니다
-   (AGENTS.md). 구현은 `claude/to-develop/...` 브랜치에서 진행하는 것을 권고합니다.
+   `/privacy` 반영이 남았습니다. 이 결정은 EU marketing의 Q1을 자동 해소하지
+   않습니다. **Q8·Q12·A18은 각자 따로 해소됐습니다** — Q8은 2026-09-14(사업자
+   정보 배포), Q12는 2026-09-14(`/privacy`의 이메일 처리 고지), A18은
+   2026-09-14(별도 Resend 계정). 셋 다 이 D9 결정이 해소한 것이 아니라 같은 무렵
+   별개로 닫힌 것이고, 그래서 여기에 묶여 있었습니다.
+3. **브랜치 정책 확인.** 이 문서의 작업은 `claude/to-develop/...` 브랜치에서
+   진행합니다 — `to-develop` 경로 조각이 있는 브랜치만 develop 자동 PR 대상입니다
+   (AGENTS.md). v1을 쓸 당시의 브랜치는 그 조각이 없었고, 그 이름은 더 이상
+   존재하지 않아 지웠습니다.
 
 ### marketing 활성화 전에 결정할 것 (MVP 착수를 막지 않음)
 
 - ~~**A18**~~ — **결정됨 (2026-09-14): 별도 계정.** 위 22절 참조.
 - **A14**(자동 opt-out 채택), **A2**(EU 리전), **A3**(일본), **A4**(중국),
-  **A1**(B2C/B2B), **A5**(opt-in 비용). ~~**A17**~~(profile 개수 — v5에서 9개로 확정).
+  **A1**(B2C/B2B) — **다섯이 남았습니다**. ~~**A5**~~(opt-in 비용)는 2026-09-16
+  개정으로 전제가 사라져 결정할 것이 없고, ~~**A17**~~(profile 개수)은 v5에서
+  9개로 확정됐습니다.
 
 ### 참고 — v2에서 승인된 항목
 5. **9.4a credential synchronous lane** — 세 행 한 트랜잭션, 만료 코드 미발송,
@@ -3162,6 +4570,7 @@ MVP 착수를 차단하지 않습니다. SCC/UK Addendum에 대한 Resend 서면
 fallback 재검토 조건이 발생할 때만 실행합니다.
 
 **MVP 착수는 위 A/B 결정만 있으면 가능합니다.** 5.3.1의 계정 분리 결정(A18)은
-marketing 활성화의 선행 조건이지 MVP의 선행 조건이 아닙니다 — MVP가 marketing을
-포함하지 않기 때문입니다. 다만 M1b가 "marketing 도메인·API 키를 만들지 않는다"를
+marketing 활성화의 선행 조건이었고 **2026-09-14에 내려졌습니다**(별도 Resend
+계정). 애초에 MVP의 선행 조건은 아니었습니다 — MVP가 marketing을 포함하지 않기
+때문입니다. 다만 M1b가 "marketing 도메인·API 키를 만들지 않는다"를
 산출물 기준으로 못박습니다.

@@ -199,10 +199,20 @@ run(
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
+    // AMUX scheduling ownership is a database CAS: two claimants must leave
+    // exactly one owner and one append-only route decision, and a failed
+    // decision write must roll the ownership change back.
+    "tests/integration/amux-orchestration.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // The staging-only create-once writer: exact historical/current provenance,
+    // audit atomicity, immutable approval and DB-clock expiry.
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    // One-run approval, atomic dispatch-intent/reservation consume, immutable
+    // terminal receipts and stop-without-retry unknown recovery.
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
@@ -233,6 +243,11 @@ run(
     // or a bucket outage cannot record an account as having lost its files.
     "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The permission ledger's constraints and triggers. Append-only, sealing and
+    // verdict immutability are enforced in Postgres because a ledger the
+    // application alone protects is one a migration or an admin script can
+    // rewrite -- and the row it rewrites is the proof that a send was allowed.
+    "tests/integration/email-permission-ledger.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
@@ -240,7 +255,22 @@ run(
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
+    // Provider events applied in their own order, every permutation to one state,
+    // and the sweep that records expired causes as released.
+    "tests/integration/email-provider-event-order.db.test.ts",
+    // The stored event state machine: leases, retries, waiting for a delivery,
+    // and abandonment after ten attempts.
+    "tests/integration/email-webhook-processing-lease.db.test.ts",
+    // Recording the permanent bounces that were handled as soft ones.
+    "tests/integration/email-permanent-bounce-recovery.db.test.ts",
+    // The lock every customer-facing send takes: the suppression word read
+    // inside it, the provider call made while it is held, and the row that
+    // waits without counting an attempt when somebody else has the address.
+    "tests/integration/email-send-address-lock.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
+    // A deletion request and a spam complaint: the suppression and the preference
+    // withdrawal commit in one transaction, keyed so a retry records nothing new.
+    "tests/integration/email-privacy-complaint-suppression.db.test.ts",
     // The double opt-in against the tables: request, history and queued mail
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
@@ -305,9 +335,10 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
-    // Deploy B: the read authority setting, the cutover under the exclusive
-    // fence, and lifting causes by the release matrix. The fence, the setting
-    // row and the audit row sharing a transaction are all database facts.
+    // Lifting causes by the release matrix, the address lock a concurrent
+    // writer contends for, and a retired setting row proving inert. The lock,
+    // the leftover row and the audit row sharing a transaction with the
+    // release are all database facts.
     "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
@@ -318,6 +349,23 @@ run(
     // reads of the same table -- the newest-N window and the single-row read --
     // so a single process with no database proves neither.
     "tests/integration/admin-audit-row-by-id.db.test.ts",
+    // The audit chain writer on real rows: the database clock, the previous
+    // hash read and the verifier agree, inside and outside a caller's
+    // transaction, and a rolled-back caller leaves no entry behind.
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    // The marketing tables' triggers and CHECK constraints, exercised with
+    // direct writes rather than through the store module: what they refuse is
+    // exactly the write that did not go through it.
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    // Proving a template: two human audit entries that still verify against
+    // the chain, which is the only route to a post published without a person
+    // looking at it. Needs real rows, because a fixture that inserted them
+    // would prove the loader agrees with the fixture.
+    "tests/integration/marketing-templates.db.test.ts",
+    // Where a plan number came from, which decides whether a price claim may
+    // rest on it. Needs rows, because the whole question is stored versus
+    // compiled.
+    "tests/integration/marketing-fact-sources.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
@@ -366,6 +414,10 @@ run(
     // idempotency key, a verdict is scoped to one person, and both cascades
     // are the deletion path the data-domain registry claims.
     "tests/integration/comparison-review-item-feedback.db.test.ts",
+    // A pin is not activity: the sidebar groups its date headers by
+    // `updatedAt`, so pinning may not touch it, and another account's pin
+    // statement must match no row.
+    "tests/integration/conversation-pin.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",
@@ -481,6 +533,23 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process, and for the same reason: it replaces next-auth. What
+// it pins is which requests reach the lift at all -- a stale cause set, a dead
+// handle and an unknown handle are three different refusals, and every one of
+// them used to answer "not found".
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/admin-suppression-lift-route.db.test.ts",
+  ],
+  "Running the administrator suppression lift route and its refusals"
 );
 // Also its own process: it replaces next-auth and the AI SDK's streamText to
 // drive a real searching turn end to end. What it asserts is the wiring

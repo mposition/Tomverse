@@ -13,9 +13,13 @@ import {
  * This module decides shapes and state only; it does not read or write a DB.
  */
 export const PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION =
-    "prompt-refiner-reservation-authority-v1" as const;
+    "prompt-refiner-reservation-authority-v2" as const;
+export const PROMPT_REFINER_RESERVATION_STAGE_IDS = Object.freeze([
+    "prompt-refiner-shadow-v1",
+    "prompt-refiner-shadow-v2",
+] as const);
 export const PROMPT_REFINER_RESERVATION_STAGE_ID =
-    "prompt-refiner-shadow-v1" as const;
+    PROMPT_REFINER_RESERVATION_STAGE_IDS[1];
 export const PROMPT_REFINER_RESERVATION_TTL_MS = 5 * 60 * 1_000;
 
 export const PROMPT_REFINER_RESERVATION_STAGE_STATUSES = Object.freeze([
@@ -64,22 +68,27 @@ const computedReservationContractDigest = `sha256:${createHash("sha256")
     .digest("hex")}`;
 
 export const PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST =
-    "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f" as const;
+    "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1" as const;
 
 if (computedReservationContractDigest !== PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST) {
-    throw new Error("Prompt Refiner reservation contract digest drifted");
+    throw new Error(
+        `Prompt Refiner reservation contract digest drifted: ${computedReservationContractDigest}`
+    );
 }
 
 export const PROMPT_REFINER_RESERVATION_REFUSALS = Object.freeze([
     "invalid_binding",
     "stage_not_found",
+    "stage_authorization_invalid",
     "stage_contract_mismatch",
     "runtime_contract_mismatch",
+    "runtime_source_mismatch",
     "request_binding_mismatch",
     "request_already_terminal",
     "reservation_not_found",
     "reservation_not_active",
     "reservation_expired",
+    "dispatch_intent_required",
     "stage_capacity_exhausted",
 ] as const);
 export type PromptRefinerReservationRefusal =
@@ -95,6 +104,8 @@ export type PromptRefinerReservationStageFacts = {
     costCeilingMicroUsd: bigint;
     reservationCount: number;
     allocatedCostMicroUsd: bigint;
+    approvedAt: Date;
+    approvalExpiresAt: Date;
 };
 
 export const promptRefinerReservationStageProblems = (
@@ -144,6 +155,12 @@ export const promptRefinerReservationStageProblems = (
     }
     if (stage.allocatedCostMicroUsd > stage.costCeilingMicroUsd) {
         problems.push("stage_cost_exceeded");
+    }
+    if (
+        stage.approvalExpiresAt.getTime() - stage.approvedAt.getTime() !==
+        60 * 60 * 1_000
+    ) {
+        problems.push("approval_window_invalid");
     }
     return problems;
 };

@@ -117,6 +117,24 @@ Applied in order, most decisive first:
 6. **stable model id** — arbitrary, and deliberately so. What it buys is that
    two runs over the same inputs answer the same way.
 
+**Criterion 5 had no data until 2026-09-17 (CHAT-LATENCY-01).** No caller of
+`completeInstrumentedDispatch` passed `firstVisibleTokenAt`, so every attempt
+read as tokenless and the TTFT tie-break never applied. The chat route now
+passes the moment the first chunk with text in it was accepted by the response
+stream, for the attempt that produced it -- a pre-token attempt that a fallback
+replaced carries none. The formula is unchanged, but its input now exists:
+
+- It is written only where `ROUTING_DISPATCH_INSTRUMENTATION` is `observe` or
+  `enforce`, since that is when attempt rows exist at all. **Turning that mode on
+  in an environment where Auto routes is therefore a change to Auto tie-breaks**,
+  and is rolled out as one.
+- `lib/routerRuntimeSignals.ts` counts only attempts that carry both
+  `dispatchedAt` and `firstVisibleTokenAt`, and `ROUTER_TTFT_MIN_OBSERVATIONS`
+  (50 per model, inside the signal window) must be met before a p95 exists, so
+  rows written before this change -- all without a first token -- cannot form a
+  small-sample p95; they are simply absent.
+- The value is a server moment, not the time the user saw the answer.
+
 Criteria 2, 4 and 5 are supplied by the caller, exactly as `unhealthyModelIds`
 is: where a number comes from is the caller's business, and what it means is
 this policy's. That is also what keeps `selectRouterModel` pure —

@@ -77,6 +77,10 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // in the product, so an export that omitted it would be narrower than
         // the screen.
         productKey: true,
+        // The pin is the account's own arrangement of its list, visible on
+        // every device it signs in on, so an export without it would be
+        // narrower than the screen.
+        pinnedAt: true,
         createdAt: true,
         updatedAt: true,
         messages: {
@@ -560,6 +564,119 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  emailPermissionEvent: (userId) =>
+    prisma.emailPermissionEvent.findMany({
+      where: { userId },
+      // The facts other than consent that a sending basis rests on. evidence
+      // holds a hash of the notice wording and a screen identifier -- ours,
+      // not theirs -- and sourceEventKey is the handle that makes a retried
+      // write idempotent, so neither is returned.
+      select: {
+        id: true,
+        emailAddress: true,
+        kind: true,
+        scopeKey: true,
+        occurredAt: true,
+        capturedVia: true,
+        jurisdiction: true,
+        jurisdictionSource: true,
+        policyVersionId: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  emailSendApprovalMember: (userId) =>
+    prisma.emailSendApprovalMember.findMany({
+      where: { userId },
+      // That an approved send covered them -- which means saying *what* was
+      // approved, or the row is a membership of nothing. The approval's type,
+      // its scope and its dates come through nested, and so does whether it
+      // was later withdrawn; without them the person learns that a decision
+      // included them and not what the decision was.
+      //
+      // The approver's identity, their reason and their review condition stay
+      // behind: their subject is the approver, not this account. addressDigest
+      // is withheld too -- it exists so a send can be refused to a mailbox the
+      // approval was not about, and it tells this person nothing they do not
+      // know while giving anyone else a value to test guesses against.
+      select: {
+        id: true,
+        noticeAnchorAt: true,
+        noticeAnchorSource: true,
+        createdAt: true,
+        approval: {
+          // A cohort belongs to a `risk_accepted` override and to nothing
+          // else -- a trigger holds that -- so the scope returned here is an
+          // override's: which purpose it covered, under which policy version.
+          // A waiver's rule, country and obligation are deliberately absent
+          // because no membership can reach one.
+          select: {
+            approvalType: true,
+            purposeKey: true,
+            policyVersionId: true,
+            approvedAt: true,
+            sealedAt: true,
+            revocations: {
+              select: { revokedAt: true },
+              orderBy: { revokedAt: "asc" },
+              take: 1,
+            },
+          },
+        },
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  emailPermissionDecision: (userId) =>
+    prisma.emailPermissionDecision.findMany({
+      where: { userId },
+      // Why each message to them was or was not permitted, including what the
+      // verdict rested on: the evidence rows come through nested, so the
+      // permission events and consent records already in this export can be
+      // matched to the decision that cited them. Without them the person has
+      // the conclusion and no way to connect it to the facts.
+      //
+      // The rule versions and the policy version travel with it for the same
+      // reason -- a verdict read a year later against a rule that has moved
+      // means nothing without saying which version it read.
+      //
+      // The delivery and approval ids and the display contract hashes stay
+      // behind: one is a handle onto a send, one onto somebody else's decision.
+      // The normalisation version describes how we compared their address
+      // rather than anything about them, and the evidence rows' own
+      // decisionId is redundant once they are nested under it.
+      select: {
+        id: true,
+        phase: true,
+        purpose: true,
+        classification: true,
+        emailAddress: true,
+        authorities: true,
+        legalAllowed: true,
+        overrideType: true,
+        blockers: true,
+        allowed: true,
+        countryCandidates: true,
+        ruleVersions: true,
+        policyVersionId: true,
+        evaluatedAt: true,
+        // When suppression was last read for this verdict, and when the message
+        // was handed to the provider. They are facts about their own message
+        // and the gap between them is what a complaint is usually about; an
+        // export that returns the conclusion and not when it was acted on
+        // tells them less than it has.
+        suppressionCheckedAt: true,
+        providerSubmittedAt: true,
+        evidence: {
+          select: {
+            authority: true,
+            eventId: true,
+            consentRecordId: true,
+          },
+        },
+      },
+      take: EXPORT_ROW_CAP,
+    }),
   emailCampaignRecipient: (userId) =>
     prisma.emailCampaignRecipient.findMany({
       where: { userId },

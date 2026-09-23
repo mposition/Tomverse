@@ -10,6 +10,16 @@ on:
       - "lib/stripe*.ts"
       - "lib/promptRefinerReservation*.ts"
       - "lib/promptRefinerExecutionContract.ts"
+      - "lib/promptRefinerShadowAdmissionCore.ts"
+      - "lib/promptRefinerStageAdmission*.ts"
+      - "app/api/admin/prompt-refiner/**"
+      - "docs/policy/prompt-refiner-observability.md"
+      - "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md"
+      - "docs/ops/prompt-refiner-durable-stage-writer-*.md"
+      - "docs/policy/tomverse-chat-data-domain-registry.yaml"
+      - "lib/accountDataExportDomains.ts"
+      - "scripts/check-data-domain-registry.mjs"
+      - "scripts/report-unswept-tables-core.mjs"
       - "lib/adminUsers.ts"
       - "lib/userTimeZone.ts"
       - "app/api/billing/**"
@@ -160,31 +170,73 @@ jobs:
         id: scenarios
         run: npm run test:db:integration
 
-      # Only the release-branch lane is worth an alert, and the notifier
-      # enforces that itself rather than trusting this condition -- a
-      # pull_request run that reached here would be refused by
-      # `resolveReleaseLaneAlert` on the branch name.
-      #
-      # This lane can be red on `develop` for hours without anyone seeing it,
-      # and was on 2026-08-25: the change that broke it touched no path in the
-      # `pull_request` filter above, so its own pull request never ran this
-      # suite, and every run afterwards was cancelled by the next merge until
-      # one finally survived. Four merges passed over it in between.
-      #
-      # Cancellation is deliberately not alerted on -- a superseded run answers
-      # nothing about the branch, and the newer run answers for both -- but it
-      # does delay this message, which is the cost of `cancel-in-progress` and
-      # is cheaper than queueing thirty-minute runs behind every merge.
-      #
-      # The commit message is passed through `env:` rather than interpolated
-      # into a `run:` line, so its contents are a string to the script and
-      # never shell.
+      # No alert step here, and no secret anywhere in this job. This job
+      # runs the checked-out tree -- a pull request's head, or whatever was
+      # just pushed -- and restores the shared npm cache, so anything it can
+      # read, that code can read. The alert lives in `report-red-lane` below,
+      # which never runs this tree.
+
+  # Only the release-branch lane is worth an alert, and the notifier enforces
+  # that itself rather than trusting this condition -- a run on any other
+  # branch is refused by `resolveReleaseLaneAlert` on the branch name.
+  #
+  # This lane can be red on `develop` for hours without anyone seeing it, and
+  # was on 2026-08-25: the change that broke it touched no path in the
+  # `pull_request` filter above, so its own pull request never ran this suite,
+  # and every run afterwards was cancelled by the next merge until one finally
+  # survived. Four merges passed over it in between.
+  #
+  # Cancellation is deliberately not alerted on -- a superseded run answers
+  # nothing about the branch, and the newer run answers for both -- but it
+  # does delay this message, which is the cost of `cancel-in-progress` and is
+  # cheaper than queueing thirty-minute runs behind every merge. `result` is
+  # `cancelled` when every unfinished lane was cancelled, and `failure` as soon
+  # as one lane failed, so a failure is not hidden by a cancelled sibling.
+  #
+  # Why a separate job (it used to be the last step of each lane). The Slack
+  # webhooks were in the environment of a step in the same job that had just
+  # run `npm ci` and the suite from the checked-out tree, with a restored npm
+  # cache: code from that tree could leave something behind for the step that
+  # held the secrets. So this job:
+  #   - takes only the matrix's `result` string from `needs`, never a file,
+  #     an artifact or the cache;
+  #   - checks out the default branch, not the commit under test, and only
+  #     the two notifier files, which import only each other;
+  #   - installs nothing and uses no `cache:`;
+  #   - never runs for `pull_request`, so a branch's own run holds no webhook.
+  # tests/creditFinanceAlertIsolation.test.mjs pins these.
+  #
+  # The commit message is passed through `env:` rather than interpolated into
+  # a `run:` line, so its contents are a string to the script and never shell.
+  report-red-lane:
+    name: Report the red release lane
+    runs-on: ubuntu-latest
+    needs: credit-finance-db
+    if: always() && needs.credit-finance-db.result == 'failure' && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the notifier from the default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/notify-release-lane-failure.mjs
+            scripts/notify-release-lane-failure-core.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - name: Report the red lane
-        if: always() && steps.scenarios.outcome == 'failure'
         env:
-          # The lane, not the shard. `LANE_KEYS` names kinds of lane and
-          # the consequence text is the same whichever group went red; the
-          # run URL already points at the failing job.
+          # The lane, not the shard. `LANE_KEYS` names kinds of lane and the
+          # consequence text is the same whichever group went red; the run URL
+          # already points at the failing job.
           RELEASE_LANE: db-integration
           RELEASE_LANE_CONCLUSION: failure
           RELEASE_LANE_BRANCH: ${{ github.ref_name }}

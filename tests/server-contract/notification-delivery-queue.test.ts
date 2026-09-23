@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for the operator-notification retry queue.
@@ -90,10 +91,10 @@ const nextSendOutcome = () =>
 /** A tiny in-memory stand-in for the two tables this contract touches. */
 const fakePrisma = {
   // Every attempt asks whether the address is suppressed first
-  // (docs/policy/email-notifications.md §13.3).
-  suppressionEntry: { findMany: async () => [] },
-  // The suppression read authority: absent, so entries decide.
-  appSetting: { findUnique: async () => null },
+  // (docs/policy/email-notifications.md §13.3), and asks the causes.
+  suppressionCause: { findMany: async () => [] },
+  // The address lock the send takes before it submits.
+  ...sendLockPrismaStubs(),
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakePrisma),
   feedback: {
     create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -256,6 +257,31 @@ async function loadModules() {
           if (outcome === "ok") return { sent: true, skipped: false, id: "1" };
           if (outcome === "skip") return { sent: false, skipped: true };
           throw new Error(outcome.throws);
+        },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: SendAttempt) => {
+          const outcome = nextSendOutcome();
+          world.sends.push({
+            to: input.to,
+            subject: input.subject,
+            text: input.text,
+            senderRole: input.senderRole,
+            idempotencyKey: input.idempotencyKey,
+          });
+          if (outcome === "ok") {
+            return { ok: true, providerMessageId: "1", from: "support@tomverse.app", senderRole: input.senderRole };
+          }
+          if (outcome === "skip") return { ok: false, notConfigured: true, status: null };
+          // The scripted throw carries its status in the message, which is what
+          // the operator path parses. The helper's path reads the status field,
+          // so the same script has to answer in both shapes.
+          const status = /Email send failed:\s*(\d{3})/.exec(outcome.throws)?.[1];
+          return status
+            ? { ok: false, status: Number(status) }
+            : { ok: false, status: null, transportError: new Error(outcome.throws) };
         },
       },
     });

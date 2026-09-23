@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-19T14:23:35.508Z",
+  "durationMs": 164157,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 22,
+    "cachedInputTokens": 407684,
+    "outputTokens": 13578,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.0717629999999996,
+    "raw": {
+      "input_tokens": 22,
+      "cache_creation_input_tokens": 52090,
+      "cache_read_input_tokens": 407684,
+      "output_tokens": 13578,
+      "output_tokens_details": {
+        "thinking_tokens": 9371
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 52090,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3024,
+          "cache_read_input_tokens": 56170,
+          "cache_creation_input_tokens": 662,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 662
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-19T14:26:19.723Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:40da843a1a58683b2566e1e0958384344abe1949a44ff55eeb1902d630d7b4fc",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1049-1053",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "Round 0's finding is fixed for the count assertion, but the same empty-message failure mode now lives in the deepEqual: an order-only divergence (same set, wrong position) yields missing=[] extra=[] and, because a custom message suppresses assert's array diff, the reported message states the list changed while naming nothing.",
+        "reproduction": "In lib/promptRefinerStageAdmissionCore.ts move 'lib/marketingAutomationAccess.ts' from after 'lib/managedSlack.ts' to after 'lib/marketingConsentConfirmationEmail.ts' (set unchanged, 187 entries) and run `node --conditions=react-server --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`; the failure reads `runtime source path list changed; missing=[] extra=[]`. Including the first differing index (e.g. `expected[i]` vs `actual[i]`) would close it."
+      },
+      {
+        "location": "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql:365",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The embedded executionManifest `runtimeSource.fileCount` literal in the SQL CHECK is hand-synced with PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT but no test binds them, so a missed edit to this one literal passes every focused test, typecheck and lint and only fails at stage-row insert time.",
+        "reproduction": "Revert only migration.sql:365 to `\"fileCount\":186` (leave lines 84 and lib/promptRefinerStageAdmissionCore.ts:41 at 187) and re-run the five focused test files plus `npm run typecheck`: all pass. The existing SQL/TS parity test (tests/promptRefinerRuntimeSourceClosure.test.mjs:1196-1206) only parses `expected_paths`, not the manifest literal. Pre-existing gap, not introduced here; a parallel regex assertion on `\"runtimeSource\":{\"fileCount\":(\\d+)` would cover it."
+      },
+      {
+        "location": "prisma/schema.prisma:5528",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The doc comment `Content-free v2 manifest for the exact 186-file runtime import closure` (and docs/ops/prompt-refiner-durable-stage-writer-task.md:17, docs/ops/tomverse-chat-progress.md:1175) still says 186 after the closure moved to 187.",
+        "reproduction": "`rg -n '186-file'` returns those three non-package paths. Note schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry and is outside this task's writableScope, so correcting the comment requires re-pinning MARKETING_WEBHOOK_PIPELINE_FINGERPRINT again; leaving it to a follow-up with a widened scope is the reasonable call."
+      }
+    ],
+    "nextAction": "Merge as is; the three nits are non-blocking and the SQL-manifest parity assertion plus the stale 186-file comments are best handled in a follow-up whose scope includes prisma/schema.prisma and the marketing fingerprint re-pin."
+  }
+}

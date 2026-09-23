@@ -72,16 +72,20 @@ export class ArtifactToolCallTracker {
    */
   noteChunk(chunk: unknown): void {
     if (!chunk || typeof chunk !== "object") return;
-    const record = chunk as Record<string, unknown>;
-    if (record.type !== "tool-input-start") return;
-    // A hosted tool the provider runs itself. Never a generated file.
-    if (record.providerExecuted === true) return;
-    const { toolCallId, toolName } = record;
-    if (!isNonEmptyString(toolCallId) || !isNonEmptyString(toolName)) return;
-    if (!this.registeredToolNames.has(toolName)) return;
-    // Keyed by call id, so a provider that repeats the frame for one call
-    // still describes one call.
-    this.started.set(toolCallId, { toolCallId, toolName });
+    try {
+      const record = chunk as Record<string, unknown>;
+      if (record.type !== "tool-input-start") return;
+      // A hosted tool the provider runs itself. Never a generated file.
+      if (record.providerExecuted === true) return;
+      const { toolCallId, toolName } = record;
+      if (!isNonEmptyString(toolCallId) || !isNonEmptyString(toolName)) return;
+      if (!this.registeredToolNames.has(toolName)) return;
+      // Keyed by call id, so a provider that repeats the frame for one call
+      // still describes one call.
+      this.started.set(toolCallId, { toolCallId, toolName });
+    } catch {
+      // A malformed provider chunk must not abort the answer or create a card.
+    }
   }
 
   /**

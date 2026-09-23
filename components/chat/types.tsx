@@ -275,6 +275,31 @@ export type Conversation = {
     shareExpiresAt?: string | null;
     messageCount?: number;
     createdAt?: string;
+    /**
+     * Whether this conversation is pinned to the top of the sidebar.
+     *
+     * Server state for an account (`Conversation.pinnedAt`), and absent for a
+     * guest row, whose pins stay in that browser because the conversation does
+     * too.
+     */
+    pinned?: boolean;
+    /**
+     * `Conversation.pinSeq`: the sequence of the last pin write the server
+     * accepted. A new write must carry a greater one, and each list is compared
+     * by it so a refreshed answer can be told from a stale one -- which the value
+     * alone cannot do once a pin has been changed and changed back.
+     */
+    pinSeq?: number;
+    /**
+     * Last activity, which is what the sidebar's date headers group by and
+     * what the server already orders the list by.
+     *
+     * Optional because a guest row written before this field existed, and an
+     * image conversation added optimistically before the server answers, do
+     * not have one. `lib/conversationListGrouping.ts` places those where they
+     * claim nothing rather than guessing at today.
+     */
+    updatedAt?: string;
 };
 
 export const MAX_SELECTED_MODELS = 3;

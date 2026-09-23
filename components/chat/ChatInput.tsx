@@ -152,7 +152,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import {
-  resolvePromptRefinerDecision,
+  resolvePromptRefinerFixtureDecision,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerResolution,
   type PromptRefinerUiState,
@@ -662,9 +662,9 @@ type ChatInputProps = {
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   /**
-   * Called before an accepted proposal changes the controlled textarea. The
-   * owner must leave `ready` after either decision and discard a stored
-   * resolution whenever a later draft no longer equals its displayPrompt.
+   * Fixture decisions are validated by the state owner. Acceptance shows a
+   * read-only preview and never changes the controlled textarea or durable
+   * draft; the owner discards it when the authored source changes.
    */
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   /**
@@ -1325,20 +1325,19 @@ export function ChatInput({
       suggestion: BoundPromptRefinerSuggestion,
       decision: "accepted" | "kept_original"
     ) => {
-      const resolution = resolvePromptRefinerDecision({
+      const resolution = resolvePromptRefinerFixtureDecision({
         suggestion,
         currentPrompt: value,
         decision,
       });
-      // The owner records the original/refined split before a controlled input
-      // update can make the ready state stale and remove it from the screen.
-      onPromptRefinerDecision?.(resolution);
-      if (decision === "accepted") {
-        onChange(resolution.displayPrompt);
-      }
+      // The owner validates the exact source and decision before leaving ready.
+      // A fixture decision is preview-only. The owner may acknowledge a
+      // validated handoff, but these synthetic bytes must never enter the
+      // authored composer draft or its durable draft writer.
       requestAnimationFrame(() => textareaRef.current?.focus());
+      onPromptRefinerDecision?.(resolution);
     },
-    [onChange, onPromptRefinerDecision, value]
+    [onPromptRefinerDecision, value]
   );
 
   /*
@@ -2262,11 +2261,34 @@ export function ChatInput({
     // 10rem rather than a fixed 160px: at 200% text scaling the auto-grow cap
     // has to grow with the text, or the box stops one line short of what the
     // reader can actually see.
-    const rootFontSize =
-      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
-  }, [value]);
+    const fit = () => {
+      const rootFontSize =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
+    };
+    fit();
+
+    // COMPOSER-REFLOW-01. The draft is not the only thing that changes how
+    // tall the box has to be. An empty textarea's scrollHeight is its
+    // placeholder's, and the placeholder wraps as the box narrows -- at Edge's
+    // 300% page zoom (a ~137px layout viewport) "무엇을 도와드릴까요?" takes two
+    // lines. Fitted only when `value` changed, the box kept the height it had
+    // before the width or the placeholder moved: the second line was cut off,
+    // and the empty box became a scroller of its own that took a drag meant
+    // for the shell, so a drag started on it could not bring Send into view.
+    // Refitting on a width change and on a new placeholder keeps the box as
+    // tall as what it shows.
+    if (typeof ResizeObserver === "undefined") return;
+    let lastWidth = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === lastWidth) return;
+      lastWidth = textarea.clientWidth;
+      fit();
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [value, placeholderText]);
 
   useEffect(() => {
     if (focusToken === undefined) return;
@@ -3042,10 +3064,16 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
+  // MOBILE-KB-INSET-01. The bar adds no safe-area inset of its own. It is
+  // only below md inside MobileChatShell, whose dock always ends with
+  // AiDisclaimerNotice, and that last row already pads for the inset -- adding
+  // it here too reserved the home-indicator space twice, once above the notice.
+  // (Above md the bar's md:pb-3 applies and no inset was ever added.) The
+  // dock's bottom edge is the only place the inset belongs.
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
-        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[0.3rem] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
@@ -3083,7 +3111,7 @@ export function ChatInput({
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-[1.4rem] border bg-white p-1.5 shadow-lg shadow-zinc-200/50 transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
+            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-[1.4rem] border bg-white p-1.5 shadow-lg shadow-zinc-200/50 transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
@@ -3599,8 +3627,18 @@ export function ChatInput({
           </p>
         )}
         <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
+        {/*
+          COMPOSER-FOCUS-CLIP-01. The global focus outline is drawn outside the
+          textarea, and this composer is rounded and overflow-hidden, so the
+          outline was cut at the corners whenever the input was the first row.
+          The composer draws the indicator instead: an outline pulled 3px inside
+          its own border, which its own overflow does not clip. An outline and
+          not a box-shadow ring, because forced-colors mode removes box-shadow
+          and keeps outlines.
+        */}
         <textarea
           data-testid="chat-textarea"
+          data-focus-ring="container"
           ref={textareaRef}
           value={value}
           wrap={preserveFormatting ? "off" : "soft"}
@@ -3725,9 +3763,16 @@ export function ChatInput({
                 {activeSelectedModels.length}
               </span>
             )}
+            {/* COMPOSER-REFLOW-01. Allowed a second line rather than `nowrap`.
+                A label that could not wrap made this button's minimum width
+                the whole label, and the group beside "+" keeps its default
+                minimum on purpose (see above), so at a ~120px viewport the
+                group was 111px in a 90px row and the composer's
+                `overflow-hidden` cut the chevron off. Where the label fits,
+                which is every phone at default zoom, it is still one line. */}
             <span
               data-testid="composer-active-model-count"
-              className="min-w-0 truncate whitespace-nowrap"
+              className="min-w-0 line-clamp-2 break-keep"
             >
               {modelsSelectedLabel(activeSelectedModels.length)}
             </span>

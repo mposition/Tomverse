@@ -13,9 +13,7 @@ import {
   MessageSquarePlus,
   MoreHorizontal,
   Search,
-  Share2,
   Sparkles,
-  Tag,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -31,15 +29,21 @@ import {
   type WorkspaceGuideSection,
 } from "./chatWorkspaceGuideContent";
 
+// One icon per tour item, in the order `tourItems` lists them: new chat,
+// search, status filters, projects, conversation menu.
 const tourIcons = [
   MessageSquarePlus,
-  Lock,
   Search,
-  Share2,
-  Tag,
+  Lock,
   Folder,
   MoreHorizontal,
 ] as const;
+
+// Which tour row is Projects. The rows are localised strings, so position is
+// what there is to match on -- and the analytics topic is the reason it has to
+// be right: pointed one row off, the menu row reports itself as a feature this
+// build no longer has.
+const TOUR_PROJECTS_INDEX = 3;
 
 type HelpTopic =
   | "workspace"
@@ -52,9 +56,13 @@ type HelpTopic =
 
 const topicForSection = (sectionId: string): HelpTopic => {
   if (sectionId === "projects") return "project";
-  if (sectionId === "states-and-labels" || sectionId === "labels") {
-    return "labels";
-  }
+  // The anchor is legacy: the labels feature was removed on 2026-09-16 and its
+  // section with it, but "#states-and-labels" is in links people already have,
+  // and the analytics topic keeps its recorded name so a rename does not split
+  // one series into two. There is no "labels" branch because this is called
+  // with the ids of sections that exist -- a branch for the retired "#labels"
+  // would read as support for that URL while nothing on the page answers to it.
+  if (sectionId === "states-and-labels") return "labels";
   if (sectionId === "lock-and-share") return "locked";
   if (sectionId === "ai-review") return "ai_review";
   if (sectionId === "credits-and-plans") return "credits";
@@ -200,7 +208,9 @@ export function ChatWorkspaceGuide() {
                     <a
                       key={item.term}
                       href={`#tour-${index + 1}`}
-                      onClick={() => trackTopic(index === 5 ? "project" : index === 4 ? "labels" : "workspace")}
+                      onClick={() =>
+                        trackTopic(index === TOUR_PROJECTS_INDEX ? "project" : "workspace")
+                      }
                       className="group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 transition hover:border-blue-500 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                     >
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">

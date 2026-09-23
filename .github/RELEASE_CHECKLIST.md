@@ -184,6 +184,15 @@ Date / timezone:    ____________________
       as a required argument. The three NOT VALID CHECKs all pass
       `productKey IS NULL`, so they stop wrong combinations and not omissions;
       this is what stops omissions (decision record v1.2 §6)
+- [ ] `npm run check:protected-table-writers` — the audit log has one writer
+      module (`lib/adminAudit.ts`). This refuses the direct writes it can read in
+      source: a delegate write, a string naming the delegate, a computed
+      delegate, raw SQL naming the table beside a write verb, and the
+      runtime-SQL spellings it lists. It does not by itself prove no other
+      write exists; the database refuses UPDATE and DELETE and checks that a
+      hashed insert links to the chain head
+      (`prisma/migrations/20260918090000_admin_audit_log_append_only`)
+      (docs/policy/marketing-automation.md §6)
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:starter-catalog` — proves every Chat starter card is still
       true: its flag key is a constant some module exports rather than a
@@ -217,6 +226,10 @@ Date / timezone:    ____________________
       own literal, so moving the sending domain moved one of them and no health
       check could tell: a check only sees the senders that ask it
       (docs/ops/email-sending-domains.md §1.2)
+- [ ] `npm run check:send-entry-points` — proves every customer-facing send
+      reaches the provider only through the address lock and suppression
+      re-check, while the one operator-only path chooses its configured
+      recipient rather than accepting an arbitrary address from a caller
 - [ ] `npm run check:email-provider-port` — proves the provider seam is still
       two methods over one implementation, and that nothing posts to the send
       endpoint around it. Templates, contacts and segments stay in our own

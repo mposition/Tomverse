@@ -134,3 +134,86 @@ mismatch stop, stale lock, truncation 또는 witness disagreement는 새 실행�
 4. 의미 보존·행동상 주입 저항·비용·지연 증거가 승인됐을 때만 제품 제안형 UI 연결을
    제안한다.
 5. Refiner 결과의 Router 결합과 전체 모델 catalogue 품질은 그 뒤의 별도 실험이다.
+
+## 8. admission-readiness proposal 경계
+
+`admission-readiness-v1` evidence는 source commit
+`f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`에서 이 문서의 provider-free 명령을
+16/16으로 완료해 동결했다. manifest는 report·journal·witness의 정확한 filename,
+byte size, SHA-256, journal/witness terminal head, sourceRef, source identity와 corpus
+digest를 묶고 canonical bundle digest
+`sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159`를
+고정한다. 이 bundle이 만드는 canonical proposal digest는
+`sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2`다.
+파일은 [`evidence/`](prompt-refiner-shadow/evidence/)에 있다.
+
+`promptRefinerShadowAdmissionCore`는 파일을 불신 입력으로 다시 읽어 strict schema,
+byte/UTF-8/BOM/duplicate/extra-key 경계와 raw file digest를 확인한다. 그 뒤 기존 strict
+journal replay API로 chain·witness·terminal을 재검증하고 다음 조건을 모두 요구한다.
+
+- completed 16/16, remaining/unknown 0
+- structural boundary violation 0
+- behavioral fixture match 16/16
+- provider call 0, cost 0
+- 정확히 고정된 harness/journal/corpus/source identity와 checked-in manifest bytes
+
+통과 결과는 `PromptRefinerShadowStageProposal` 하나이며 status는
+`awaiting_explicit_admin_cost_approval`, `executionAdmitted`는 항상 `false`다. proposal은
+`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`를 고정해 이
+검사가 현재 checkout이나 실행 환경을 검증하지 않았음을 구조적으로 드러낸다. 검증 범위는
+manifest가 가리키는 과거 evidence snapshot 내부의 source/corpus 일치뿐이다. proposal은
+기존 reservation stage id·contract digest·요청/단계 비용·slot·TTL과 content-free
+provenance만 담고 `approvedBy`, `approvedAt`, stage mutation 또는 승인 성공 표현은 담지
+않는다. 이는 합성 구조 prerequisite일 뿐 실제 모델 품질, paid shadow, PLANNER,
+release 또는 rollout 승인 증거가 아니다.
+
+실제 writer는 이번 범위에 없다. 다음 계약은 승인 직전에 현재 checkout의 exact source,
+manifest bytes와 대상 environment를 다시 검증한 결과를 요구하고, 새 migration에서 exact evidence digest,
+명시적 사람 승인과 비용 상한, 대상 environment, 승인 expiry, 실행 manifest를 한 행에
+결속하고 durable admin writer가 그것을 원자적으로 생성하도록 별도 설계·검토해야 한다.
+그 전에는 stage seed, Prisma mutation, admin route/script, receipt writer, product caller,
+provider SDK, 자격증명 조회, flag 활성화 또는 `admitted: true` 경로를 추가하지 않는다.
+
+## 9. live adapter 준비 상태
+
+후속 `prompt-refiner-shadow-run-v1` 계약은 첫 실제 shadow를 이 문서의 동결 corpus
+16건으로 제한하고 최대 16 dispatch, 요청당 24,916 microUSD, run 전체 398,656
+microUSD를 고정한다. 이 계약과 서버 전용 OpenAI SDK adapter는 구현돼 있지만
+`durableRunWriterReady=false`, `entryPointReady=false`, `executionAdmitted=false`,
+`productAdapterReady=false`다.
+
+adapter는 기존 message builder와 strict parser를 재사용하고 15초 timeout, retry 0,
+4096 output-token cap을 고정한다. dispatch 직전 future runner가 제공할 callback을 먼저
+완료해야 하며, callback이 실패하면 provider를 부르지 않는다. dispatch 이후 timeout,
+알려진 provider 실패와 unknown outcome을 분리하고, 알 수 없는 usage는 null로 유지한다.
+system/data message의 UTF-8 byte 수에 고정 framing allowance를 더한 값은 exact tokenizer
+측정이 아닌 보수적 token upper bound다.
+
+중요하게도 이 adapter를 import하는 제품 route, 관리자 route, script, cron 또는 다른
+runtime library는 없다. 기존 `npm run shadow:prompt-refiner` 역시 provider-free 상태를
+그대로 유지하며 adapter를 호출하지 않는다. 다음 단계는 adapter 호출 추가가 아니라,
+먼저 exact 비용 승인과 reservation consume, dispatch intent와 terminal receipt를 durable하게
+기록하는 별도 runner/writer 계약을 구현·독립 검토하는 것이다.
+
+## 10. content-free evidence gate v1
+
+`lib/promptRefinerShadowEvidenceCore.ts`와
+`docs/ops/prompt-refiner-shadow/evidence-spec-v1.json`은 동결 합성 corpus 16건에 대한
+provider-independent 조기 품질 gate다. preregistered 의미 concept, exact quoted/code
+literal, 언어 연속성, 두 injection 문자열의 quoted-data + non-execution framing과 완전한
+비용·지연 telemetry를 함께 검사한다. 결과에는 prompt·proposal·excerpt·per-item digest가
+없고 synthetic case ID, boolean, count, coarse bucket과 closed reason만 남는다.
+
+이 gate는 v3 실행 뒤에 만들어졌다. v3 terminal receipt에는 refined prompt bytes가 없으므로
+2026-09-21의 16건 실행을 이 gate로 소급 판정할 수 없다. 기존 receipt는 자기 계약 안에서의
+신뢰성·비용·지연 evidence로 유지한다. 의미 anchor와 injection behavior 확인에는 proposal을
+메모리에서 평가한 뒤 content-free 결과만 쓰는 **새 confirmatory 계약과 새 1회 실행 승인**이
+필요하다.
+
+통과 결과도 `executionAdmitted=false`, `productAdapterReady=false`,
+`suggestionUiAuthorized=false`, `routerCouplingAuthorized=false`,
+`paidRunAuthorized=false`, `humanReviewRequired=true`다. 고정 16건 anchor 통과는 일반적인
+semantic equivalence나 prompt-injection resistance의 인증이 아니며 UI·Router·rollout을
+자동으로 열지 않는다. 상세 계약과 limitation은
+[`prompt-refiner-shadow-evidence-gate-v1.md`](prompt-refiner-shadow-evidence-gate-v1.md)에
+있다.

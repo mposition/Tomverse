@@ -59,6 +59,13 @@ export type NotificationAttemptOutcome =
    * abandonment raises the incident that says so.
    */
   | { kind: "not_configured" }
+  /**
+   * A writer holds the recipient address, so nothing was submitted. Not an
+   * attempt: the send never happened, and counting it would spend the queue's
+   * abandonment budget on somebody else's withdrawal
+   * (docs/policy/email-product-news-redesign-draft.md section 7.4).
+   */
+  | { kind: "lock_unavailable" }
   | { kind: "failed"; errorKind: string; permanent: boolean };
 
 export type NotificationDeliveryTransition = {
@@ -137,6 +144,20 @@ export const nextNotificationDeliveryState = ({
     };
   }
 
+  if (outcome.kind === "lock_unavailable") {
+    // The row goes back on the curve it was already on. `attempts` arrives
+    // here including the attempt being recorded, so the one that never
+    // happened is taken back off again -- and the delay is the one the row
+    // would have waited anyway.
+    const made = Math.max(attempts - 1, 0);
+    return {
+      status: NOTIFICATION_DELIVERY_STATUS.pending,
+      attempts: made,
+      nextAttemptAt: nextNotificationAttemptAt(made, now),
+      lastErrorKind: "send_not_submitted",
+    };
+  }
+
   if (outcome.kind === "unsendable") {
     // Nothing to deliver and nothing a later attempt could change.
     return {
@@ -165,5 +186,55 @@ export const nextNotificationDeliveryState = ({
     attempts,
     nextAttemptAt: nextNotificationAttemptAt(attempts, now),
     lastErrorKind: errorKind,
+  };
+};
+
+/**
+ * What the provider's answer means for a queued notification.
+ *
+ * The customer-facing kinds submit through `sendWithAddressLock()`, which
+ * reports the provider's result rather than throwing a string for
+ * `classifyNotificationError()` to parse. Reading the result directly is both
+ * shorter and more truthful: a refused sending identity used to arrive here as
+ * an unparseable message and be classified `unknown` and retried, when no
+ * amount of waiting sets an environment variable.
+ *
+ * Pure, and beside the classifier it replaces for that path, so the two answers
+ * can be compared in one file.
+ */
+export const notificationOutcomeForProviderResult = (result: {
+  ok: boolean;
+  notConfigured?: boolean;
+  identityRefusal?: string | null;
+  status?: number | null;
+  transportError?: unknown;
+}): NotificationAttemptOutcome => {
+  if (result.ok) return { kind: "delivered" };
+  if (result.notConfigured) return { kind: "not_configured" };
+  if (result.identityRefusal) {
+    // Retryable, as it was before this mapper existed. The reasoning for
+    // calling it permanent -- no amount of waiting sets an environment
+    // variable -- is true of the waiting and false of the window: an operator
+    // who fixes the configuration and redeploys between attempts is exactly
+    // who this queue is retrying for, and a terminal verdict would lose the
+    // notice they were trying to save (independent review, 2026-09-18).
+    //
+    // What did change is the name. It used to arrive as an unparseable thrown
+    // string and be recorded as `unknown`, which told an operator nothing.
+    return {
+      kind: "failed",
+      errorKind: `identity_${result.identityRefusal.toLowerCase()}`.slice(0, 40),
+      permanent: false,
+    };
+  }
+  if (result.status === null || result.status === undefined) {
+    const name =
+      result.transportError instanceof Error ? result.transportError.name : "unknown";
+    return { kind: "failed", errorKind: name.slice(0, 40), permanent: false };
+  }
+  return {
+    kind: "failed",
+    errorKind: `http_${result.status}`,
+    permanent: isPermanentDeliveryStatus(result.status),
   };
 };

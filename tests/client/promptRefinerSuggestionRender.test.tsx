@@ -60,6 +60,19 @@ test("the ready state shows proposal and two explicit choices", () => {
   assert.equal((rendered.match(/min-h-11/g) ?? []).length, 2);
 });
 
+test("accepted fixture is a read-only preview bound to the authored source", () => {
+  const state = { status: "accepted_preview" as const, suggestion };
+  const rendered = render({ state });
+  assert.equal(hasTestId(rendered, "prompt-refiner-accepted-preview"), true);
+  assert.ok(rendered.includes(suggestion.refinedPrompt));
+  assert.ok(rendered.includes(promptRefinerCopy.ko.previewOnly));
+  assert.equal(hasTestId(rendered, "prompt-refiner-use"), false);
+  assert.equal(hasTestId(rendered, "prompt-refiner-request"), false);
+  const edited = render({ state, currentPrompt: "새로 작성한 문장" });
+  assert.equal(hasTestId(edited, "prompt-refiner-accepted-preview"), false);
+  assert.equal(hasTestId(edited, "prompt-refiner-request"), true);
+});
+
 test("requesting and failure copy promise that the original remains unchanged", () => {
   const request = {
     requestId: suggestion.requestId,
@@ -83,8 +96,16 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     keyof typeof promptRefinerCopy
   >) {
     const rendered = render({ language });
-    assert.ok(rendered.includes(promptRefinerCopy[language].useProposal), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].previewAction), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].keepOriginal), language);
+    const acceptedPreview = render({
+      language,
+      state: { status: "accepted_preview", suggestion },
+    });
+    assert.ok(
+      acceptedPreview.includes(promptRefinerCopy[language].previewOnly),
+      `${language}: accepted preview must explain that nothing was sent`
+    );
   }
 });
 
@@ -127,6 +148,8 @@ test("IME composition keeps the idle row's visible copy stable", () => {
 });
 
 test("rendered copy never names the internal refiner model or makes a superiority claim", () => {
+  const stripGermanConfirmation = (text: string) =>
+    text.replace(/(?<!\p{L})bestätig\p{L}*/giu, " ");
   const forbidden = [
     "provider",
     "model",
@@ -141,9 +164,22 @@ test("rendered copy never names the internal refiner model or makes a superiorit
   for (const language of Object.keys(promptRefinerCopy) as Array<
     keyof typeof promptRefinerCopy
   >) {
-    const text = render({ language }).toLowerCase();
+    const text = [
+      render({ language }),
+      render({ language, state: { status: "accepted_preview", suggestion } }),
+    ].join(" ").toLowerCase();
     for (const word of forbidden) {
-      assert.equal(text.includes(word.toLowerCase()), false, `${language}: ${word}`);
+      // German "bestätigen" is a confirmation verb, not a superiority claim.
+      // Exempt only that word family; substring matching still catches
+      // "beste", "bester" and model/provider inflections in every locale.
+      const checkedText = word === "best" && language === "de"
+        ? stripGermanConfirmation(text)
+        : text;
+      const present = checkedText.includes(word.toLowerCase());
+      assert.equal(present, false, `${language}: ${word}`);
     }
   }
+  assert.equal(stripGermanConfirmation("Vorschau bestätigen").toLowerCase().includes("best"), false);
+  assert.equal(stripGermanConfirmation("Die beste Formulierung").toLowerCase().includes("best"), true);
+  assert.equal(stripGermanConfirmation("Der bester Vorschlag").toLowerCase().includes("best"), true);
 });

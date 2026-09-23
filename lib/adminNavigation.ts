@@ -41,7 +41,8 @@ export type AdminNavBadgeKey =
   | "automation"
   | "alerts"
   | "modelLifecycle"
-  | "emailCampaigns";
+  | "emailCampaigns"
+  | "marketing";
 
 export type AdminNavTab = {
   id: string;
@@ -96,9 +97,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "analytics",
     label: "Analytics",
     href: "/admin/analytics",
-    description: "Product funnel, activation, and import/memory metrics",
+    description: "Active users, usage, model share, product funnel, and import/memory metrics",
     group: "Command Center",
     aliases: [
+      "usage",
+      "active users",
+      "dau",
+      "mau",
+      "model share",
+      "geography",
+      "language",
       "funnel",
       "activation",
       "conversion",
@@ -113,6 +121,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "reviewer",
     ],
     tabs: [
+      {
+        id: "usage",
+        label: "Usage",
+        description: "Active users, messages, model share, and when and where people use Tomverse",
+      },
       {
         id: "product",
         label: "Product analytics",
@@ -445,6 +458,59 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "marketing",
+    label: "Marketing",
+    href: "/admin/marketing",
+    description:
+      "Draft queue, published posts, brand accounts, and what the automation reported",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "marketing",
+    aliases: [
+      "social",
+      "posts",
+      "linkedin",
+      "zernio",
+      "campaign",
+      "brand account",
+      "draft queue",
+      "guard",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Queue",
+        description: "Drafts waiting on a person, and what the Guard said about each",
+      },
+      {
+        id: "published",
+        label: "Publish state",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
+      },
+      {
+        id: "accounts",
+        label: "Accounts",
+        description: "Brand accounts, their mode, and why a paused one is paused",
+      },
+      {
+        id: "experiments",
+        label: "Experiments",
+        description: "Landing copy experiments and their results",
+      },
+      {
+        id: "reports",
+        label: "Reports",
+        description: "Weekly summaries, competitor facts, and retention runs",
+      },
+      {
+        id: "comments",
+        label: "Comments",
+        description: "Comment alerts the monitor raised and nobody has answered",
+      },
+    ],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",
@@ -588,6 +654,32 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
   ADMIN_NAVIGATION.find((item) => matchesRoute(pathname, item.href)) || null;
 
 export const ADMIN_DETAIL_ROUTES = [
+  {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // catalog import is owner-only and must not be advertised to roles that
+    // receive a 404 from the page and the API.
+    id: "amux-board-import",
+    pattern: /^\/admin\/amux-board-import$/,
+    label: "AMUX catalog import",
+    description: "Owner-only preview and approval. Apply stays off on this screen.",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // those tables feed the palette for every admin role, while this one-shot
+    // cost-authority surface is owner-only and should not be advertised to
+    // roles that receive a 404 from the page and API routes.
+    id: "prompt-refiner-shadow",
+    pattern: /^\/admin\/prompt-refiner-shadow$/,
+    label: "Prompt Refiner shadow run",
+    description:
+      "Owner-only approval and execution for the frozen synthetic shadow run",
+    parentLabel: "Models",
+    parentHref: "/admin/models",
+    group: "AI Platform" as const,
+  },
   {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,

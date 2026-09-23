@@ -66,3 +66,18 @@ lib/promptInjectionAudit.ts text eol=lf
 lib/promptRefinerSuggestion.ts text eol=lf
 lib/routerDevelopmentBenchmark.ts text eol=lf
 scripts/prompt-refiner-shadow-harness.mjs text eol=lf
+
+# Prompt Refiner admission-readiness evidence is verified as exact bytes.
+#
+# These four paths, and only these four paths in the evidence directory, are
+# digest-bound. The README is explanatory rather than evidence, so pinning a
+# directory-wide glob would silently expand the immutable set.
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl text eol=lf
+
+# Admission proposal implementation paths are pinned narrowly for reproducible
+# review bytes without changing the rest of lib/, tests/, or nested docs.
+/lib/promptRefinerShadowAdmissionCore.ts text eol=lf
+/tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf

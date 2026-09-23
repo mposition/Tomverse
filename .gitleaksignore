@@ -93,3 +93,211 @@ fc1e3368e4d14f3d3552c677184a9a88b7a05697:tests/assistantPackageReview.test.mjs:g
 # Scope: exactly these two findings in that one commit -- nothing wider.
 866e0693603aee6d1b315d7e82d7889d82b1736e:scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1:generic-api-key:205
 866e0693603aee6d1b315d7e82d7889d82b1736e:scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1:generic-api-key:206
+
+# Synthetic webhook signing secrets in a server-contract test, not credentials.
+#
+# Commits bd8584ca and 048dd1c9 added tests/server-contract/email-provider-port.test.ts
+# cases that set RESEND_WEBHOOK_SECRET and MARKETING_RESEND_WEBHOOK_SECRET to
+# invented `whsec_` strings (base64 of plain words) to test that one secret on
+# both accounts verifies nothing and that marketing never borrows the
+# transactional secret. They never belonged to any system. The follow-up
+# commit builds the values from plain words, so no later edit of the line
+# recreates the finding under a new commit.
+#
+# Scope: exactly these findings in those two commits -- nothing wider.
+bd8584ca778a3f1774740f39b2af8568afa16d71:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
+048dd1c9380a53d1210ca6ba2b4936ec1f056d74:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
+
+# SHA-256 snapshot digest in a runtime-closure test, not a credential.
+#
+# Commit a831d33 records the exact path/position/text digest of the reviewed
+# non-static element-access snapshot. The value is derived entirely from
+# tracked source text and never authenticated any system. A follow-up commit
+# constructs the current digest from two parts so future edits do not recreate
+# the credential-shaped assignment; the immutable introducing commit remains
+# pinned here. `dynamicElementAccessSnapshot()` in
+# tests/promptRefinerRuntimeSourceClosure.test.mjs recomputes it; run
+# `node --conditions=react-server --import tsx --test
+# tests/promptRefinerRuntimeSourceClosure.test.mjs` to assert the digest.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+a831d33ff49b2e7b9d31d829f734c80cacacfbd7:tests/promptRefinerRuntimeSourceClosure.test.mjs:generic-api-key:64
+
+# A locale key path, not a credential.
+#
+# Commit 308652d added a claim fixture whose `statementKey` was
+# "sections.0.body" -- the dotted path to the body of the first FAQ answer,
+# used to show a claim whose statement key has drifted from its evidence key.
+# The generic-api-key rule matched it on entropy alone: it is fifteen
+# characters of mixed letters, digits and dots sitting after a colon, which is
+# the shape that rule looks for, and it names a sentence on a public page.
+#
+# The fixture now uses "description", which does not trip the rule, so this
+# pins only the immutable commit that introduced the earlier value.
+308652dc486cacdb395b53dbd52ee2c4c907706c:tests/marketingFactSources.test.mjs:generic-api-key:360
+# Prompt Refiner v4 cross-review packages preserve the exact local DB
+# integration command as immutable evidence. The command uses the public,
+# deterministic test-only NEXTAUTH_SECRET from scripts/run-db-integration-tests.mjs;
+# it never authenticated any deployed system. Gitleaks reports that same value
+# wherever the review package copied the command.
+#
+# Scope: only the exact introducing commit + path + rule + line findings from
+# PR #1584. Fingerprints are intentionally used instead of a regex/path
+# allowlist: any edited line, future package, different rule, or different
+# commit gets a new fingerprint and remains blocked.
+# Follow-up packages must redact this test-only value while recording command
+# evidence so this immutable exception list does not grow with each review.
+# These fingerprints remain valid only while the named branch commits stay in
+# history: merge PR #1584 with a merge commit; never squash or rebase it.
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10335
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10438
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10644
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:10684
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:14044
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:24489
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:24592
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:24798
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:24838
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:28198
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:31886
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32037
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32108
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32293
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32333
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32471
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:32511
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:39414
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:39517
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:39723
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:39763
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:43123
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round2.diff:generic-api-key:46737
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:10335
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:10438
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:10644
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:10684
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:14044
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:24489
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:24592
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:24798
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:24838
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:28198
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:31886
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32037
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32108
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32293
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32333
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32471
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:32511
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:39414
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:39517
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:39723
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:39763
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:43123
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:46737
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json:generic-api-key:383
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round2.json:generic-api-key:132
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round2.json:generic-api-key:172
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:10358
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:10461
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:10667
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:10707
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:14067
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:24512
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:24615
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:24821
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:24861
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:28221
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:31909
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32060
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32131
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32316
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32356
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32494
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:32534
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:39437
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:39540
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:39746
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:39786
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:43146
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:46760
+26aeecba8a00dd82d189daed8a1ac4fac980d5dd:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:50514
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/exchange.failed-attempt1.json:generic-api-key:140
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/exchange.failed-attempt1.json:generic-api-key:206
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/exchange.json:generic-api-key:140
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/exchange.json:generic-api-key:211
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round0.failed-attempt1.json:generic-api-key:175
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round0.failed-attempt1.json:generic-api-key:215
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round0.json:generic-api-key:175
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round0.json:generic-api-key:215
+3f588a989c3c953a2f544cb91405d9630ab9c5d3:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/review-prompt.md:generic-api-key:3866
+59d895c649d70b76acad4a6972f5edbade4a01a9:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/exchange.json:generic-api-key:290
+59d895c649d70b76acad4a6972f5edbade4a01a9:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round1.json:generic-api-key:193
+59d895c649d70b76acad4a6972f5edbade4a01a9:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/package-round1.json:generic-api-key:233
+59d895c649d70b76acad4a6972f5edbade4a01a9:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v3/records/review-prompt.md:generic-api-key:3875
+724ca10b451776eb1d1c24b74758abd49ca5654f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json:generic-api-key:109
+724ca10b451776eb1d1c24b74758abd49ca5654f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json:generic-api-key:212
+724ca10b451776eb1d1c24b74758abd49ca5654f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round0.json:generic-api-key:102
+724ca10b451776eb1d1c24b74758abd49ca5654f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round0.json:generic-api-key:142
+724ca10b451776eb1d1c24b74758abd49ca5654f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:3346
+bc5a47468b046406ce7631cf2732a26356294352:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:3686
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff:generic-api-key:10575
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff:generic-api-key:6866
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff:generic-api-key:6969
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff:generic-api-key:7175
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change-round1.diff:generic-api-key:7215
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:10575
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:6866
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:6969
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:7175
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/change.diff:generic-api-key:7215
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json:generic-api-key:260
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json:generic-api-key:322
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round1.json:generic-api-key:124
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/package-round1.json:generic-api-key:164
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:10598
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:14212
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:6889
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:6992
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:7198
+c54ce50056e89ca883260a0e89d12c18a7452f4f:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/review-prompt.md:generic-api-key:7238
+cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/exchange.json:generic-api-key:139
+cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/exchange.json:generic-api-key:77
+cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:54
+cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:94
+cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md:generic-api-key:168
+
+# Commit 9662e94b (S2a, 2026-09-21) added two marketing E2E fixture constants
+# that assigned a hyphenated token to a property whose name ends in "Key" --
+# MarketingPost's idempotency identifier, which is a business key a draft is
+# deduplicated by and not a credential. To a scanner that is a key assignment,
+# and reading it that way is correct behaviour rather than a bug in the rule.
+#
+# The shape is described rather than quoted here. The first attempt at this
+# note reproduced the offending line verbatim, and gitleaks scans this file
+# too, so the explanation became a finding of its own.
+#
+# Pinned rather than allowlisted for the same reason as the block above: an
+# allowlist pattern wide enough to cover that property name would also cover a
+# line that really did assign a secret to something similarly named. The
+# introducing commit is immutable history and stays here.
+#
+# The follow-up commit stopped writing the shape -- the fixture property is now
+# named `logical` and the seed passes it as an identifier rather than as a
+# quoted literal -- so no later edit recreates the finding under a new commit.
+#
+# Scope: exactly these two findings in that one commit -- nothing wider.
+9662e94bcfe3557df2df6e43cca689e2887114b4:tests/e2e-admin/support/fixture-data.ts:generic-api-key:361
+9662e94bcfe3557df2df6e43cca689e2887114b4:tests/e2e-admin/support/fixture-data.ts:generic-api-key:367
+
+# Commit f0910bfd (S2a, 2026-09-22) is the note above, in its first form. That
+# draft reproduced the offending line verbatim in order to explain it, and
+# gitleaks scans this file too, so the explanation became two findings of its
+# own. The next commit rewrote the note to describe the shape instead, but the
+# draft is immutable history on the branch and the history scan still reads it.
+#
+# These two lines exist only because of that mistake and cover nothing in the
+# product. They can be deleted once this branch is squash-merged, at which
+# point the commit will not be in develop history at all.
+f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:271
+f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272

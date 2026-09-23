@@ -68,6 +68,7 @@ import {
     recordDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
+import { logChatTurnTiming } from "@/lib/chatTurnTiming";
 import type {
     RoutingAttemptErrorClass,
     RoutingAttemptOutcome,
@@ -122,6 +123,7 @@ import {
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
+import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
@@ -1015,6 +1017,13 @@ async function handleChatPost(
     traceId: string,
     verificationGrant: { setCookie?: string }
 ): Promise<Response> {
+    // CHAT-LATENCY-01. The start of every server-side duration this turn
+    // reports (lib/chatTurnTiming.ts).
+    const requestReceivedAt = Date.now();
+    // One timing line per turn, whichever path ends it: the stream's
+    // settlement or the request failure path below. Shared, so a turn that
+    // settled and then threw on its way out is not written twice.
+    let turnTimingLogged = false;
     // Who holds the concurrency slot right now. The failure path at the bottom
     // asks this rather than a boolean, because "the request no longer holds it"
     // covers both a clean handoff to the stream and a stream that was built and
@@ -2378,6 +2387,7 @@ async function handleChatPost(
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             modelId: modelConfig.id,
             provider: modelConfig.provider,
+            autoRouted: autoSelection.routed,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
             canPersist: Boolean(
@@ -3697,6 +3707,7 @@ async function handleChatPost(
         */
         let streamController: ReadableStreamDefaultController<string> | null =
             null;
+        let artifactToolRejectionLog: ArtifactToolRejectionLog | null = null;
         const artifactCollector =
             artifactToolPlan && artifactToolPlan.registerTool
                 ? new GeneratedArtifactCollector({
@@ -3705,6 +3716,13 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
+                      noteRejection: (toolCallId, toolName, input, rejectionCode) =>
+                          artifactToolRejectionLog?.record(
+                              toolCallId,
+                              toolName,
+                              input,
+                              rejectionCode
+                          ),
                       emitProgress: (format) => {
                           if (!streamController) return;
                           enqueueSafely(
@@ -3751,6 +3769,9 @@ async function handleChatPost(
             // what keeps a truncated native search from being reported as a
             // file the user never got.
             artifactToolCallTracker = new ArtifactToolCallTracker(
+                Object.keys(artifactToolConfig.tools)
+            );
+            artifactToolRejectionLog = new ArtifactToolRejectionLog(
                 Object.keys(artifactToolConfig.tools)
             );
         }
@@ -3827,15 +3848,25 @@ async function handleChatPost(
                                   which is what keeps a second card off a file
                                   that already failed on its own terms.
                                 */
-                                onChunk: ({ chunk }: { chunk: unknown }) => {
-                                    artifactToolCallTracker?.noteChunk(chunk);
+                                onChunk: (event: { chunk: unknown }) => {
+                                    try {
+                                        const chunk = event.chunk;
+                                        artifactToolCallTracker?.noteChunk(chunk);
+                                        artifactToolRejectionLog?.noteChunk(chunk);
+                                    } catch {
+                                        // A malformed SDK callback must not abort the turn.
+                                    }
                                 },
                                 onToolExecutionStart: (event: {
                                     toolCall?: { toolCallId?: string };
                                 }) => {
-                                    artifactToolCallTracker?.noteExecutionStarted(
-                                        event.toolCall?.toolCallId
-                                    );
+                                    try {
+                                        artifactToolCallTracker?.noteExecutionStarted(
+                                            event.toolCall?.toolCallId
+                                        );
+                                    } catch {
+                                        // The tool's execute reports its own start independently.
+                                    }
                                 },
                             }
                           : {}),
@@ -4158,6 +4189,12 @@ async function handleChatPost(
          */
         let visibleTokenEmitted = false;
         /**
+         * CHAT-LATENCY-01. When the first of those visible chunks was handed
+         * to the response stream -- a server moment, not the user's render.
+         * Set once, by the same line that sets `visibleTokenEmitted`.
+         */
+        let firstVisibleTokenAt: Date | null = null;
+        /**
          * Cancels the keepalive writer and the first-token deadline below.
          *
          * Declared here, assigned once the stream helpers exist, for the same
@@ -4257,6 +4294,20 @@ async function handleChatPost(
                 errorClass?: RoutingAttemptErrorClass | null;
             }
         ) => {
+            // Before the reservation guard: a turn without a reservation still
+            // ended, and its timing is still a fact worth one line.
+            if (!turnTimingLogged) {
+                turnTimingLogged = true;
+                logChatTurnTiming({
+                    traceId,
+                    modelId: dispatched.modelId,
+                    provider: dispatched.provider,
+                    outcome,
+                    requestReceivedAt,
+                    firstVisibleChunkAt: firstVisibleTokenAt?.getTime() ?? null,
+                    endedAt: Date.now(),
+                });
+            }
             if (usageSettlement) return usageSettlement;
             const reservation = usageReservation;
             if (!reservation) return Promise.resolve();
@@ -4392,6 +4443,11 @@ async function handleChatPost(
                                   ? "empty_response"
                                   : null,
                         settlementOutcome: outcome,
+                        // CHAT-LATENCY-01. The columns existed and no caller
+                        // filled them, so every run's first-token time read
+                        // as unknown. The run's `firstTokenMs` is derived from
+                        // this in lib/routingDispatchInstrumentation.ts.
+                        firstVisibleTokenAt,
                     });
                     // Auto's memory of this conversation, written only for a
                     // turn it actually routed and only when that turn
@@ -5826,6 +5882,12 @@ async function handleChatPost(
                         await releaseSafely();
                         return;
                     }
+                    // An empty delta shows nothing and changes nothing. Return
+                    // before it can stop the first-token watchdog: a provider
+                    // that sends one and then stalls must still meet the
+                    // deadline instead of hanging with the keepalive stopped.
+                    // `pull` is called again for the next chunk.
+                    if (value.length === 0) return;
                     generatedText += value;
                     // The user is about to see something, so the keepalive
                     // window is over -- for this attempt and for the turn:
@@ -5839,6 +5901,11 @@ async function handleChatPost(
                         await releaseSafely();
                         return;
                     }
+                    // After the enqueue, not before it: a chunk the closed
+                    // response refused never reached the stream, and a first
+                    // token recorded for it would feed the Router's TTFT
+                    // signal a time for an answer nobody was sent.
+                    firstVisibleTokenAt ??= new Date();
                     // Checkpoint only bytes the browser was successfully
                     // offered. The writer coalesces chunks and applies owner,
                     // revision and database-clock lease CAS.
@@ -6121,6 +6188,23 @@ async function handleChatPost(
         // the provider call, and claiming nothing was sent when it may have
         // been is the misrepresentation §5 forbids. Left `pending` it would be
         // an attempt the reliability numbers cannot classify at all.
+        //
+        // CHAT-LATENCY-01. A turn that got as far as a reservation or a
+        // dispatch record and then failed before a response stream existed
+        // still has a duration. A request refused earlier (auth, rate limit,
+        // credits) is not a turn and writes no timing line.
+        if ((dispatchRecord || usageReservation) && !turnTimingLogged) {
+            turnTimingLogged = true;
+            logChatTurnTiming({
+                traceId,
+                modelId: dispatchModelIdForLog ?? null,
+                provider: dispatchProviderForLog ?? null,
+                outcome: "failed_before_stream",
+                requestReceivedAt,
+                firstVisibleChunkAt: null,
+                endedAt: Date.now(),
+            });
+        }
         if (dispatchRecord) {
             await completeInstrumentedDispatch(dispatchRecord, {
                 outcome: "failed_pre_token",

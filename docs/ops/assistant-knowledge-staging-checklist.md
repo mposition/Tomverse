@@ -142,7 +142,7 @@ epoch이 없어 키를 한 번 바꾸면 그 이전 전부가 영구히 무효�
 하나라도 없으면 나머지 둘이 무엇을 말하는지 알 수 없습니다.
 
 `*/15`는 "삭제하고 15분"이 아니라 **다음 정각**입니다
-(`railway.credit-reconciliation.json`). :58에 지웠으면 2분이고 :01에 지웠으면
+(`.railway/scheduled-jobs.ts`의 `Credit Reconciliation`). :58에 지웠으면 2분이고 :01에 지웠으면
 14분이므로, 시계가 아니라 **다음 정각 run이 뜬 뒤에** 봅니다. 그 run이 실제로
 떴는지는 Railway의 `Credit Reconciliation` 서비스 로그에서 확인할 수 있습니다 —
 `Starting Container` 줄이 그 시각에 있으면 뜬 것입니다.
@@ -153,7 +153,7 @@ epoch이 없어 키를 한 번 바꾸면 그 이전 전부가 영구히 무효�
 로그에도 admin 표면에도 나오지 않습니다(`227be331` 회차 발견 사항 1). **판별은
 R2 콘솔에서 합니다.**
 
-일간 `railway.maintenance.json`(`0 3 * * *`)도 같은 큐를 계속 비웁니다.
+일간 `Maintenance Cron`(`0 3 * * *`, `.railway/scheduled-jobs.ts`)도 같은 큐를 계속 비웁니다.
 멱등한 그물이며, 15분 경로가 어떤 이유로 멈춰도 하루 안에는 정리된다는 뜻입니다.
 
 두 번째 정각 run 이후에도 남아 있으면 그때가 결함입니다. 그때는 Admin

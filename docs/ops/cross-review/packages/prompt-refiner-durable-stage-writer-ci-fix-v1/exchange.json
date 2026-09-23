@@ -1,0 +1,338 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+  "requirement": "PR #1555의 Prompt Refiner durable stage writer가 추가한 외래 키, runtime source manifest, 설치 의존성 해석과 SQL 상수 때문에 기존 CI가 실패한 부분을 정확한 최소 예외와 FK-aware test cleanup으로 정합화한다. AdminAuditLog test cleanup은 관련된 세 integration suite 모두 PromptRefinerReservation 및 PromptRefinerReservationStage와 함께 명시적으로 truncate하되 CASCADE를 쓰지 않는다. automatic fallback 경계는 fallback source의 content-free digest manifest만 허용하고 exports 조회나 dispatch를 허용하지 않는다. runtime source closure는 node_modules 아래 비-workspace 설치 의존성 선언을 외부로 취급하되 등록된 workspace source는 계속 local closure 규칙과 정확한 진단을 적용하고, 미등록 @tomverse/* 이름은 fail-closed한다. protected-table writer 예외는 새 migration과 constant LOCK TABLE statement의 실제 동작·개수에 exact-match하며, retention report의 Prompt Refiner 문구 때문에 바뀐 정적 write-verb count도 정확히 설명하고 protected table write를 허용하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "세 PostgreSQL integration test의 cleanup은 PromptRefinerReservation, PromptRefinerReservationStage, AdminAuditLog를 한 TRUNCATE statement에 명시하고 CASCADE를 사용하지 않는다.",
+    "automaticFallbackBoundary의 새 exact allowlist는 lib/promptRefinerStageAdmissionCore.ts가 providerFallbackCandidates source bytes를 content-free manifest에 결속하는 경우만 설명하며 fallback exports 조회 또는 model dispatch를 숨기지 않는다.",
+    "runtime source closure는 Linux checkout 내부 node_modules resolution을 external dependency로 제외하면서 등록된 workspace source와 @/* alias source를 계속 local closure에 포함하고 실제 next-auth/next resolution 경로와 미등록 @tomverse/* 거부를 테스트한다.",
+    "protected-table writer allowlist는 20260918130000 migration의 AdminAuditLog read-only FK/guard reference, promptRefinerStageAdmission.ts의 constant ModelRegistryEntry lock 및 report-unswept-tables의 Prompt Refiner retention 문구로 인한 정적 count를 exact path/count로 설명하며 실제 protected table write를 허용하지 않는다.",
+    "관련 focused tests, full unit suite, PostgreSQL accounts integration lane, TypeScript, ESLint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "변경은 CI 정합성으로 한정되고 Prompt Refiner product/provider/network/credential/stage seed/flag/rollout/spending 경계를 바꾸지 않는다.",
+    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "29d7f98a4986ae8d1226854a43ed785b5086fd9f",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:be274d65f2843093db0c834d83e70ebcbb62c52adcf4704a2cb77a5dcecd6939",
+      "commit": "a3119753bd874b433d13f98427bebaa47425eaca",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/integration/admin-audit-chain-writer.db.test.ts",
+        "tests/integration/marketing-automation-schema.db.test.ts",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "PR #1555 CI failures are fixed without expanding product behavior: FK-aware integration cleanup names dependent stage tables without CASCADE; fallback boundary permits only content-free source identity binding; Linux dependency declarations under node_modules are external while workspace sources remain local; protected-writer exceptions are exact-path/count read/lock declarations. Before packaging, the complete unit suite passed (server 9786 pass, 0 fail, 1 skipped; client 58 pass), the isolated PostgreSQL 17 accounts lane passed, and focused tests/typecheck/lint/strict encoding passed. No product database, provider, Railway management API, credential lookup, stage mutation, flag activation, or paid call occurred.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/automaticFallbackBoundary.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/protectedTableWriters.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 34251.4216",
+          "durationMs": 34403
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "ected table writer check passed: 2019 source file(s) analysed; no direct AdminAuditLog write found outside lib/adminAudit.ts; no direct MarketingChannel write found outside lib/marketingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts.",
+          "durationMs": 6829
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 81060
+        },
+        {
+          "rule": "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 47557
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 2367
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 4977
+        },
+        {
+          "rule": "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 66
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1150-1154",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The new boundary test exercises only the `isInstalledDependencyResolution` predicate on string inputs, not `resolveLocalRuntimeImport`'s new early return, so the integration point the CI failure lived in is covered only indirectly by the pinned 186-path closure assertion.",
+          "reproduction": "Read tests/promptRefinerRuntimeSourceClosure.test.mjs:1150-1154: the three assertions call the predicate directly and never call resolveLocalRuntimeImport. Delete line 224 (`if (isInstalledDependencyResolution(path)) return null;`) and run `node --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`: the test at line 1150 still passes; only the closure test at line 1022 reports the change. An added `assert.equal(resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"typescript\"), null)` would pin the early return itself (note it is only discriminating on a checkout whose node_modules is inside the repository, i.e. the Linux layout).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:224",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The early return is placed before the `local workspace import resolved outside repository` assertion at line 234, so a `@tomverse/*` import that ever resolved to a real (non-symlinked) copy under node_modules would be silently classified external instead of failing on that guard.",
+          "reproduction": "Read lines 217-240: the `isInstalledDependencyResolution` return at 224 precedes both the `.d.ts` assertion (227) and the workspace assertion (234). The behaviour is still fail-closed — the closure would then omit packages/chat-core/src/index.ts and `assert.deepEqual([...PROMPT_REFINER_RUNTIME_SOURCE_PATHS], expected)` at line 1036 fails — but the message names a path list rather than the workspace rule. Gating the early return on `workspace === null` would keep the precise message; today's workspace layout (npm symlink, realpath into packages/*) is unaffected either way, which line 1158 confirms.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/integration/prompt-refiner-reservation-admission.db.test.ts:56-57",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "A third PostgreSQL suite truncates the same three tables but still with `CASCADE`, so the no-CASCADE cleanup rule this change establishes is not uniform across the FK's dependents (pre-existing from PR #1555 and outside this task's writable scope, so not actionable here).",
+          "reproduction": "`rg -U 'TRUNCATE TABLE[^;]*\"AdminAuditLog\"[^;]*RESTART IDENTITY( CASCADE)?' tests/integration` shows prompt-refiner-reservation-admission.db.test.ts:56-57 ending in `RESTART IDENTITY CASCADE`, while the two suites changed here end in `RESTART IDENTITY`. That suite runs in the `finance` lane (scripts/db-integration-groups.mjs:73 matches `prompt-refiner-reservation`), so it is not covered by the accounts lane the author ran.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:1150-1154; open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:224; open finding: tests/integration/prompt-refiner-reservation-admission.db.test.ts:56-57); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:08d76228dd3170f4066025677c73f05bf6ed67265c6edabc99c8dbf28f718546",
+      "commit": "728f59bcb243a563bc1682b701668b121fb52626",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/integration/admin-audit-chain-writer.db.test.ts",
+        "tests/integration/marketing-automation-schema.db.test.ts",
+        "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 0's three nits are closed: installed node_modules resolutions return external only when no workspace package is recognized; an actual next-auth/next resolver assertion covers the integration point; and the finance-lane Prompt Refiner admission suite now uses the same explicit three-table cleanup without CASCADE. Focused tests pass 34/34. A detached local PostgreSQL 17 database applied all 124 migrations and the prompt-refiner-reservation-admission suite passed 15/15; the temporary server was stopped. The earlier complete unit suite and accounts lane remain green. No product database, provider, Railway management API, credential lookup, stage mutation, flag activation, or paid call occurred.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/automaticFallbackBoundary.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/protectedTableWriters.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 6197.6801",
+          "durationMs": 6290
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "ected table writer check passed: 2019 source file(s) analysed; no direct AdminAuditLog write found outside lib/adminAudit.ts; no direct MarketingChannel write found outside lib/marketingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts.",
+          "durationMs": 3305
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 64528
+        },
+        {
+          "rule": "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 14751
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1649
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1531
+        },
+        {
+          "rule": "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 59
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "scripts/check-protected-table-writers-core.mjs:303-308",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The diff also recalibrates a third allowlist entry (scripts/report-unswept-tables-core.mjs, MarketingReport writeVerbs 2 -> 4), which the completion criterion's \"only the 20260918130000 migration and promptRefinerStageAdmission.ts\" wording does not mention, and the entry's reason text does not name the Prompt Refiner prose that accounts for the two added verbs.",
+          "reproduction": "Grep scripts/report-unswept-tables-core.mjs for whole-word write verbs inside string literals: line 52 (\"...no seed or update/delete path\", added by PR #1555's PromptRefinerReservationStage entry) contributes `update` and `delete`; line 78 (\"a delete the database refuses\") and line 107 (\"not a delete\") contribute the other two. Count = 4, matching the new value, and `npm run check:protected-table-writers` passes in both directions, so the edit is required and grants nothing new; only the criterion's enumeration and the reason prose are out of step.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:224",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The `workspace === null` gate closes round 0's finding for recognised workspace packages, but a `@tomverse/*` specifier that is not a workspace name (workspaceForSpecifier returns null) and resolves under node_modules is still classified external without reaching the `local workspace import resolved outside repository` assertion at line 234.",
+          "reproduction": "Add a scoped dependency `@tomverse/anything` under node_modules that is not one of packages/*|apps/* (so workspacePackages has no entry for it) and call `resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"@tomverse/anything\")`: it returns null via the new early return instead of failing the @tomverse assertion. For every name actually in package.json workspaces the fix is correct — npm's link realpaths back to packages/*, and a real copy under node_modules now falls through to `inside === true` and fails loudly on the pinned 186-path list, which is the intended direction.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: scripts/check-protected-table-writers-core.mjs:303-308; open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:224); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:00a6ce12d2fde96f12440d8905faa48fea7effeb8bac75649d60b8e8b99a192f",
+      "commit": "77a4270d0a72dd16e27a66ab3e3570b48e2cbc75",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+        "scripts/check-protected-table-writers-core.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/integration/admin-audit-chain-writer.db.test.ts",
+        "tests/integration/marketing-automation-schema.db.test.ts",
+        "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 1's two nits are closed. The static MarketingReport allowlist now names exactly why Prompt Refiner retention prose adds update/delete to the two existing delete verbs, and the task criterion covers that exact count. The runtime closure rejects any unregistered @tomverse/* specifier before resolution, while registered workspaces remain local and ordinary node_modules dependencies remain external; a direct rejection test pins this boundary. Focused tests pass 34/34, protected-table writer and lint pass. Prior PostgreSQL evidence remains 124 migrations plus admission suite 15/15, accounts lane green, and full unit suite green. No product database, provider, Railway management API, credential lookup, stage mutation, flag activation, or paid call occurred.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/automaticFallbackBoundary.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/protectedTableWriters.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5849.2609",
+          "durationMs": 5945
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:protected-table-writers",
+          "passed": true,
+          "detail": "ected table writer check passed: 2019 source file(s) analysed; no direct AdminAuditLog write found outside lib/adminAudit.ts; no direct MarketingChannel write found outside lib/marketingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts.",
+          "durationMs": 3084
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 41472
+        },
+        {
+          "rule": "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3165
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+          "durationMs": 1430
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1364
+        },
+        {
+          "rule": "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 60
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Round 1's two nits are closed and I found no new actionable issue: the FK closure over AdminAuditLog is exactly {AdminAuditLog <- PromptRefinerReservationStage <- PromptRefinerReservation} (prisma/migrations/20260918130000.../migration.sql:328 and prisma/migrations/20260916120000.../migration.sql:93 are the only REFERENCES), so the three single-statement TRUNCATEs are valid without CASCADE; the migration names AdminAuditLog twice (FK at :328, guard SELECT at :420) and writes it nowhere; report-unswept-tables-core.mjs's 4 literal write verbs are update+delete at :52, delete at :78 and delete at :107, which the reason now states; lib/promptRefinerStageAdmission.ts's single runtime SQL is the constant LOCK TABLE at :440; the fallback allowlist entry is a manifest path string (lib/promptRefinerStageAdmissionCore.ts:210), not an exports read; and unregistered @tomverse/* now fails closed before resolution while @/* and registered workspaces stay local — the DB lanes were not re-run this round, so the TRUNCATE behaviour rests on this static FK check plus the author's prior PostgreSQL evidence."
+    }
+  ],
+  "changeDigest": "sha256:00a6ce12d2fde96f12440d8905faa48fea7effeb8bac75649d60b8e8b99a192f",
+  "commit": "77a4270d0a72dd16e27a66ab3e3570b48e2cbc75",
+  "changeSummary": "Round 1's two nits are closed. The static MarketingReport allowlist now names exactly why Prompt Refiner retention prose adds update/delete to the two existing delete verbs, and the task criterion covers that exact count. The runtime closure rejects any unregistered @tomverse/* specifier before resolution, while registered workspaces remain local and ordinary node_modules dependencies remain external; a direct rejection test pins this boundary. Focused tests pass 34/34, protected-table writer and lint pass. Prior PostgreSQL evidence remains 124 migrations plus admission suite 15/15, accounts lane green, and full unit suite green. No product database, provider, Railway management API, credential lookup, stage mutation, flag activation, or paid call occurred.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/automaticFallbackBoundary.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/protectedTableWriters.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5849.2609",
+      "durationMs": 5945
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "ected table writer check passed: 2019 source file(s) analysed; no direct AdminAuditLog write found outside lib/adminAudit.ts; no direct MarketingChannel write found outside lib/marketingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts.",
+      "durationMs": 3084
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 41472
+    },
+    {
+      "rule": "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3165
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+      "durationMs": 1430
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1364
+    },
+    {
+      "rule": "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 60
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Round 1's two nits are closed and I found no new actionable issue: the FK closure over AdminAuditLog is exactly {AdminAuditLog <- PromptRefinerReservationStage <- PromptRefinerReservation} (prisma/migrations/20260918130000.../migration.sql:328 and prisma/migrations/20260916120000.../migration.sql:93 are the only REFERENCES), so the three single-statement TRUNCATEs are valid without CASCADE; the migration names AdminAuditLog twice (FK at :328, guard SELECT at :420) and writes it nowhere; report-unswept-tables-core.mjs's 4 literal write verbs are update+delete at :52, delete at :78 and delete at :107, which the reason now states; lib/promptRefinerStageAdmission.ts's single runtime SQL is the constant LOCK TABLE at :440; the fallback allowlist entry is a manifest path string (lib/promptRefinerStageAdmissionCore.ts:210), not an exports read; and unregistered @tomverse/* now fails closed before resolution while @/* and registered workspaces stay local — the DB lanes were not re-run this round, so the TRUNCATE behaviour rests on this static FK check plus the author's prior PostgreSQL evidence.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-18T16:28:30.535Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "77a4270d0a72dd16e27a66ab3e3570b48e2cbc75",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ]
+}

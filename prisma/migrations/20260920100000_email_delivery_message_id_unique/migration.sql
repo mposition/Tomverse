@@ -1,0 +1,157 @@
+-- One message id, one delivery, within its account.
+--
+-- Contract: docs/policy/email-product-news-redesign-draft.md section 7.4 (C72),
+-- docs/policy/email-notifications.md v24.
+--
+-- S1b-2b made the webhook match a delivery by `(providerAccount,
+-- providerMessageId)` and left the pair merely indexed, because the build
+-- before it wrote neither column. This makes it unique, which is what that
+-- matching has been assuming.
+--
+-- **One table.** The `ProviderWebhookEvent` half of the same contraction is
+-- 20260920100100, and it is separate for a reason rather than for tidiness:
+-- together in one transaction they lock two tables in the opposite order to the
+-- webhook handler, which writes `ProviderWebhookEvent` and then updates
+-- `EmailDelivery`. Holding SHARE here to commit and then asking for ACCESS
+-- EXCLUSIVE there is a deadlock with any webhook in flight, and the loser is
+-- either a long index build thrown away or a bounce that was not recorded.
+-- Each migration now takes one table's locks and lets them go.
+--
+-- Plain, not partial. A `WHERE "providerAccount" IS NOT NULL AND
+-- "providerMessageId" IS NOT NULL` predicate would enforce exactly what a plain
+-- unique index already enforces -- Postgres does not compare nulls, so a
+-- delivery that never reached the provider conflicts with nothing. Prisma can
+-- express a partial index since 7.4, but only behind the `partialIndexes`
+-- preview feature, and this schema enables no preview features at all. Turning
+-- one on is a commitment across the whole schema; the predicate would buy
+-- nothing for it, and without it `prisma db push` would not create the index
+-- and `migrate diff` would call it drift on every run.
+-- 20260801190000_plan_change_pending_slot is this same lesson, learned on a
+-- constraint that turned out not to exist in the database its test was written
+-- against.
+--
+-- **This one cannot be applied blind.** A unique index fails on the first
+-- duplicate it meets, part-way through a deploy, and the answer lives in the
+-- data rather than in this file. `npm run email:check-message-id-duplicates`
+-- asks it read-only and prints counts. That reading is a reason to stop, never
+-- a promise to go: it is taken before the deploy and a writer can add a
+-- duplicate after it. The build is the statement that decides.
+--
+-- **If this fails and Prisma records it**, the recovery is decided by looking
+-- at the index rather than by assuming. Its name is not enough -- that is the
+-- same reason `IF NOT EXISTS` is refused below -- so ask what it is:
+--
+--     SELECT to_regclass('"EmailDelivery"') AS delivery_table,
+--            i.indisunique, i.indisvalid, i.indisready, i.indislive,
+--            i.indimmediate, i.indisprimary, i.indnullsnotdistinct,
+--            i.indnkeyatts, i.indnatts,
+--            i.indexprs IS NOT NULL AS has_expressions,
+--            pg_get_expr(i.indpred, i.indrelid) AS predicate,
+--            am.amname,
+--            (SELECT array_agg(a.attname ORDER BY k.ord)
+--               FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+--               JOIN pg_attribute a
+--                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS columns,
+--            (SELECT array_agg(oc.opcname || '@' || ocns.nspname ORDER BY c.ord)
+--               FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(oid, ord)
+--               JOIN pg_opclass oc ON oc.oid = c.oid
+--               JOIN pg_namespace ocns ON ocns.oid = oc.opcnamespace)
+--              AS operator_classes,
+--            (SELECT bool_and(coll.indcoll = a.attcollation)
+--               FROM unnest(i.indcollation) WITH ORDINALITY AS coll(indcoll, ord)
+--               JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+--                 ON k.ord = coll.ord
+--               JOIN pg_attribute a
+--                 ON a.attrelid = i.indrelid AND a.attnum = k.attnum)
+--              AS collations_are_the_columns_own
+--       FROM (SELECT 1) AS always_one_row
+--       LEFT JOIN pg_index i
+--              ON i.indexrelid = to_regclass('"EmailDelivery_providerAccount_providerMessageId_key"')
+--             AND i.indrelid = to_regclass('"EmailDelivery"')
+--       LEFT JOIN pg_class ix ON ix.oid = i.indexrelid
+--       LEFT JOIN pg_am am ON am.oid = ix.relam;
+--
+-- The table is named by `to_regclass`, not by `relname` plus
+-- `current_schema()`. `current_schema()` is the first schema on the search
+-- path, which is not necessarily the schema the unqualified `"EmailDelivery"`
+-- in the statement below resolved to; `to_regclass` resolves the same name the
+-- same way the statement does, so the query is asking about the table the
+-- migration actually touched.
+--
+-- It is written to return exactly one row, whatever the state, because
+-- returning none would collapse two different answers into one: an index that
+-- is absent, and a table this session cannot see at all. The first means the
+-- migration rolled back; the second means the query is pointed at the wrong
+-- database or search path and says nothing about the migration. `to_regclass`
+-- resolves against *this* session's path, not the deploy's.
+--
+--   * `delivery_table` null -> stop. Whatever this session is looking at, it is
+--     not the schema the migration ran in;
+--   * `delivery_table` present and `indisunique` null -> the index is not
+--     there: it rolled back. `prisma migrate resolve --rolled-back
+--     20260920100000_email_delivery_message_id_unique`, then deploy again;
+--   * a row that is unique, valid, ready, live, immediate, NOT primary, NOT
+--     nulls-not-distinct, two key attributes and two total, no expressions, no
+--     predicate, btree, with columns {providerAccount,providerMessageId} in
+--     that order, operator classes {text_ops@pg_catalog,text_ops@pg_catalog},
+--     and `collations_are_the_columns_own` true -> it committed:
+--     `prisma migrate resolve --applied ...`;
+--   * a row that is anything else -> stop. This file cannot have created it, so
+--     something else did, and marking the migration applied would seal a
+--     guarantee that is not there.
+--
+-- Every line of that is load-bearing, and the reason is always the same shape:
+-- an index that answers yes to all the *other* lines can still not be this one,
+-- and sealing it with `--applied` then lets 20260920100200 drop the plain index
+-- that was doing the real work -- leaving neither the guarantee nor an index
+-- behind the webhook matcher.
+--
+--   * the columns: an index of this name over `("providerAccount", "id")` is
+--     unique, valid, immediate, plain btree and two-keyed, and says nothing
+--     about message ids;
+--   * the opclass namespace: `text_ops` is a name, and a schema earlier in the
+--     search path can define its own. The one this index must use is
+--     `pg_catalog`'s;
+--   * the collation: an index built `COLLATE` something other than the
+--     column's own sorts by a different rule, so a lookup using the column's
+--     collation cannot use it. `indcollation` holding each column's own
+--     `attcollation` is what says it was not built that way;
+--   * `indisprimary`: a primary key's index would pass every line above and is
+--     not this index. Sealing one as this migration's work would also mean the
+--     columns carry a `NOT NULL` nothing here asked for.
+
+-- The same class of problem reaches executable SQL in the two files that drop
+-- an index: `DROP INDEX` takes a name and resolves it in the relation
+-- namespace, with no way to say which table the index must belong to. Each of
+-- those files checks the ownership before it drops, and raises if the name has
+-- been taken by an index on some other table -- see 20260920100100 for why a
+-- recovery branch is not enough on its own.
+
+BEGIN;
+
+-- Bound the wait for the lock below.
+--
+-- Without it a lock request waits indefinitely. `CREATE INDEX` takes SHARE on
+-- `EmailDelivery`, which reads pass and writes wait behind -- so an unbounded
+-- wait here is mail queueing up with nobody being told why. A deploy that gives
+-- up after fifteen seconds can be retried at a quieter moment.
+--
+-- It bounds the *wait for the lock*, not the build. A large table still takes
+-- as long as it takes once the lock is held.
+SET LOCAL lock_timeout = '15s';
+
+-- No `IF NOT EXISTS`. It would let an index that merely shares this name stand
+-- in for this one, and "merely shares the name" covers more than it sounds: an
+-- index left INVALID by a failed `CREATE INDEX CONCURRENTLY`, one built NULLS
+-- NOT DISTINCT, one carrying a third expression key. Each would satisfy the
+-- name and skip the build -- and a catalogue check written to tell them apart
+-- is a second thing to get exactly right. Failing loudly on the name is cheaper
+-- and needs nothing to be right.
+--
+-- `CREATE INDEX CONCURRENTLY` would avoid the SHARE lock entirely and cannot be
+-- used here: Postgres refuses it inside a transaction block, and the BEGIN
+-- above puts us in one.
+CREATE UNIQUE INDEX "EmailDelivery_providerAccount_providerMessageId_key"
+    ON "EmailDelivery"("providerAccount", "providerMessageId");
+
+COMMIT;

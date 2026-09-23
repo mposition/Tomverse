@@ -79,37 +79,43 @@ const READ_ONLY_KEYS = {
       "with no consumer would be a switch that does nothing, which teaches an " +
       "operator that switches do nothing.",
   },
-  EMAIL_MARKETING_FLAG_KEY: {
-    reason:
-      "docs/policy/email-notifications.md §15.2 keeps this off until the legal " +
-      "review lands: Q1, Q2 and Q8 are unanswered, the A18 suppression " +
-      "boundary is undecided, and `news.tomverse.app` has neither been " +
-      "configured nor warmed up. A checkbox would put all of that behind one " +
-      "click. The flag exists ahead of the control on purpose -- turning it " +
-      "on later is then a settings change against a path that has already " +
-      "been reviewed and tested.",
-  },
-  EMAIL_CAMPAIGNS_FLAG_KEY: {
-    reason:
-      "Same §15.2 table, different condition: the approval process has to be " +
-      "settled first. Much of it now exists, but whether it is settled is an " +
-      "organisational judgement recorded by an operator writing the row, not " +
-      "something this code may decide by offering a toggle.",
-  },
-  EMAIL_CONSENT_RECONFIRM_FLAG_KEY: {
-    reason:
-      "The two-year re-confirmation batch does not exist yet, so there is " +
-      "nothing for a control to switch. The key is declared so the name in " +
-      "§15.2 resolves to something a reader can find; a writer for a feature " +
-      "with no consumer would be a switch that does nothing, which teaches an " +
-      "operator that switches do nothing.",
-  },
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY: {
     reason:
       "docs/policy/email-double-opt-in.md: turning this on starts sending " +
       "confirmation mail and needs EMAIL_CONSENT_KEYS deployed first. It is an " +
       "operator step in the marketing activation order, recorded by writing " +
       "the row, not a toggle a screen should offer ahead of that order.",
+  },
+  MARKETING_DRAFTS_KEY: {
+    reason:
+      "Marketing automation S1 only installs the fail-closed reader and " +
+      "resolver. S2 adds the marketing:write, step-up and same-transaction " +
+      "audit-logged switch route before this key may be changed in-app.",
+  },
+  MARKETING_PUBLISH_KEY: {
+    reason:
+      "S2 owns the audited publishing activation route and verifies adapter, " +
+      "recovery and platform-budget readiness; S1 must not offer a bypassing toggle.",
+  },
+  MARKETING_AUTO_PUBLISH_KEY: {
+    reason:
+      "Autonomous publishing is graduated per account and remains read-only " +
+      "until the S2 permission-checked activation workflow exists.",
+  },
+  MARKETING_EXPERIMENTS_KEY: {
+    reason:
+      "S2 adds the audited experiment activation route after cache and CSP " +
+      "evidence exists; S1 only consumes this default-off value.",
+  },
+  MARKETING_WEBHOOK_SHADOW_KEY: {
+    reason:
+      "The staging-only webhook receiver and signed verification workflow are " +
+      "S2 work. S1 reads the switch but intentionally provides no writer.",
+  },
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY: {
+    reason:
+      "S2 writes the verified event-type and channel subset with marketing:write, " +
+      "step-up and a human audit row; S1 keeps webhook apply always false.",
   },
   VOICE_INPUT_FLAG_KEY: {
     reason:

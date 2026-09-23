@@ -596,6 +596,130 @@ test.describe("Mobile composer: input remains reviewable", { tag: "@ui-risk" }, 
   });
 });
 
+/**
+ * COMPOSER-FOCUS-CLIP-01. "Focus indicators must remain visible and must not
+ * be clipped by the composer's overflow-hidden" had no test, and the global
+ * `:focus-visible` outline drew 4px outside the textarea, where the rounded,
+ * clipped composer cut it off.
+ *
+ * Measured, not eyeballed, within stated limits: an outline on the textarea
+ * or on the composer is turned into a rectangle, which must lie inside every
+ * clipping ancestor -- including the rounded corners, which a plain rectangle
+ * test would pass. An outline counts as drawn only with a non-zero width and a
+ * colour that is not transparent. This is clipping geometry, not contrast, and
+ * it does not detect a descendant painted over the outline. A box-shadow ring
+ * is not counted at all: forced-colors mode removes box-shadow, so a ring
+ * cannot be the only indicator.
+ */
+async function readFocusIndicator(page: Page) {
+  return page.evaluate(() => {
+    const textarea = document.querySelector<HTMLElement>('[data-testid="chat-textarea"]')!;
+    const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
+    const px = (value: string) => Number.parseFloat(value) || 0;
+
+    type Box = { left: number; top: number; right: number; bottom: number };
+    const indicators: Array<{ owner: string; kind: string; box: Box }> = [];
+    for (const [owner, element] of [
+      ["textarea", textarea],
+      ["composer", composer],
+    ] as const) {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const width = px(style.outlineWidth);
+      const colour = style.outlineColor.replace(/\s+/g, "");
+      const transparent =
+        colour === "transparent" || /^rgba\(\d+,\d+,\d+,0\)$/.test(colour) || /\/0\)$/.test(colour);
+      if (style.outlineStyle !== "none" && width > 0 && !transparent) {
+        const grow = width + px(style.outlineOffset);
+        indicators.push({
+          owner,
+          kind: "outline",
+          box: {
+            left: rect.left - grow,
+            top: rect.top - grow,
+            right: rect.right + grow,
+            bottom: rect.bottom + grow,
+          },
+        });
+      }
+    }
+
+    const escapes: string[] = [];
+    for (const indicator of indicators) {
+      // The element that owns an outline does not clip it; its ancestors do.
+      const start = indicator.owner === "textarea" ? textarea.parentElement : composer.parentElement;
+      for (let node = start; node && node !== document.body; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+        const rect = node.getBoundingClientRect();
+        const inner = {
+          left: rect.left + px(style.borderLeftWidth),
+          top: rect.top + px(style.borderTopWidth),
+          right: rect.right - px(style.borderRightWidth),
+          bottom: rect.bottom - px(style.borderBottomWidth),
+        };
+        const box = indicator.box;
+        const tolerance = 0.5;
+        if (
+          box.left < inner.left - tolerance ||
+          box.top < inner.top - tolerance ||
+          box.right > inner.right + tolerance ||
+          box.bottom > inner.bottom + tolerance
+        ) {
+          escapes.push(`${indicator.owner} ${indicator.kind} outside ${node.dataset.testid ?? node.tagName} rect`);
+          continue;
+        }
+        const radius = Math.max(0, px(style.borderTopLeftRadius) - px(style.borderLeftWidth));
+        if (radius === 0) continue;
+        const corners = [
+          [box.left, box.top, inner.left + radius, inner.top + radius, box.left < inner.left + radius && box.top < inner.top + radius],
+          [box.right, box.top, inner.right - radius, inner.top + radius, box.right > inner.right - radius && box.top < inner.top + radius],
+          [box.left, box.bottom, inner.left + radius, inner.bottom - radius, box.left < inner.left + radius && box.bottom > inner.bottom - radius],
+          [box.right, box.bottom, inner.right - radius, inner.bottom - radius, box.right > inner.right - radius && box.bottom > inner.bottom - radius],
+        ] as const;
+        for (const [x, y, cx, cy, inZone] of corners) {
+          if (inZone && Math.hypot(x - cx, y - cy) > radius + tolerance) {
+            escapes.push(`${indicator.owner} ${indicator.kind} cut by ${node.dataset.testid ?? node.tagName} corner`);
+          }
+        }
+      }
+    }
+    return {
+      focused: document.activeElement === textarea,
+      indicators: indicators.map((indicator) => `${indicator.owner}:${indicator.kind}`),
+      escapes,
+    };
+  });
+}
+
+test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
+  for (const [width, webSearchMode, forcedColors] of [
+    [320, "off", "none"],
+    [390, "off", "none"],
+    [390, "always", "none"],
+    // Windows high contrast: box-shadow is removed, outlines are kept.
+    [320, "off", "active"],
+  ] as const) {
+    // With web search off no chip row sits above the input, so the textarea is
+    // the composer's first row -- inside the rounded corners.
+    test(`the textarea's focus indicator is drawn and not clipped at ${width}px, web search ${webSearchMode}, forced colors ${forcedColors}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ forcedColors });
+      await enterMobileComposer(page, { viewport: { width, height: 700 }, webSearchMode });
+      const before = await readFocusIndicator(page);
+      expect(before.indicators, "an indicator is drawn before focus").toEqual([]);
+
+      await page.getByTestId("chat-textarea").focus();
+      const focused = await readFocusIndicator(page);
+      console.log(`[composer-focus] ${width} ${JSON.stringify(focused)}`);
+      expect(focused.focused).toBe(true);
+      expect(focused.indicators.length, "no focus indicator is drawn").toBeGreaterThan(0);
+      expect(focused.escapes).toEqual([]);
+    });
+  }
+});
+
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
   test("an on-screen keyboard does not collapse the input row", async ({ page }) => {
     await enterMobileComposer(page, { viewport: { width: 390, height: 680 } });
@@ -690,6 +814,303 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
 
     await expectComposerContract(page, "195x340 (200% zoom)");
     await expect(page.getByTestId("chat-send-button")).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Page zoom and short screens (COMPOSER-REFLOW-01).
+//
+// Staging, 2026-09-17, Galaxy S25+ / Edge "Default zoom": at 150% the notice
+// under the composer was cut at "민감정…", at 200% the starters had no room at
+// all, and at 300% (a ~137px layout viewport) Send, the credit estimate and
+// the microphone were below the screen and the user could not drag them into
+// view. Three causes, each measured here rather than inferred from classes:
+//
+//   - the empty textarea kept a one-line height while its placeholder wrapped
+//     to two, so the box scrolled itself and took the drag meant for the shell;
+//   - the notice was one truncated line;
+//   - the conversation section could flex down to 0, leaving the starters (or
+//     the answers) nothing to be drawn in.
+//
+// The sizes are Edge's zoom levels on that phone in CSS pixels, plus a
+// landscape phone. `isMobile` because Chromium only turns a CDP touch drag
+// into a scroll under mobile emulation; the drag is dispatched as raw touch
+// points, which is what a finger does, and `elementFromPoint` at the control's
+// centre is the reachability test, as in the sidebar drawer contract.
+// ---------------------------------------------------------------------------
+
+const ZOOM_VIEWPORTS = [
+  { label: "150% page zoom", width: 275, height: 493 },
+  { label: "200% page zoom", width: 206, height: 370 },
+  { label: "300% page zoom", width: 137, height: 247 },
+  { label: "landscape phone", width: 568, height: 320 },
+];
+
+const STARTER_COOKIE_URL = "http://127.0.0.1:3100";
+
+async function touchDrag(page: Page, x: number, y: number, dy: number) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  const steps = 12;
+  for (let step = 1; step <= steps; step += 1) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y + (dy * step) / steps }],
+    });
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
+/** Whether the control's centre is on screen and is the control itself. */
+async function isReachableAtCentre(page: Page, testId: string) {
+  return page.evaluate((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    if (!element) return false;
+    const box = element.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    return Boolean(hit && (hit === element || element.contains(hit)));
+  }, testId);
+}
+
+async function enterZoomedWelcome(page: Page, viewport: { width: number; height: number }) {
+  await prepareGuestPage(page, "en");
+  await page.context().addCookies([
+    { name: "__tomverse_e2e_chat_starter", value: "1", url: STARTER_COOKIE_URL },
+  ]);
+  await mockAuthenticatedApi(page, { selectedModels: [MODEL_C] });
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await page.setViewportSize(viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(page.getByTestId("chat-empty-state")).toBeAttached();
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await freezeAnimations(page);
+}
+
+test.describe("Mobile composer: page zoom and short screens", { tag: "@ui-risk" }, () => {
+  test.use({ isMobile: true });
+
+  for (const viewport of ZOOM_VIEWPORTS) {
+    const size = `${viewport.width}x${viewport.height}`;
+
+    test(`${viewport.label} (${size}): a drag started on the empty input brings Send into view`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      // The empty box has no vertical overflow: nothing of its placeholder is
+      // cut off, and there is nothing inside it to scroll. The placeholder
+      // arrives in its final language after mount, so this also fails if the
+      // box is fitted only when the draft changes.
+      const clipped = await page
+        .getByTestId("chat-textarea")
+        .evaluate((node: HTMLTextAreaElement) => node.scrollHeight - node.clientHeight);
+      expect(clipped, `${size}: the placeholder is cut off inside the input`).toBeLessThanOrEqual(1);
+      await expectComposerContract(page, `${size} (${viewport.label}, new chat)`);
+
+      // The textarea is the largest target in the dock at this size, so a
+      // drag that starts on it is the one a user makes.
+      const input = await page.getByTestId("chat-textarea").boundingBox();
+      if (!input) throw new Error("chat-textarea has no box");
+      const startX = Math.round(input.x + input.width / 2);
+      const startY = Math.round(Math.min(input.y + input.height / 2, viewport.height - 8));
+      const startsOnInput = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.getAttribute("data-testid") === "chat-textarea",
+        [startX, startY]
+      );
+      expect(startsOnInput, `${size}: the drag does not start on the input`).toBe(true);
+      const sendReachableBefore = await isReachableAtCentre(page, "chat-send-button");
+      const shellScrollTop = () =>
+        page.getByTestId("mobile-chat-shell").evaluate((node) => node.scrollTop);
+      const shellTopBefore = await shellScrollTop();
+      await touchDrag(page, startX, startY, -viewport.height);
+
+      await expect
+        .poll(() => isReachableAtCentre(page, "chat-send-button"), {
+          message: `${size}: Send is not reachable after one drag`,
+          timeout: 3_000,
+        })
+        .toBe(true);
+      // Through the shell, the composer's one scroll owner -- never the page.
+      expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0);
+      if (!sendReachableBefore) {
+        // Where Send started off screen (300%), it is the shell that brought it.
+        expect(
+          await shellScrollTop(),
+          `${size}: Send became reachable without the shell scrolling`
+        ).toBeGreaterThan(shellTopBefore);
+      }
+    });
+
+    test(`${viewport.label} (${size}): the sensitive-data notice is never cut off`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      const notice = page.getByTestId("chat-ai-disclaimer-mobile");
+      const truncated = await notice.evaluate((node) =>
+        Array.from(node.querySelectorAll("span")).some(
+          (span) => span.scrollWidth > span.clientWidth + 1
+        )
+      );
+      expect(truncated, `${size}: the notice is truncated`).toBe(false);
+      const details = page.getByTestId("chat-ai-disclaimer-details");
+      await details.scrollIntoViewIfNeeded();
+      const detailsBox = await details.boundingBox();
+      const noticeBox = await notice.boundingBox();
+      if (!detailsBox || !noticeBox) throw new Error("notice has no box");
+      // "Details" wraps inside the notice rather than being pushed past it.
+      expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(noticeBox.x + noticeBox.width + 1);
+    });
+
+    test(`${viewport.label} (${size}): the starters keep a box to be reached in`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      const floor = await page.evaluate(
+        () => 4 * (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+      );
+      const surface = await page.getByTestId("mobile-conversation-surface").boundingBox();
+      expect(surface?.height ?? 0, `${size}: the conversation section collapsed`).toBeGreaterThanOrEqual(
+        floor - 1
+      );
+
+      // Reached through the section's own scroller, which is not an ancestor
+      // of the composer.
+      const firstCard = page.getByTestId("chat-starter-card").first();
+      const cardIsReachable = () =>
+        firstCard.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const section = document
+            .querySelector('[data-testid="mobile-conversation-surface"]')
+            ?.getBoundingClientRect();
+          if (!section) return false;
+          // A card taller than the section is reached once part of it is
+          // drawn inside the section and hit-testable, so measure the middle
+          // of the part the section actually shows.
+          const top = Math.max(box.top, section.top, 0);
+          const bottom = Math.min(box.bottom, section.bottom, window.innerHeight);
+          if (bottom - top < 8) return false;
+          const x = box.left + box.width / 2;
+          const y = (top + bottom) / 2;
+          if (x < 0 || x > window.innerWidth) return false;
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(hit && (hit === element || element.contains(hit)));
+        });
+      // Drag inside the section until a card is drawn there, as a finger
+      // would; bounded so a card that can never arrive fails rather than hangs.
+      for (let drag = 0; drag < 40 && !(await cardIsReachable()); drag += 1) {
+        const box = await page.getByTestId("mobile-conversation-surface").boundingBox();
+        if (!box) throw new Error("mobile-conversation-surface has no box");
+        const x = Math.round(box.x + box.width / 2);
+        const y = Math.round(Math.max(box.y, 0) + Math.min(box.height, viewport.height) * 0.75);
+        const startsInSection = await page.evaluate(
+          ([px, py]) => {
+            const section = document.querySelector('[data-testid="mobile-conversation-surface"]');
+            const hit = document.elementFromPoint(px, py);
+            return Boolean(section && hit && section.contains(hit));
+          },
+          [x, y]
+        );
+        expect(startsInSection, `${size}: the drag does not start in the section`).toBe(true);
+        await touchDrag(page, x, y, -Math.round(box.height / 2));
+      }
+      expect(await cardIsReachable(), `${size}: no starter card can be reached`).toBe(true);
+    });
+  }
+
+  test("zooming in after the page loaded refits the empty input", async ({ page }) => {
+    // Page zoom changed while the chat is open: the width moves and the draft
+    // does not, which is the path a value-only fit never ran on.
+    await enterZoomedWelcome(page, { width: 390, height: 780 });
+    await page.setViewportSize({ width: 137, height: 247 });
+    await expect
+      .poll(
+        () =>
+          page
+            .getByTestId("chat-textarea")
+            .evaluate((node: HTMLTextAreaElement) => node.scrollHeight - node.clientHeight),
+        { message: "the placeholder is cut off after zooming in", timeout: 3_000 }
+      )
+      .toBeLessThanOrEqual(1);
+  });
+
+  for (const width of [137, 120]) {
+    test(`the model button and its chevron stay inside the composer at ${width}px`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, { width, height: 247 });
+      await page.getByTestId("composer-model-select").scrollIntoViewIfNeeded();
+      const measured = await page.evaluate(() => {
+        const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
+        const button = document.querySelector<HTMLElement>('[data-testid="composer-model-select"]')!;
+        const icons = button.querySelectorAll("svg");
+        const chevron = icons[icons.length - 1].getBoundingClientRect();
+        const outer = composer.getBoundingClientRect();
+        const style = getComputedStyle(composer);
+        // The padding box: what the composer's overflow-hidden clips to.
+        const clipRight = outer.right - (Number.parseFloat(style.borderRightWidth) || 0);
+        const x = chevron.left + chevron.width / 2;
+        const y = chevron.top + chevron.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          buttonRight: button.getBoundingClientRect().right,
+          chevronRight: chevron.right,
+          clipRight,
+          chevronHit: Boolean(hit && button.contains(hit)),
+        };
+      });
+      expect(measured.buttonRight, JSON.stringify(measured)).toBeLessThanOrEqual(measured.clipRight + 0.5);
+      expect(measured.chevronRight, JSON.stringify(measured)).toBeLessThanOrEqual(measured.clipRight + 0.5);
+      expect(measured.chevronHit, JSON.stringify(measured)).toBe(true);
+    });
+  }
+
+  test("300% page zoom: focusing a dock control does not move the dock under the press", async ({
+    page,
+  }) => {
+    await enterZoomedWelcome(page, { width: 137, height: 247 });
+    const tools = page.getByTestId("composer-tools-button");
+    await tools.scrollIntoViewIfNeeded();
+    const before = await tools.boundingBox();
+
+    // Focus is what a press gives the control before its release lands; the
+    // layout may not change in between, or the release hits something else.
+    await tools.focus();
+    const after = await tools.boundingBox();
+    expect(after?.y).toBe(before?.y);
+
+    // And a focused input is on screen without a second scroll.
+    await page.getByTestId("chat-textarea").focus();
+    await expect
+      .poll(() => isReachableAtCentre(page, "chat-textarea"), { timeout: 3_000 })
+      .toBe(true);
+  });
+
+  test("an ongoing conversation at 300% page zoom keeps its answers a box too", async ({
+    page,
+  }) => {
+    await enterMobileComposer(page, {
+      viewport: { width: 137, height: 247 },
+      webSearchMode: "off",
+    });
+    const surface = await page.getByTestId("mobile-conversation-surface").boundingBox();
+    expect(surface?.height ?? 0).toBeGreaterThanOrEqual(63);
+
+    const header = await page.getByTestId("mobile-chat-header").boundingBox();
+    if (!header) throw new Error("header has no box");
+    await touchDrag(page, 68, Math.round(header.y + header.height / 2), -247);
+    await expect
+      .poll(() => isReachableAtCentre(page, "chat-send-button"), { timeout: 3_000 })
+      .toBe(true);
   });
 });
 

@@ -391,24 +391,11 @@ test("a refund receipt and its queue row are written together", () => {
  */
 test("every transactional email sender has a reviewed failure policy", () => {
   const CLASSIFIED = {
-    "lib/notificationDeliveries.ts": "is the retry queue itself",
-    "lib/supportNotificationEmail.ts": "renders for the queue, does not send",
-    // Claims its row before sending and resets the claim on failure, so the
-    // next maintenance pass retries it.
-    "lib/maintenance.ts": "retries via its own claim/reset",
-    "lib/billingEmails.ts": "renders and sends; callers own the policy",
-    "lib/accountEmails.ts": "renders and sends; callers own the policy",
-    // Time-sensitive by design: a login code delivered late is worse than
-    // one not delivered, and the user can simply request another.
-    "lib/emailLoginEmails.ts": "deliberately fire-and-forget (time-sensitive)",
-    // Records every send, skip and failure in its own report table, which the
-    // admin console surfaces.
-    "lib/providerModelCatalogReport.ts": "records outcomes in its report table",
+    // The queue's operator half, split out so the queue file itself need not
+    // be on the send allowlist. It answers in the queue's own outcome type, so
+    // the retry policy is the queue's (docs/policy/email-notifications.md v23).
+    "lib/operatorNotificationSend.ts": "answers in the retry queue's outcome type",
     "app/api/admin/test-email/route.ts": "an admin's own manual probe",
-    // Raises an operational incident on failure.
-    "app/api/user/account/route.ts": "alerts via reportOperationalIncident",
-    "app/api/billing/refund-request/route.ts": "queued",
-    "app/api/admin/refund-requests/[requestId]/route.ts": "queued",
   };
 
   const senders = execFileSync(
@@ -432,6 +419,8 @@ test("every transactional email sender has a reviewed failure policy", () => {
       `CLASSIFIED here with the reason they may be fire-and-forget:\n` +
       unclassified.join("\n")
   );
+  const stale = Object.keys(CLASSIFIED).filter((path) => !senders.includes(path));
+  assert.deepEqual(stale, [], `These reviewed sender policies are stale:\n${stale.join("\n")}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -454,4 +443,80 @@ test("a queue that is not keeping up says so before anything abandons", () => {
     job,
     /result\.pending >= NOTIFICATION_QUEUE_DEPTH_ALERT \|\| !result\.exhausted/
   );
+});
+
+// ---------------------------------------------------------------------------
+// The address lock
+// ---------------------------------------------------------------------------
+
+test("losing the address lock is not an attempt", () => {
+  // The send never happened: nothing was submitted and nothing was written.
+  // Counting it would spend the queue's six attempts on somebody else's
+  // withdrawal (docs/policy/email-product-news-redesign-draft.md section 7.4).
+  const state = at({ kind: "lock_unavailable" }, 1);
+  assert.equal(state.status, "pending");
+  assert.equal(state.attempts, 0);
+  assert.equal(state.lastErrorKind, "send_not_submitted");
+  assert.equal(
+    state.nextAttemptAt.getTime(),
+    NOW.getTime() + NOTIFICATION_RETRY_DELAYS_MS[0]
+  );
+});
+
+test("a row that lost the lock waits the delay it was already on", () => {
+  // Three attempts made, the fourth never happened: it comes back on the delay
+  // that follows the third, not on the first step of the curve.
+  const state = at({ kind: "lock_unavailable" }, 4);
+  assert.equal(state.attempts, 3);
+  assert.equal(
+    state.nextAttemptAt.getTime(),
+    NOW.getTime() + NOTIFICATION_RETRY_DELAYS_MS[2]
+  );
+});
+
+test("a row at its last attempt is not abandoned for losing the lock", () => {
+  // Abandonment is for deliveries that were tried and failed. This one was not
+  // tried, so it stays pending however many attempts are behind it.
+  const state = at({ kind: "lock_unavailable" }, NOTIFICATION_MAX_ATTEMPTS);
+  assert.equal(state.status, "pending");
+  assert.notEqual(state.nextAttemptAt, null);
+});
+
+test("every customer-facing notification kind goes through the address lock", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  // Every kind is classified, so a kind added without a decision about who
+  // receives it fails the build rather than inheriting a branch by name.
+  assert.match(queue, /isCustomerNotificationKind\(kind\)/);
+  assert.match(queue, /sendWithAddressLock\(/);
+  const table = queue.slice(
+    queue.indexOf("export const NOTIFICATION_AUDIENCE"),
+    queue.indexOf("export const isCustomerNotificationKind")
+  );
+  for (const kind of [
+    "refundRequestReceived",
+    "refundRequestApproved",
+    "refundRequestRejected",
+    "feedbackUserReceived",
+    "feedbackUserReviewing",
+    "feedbackUserCompleted",
+    "feedbackUserCompletedResend",
+  ]) {
+    assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "customer"`));
+  }
+  // The operator alerts are about somebody else's record and go to our own
+  // mailboxes; a customer's suppression must not silence them.
+  for (const kind of [
+    "supportFeedback",
+    "autoFixReviewRequested",
+    "autoFixProductionVerified",
+    "autoFixPromotionFailed",
+  ]) {
+    assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "operator"`));
+  }
+});
+
+test("a customer notice reports a complaint it was told about under the lock", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  assert.match(queue, /submitted\.raiseIncident === "transactional_complaint"/);
+  assert.match(queue, /EMAIL_TRANSACTIONAL_COMPLAINT_SEND/);
 });

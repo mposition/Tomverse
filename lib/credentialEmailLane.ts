@@ -3,9 +3,10 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { suppressionCheck } from "@/lib/emailSuppression";
+import { sendWithAddressLock } from "@/lib/emailSendLock";
+import { credentialSendWindow } from "@/lib/emailSendLockCore";
 import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import {
   AUTH_LOGIN_CODE_TEMPLATE,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/emailAuditHash";
 import {
   classifyProviderStatus,
+  CREDENTIAL_SEND_BUDGET_MS,
   classifyTransportError,
   isCredentialStillSendable,
   isProviderAuthFailure,
@@ -183,11 +185,17 @@ export async function sendCredentialEmailNow(input: {
     input.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-  // Checked once, before the first attempt. A hard bounce means the mailbox
-  // does not exist, so no amount of retrying inside this request reaches it --
-  // and a complaint deliberately does *not* stop this lane, because refusing to
-  // send a login code to someone who reported a newsletter locks them out of
-  // the account they were trying to leave (§13.3).
+  // Checked once, before the first attempt, so a mailbox that cannot receive
+  // anything costs no provider call. A hard bounce means the mailbox does not
+  // exist, so no amount of retrying inside this request reaches it -- and a
+  // complaint deliberately does *not* stop this lane, because refusing to send
+  // a login code to someone who reported a newsletter locks them out of the
+  // account they were trying to leave (§13.3).
+  //
+  // It is not the decision each attempt is made on: this lane retries for up
+  // to three seconds, and a privacy request committed during that window has
+  // to stop the next attempt. Every attempt below re-asks under the address
+  // lock (lib/emailSendLock.ts).
   const verdict = await suppressionCheck({
     emailAddress: input.to,
     classification: "transactional",
@@ -244,19 +252,98 @@ export async function sendCredentialEmailNow(input: {
     attemptsMade += 1;
     retryAfterMs = undefined;
 
-    const response = await deliverEmailOnce({
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
+    // Every wait this attempt may start comes out of the same three seconds --
+    // the connection, the locks and the provider call -- so they are all cut
+    // from what the request has left rather than from their own caps
+    // (lib/emailSendLockCore.ts).
+    const window = credentialSendWindow({
+      budgetLeftMs: CREDENTIAL_SEND_BUDGET_MS - (now() - startedAt),
+      attemptTimeoutMs: decision.timeoutMs,
+    });
+    if (!window.send) {
+      // Not even the waits are worth starting. The loop would refuse the next
+      // attempt anyway; saying so here keeps the reason truthful rather than
+      // reporting a provider timeout we never made.
+      lastErrorKind = "budget_exhausted";
+      break;
+    }
+
+    // The address lock, the last suppression word and this attempt, in one
+    // scope (docs/policy/email-product-news-redesign-draft.md section 7.4), so
+    // a busy address costs a retry rather than the person's sign-in.
+    const submitted = await sendWithAddressLock({
+      emailAddress: input.to,
+      classification: "transactional",
+      now: new Date(now()),
+      lockTimeoutMs: window.lockTimeoutMs,
+      transactionTimeoutMs: window.transactionTimeoutMs,
+      // The lane cap for this attempt. The helper cuts it again to what the
+      // transaction can protect, and that ceiling is itself this request's
+      // remaining budget plus the commit reserve -- so a budget spent while
+      // waiting for the address shortens the call, and a budget gone refuses
+      // it, without this lane recomputing anything.
+      providerTimeoutMs: window.providerCapMs,
+      message: {
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+      },
       idempotencyKey: input.idempotencyKey,
-      timeoutMs: decision.timeoutMs,
       // Read from the one template this lane carries rather than written here.
       // Every attempt inside this request, and the record of it, then names the
       // same sender as the standard lane would for the same template
       // (docs/policy/email-notifications.md §14.1a).
       senderRole: CREDENTIAL_SENDER_ROLE,
     });
+
+    if (submitted.ok === false && submitted.reason === "lock_unavailable") {
+      if (submitted.cause === "budget") {
+        // The budget went while this attempt was waiting for the address, so
+        // the helper refused rather than starting a call it could not protect.
+        // The loop would refuse the next attempt anyway; naming it here keeps
+        // the record truthful rather than reporting a wait for a lock.
+        lastErrorKind = "budget_exhausted";
+        break;
+      }
+      // A writer holds the address, or no connection came free. Nothing was
+      // submitted, so this is an attempt that can be made again inside the
+      // budget -- the loop decides whether there is room for it (section 7.4).
+      lastErrorKind = "send_not_submitted";
+      continue;
+    }
+
+    if (submitted.ok === false) {
+      // A suppression committed while this request was retrying: a privacy
+      // request or an operator stop, the two this lane honours mid-flight.
+      await prisma.emailDelivery.update({
+        where: { id: input.deliveryId },
+        data: {
+          status: "suppressed",
+          skipReason: submitted.skipReason,
+          attempts: attemptsMade,
+          lastAttemptAt: new Date(now()),
+        },
+      });
+      return { sent: false, reason: "suppressed", skipReason: submitted.skipReason };
+    }
+
+    if (submitted.raiseIncident === "transactional_complaint") {
+      // The verdict taken under the lock, so a complaint recorded while this
+      // request was retrying is still reported. The code goes out either way --
+      // withholding it would lock the account holder out (§13.3).
+      await reportOperationalIncident({
+        code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
+        title: "Sending to an address that reported transactional mail as spam",
+        error:
+          "A login code is going out anyway -- withholding it would lock the " +
+          "account holder out -- but the complaint needs a person to look at it.",
+        severity: "warning",
+        cooldownMs: 60 * 60 * 1_000,
+        context: { component: "credential-email-lane", classification: "transactional" },
+      });
+    }
+
+    const response = submitted.value;
 
     const outcome: ProviderSendOutcome = response.ok
       ? { kind: "delivered", providerMessageId: response.providerMessageId }

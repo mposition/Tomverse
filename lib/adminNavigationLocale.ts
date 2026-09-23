@@ -63,9 +63,24 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   analytics: {
     label: "분석",
-    description: "제품 퍼널, 활성화, 가져오기·메모리 지표",
-    aliases: ["퍼널", "활성화", "전환", "제품 분석", "메모리", "가져오기", "교차검토"],
+    description: "활성 사용자, 사용량, 모델 점유율, 제품 퍼널, 가져오기·메모리 지표",
+    aliases: [
+      "사용 현황",
+      "활성 사용자",
+      "사용자 수",
+      "모델 점유율",
+      "지역",
+      "언어",
+      "퍼널",
+      "활성화",
+      "전환",
+      "제품 분석",
+      "메모리",
+      "가져오기",
+      "교차검토",
+    ],
     tabs: {
+      usage: { label: "사용 현황", description: "활성 사용자, 메시지, 모델 점유율, 사용 시간대와 지역" },
       product: { label: "제품 분석", description: "유입, 활성화, 매출 퍼널" },
       imports: { label: "가져오기·메모리", description: "외부 대화 가져오기와 메모리 지표" },
       "ai-review": { label: "AI Review", description: "신뢰성, 채택, 검토자 쌍 근거" },
@@ -157,6 +172,22 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       deliveries: { label: "전송 로그", description: "무엇을 어디로 보냈고 도착했는지" },
     },
   },
+  marketing: {
+    label: "마케팅",
+    description: "초안 대기열, 게시된 글, 브랜드 계정, 자동화가 남긴 보고",
+    aliases: ["소셜", "게시물", "링크드인", "제르니오", "캠페인", "브랜드 계정", "초안 대기열", "가드"],
+    tabs: {
+      queue: { label: "대기열", description: "사람을 기다리는 초안과 Guard가 각각에 대해 말한 것" },
+      published: {
+        label: "게시 상태",
+        description: "승인된 모든 글 — 대기, 전송 중, 게시됨, 실패, 결과 불명",
+      },
+      accounts: { label: "계정", description: "브랜드 계정과 모드, 정지된 계정이 왜 정지됐는지" },
+      experiments: { label: "실험", description: "랜딩 문구 실험과 결과" },
+      reports: { label: "보고서", description: "주간 요약, 경쟁사 사실, 보존 실행 기록" },
+      comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
+    },
+  },
   "email-campaigns": {
     label: "이메일 캠페인",
     description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",
@@ -214,6 +245,14 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-board-import": {
+    label: "AMUX 카탈로그 이관",
+    description: "owner 전용 미리보기와 승인. 이 화면에서 운영 적용은 꺼져 있다.",
+  },
+  "prompt-refiner-shadow": {
+    label: "Prompt Refiner shadow 실행",
+    description: "동결된 합성 shadow run의 owner 전용 승인과 실행",
+  },
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",

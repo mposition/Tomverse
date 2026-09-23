@@ -1,0 +1,25 @@
+{
+  "round": 0,
+  "reviewer": "claude",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-21T04:48:54.112Z",
+  "durationMs": 31,
+  "usage": null,
+  "failure": "execution_failed",
+  "detail": "claude exited 1: 'claude' is not recognized as an internal or external command,\r\noperable program or batch file."
+}

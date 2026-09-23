@@ -272,6 +272,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:sending-identity
 
+      # Every customer-facing send takes the address lock and asks suppression
+      # again inside it. A send made anywhere else skips all three, and the
+      # failure is silent -- the message goes out, the recipient is somebody who
+      # had withdrawn, and the record says the check was made.
+      - name: Only the allowed files can reach the mail provider
+        timeout-minutes: 5
+        run: npm run check:send-entry-points
+
       - name: Email provider port stays two methods over one provider
         timeout-minutes: 5
         run: npm run check:email-provider-port
@@ -493,6 +501,19 @@ jobs:
       - name: Conversation writer coverage
         timeout-minutes: 5
         run: npm run check:conversation-writers
+
+      # The audit chain proves nothing about a row that reached the table some
+      # other way, so a protected table has one writer module
+      # (docs/policy/marketing-automation.md §6). Direct delegate writes, raw SQL
+      # naming a protected table beside a write verb, and the runtime-SQL
+      # spellings the check lists fail here. Separately, the database refuses
+      # UPDATE and DELETE on the audit log and checks that a hashed insert links
+      # to the chain head and is dated after it
+      # (prisma/migrations/20260918090000_admin_audit_log_append_only). Neither
+      # rules out a deliberately obfuscated write; that is a review finding.
+      - name: Protected table writers
+        timeout-minutes: 5
+        run: npm run check:protected-table-writers
 
       # The readiness register is the only thing standing between "Auto works
       # in shadow" and "Auto answers a real person", which makes it worth

@@ -1,5 +1,9 @@
 # Prompt Refiner receipt와 관측 계약
 
+구현 승인 기록: `mposition`, 2026-09-21 (Australia/Brisbane). 승인 범위는
+confirmatory shadow v4 계약과 content-free evidence writer의 구현·독립 검토까지이며,
+provider 호출·유료 실행·제품 노출·Router 결합은 포함하지 않는다.
+
 상태: **provider-independent 데이터·실행 사전등록·예약 authority 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를
@@ -42,8 +46,9 @@ profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease
 
 ## 0. Durable reservation authority 경계
 
-- stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며 요청당 24,916 microUSD,
-  최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
+- 완료된 legacy stage는 `prompt-refiner-shadow-v1`, confirmatory authority는
+  `prompt-refiner-shadow-v2`로 분리한다. 새 승인은 v2 한 행에만 생성되며 요청당 24,916
+  microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
 - reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
   검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
   counter를 결속한다. stage 최초 counter는 0/0이어야 하고 direct stage counter UPDATE는
@@ -202,9 +207,13 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
 1. 구현된 사전등록을 독립 검토와 통합 CI로 검증한다. 이는 실행 승인이 아니다.
 2. 별도 승인된 작은 shadow가 execution bundle을 생성한다. 사용자에게 UI를
    노출하지 않으므로 disposition은 만들지 않는다.
-3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
-4. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
-5. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
+3. 동결 16건의 provider-independent evidence gate는 구현됐지만, 과거 v3 receipt에는
+   proposal bytes가 없어 의미 anchor·주입 behavior를 소급 판정할 수 없다. 새 계약은
+   proposal을 메모리에서 평가한 뒤 content-free case 결과만 영속화해야 하며, 별도
+   독립 검토·exact 비용 승인·1회 authority 없이는 실행하지 않는다.
+4. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
+5. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
+6. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
 
 ## 9. provider-free shadow harness 관측 경계
 
@@ -264,3 +273,143 @@ terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 �
 [`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
 이 하네스가 completed라는 사실은 실제 shadow 실행, 품질 승인, release gate, 제품 연결
 또는 rollout 승인이 아니다.
+
+## 10. provider-free admission proposal 관측 경계
+
+체크인된 `admission-readiness-v1` bundle은 provider-free harness의 report·journal·witness
+세 파일과 terminal head를 strict manifest로 결속한다. 검증기는 raw size/SHA-256과
+canonical bundle digest를 다시 계산하고 기존 journal replay API로 16/16 completion,
+remaining/unknown 0, structural violation 0, fixture match 16, provider call/cost 0을 다시
+확인한다. synthetic corpus와 source identity digest는 재현 provenance로 허용하지만,
+prompt·fixture output·refined prompt·provider 오류 또는 per-item content digest는 evidence와
+proposal에 기록하지 않는다.
+
+검증 성공은 `awaiting_explicit_admin_cost_approval` proposal일 뿐이고
+`executionAdmitted=false`, `currentCheckoutValidated=false`,
+`runtimeSourceRevalidationRequired=true`다. 이는 manifest가 고정한 과거 snapshot 내부의
+source/corpus 결속만 검증하며 현재 checkout이나 실행 environment의 동일성을 주장하지
+않는다. proposal에는 사람 승인자·승인 시각 입력이 없고, stage/DB
+mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서 다음 항목의 관측이나
+승인으로 해석하지 않는다.
+
+- 실제 모델의 의미 보존·행동상 주입 저항·품질
+- provider 비용·지연·신뢰성 또는 paid shadow 승인
+- PLANNER/release/rollout gate 통과
+- UI 또는 Router 결합 승인
+
+실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
+검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
+새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
+추가한다. 그 writer 전까지 현재 v2 admission의 fail-closed 결과와 default-off 제품 상태를
+유지한다.
+
+## 11. durable staging approval provenance
+
+후속 `prompt-refiner-stage-admission-v2`는 과거 proposal을 현재 staging 배포에 다시
+결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
+다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 188개 source
+파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는
+admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 10개는
+root/workspace resolution metadata, Prisma schema와 두 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
+넘으면 거부한다. 별도 execution manifest는
+고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
+`executionAdmitted=false`, `productAdapterReady=false`를 유지한다.
+
+승인 시각과 정확히 60분인 expiry는 PostgreSQL clock이 소유한다. stage insert와
+tamper-evident success audit은 advisory lock 아래 같은 transaction에서 commit하며, exact
+same actor/runtime replay만 audit 추가 없이 idempotent하다. 다른 immutable facts 또는 만료된
+행의 replay는 409다. migration은 기존 stage를 추측 backfill하거나 seed하지 않고 예상하지
+못한 행이 하나라도 있으면 실패한다. DB trigger가 provenance 수정·삭제 및 만료 후 새
+reservation/consume을 거부하되 HMAC secret은 소유하지 않으므로 hash shape만 검사한다.
+application writer create/replay와 reserve/consume이 같은 검증 helper로 stage-linked audit
+행의 signed payload HMAC을 현재·과거 integrity key와 현재·legacy canonical 형식으로
+검증하고, signed metadata를 stage에 다시 결속한 뒤 current source/execution manifest를
+다시 읽어 저장 행과 비교한다. HMAC에 포함된 `previousHash`가 null이 아니면 그 exact hash의
+선행 audit 행도 존재해야 한다. 위조 audit/stage는 `stage_authorization_invalid`다. global
+audit chain scan이나 table SHARE lock은 하지 않으므로 unrelated audit write가 모든
+reserve/consume과 경합하지 않는다.
+
+`requestId`가 이미 active reservation을 가리키더라도 replay 전에 같은 stage expiry,
+runtime source/deployment/execution 및 model/pricing 검증을 다시 수행한다. idempotency는 현재
+권한 안에서 같은 reservation을 재사용한다는 뜻이며, 만료되거나 drift한 권한을 우회하지 않는다.
+
+manifest와 API는 content-free다. prompt/refined prompt/output, 사용자·대화·session id,
+credential, provider error/body는 저장하지 않는다. `approvedBy`는 운영자 식별자라 data-domain
+registry의 actor row로 retain되며 manual PrivacyRequest 경로를 따른다. customer data export에는
+포함되지 않는다. 권한 TTL 60분은 감사 evidence retention 기간을 뜻하지 않는다.
+
+GET preview는 no-write이고 POST body는 세 digest, preview binding digest와 고정
+confirmation만 받는다. reason은 caller 입력이 아니라 서버 고정 상수다.
+owner-only, recent auth, 전역 CSRF, 4 KiB strict JSON, DB rate limit을 적용한다. 이 endpoint와
+stage 행은 provider/network/credential/receipt/reservation/product/flag를 실행하지 않으며,
+실제 paid shadow는 별도 독립 검토와 비용 승인 없이는 열리지 않는다. 세부 계약은
+[`prompt-refiner-durable-stage-writer-contract.md`](../ops/prompt-refiner-durable-stage-writer-contract.md),
+위협 모델은
+[`prompt-refiner-durable-stage-writer-threat-model.md`](prompt-refiner-durable-stage-writer-threat-model.md)에
+있다.
+
+## 12. 격리된 live adapter와 단일 실행 계약
+
+`prompt-refiner-shadow-run-v3`는 위 stage의 100개 reservation pool을 실제 실행
+승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
+좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
+retry는 0, timeout은 15초다. route의 300초 platform cap보다 짧은 240초 호출 admission
+budget과 10초 terminal-write 여유를 고정해, 다음 case를 안전하게 끝낼 시간이 없으면
+reservation 전에 pause한다. 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
+같은 요청을 다시 보내지 않는다. 이 값은 실행 가능한 budget이 아니라 별도 비용 승인이
+결속될 때 적용할 ceiling이다.
+계약은 `routeMaxDurationSeconds=300`도 digest에 포함하며 회귀 검사가 route의 정적
+`maxDuration` literal과 직접 비교한다. 따라서 platform cap 변경이 admission budget과 분리되어
+조용히 배포될 수 없다.
+
+`prompt-refiner-openai-sdk-adapter-v1`은 고정된 OpenAI 모델·가격·reasoning 설정과 기존
+strict JSON parser를 연결한 서버 전용 모듈이다. provider SDK와 credential boundary는
+유일한 live export가 실제 호출될 때만 동적으로 해석한다. 현재 제품·관리자 route,
+script, cron과 다른 runtime library는 이 모듈을 import하지 않는다. 따라서 이 변경만으로
+provider 호출, stage/reservation 소비, DB mutation 또는 사용자 UI 효과가 생기지 않는다.
+
+입력 사전 검사는 두 층이다. system/data message의 UTF-8 byte 수와 고정 framing allowance는
+조기 거부용 보수적 상한이다. 이어 `js-tiktoken@1.0.21`의 `o200k_base` BPE로 같은 두 content를
+실제 계수하고 framing 32 tokens를 더해 100,000-token 계약을 넘으면 dispatch intent 전에 거부한다.
+`js-tiktoken`은 production dependency에 exact version으로 고정하며 bundled corpus digest도
+동결 digest에 직접 결속한다.
+tokenizer package/version/encoding과 admission token 수는 content-free dispatch audit에 결속한다. 실제 provider usage는 nullable로
+기록하며 알 수 없는 값을 0으로 만들지 않는다. warning, multi-step, usage cap 초과 또는
+provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 않는다. 계산된 비용은 고정
+단가의 보수적 upper bound이지 provider invoice가 아니다.
+
+durable run writer와 owner-only 승인 route는 구현되었다. GET은 배포·stage·run source의
+exact digest와 고정 비용 계약을 no-write preview로 반환한다. POST는 별도 default-off flag와
+고정 confirmation을 요구하며, run 승인 행과 사람 audit을 한 transaction에 쓴다. 이 승인은
+provider 실행 승인이 아니다. `recordPromptRefinerShadowDispatchIntent()`는 stage, model registry,
+run, reservation 순으로 lock한 뒤 system audit, attempt의 `dispatch_intent`, reservation consume와
+run accounting을 한 transaction에 결속한다. 따라서 attempt 없는 consume은 application과 DB
+양쪽에서 거부된다.
+
+terminal receipt는 같은 attempt에 대한 compare-and-set으로 한 번만 기록되고, 동일 facts replay만
+idempotent하다. 다른 receipt는 충돌로 거부한다. dispatch intent가 PostgreSQL clock 기준 60초 동안
+terminal receipt를 얻지 못하면 bounded sweeper가 `unknown_after_dispatch`로 닫고 run 전체를
+`stopped_unknown`으로 latch한다. 같은 snapshot의 나머지 stale intent도 latch 뒤 accounting
+catch-up으로 모두 닫으며, 경쟁으로 닫지 못한 id는 결과에 명시한다. sweeper는 adapter 호출,
+reservation 생성 또는 재전송을 하지 않는다. content는 저장하지 않으며 case id, provider/model
+identity, 상태, duration, nullable usage와 보수적 cost upper bound만 기록한다. latch 전에 이미
+dispatch된 attempt의 known receipt가 뒤늦게 도착하면 terminal과 cost는 보존하되 latch는 풀지
+않는다. 세부 운영 계약은
+[`prompt-refiner-durable-run-writer-contract.md`](../ops/prompt-refiner-durable-run-writer-contract.md)에
+있다.
+
+현재 readiness 값은 `durableRunWriterReady=true`, `runApprovalPreviewReady=true`,
+`entryPointReady=true`, `executionAdmitted=true`, `productAdapterReady=false`다. 승인 route는
+비용 승인 행만 만들고 live adapter를 import하지 않는다. 별도 owner-only execute GET/POST는
+각각 DB rate limit과 no-store를 적용하고, POST만 frozen
+16건을 순서대로 reserve하고 dispatch/terminal writer를 호출할 수 있으며, 서버 kill switch는
+default-off다. 시작·resume 시 unknown sweep을 먼저 수행하고, maintenance는 15분마다 sweeper만
+실행한다. 어느 경로에도 retry·fallback·parallel dispatch·제품 Chat 연결은 없다. 배포만으로는
+stage/run 승인 행이나 flag가 생기지 않으므로 provider 호출은 발생하지 않는다.
+
+runner의 pre/post-dispatch, intent 누락, reservation release 실패와 terminal-write 불명 경로는
+응답 전에 운영 incident를 남긴다. payload는 고정 phase/cause code와 run/case/attempt 식별자만
+허용하고 prompt·제안문·provider 오류 원문·model output은 전달하지 않는다. incident 전달 실패는
+고정 content-free 로그만 남기고 원래 실행 결과를 바꾸지 않는다. intent writer가 DB에서
+`reservation_expired`로 이미 닫은 예약은 release를 재시도하지 않으며 원래 dispatch 거부를
+보존한다.

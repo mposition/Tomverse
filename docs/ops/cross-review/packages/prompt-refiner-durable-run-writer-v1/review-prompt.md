@@ -1,0 +1,4066 @@
+# Independent review — task prompt-refiner-durable-run-writer-v1, round 2
+
+Review the change against the original requirement below. Read the requirement and the diff before anything else.
+Do not take the author's summary as a description of what the change does; the diff is.
+
+## Requirement (original)
+
+CHAT-01 Prompt Refiner의 다음 안전 경계로, 승인된 staging durable stage 위에 정확히 16개 합성 case만을 위한 content-free durable run/attempt writer와 owner-only 승인 preview를 구현한다. 사람 승인 audit과 run 생성, provider dispatch 직전 system audit·attempt intent·reservation consume·run accounting, provider 경계 종료 후 immutable terminal receipt를 각각 같은 transaction에 결속한다. dispatch intent가 60초 동안 terminal을 얻지 못하면 unknown_after_dispatch로 닫고 run 전체를 stopped_unknown으로 latch하며 자동 retry·redispatch·provider 조회를 금지한다. AdminAuditLog는 서명된 행이므로 새 audit id는 foreign key가 아닌 immutable plain column으로 보관하고 DB trigger가 exact linked audit을 검증한다. 실행 entry point, actual tokenizer admission, provider 호출, product Chat 연결, flag 활성화와 유료 실행은 추가하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.
+
+## Completion criteria
+
+- GET은 owner와 recent authentication을 요구하는 no-write exact preview이고 POST는 global origin guard, DB rate limit, 4 KiB strict schema, 고정 confirmation과 default-off approval flag를 요구한다.
+- PromptRefinerShadowRun/Attempt는 content-free이며 immutable provenance, exact case/request/reservation uniqueness, bounded cost/count와 DB-owned timestamps를 enforce한다.
+- 사람 승인 audit과 run insert가 원자적이고, dispatch system audit·intent·reservation consume·run counter가 고정 lock order로 원자적이며, standalone consume과 direct SQL consume-without-intent가 모두 거부된다.
+- terminal receipt는 exact replay만 idempotent하고 conflicting replay·사후 수정·삭제를 거부하며 nullable usage와 보수적 cost만 저장한다.
+- 60초 stale intent sweeper는 최대 16건을 unknown_after_dispatch로 terminal 처리하고 stopped_unknown을 latch하되 provider call, reserve, retry, redispatch 또는 자동 해제를 수행하지 않는다.
+- AdminAuditLog에 새 relation/foreign key를 만들지 않고 plain audit id와 insert/terminal trigger의 exact audit 검증으로 결속한다.
+- run contract는 entryPointReady=false, executionAdmitted=false, productAdapterReady=false를 유지하고 route는 live adapter를 import하지 않는다.
+- 빈 PostgreSQL 데이터베이스에 모든 migration이 적용되고 관련 DB integration, server contract, focused unit, typecheck, ESLint, protected-writer/data-domain/doc/policy/encoding guards가 통과한다.
+- Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다.
+
+## Change under review — digest sha256:53eb076d11c4ba6756aec49a790e5fa9aa936933d7207e89e7b5aecc70f41211
+
+```diff
+diff --git a/app/api/admin/prompt-refiner/shadow-run/route.ts b/app/api/admin/prompt-refiner/shadow-run/route.ts
+new file mode 100644
+index 00000000..7da35d49
+--- /dev/null
++++ b/app/api/admin/prompt-refiner/shadow-run/route.ts
+@@ -0,0 +1,173 @@
++export const dynamic = "force-dynamic";
++
++import { getServerSession } from "next-auth/next";
++import { NextResponse } from "next/server";
++import { z } from "zod";
++
++import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
++import {
++    assertRecentAdminAuthentication,
++    isAdminReauthenticationError,
++} from "@/lib/adminReauthentication";
++import {
++    apiSecurityResponse,
++    consumeApiRateLimit,
++    readLimitedJson,
++} from "@/lib/apiSecurity";
++import { authOptions } from "@/lib/auth";
++import {
++    PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++} from "@/lib/promptRefinerShadowRunContract";
++import {
++    createPromptRefinerShadowRun,
++    promptRefinerShadowRunErrorResponse,
++    promptRefinerShadowRunPreview,
++} from "@/lib/promptRefinerShadowRunStore";
++import { promptRefinerStageAdmissionErrorResponse } from "@/lib/promptRefinerStageAdmission";
++
++const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
++const createSchema = z
++    .object({
++        runContractDigest: digest,
++        stageRuntimeSourceManifestDigest: digest,
++        runSourceManifestDigest: digest,
++        previewBindingDigest: digest,
++        confirmation: z.literal(PROMPT_REFINER_SHADOW_RUN_CONFIRMATION),
++    })
++    .strict();
++
++const noStoreHeaders = {
++    "Cache-Control": "private, no-store, max-age=0",
++};
++
++const withNoStore = (response: Response) => {
++    response.headers.set("Cache-Control", noStoreHeaders["Cache-Control"]);
++    return response;
++};
++
++const requireOwner = async () => {
++    const session = await getServerSession(authOptions);
++    if (!session?.user?.id || !isAdminSession(session)) {
++        return {
++            response: NextResponse.json(
++                { error: "Not found." },
++                { status: 404, headers: noStoreHeaders }
++            ),
++        } as const;
++    }
++    if (getAdminRole(session) !== "owner") {
++        return {
++            response: NextResponse.json(
++                { error: "Forbidden." },
++                { status: 403, headers: noStoreHeaders }
++            ),
++        } as const;
++    }
++    try {
++        await assertRecentAdminAuthentication(session);
++    } catch (error) {
++        if (isAdminReauthenticationError(error)) {
++            return {
++                response: NextResponse.json(
++                    {
++                        error: "Recent administrator authentication is required.",
++                        code: "ADMIN_REAUTHENTICATION_REQUIRED",
++                    },
++                    { status: 428, headers: noStoreHeaders }
++                ),
++            } as const;
++        }
++        throw error;
++    }
++    return { session } as const;
++};
++
++export async function GET() {
++    try {
++        const auth = await requireOwner();
++        if ("response" in auth) return auth.response;
++        const preview = await promptRefinerShadowRunPreview();
++        return NextResponse.json({ preview }, { headers: noStoreHeaders });
++    } catch (error) {
++        const run = promptRefinerShadowRunErrorResponse(error);
++        if (run) return withNoStore(run);
++        const stage = promptRefinerStageAdmissionErrorResponse(error);
++        if (stage) return withNoStore(stage);
++        console.error("Failed to preview Prompt Refiner shadow run:", error);
++        return NextResponse.json(
++            { error: "Failed to preview Prompt Refiner shadow run." },
++            { status: 500, headers: noStoreHeaders }
++        );
++    }
++}
++/** Records approval only. It cannot import or invoke the provider adapter. */
++export async function POST(request: Request) {
++    try {
++        const auth = await requireOwner();
++        if ("response" in auth) return auth.response;
++        await consumeApiRateLimit(
++            request,
++            auth.session.user.id,
++            "admin-prompt-refiner-shadow-run-approve",
++            { minute: 2, day: 4 }
++        );
++        const body = await readLimitedJson(request, 4 * 1024, createSchema);
++        const result = await createPromptRefinerShadowRun({
++            session: auth.session,
++            request,
++            expected: {
++                runContractDigest: body.runContractDigest,
++                stageRuntimeSourceManifestDigest:
++                    body.stageRuntimeSourceManifestDigest,
++                runSourceManifestDigest: body.runSourceManifestDigest,
++                previewBindingDigest: body.previewBindingDigest,
++            },
++        });
++        return NextResponse.json(
++            {
++                run: {
++                    id: result.run.id,
++                    status: result.run.status,
++                    runContractDigest: result.run.runContractDigest,
++                    corpusDigest: result.run.corpusDigest,
++                    adapterVersion: result.run.adapterVersion,
++                    environment: "staging",
++                    deploymentId: result.run.runtimeDeploymentId,
++                    commitSha: result.run.runtimeCommitSha,
++                    perRequestCostMicroUsd: Number(
++                        result.run.perRequestCostMicroUsd
++                    ),
++                    maxDispatches: result.run.maxDispatches,
++                    costCeilingMicroUsd: Number(
++                        result.run.costCeilingMicroUsd
++                    ),
++                    approvedAt: result.run.approvedAt.toISOString(),
++                    approvalExpiresAt:
++                        result.run.approvalExpiresAt.toISOString(),
++                    authorizationAuditLogId:
++                        result.run.authorizationAuditLogId,
++                    executionAdmitted: false,
++                    productAdapterReady: false,
++                },
++                created: result.created,
++                replayed: result.replayed,
++            },
++            {
++                status: result.created ? 201 : 200,
++                headers: noStoreHeaders,
++            }
++        );
++    } catch (error) {
++        const run = promptRefinerShadowRunErrorResponse(error);
++        if (run) return withNoStore(run);
++        const stage = promptRefinerStageAdmissionErrorResponse(error);
++        if (stage) return withNoStore(stage);
++        const security = apiSecurityResponse(error);
++        if (security) return withNoStore(security);
++        console.error("Failed to approve Prompt Refiner shadow run:", error);
++        return NextResponse.json(
++            { error: "Failed to approve Prompt Refiner shadow run." },
++            { status: 500, headers: noStoreHeaders }
++        );
++    }
++}
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.authorization.md
+new file mode 100644
+index 00000000..102c8807
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.authorization.md
+@@ -0,0 +1,27 @@
++# Prompt Refiner durable run writer Claude 독립 검토 제한 승인
++
++Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 권장 순서의 자동 진행,
++필요한 Claude 독립 검토와 이 작업에 대한 `--skip-preflight` 예외를 승인했다.
++이 문서는 전자서명, 제품 실행 승인, 비용 승인, push·merge·deploy 승인이 아니다.
++
++## 적용 범위
++
++이 승인은
++[검토 task](prompt-refiner-durable-run-writer-v1.task.json)에 정의된 Codex 작성 변경의
++Claude 읽기 전용 독립 검토에만 적용한다. 최초 검토와 actionable finding 대응 후
++최대 두 번의 수정 검토를 허용한다.
++
++## 유지되는 경계
++
++- reviewer는 로컬 Claude Code CLI와 저장된 Claude Max `claude.ai` 로그인을 사용한다.
++  child 환경에서 `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 제거하고,
++  `claude auth status --json`이 `authMethod=claude.ai`, `subscriptionType=max`임을
++  확인한다. 실패하면 API key 방식으로 전환하지 않는다.
++- Claude는 `--print --safe-mode --output-format json --tools Read,Grep,Glob
++  --allowedTools Read,Grep,Glob --strict-mcp-config`의 읽기 전용 경계만 사용한다.
++- `--skip-preflight`만 허용한다. `--review-despite-check-failures`, 테스트·CI 우회,
++  reviewer write·shell·MCP·hook 권한 확대는 허용하지 않는다.
++- Prompt Refiner provider 호출, Railway 또는 외부 API 호출, credential 조회, 실제 stage/run
++  승인, flag 활성화, 유료 실행과 제품 Chat 연결은 승인하지 않는다.
++- 검토 기록은 package digest에 결속하고, 수정 라운드 상한 뒤 actionable finding이 남으면
++  `on_hold`로 끝낸다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.task.json
+new file mode 100644
+index 00000000..b5afad1e
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.task.json
+@@ -0,0 +1,47 @@
++{
++  "taskId": "prompt-refiner-durable-run-writer-v1",
++  "requirement": "CHAT-01 Prompt Refiner의 다음 안전 경계로, 승인된 staging durable stage 위에 정확히 16개 합성 case만을 위한 content-free durable run/attempt writer와 owner-only 승인 preview를 구현한다. 사람 승인 audit과 run 생성, provider dispatch 직전 system audit·attempt intent·reservation consume·run accounting, provider 경계 종료 후 immutable terminal receipt를 각각 같은 transaction에 결속한다. dispatch intent가 60초 동안 terminal을 얻지 못하면 unknown_after_dispatch로 닫고 run 전체를 stopped_unknown으로 latch하며 자동 retry·redispatch·provider 조회를 금지한다. AdminAuditLog는 서명된 행이므로 새 audit id는 foreign key가 아닌 immutable plain column으로 보관하고 DB trigger가 exact linked audit을 검증한다. 실행 entry point, actual tokenizer admission, provider 호출, product Chat 연결, flag 활성화와 유료 실행은 추가하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
++  "completionCriteria": [
++    "GET은 owner와 recent authentication을 요구하는 no-write exact preview이고 POST는 global origin guard, DB rate limit, 4 KiB strict schema, 고정 confirmation과 default-off approval flag를 요구한다.",
++    "PromptRefinerShadowRun/Attempt는 content-free이며 immutable provenance, exact case/request/reservation uniqueness, bounded cost/count와 DB-owned timestamps를 enforce한다.",
++    "사람 승인 audit과 run insert가 원자적이고, dispatch system audit·intent·reservation consume·run counter가 고정 lock order로 원자적이며, standalone consume과 direct SQL consume-without-intent가 모두 거부된다.",
++    "terminal receipt는 exact replay만 idempotent하고 conflicting replay·사후 수정·삭제를 거부하며 nullable usage와 보수적 cost만 저장한다.",
++    "60초 stale intent sweeper는 최대 16건을 unknown_after_dispatch로 terminal 처리하고 stopped_unknown을 latch하되 provider call, reserve, retry, redispatch 또는 자동 해제를 수행하지 않는다.",
++    "AdminAuditLog에 새 relation/foreign key를 만들지 않고 plain audit id와 insert/terminal trigger의 exact audit 검증으로 결속한다.",
++    "run contract는 entryPointReady=false, executionAdmitted=false, productAdapterReady=false를 유지하고 route는 live adapter를 import하지 않는다.",
++    "빈 PostgreSQL 데이터베이스에 모든 migration이 적용되고 관련 DB integration, server contract, focused unit, typecheck, ESLint, protected-writer/data-domain/doc/policy/encoding guards가 통과한다.",
++    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
++  ],
++  "baseCommit": "a63a2852f707efbd0a2108b53ac4f87b943120bc",
++  "writableScope": [
++    "app/api/admin/prompt-refiner/shadow-run/route.ts",
++    "docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.authorization.md",
++    "docs/ops/cross-review/packages/prompt-refiner-durable-run-writer-v1.task.json",
++    "docs/ops/prompt-refiner-durable-run-writer-contract.md",
++    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
++    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
++    "docs/policy/prompt-refiner-observability.md",
++    "docs/policy/tomverse-chat-data-domain-registry.yaml",
++    "lib/accountDataExportDomains.ts",
++    "lib/adminAuditSystemActors.ts",
++    "lib/marketingAutomationAccess.ts",
++    "lib/promptRefinerReservationAuthority.ts",
++    "lib/promptRefinerReservationCore.ts",
++    "lib/promptRefinerShadowRunContract.ts",
++    "lib/promptRefinerShadowRunStore.ts",
++    "lib/promptRefinerShadowSystemAudit.ts",
++    "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
++    "prisma/schema.prisma",
++    "scripts/check-protected-table-writers-core.mjs",
++    "scripts/run-db-integration-tests.mjs",
++    "tests/adminAuditSystemActors.test.ts",
++    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
++    "tests/integration/prompt-refiner-reservation.db.test.ts",
++    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
++    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
++    "tests/promptRefinerShadowLiveAdapter.test.mjs",
++    "tests/promptRefinerShadowRunContract.test.mjs",
++    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/prompt-refiner-durable-run-writer-contract.md b/docs/ops/prompt-refiner-durable-run-writer-contract.md
+new file mode 100644
+index 00000000..d0e0336d
+--- /dev/null
++++ b/docs/ops/prompt-refiner-durable-run-writer-contract.md
+@@ -0,0 +1,115 @@
++# Prompt Refiner durable run writer 운영 계약
++
++## 1. 범위와 현재 readiness
++
++- run: `prompt-refiner-shadow-run-v2`
++- corpus: 동결된 한국어 8건·영어 8건, 합계 16건
++- provider/model/가격: execution contract에 고정된 exact identity와 단가
++- 요청당 비용 상한: 24,916 microUSD
++- run 비용 상한: 398,656 microUSD
++- timeout: 15초
++- retry: 0
++- unknown 기준: dispatch intent 뒤 60초
++
++`durableRunWriterReady=true`, `runApprovalPreviewReady=true`다. 반면
++`entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`다. 이 문서의
++writer는 실행을 기록할 안전한 경계를 제공하지만, provider를 호출하는 entry point는 제공하지
++않는다.
++
++## 2. owner 승인 route
++
++`GET /api/admin/prompt-refiner/shadow-run`은 owner와 recent authentication을 요구하는 no-write
++preview다. 승인된 stage와 현재 deployment/commit, stage source manifest, run delta source
++manifest, corpus, model, 비용과 unknown 정책을 canonical binding digest로 반환한다. 응답은
++`private, no-store`다.
++
++`POST /api/admin/prompt-refiner/shadow-run`은 같은 인증과 전역 origin 검사, DB rate limit,
++4 KiB strict JSON을 적용한다. body는 네 digest와 고정 confirmation만 받는다. 서버의
++`PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED`가 정확히 `true`가 아니면 거부한다. POST는 facts를
++다시 읽고 stage authorization, registry/pricing, DB clock, preview binding을 transaction 안에서
++재검증한다. 사람 audit과 `PromptRefinerShadowRun`은 함께 commit되거나 함께 rollback된다.
++
++동일 actor와 동일 immutable facts의 replay만 기존 행을 반환한다. run id와 contract digest는
++한 번만 사용할 수 있고, 다른 actor/facts 또는 terminal run을 새 승인으로 바꾸지 않는다.
++
++## 3. dispatch 경계
++
++향후 runner는 provider 호출 전에 `recordPromptRefinerShadowDispatchIntent()`를 호출해야 한다.
++transaction lock 순서는 stage, model registry, run, reservation이다. writer는 다음을 원자적으로
++기록한다.
++
++1. system audit `prompt_refiner.shadow_dispatch.intent_recorded`
++2. case id/index와 request/reservation에 결속된 `dispatch_intent` attempt
++3. exact reservation의 `reserved -> consumed`
++4. run의 `approved -> running` 및 dispatch count
++
++case id/index, request id와 reservation id는 중복될 수 없다. model, adapter, output cap,
++timeout, retry가 고정 execution contract와 다르면 transaction 전에 거부한다. standalone
++reservation consume은 application에서 `dispatch_intent_required`로 거부되며 DB trigger도 같은
++transaction에 exact attempt가 하나 없으면 거부한다.
++
++writer가 성공한 뒤에만 provider 경계로 나갈 수 있다. writer 성공 자체는 provider가 호출됐거나
++응답했다는 증거가 아니다.
++
++## 4. terminal receipt와 accounting
++
++provider 경계가 끝나면 runner는 `recordPromptRefinerShadowTerminal()`에 terminal reason,
++duration과 nullable usage만 전달한다. 저장 가능한 terminal reason은 execution contract의
++`suggested`, provider/timeout/response-validation/cancel/unknown 분류로 제한된다. prompt,
++refined prompt, output, provider body와 credential은 저장하지 않는다.
++
++attempt row lock 뒤 `dispatch_intent -> terminal` compare-and-set을 수행하고 system audit과
++terminal facts를 같은 transaction에 쓴다. 동일 receipt replay는 idempotent하고, 다른 값은
++충돌이다. run의 dispatch/terminal count와 known cost는 attempt 집계와 정확히 같아야 하며,
++known cost가 승인 ceiling을 넘으면 rollback한다. 16건 모두 terminal이면 `completed`, 하나라도
++`unknown_after_dispatch`면 `stopped_unknown`이다.
++
++## 5. unknown 복구
++
++`sweepPromptRefinerShadowUnknowns()`는 PostgreSQL clock으로 60초가 지난 `dispatch_intent`를
++오래된 순으로 최대 16건 읽어 `unknown_after_dispatch` receipt로 닫는다. 첫 receipt가 run을
++`stopped_unknown`으로 latch한 뒤에도 같은 snapshot에 있던 나머지 stale intent를 모두 닫는다.
++경쟁으로 닫지 못한 id는 `unresolvedStaleAttemptIds`로 명시해 조용히 사라지지 않게 한다. 다음
++행위는 금지된다.
++
++- provider adapter 호출
++- 새 reservation 또는 dispatch intent 생성
++- retry 또는 redispatch
++- provider 결과 추측
++- terminal facts 덮어쓰기
++
++`stopped_unknown`은 자동으로 해제하지 않는다. 운영자는 provider 및 결제 기록을 별도로 확인하고
++새 정책/계약 없이는 같은 요청을 보내지 않는다. `consumed`인데 attempt가 없는 reservation은
++incident 목록으로만 반환하며 자동 수선하지 않는다. latch 전에 이미 dispatch된 다른 attempt의
++known receipt가 뒤늦게 도착하면 그 terminal과 실제 cost는 보존하되 run은 `stopped_unknown`으로
++유지한다. 이는 새 요청이나 재전송 권한을 만들지 않는다.
++
++## 6. DB·개인정보 경계
++
++run과 attempt의 provenance, audit linkage, case/request/reservation binding은 immutable하다.
++상태 전이는 `approved -> running -> completed|stopped_unknown`과
++`dispatch_intent -> terminal`만 허용하며 terminal 행 삭제는 금지한다. DB-owned timestamp와
++cross-row accounting은 trigger가 다시 검사한다.
++
++세 audit id는 `AdminAuditLog`를 향한 외래키가 아닌 immutable plain column이다. 감사 행은 HMAC
++입력이라 외래키의 referential action이 서명된 증거를 다시 쓰거나 삭제할 경로를 만들면 안 된다.
++대신 insert/terminal trigger가 같은 transaction 안에서 exact audit 행의 존재, action, target,
++system actor와 결속 metadata를 읽어 일치하지 않으면 전체 transaction을 거부한다.
++
++두 테이블은 서비스 운영·비용·감사 도메인이다. 고객 content를 보관하지 않고 customer data
++export에서 제외한다. 승인자 식별자는 기존 admin audit/retention 절차를 따른다. retention은
++`TBD-security-retention-schedule`이 확정될 때까지 자동 삭제하지 않는다.
++
++## 7. 다음 단계의 금지선
++
++다음 변경은 별도 독립 검토를 거쳐야 한다. runner/entry point는 정확히 16개 case를 순차 reserve,
++dispatch-intent 기록, provider 호출, terminal 기록으로 연결해야 한다. 다음을 이 writer 변경에
++소급해 허용하지 않는다.
++
++- 제품 Chat 요청 또는 사용자 content 연결
++- 다른 provider/model/corpus/가격 사용
++- parallel dispatch, retry, fallback 또는 resume-after-unknown
++- 승인 flag의 자동 활성화
++- 신규 paid call, staging dispatch 또는 비용 승인
++
++실제 실행은 별도 사람 비용 승인과 실행 당시 exact deployment 검증 없이는 시작할 수 없다.
+diff --git a/docs/ops/prompt-refiner-durable-stage-writer-contract.md b/docs/ops/prompt-refiner-durable-stage-writer-contract.md
+index b51444ad..03e73a21 100644
+--- a/docs/ops/prompt-refiner-durable-stage-writer-contract.md
++++ b/docs/ops/prompt-refiner-durable-stage-writer-contract.md
+@@ -136,8 +136,11 @@ stage와 비교한다. audit 위조, 불일치 또는 만료면 fail-closed한
+ source/deployment/execution, model/pricing이 모두 현재일 때만 기존 reservation을 idempotent하게
+ 반환하며, drift 뒤 replay는 과거 reservation을 새 실행 권한으로 되살리지 않는다.
+ 
+-이 회차에는 stage를 소비하는 actual provider admission/caller가 없다. stage가 생겨도 제품
+-요청, credential lookup, network, provider call, receipt 또는 flag mutation은 발생하지 않는다.
++후속 durable run writer는 stage를 exact 16건 run 승인과 dispatch/terminal 기록 경계로 더
++좁혔지만 actual provider admission/caller는 여전히 없다. stage나 run 승인이 생겨도 제품 요청,
++credential lookup, network, provider call 또는 flag mutation은 발생하지 않는다. 후속 계약은
++[`prompt-refiner-durable-run-writer-contract.md`](prompt-refiner-durable-run-writer-contract.md)에
++있다.
+ 
+ ## 8. 오류와 운영 판단
+ 
+diff --git a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
+index 3fe8c2f7..ae79e1cc 100644
+--- a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
++++ b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
+@@ -42,6 +42,16 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시
+ | prompt/credential/provider error가 provenance에 유입 | manifest schema는 path/size/hash와 고정 실행 숫자만 허용; audit reason은 request가 아니라 서버 내부 상수 |
+ | 승인 endpoint 탐색·CSRF·탈취 session | 비관리자 404, owner-only, recent authentication, global origin guard, DB atomic rate limit |
+ | stage 행 존재가 provider 실행으로 오인 | execution manifest 및 response에서 두 readiness boolean이 false; 새 adapter/caller 없음 |
++| run 승인 행 존재가 provider 실행 승인으로 오인 | run contract와 승인 응답은 `entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`; 승인 route는 live adapter를 import하거나 호출하지 않음 |
++| caller가 run 비용·corpus·model·배포 identity를 바꿈 | GET preview가 stage/runtime/run source와 고정 비용 계약의 canonical digest를 반환하고 POST는 exact digest와 고정 confirmation만 받음; 별도 default-off flag를 서버에서 검사 |
++| run 승인 audit만 남거나 run만 남음 | owner action audit과 `PromptRefinerShadowRun` insert를 한 transaction에 기록하고 linked audit HMAC·metadata를 commit 전에 재검증 |
++| run/attempt 외래키가 서명된 audit 행을 사후 변경·삭제 | audit id는 immutable plain column으로 두고 referential action을 만들지 않음; trigger가 insert/terminal 시 exact audit action·target·actor·metadata를 같은 transaction에서 검증 |
++| reservation이 dispatch evidence 없이 consumed 됨 | stage→registry→run→reservation 고정 lock 순서 안에서 system audit, dispatch intent, consume, run counter를 함께 commit; application authority와 DB trigger가 attempt 없는 consume을 모두 거부 |
++| 같은 case/request/reservation을 이중 dispatch | reservation/request와 run+case id/index의 unique key 및 transaction 안 duplicate 검사; 이미 기록된 dispatch intent는 재호출 권한으로 해석하지 않음 |
++| terminal receipt가 경쟁하거나 사후 변경됨 | attempt row lock과 `dispatch_intent -> terminal` compare-and-set; 동일 facts replay만 idempotent, 다른 receipt는 409, terminal 행 UPDATE/DELETE는 DB trigger가 거부 |
++| provider dispatch 뒤 process가 죽어 결과를 모름 | PostgreSQL clock 기준 60초 stale intent만 bounded sweeper가 `unknown_after_dispatch`로 terminal 처리하고 run을 `stopped_unknown`으로 latch; 같은 snapshot의 나머지 stale intent도 latch 뒤 닫고 경쟁으로 닫지 못한 id를 보고; sweeper는 adapter 호출·reserve·retry·redispatch를 하지 않음 |
++| unknown run에서 다음 case를 계속 실행 | run authorization/runtime/state 재검증과 terminal latch가 새 dispatch intent를 거부; latch 전 이미 dispatch된 attempt의 늦은 known receipt만 terminal/cost 충실도를 위해 기록하고 latch는 유지; retry count는 항상 0 |
++| prompt/refined output/provider body가 run DB나 audit에 유입 | run/attempt schema와 audit metadata는 식별자·상태·duration·nullable token usage·cost upper bound만 허용하고 content 필드는 두지 않음 |
+ 
+ ## 4. 잔여 위험
+ 
+@@ -58,3 +68,9 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시
+   60분과 감사 증거 retention은 서로 다른 개념이다.
+ - 이 writer는 actual dispatch를 열지 않으므로 provider 실패, 품질, 의미 보존과 행동상
+   injection resistance에 대한 새 증거를 만들지 않는다.
++- DB transaction은 provider network 호출과 원자적일 수 없다. dispatch intent가 commit된 뒤
++  호출 여부나 결과를 확정할 수 없으면 보수적으로 unknown에 latch하며 자동 복구나 재전송으로
++  비용·중복 실행을 추측하지 않는다.
++- `consumed`인데 attempt가 없는 행은 새 migration 이후 정상 writer가 만들 수 없지만, legacy,
++  trigger 비활성화 또는 privileged SQL 사고의 증거일 수 있다. sweeper는 이를 고치거나 다시
++  보내지 않고 incident 목록으로만 반환한다.
+diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
+index 467c0db5..3360cb14 100644
+--- a/docs/policy/prompt-refiner-observability.md
++++ b/docs/policy/prompt-refiner-observability.md
+@@ -341,7 +341,7 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
+ 
+ ## 12. 격리된 live adapter와 단일 실행 계약
+ 
+-`prompt-refiner-shadow-run-v1`은 위 stage의 100개 reservation pool을 실제 실행
++`prompt-refiner-shadow-run-v2`는 위 stage의 100개 reservation pool을 실제 실행
+ 승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
+ 좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
+ retry는 0, timeout은 15초이며 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
+@@ -363,9 +363,28 @@ provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 
+ 요구한 actual-tokenizer 식별·계수를 충족하지 않으므로 실행 승인 근거가 아니다. durable
+ runner가 열리기 전에 그 요구를 구현하거나 별도 계약 변경으로 다시 승인해야 한다.
+ 
+-이 단계의 readiness 값은 `durableRunWriterReady=false`, `entryPointReady=false`,
+-`executionAdmitted=false`, `productAdapterReady=false`다. 다음 변경은 별도 검토에서 exact
+-승인·reservation consume·dispatch intent·terminal receipt를 한 transaction 경계에
+-결속하고, dispatch 뒤 unknown outcome을 운영자가 확인하기 전 재시도하지 못하게 해야 한다.
+-그 writer와 owner-only entry point가 배포되기 전에는 비용 승인을 받아도 live adapter를
+-호출할 수 없다.
++durable run writer와 owner-only 승인 route는 구현되었다. GET은 배포·stage·run source의
++exact digest와 고정 비용 계약을 no-write preview로 반환한다. POST는 별도 default-off flag와
++고정 confirmation을 요구하며, run 승인 행과 사람 audit을 한 transaction에 쓴다. 이 승인은
++provider 실행 승인이 아니다. `recordPromptRefinerShadowDispatchIntent()`는 stage, model registry,
++run, reservation 순으로 lock한 뒤 system audit, attempt의 `dispatch_intent`, reservation consume와
++run accounting을 한 transaction에 결속한다. 따라서 attempt 없는 consume은 application과 DB
++양쪽에서 거부된다.
++
++terminal receipt는 같은 attempt에 대한 compare-and-set으로 한 번만 기록되고, 동일 facts replay만
++idempotent하다. 다른 receipt는 충돌로 거부한다. dispatch intent가 PostgreSQL clock 기준 60초 동안
++terminal receipt를 얻지 못하면 bounded sweeper가 `unknown_after_dispatch`로 닫고 run 전체를
++`stopped_unknown`으로 latch한다. 같은 snapshot의 나머지 stale intent도 latch 뒤 accounting
++catch-up으로 모두 닫으며, 경쟁으로 닫지 못한 id는 결과에 명시한다. sweeper는 adapter 호출,
++reservation 생성 또는 재전송을 하지 않는다. content는 저장하지 않으며 case id, provider/model
++identity, 상태, duration, nullable usage와 보수적 cost upper bound만 기록한다. latch 전에 이미
++dispatch된 attempt의 known receipt가 뒤늦게 도착하면 terminal과 cost는 보존하되 latch는 풀지
++않는다. 세부 운영 계약은
++[`prompt-refiner-durable-run-writer-contract.md`](../ops/prompt-refiner-durable-run-writer-contract.md)에
++있다.
++
++현재 readiness 값은 `durableRunWriterReady=true`, `runApprovalPreviewReady=true`,
++`entryPointReady=false`, `executionAdmitted=false`, `productAdapterReady=false`다. 관리자 route는
++비용 승인 행만 만들며 dispatch entry point나 live adapter를 import하지 않는다. 다음 변경은
++실제 16건을 순서대로 reserve하고, 위 dispatch/terminal writer를 호출하는 별도 실행 entry point를
++추가해야 한다. 그 변경 전에는 run 승인을 받아도 provider 호출은 발생하지 않는다.
+diff --git a/docs/policy/tomverse-chat-data-domain-registry.yaml b/docs/policy/tomverse-chat-data-domain-registry.yaml
+index 06d2d208..33725ee4 100644
+--- a/docs/policy/tomverse-chat-data-domain-registry.yaml
++++ b/docs/policy/tomverse-chat-data-domain-registry.yaml
+@@ -1070,6 +1070,39 @@ domains:
+       create-only, globally bounded, and expires after exactly 60 minutes; its
+       retention decision is separate from its authority expiry.
+ 
++  - domain: promptRefinerShadowRun
++    prismaModel: PromptRefinerShadowRun
++    userLinkageRole: actor
++    owner: backend-ai
++    deletionAction: retain
++    retentionPolicy: statutory
++    implementationStatus: implemented
++    retention:
++      retentionPolicyRef: "TBD-security-retention-schedule"
++      legalBasis: >-
++        Immutable evidence that a named administrator approved one bounded,
++        content-free staging run against exact stage, source, deployment,
++        model and cost contracts. Retention supports security investigation,
++        spending-control audit, and defence of related legal claims under GDPR
++        Article 17(3)(b) and (e), subject to legal confirmation of the final
++        schedule.
++      retentionStartsFrom: "approvedAt"
++      retentionPeriod: "TBD-pending-security-and-legal-approval"
++      owner: security-privacy
++      legalHoldOverridesPurge: true
++      nextReviewAt: "2026-12-20"
++    subjectReference:
++      kind: none
++    inUnifiedExport: excluded
++    note: >-
++      approvedBy is the operator id and intentionally has no User foreign key,
++      so account deletion cannot rewrite immutable approval evidence. The run
++      and its attempt receipts contain no customer id, prompt, output,
++      credential, provider response, or provider error prose. Operator access
++      requests are handled through the manual PrivacyRequest path together
++      with the linked tamper-evident AdminAuditLog entry. Authority expiry and
++      retention are separate decisions.
++
+   - domain: adminNote
+     prismaModel: AdminNote
+     userLinkageRole: actor
+diff --git a/lib/accountDataExportDomains.ts b/lib/accountDataExportDomains.ts
+index c788fa3b..19f4c446 100644
+--- a/lib/accountDataExportDomains.ts
++++ b/lib/accountDataExportDomains.ts
+@@ -349,6 +349,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
+     exclusionReason:
+       "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+   },
++  {
++    domain: "promptRefinerShadowRun",
++    publicName: "prompt_refiner_shadow_run_approvals",
++    prismaModel: "PromptRefinerShadowRun",
++    state: "excluded",
++    exclusionReason:
++      "Content-free, immutable staging run approval evidence. It contains deployment/source digests, bounded cost and capacity, lifecycle counters and the approving operator id, but no customer id, prompt, output, credential, provider response or error prose. Operator access requests remain on the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
++  },
+   {
+     domain: "adminNote",
+     publicName: "admin_notes",
+diff --git a/lib/adminAuditSystemActors.ts b/lib/adminAuditSystemActors.ts
+index ac0fdefc..4f749d4b 100644
+--- a/lib/adminAuditSystemActors.ts
++++ b/lib/adminAuditSystemActors.ts
+@@ -19,6 +19,7 @@ export const SYSTEM_AUDIT_ACTORS = [
+   "marketing-publisher",
+   "marketing-retention",
+   "marketing-guard",
++  "prompt-refiner-shadow-runner",
+ ] as const;
+ 
+ export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
+diff --git a/lib/marketingAutomationAccess.ts b/lib/marketingAutomationAccess.ts
+index 8a1f8b84..d9d7790b 100644
+--- a/lib/marketingAutomationAccess.ts
++++ b/lib/marketingAutomationAccess.ts
+@@ -172,7 +172,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
+ 
+ /** Updated only by the fingerprint test after reviewing a declared file change. */
+ export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
+-  "ac8d4125347e59b7f896d2b70927f45595768e369716d8299db2692414bbc63e";
++  "5439839348d7e0f5b6e63261d430b4248476d0e275defc09bba7f49a6c61a4c0";
+ 
+ const sha256 = (value: string): string =>
+   createHash("sha256").update(value, "utf8").digest("hex");
+diff --git a/lib/promptRefinerReservationAuthority.ts b/lib/promptRefinerReservationAuthority.ts
+index 1f1f102f..4d8303bb 100644
+--- a/lib/promptRefinerReservationAuthority.ts
++++ b/lib/promptRefinerReservationAuthority.ts
+@@ -323,6 +323,14 @@ const transitionReservation = async (input: {
+             return refuse("reservation_expired");
+         }
+ 
++        if (input.transition === "consume") {
++            const intent = await tx.promptRefinerShadowAttempt.findUnique({
++                where: { reservationId: current.id },
++                select: { id: true },
++            });
++            if (!intent) return refuse("dispatch_intent_required");
++        }
++
+         const updated = await tx.promptRefinerReservation.updateMany({
+             where: { id: current.id, status: "reserved" },
+             data:
+diff --git a/lib/promptRefinerReservationCore.ts b/lib/promptRefinerReservationCore.ts
+index a357fe3b..05ebc87f 100644
+--- a/lib/promptRefinerReservationCore.ts
++++ b/lib/promptRefinerReservationCore.ts
+@@ -82,6 +82,7 @@ export const PROMPT_REFINER_RESERVATION_REFUSALS = Object.freeze([
+     "reservation_not_found",
+     "reservation_not_active",
+     "reservation_expired",
++    "dispatch_intent_required",
+     "stage_capacity_exhausted",
+ ] as const);
+ export type PromptRefinerReservationRefusal =
+diff --git a/lib/promptRefinerShadowRunContract.ts b/lib/promptRefinerShadowRunContract.ts
+index 45c3ce7c..ac34def1 100644
+--- a/lib/promptRefinerShadowRunContract.ts
++++ b/lib/promptRefinerShadowRunContract.ts
+@@ -1,6 +1,7 @@
+ import { createHash } from "node:crypto";
+ 
+ import {
++    PROMPT_REFINER_EXECUTION_MODEL_PIN,
+     PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
+     PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
+     PROMPT_REFINER_RETRY_COUNT,
+@@ -20,16 +21,77 @@ import {
+ } from "@/lib/promptRefinerShadowHarness";
+ 
+ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
+-    "prompt-refiner-shadow-run-v1" as const;
++    "prompt-refiner-shadow-run-v2" as const;
+ export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
+     "prompt-refiner-openai-sdk-adapter-v1" as const;
+ export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
++export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION =
++    "prompt-refiner-shadow-run-source-v1" as const;
++export const PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG =
++    "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED" as const;
++export const PROMPT_REFINER_SHADOW_RUN_CONFIRMATION =
++    "APPROVE PROMPT REFINER SHADOW RUN V2 FOR THE DISPLAYED COST CEILING" as const;
++export const PROMPT_REFINER_SHADOW_RUN_ID =
++    "prompt-refiner-shadow-run-v2" as const;
++export const PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS = 60_000 as const;
++export const PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH = 16 as const;
+ export const PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES =
+     PROMPT_REFINER_SHADOW_CORPUS_CASES;
+ export const PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD =
+     PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD *
+     PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES;
+ 
++export const PROMPT_REFINER_SHADOW_RUN_STATUSES = Object.freeze([
++    "approved",
++    "running",
++    "completed",
++    "stopped_unknown",
++] as const);
++export type PromptRefinerShadowRunStatus =
++    (typeof PROMPT_REFINER_SHADOW_RUN_STATUSES)[number];
++
++export const PROMPT_REFINER_SHADOW_ATTEMPT_STATUSES = Object.freeze([
++    "dispatch_intent",
++    "terminal",
++] as const);
++export type PromptRefinerShadowAttemptStatus =
++    (typeof PROMPT_REFINER_SHADOW_ATTEMPT_STATUSES)[number];
++
++/**
++ * Files added after the durable stage closure was approved. The run preview
++ * binds these exact bytes while also binding the current stage source manifest
++ * digest, so the combined approval covers the old closure and this delta.
++ */
++export const PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS = Object.freeze([
++    "app/api/admin/prompt-refiner/shadow-run/route.ts",
++    "lib/adminAuditSystemActors.ts",
++    "lib/promptRefinerShadowLiveAdapter.ts",
++    "lib/promptRefinerShadowRunContract.ts",
++    "lib/promptRefinerShadowRunStore.ts",
++    "lib/promptRefinerShadowSystemAudit.ts",
++    "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
++] as const);
++export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES = 2 * 1024 * 1024;
++export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
++export const PROMPT_REFINER_SHADOW_CASE_IDS = Object.freeze([
++    "prsv1-ko-01",
++    "prsv1-ko-02",
++    "prsv1-ko-03",
++    "prsv1-ko-04",
++    "prsv1-ko-05",
++    "prsv1-ko-06",
++    "prsv1-ko-07",
++    "prsv1-ko-08",
++    "prsv1-en-01",
++    "prsv1-en-02",
++    "prsv1-en-03",
++    "prsv1-en-04",
++    "prsv1-en-05",
++    "prsv1-en-06",
++    "prsv1-en-07",
++    "prsv1-en-08",
++] as const);
++
+ const canonicalJson = (value: unknown): string => {
+     if (value === null || typeof value !== "object") return JSON.stringify(value);
+     if (Array.isArray(value)) {
+@@ -45,9 +107,9 @@ const canonicalJson = (value: unknown): string => {
+ /**
+  * The stage writer authorises a bounded reservation pool, not provider work.
+  * This second contract narrows one future paid run to the frozen 16-case
+- * synthetic corpus. The false readiness values are part of the digest: merely
+- * shipping the adapter must not turn the deployed stage into an executable
+- * run.
++ * synthetic corpus. The durable writer and preview are ready, while the false
++ * entry-point and execution-admission values remain part of the digest:
++ * shipping storage must not turn the deployed stage into an executable run.
+  */
+ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
+     runContractVersion: PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
+@@ -75,14 +137,19 @@ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
+         }),
+     }),
+     run: Object.freeze({
++        runId: PROMPT_REFINER_SHADOW_RUN_ID,
++        caseIds: PROMPT_REFINER_SHADOW_CASE_IDS,
+         maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
+         costCeilingMicroUsd:
+             PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
+         requiresExplicitCostApproval: true,
+         unknownOutcomePolicy: "stop_no_redispatch" as const,
++        consumedWithoutTerminalAfterMs:
++            PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
+     }),
+     shadowAdapterImplemented: true,
+-    durableRunWriterReady: false,
++    durableRunWriterReady: true,
++    runApprovalPreviewReady: true,
+     entryPointReady: false,
+     executionAdmitted: false,
+     productAdapterReady: false,
+@@ -94,7 +161,7 @@ const computedDigest = `sha256:${createHash("sha256")
+ 
+ // Replaced with the computed literal before review. A mismatch fails import.
+ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
+-    "sha256:50a77992458e4fbdc3bf0325ec2df93feabe894b02eb242438cc036120e067dd" as const;
++    "sha256:a48ca37275c72f5a39d6029c9952d0ab4e35de7e55a4fd7086cb8a148eb6222a" as const;
+ 
+ if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
+     throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);
+@@ -118,14 +185,154 @@ export const promptRefinerShadowRunContractProblems = (): string[] => {
+         problems.push("run_cost_ceiling_mismatch");
+     }
+     if (PROMPT_REFINER_RETRY_COUNT !== 0) problems.push("retry_mismatch");
++    if (
++        PROMPT_REFINER_SHADOW_CASE_IDS.length !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        new Set(PROMPT_REFINER_SHADOW_CASE_IDS).size !==
++            PROMPT_REFINER_SHADOW_CASE_IDS.length
++    ) {
++        problems.push("run_case_ids_mismatch");
++    }
+     if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted !== false) {
+         problems.push("execution_must_remain_unadmitted");
+     }
+     if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady !== false) {
+         problems.push("entry_point_must_remain_unready");
+     }
+-    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady !== false) {
+-        problems.push("durable_writer_must_remain_unready");
++    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady !== true) {
++        problems.push("durable_writer_must_be_ready");
++    }
++    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady !== true) {
++        problems.push("run_preview_must_be_ready");
+     }
+     return problems;
+ };
++
++export type PromptRefinerShadowRunSourceManifest = Readonly<{
++    schemaVersion: typeof PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION;
++    commitSha: string;
++    totalSizeBytes: number;
++    files: readonly Readonly<{
++        path: (typeof PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS)[number];
++        sizeBytes: number;
++        sha256: string;
++    }>[];
++}>;
++
++export const promptRefinerShadowRunDigest = (value: unknown): string =>
++    `sha256:${createHash("sha256")
++        .update(canonicalJson(value), "utf8")
++        .digest("hex")}`;
++
++export const buildPromptRefinerShadowRunSourceManifest = (input: {
++    commitSha: string;
++    files: ReadonlyMap<string, Uint8Array>;
++}): Readonly<{
++    manifest: PromptRefinerShadowRunSourceManifest;
++    manifestDigest: string;
++}> => {
++    if (!/^[a-f0-9]{40}$/.test(input.commitSha)) {
++        throw new Error("prompt_refiner_shadow_run_commit_invalid");
++    }
++    const expected = [...PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS];
++    if (
++        input.files.size !== expected.length ||
++        expected.some((path) => !input.files.has(path)) ||
++        [...input.files.keys()].some((path) => !expected.includes(path as never))
++    ) {
++        throw new Error("prompt_refiner_shadow_run_source_path_allowlist");
++    }
++    let totalSizeBytes = 0;
++    const files = expected.map((path) => {
++        const bytes = input.files.get(path);
++        if (
++            !(bytes instanceof Uint8Array) ||
++            bytes.byteLength === 0 ||
++            bytes.byteLength > PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES
++        ) {
++            throw new Error("prompt_refiner_shadow_run_source_file_invalid");
++        }
++        totalSizeBytes += bytes.byteLength;
++        if (totalSizeBytes > PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES) {
++            throw new Error("prompt_refiner_shadow_run_source_total_size");
++        }
++        return Object.freeze({
++            path,
++            sizeBytes: bytes.byteLength,
++            sha256: createHash("sha256").update(bytes).digest("hex"),
++        });
++    });
++    const manifest = Object.freeze({
++        schemaVersion: PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION,
++        commitSha: input.commitSha,
++        totalSizeBytes,
++        files: Object.freeze(files),
++    });
++    return Object.freeze({
++        manifest,
++        manifestDigest: promptRefinerShadowRunDigest(manifest),
++    });
++};
++
++export type PromptRefinerShadowRunPreviewBinding = Readonly<{
++    runId: typeof PROMPT_REFINER_SHADOW_RUN_ID;
++    stageId: typeof PROMPT_REFINER_RESERVATION_STAGE_ID;
++    stageRuntimeSourceManifestDigest: string;
++    runSourceManifestDigest: string;
++    environment: "staging";
++    deploymentId: string;
++    commitSha: string;
++    stageApprovalExpiresAt: string;
++    runContractDigest: typeof PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST;
++    corpusDigest: typeof PROMPT_REFINER_SHADOW_CORPUS_DIGEST;
++    adapterVersion: typeof PROMPT_REFINER_SHADOW_ADAPTER_VERSION;
++    provider: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.provider;
++    modelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId;
++    apiModelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId;
++    timeoutMs: typeof PROMPT_REFINER_TIMEOUT_MS;
++    retryCount: typeof PROMPT_REFINER_RETRY_COUNT;
++    maxDispatches: typeof PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES;
++    perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
++    costCeilingMicroUsd: typeof PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD;
++    unknownOutcomePolicy: "stop_no_redispatch";
++    executionAdmitted: false;
++    productAdapterReady: false;
++}>;
++
++export const buildPromptRefinerShadowRunPreviewBinding = (input: {
++    stageRuntimeSourceManifestDigest: string;
++    runSourceManifestDigest: string;
++    deploymentId: string;
++    commitSha: string;
++    stageApprovalExpiresAt: Date;
++}): PromptRefinerShadowRunPreviewBinding =>
++    Object.freeze({
++        runId: PROMPT_REFINER_SHADOW_RUN_ID,
++        stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++        stageRuntimeSourceManifestDigest: input.stageRuntimeSourceManifestDigest,
++        runSourceManifestDigest: input.runSourceManifestDigest,
++        environment: "staging",
++        deploymentId: input.deploymentId,
++        commitSha: input.commitSha,
++        stageApprovalExpiresAt: input.stageApprovalExpiresAt.toISOString(),
++        runContractDigest: PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++        corpusDigest: PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
++        adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++        provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++        modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++        apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++        timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++        retryCount: PROMPT_REFINER_RETRY_COUNT,
++        maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++        perRequestCostMicroUsd:
++            PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++        costCeilingMicroUsd:
++            PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++        unknownOutcomePolicy: "stop_no_redispatch",
++        executionAdmitted: false,
++        productAdapterReady: false,
++    });
++
++export const promptRefinerShadowRunPreviewBindingDigest = (
++    binding: PromptRefinerShadowRunPreviewBinding
++): string => promptRefinerShadowRunDigest(binding);
+diff --git a/lib/promptRefinerShadowRunStore.ts b/lib/promptRefinerShadowRunStore.ts
+new file mode 100644
+index 00000000..eb4d8e8b
+--- /dev/null
++++ b/lib/promptRefinerShadowRunStore.ts
+@@ -0,0 +1,951 @@
++import "server-only";
++
++import { randomUUID } from "node:crypto";
++import type { Session } from "next-auth";
++import { Prisma, type ModelRegistryEntry } from "@prisma/client";
++
++import { writeAdminAuditLog } from "@/lib/adminAudit";
++import {
++    ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
++    adminAuditEntryHashVariants,
++    adminAuditIntegrityKeys,
++} from "@/lib/adminAuditIntegrityCore";
++import { getModelPricingProfile } from "@/lib/modelPricing";
++import { registryRowToModel } from "@/lib/modelRegistry";
++import { prisma } from "@/lib/prisma";
++import {
++    PROMPT_REFINER_EXECUTION_MODEL_PIN,
++    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++    PROMPT_REFINER_RETRY_COUNT,
++    PROMPT_REFINER_TIMEOUT_MS,
++    promptRefinerExecutionContractProblems,
++    promptRefinerTerminalReceiptFacts,
++    type PromptRefinerTerminalReason,
++} from "@/lib/promptRefinerExecutionContract";
++import {
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++    promptRefinerReservationBindingMatches,
++    promptRefinerReservationIdentifiersAreValid,
++    promptRefinerReservationStageProblems,
++    type PromptRefinerReservationBinding,
++} from "@/lib/promptRefinerReservationCore";
++import {
++    loadPromptRefinerStageAdmissionFacts,
++    promptRefinerStageAuthorizationIsValid,
++    promptRefinerStoredStageMatchesRuntime,
++    readExactCheckoutFile,
++} from "@/lib/promptRefinerStageAdmission";
++import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
++import {
++    PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++    PROMPT_REFINER_SHADOW_CASE_IDS,
++    PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG,
++    PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
++    PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++    PROMPT_REFINER_SHADOW_RUN_ID,
++    PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++    PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES,
++    PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES,
++    PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
++    PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH,
++    PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
++    buildPromptRefinerShadowRunPreviewBinding,
++    buildPromptRefinerShadowRunSourceManifest,
++    promptRefinerShadowRunContractProblems,
++    promptRefinerShadowRunPreviewBindingDigest,
++    type PromptRefinerShadowRunSourceManifest,
++} from "@/lib/promptRefinerShadowRunContract";
++import { PROMPT_REFINER_SHADOW_CORPUS_DIGEST } from "@/lib/promptRefinerShadowHarness";
++import {
++    writePromptRefinerDispatchAudit,
++    writePromptRefinerTerminalAudit,
++} from "@/lib/promptRefinerShadowSystemAudit";
++
++type PromptRefinerShadowDispatchFact = {
++    requestId: string;
++    adapterVersion: string;
++    provider: string;
++    modelId: string;
++    apiModelId: string;
++    maxOutputTokens: number;
++    timeoutMs: number;
++    retryCount: number;
++};
++
++type PromptRefinerShadowUsage = {
++    inputTokens: number | null;
++    cachedInputTokens: number | null;
++    cacheWriteInputTokens: number | null;
++    outputTokens: number | null;
++    reasoningTokens: number | null;
++    costUpperBoundMicroUsd: number | null;
++};
++
++const RUN_APPROVAL_ACTION = "prompt_refiner.shadow_run.approved";
++const RUN_APPROVAL_TARGET = "PromptRefinerShadowRun";
++const RUN_APPROVAL_SUMMARY =
++    "Approved one bounded Prompt Refiner staging shadow run.";
++const DISPATCH_TERMINAL_REASONS = new Set<PromptRefinerTerminalReason>([
++    "suggested",
++    "provider_error",
++    "timeout",
++    "invalid_response",
++    "empty_response",
++    "no_change",
++    "cancelled_after_dispatch",
++    "unknown_after_dispatch",
++]);
++
++type StoredRun = {
++    id: string;
++    stageId: string;
++    runContractVersion: string;
++    runContractDigest: string;
++    corpusDigest: string;
++    adapterVersion: string;
++    status: string;
++    perRequestCostMicroUsd: bigint;
++    maxDispatches: number;
++    costCeilingMicroUsd: bigint;
++    dispatchCount: number;
++    terminalCount: number;
++    knownActualCostMicroUsd: bigint;
++    runtimeCommitSha: string;
++    runtimeDeploymentId: string;
++    runtimeSourceManifest: unknown;
++    runtimeSourceManifestDigest: string;
++    previewBindingDigest: string;
++    approvedBy: string;
++    approvedAt: Date;
++    approvalExpiresAt: Date;
++    authorizationAuditLogId: string;
++};
++
++type AuditRow = {
++    actorUserId: string | null;
++    actorEmail: string | null;
++    action: string;
++    targetType: string;
++    targetId: string | null;
++    summary: string;
++    metadata: unknown;
++    ipAddress: string | null;
++    userAgent: string | null;
++    previousHash: string | null;
++    entryHash: string | null;
++    createdAt: Date;
++};
++
++export class PromptRefinerShadowRunError extends Error {
++    constructor(
++        public readonly status: number,
++        public readonly code: string,
++        message: string
++    ) {
++        super(message);
++        this.name = "PromptRefinerShadowRunError";
++    }
++}
++
++const refuse = (status: number, code: string, message: string): never => {
++    throw new PromptRefinerShadowRunError(status, code, message);
++};
++
++const dbClock = async (tx: Prisma.TransactionClient): Promise<Date> => {
++    const rows = await tx.$queryRaw<Array<{ now: Date }>>`
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
++    `;
++    if (!rows[0]) throw new Error("prompt_refiner_shadow_run_db_clock_unavailable");
++    return rows[0].now;
++};
++
++const lockStage = async (tx: Prisma.TransactionClient) => {
++    const rows = await tx.$queryRaw<Array<{ id: string }>>`
++        SELECT "id" FROM "PromptRefinerReservationStage"
++        WHERE "id" = ${PROMPT_REFINER_RESERVATION_STAGE_ID}
++        FOR UPDATE
++    `;
++    if (rows.length !== 1) return null;
++    return tx.promptRefinerReservationStage.findUnique({
++        where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
++    });
++};
++
++const lockAndValidateRegistry = async (tx: Prisma.TransactionClient) => {
++    await tx.$executeRaw`LOCK TABLE "ModelRegistryEntry" IN SHARE MODE`;
++    const row = await tx.modelRegistryEntry.findUnique({
++        where: { id: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId },
++    });
++    if (!row) {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_MODEL_MISSING", "Pinned model registry row is missing.");
++    }
++    let model;
++    try {
++        model = registryRowToModel(row as ModelRegistryEntry);
++    } catch {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_MODEL_INVALID", "Pinned model registry row is invalid.");
++    }
++    const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
++    if (promptRefinerExecutionContractProblems({ model, pricing }).length > 0) {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_EXECUTION_DRIFT", "Pinned model or pricing contract drifted.");
++    }
++};
++
++const readRunSourceFiles = async (
++    root: string
++): Promise<ReadonlyMap<string, Uint8Array>> => {
++    const files = new Map<string, Uint8Array>();
++    let totalSizeBytes = 0;
++    for (const path of PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS) {
++        const remaining =
++            PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES - totalSizeBytes;
++        if (remaining <= 0) {
++            refuse(503, "PROMPT_REFINER_SHADOW_RUN_SOURCE_SIZE", "Run source total exceeds the contract.");
++        }
++        const bytes = await readExactCheckoutFile(root, path, {
++            maxBytes: Math.min(
++                PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES,
++                remaining
++            ),
++        });
++        totalSizeBytes += bytes.byteLength;
++        files.set(path, bytes);
++    }
++    return files;
++};
++
++type RunRuntimeFacts = {
++    stageFacts: Awaited<ReturnType<typeof loadPromptRefinerStageAdmissionFacts>>;
++    runSourceManifest: PromptRefinerShadowRunSourceManifest;
++    runSourceManifestDigest: string;
++};
++
++export const loadPromptRefinerShadowRunRuntimeFacts = async (): Promise<RunRuntimeFacts> => {
++    if (promptRefinerShadowRunContractProblems().length > 0) {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_CONTRACT_DRIFT", "The run contract drifted.");
++    }
++    const stageFacts = await loadPromptRefinerStageAdmissionFacts();
++    const source = buildPromptRefinerShadowRunSourceManifest({
++        commitSha: stageFacts.runtimeCommitSha,
++        files: await readRunSourceFiles(process.cwd()),
++    });
++    return {
++        stageFacts,
++        runSourceManifest: source.manifest,
++        runSourceManifestDigest: source.manifestDigest,
++    };
++};
++
++const runApprovalMetadata = (run: StoredRun) => ({
++    stageId: run.stageId,
++    runContractVersion: run.runContractVersion,
++    runContractDigest: run.runContractDigest,
++    corpusDigest: run.corpusDigest,
++    adapterVersion: run.adapterVersion,
++    runtimeSourceManifestDigest: run.runtimeSourceManifestDigest,
++    previewBindingDigest: run.previewBindingDigest,
++    runtimeDeploymentId: run.runtimeDeploymentId,
++    runtimeCommitSha: run.runtimeCommitSha,
++    perRequestCostMicroUsd: Number(run.perRequestCostMicroUsd),
++    maxDispatches: run.maxDispatches,
++    costCeilingMicroUsd: Number(run.costCeilingMicroUsd),
++    timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++    retryCount: PROMPT_REFINER_RETRY_COUNT,
++    unknownOutcomePolicy: "stop_no_redispatch",
++    approvedAt: run.approvedAt.toISOString(),
++    approvalExpiresAt: run.approvalExpiresAt.toISOString(),
++    executionAdmitted: false,
++    productAdapterReady: false,
++});
++
++export const promptRefinerShadowRunAuthorizationAuditEntryIsValid = (
++    run: StoredRun,
++    audit: AuditRow,
++    keys: readonly string[]
++): boolean => {
++    if (
++        keys.length === 0 ||
++        !audit.entryHash ||
++        audit.actorUserId !== run.approvedBy ||
++        audit.action !== RUN_APPROVAL_ACTION ||
++        audit.targetType !== RUN_APPROVAL_TARGET ||
++        audit.targetId !== run.id ||
++        audit.summary !== RUN_APPROVAL_SUMMARY ||
++        canonicalBenchmarkJson(audit.metadata ?? null) !==
++            canonicalBenchmarkJson(runApprovalMetadata(run))
++    ) {
++        return false;
++    }
++    const hashInput = {
++        previousHash: audit.previousHash,
++        actorUserId: audit.actorUserId,
++        actorEmail: audit.actorEmail,
++        action: audit.action,
++        targetType: audit.targetType,
++        targetId: audit.targetId,
++        summary: audit.summary,
++        metadata: audit.metadata ?? null,
++        ipAddress: audit.ipAddress,
++        userAgent: audit.userAgent,
++        createdAt: audit.createdAt.toISOString(),
++    };
++    return keys.some((key) => {
++        const variants = adminAuditEntryHashVariants(hashInput, key);
++        return ADMIN_AUDIT_VERIFICATION_KEY_ORDERS.some(
++            (order) => variants[order] === audit.entryHash
++        );
++    });
++};
++
++const runAuthorizationIsValid = async (
++    tx: Prisma.TransactionClient,
++    run: StoredRun
++): Promise<boolean> => {
++    const keys = adminAuditIntegrityKeys(process.env);
++    if (keys.length === 0 || !run.authorizationAuditLogId) return false;
++    const audit = await tx.adminAuditLog.findUnique({
++        where: { id: run.authorizationAuditLogId },
++    });
++    if (
++        !audit ||
++        !promptRefinerShadowRunAuthorizationAuditEntryIsValid(run, audit, keys)
++    ) {
++        return false;
++    }
++    if (!audit.previousHash) return true;
++    const predecessor = await tx.adminAuditLog.findUnique({
++        where: { entryHash: audit.previousHash },
++        select: { entryHash: true },
++    });
++    return predecessor?.entryHash === audit.previousHash;
++};
++
++const runMatchesRuntime = (
++    run: StoredRun,
++    facts: RunRuntimeFacts,
++    stage: { runtimeSourceManifestDigest: string; approvalExpiresAt: Date },
++    now: Date
++): boolean => {
++    const binding = buildPromptRefinerShadowRunPreviewBinding({
++        stageRuntimeSourceManifestDigest: stage.runtimeSourceManifestDigest,
++        runSourceManifestDigest: facts.runSourceManifestDigest,
++        deploymentId: facts.stageFacts.runtimeDeploymentId,
++        commitSha: facts.stageFacts.runtimeCommitSha,
++        stageApprovalExpiresAt: stage.approvalExpiresAt,
++    });
++    return (
++        run.id === PROMPT_REFINER_SHADOW_RUN_ID &&
++        run.stageId === PROMPT_REFINER_RESERVATION_STAGE_ID &&
++        run.runContractVersion === PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION &&
++        run.runContractDigest === PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST &&
++        run.corpusDigest === PROMPT_REFINER_SHADOW_CORPUS_DIGEST &&
++        run.adapterVersion === PROMPT_REFINER_SHADOW_ADAPTER_VERSION &&
++        ["approved", "running"].includes(run.status) &&
++        run.perRequestCostMicroUsd ===
++            BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD) &&
++        run.maxDispatches === PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES &&
++        run.costCeilingMicroUsd ===
++            BigInt(PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD) &&
++        run.runtimeCommitSha === facts.stageFacts.runtimeCommitSha &&
++        run.runtimeDeploymentId === facts.stageFacts.runtimeDeploymentId &&
++        canonicalBenchmarkJson(run.runtimeSourceManifest) ===
++            canonicalBenchmarkJson(facts.runSourceManifest) &&
++        run.runtimeSourceManifestDigest === facts.runSourceManifestDigest &&
++        run.previewBindingDigest ===
++            promptRefinerShadowRunPreviewBindingDigest(binding) &&
++        run.approvalExpiresAt.getTime() === stage.approvalExpiresAt.getTime() &&
++        run.approvedAt.getTime() <= now.getTime() &&
++        run.approvalExpiresAt.getTime() > now.getTime()
++    );
++};
++
++export const promptRefinerShadowRunPreview = async () => {
++    const facts = await loadPromptRefinerShadowRunRuntimeFacts();
++    const foundStage = await prisma.promptRefinerReservationStage.findUnique({
++        where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
++    });
++    if (!foundStage) {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_STAGE_REQUIRED", "The durable stage must be approved first.");
++    }
++    const stage = foundStage!;
++    const now = new Date();
++    if (
++        promptRefinerReservationStageProblems(stage).length > 0 ||
++        !promptRefinerStoredStageMatchesRuntime(stage, facts.stageFacts, now)
++    ) {
++        refuse(409, "PROMPT_REFINER_SHADOW_RUN_STAGE_DRIFT", "The approved stage no longer matches this deployment.");
++    }
++    const existing = await prisma.promptRefinerShadowRun.findUnique({
++        where: { runContractDigest: PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST },
++    });
++    const binding = buildPromptRefinerShadowRunPreviewBinding({
++        stageRuntimeSourceManifestDigest: stage.runtimeSourceManifestDigest,
++        runSourceManifestDigest: facts.runSourceManifestDigest,
++        deploymentId: facts.stageFacts.runtimeDeploymentId,
++        commitSha: facts.stageFacts.runtimeCommitSha,
++        stageApprovalExpiresAt: stage.approvalExpiresAt,
++    });
++    return {
++        status: existing ? "already_exists" : "ready_for_explicit_cost_approval",
++        ...binding,
++        previewBindingDigest: promptRefinerShadowRunPreviewBindingDigest(binding),
++        confirmation: PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++        approvalEnabled:
++            process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] === "true",
++    };
++};
++
++export const createPromptRefinerShadowRun = async (input: {
++    session: Session;
++    request: Request;
++    expected: {
++        runContractDigest: string;
++        stageRuntimeSourceManifestDigest: string;
++        runSourceManifestDigest: string;
++        previewBindingDigest: string;
++    };
++}) => {
++    if (!input.session.user?.id) {
++        refuse(403, "PROMPT_REFINER_SHADOW_RUN_ACTOR_REQUIRED", "Administrator identity is required.");
++    }
++    if (process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] !== "true") {
++        refuse(403, "PROMPT_REFINER_SHADOW_RUN_APPROVAL_DISABLED", "Run approval is disabled.");
++    }
++    if (adminAuditIntegrityKeys(process.env).length === 0) {
++        refuse(503, "PROMPT_REFINER_SHADOW_RUN_AUDIT_KEY_REQUIRED", "Audit integrity signing is not configured.");
++    }
++    const facts = await loadPromptRefinerShadowRunRuntimeFacts();
++
++    return prisma.$transaction(async (tx) => {
++        const foundStage = await lockStage(tx);
++        if (!foundStage) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_STAGE_REQUIRED", "The durable stage must be approved first.");
++        }
++        const stage = foundStage!;
++        if (!(await promptRefinerStageAuthorizationIsValid(tx, stage))) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_STAGE_AUTHORIZATION_INVALID", "The stage authorization is invalid.");
++        }
++        await lockAndValidateRegistry(tx);
++        const now = await dbClock(tx);
++        if (
++            promptRefinerReservationStageProblems(stage).length > 0 ||
++            !promptRefinerStoredStageMatchesRuntime(stage, facts.stageFacts, now)
++        ) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_STAGE_DRIFT", "The approved stage no longer matches this deployment.");
++        }
++        const binding = buildPromptRefinerShadowRunPreviewBinding({
++            stageRuntimeSourceManifestDigest: stage.runtimeSourceManifestDigest,
++            runSourceManifestDigest: facts.runSourceManifestDigest,
++            deploymentId: facts.stageFacts.runtimeDeploymentId,
++            commitSha: facts.stageFacts.runtimeCommitSha,
++            stageApprovalExpiresAt: stage.approvalExpiresAt,
++        });
++        const previewBindingDigest =
++            promptRefinerShadowRunPreviewBindingDigest(binding);
++        if (
++            input.expected.runContractDigest !==
++                PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST ||
++            input.expected.stageRuntimeSourceManifestDigest !==
++                stage.runtimeSourceManifestDigest ||
++            input.expected.runSourceManifestDigest !==
++                facts.runSourceManifestDigest ||
++            input.expected.previewBindingDigest !== previewBindingDigest
++        ) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_PREVIEW_STALE", "Run approval preview no longer matches this deployment.");
++        }
++
++        const existing = await tx.promptRefinerShadowRun.findUnique({
++            where: { runContractDigest: PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST },
++        });
++        if (existing) {
++            if (
++                existing.approvedBy === input.session.user!.id &&
++                (await runAuthorizationIsValid(tx, existing)) &&
++                runMatchesRuntime(existing, facts, stage, now)
++            ) {
++                return { created: false, replayed: true, run: existing };
++            }
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_ALREADY_EXISTS", "The one-run authority has already been consumed.");
++        }
++
++        const draft: StoredRun = {
++            id: PROMPT_REFINER_SHADOW_RUN_ID,
++            stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++            runContractVersion: PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
++            runContractDigest: PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++            corpusDigest: PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
++            adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++            status: "approved",
++            perRequestCostMicroUsd: BigInt(PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD),
++            maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++            costCeilingMicroUsd: BigInt(PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD),
++            dispatchCount: 0,
++            terminalCount: 0,
++            knownActualCostMicroUsd: BigInt(0),
++            runtimeCommitSha: facts.stageFacts.runtimeCommitSha,
++            runtimeDeploymentId: facts.stageFacts.runtimeDeploymentId,
++            runtimeSourceManifest: facts.runSourceManifest,
++            runtimeSourceManifestDigest: facts.runSourceManifestDigest,
++            previewBindingDigest,
++            approvedBy: input.session.user!.id,
++            approvedAt: now,
++            approvalExpiresAt: stage.approvalExpiresAt,
++            authorizationAuditLogId: "pending",
++        };
++        const auditId = await writeAdminAuditLog({
++            session: input.session,
++            request: input.request,
++            action: RUN_APPROVAL_ACTION,
++            targetType: RUN_APPROVAL_TARGET,
++            targetId: draft.id,
++            summary: RUN_APPROVAL_SUMMARY,
++            metadata: runApprovalMetadata(draft),
++            tx,
++        });
++        const run = await tx.promptRefinerShadowRun.create({
++            data: {
++                ...draft,
++                runtimeSourceManifest:
++                    facts.runSourceManifest as unknown as Prisma.InputJsonValue,
++                authorizationAuditLogId: auditId,
++                createdAt: now,
++            },
++        });
++        if (!(await runAuthorizationIsValid(tx, run))) {
++            refuse(503, "PROMPT_REFINER_SHADOW_RUN_AUTHORIZATION_INVALID", "The durable run authorization could not be verified.");
++        }
++        return { created: true, replayed: false, run };
++    });
++};
++
++const dispatchFactIsExact = (
++    fact: PromptRefinerShadowDispatchFact,
++    requestId: string
++): boolean =>
++    fact.requestId === requestId &&
++    fact.adapterVersion === PROMPT_REFINER_SHADOW_ADAPTER_VERSION &&
++    fact.provider === PROMPT_REFINER_EXECUTION_MODEL_PIN.provider &&
++    fact.modelId === PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId &&
++    fact.apiModelId === PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId &&
++    fact.maxOutputTokens === PROMPT_REFINER_MAX_OUTPUT_TOKENS &&
++    fact.timeoutMs === PROMPT_REFINER_TIMEOUT_MS &&
++    fact.retryCount === PROMPT_REFINER_RETRY_COUNT;
++
++export const recordPromptRefinerShadowDispatchIntent = async (input: {
++    runId: string;
++    caseId: string;
++    caseIndex: number;
++    reservation: PromptRefinerReservationBinding;
++    fact: PromptRefinerShadowDispatchFact;
++}) => {
++    if (
++        input.runId !== PROMPT_REFINER_SHADOW_RUN_ID ||
++        input.caseIndex < 0 ||
++        input.caseIndex >= PROMPT_REFINER_SHADOW_CASE_IDS.length ||
++        PROMPT_REFINER_SHADOW_CASE_IDS[input.caseIndex] !== input.caseId ||
++        !promptRefinerReservationIdentifiersAreValid(input.reservation) ||
++        !dispatchFactIsExact(input.fact, input.reservation.requestId)
++    ) {
++        refuse(400, "PROMPT_REFINER_SHADOW_DISPATCH_BINDING_INVALID", "Dispatch binding is invalid.");
++    }
++    const facts = await loadPromptRefinerShadowRunRuntimeFacts();
++
++    return prisma.$transaction(async (tx) => {
++        const foundStage = await lockStage(tx);
++        if (!foundStage) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_STAGE_INVALID", "The stage is unavailable or unauthorized.");
++        }
++        const stage = foundStage!;
++        if (!(await promptRefinerStageAuthorizationIsValid(tx, stage))) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_STAGE_INVALID", "The stage is unavailable or unauthorized.");
++        }
++        await lockAndValidateRegistry(tx);
++        const runRows = await tx.$queryRaw<Array<{ id: string }>>`
++            SELECT "id" FROM "PromptRefinerShadowRun"
++            WHERE "id" = ${input.runId} FOR UPDATE
++        `;
++        if (runRows.length !== 1) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RUN_REQUIRED", "The approved run does not exist.");
++        }
++        const run = await tx.promptRefinerShadowRun.findUniqueOrThrow({
++            where: { id: input.runId },
++        });
++        const reservationRows = await tx.$queryRaw<Array<{ id: string }>>`
++            SELECT "id" FROM "PromptRefinerReservation"
++            WHERE "id" = ${input.reservation.reservationId} FOR UPDATE
++        `;
++        if (reservationRows.length !== 1) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RESERVATION_REQUIRED", "The reservation does not exist.");
++        }
++        const reservation = await tx.promptRefinerReservation.findUniqueOrThrow({
++            where: { id: input.reservation.reservationId },
++        });
++        const now = await dbClock(tx);
++        if (
++            !(await runAuthorizationIsValid(tx, run)) ||
++            !runMatchesRuntime(run, facts, stage, now) ||
++            run.status === "stopped_unknown" ||
++            run.dispatchCount >= run.maxDispatches
++        ) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RUN_INVALID", "The run cannot accept another dispatch.");
++        }
++        if (
++            input.reservation.stageId !== PROMPT_REFINER_RESERVATION_STAGE_ID ||
++            input.reservation.contractDigest !== PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST ||
++            !promptRefinerReservationBindingMatches(input.reservation, {
++                reservationId: reservation.id,
++                requestId: reservation.requestId,
++                stageId: reservation.stageId,
++                contractDigest: reservation.contractDigest,
++            })
++        ) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RESERVATION_MISMATCH", "The reservation binding does not match.");
++        }
++        const duplicate = await tx.promptRefinerShadowAttempt.findFirst({
++            where: {
++                OR: [
++                    { reservationId: reservation.id },
++                    { requestId: reservation.requestId },
++                    { runId: run.id, caseId: input.caseId },
++                    { runId: run.id, caseIndex: input.caseIndex },
++                ],
++            },
++        });
++        if (duplicate) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_ALREADY_RECORDED", "This request or case already has a dispatch intent.");
++        }
++        if (reservation.status !== "reserved") {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RESERVATION_TERMINAL", "The reservation is not active.");
++        }
++        if (reservation.expiresAt.getTime() <= now.getTime()) {
++            await tx.promptRefinerReservation.update({
++                where: { id: reservation.id },
++                data: { status: "expired" },
++            });
++            return { ok: false as const, reason: "reservation_expired" as const };
++        }
++
++        const attemptId = randomUUID();
++        const dispatchAuditLogId = await writePromptRefinerDispatchAudit({
++            tx,
++            attemptId,
++            runId: run.id,
++            reservationId: reservation.id,
++            requestId: reservation.requestId,
++            caseId: input.caseId,
++            caseIndex: input.caseIndex,
++            runContractDigest: run.runContractDigest,
++            adapterVersion: run.adapterVersion,
++            provider: input.fact.provider,
++            modelId: input.fact.modelId,
++            timeoutMs: input.fact.timeoutMs,
++            retryCount: input.fact.retryCount,
++        });
++        const attempt = await tx.promptRefinerShadowAttempt.create({
++            data: {
++                id: attemptId,
++                runId: run.id,
++                reservationId: reservation.id,
++                requestId: reservation.requestId,
++                caseId: input.caseId,
++                caseIndex: input.caseIndex,
++                stageId: run.stageId,
++                reservationContractDigest: reservation.contractDigest,
++                runContractDigest: run.runContractDigest,
++                provider: input.fact.provider,
++                modelId: input.fact.modelId,
++                adapterVersion: input.fact.adapterVersion,
++                status: "dispatch_intent",
++                dispatchIntentAt: now,
++                dispatchAuditLogId,
++                createdAt: now,
++            },
++        });
++        const consumed = await tx.promptRefinerReservation.updateMany({
++            where: { id: reservation.id, status: "reserved" },
++            data: { status: "consumed" },
++        });
++        if (consumed.count !== 1) {
++            refuse(409, "PROMPT_REFINER_SHADOW_DISPATCH_RESERVATION_RACE", "The reservation changed before dispatch.");
++        }
++        await tx.promptRefinerShadowRun.update({
++            where: { id: run.id },
++            data: {
++                status: "running",
++                dispatchCount: run.dispatchCount + 1,
++            },
++        });
++        return { ok: true as const, attempt };
++    });
++};
++
++type TerminalTelemetry = {
++    durationMs: number;
++    usage: PromptRefinerShadowUsage;
++};
++
++const nullableNonnegativeInteger = (value: number | null): boolean =>
++    value === null || (Number.isSafeInteger(value) && value >= 0);
++
++const terminalInputIsValid = (
++    reason: PromptRefinerTerminalReason,
++    telemetry: TerminalTelemetry
++): boolean =>
++    DISPATCH_TERMINAL_REASONS.has(reason) &&
++    Number.isSafeInteger(telemetry.durationMs) &&
++    telemetry.durationMs >= 0 &&
++    nullableNonnegativeInteger(telemetry.usage.inputTokens) &&
++    nullableNonnegativeInteger(telemetry.usage.cachedInputTokens) &&
++    nullableNonnegativeInteger(telemetry.usage.cacheWriteInputTokens) &&
++    nullableNonnegativeInteger(telemetry.usage.outputTokens) &&
++    nullableNonnegativeInteger(telemetry.usage.reasoningTokens) &&
++    nullableNonnegativeInteger(telemetry.usage.costUpperBoundMicroUsd) &&
++    (telemetry.usage.costUpperBoundMicroUsd === null ||
++        telemetry.usage.costUpperBoundMicroUsd <=
++            PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD);
++
++const terminalValuesEqual = (
++    attempt: {
++        terminalReason: string | null;
++        durationMs: number | null;
++        inputTokens: number | null;
++        cachedInputTokens: number | null;
++        cacheWriteInputTokens: number | null;
++        outputTokens: number | null;
++        reasoningTokens: number | null;
++        actualCostMicroUsd: bigint | null;
++    },
++    reason: PromptRefinerTerminalReason,
++    telemetry: TerminalTelemetry
++) =>
++    attempt.terminalReason === reason &&
++    attempt.durationMs === telemetry.durationMs &&
++    attempt.inputTokens === telemetry.usage.inputTokens &&
++    attempt.cachedInputTokens === telemetry.usage.cachedInputTokens &&
++    attempt.cacheWriteInputTokens === telemetry.usage.cacheWriteInputTokens &&
++    attempt.outputTokens === telemetry.usage.outputTokens &&
++    attempt.reasoningTokens === telemetry.usage.reasoningTokens &&
++    attempt.actualCostMicroUsd ===
++        (telemetry.usage.costUpperBoundMicroUsd === null
++            ? null
++            : BigInt(telemetry.usage.costUpperBoundMicroUsd));
++
++export const recordPromptRefinerShadowTerminal = async (input: {
++    attemptId: string;
++    terminalReason: PromptRefinerTerminalReason;
++    durationMs: number;
++    usage: PromptRefinerShadowUsage;
++}) => {
++    if (
++        !/^[A-Za-z0-9_-]{1,128}$/.test(input.attemptId) ||
++        !terminalInputIsValid(input.terminalReason, input)
++    ) {
++        refuse(400, "PROMPT_REFINER_SHADOW_TERMINAL_INVALID", "Terminal receipt is invalid.");
++    }
++    const terminalFacts = promptRefinerTerminalReceiptFacts(input.terminalReason);
++    return prisma.$transaction(async (tx) => {
++        const foundAttempt = await tx.promptRefinerShadowAttempt.findUnique({
++            where: { id: input.attemptId },
++            select: { runId: true },
++        });
++        if (!foundAttempt) {
++            refuse(404, "PROMPT_REFINER_SHADOW_ATTEMPT_NOT_FOUND", "The dispatch attempt does not exist.");
++        }
++        const found = foundAttempt!;
++        await tx.$queryRaw`
++            SELECT "id" FROM "PromptRefinerShadowRun"
++            WHERE "id" = ${found.runId} FOR UPDATE
++        `;
++        await tx.$queryRaw`
++            SELECT "id" FROM "PromptRefinerShadowAttempt"
++            WHERE "id" = ${input.attemptId} FOR UPDATE
++        `;
++        const run = await tx.promptRefinerShadowRun.findUniqueOrThrow({
++            where: { id: found.runId },
++        });
++        const attempt = await tx.promptRefinerShadowAttempt.findUniqueOrThrow({
++            where: { id: input.attemptId },
++        });
++        if (attempt.status === "terminal") {
++            if (terminalValuesEqual(attempt, input.terminalReason, input)) {
++                return { created: false, replayed: true, attempt, run };
++            }
++            refuse(409, "PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT", "A different terminal receipt already exists.");
++        }
++        const mayRecordInFlightReceiptAfterUnknownLatch =
++            run.status === "stopped_unknown";
++        if (
++            !["running", "approved"].includes(run.status) &&
++            !mayRecordInFlightReceiptAfterUnknownLatch
++        ) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_TERMINAL", "The run is already terminal.");
++        }
++        const terminalAuditLogId = await writePromptRefinerTerminalAudit({
++            tx,
++            attemptId: attempt.id,
++            runId: run.id,
++            reservationId: attempt.reservationId,
++            requestId: attempt.requestId,
++            caseId: attempt.caseId,
++            terminalReason: input.terminalReason,
++            failureLayer: terminalFacts.failureLayer,
++            failureCode: terminalFacts.failureCode,
++            durationMs: input.durationMs,
++            inputTokens: input.usage.inputTokens,
++            cachedInputTokens: input.usage.cachedInputTokens,
++            cacheWriteInputTokens: input.usage.cacheWriteInputTokens,
++            outputTokens: input.usage.outputTokens,
++            reasoningTokens: input.usage.reasoningTokens,
++            actualCostMicroUsd: input.usage.costUpperBoundMicroUsd,
++        });
++        const updatedCount = await tx.promptRefinerShadowAttempt.updateMany({
++            where: { id: attempt.id, status: "dispatch_intent" },
++            data: {
++                status: "terminal",
++                terminalReason: input.terminalReason,
++                failureLayer: terminalFacts.failureLayer,
++                failureCode: terminalFacts.failureCode,
++                durationMs: input.durationMs,
++                inputTokens: input.usage.inputTokens,
++                cachedInputTokens: input.usage.cachedInputTokens,
++                cacheWriteInputTokens: input.usage.cacheWriteInputTokens,
++                outputTokens: input.usage.outputTokens,
++                reasoningTokens: input.usage.reasoningTokens,
++                actualCostMicroUsd:
++                    input.usage.costUpperBoundMicroUsd === null
++                        ? null
++                        : BigInt(input.usage.costUpperBoundMicroUsd),
++                terminalAuditLogId,
++            },
++        });
++        if (updatedCount.count !== 1) {
++            refuse(409, "PROMPT_REFINER_SHADOW_TERMINAL_CAS_LOST", "Another writer closed this attempt.");
++        }
++        const aggregates = await tx.promptRefinerShadowAttempt.aggregate({
++            where: { runId: run.id },
++            _count: { id: true, terminalAt: true },
++            _sum: { actualCostMicroUsd: true },
++        });
++        const dispatchCount = aggregates._count.id;
++        const terminalCount = aggregates._count.terminalAt;
++        const knownCost = aggregates._sum.actualCostMicroUsd ?? BigInt(0);
++        if (knownCost > run.costCeilingMicroUsd) {
++            refuse(409, "PROMPT_REFINER_SHADOW_RUN_COST_EXCEEDED", "Known run cost exceeds the approved ceiling.");
++        }
++        const nextStatus =
++            run.status === "stopped_unknown" ||
++            input.terminalReason === "unknown_after_dispatch"
++                ? "stopped_unknown"
++                : dispatchCount === run.maxDispatches && terminalCount === dispatchCount
++                  ? "completed"
++                  : "running";
++        const updatedRun = await tx.promptRefinerShadowRun.update({
++            where: { id: run.id },
++            data: {
++                status: nextStatus,
++                dispatchCount,
++                terminalCount,
++                knownActualCostMicroUsd: knownCost,
++            },
++        });
++        const updatedAttempt = await tx.promptRefinerShadowAttempt.findUniqueOrThrow({
++            where: { id: attempt.id },
++        });
++        return {
++            created: true,
++            replayed: false,
++            attempt: updatedAttempt,
++            run: updatedRun,
++        };
++    });
++};
++
++const unknownTelemetry = (): TerminalTelemetry => ({
++    durationMs: PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
++    usage: {
++        inputTokens: null,
++        cachedInputTokens: null,
++        cacheWriteInputTokens: null,
++        outputTokens: null,
++        reasoningTokens: null,
++        costUpperBoundMicroUsd: null,
++    },
++});
++
++/**
++ * Closes only already-dispatched stale intents. It never calls an adapter,
++ * never re-reserves and never retries. It uses the database clock, continues
++ * closing the selected batch after the first unknown latches the run, and
++ * reports any race it could not close. Consumed rows without an attempt are
++ * reported as an incident because their provider outcome cannot be inferred.
++ */
++export const sweepPromptRefinerShadowUnknowns = async () => {
++    const snapshot = await prisma.$transaction(async (tx) => {
++        const observedAt = await dbClock(tx);
++        const cutoff = new Date(
++            observedAt.getTime() - PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS
++        );
++        const stale = await tx.promptRefinerShadowAttempt.findMany({
++            where: {
++                status: "dispatch_intent",
++                dispatchIntentAt: { lte: cutoff },
++                run: {
++                    status: {
++                        in: ["approved", "running", "stopped_unknown"],
++                    },
++                },
++            },
++            orderBy: [{ dispatchIntentAt: "asc" }, { id: "asc" }],
++            take: PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH,
++            select: { id: true },
++        });
++        return { observedAt, stale };
++    });
++    const closed: string[] = [];
++    const unresolved: string[] = [];
++    for (const attempt of snapshot.stale) {
++        try {
++            const result = await recordPromptRefinerShadowTerminal({
++                attemptId: attempt.id,
++                terminalReason: "unknown_after_dispatch",
++                ...unknownTelemetry(),
++            });
++            if (result.created || result.replayed) closed.push(attempt.id);
++        } catch (error) {
++            if (
++                !(error instanceof PromptRefinerShadowRunError) ||
++                error.code !== "PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT"
++            ) {
++                throw error;
++            }
++            unresolved.push(attempt.id);
++        }
++    }
++    const consumedWithoutAttempt = await prisma.promptRefinerReservation.findMany({
++        where: { status: "consumed", shadowAttempt: null },
++        orderBy: [{ consumedAt: "asc" }, { id: "asc" }],
++        take: PROMPT_REFINER_SHADOW_RUN_SWEEP_BATCH,
++        select: { id: true, requestId: true },
++    });
++    return {
++        observedAt: snapshot.observedAt.toISOString(),
++        staleCandidates: snapshot.stale.length,
++        closedUnknownAttemptIds: closed,
++        unresolvedStaleAttemptIds: unresolved,
++        consumedWithoutAttempt,
++        retryCount: 0 as const,
++        redispatched: 0 as const,
++    };
++};
++
++export const promptRefinerShadowRunErrorResponse = (error: unknown) => {
++    if (!(error instanceof PromptRefinerShadowRunError)) return null;
++    return Response.json(
++        { error: error.message, code: error.code },
++        { status: error.status }
++    );
++};
+diff --git a/lib/promptRefinerShadowSystemAudit.ts b/lib/promptRefinerShadowSystemAudit.ts
+new file mode 100644
+index 00000000..ae28dba9
+--- /dev/null
++++ b/lib/promptRefinerShadowSystemAudit.ts
+@@ -0,0 +1,89 @@
++import "server-only";
++
++import type { Prisma } from "@prisma/client";
++
++import { writeSystemAuditLog } from "@/lib/adminAudit";
++
++const SYSTEM_ACTOR = "prompt-refiner-shadow-runner" as const;
++const ATTEMPT_TARGET = "PromptRefinerShadowAttempt";
++
++export const writePromptRefinerDispatchAudit = (input: {
++    tx: Prisma.TransactionClient;
++    attemptId: string;
++    runId: string;
++    reservationId: string;
++    requestId: string;
++    caseId: string;
++    caseIndex: number;
++    runContractDigest: string;
++    adapterVersion: string;
++    provider: string;
++    modelId: string;
++    timeoutMs: number;
++    retryCount: number;
++}): Promise<string> =>
++    writeSystemAuditLog({
++        tx: input.tx,
++        systemActor: SYSTEM_ACTOR,
++        action: "prompt_refiner.shadow_dispatch.intent_recorded",
++        targetType: ATTEMPT_TARGET,
++        targetId: input.attemptId,
++        summary: "Recorded one Prompt Refiner provider dispatch intent.",
++        metadata: {
++            runId: input.runId,
++            reservationId: input.reservationId,
++            requestId: input.requestId,
++            caseId: input.caseId,
++            caseIndex: input.caseIndex,
++            runContractDigest: input.runContractDigest,
++            adapterVersion: input.adapterVersion,
++            provider: input.provider,
++            modelId: input.modelId,
++            timeoutMs: input.timeoutMs,
++            retryCount: input.retryCount,
++        },
++    });
++
++export const writePromptRefinerTerminalAudit = (input: {
++    tx: Prisma.TransactionClient;
++    attemptId: string;
++    runId: string;
++    reservationId: string;
++    requestId: string;
++    caseId: string;
++    terminalReason: string;
++    failureLayer: string;
++    failureCode: string | null;
++    durationMs: number;
++    inputTokens: number | null;
++    cachedInputTokens: number | null;
++    cacheWriteInputTokens: number | null;
++    outputTokens: number | null;
++    reasoningTokens: number | null;
++    actualCostMicroUsd: number | null;
++}): Promise<string> =>
++    writeSystemAuditLog({
++        tx: input.tx,
++        systemActor: SYSTEM_ACTOR,
++        action: "prompt_refiner.shadow_dispatch.terminal_recorded",
++        targetType: ATTEMPT_TARGET,
++        targetId: input.attemptId,
++        summary: "Recorded one immutable Prompt Refiner terminal receipt.",
++        metadata: {
++            runId: input.runId,
++            reservationId: input.reservationId,
++            requestId: input.requestId,
++            caseId: input.caseId,
++            terminalReason: input.terminalReason,
++            failureLayer: input.failureLayer,
++            failureCode: input.failureCode,
++            durationMs: input.durationMs,
++            inputTokens: input.inputTokens,
++            cachedInputTokens: input.cachedInputTokens,
++            cacheWriteInputTokens: input.cacheWriteInputTokens,
++            outputTokens: input.outputTokens,
++            reasoningTokens: input.reasoningTokens,
++            actualCostMicroUsd: input.actualCostMicroUsd,
++            retryCount: 0,
++        },
++    });
+diff --git a/prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql b/prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql
+new file mode 100644
+index 00000000..cef10ae8
+--- /dev/null
++++ b/prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql
+@@ -0,0 +1,525 @@
++-- Durable, content-free Prompt Refiner shadow run and terminal receipts.
++-- No row is seeded. The owner-only application writer must first create the
++-- exact run authorization; no migration or trigger can call a provider.
++
++CREATE TABLE "PromptRefinerShadowRun" (
++    "id" TEXT NOT NULL,
++    "stageId" TEXT NOT NULL,
++    "runContractVersion" TEXT NOT NULL,
++    "runContractDigest" TEXT NOT NULL,
++    "corpusDigest" TEXT NOT NULL,
++    "adapterVersion" TEXT NOT NULL,
++    "status" TEXT NOT NULL DEFAULT 'approved',
++    "perRequestCostMicroUsd" BIGINT NOT NULL,
++    "maxDispatches" INTEGER NOT NULL,
++    "costCeilingMicroUsd" BIGINT NOT NULL,
++    "dispatchCount" INTEGER NOT NULL DEFAULT 0,
++    "terminalCount" INTEGER NOT NULL DEFAULT 0,
++    "knownActualCostMicroUsd" BIGINT NOT NULL DEFAULT 0,
++    "runtimeCommitSha" TEXT NOT NULL,
++    "runtimeDeploymentId" TEXT NOT NULL,
++    "runtimeSourceManifest" JSONB NOT NULL,
++    "runtimeSourceManifestDigest" TEXT NOT NULL,
++    "previewBindingDigest" TEXT NOT NULL,
++    "approvedBy" TEXT NOT NULL,
++    "approvedAt" TIMESTAMP(3) NOT NULL,
++    "approvalExpiresAt" TIMESTAMP(3) NOT NULL,
++    "authorizationAuditLogId" TEXT NOT NULL,
++    "startedAt" TIMESTAMP(3),
++    "completedAt" TIMESTAMP(3),
++    "stoppedAt" TIMESTAMP(3),
++    "stopReason" TEXT,
++    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" TIMESTAMP(3) NOT NULL,
++    CONSTRAINT "PromptRefinerShadowRun_pkey" PRIMARY KEY ("id"),
++    CONSTRAINT "PromptRefinerShadowRun_status_check"
++        CHECK ("status" IN ('approved', 'running', 'completed', 'stopped_unknown')),
++    CONSTRAINT "PromptRefinerShadowRun_contract_check" CHECK (
++        "stageId" = 'prompt-refiner-shadow-v1'
++        AND "runContractVersion" = 'prompt-refiner-shadow-run-v2'
++        AND "runContractDigest" = 'sha256:a48ca37275c72f5a39d6029c9952d0ab4e35de7e55a4fd7086cb8a148eb6222a'
++        AND "corpusDigest" = 'bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958'
++        AND "adapterVersion" = 'prompt-refiner-openai-sdk-adapter-v1'
++        AND "perRequestCostMicroUsd" = 24916
++        AND "maxDispatches" = 16
++        AND "costCeilingMicroUsd" = 398656
++    ),
++    CONSTRAINT "PromptRefinerShadowRun_accounting_check" CHECK (
++        "dispatchCount" >= 0
++        AND "dispatchCount" <= "maxDispatches"
++        AND "terminalCount" >= 0
++        AND "terminalCount" <= "dispatchCount"
++        AND "knownActualCostMicroUsd" >= 0
++        AND "knownActualCostMicroUsd" <= "costCeilingMicroUsd"
++    ),
++    CONSTRAINT "PromptRefinerShadowRun_identity_check" CHECK (
++        "id" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "runtimeCommitSha" ~ '^[a-f0-9]{40}$'
++        AND "runtimeDeploymentId" ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
++        AND "runtimeSourceManifestDigest" ~ '^sha256:[a-f0-9]{64}$'
++        AND "previewBindingDigest" ~ '^sha256:[a-f0-9]{64}$'
++        AND length("approvedBy") BETWEEN 1 AND 128
++    ),
++    CONSTRAINT "PromptRefinerShadowRun_time_check" CHECK (
++        "approvedAt" < "approvalExpiresAt"
++        AND "createdAt" >= "approvedAt"
++        AND "createdAt" < "approvalExpiresAt"
++    ),
++    CONSTRAINT "PromptRefinerShadowRun_terminal_shape_check" CHECK (
++        ("status" = 'approved' AND "dispatchCount" = 0 AND "terminalCount" = 0
++            AND "startedAt" IS NULL AND "completedAt" IS NULL
++            AND "stoppedAt" IS NULL AND "stopReason" IS NULL)
++        OR ("status" = 'running' AND "dispatchCount" > 0 AND "startedAt" IS NOT NULL
++            AND "completedAt" IS NULL AND "stoppedAt" IS NULL AND "stopReason" IS NULL)
++        OR ("status" = 'completed' AND "dispatchCount" = 16 AND "terminalCount" = 16
++            AND "startedAt" IS NOT NULL AND "completedAt" IS NOT NULL
++            AND "stoppedAt" IS NULL AND "stopReason" IS NULL)
++        OR ("status" = 'stopped_unknown' AND "dispatchCount" > 0
++            AND "terminalCount" > 0 AND "startedAt" IS NOT NULL
++            AND "completedAt" IS NULL AND "stoppedAt" IS NOT NULL
++            AND "stopReason" = 'unknown_after_dispatch')
++    )
++);
++
++CREATE UNIQUE INDEX "PromptRefinerShadowRun_runContractDigest_key"
++    ON "PromptRefinerShadowRun"("runContractDigest");
++CREATE UNIQUE INDEX "PromptRefinerShadowRun_authorizationAuditLogId_key"
++    ON "PromptRefinerShadowRun"("authorizationAuditLogId");
++CREATE INDEX "PromptRefinerShadowRun_stageId_status_idx"
++    ON "PromptRefinerShadowRun"("stageId", "status");
++
++CREATE TABLE "PromptRefinerShadowAttempt" (
++    "id" TEXT NOT NULL,
++    "runId" TEXT NOT NULL,
++    "reservationId" TEXT NOT NULL,
++    "requestId" TEXT NOT NULL,
++    "caseId" TEXT NOT NULL,
++    "caseIndex" INTEGER NOT NULL,
++    "stageId" TEXT NOT NULL,
++    "reservationContractDigest" TEXT NOT NULL,
++    "runContractDigest" TEXT NOT NULL,
++    "provider" TEXT NOT NULL,
++    "modelId" TEXT NOT NULL,
++    "adapterVersion" TEXT NOT NULL,
++    "status" TEXT NOT NULL DEFAULT 'dispatch_intent',
++    "terminalReason" TEXT,
++    "failureLayer" TEXT,
++    "failureCode" TEXT,
++    "dispatchIntentAt" TIMESTAMP(3) NOT NULL,
++    "terminalAt" TIMESTAMP(3),
++    "durationMs" INTEGER,
++    "inputTokens" INTEGER,
++    "cachedInputTokens" INTEGER,
++    "cacheWriteInputTokens" INTEGER,
++    "outputTokens" INTEGER,
++    "reasoningTokens" INTEGER,
++    "actualCostMicroUsd" BIGINT,
++    "dispatchAuditLogId" TEXT NOT NULL,
++    "terminalAuditLogId" TEXT,
++    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" TIMESTAMP(3) NOT NULL,
++    CONSTRAINT "PromptRefinerShadowAttempt_pkey" PRIMARY KEY ("id"),
++    CONSTRAINT "PromptRefinerShadowAttempt_status_check"
++        CHECK ("status" IN ('dispatch_intent', 'terminal')),
++    CONSTRAINT "PromptRefinerShadowAttempt_binding_check" CHECK (
++        "id" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "runId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "reservationId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "requestId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "caseId" ~ '^[A-Za-z0-9._:-]{1,128}$'
++        AND "caseIndex" BETWEEN 0 AND 15
++        AND "stageId" = 'prompt-refiner-shadow-v1'
++        AND "reservationContractDigest" = 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f'
++        AND "runContractDigest" = 'sha256:a48ca37275c72f5a39d6029c9952d0ab4e35de7e55a4fd7086cb8a148eb6222a'
++        AND "provider" = 'openai'
++        AND "modelId" = 'gpt-5-6-luna'
++        AND "adapterVersion" = 'prompt-refiner-openai-sdk-adapter-v1'
++    ),
++    CONSTRAINT "PromptRefinerShadowAttempt_nonnegative_check" CHECK (
++        ("durationMs" IS NULL OR "durationMs" >= 0)
++        AND ("inputTokens" IS NULL OR "inputTokens" >= 0)
++        AND ("cachedInputTokens" IS NULL OR "cachedInputTokens" >= 0)
++        AND ("cacheWriteInputTokens" IS NULL OR "cacheWriteInputTokens" >= 0)
++        AND ("outputTokens" IS NULL OR "outputTokens" >= 0)
++        AND ("reasoningTokens" IS NULL OR "reasoningTokens" >= 0)
++        AND ("actualCostMicroUsd" IS NULL OR ("actualCostMicroUsd" >= 0 AND "actualCostMicroUsd" <= 24916))
++    ),
++    CONSTRAINT "PromptRefinerShadowAttempt_terminal_check" CHECK (
++        ("status" = 'dispatch_intent'
++            AND "terminalReason" IS NULL AND "failureLayer" IS NULL
++            AND "failureCode" IS NULL AND "terminalAt" IS NULL
++            AND "durationMs" IS NULL AND "inputTokens" IS NULL
++            AND "cachedInputTokens" IS NULL AND "cacheWriteInputTokens" IS NULL
++            AND "outputTokens" IS NULL AND "reasoningTokens" IS NULL
++            AND "actualCostMicroUsd" IS NULL AND "terminalAuditLogId" IS NULL)
++        OR ("status" = 'terminal'
++            AND "terminalReason" IN ('suggested', 'provider_error', 'timeout', 'invalid_response', 'empty_response', 'no_change', 'cancelled_after_dispatch', 'unknown_after_dispatch')
++            AND "terminalAt" IS NOT NULL AND "terminalAuditLogId" IS NOT NULL
++            AND (
++                ("terminalReason" = 'suggested' AND "failureLayer" = 'none' AND "failureCode" IS NULL)
++                OR ("terminalReason" IN ('provider_error', 'timeout', 'cancelled_after_dispatch', 'unknown_after_dispatch')
++                    AND "failureLayer" = 'provider' AND "failureCode" IS NOT NULL)
++                OR ("terminalReason" IN ('invalid_response', 'empty_response', 'no_change')
++                    AND "failureLayer" = 'response_validation' AND "failureCode" = "terminalReason")
++            )
++        )
++    ),
++    CONSTRAINT "PromptRefinerShadowAttempt_time_check" CHECK (
++        "createdAt" >= "dispatchIntentAt"
++        AND ("terminalAt" IS NULL OR "terminalAt" >= "dispatchIntentAt")
++    )
++);
++
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_reservationId_key"
++    ON "PromptRefinerShadowAttempt"("reservationId");
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_requestId_key"
++    ON "PromptRefinerShadowAttempt"("requestId");
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_dispatchAuditLogId_key"
++    ON "PromptRefinerShadowAttempt"("dispatchAuditLogId");
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_terminalAuditLogId_key"
++    ON "PromptRefinerShadowAttempt"("terminalAuditLogId");
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_runId_caseId_key"
++    ON "PromptRefinerShadowAttempt"("runId", "caseId");
++CREATE UNIQUE INDEX "PromptRefinerShadowAttempt_runId_caseIndex_key"
++    ON "PromptRefinerShadowAttempt"("runId", "caseIndex");
++CREATE INDEX "PromptRefinerShadowAttempt_status_dispatchIntentAt_idx"
++    ON "PromptRefinerShadowAttempt"("status", "dispatchIntentAt");
++
++ALTER TABLE "PromptRefinerShadowRun"
++    ADD CONSTRAINT "PromptRefinerShadowRun_stageId_fkey"
++    FOREIGN KEY ("stageId") REFERENCES "PromptRefinerReservationStage"("id")
++    ON DELETE RESTRICT ON UPDATE RESTRICT;
++ALTER TABLE "PromptRefinerShadowAttempt"
++    ADD CONSTRAINT "PromptRefinerShadowAttempt_runId_fkey"
++    FOREIGN KEY ("runId") REFERENCES "PromptRefinerShadowRun"("id")
++    ON DELETE RESTRICT ON UPDATE RESTRICT;
++ALTER TABLE "PromptRefinerShadowAttempt"
++    ADD CONSTRAINT "PromptRefinerShadowAttempt_reservationId_fkey"
++    FOREIGN KEY ("reservationId") REFERENCES "PromptRefinerReservation"("id")
++    ON DELETE RESTRICT ON UPDATE RESTRICT;
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_run_insert_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    stage "PromptRefinerReservationStage"%ROWTYPE;
++    audit "AdminAuditLog"%ROWTYPE;
++    audit_approved_at TIMESTAMP(3);
++    audit_expires_at TIMESTAMP(3);
++BEGIN
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."status" <> 'approved' OR NEW."dispatchCount" <> 0
++       OR NEW."terminalCount" <> 0 OR NEW."knownActualCostMicroUsd" <> 0
++       OR NEW."startedAt" IS NOT NULL OR NEW."completedAt" IS NOT NULL
++       OR NEW."stoppedAt" IS NOT NULL OR NEW."stopReason" IS NOT NULL THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun must start approved and empty';
++    END IF;
++    IF NEW."approvedAt" > observed_at
++       OR NEW."approvalExpiresAt" <= observed_at
++       OR NEW."createdAt" < NEW."approvedAt"
++       OR NEW."createdAt" > observed_at + INTERVAL '1 minute' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun approval time is invalid';
++    END IF;
++    SELECT * INTO stage FROM "PromptRefinerReservationStage"
++    WHERE "id" = NEW."stageId" FOR UPDATE;
++    IF NOT FOUND OR stage."status" <> 'approved'
++       OR stage."approvalExpiresAt" <= observed_at
++       OR NEW."approvalExpiresAt" > stage."approvalExpiresAt"
++       OR stage."contractDigest" <> 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f'
++       OR stage."corpusDigest" <> NEW."corpusDigest"
++       OR stage."runtimeCommitSha" <> NEW."runtimeCommitSha"
++       OR stage."runtimeDeploymentId" <> NEW."runtimeDeploymentId" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun stage binding is invalid';
++    END IF;
++    SELECT * INTO audit FROM "AdminAuditLog"
++    WHERE "id" = NEW."authorizationAuditLogId";
++    audit_approved_at := ((audit."metadata"->>'approvedAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    audit_expires_at := ((audit."metadata"->>'approvalExpiresAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NOT FOUND OR audit."actorUserId" IS DISTINCT FROM NEW."approvedBy"
++       OR audit."action" <> 'prompt_refiner.shadow_run.approved'
++       OR audit."targetType" <> 'PromptRefinerShadowRun'
++       OR audit."targetId" IS DISTINCT FROM NEW."id"
++       OR audit."summary" <> 'Approved one bounded Prompt Refiner staging shadow run.'
++       OR audit."entryHash" IS NULL
++       OR audit."entryHash" !~ '^[a-f0-9]{64}$'
++       OR audit."metadata" IS DISTINCT FROM jsonb_build_object(
++            'stageId', NEW."stageId",
++            'runContractVersion', NEW."runContractVersion",
++            'runContractDigest', NEW."runContractDigest",
++            'corpusDigest', NEW."corpusDigest",
++            'adapterVersion', NEW."adapterVersion",
++            'runtimeSourceManifestDigest', NEW."runtimeSourceManifestDigest",
++            'previewBindingDigest', NEW."previewBindingDigest",
++            'runtimeDeploymentId', NEW."runtimeDeploymentId",
++            'runtimeCommitSha', NEW."runtimeCommitSha",
++            'perRequestCostMicroUsd', NEW."perRequestCostMicroUsd",
++            'maxDispatches', NEW."maxDispatches",
++            'costCeilingMicroUsd', NEW."costCeilingMicroUsd",
++            'timeoutMs', 15000,
++            'retryCount', 0,
++            'unknownOutcomePolicy', 'stop_no_redispatch',
++            'approvedAt', audit."metadata"->'approvedAt',
++            'approvalExpiresAt', audit."metadata"->'approvalExpiresAt',
++            'executionAdmitted', false,
++            'productAdapterReady', false
++       )
++       OR jsonb_typeof(audit."metadata"->'approvedAt') <> 'string'
++       OR jsonb_typeof(audit."metadata"->'approvalExpiresAt') <> 'string'
++       OR NEW."approvedAt" IS DISTINCT FROM audit_approved_at
++       OR NEW."approvalExpiresAt" IS DISTINCT FROM audit_expires_at THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun authorization audit binding is invalid';
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_run_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    actual_dispatches INTEGER;
++    actual_terminals INTEGER;
++    actual_cost BIGINT;
++BEGIN
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % cannot be deleted', OLD."id";
++    END IF;
++    IF NEW."id" IS DISTINCT FROM OLD."id"
++       OR NEW."stageId" IS DISTINCT FROM OLD."stageId"
++       OR NEW."runContractVersion" IS DISTINCT FROM OLD."runContractVersion"
++       OR NEW."runContractDigest" IS DISTINCT FROM OLD."runContractDigest"
++       OR NEW."corpusDigest" IS DISTINCT FROM OLD."corpusDigest"
++       OR NEW."adapterVersion" IS DISTINCT FROM OLD."adapterVersion"
++       OR NEW."perRequestCostMicroUsd" IS DISTINCT FROM OLD."perRequestCostMicroUsd"
++       OR NEW."maxDispatches" IS DISTINCT FROM OLD."maxDispatches"
++       OR NEW."costCeilingMicroUsd" IS DISTINCT FROM OLD."costCeilingMicroUsd"
++       OR NEW."runtimeCommitSha" IS DISTINCT FROM OLD."runtimeCommitSha"
++       OR NEW."runtimeDeploymentId" IS DISTINCT FROM OLD."runtimeDeploymentId"
++       OR NEW."runtimeSourceManifest" IS DISTINCT FROM OLD."runtimeSourceManifest"
++       OR NEW."runtimeSourceManifestDigest" IS DISTINCT FROM OLD."runtimeSourceManifestDigest"
++       OR NEW."previewBindingDigest" IS DISTINCT FROM OLD."previewBindingDigest"
++       OR NEW."approvedBy" IS DISTINCT FROM OLD."approvedBy"
++       OR NEW."approvedAt" IS DISTINCT FROM OLD."approvedAt"
++       OR NEW."approvalExpiresAt" IS DISTINCT FROM OLD."approvalExpiresAt"
++       OR NEW."authorizationAuditLogId" IS DISTINCT FROM OLD."authorizationAuditLogId"
++       OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % binding is immutable', OLD."id";
++    END IF;
++    IF OLD."status" = 'completed' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % is terminal', OLD."id";
++    END IF;
++    IF OLD."status" = 'stopped_unknown' AND NEW."status" <> 'stopped_unknown' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % unknown latch is immutable', OLD."id";
++    END IF;
++    IF NOT (
++        (NEW."status" = OLD."status")
++        OR (OLD."status" = 'approved' AND NEW."status" = 'running')
++        OR (OLD."status" = 'running' AND NEW."status" IN ('completed', 'stopped_unknown'))
++    ) THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % transition is invalid', OLD."id";
++    END IF;
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."startedAt" IS DISTINCT FROM OLD."startedAt"
++       OR NEW."completedAt" IS DISTINCT FROM OLD."completedAt"
++       OR NEW."stoppedAt" IS DISTINCT FROM OLD."stoppedAt"
++       OR NEW."stopReason" IS DISTINCT FROM OLD."stopReason" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % timestamps are database-owned', OLD."id";
++    END IF;
++    IF OLD."status" = 'approved' AND NEW."status" = 'running' THEN
++        NEW."startedAt" := observed_at;
++    ELSIF NEW."status" = 'completed' THEN
++        NEW."completedAt" := observed_at;
++    ELSIF OLD."status" <> 'stopped_unknown' AND NEW."status" = 'stopped_unknown' THEN
++        NEW."stoppedAt" := observed_at;
++        NEW."stopReason" := 'unknown_after_dispatch';
++    END IF;
++    SELECT COUNT(*)::INTEGER,
++           COUNT(*) FILTER (WHERE "status" = 'terminal')::INTEGER,
++           COALESCE(SUM("actualCostMicroUsd") FILTER (WHERE "status" = 'terminal'), 0)::BIGINT
++    INTO actual_dispatches, actual_terminals, actual_cost
++    FROM "PromptRefinerShadowAttempt" WHERE "runId" = OLD."id";
++    IF NEW."dispatchCount" <> actual_dispatches
++       OR NEW."terminalCount" <> actual_terminals
++       OR NEW."knownActualCostMicroUsd" <> actual_cost THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun % accounting must equal attempts', OLD."id";
++    END IF;
++    NEW."updatedAt" := observed_at;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_attempt_insert_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    run "PromptRefinerShadowRun"%ROWTYPE;
++    reservation "PromptRefinerReservation"%ROWTYPE;
++    audit "AdminAuditLog"%ROWTYPE;
++BEGIN
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."status" <> 'dispatch_intent' OR NEW."dispatchIntentAt" <> NEW."createdAt"
++       OR NEW."dispatchIntentAt" > observed_at
++       OR NEW."dispatchIntentAt" < observed_at - INTERVAL '1 minute' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt must start as a current dispatch intent';
++    END IF;
++    SELECT * INTO run FROM "PromptRefinerShadowRun" WHERE "id" = NEW."runId" FOR UPDATE;
++    IF NOT FOUND OR run."status" NOT IN ('approved', 'running')
++       OR run."approvalExpiresAt" <= observed_at
++       OR run."runContractDigest" <> NEW."runContractDigest"
++       OR run."stageId" <> NEW."stageId"
++       OR run."adapterVersion" <> NEW."adapterVersion"
++       OR run."dispatchCount" >= run."maxDispatches"
++       OR run."knownActualCostMicroUsd" > run."costCeilingMicroUsd" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun cannot accept a dispatch intent';
++    END IF;
++    SELECT * INTO reservation FROM "PromptRefinerReservation"
++    WHERE "id" = NEW."reservationId" FOR UPDATE;
++    IF NOT FOUND OR reservation."status" <> 'reserved'
++       OR reservation."expiresAt" <= observed_at
++       OR reservation."requestId" <> NEW."requestId"
++       OR reservation."stageId" <> NEW."stageId"
++       OR reservation."contractDigest" <> NEW."reservationContractDigest" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt reservation binding is invalid';
++    END IF;
++    SELECT * INTO audit FROM "AdminAuditLog" WHERE "id" = NEW."dispatchAuditLogId";
++    IF NOT FOUND OR audit."actorUserId" IS NOT NULL
++       OR audit."action" <> 'prompt_refiner.shadow_dispatch.intent_recorded'
++       OR audit."targetType" <> 'PromptRefinerShadowAttempt'
++       OR audit."targetId" IS DISTINCT FROM NEW."id"
++       OR audit."metadata"->>'systemActor' IS DISTINCT FROM 'prompt-refiner-shadow-runner'
++       OR audit."metadata"->>'runId' IS DISTINCT FROM NEW."runId"
++       OR audit."metadata"->>'reservationId' IS DISTINCT FROM NEW."reservationId"
++       OR audit."metadata"->>'requestId' IS DISTINCT FROM NEW."requestId"
++       OR audit."metadata"->>'caseId' IS DISTINCT FROM NEW."caseId" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt dispatch audit binding is invalid';
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_attempt_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    audit "AdminAuditLog"%ROWTYPE;
++BEGIN
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt % cannot be deleted', OLD."id";
++    END IF;
++    IF NEW."id" IS DISTINCT FROM OLD."id"
++       OR NEW."runId" IS DISTINCT FROM OLD."runId"
++       OR NEW."reservationId" IS DISTINCT FROM OLD."reservationId"
++       OR NEW."requestId" IS DISTINCT FROM OLD."requestId"
++       OR NEW."caseId" IS DISTINCT FROM OLD."caseId"
++       OR NEW."caseIndex" IS DISTINCT FROM OLD."caseIndex"
++       OR NEW."stageId" IS DISTINCT FROM OLD."stageId"
++       OR NEW."reservationContractDigest" IS DISTINCT FROM OLD."reservationContractDigest"
++       OR NEW."runContractDigest" IS DISTINCT FROM OLD."runContractDigest"
++       OR NEW."provider" IS DISTINCT FROM OLD."provider"
++       OR NEW."modelId" IS DISTINCT FROM OLD."modelId"
++       OR NEW."adapterVersion" IS DISTINCT FROM OLD."adapterVersion"
++       OR NEW."dispatchIntentAt" IS DISTINCT FROM OLD."dispatchIntentAt"
++       OR NEW."dispatchAuditLogId" IS DISTINCT FROM OLD."dispatchAuditLogId"
++       OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt % binding is immutable', OLD."id";
++    END IF;
++    IF OLD."status" <> 'dispatch_intent' OR NEW."status" <> 'terminal' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt % terminal is immutable', OLD."id";
++    END IF;
++    IF NEW."terminalAt" IS NOT NULL THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt % terminal timestamp is database-owned', OLD."id";
++    END IF;
++    SELECT * INTO audit FROM "AdminAuditLog" WHERE "id" = NEW."terminalAuditLogId";
++    IF NOT FOUND OR audit."actorUserId" IS NOT NULL
++       OR audit."action" <> 'prompt_refiner.shadow_dispatch.terminal_recorded'
++       OR audit."targetType" <> 'PromptRefinerShadowAttempt'
++       OR audit."targetId" IS DISTINCT FROM NEW."id"
++       OR audit."metadata"->>'systemActor' IS DISTINCT FROM 'prompt-refiner-shadow-runner'
++       OR audit."metadata"->>'runId' IS DISTINCT FROM NEW."runId"
++       OR audit."metadata"->>'reservationId' IS DISTINCT FROM NEW."reservationId"
++       OR audit."metadata"->>'requestId' IS DISTINCT FROM NEW."requestId"
++       OR audit."metadata"->>'terminalReason' IS DISTINCT FROM NEW."terminalReason" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt terminal audit binding is invalid';
++    END IF;
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    NEW."terminalAt" := observed_at;
++    NEW."updatedAt" := observed_at;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE TRIGGER "prompt_refiner_shadow_run_insert_guard_trigger"
++BEFORE INSERT ON "PromptRefinerShadowRun"
++FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_shadow_run_insert_guard"();
++CREATE TRIGGER "prompt_refiner_shadow_run_guard_trigger"
++BEFORE UPDATE OR DELETE ON "PromptRefinerShadowRun"
++FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_shadow_run_guard"();
++CREATE TRIGGER "prompt_refiner_shadow_attempt_insert_guard_trigger"
++BEFORE INSERT ON "PromptRefinerShadowAttempt"
++FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_shadow_attempt_insert_guard"();
++CREATE TRIGGER "prompt_refiner_shadow_attempt_guard_trigger"
++BEFORE UPDATE OR DELETE ON "PromptRefinerShadowAttempt"
++FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_shadow_attempt_guard"();
++
++-- A consumed reservation without a same-transaction dispatch intent is an
++-- unrepairable ambiguity. Replace the existing guard with the additional
++-- cross-row check; release and expiry keep their prior behaviour.
++CREATE OR REPLACE FUNCTION "prompt_refiner_reservation_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    stage_expires_at TIMESTAMP(3);
++    intent_count INTEGER;
++BEGIN
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % cannot be deleted', OLD."id";
++    END IF;
++    IF NEW."id" IS DISTINCT FROM OLD."id"
++       OR NEW."stageId" IS DISTINCT FROM OLD."stageId"
++       OR NEW."requestId" IS DISTINCT FROM OLD."requestId"
++       OR NEW."contractDigest" IS DISTINCT FROM OLD."contractDigest"
++       OR NEW."reservedCostMicroUsd" IS DISTINCT FROM OLD."reservedCostMicroUsd"
++       OR NEW."expiresAt" IS DISTINCT FROM OLD."expiresAt"
++       OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % binding is immutable', OLD."id";
++    END IF;
++    IF OLD."status" <> 'reserved' THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % is already terminal', OLD."id";
++    END IF;
++    IF NEW."consumedAt" IS NOT NULL OR NEW."releasedAt" IS NOT NULL OR NEW."expiredAt" IS NOT NULL THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % terminal timestamp is database-owned', OLD."id";
++    END IF;
++    IF NEW."status" NOT IN ('consumed', 'released', 'expired') THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % transition is invalid', OLD."id";
++    END IF;
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    SELECT "approvalExpiresAt" INTO stage_expires_at FROM "PromptRefinerReservationStage"
++    WHERE "id" = OLD."stageId" FOR UPDATE;
++    IF NEW."status" = 'consumed' AND (stage_expires_at IS NULL OR observed_at >= stage_expires_at) THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage approval expired before consume';
++    END IF;
++    IF NEW."status" = 'consumed' THEN
++        SELECT COUNT(*)::INTEGER INTO intent_count
++        FROM "PromptRefinerShadowAttempt"
++        WHERE "reservationId" = OLD."id"
++          AND "requestId" = OLD."requestId"
++          AND "stageId" = OLD."stageId"
++          AND "reservationContractDigest" = OLD."contractDigest"
++          AND "status" = 'dispatch_intent';
++        IF intent_count <> 1 THEN
++            RAISE EXCEPTION 'PromptRefinerReservation % consume requires one dispatch intent', OLD."id";
++        END IF;
++    END IF;
++    IF NEW."status" = 'expired' AND observed_at < OLD."expiresAt" THEN
++        RAISE EXCEPTION 'PromptRefinerReservation % cannot expire before its deadline', OLD."id";
++    END IF;
++    IF observed_at >= OLD."expiresAt" THEN
++        NEW."status" := 'expired'; NEW."expiredAt" := observed_at;
++    ELSIF NEW."status" = 'consumed' THEN
++        NEW."consumedAt" := observed_at;
++    ELSE
++        NEW."releasedAt" := observed_at;
++    END IF;
++    NEW."updatedAt" := observed_at;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index d9da0a9a..8fbe3e3e 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -5541,6 +5541,7 @@ model PromptRefinerReservationStage {
+   updatedAt                      DateTime @updatedAt
+ 
+   reservations          PromptRefinerReservation[]
++  shadowRuns            PromptRefinerShadowRun[]
+   authorizationAuditLog AdminAuditLog              @relation(fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+ }
+ 
+@@ -5558,11 +5559,93 @@ model PromptRefinerReservation {
+   createdAt            DateTime  @default(now())
+   updatedAt            DateTime  @updatedAt
+ 
+-  stage PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
++  stage         PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
++  shadowAttempt PromptRefinerShadowAttempt?
+ 
+   @@index([stageId, status, expiresAt])
+ }
+ 
++/// One separately approved, content-free Prompt Refiner staging shadow.
++/// The run contract digest is unique so v1 can execute at most once; a retry
++/// after an unknown outcome requires a new reviewed contract rather than a
++/// second row with the same authority.
++model PromptRefinerShadowRun {
++  id                          String    @id
++  stageId                     String
++  runContractVersion          String
++  runContractDigest           String    @unique
++  corpusDigest                String
++  adapterVersion              String
++  status                      String    @default("approved")
++  perRequestCostMicroUsd      BigInt
++  maxDispatches               Int
++  costCeilingMicroUsd         BigInt
++  dispatchCount               Int       @default(0)
++  terminalCount               Int       @default(0)
++  knownActualCostMicroUsd     BigInt    @default(0)
++  runtimeCommitSha            String
++  runtimeDeploymentId         String
++  runtimeSourceManifest       Json
++  runtimeSourceManifestDigest String
++  previewBindingDigest        String
++  approvedBy                  String
++  approvedAt                  DateTime
++  approvalExpiresAt           DateTime
++  authorizationAuditLogId     String    @unique
++  startedAt                   DateTime?
++  completedAt                 DateTime?
++  stoppedAt                   DateTime?
++  stopReason                  String?
++  createdAt                   DateTime  @default(now())
++  updatedAt                   DateTime  @updatedAt
++
++  stage                 PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
++  attempts              PromptRefinerShadowAttempt[]
++
++  @@index([stageId, status])
++}
++
++/// A dispatch intent and its immutable terminal receipt. No prompt, refined
++/// prompt, provider body/error prose, credential or customer identifier has a
++/// column in this table.
++model PromptRefinerShadowAttempt {
++  id                        String    @id
++  runId                     String
++  reservationId             String    @unique
++  requestId                 String    @unique
++  caseId                    String
++  caseIndex                 Int
++  stageId                   String
++  reservationContractDigest String
++  runContractDigest         String
++  provider                  String
++  modelId                   String
++  adapterVersion            String
++  status                    String    @default("dispatch_intent")
++  terminalReason            String?
++  failureLayer              String?
++  failureCode               String?
++  dispatchIntentAt          DateTime
++  terminalAt                DateTime?
++  durationMs                Int?
++  inputTokens               Int?
++  cachedInputTokens         Int?
++  cacheWriteInputTokens     Int?
++  outputTokens              Int?
++  reasoningTokens           Int?
++  actualCostMicroUsd        BigInt?
++  dispatchAuditLogId        String    @unique
++  terminalAuditLogId        String?   @unique
++  createdAt                 DateTime  @default(now())
++  updatedAt                 DateTime  @updatedAt
++
++  run              PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
++  reservation      PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
++  @@unique([runId, caseId])
++  @@unique([runId, caseIndex])
++  @@index([status, dispatchIntentAt])
++}
++
+ // The marketing automation tables (docs/policy/marketing-automation.md).
+ // Every invariant lives in 20260918120000_marketing_automation_tables: the
+ // closed-list CHECKs that repeat lib/marketingAutomationSchema.ts, the O15
+diff --git a/scripts/check-protected-table-writers-core.mjs b/scripts/check-protected-table-writers-core.mjs
+index f73d6b41..b4cd739e 100644
+--- a/scripts/check-protected-table-writers-core.mjs
++++ b/scripts/check-protected-table-writers-core.mjs
+@@ -150,6 +150,18 @@ export const PROTECTED_TABLES = [
+     writers: ["lib/marketingStore.ts"],
+     contract: "docs/policy/marketing-automation.md §5",
+   },
++  {
++    table: "PromptRefinerShadowRun",
++    delegate: "promptRefinerShadowRun",
++    writers: ["lib/promptRefinerShadowRunStore.ts"],
++    contract: "docs/policy/prompt-refiner-observability.md §12",
++  },
++  {
++    table: "PromptRefinerShadowAttempt",
++    delegate: "promptRefinerShadowAttempt",
++    writers: ["lib/promptRefinerShadowRunStore.ts"],
++    contract: "docs/policy/prompt-refiner-observability.md §12",
++  },
+ ];
+ 
+ /** Prisma delegate operations that cannot change a row. */
+@@ -244,6 +256,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
+     count: 1,
+     reason: "The data-domain registry's domain key. No client is indexed with it.",
+   },
++  {
++    path: "lib/accountDataExportDomains.ts",
++    delegate: "promptRefinerShadowRun",
++    count: 1,
++    reason: "The data-domain registry's domain key. No client is indexed with it.",
++  },
+ ];
+ 
+ /**
+@@ -259,6 +277,30 @@ export const RAW_SQL_ALLOWLIST = [
+     reason:
+       "The data-domain registry names the model as prismaModel and in prose, and other domains' prose uses delete and update. No SQL is built from this file.",
+   },
++  {
++    path: "lib/accountDataExportDomains.ts",
++    table: "PromptRefinerShadowRun",
++    tableMentions: 2,
++    writeVerbs: 3,
++    reason:
++      "The data-domain registry names the content-free run model and describes retention and deletion. It builds no SQL and opens no database connection.",
++  },
++  {
++    path: "lib/promptRefinerShadowRunStore.ts",
++    table: "PromptRefinerShadowRun",
++    tableMentions: 3,
++    writeVerbs: 5,
++    reason:
++      "The sole run/attempt writer uses Prisma delegates for mutations. Its raw SQL is limited to constant SELECT ... FOR UPDATE statements used to enforce the documented lock order; it never interpolates a table name.",
++  },
++  {
++    path: "lib/promptRefinerShadowRunStore.ts",
++    table: "PromptRefinerShadowAttempt",
++    tableMentions: 1,
++    writeVerbs: 5,
++    reason:
++      "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
++  },
+   {
+     path: "scripts/report-issue-backlog-core.mjs",
+     table: "AdminAuditLog",
+@@ -299,6 +341,30 @@ export const RAW_SQL_ALLOWLIST = [
+     reason:
+       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+   },
++  {
++    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
++    table: "AdminAuditLog",
++    tableMentions: 6,
++    writeVerbs: 22,
++    reason:
++      "The run-writer migration deliberately keeps audit IDs as plain immutable columns, then trigger-checks the linked human/system audit rows without giving a foreign key any path to rewrite the signed audit chain. It never writes AdminAuditLog; its write verbs create and constrain the content-free run, attempt and reservation tables.",
++  },
++  {
++    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
++    table: "PromptRefinerShadowRun",
++    tableMentions: 23,
++    writeVerbs: 22,
++    reason:
++      "The migration creates the content-free run table and its fail-closed insert/update/delete triggers. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
++  },
++  {
++    path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
++    table: "PromptRefinerShadowAttempt",
++    tableMentions: 24,
++    writeVerbs: 22,
++    reason:
++      "The migration creates the content-free attempt table and its immutable terminal trigger, and binds reservation consume to one intent. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
++  },
+   {
+     path: "scripts/report-unswept-tables-core.mjs",
+     table: "MarketingReport",
+diff --git a/scripts/run-db-integration-tests.mjs b/scripts/run-db-integration-tests.mjs
+index ca1b95ac..789ace28 100644
+--- a/scripts/run-db-integration-tests.mjs
++++ b/scripts/run-db-integration-tests.mjs
+@@ -206,6 +206,9 @@ run(
+     // The staging-only create-once writer: exact historical/current provenance,
+     // audit atomicity, immutable approval and DB-clock expiry.
+     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
++    // One-run approval, atomic dispatch-intent/reservation consume, immutable
++    // terminal receipts and stop-without-retry unknown recovery.
++    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+     "tests/integration/admin-security.db.test.ts",
+     "tests/integration/admin-users.db.test.ts",
+     "tests/integration/login-methods.db.test.ts",
+diff --git a/tests/adminAuditSystemActors.test.ts b/tests/adminAuditSystemActors.test.ts
+index b587b352..ca658127 100644
+--- a/tests/adminAuditSystemActors.test.ts
++++ b/tests/adminAuditSystemActors.test.ts
+@@ -28,6 +28,7 @@ test("the system actor list is closed and changes only by review", () => {
+     "marketing-publisher",
+     "marketing-retention",
+     "marketing-guard",
++    "prompt-refiner-shadow-runner",
+   ]);
+   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
+   assert.equal(isSystemAuditActor("marketing-guard"), true);
+diff --git a/tests/integration/prompt-refiner-reservation-admission.db.test.ts b/tests/integration/prompt-refiner-reservation-admission.db.test.ts
+index 7d0c5f8f..1f276481 100644
+--- a/tests/integration/prompt-refiner-reservation-admission.db.test.ts
++++ b/tests/integration/prompt-refiner-reservation-admission.db.test.ts
+@@ -53,7 +53,12 @@ const request = () =>
+ 
+ const reset = async () => {
+   await prisma.$executeRawUnsafe(`
+-    TRUNCATE TABLE "PromptRefinerReservation", "PromptRefinerReservationStage", "AdminAuditLog"
++    TRUNCATE TABLE
++      "PromptRefinerShadowAttempt",
++      "PromptRefinerShadowRun",
++      "PromptRefinerReservation",
++      "PromptRefinerReservationStage",
++      "AdminAuditLog"
+     RESTART IDENTITY
+   `);
+ };
+diff --git a/tests/integration/prompt-refiner-reservation.db.test.ts b/tests/integration/prompt-refiner-reservation.db.test.ts
+index 160a4754..153a563a 100644
+--- a/tests/integration/prompt-refiner-reservation.db.test.ts
++++ b/tests/integration/prompt-refiner-reservation.db.test.ts
+@@ -442,7 +442,15 @@ test("every exact direct insert consumes budget and forged or 101st inserts fail
+         stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+         contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+     });
+-    assert.equal(consumed.ok, true, consumed.ok ? undefined : consumed.reason);
++    assert.deepEqual(consumed, { ok: false, reason: "dispatch_intent_required" });
++    assert.equal(
++        (
++            await prisma.promptRefinerReservation.findUniqueOrThrow({
++                where: { id: firstId },
++            })
++        ).status,
++        "reserved"
++    );
+ 
+     await assert.rejects(
+         prisma.promptRefinerReservation.create({
+@@ -530,7 +538,7 @@ test("every exact direct insert consumes budget and forged or 101st inserts fail
+     assert.equal(await prisma.promptRefinerReservation.count(), 100);
+ });
+ 
+-test("consume requires the four-part binding and succeeds exactly once under race", async () => {
++test("standalone consume requires the four-part binding and refuses without a dispatch intent", async () => {
+     await createStage();
+     const reserved = await reservePromptRefinerExecution({ requestId: "request_consume" });
+     assert.equal(reserved.ok, true);
+@@ -545,16 +553,15 @@ test("consume requires the four-part binding and succeeds exactly once under rac
+         consumePromptRefinerReservation(binding),
+         consumePromptRefinerReservation(binding),
+     ]);
+-    assert.equal(outcomes.filter((result) => result.ok).length, 1);
+-    assert.equal(
+-        outcomes.filter((result) => !result.ok && result.reason === "reservation_not_active").length,
+-        1
+-    );
++    assert.deepEqual(outcomes, [
++        { ok: false, reason: "dispatch_intent_required" },
++        { ok: false, reason: "dispatch_intent_required" },
++    ]);
+     const row = await prisma.promptRefinerReservation.findUniqueOrThrow({
+         where: { id: binding.reservationId },
+     });
+-    assert.equal(row.status, "consumed");
+-    assert.ok(row.consumedAt);
++    assert.equal(row.status, "reserved");
++    assert.equal(row.consumedAt, null);
+ });
+ 
+ test("the database owns terminal clocks and turns every late direct transition into expiry", async () => {
+@@ -564,7 +571,7 @@ test("the database owns terminal clocks and turns every late direct transition i
+     `;
+     const nearExpiryCreatedAt = new Date(clock!.now.getTime() - 298_800);
+     await prisma.promptRefinerReservation.createMany({
+-        data: ["late_consume", "late_release"].map((requestId) => ({
++        data: ["late_release_one", "late_release_two"].map((requestId) => ({
+             id: requestId,
+             stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+             requestId,
+@@ -588,15 +595,11 @@ test("the database owns terminal clocks and turns every late direct transition i
+         FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_a_test_delay_transition"();
+     `);
+     try {
+-        assert.deepEqual(
+-            await consumePromptRefinerReservation({
+-                reservationId: "late_consume",
+-                requestId: "late_consume",
+-                stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+-                contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+-            }),
+-            { ok: false, reason: "reservation_expired" }
+-        );
++        await prisma.$executeRaw`
++            UPDATE "PromptRefinerReservation"
++            SET "status" = 'released'
++            WHERE "id" = 'late_release_one'
++        `;
+     } finally {
+         await prisma.$executeRawUnsafe(`
+             DROP TRIGGER IF EXISTS "prompt_refiner_a_test_delay_transition_trigger"
+@@ -607,10 +610,10 @@ test("the database owns terminal clocks and turns every late direct transition i
+     await prisma.$executeRaw`
+         UPDATE "PromptRefinerReservation"
+         SET "status" = 'released'
+-        WHERE "id" = 'late_release'
++        WHERE "id" = 'late_release_two'
+     `;
+     const lateRows = await prisma.promptRefinerReservation.findMany({
+-        where: { id: { in: ["late_consume", "late_release"] } },
++        where: { id: { in: ["late_release_one", "late_release_two"] } },
+         orderBy: { id: "asc" },
+     });
+     assert.deepEqual(
+@@ -645,21 +648,21 @@ test("the database owns terminal clocks and turns every late direct transition i
+     );
+     await prisma.$executeRaw`
+         UPDATE "PromptRefinerReservation"
+-        SET "status" = 'consumed'
++        SET "status" = 'released'
+         WHERE "id" = ${active.value.reservation.reservationId}
+     `;
+     const after = await prisma.$queryRaw<Array<{ now: Date }>>`
+         SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+     `;
+-    const consumed = await prisma.promptRefinerReservation.findUniqueOrThrow({
++    const released = await prisma.promptRefinerReservation.findUniqueOrThrow({
+         where: { id: active.value.reservation.reservationId },
+     });
+-    assert.equal(consumed.status, "consumed");
+-    assert.ok(consumed.consumedAt);
+-    assert.ok(consumed.consumedAt.getTime() >= before[0]!.now.getTime());
+-    assert.ok(consumed.consumedAt.getTime() <= after[0]!.now.getTime());
+-    assert.equal(consumed.releasedAt, null);
+-    assert.equal(consumed.expiredAt, null);
++    assert.equal(released.status, "released");
++    assert.ok(released.releasedAt);
++    assert.ok(released.releasedAt.getTime() >= before[0]!.now.getTime());
++    assert.ok(released.releasedAt.getTime() <= after[0]!.now.getTime());
++    assert.equal(released.consumedAt, null);
++    assert.equal(released.expiredAt, null);
+ });
+ 
+ test("naive reservation timestamps remain UTC under non-UTC database sessions", async () => {
+@@ -667,9 +670,9 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions",
+     const [databaseZone] = await prisma.$queryRaw<Array<{ zone: string }>>`
+         SELECT current_setting('TimeZone') AS "zone"
+     `;
+-    for (const [zone, requestedStatus] of [
+-        ["America/New_York", "consumed"],
+-        ["Asia/Seoul", "released"],
++    for (const [zone, suffix] of [
++        ["America/New_York", "new_york"],
++        ["Asia/Seoul", "seoul"],
+     ] as const) {
+         await assert.rejects(
+             prisma.$transaction(async (tx) => {
+@@ -679,7 +682,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions",
+                 const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
+                     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+                 `;
+-                const exactId = `timezone_exact_${requestedStatus}`;
++                const exactId = `timezone_exact_${suffix}`;
+                 await tx.promptRefinerReservation.create({
+                     data: {
+                         id: exactId,
+@@ -697,7 +700,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions",
+                 });
+                 assert.equal(exact.expiresAt.getTime() - exact.createdAt.getTime(), 300_000);
+ 
+-                const lateId = `timezone_late_${requestedStatus}`;
++                const lateId = `timezone_late_${suffix}`;
+                 const lateCreatedAt = new Date(clock!.now.getTime() - 299_700);
+                 await tx.promptRefinerReservation.create({
+                     data: {
+@@ -714,7 +717,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions",
+                 await wait(400);
+                 await tx.$executeRaw`
+                     UPDATE "PromptRefinerReservation"
+-                    SET "status" = ${requestedStatus}
++                    SET "status" = 'released'
+                     WHERE "id" = ${lateId}
+                 `;
+                 const late = await tx.promptRefinerReservation.findUniqueOrThrow({
+@@ -910,9 +913,17 @@ test("runtime pricing drift rolls back without consuming a stage slot", async ()
+         where: { id: reserved.value.reservation.reservationId },
+     });
+     assert.equal(stillReserved.status, "reserved");
++    assert.deepEqual(
++        await consumePromptRefinerReservation(bindingOf(reserved.value.reservation)),
++        { ok: false, reason: "dispatch_intent_required" }
++    );
+     assert.equal(
+-        (await consumePromptRefinerReservation(bindingOf(reserved.value.reservation))).ok,
+-        true
++        (
++            await prisma.promptRefinerReservation.findUniqueOrThrow({
++                where: { id: reserved.value.reservation.reservationId },
++            })
++        ).status,
++        "reserved"
+     );
+ });
+ 
+@@ -984,7 +995,10 @@ test("a registry admin update cannot slip between consume validation and reserva
+         releaseReservation();
+         await reservationBlocker;
+     }
+-    assert.equal((await consumePromise).ok, true);
++    assert.deepEqual(await consumePromise, {
++        ok: false,
++        reason: "dispatch_intent_required",
++    });
+ });
+ 
+ test("a failure after reservation insert rolls the row and stage accounting back together", async () => {
+@@ -1167,7 +1181,7 @@ test("database constraints reject malformed state and triggers prevent deletion
+     assert.equal(reserved.ok, true);
+     if (!reserved.ok) return;
+     const consumed = await consumePromptRefinerReservation(bindingOf(reserved.value.reservation));
+-    assert.equal(consumed.ok, true);
++    assert.deepEqual(consumed, { ok: false, reason: "dispatch_intent_required" });
+     await assert.rejects(
+         prisma.promptRefinerReservation.delete({
+             where: { id: reserved.value.reservation.reservationId },
+diff --git a/tests/integration/prompt-refiner-shadow-run.db.test.ts b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+new file mode 100644
+index 00000000..b5105227
+--- /dev/null
++++ b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+@@ -0,0 +1,561 @@
++import assert from "node:assert/strict";
++import { before, beforeEach, test } from "node:test";
++import type { Session } from "next-auth";
++
++import { prisma } from "@/lib/prisma";
++import {
++    consumePromptRefinerReservation,
++    reservePromptRefinerExecution,
++} from "@/lib/promptRefinerReservationAuthority";
++import {
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++} from "@/lib/promptRefinerReservationCore";
++import {
++    PROMPT_REFINER_EXECUTION_MODEL_PIN,
++    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++    PROMPT_REFINER_RETRY_COUNT,
++    PROMPT_REFINER_TIMEOUT_MS,
++} from "@/lib/promptRefinerExecutionContract";
++import {
++    createPromptRefinerReservationStage,
++    promptRefinerStagePreview,
++} from "@/lib/promptRefinerStageAdmission";
++import {
++    PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++    PROMPT_REFINER_SHADOW_CASE_IDS,
++    PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG,
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++    PROMPT_REFINER_SHADOW_RUN_ID,
++} from "@/lib/promptRefinerShadowRunContract";
++import {
++    createPromptRefinerShadowRun,
++    promptRefinerShadowRunPreview,
++    recordPromptRefinerShadowDispatchIntent,
++    recordPromptRefinerShadowTerminal,
++    sweepPromptRefinerShadowUnknowns,
++} from "@/lib/promptRefinerShadowRunStore";
++import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
++
++const FIXTURE_COMMIT_SHA = "a".repeat(40);
++const FIXTURE_DEPLOYMENT_ID = "prompt-refiner-shadow-run-db-test";
++process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
++process.env.RAILWAY_GIT_COMMIT_SHA = FIXTURE_COMMIT_SHA;
++process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
++process.env.ADMIN_AUDIT_INTEGRITY_KEY =
++    "prompt-refiner-shadow-run-strong-fixture-key";
++process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] = "true";
++
++const fixtureSession = {
++    user: { id: "mposition", email: "owner@example.com" },
++} as Session;
++const fixtureRequest = new Request(
++    "http://127.0.0.1:3100/api/admin/prompt-refiner/shadow-run",
++    { headers: { "user-agent": "prompt-refiner-shadow-run-db-integration" } }
++);
++
++const reset = async () => {
++    await prisma.$executeRawUnsafe(`
++        TRUNCATE TABLE
++          "PromptRefinerShadowAttempt",
++          "PromptRefinerShadowRun",
++          "PromptRefinerReservation",
++          "PromptRefinerReservationStage",
++          "AdminAuditLog"
++        RESTART IDENTITY CASCADE
++    `);
++};
++
++const ensureRuntimeModel = async () => {
++    const row = staticModelRegistrySeedRows().find(
++        (candidate) => candidate.id === PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId
++    );
++    assert.ok(row);
++    await prisma.modelRegistryEntry.upsert({
++        where: { id: row.id },
++        create: row,
++        update: row,
++    });
++};
++
++const approveStage = async () => {
++    const preview = await promptRefinerStagePreview();
++    return createPromptRefinerReservationStage({
++        session: fixtureSession,
++        request: fixtureRequest,
++        expected: {
++            proposalDigest: preview.proposalDigest,
++            runtimeSourceManifestDigest: preview.runtimeSourceManifestDigest,
++            executionManifestDigest: preview.executionManifestDigest,
++            previewBindingDigest: preview.previewBindingDigest,
++        },
++    });
++};
++
++const approveRun = async () => {
++    const preview = await promptRefinerShadowRunPreview();
++    return createPromptRefinerShadowRun({
++        session: fixtureSession,
++        request: fixtureRequest,
++        expected: {
++            runContractDigest: preview.runContractDigest,
++            stageRuntimeSourceManifestDigest:
++                preview.stageRuntimeSourceManifestDigest,
++            runSourceManifestDigest: preview.runSourceManifestDigest,
++            previewBindingDigest: preview.previewBindingDigest,
++        },
++    });
++};
++
++const reserve = async (requestId: string) => {
++    const result = await reservePromptRefinerExecution({ requestId });
++    assert.equal(result.ok, true, result.ok ? undefined : result.reason);
++    if (!result.ok) throw new Error("reservation fixture failed");
++    return result.value.reservation;
++};
++
++const dispatch = async (input: {
++    requestId: string;
++    caseIndex: number;
++}) => {
++    const reservation = await reserve(input.requestId);
++    const result = await recordPromptRefinerShadowDispatchIntent({
++        runId: PROMPT_REFINER_SHADOW_RUN_ID,
++        caseId: PROMPT_REFINER_SHADOW_CASE_IDS[input.caseIndex]!,
++        caseIndex: input.caseIndex,
++        reservation: {
++            reservationId: reservation.reservationId,
++            requestId: reservation.requestId,
++            stageId: reservation.stageId,
++            contractDigest: reservation.contractDigest,
++        },
++        fact: {
++            requestId: reservation.requestId,
++            adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++            provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++            modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++            apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++            maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++            timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++            retryCount: PROMPT_REFINER_RETRY_COUNT,
++        },
++    });
++    assert.equal(result.ok, true);
++    if (!result.ok) throw new Error("dispatch fixture failed");
++    return { reservation, attempt: result.attempt };
++};
++
++const usage = (costUpperBoundMicroUsd: number | null = 44) => ({
++    inputTokens: costUpperBoundMicroUsd === null ? null : 100,
++    cachedInputTokens: costUpperBoundMicroUsd === null ? null : 0,
++    cacheWriteInputTokens: costUpperBoundMicroUsd === null ? null : 0,
++    outputTokens: costUpperBoundMicroUsd === null ? null : 20,
++    reasoningTokens: costUpperBoundMicroUsd === null ? null : 8,
++    costUpperBoundMicroUsd,
++});
++
++before(async () => {
++    await ensureRuntimeModel();
++});
++
++beforeEach(async () => {
++    process.env.RAILWAY_GIT_COMMIT_SHA = FIXTURE_COMMIT_SHA;
++    process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
++    process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] = "true";
++    await reset();
++});
++
++test("run approval is default-off and writes no run or audit when disabled", async () => {
++    await approveStage();
++    const before = await prisma.adminAuditLog.count();
++    delete process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG];
++    const preview = await promptRefinerShadowRunPreview();
++    assert.equal(preview.approvalEnabled, false);
++    await assert.rejects(
++        approveRun(),
++        (error: unknown) =>
++            error instanceof Error &&
++            "code" in error &&
++            error.code === "PROMPT_REFINER_SHADOW_RUN_APPROVAL_DISABLED"
++    );
++    assert.equal(await prisma.promptRefinerShadowRun.count(), 0);
++    assert.equal(await prisma.adminAuditLog.count(), before);
++});
++
++test("exact preview approval is create-once, signed and content-free", async () => {
++    await approveStage();
++    const first = await approveRun();
++    assert.equal(first.created, true);
++    assert.equal(first.run.id, PROMPT_REFINER_SHADOW_RUN_ID);
++    assert.equal(first.run.runContractDigest, PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST);
++    assert.equal(first.run.dispatchCount, 0);
++    const replay = await approveRun();
++    assert.equal(replay.created, false);
++    assert.equal(replay.replayed, true);
++    assert.equal(await prisma.promptRefinerShadowRun.count(), 1);
++    const audit = await prisma.adminAuditLog.findUniqueOrThrow({
++        where: { id: first.run.authorizationAuditLogId },
++    });
++    assert.ok(audit.entryHash);
++    assert.equal(audit.action, "prompt_refiner.shadow_run.approved");
++    const serialized = JSON.stringify(
++        { run: first.run, audit },
++        (_key, value) => (typeof value === "bigint" ? value.toString() : value)
++    );
++    assert.doesNotMatch(serialized, /sourceText|refinedPrompt|responseBody|credential/i);
++});
++
++test("dispatch intent, reservation consume, audit and run accounting commit atomically", async () => {
++    await approveStage();
++    await approveRun();
++    const result = await dispatch({ requestId: "shadow_db_dispatch_1", caseIndex: 0 });
++    const [reservation, run, audit] = await Promise.all([
++        prisma.promptRefinerReservation.findUniqueOrThrow({
++            where: { id: result.reservation.reservationId },
++        }),
++        prisma.promptRefinerShadowRun.findUniqueOrThrow({
++            where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
++        }),
++        prisma.adminAuditLog.findUniqueOrThrow({
++            where: { id: result.attempt.dispatchAuditLogId },
++        }),
++    ]);
++    assert.equal(reservation.status, "consumed");
++    assert.ok(reservation.consumedAt);
++    assert.equal(run.status, "running");
++    assert.equal(run.dispatchCount, 1);
++    assert.equal(run.terminalCount, 0);
++    assert.equal(audit.action, "prompt_refiner.shadow_dispatch.intent_recorded");
++    assert.equal((audit.metadata as { systemActor: string }).systemActor, "prompt-refiner-shadow-runner");
++});
++
++test("an injected attempt failure rolls audit, attempt, consume and run counter back", async () => {
++    await approveStage();
++    await approveRun();
++    const reservation = await reserve("shadow_db_rollback_1");
++    await prisma.$executeRawUnsafe(`
++        CREATE OR REPLACE FUNCTION "prompt_refiner_test_fail_attempt"()
++        RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'injected attempt failure'; END; $$ LANGUAGE plpgsql;
++        CREATE TRIGGER "prompt_refiner_test_fail_attempt_trigger"
++        BEFORE INSERT ON "PromptRefinerShadowAttempt"
++        FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_test_fail_attempt"();
++    `);
++    try {
++        await assert.rejects(
++            recordPromptRefinerShadowDispatchIntent({
++                runId: PROMPT_REFINER_SHADOW_RUN_ID,
++                caseId: PROMPT_REFINER_SHADOW_CASE_IDS[0],
++                caseIndex: 0,
++                reservation: {
++                    reservationId: reservation.reservationId,
++                    requestId: reservation.requestId,
++                    stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++                    contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++                },
++                fact: {
++                    requestId: reservation.requestId,
++                    adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++                    provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++                    modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++                    apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++                    maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++                    timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++                    retryCount: 0,
++                },
++            }),
++            /injected attempt failure/
++        );
++    } finally {
++        await prisma.$executeRawUnsafe(`
++            DROP TRIGGER IF EXISTS "prompt_refiner_test_fail_attempt_trigger" ON "PromptRefinerShadowAttempt";
++            DROP FUNCTION IF EXISTS "prompt_refiner_test_fail_attempt"();
++        `);
++    }
++    assert.equal(await prisma.promptRefinerShadowAttempt.count(), 0);
++    assert.equal(
++        (
++            await prisma.promptRefinerReservation.findUniqueOrThrow({
++                where: { id: reservation.reservationId },
++            })
++        ).status,
++        "reserved"
++    );
++    const run = await prisma.promptRefinerShadowRun.findUniqueOrThrow({
++        where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
++    });
++    assert.equal(run.dispatchCount, 0);
++    assert.equal(
++        await prisma.adminAuditLog.count({
++            where: { action: "prompt_refiner.shadow_dispatch.intent_recorded" },
++        }),
++        0
++    );
++});
++
++test("terminal receipt is immutable, idempotent only when exact, and updates cost", async () => {
++    await approveStage();
++    await approveRun();
++    const { attempt } = await dispatch({ requestId: "shadow_db_terminal_1", caseIndex: 0 });
++    const first = await recordPromptRefinerShadowTerminal({
++        attemptId: attempt.id,
++        terminalReason: "suggested",
++        durationMs: 12,
++        usage: usage(44),
++    });
++    assert.equal(first.created, true);
++    assert.equal(first.attempt.status, "terminal");
++    assert.ok(first.attempt.terminalAt);
++    assert.equal(first.run.terminalCount, 1);
++    assert.equal(first.run.knownActualCostMicroUsd, BigInt(44));
++    const replay = await recordPromptRefinerShadowTerminal({
++        attemptId: attempt.id,
++        terminalReason: "suggested",
++        durationMs: 12,
++        usage: usage(44),
++    });
++    assert.equal(replay.replayed, true);
++    await assert.rejects(
++        recordPromptRefinerShadowTerminal({
++            attemptId: attempt.id,
++            terminalReason: "provider_error",
++            durationMs: 12,
++            usage: usage(null),
++        }),
++        (error: unknown) =>
++            error instanceof Error &&
++            "code" in error &&
++            error.code === "PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT"
++    );
++    assert.equal(
++        await prisma.adminAuditLog.count({
++            where: { action: "prompt_refiner.shadow_dispatch.terminal_recorded" },
++        }),
++        1
++    );
++});
++
++test("unknown terminal latches the run and refuses every later case without redispatch", async () => {
++    await approveStage();
++    await approveRun();
++    const { attempt } = await dispatch({ requestId: "shadow_db_unknown_1", caseIndex: 0 });
++    const { attempt: secondAttempt } = await dispatch({
++        requestId: "shadow_db_unknown_2",
++        caseIndex: 1,
++    });
++    const terminal = await recordPromptRefinerShadowTerminal({
++        attemptId: attempt.id,
++        terminalReason: "unknown_after_dispatch",
++        durationMs: 60_000,
++        usage: usage(null),
++    });
++    assert.equal(terminal.run.status, "stopped_unknown");
++    assert.equal(terminal.run.stopReason, "unknown_after_dispatch");
++    assert.ok(terminal.run.stoppedAt);
++    await new Promise((resolve) => setTimeout(resolve, 10));
++    const catchUp = await recordPromptRefinerShadowTerminal({
++        attemptId: secondAttempt.id,
++        terminalReason: "suggested",
++        durationMs: 12,
++        usage: usage(44),
++    });
++    assert.equal(catchUp.run.status, "stopped_unknown");
++    assert.equal(catchUp.run.terminalCount, 2);
++    assert.equal(catchUp.run.knownActualCostMicroUsd, BigInt(44));
++    assert.equal(
++        catchUp.run.stoppedAt?.toISOString(),
++        terminal.run.stoppedAt?.toISOString()
++    );
++    const reservation = await reserve("shadow_db_unknown_3");
++    await assert.rejects(
++        recordPromptRefinerShadowDispatchIntent({
++            runId: PROMPT_REFINER_SHADOW_RUN_ID,
++            caseId: PROMPT_REFINER_SHADOW_CASE_IDS[2],
++            caseIndex: 2,
++            reservation: {
++                reservationId: reservation.reservationId,
++                requestId: reservation.requestId,
++                stageId: reservation.stageId,
++                contractDigest: reservation.contractDigest,
++            },
++            fact: {
++                requestId: reservation.requestId,
++                adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++                provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++                modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++                apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++                maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++                timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++                retryCount: 0,
++            },
++        }),
++        (error: unknown) =>
++            error instanceof Error &&
++            "code" in error &&
++            error.code === "PROMPT_REFINER_SHADOW_DISPATCH_RUN_INVALID"
++    );
++    assert.equal(
++        (
++            await prisma.promptRefinerReservation.findUniqueOrThrow({
++                where: { id: reservation.reservationId },
++            })
++        ).status,
++        "reserved"
++    );
++});
++
++test("bounded sweep closes every selected stale intent after the first unknown latch", async () => {
++    await approveStage();
++    await approveRun();
++    const { attempt: firstAttempt } = await dispatch({
++        requestId: "shadow_db_sweep_1",
++        caseIndex: 0,
++    });
++    const { attempt: secondAttempt } = await dispatch({
++        requestId: "shadow_db_sweep_2",
++        caseIndex: 1,
++    });
++    await prisma.$executeRawUnsafe(
++        'ALTER TABLE "PromptRefinerShadowAttempt" DISABLE TRIGGER "prompt_refiner_shadow_attempt_guard_trigger"'
++    );
++    try {
++        await prisma.$executeRaw`
++            UPDATE "PromptRefinerShadowAttempt"
++            SET "dispatchIntentAt" = (clock_timestamp() AT TIME ZONE 'UTC')
++                - CASE WHEN "caseIndex" = 0 THEN INTERVAL '62 seconds'
++                       ELSE INTERVAL '61 seconds' END
++            WHERE "id" IN (${firstAttempt.id}, ${secondAttempt.id})
++        `;
++    } finally {
++        await prisma.$executeRawUnsafe(
++            'ALTER TABLE "PromptRefinerShadowAttempt" ENABLE TRIGGER "prompt_refiner_shadow_attempt_guard_trigger"'
++        );
++    }
++    const sweep = await sweepPromptRefinerShadowUnknowns();
++    assert.deepEqual(
++        [...sweep.closedUnknownAttemptIds].sort(),
++        [firstAttempt.id, secondAttempt.id].sort()
++    );
++    assert.deepEqual(sweep.unresolvedStaleAttemptIds, []);
++    assert.equal(sweep.redispatched, 0);
++    assert.equal(sweep.retryCount, 0);
++    const run = await prisma.promptRefinerShadowRun.findUniqueOrThrow({
++        where: { id: PROMPT_REFINER_SHADOW_RUN_ID },
++    });
++    assert.equal(run.status, "stopped_unknown");
++    assert.equal(run.terminalCount, 2);
++    assert.equal(run.stopReason, "unknown_after_dispatch");
++    assert.ok(run.stoppedAt);
++});
++
++test("sweep reports a conflicting known receipt race without discarding prior closures", async () => {
++    await approveStage();
++    await approveRun();
++    const { attempt: firstAttempt } = await dispatch({
++        requestId: "shadow_db_race_1",
++        caseIndex: 0,
++    });
++    const { attempt: secondAttempt } = await dispatch({
++        requestId: "shadow_db_race_2",
++        caseIndex: 1,
++    });
++    await prisma.$executeRawUnsafe(
++        'ALTER TABLE "PromptRefinerShadowAttempt" DISABLE TRIGGER "prompt_refiner_shadow_attempt_guard_trigger"'
++    );
++    try {
++        await prisma.$executeRaw`
++            UPDATE "PromptRefinerShadowAttempt"
++            SET "dispatchIntentAt" = (clock_timestamp() AT TIME ZONE 'UTC')
++                - CASE WHEN "caseIndex" = 0 THEN INTERVAL '62 seconds'
++                       ELSE INTERVAL '61 seconds' END
++            WHERE "id" IN (${firstAttempt.id}, ${secondAttempt.id})
++        `;
++    } finally {
++        await prisma.$executeRawUnsafe(
++            'ALTER TABLE "PromptRefinerShadowAttempt" ENABLE TRIGGER "prompt_refiner_shadow_attempt_guard_trigger"'
++        );
++    }
++    await prisma.$executeRawUnsafe(`
++        CREATE FUNCTION "prompt_refiner_test_delay_first_terminal"()
++        RETURNS TRIGGER AS $$
++        BEGIN
++            IF OLD."caseIndex" = 0 THEN PERFORM pg_sleep(0.25); END IF;
++            RETURN NEW;
++        END;
++        $$ LANGUAGE plpgsql;
++        CREATE TRIGGER "prompt_refiner_test_delay_first_terminal_trigger"
++        BEFORE UPDATE ON "PromptRefinerShadowAttempt"
++        FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_test_delay_first_terminal"();
++    `);
++    let sweep: Awaited<ReturnType<typeof sweepPromptRefinerShadowUnknowns>>;
++    try {
++        const sweepPromise = sweepPromptRefinerShadowUnknowns();
++        await new Promise((resolve) => setTimeout(resolve, 50));
++        const knownReceiptPromise = recordPromptRefinerShadowTerminal({
++            attemptId: secondAttempt.id,
++            terminalReason: "suggested",
++            durationMs: 12,
++            usage: usage(44),
++        });
++        [sweep] = await Promise.all([sweepPromise, knownReceiptPromise]);
++    } finally {
++        await prisma.$executeRawUnsafe(`
++            DROP TRIGGER IF EXISTS "prompt_refiner_test_delay_first_terminal_trigger"
++                ON "PromptRefinerShadowAttempt";
++            DROP FUNCTION IF EXISTS "prompt_refiner_test_delay_first_terminal"();
++        `);
++    }
++    assert.deepEqual(sweep.closedUnknownAttemptIds, [firstAttempt.id]);
++    assert.deepEqual(sweep.unresolvedStaleAttemptIds, [secondAttempt.id]);
++    const second = await prisma.promptRefinerShadowAttempt.findUniqueOrThrow({
++        where: { id: secondAttempt.id },
++    });
++    assert.equal(second.terminalReason, "suggested");
++    assert.equal(second.actualCostMicroUsd, BigInt(44));
++});
++
++test("unknown sweep uses the PostgreSQL clock instead of a skewed application clock", async () => {
++    await approveStage();
++    await approveRun();
++    await dispatch({ requestId: "shadow_db_clock_1", caseIndex: 0 });
++    const realDateNow = Date.now;
++    Date.now = () => realDateNow() + 120_000;
++    try {
++        const sweep = await sweepPromptRefinerShadowUnknowns();
++        assert.equal(sweep.staleCandidates, 0);
++        assert.deepEqual(sweep.closedUnknownAttemptIds, []);
++        assert.deepEqual(sweep.unresolvedStaleAttemptIds, []);
++        assert.ok(new Date(sweep.observedAt).getTime() < Date.now() - 60_000);
++    } finally {
++        Date.now = realDateNow;
++    }
++});
++
++test("standalone consume and direct SQL cannot create consumed-without-intent", async () => {
++    await approveStage();
++    const reservation = await reserve("shadow_db_direct_consume_1");
++    assert.deepEqual(
++        await consumePromptRefinerReservation({
++            reservationId: reservation.reservationId,
++            requestId: reservation.requestId,
++            stageId: reservation.stageId,
++            contractDigest: reservation.contractDigest,
++        }),
++        { ok: false, reason: "dispatch_intent_required" }
++    );
++    await assert.rejects(
++        prisma.$executeRaw`
++            UPDATE "PromptRefinerReservation"
++            SET "status" = 'consumed'
++            WHERE "id" = ${reservation.reservationId}
++        `,
++        /consume requires one dispatch intent/i
++    );
++    assert.equal(
++        (
++            await prisma.promptRefinerReservation.findUniqueOrThrow({
++                where: { id: reservation.reservationId },
++            })
++        ).status,
++        "reserved"
++    );
++});
+diff --git a/tests/promptRefinerRuntimeSourceClosure.test.mjs b/tests/promptRefinerRuntimeSourceClosure.test.mjs
+index 0ead270e..907631e1 100644
+--- a/tests/promptRefinerRuntimeSourceClosure.test.mjs
++++ b/tests/promptRefinerRuntimeSourceClosure.test.mjs
+@@ -62,8 +62,8 @@ const compilerOptions = parsedConfig.options;
+ // be reviewed and must update this digest before the closure gate can pass.
+ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
+ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
+-  "151ba90d010480e4e17a0a01fa60f28b",
+-  "45acad0c4a40ee4f40684d80b8083141",
++  "6c04c275e702bdd092ebfa7277943cc05",
++  "82ca4ce6a4f1dfe4cb67518df8d871b",
+ ].join("");
+ 
+ const unwrapStaticExpression = (node) => {
+diff --git a/tests/promptRefinerShadowLiveAdapter.test.mjs b/tests/promptRefinerShadowLiveAdapter.test.mjs
+index d9b6d7ba..283fb08e 100644
+--- a/tests/promptRefinerShadowLiveAdapter.test.mjs
++++ b/tests/promptRefinerShadowLiveAdapter.test.mjs
+@@ -242,6 +242,10 @@ const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
+   "tests",
+ ]);
+ const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
++const LIVE_ADAPTER_REFERENCE = "promptRefinerShadowLiveAdapter";
++const RUN_CONTRACT_PATH = "lib/promptRefinerShadowRunContract.ts";
++const RUN_CONTRACT_MANIFEST_ENTRY =
++  '    "lib/promptRefinerShadowLiveAdapter.ts",';
+ const STATIC_AI_IMPORT_PATTERN =
+   /(?:^|\n)\s*import\b(?!\s*\()[^;]*?["']ai["']\s*;/;
+ const STATIC_ACTIVE_MODEL_IMPORT_PATTERN =
+@@ -262,6 +266,21 @@ const sourceFiles = (root) =>
+     return SOURCE_FILE_PATTERN.test(entry.name) ? [path] : [];
+   });
+ 
++const shippedSourceReferencesLiveAdapter = ({ relativePath, source }) => {
++  if (relativePath !== RUN_CONTRACT_PATH) {
++    return source.includes(LIVE_ADAPTER_REFERENCE);
++  }
++  const occurrences = source.split(RUN_CONTRACT_MANIFEST_ENTRY).length - 1;
++  assert.equal(
++    occurrences,
++    1,
++    "the run contract must carry exactly one literal manifest entry for the adapter",
++  );
++  return source.replace(RUN_CONTRACT_MANIFEST_ENTRY, "").includes(
++    LIVE_ADAPTER_REFERENCE,
++  );
++};
++
+ test("no shipped entry point imports the live adapter", () => {
+   const root = resolve(import.meta.dirname, "..");
+   const adapterPath = join(root, "lib/promptRefinerShadowLiveAdapter.ts");
+@@ -269,9 +288,11 @@ test("no shipped entry point imports the live adapter", () => {
+   assert.ok(scanned.some((path) => path === join(root, "instrumentation.ts")));
+   assert.ok(scanned.some((path) => path.startsWith(join(root, "components"))));
+   const offenders = scanned
+-    .filter((path) =>
+-      readFileSync(path, "utf8").includes("promptRefinerShadowLiveAdapter"),
+-    )
++    .filter((path) => {
++      const source = readFileSync(path, "utf8");
++      const relativePath = path.slice(root.length + 1).replaceAll("\\", "/");
++      return shippedSourceReferencesLiveAdapter({ relativePath, source });
++    })
+     .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
+   assert.deepEqual(offenders, []);
+   assert.equal(
+@@ -326,3 +347,36 @@ test("unreachability guard recognizes multiline imports and JS entry extensions"
+     assert.equal(SOURCE_FILE_PATTERN.test(name), true, name);
+   }
+ });
++
++test("live-adapter guard rejects every reference syntax and exempts only the exact manifest entry", () => {
++  for (const source of [
++    'import { x } from "@/lib/promptRefinerShadowLiveAdapter";',
++    'const x = import("@/lib/promptRefinerShadowLiveAdapter");',
++    'export * from "@/lib/promptRefinerShadowLiveAdapter";',
++    'const x = require("@/lib/promptRefinerShadowLiveAdapter");',
++    'const x = module.require("@/lib/promptRefinerShadowLiveAdapter");',
++  ]) {
++    assert.equal(
++      shippedSourceReferencesLiveAdapter({
++        relativePath: "app/api/example/route.ts",
++        source,
++      }),
++      true,
++      source,
++    );
++  }
++  assert.equal(
++    shippedSourceReferencesLiveAdapter({
++      relativePath: RUN_CONTRACT_PATH,
++      source: `${RUN_CONTRACT_MANIFEST_ENTRY}\n`,
++    }),
++    false,
++  );
++  assert.equal(
++    shippedSourceReferencesLiveAdapter({
++      relativePath: RUN_CONTRACT_PATH,
++      source: `${RUN_CONTRACT_MANIFEST_ENTRY}\nexport * from "@/lib/promptRefinerShadowLiveAdapter";`,
++    }),
++    true,
++  );
++});
+diff --git a/tests/promptRefinerShadowRunContract.test.mjs b/tests/promptRefinerShadowRunContract.test.mjs
+index 29328ed0..487afa68 100644
+--- a/tests/promptRefinerShadowRunContract.test.mjs
++++ b/tests/promptRefinerShadowRunContract.test.mjs
+@@ -14,10 +14,16 @@ import {
+ import {
+   PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
+   PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
++  PROMPT_REFINER_SHADOW_CASE_IDS,
+   PROMPT_REFINER_SHADOW_RUN_CONTRACT,
+   PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
+   PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++  PROMPT_REFINER_SHADOW_RUN_ID,
+   PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++  PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
++  buildPromptRefinerShadowRunPreviewBinding,
++  buildPromptRefinerShadowRunSourceManifest,
++  promptRefinerShadowRunPreviewBindingDigest,
+   promptRefinerShadowRunContractProblems,
+ } from "../lib/promptRefinerShadowRunContract.ts";
+ import {
+@@ -64,12 +70,17 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run",
+     PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.requiresExplicitCostApproval,
+     true,
+   );
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.runId, PROMPT_REFINER_SHADOW_RUN_ID);
++  assert.deepEqual(PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.caseIds, PROMPT_REFINER_SHADOW_CASE_IDS);
++  assert.equal(PROMPT_REFINER_SHADOW_CASE_IDS.length, 16);
++  assert.equal(new Set(PROMPT_REFINER_SHADOW_CASE_IDS).size, 16);
+   assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
+ });
+ 
+-test("shipping the adapter does not make the run or product executable", () => {
++test("shipping the durable writer still does not make the run or product executable", () => {
+   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
+-  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, false);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, true);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady, true);
+   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady, false);
+   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted, false);
+   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.productAdapterReady, false);
+@@ -78,3 +89,50 @@ test("shipping the adapter does not make the run or product executable", () => {
+     /^sha256:[a-f0-9]{64}$/,
+   );
+ });
++
++test("run source manifest is exact, bounded and commit-bound", () => {
++  const files = new Map(
++    PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.map((path, index) => [
++      path,
++      new TextEncoder().encode(`fixture-${index}`),
++    ]),
++  );
++  const built = buildPromptRefinerShadowRunSourceManifest({
++    commitSha: "a".repeat(40),
++    files,
++  });
++  assert.equal(built.manifest.files.length, PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.length);
++  assert.deepEqual(
++    built.manifest.files.map((entry) => entry.path),
++    [...PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS],
++  );
++  assert.match(built.manifestDigest, /^sha256:[a-f0-9]{64}$/);
++  assert.throws(
++    () => buildPromptRefinerShadowRunSourceManifest({
++      commitSha: "a".repeat(40),
++      files: new Map([...files].slice(1)),
++    }),
++    /source_path_allowlist/,
++  );
++});
++
++test("run preview digest binds deployment, stage closure, delta and cost", () => {
++  const base = {
++    stageRuntimeSourceManifestDigest: `sha256:${"1".repeat(64)}`,
++    runSourceManifestDigest: `sha256:${"2".repeat(64)}`,
++    deploymentId: "deploy-1",
++    commitSha: "a".repeat(40),
++    stageApprovalExpiresAt: new Date("2026-09-20T03:00:00.000Z"),
++  };
++  const binding = buildPromptRefinerShadowRunPreviewBinding(base);
++  const digest = promptRefinerShadowRunPreviewBindingDigest(binding);
++  assert.match(digest, /^sha256:[a-f0-9]{64}$/);
++  assert.notEqual(
++    digest,
++    promptRefinerShadowRunPreviewBindingDigest(
++      buildPromptRefinerShadowRunPreviewBinding({ ...base, deploymentId: "deploy-2" }),
++    ),
++  );
++  assert.equal(binding.executionAdmitted, false);
++  assert.equal(binding.productAdapterReady, false);
++});
+diff --git a/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts b/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts
+new file mode 100644
+index 00000000..69786c97
+--- /dev/null
++++ b/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts
+@@ -0,0 +1,251 @@
++import assert from "node:assert/strict";
++import test, { mock } from "node:test";
++import { resolve } from "node:path";
++import { pathToFileURL } from "node:url";
++
++import { requiresMutationOriginCheck } from "../../lib/requestOrigin.ts";
++import {
++    PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++} from "../../lib/promptRefinerShadowRunContract.ts";
++
++const ROOT = resolve(import.meta.dirname, "..", "..");
++const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
++
++process.env.E2E_DISABLE_DATABASE = "true";
++process.env.DATABASE_URL ||=
++    "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
++process.env.NEXTAUTH_SECRET ||= "prompt-refiner-run-route-test";
++process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
++
++const digest = (character: string) => `sha256:${character.repeat(64)}`;
++const preview = {
++    status: "ready_for_explicit_cost_approval",
++    runId: "prompt-refiner-shadow-run-v2",
++    stageId: "prompt-refiner-shadow-v1",
++    stageRuntimeSourceManifestDigest: digest("1"),
++    runSourceManifestDigest: digest("2"),
++    environment: "staging",
++    deploymentId: "deployment-1",
++    commitSha: "a".repeat(40),
++    stageApprovalExpiresAt: "2026-09-20T03:00:00.000Z",
++    runContractDigest: digest("3"),
++    corpusDigest: "b".repeat(64),
++    adapterVersion: "prompt-refiner-openai-sdk-adapter-v1",
++    provider: "openai",
++    modelId: "gpt-5-6-luna",
++    apiModelId: "gpt-5.6-luna",
++    timeoutMs: 15_000,
++    retryCount: 0,
++    maxDispatches: 16,
++    perRequestCostMicroUsd: 24_916,
++    costCeilingMicroUsd: 398_656,
++    unknownOutcomePolicy: "stop_no_redispatch",
++    executionAdmitted: false,
++    productAdapterReady: false,
++    previewBindingDigest: digest("4"),
++    confirmation: PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++    approvalEnabled: false,
++} as const;
++
++type World = {
++    authenticated: boolean;
++    role: string;
++    recent: boolean;
++    previewCalls: number;
++    createCalls: number;
++    rateLimitCalls: number;
++    lastCreate: unknown;
++};
++
++const fresh = (): World => ({
++    authenticated: true,
++    role: "owner",
++    recent: true,
++    previewCalls: 0,
++    createCalls: 0,
++    rateLimitCalls: 0,
++    lastCreate: null,
++});
++let world = fresh();
++let installed = false;
++
++const fakeRun = {
++    id: preview.runId,
++    status: "approved",
++    runContractDigest: preview.runContractDigest,
++    corpusDigest: preview.corpusDigest,
++    adapterVersion: preview.adapterVersion,
++    runtimeDeploymentId: preview.deploymentId,
++    runtimeCommitSha: preview.commitSha,
++    perRequestCostMicroUsd: BigInt(preview.perRequestCostMicroUsd),
++    maxDispatches: preview.maxDispatches,
++    costCeilingMicroUsd: BigInt(preview.costCeilingMicroUsd),
++    approvedAt: new Date("2026-09-20T02:00:00.000Z"),
++    approvalExpiresAt: new Date(preview.stageApprovalExpiresAt),
++    authorizationAuditLogId: "audit-run-1",
++};
++
++async function loadRoute() {
++    if (!installed) {
++        installed = true;
++        mock.module(mod("node_modules/next-auth/next/index.js"), {
++            namedExports: {
++                getServerSession: async () =>
++                    world.authenticated
++                        ? {
++                              user: {
++                                  id: "owner-1",
++                                  email: "owner@example.com",
++                                  authenticatedAt: new Date().toISOString(),
++                              },
++                          }
++                        : null,
++            },
++        });
++        mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
++        mock.module(mod("lib/adminAuth.ts"), {
++            namedExports: {
++                isAdminSession: () => world.authenticated,
++                getAdminRole: () => world.role,
++            },
++        });
++        mock.module(mod("lib/adminReauthentication.ts"), {
++            namedExports: {
++                assertRecentAdminAuthentication: async () => {
++                    if (!world.recent) throw new Error("reauth");
++                },
++                isAdminReauthenticationError: (error: unknown) =>
++                    error instanceof Error && error.message === "reauth",
++            },
++        });
++        const { createRequire } = await import("node:module");
++        const require = createRequire(import.meta.url);
++        const realSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<
++            string,
++            unknown
++        >;
++        mock.module(mod("lib/apiSecurity.ts"), {
++            namedExports: {
++                ...realSecurity,
++                consumeApiRateLimit: async () => {
++                    world.rateLimitCalls += 1;
++                },
++            },
++        });
++        mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
++            namedExports: {
++                promptRefinerShadowRunPreview: async () => {
++                    world.previewCalls += 1;
++                    return preview;
++                },
++                createPromptRefinerShadowRun: async (input: unknown) => {
++                    world.createCalls += 1;
++                    world.lastCreate = input;
++                    return { created: true, replayed: false, run: fakeRun };
++                },
++                promptRefinerShadowRunErrorResponse: () => null,
++            },
++        });
++        mock.module(mod("lib/promptRefinerStageAdmission.ts"), {
++            namedExports: { promptRefinerStageAdmissionErrorResponse: () => null },
++        });
++    }
++    return import(mod("app/api/admin/prompt-refiner/shadow-run/route.ts"));
++}
++
++const post = (body: unknown) =>
++    new Request("http://127.0.0.1:3100/api/admin/prompt-refiner/shadow-run", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify(body),
++    });
++
++const validBody = () => ({
++    runContractDigest: preview.runContractDigest,
++    stageRuntimeSourceManifestDigest: preview.stageRuntimeSourceManifestDigest,
++    runSourceManifestDigest: preview.runSourceManifestDigest,
++    previewBindingDigest: preview.previewBindingDigest,
++    confirmation: PROMPT_REFINER_SHADOW_RUN_CONFIRMATION,
++});
++test.beforeEach(() => {
++    world = fresh();
++});
++
++test("origin guard covers approval POST while preview GET remains read-only", () => {
++    const path = "/api/admin/prompt-refiner/shadow-run";
++    assert.equal(requiresMutationOriginCheck("POST", path), true);
++    assert.equal(requiresMutationOriginCheck("GET", path), false);
++});
++
++test("run approval surface is hidden, owner-only and recently authenticated", async () => {
++    const route = await loadRoute();
++    world.authenticated = false;
++    assert.equal((await route.GET()).status, 404);
++    world.authenticated = true;
++    world.role = "ops";
++    assert.equal((await route.GET()).status, 403);
++    world.role = "owner";
++    world.recent = false;
++    assert.equal((await route.GET()).status, 428);
++    assert.equal(world.previewCalls, 0);
++});
++
++test("GET is a no-write, no-rate-limit exact preview", async () => {
++    const route = await loadRoute();
++    const response = await route.GET();
++    assert.equal(response.status, 200);
++    assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
++    assert.deepEqual(await response.json(), { preview });
++    assert.equal(world.previewCalls, 1);
++    assert.equal(world.createCalls, 0);
++    assert.equal(world.rateLimitCalls, 0);
++});
++
++test("POST accepts only the fixed 4 KiB approval binding", async () => {
++    const route = await loadRoute();
++    assert.equal(
++        (await route.POST(post({ ...validBody(), confirmation: "yes" }))).status,
++        400
++    );
++    assert.equal(
++        (await route.POST(post({ ...validBody(), approvedBy: "attacker" }))).status,
++        400
++    );
++    assert.equal(
++        (
++            await route.POST(
++                post({ ...validBody(), confirmation: "x".repeat(5000) })
++            )
++        ).status,
++        413
++    );
++    assert.equal(world.createCalls, 0);
++});
++
++test("POST records approval only and exposes no executable readiness", async () => {
++    const route = await loadRoute();
++    const oldFetch = globalThis.fetch;
++    globalThis.fetch = async () => {
++        throw new Error("approval route must not call a provider");
++    };
++    try {
++        const response = await route.POST(post(validBody()));
++        assert.equal(response.status, 201);
++        assert.equal(world.rateLimitCalls, 1);
++        assert.equal(world.createCalls, 1);
++        const forwarded = world.lastCreate as Record<string, unknown>;
++        assert.deepEqual(forwarded.expected, {
++            runContractDigest: preview.runContractDigest,
++            stageRuntimeSourceManifestDigest:
++                preview.stageRuntimeSourceManifestDigest,
++            runSourceManifestDigest: preview.runSourceManifestDigest,
++            previewBindingDigest: preview.previewBindingDigest,
++        });
++        assert.equal("confirmation" in forwarded, false);
++        const body = await response.json();
++        assert.equal(body.run.executionAdmitted, false);
++        assert.equal(body.run.productAdapterReady, false);
++    } finally {
++        globalThis.fetch = oldFetch;
++    }
++});
+
+```
+
+## Test results (run by the control program)
+
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/adminAuditActorNotAForeignKey.test.mjs tests/adminAuditSystemActors.test.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerReservationAuthority.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs` (5319ms)
+  ℹ fail 0
+  ℹ cancelled 0
+  ℹ skipped 0
+  ℹ todo 0
+  ℹ duration_ms 5223.4492
+
+## Guard results (run by the control program)
+
+- PASS `node --experimental-test-module-mocks --conditions=react-server --import tsx --test tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts` (632ms)
+  # fail 0
+  # cancelled 0
+  # skipped 0
+  # todo 0
+  # duration_ms 542.9194
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts` (67955ms)
+  # fail 0
+  # cancelled 0
+  # skipped 0
+  # todo 0
+  # duration_ms 67867.477
+- PASS `npm run typecheck` (45013ms)
+  > ai-chat-hub@0.1.0 typecheck
+  > next typegen && tsc --noEmit --incremental false
+  
+  Generating route types...
+  ✓ Types generated successfully
+- PASS `npx eslint lib/promptRefinerShadowRunStore.ts lib/promptRefinerShadowSystemAudit.ts lib/promptRefinerShadowRunContract.ts lib/adminAuditSystemActors.ts app/api/admin/prompt-refiner/shadow-run/route.ts tests/adminAuditSystemActors.test.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts` (3470ms)
+- PASS `npm run check:data-domain-registry` (786ms)
+  y\tomverse-chat-data-domain-registry.yaml: 67 data domains, all user-linked models registered.
+     Deletion action: 49 delete, 9 anonymise, 2 unverified, 7 retain.
+     Retention policy: 56 immediate, 2 unverified, 2 ttl, 4 statutory, 3 legal_hold.
+     2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
+- PASS `npm run check:protected-table-writers` (3245ms)
+  tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.
+- PASS `npm run check:doc-references` (1580ms)
+  > ai-chat-hub@0.1.0 check:doc-references
+  > node scripts/check-doc-references.mjs
+  
+  Document reference check passed: 900 referenced path(s) across 117 instruction document(s), and 1013 path(s) named by comments across 3043 source file(s), all present.
+- PASS `npm run check:policy-section-references` (1171ms)
+  > ai-chat-hub@0.1.0 check:policy-section-references
+  > node scripts/check-policy-section-references.mjs
+  
+  Policy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).
+- PASS `npm run check:encoding:strict` (1475ms)
+  > ai-chat-hub@0.1.0 check:encoding:strict
+  > node scripts/check-text-encoding.mjs --strict
+  
+  Text encoding check passed. No mojibake markers found.
+- PASS `git diff --check a63a2852f707efbd0a2108b53ac4f87b943120bc -- .` (77ms)
+
+## Findings from the previous round (check each was addressed)
+
+- [nit/evidence] lib/promptRefinerShadowRunStore.ts:918-929 (sweepPromptRefinerShadowUnknowns catch): The swallow-list covers two codes that cannot occur while the attempt row lock is held, and omits PROMPT_REFINER_SHADOW_TERMINAL_CONFLICT, the one race a second terminal writer can actually cause, so that race aborts the sweep and discards the already-computed closedUnknownAttemptIds/unresolvedStaleAttemptIds report instead of listing the id.
+- [nit/judgement] lib/promptRefinerShadowRunStore.ts:779-787 (mayCloseAfterUnknownLatch): After the run latches to stopped_unknown, a genuinely known receipt for another in-flight attempt is refused with PROMPT_REFINER_SHADOW_RUN_TERMINAL, so that attempt is later closed by the sweeper as unknown_after_dispatch with null cost, and its real actualCostMicroUsd never reaches knownActualCostMicroUsd — under-reporting, not over-reporting, actual spend, which reads against the contract's "보수적 cost" wording in docs/ops/prompt-refiner-durable-run-writer-contract.md §4.
+
+## Author's account (read last; a claim, not a finding)
+
+Summary: Claude round 1의 두 기록 충실도 nit를 수정했다. unknown latch 전에 dispatch된 attempt의 늦은 known receipt와 실제 cost를 기록하면서 latch를 유지하고, concurrent terminal conflict는 sweep을 중단하지 않고 unresolved id로 반환한다. 실제 DB concurrency 회귀 테스트를 추가했다.
+
+## Answer format
+
+Reply with exactly one JSON document and nothing else:
+
+```json
+{
+  "taskId": "prompt-refiner-durable-run-writer-v1",
+  "round": 2,
+  "reviewedDigest": "sha256:53eb076d11c4ba6756aec49a790e5fa9aa936933d7207e89e7b5aecc70f41211",
+  "conclusion": "approve | request_changes | blocked",
+  "findings": [
+    {
+      "location": "path:line or symbol",
+      "severity": "error | warning | nit",
+      "basis": "evidence | preference | judgement",
+      "claim": "what is wrong, in one sentence",
+      "reproduction": "how to see it: a command, or an input and its expected output (required for the finding to be acted on)"
+    }
+  ],
+  "nextAction": "one sentence"
+}
+```
+
+`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; any other finding is acted on only with a reproduction, and without one it is recorded and the current version stands.
