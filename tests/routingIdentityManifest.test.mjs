@@ -27,6 +27,15 @@ const migration = () =>
         "utf8"
     );
 
+const ceilingMigration = () =>
+    readFileSync(
+        new URL(
+            "../prisma/migrations/20260923340000_routing_manifest_ceiling_dark/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
+
 const identityMigration = () =>
     readFileSync(
         new URL(
@@ -76,6 +85,11 @@ const manifest = (entries, overrides = {}) => ({
     version: 1,
     digest: manifestDigest(entries),
     entryCount: entries.length,
+    ceilingApproval: {
+        id: "ceil_1",
+        ceiling: 50,
+        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+    },
     entries,
     approvedBy: "@mposition",
     approvedAt: new Date("2026-09-23T00:00:00.000Z"),
@@ -395,6 +409,149 @@ test("a manifest says when it was published", () => {
     );
 });
 
+test("a manifest cites an approved ceiling, and there is no default", () => {
+    // A ceiling is an approval, and an absent approval is not an unlimited
+    // one.
+    assert.ok(
+        manifestProblems(manifest([entry()], { ceilingApproval: null })).includes(
+            "a manifest is published under an approved ceiling"
+        )
+    );
+    for (const ceiling of [0, -1, 2.5]) {
+        assert.ok(
+            manifestProblems(
+                manifest([entry()], {
+                    ceilingApproval: {
+                        id: "c",
+                        ceiling,
+                        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+                    },
+                })
+            ).includes("an approved ceiling is a whole number from one"),
+            String(ceiling)
+        );
+    }
+});
+
+test("the ceiling is not a number the publisher supplies", () => {
+    // The first version took the ceiling from the publisher in the same
+    // call as the entries, and a hundred deployments with a ceiling of a
+    // hundred passed. The input no longer has anywhere to put such a
+    // number: the ceiling arrives as a cited approval row.
+    const source = readFileSync(
+        new URL("../lib/routingIdentityManifest.ts", import.meta.url),
+        "utf8"
+    );
+    const inputType = /export type ManifestInput = \{([\s\S]*?)\n\};/.exec(source);
+    assert.ok(inputType, "ManifestInput is declared");
+    const fields = [...inputType[1].matchAll(/^\s{4}(\w+)\??:/gm)].map((m) => m[1]);
+    assert.ok(fields.includes("ceilingApproval"));
+    assert.ok(!fields.includes("approvedCeiling"), "no free-standing ceiling number");
+});
+
+test("a manifest over its ceiling is reported, not trimmed", () => {
+    // Whichever cut you take when trimming throws away either the
+    // lowest-ranked candidates or a particular rejection reason. This
+    // function reports the problem; it does not refuse a write -- there is
+    // no publisher yet.
+    const entries = [
+        entry({ modelDeploymentId: "dep_a" }),
+        entry({ modelDeploymentId: "dep_b" }),
+        entry({ modelDeploymentId: "dep_c" }),
+    ];
+    const approval = (ceiling) => ({
+        id: "c",
+        ceiling,
+        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+    });
+    assert.deepEqual(
+        manifestProblems(manifest(entries, { ceilingApproval: approval(3) })),
+        []
+    );
+    assert.deepEqual(
+        manifestProblems(manifest(entries, { ceilingApproval: approval(2) })),
+        ["3 deployments is over the approved ceiling of 2"]
+    );
+});
+
+test("a ceiling approved after the publication cannot be cited", () => {
+    assert.ok(
+        manifestProblems(
+            manifest([entry()], {
+                ceilingApproval: {
+                    id: "c",
+                    ceiling: 50,
+                    approvedAt: new Date("2026-09-24T00:00:00.000Z"),
+                },
+            })
+        ).includes("the ceiling was approved after this manifest was published")
+    );
+});
+
+test("the migration installs a refusal of a copy that does not match the cited approval", () => {
+    // This reads the migration text; it is not a PostgreSQL run.
+    // This is the part that makes the ceiling an approval: without it the
+    // stored copy could be written to fit whatever was being published.
+    const sql = ceilingMigration();
+    assert.match(sql, /CREATE TABLE "RoutingSnapshotCeilingApproval"/);
+    assert.match(
+        sql,
+        /FOREIGN KEY \("ceilingApprovalId"\) REFERENCES "RoutingSnapshotCeilingApproval"\("id"\)\s*\n\s*ON DELETE RESTRICT/
+    );
+    const trigger = /FUNCTION "routing_identity_manifest_cites_its_ceiling"\(\)([\s\S]*?)\$\$ LANGUAGE plpgsql;/.exec(
+        sql
+    );
+    assert.ok(trigger, "the citing trigger is in the migration");
+    assert.match(trigger[1], /NEW\."approvedCeiling" <> approved_ceiling/);
+    assert.match(trigger[1], /approved_at > NEW\."approvedAt"/);
+    assert.match(trigger[1], /IF NOT FOUND THEN/);
+    assert.match(sql, /BEFORE INSERT ON "RoutingIdentityManifest"/);
+});
+
+test("the stored count check is about two integers on one row", () => {
+    // It does not see the entry rows. The slot trigger holds the rows under
+    // `entryCount`; this check holds `entryCount` under the ceiling; only
+    // making the rows reach `entryCount` is left to manifestProblems(). What
+    // this check adds is that a row cannot record a ceiling it exceeded.
+    const sql = ceilingMigration();
+    assert.match(
+        sql,
+        /RoutingIdentityManifest_within_ceiling_check"\s*\n\s*CHECK \("entryCount" <= "approvedCeiling"\)/
+    );
+    assert.ok(!/approvedCeiling" INTEGER NOT NULL DEFAULT/.test(sql));
+});
+
+test("the migration holds the entry rows under the count, by slot rather than by count", () => {
+    // Two integers on the manifest row were bounded and the entry rows were
+    // not: a third entry inserted after a manifest of two passed every check.
+    // A count is a race; a unique slot below an immutable entryCount is not.
+    // This reads the migration text; it is not a PostgreSQL run.
+    const sql = ceilingMigration();
+    assert.match(sql, /ALTER TABLE "RoutingIdentityManifestEntry"\s*\n\s*ADD COLUMN "slot" INTEGER NOT NULL;/);
+    assert.match(sql, /CHECK \("slot" >= 0\)/);
+    assert.match(
+        sql,
+        /CREATE UNIQUE INDEX "RoutingIdentityManifestEntry_manifestId_slot_key"\s*\n\s*ON "RoutingIdentityManifestEntry"\("manifestId", "slot"\);/
+    );
+    const trigger = /FUNCTION "routing_identity_manifest_entry_fits_its_manifest"\(\)([\s\S]*?)\$\$ LANGUAGE plpgsql;/.exec(
+        sql
+    );
+    assert.ok(trigger, "the slot trigger is in the migration");
+    assert.match(trigger[1], /NEW\."slot" >= manifest_entry_count/);
+    assert.match(trigger[1], /IF NOT FOUND THEN/);
+    assert.ok(!/COUNT\(/.test(trigger[1]), "no counting: a count is a race");
+    assert.match(sql, /BEFORE INSERT ON "RoutingIdentityManifestEntry"/);
+});
+
+test("an approved ceiling cannot be rewritten", () => {
+    const sql = ceilingMigration();
+    assert.match(
+        sql,
+        /CREATE TRIGGER "routing_snapshot_ceiling_approval_is_immutable_trigger"/
+    );
+    assert.match(sql, /BEFORE UPDATE OR DELETE ON "RoutingSnapshotCeilingApproval"/);
+    assert.match(sql, /BEFORE TRUNCATE ON "RoutingSnapshotCeilingApproval"/);
+});
 test("every digest field is a column of the entry table", () => {
     // The review's rejection was that a digest proves values were not altered
     // while you still have the values, and ModelDeployment and

@@ -937,7 +937,7 @@ workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 wo
 | 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 12개·dark column 6개, migration이 어느 환경에도 적용되지 않음. A-5는 2라운드 검토를 거쳤습니다 — 1라운드가 reject였고, digest가 덮는 field 목록이 `model_deployment_gate_follows_identity()`보다 좁았던 것과 digest만으로는 재구성이 안 된다는 것 둘입니다. 후자가 `RoutingIdentityManifestEntry`를 만든 이유입니다 |
 | 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
 | 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
-| 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료(`RoutingCandidateVerdict`), ceiling 미착수 |
+| 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료. ceiling은 이 스택에 merge (`§14.22`). 라우터는 읽지 않음 |
 | 9 | sticky·score snapshot grain 전환, 그 뒤 shadow 검증 | 판정 (`lib/routingStickyGrain.ts`, §14.21). 저장된 id는 그대로. 라우터는 호출하지 않음 |
 | 10 | decision grain을 `deploymentId`로 원자 전환 | §8.1 선행조건 5개가 선행 |
 | 11 | scope·capacity 준비 후 2-attempt fallback 활성화 | 미착수 |
@@ -1491,6 +1491,20 @@ ADR 풀의 Vertex AI와 Azure OpenAI가 `lib/regionPinHosts.ts`에 있습니다.
 §14.3의 약 50단위에서 완료는 37, **약 74%(추정)**입니다. 10번의 원자
 전환은 하지 않습니다. §8.1의 선행조건은 그대로입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.22 Snapshot ceiling이 이 스택에 있습니다 (2026-09-24)
+
+`91e3d7e5b`의 ceiling을 이 스택에 merge했습니다. rebase는 하지 않았습니다.
+충돌은 fingerprint와 closure의 위치 포함 sha 둘이었고, 둘 다 합쳐진
+스키마로 다시 고정했습니다. 개수 228과 위치 무관 sha는 그대로입니다.
+
+ceiling 자체는 그 브랜치에서 이미 검토를 거쳤습니다. 이 절은 그 검토를
+다시 하지 않습니다. 라우터는 여전히 ceiling 표를 읽지 않습니다.
+
+이 줄이 §14의 8번 가운데 남아 있던 ceiling입니다. verdict는 이미 세어
+있었습니다. 직전 sticky 보고는 37, 약 74%였습니다. §14.3의 약 50단위에서
+완료는 38, **약 76%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다.
+production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

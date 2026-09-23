@@ -294,9 +294,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-23, a nullable pre-commit buffer duration on RoutingRun. The
  * column is not a marketing model and does not touch a webhook writer.
  * The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, the routing snapshot ceiling, merged onto the stack above:
+ * RoutingSnapshotCeilingApproval, two columns on RoutingIdentityManifest
+ * that cite it, a `slot` column on RoutingIdentityManifestEntry and an
+ * index the migration already created. All dark, none a marketing model,
+ * nothing here touches the descriptor, the config snapshot, a webhook
+ * writer or an admission decision. The digest below is the merged schema,
+ * not either parent's.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "0b773f1778ad33bae176ea88e829f9b8d9c5dccff6918cfc22eff8018a354f4e";
+  "e0c9e8d96a6d952db04ddff287789e9985f14b92438391bc3f56e32a8ce850e5";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

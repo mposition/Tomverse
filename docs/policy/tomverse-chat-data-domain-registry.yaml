@@ -1328,6 +1328,42 @@ domains:
       identity at all and so are not a data domain. Dark, and registered
       anyway for the reason the row above records.
 
+  - domain: routingSnapshotCeilingApproval
+    prismaModel: RoutingSnapshotCeilingApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.5 (routing-snapshot ceiling) and section 14 step 8
+    subjectReference:
+      kind: none
+    minimisationFields:
+      - approvedBy
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Who approved the largest routing snapshot Tomverse may publish, and
+        when. A manifest cites this row and the database refuses a manifest
+        whose ceiling does not match it, so the approver's name is what makes
+        the ceiling an approval rather than a number somebody chose to fit.
+        Append-only by trigger for the same reason.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-23"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject is the approver, not any exporting account. The row is a
+      limit on infrastructure and holds nothing an account wrote.
+    note: >-
+      `kind: none`: an approval of a number, with no subject account. Dark,
+      and registered anyway for the reason the two approvals beside it
+      record.
+
   - domain: credentialBinding
     prismaModel: CredentialBinding
     # The row is about the account whose key it is -- the BYOK case -- and

@@ -5897,6 +5897,32 @@ model ModelDeployment {
   @@index([logicalModelId, enabled])
 }
 
+/// A ceiling on the published routing snapshot, approved by a named person.
+///
+/// Dark. Section 8.5 controls size when the configuration is approved rather
+/// than by discarding evidence when a turn runs, and T4 scopes it to the
+/// published snapshot only -- the staging registry may grow.
+///
+/// A row of its own, cited by a manifest, so the ceiling exists before and
+/// independently of what is being published. Append-only by trigger: an
+/// approval edited afterwards could not answer what the limit was when a
+/// manifest was published under it.
+///
+/// No User relation. Deleting the approver's account must not rewrite what
+/// they approved -- the reasoning EndpointResidencyApproval records.
+model RoutingSnapshotCeilingApproval {
+  id          String   @id @default(cuid())
+  ceiling     Int
+  approvedBy  String
+  approvedAt  DateTime
+  evidenceRef String?
+  createdAt   DateTime @default(now())
+
+  manifests RoutingIdentityManifest[]
+
+  @@index([approvedAt])
+}
+
 /// One published snapshot of the routing identity configuration.
 ///
 /// Dark. Nothing publishes a manifest and nothing reads one.
@@ -5924,21 +5950,37 @@ model ModelDeployment {
 /// lib/routingIdentityManifest.ts, so changing what a manifest commits to is
 /// a change to that file rather than a silent effect of adding a column.
 model RoutingIdentityManifest {
-  id         String   @id @default(cuid())
-  version    Int
+  id                String @id @default(cuid())
+  version           Int
   /// sha256, lowercase hex. The database checks the shape; that it describes
   /// the deployments it was computed over is checked where they are visible.
-  digest     String
-  entryCount Int
-  approvedBy String
-  approvedAt DateTime
-  createdAt  DateTime @default(now())
+  digest            String
+  entryCount        Int
+  /// The approved ceiling this manifest is published under, by id, and a
+  /// copy of its value.
+  ///
+  /// A separate approval rather than a number supplied with the entries: a
+  /// limit the publisher picks to fit is not the ceiling section 8.5 means.
+  /// The copy is kept because a later reader asks what the limit was then,
+  /// and a trigger refuses a copy that does not match the approval, or an
+  /// approval dated after the publication.
+  ///
+  /// No default. A ceiling is an approval, and an absent approval is not an
+  /// unlimited one.
+  ceilingApprovalId String
+  approvedCeiling   Int
+
+  ceilingApproval RoutingSnapshotCeilingApproval @relation(fields: [ceilingApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy      String
+  approvedAt      DateTime
+  createdAt       DateTime                       @default(now())
 
   attempts RoutingAttempt[]
   entries  RoutingIdentityManifestEntry[]
 
   @@unique([version])
   @@index([approvedAt])
+  @@index([ceilingApprovalId])
 }
 
 /// What one published manifest held about one deployment.
@@ -5961,6 +6003,11 @@ model RoutingIdentityManifest {
 model RoutingIdentityManifestEntry {
   id         String @id @default(cuid())
   manifestId String
+  /// This entry's place in its manifest: unique within the manifest and below
+  /// its `entryCount`, so the entries cannot outnumber the count the
+  /// approved ceiling bounds. A trigger in
+  /// 20260923340000_routing_manifest_ceiling_dark enforces the upper bound.
+  slot       Int
 
   /// The placement, as it stood.
   modelDeploymentId      String
@@ -6009,6 +6056,7 @@ model RoutingIdentityManifestEntry {
   // Prisma cannot express.
 
   @@unique([manifestId, modelDeploymentId])
+  @@unique([manifestId, slot])
   @@index([modelDeploymentId])
 }
 
@@ -6616,11 +6664,11 @@ model AmuxWorkItem {
   description    String?
   /// New rows default to non-dispatchable backlog. This schema imports no
   /// cards and does not promote backlog rows to runnable Todo.
-  status         String   @default("backlog")
-  kind           String   @default("unknown")
-  priority       String   @default("p3")
-  pinned         Boolean  @default(false)
-  drag           Int      @default(0)
+  status         String    @default("backlog")
+  kind           String    @default("unknown")
+  priority       String    @default("p3")
+  pinned         Boolean   @default(false)
+  drag           Int       @default(0)
   owner          String?
   classification Json?
   revision       Int       @default(0)
@@ -6634,18 +6682,18 @@ model AmuxWorkItem {
   sourceVersion  String?
   sourceDigest   String?
   sourceSnapshot Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
   routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
 
+  @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
-  @@unique([sourceSystem, sourceKey])
 }
 
 model AmuxWorkDependency {

@@ -240,12 +240,17 @@ const compilerOptions = parsedConfig.options;
 // RoutingRun in `prisma/schema.prisma`. No computed access. Count 228,
 // position-free hash unchanged. A repin of the position-sensitive digest
 // only.
+//
+// 2026-09-24, the routing snapshot ceiling merged onto that stack. Another
+// review note above the watched-schema fingerprint, comment only, plus the
+// schema and manifest fields that note names. Count 228, position-free hash
+// unchanged. A repin of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "bd68b367ef0d1d9c97e0d70026e7eee0",
-  "95c3823371767a2f595ca3354061a946",
+  "2e87e9f9d06e64e7dcfda1e21fe04db7",
+  "2d3fafee758d2c37d3175a3f0d8bc7f3",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
