@@ -135,17 +135,22 @@ import {
  *   left no basis, no route to one and no mail, and the wording was true of
  *   them all along.
  *
- * The recipient's own decisions (objected, suppressed, withdrawn) are not
- * re-checked here, because the offer answers for them earlier and they cannot
- * change this result. Obligation status is not checked either: it is the
+ * Objection and suppression are not re-checked here, because the offer
+ * answers for them earlier and they cannot change this result. A withdrawal
+ * is, because the offer deliberately treats it as "not consented yet" and
+ * asks again. Obligation status is not checked either: it is the
  * send's gate (S9), it is not knowable here, and the two mistakes are not
  * symmetrical -- hiding the notice wrongly writes nothing and is undone the
  * moment the state behind it changes, while showing it wrongly writes a
  * permanent `copyHash` of a promise we have broken.
  *
- * `jurisdictionForUser()` reads on the global client. That is a read in a
- * different snapshot from a caller's transaction, not a write that escapes
- * it, and it is the one resolver the send also uses.
+ * Every read here goes through the caller's client, including
+ * `jurisdictionForUser()`. An earlier comment said reading the country on
+ * the global client was "a read in another snapshot, not a write that
+ * escapes" -- and that was the mistake: the answer decides whether a
+ * permanent `notice_shown` may be written in the same transaction, so a
+ * stale country let the writer record a promise the override broke the moment
+ * the transaction committed.
  */
 const overrideWouldSend = async (input: {
   db: Prisma.TransactionClient | typeof prisma;
@@ -184,11 +189,39 @@ const overrideWouldSend = async (input: {
   // preference centre refuses the same country. The function that decides
   // whether marketing may go to a jurisdiction already existed; asking it is
   // the whole fix.
-  const jurisdiction = await jurisdictionForUser({ userId: input.userId });
+  const jurisdiction = await jurisdictionForUser({
+    userId: input.userId,
+    ...(input.client ? { client: input.client } : {}),
+  });
   if (!marketingJurisdictionVerdict(jurisdiction).allowed) return false;
+
+  // A withdrawal is one of the things an override cannot cross (section 5.6's
+  // second table), per purpose. The offer does not see it -- it reads a
+  // latest `withdrawn` as "not consented yet" and asks again, which is right
+  // -- so without this check a member who had withdrawn one purpose was hidden
+  // from the notice for it while the override refused to send it. Never
+  // asked, never mailed. Today the preference centre also writes a purpose
+  // suppression when somebody turns a purpose off, which the offer does see;
+  // a withdrawal on its own is the state section 5.6 lists separately, and
+  // this is what handles it.
+  const withdrawn = new Set(
+    (
+      await input.db.$queryRaw<{ purpose: string }[]>`
+        SELECT purpose FROM (
+          SELECT DISTINCT ON (purpose) purpose, action
+          FROM "ConsentRecord"
+          WHERE "emailAddress" = ${input.emailAddress}
+            AND purpose = ANY(${[...input.purposes]}::text[])
+          ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
+        ) latest
+        WHERE action = 'withdrawn'
+      `
+    ).map((row) => row.purpose)
+  );
 
   for (const { approvalId } of memberships) {
     for (const purpose of input.purposes) {
+      if (withdrawn.has(purpose)) continue;
       const standing = await cohortStanding({
         approvalId,
         userId: input.userId,

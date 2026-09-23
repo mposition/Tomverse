@@ -1058,6 +1058,74 @@ test("a cohort member outside the marketing countries is offered the notice", as
   });
 });
 
+test("a country settled in the same transaction is seen by the refusal", async () => {
+  // The country used to be read on the global client, which cannot see what
+  // the caller's transaction has just written. Settling a country and
+  // recording a render in one transaction therefore asked a stale snapshot,
+  // heard "the override will not mail them", and wrote `notice_shown` -- and
+  // once the transaction committed the override did mail them. One row per
+  // account, append-only: the broken promise was permanent.
+  const user = await createUser();
+  await sealFor([user]);
+
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.userSettings.upsert({
+        where: { userId: user.id },
+        update: {
+          country: "AU",
+          countrySource: "self_declared",
+          countryUpdatedAt: new Date(),
+        },
+        create: {
+          userId: user.id,
+          country: "AU",
+          countrySource: "self_declared",
+          countryUpdatedAt: new Date(),
+        },
+      });
+      await recordNoticeShown({ ...noticeInput(user), client: tx });
+    }),
+    /wording would be false for it/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
+test("a member who withdrew every purpose is offered the notice", async () => {
+  // Section 5.6: an override cannot cross a withdrawal. The offer reads a
+  // latest `withdrawn` as "not consented yet" and asks again, so a member
+  // whose every purpose ends in a withdrawal is not mailed -- and was hidden
+  // from the notice anyway, because the coverage check did not look.
+  const user = await createUser();
+  await settleCountry(user.id, "AU");
+  await sealFor([user]);
+  const policyId = await policyVersionId();
+
+  for (const purpose of noticePurposes()) {
+    await prisma.consentRecord.create({
+      data: {
+        userId: user.id,
+        emailAddress: user.email!,
+        purpose,
+        action: "withdrawn",
+        occurredAt: new Date(),
+        jurisdiction: "AU",
+        jurisdictionSource: "self_declared",
+        policyVersionId: policyId,
+        capturedVia: "preference_center",
+      },
+    });
+  }
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
 test("a render cannot be recorded for somebody the override mails", async () => {
   // A route that asks `noticeStateForUser()` first never tries this. The
   // writer refuses anyway, because the row would be permanent evidence that we
