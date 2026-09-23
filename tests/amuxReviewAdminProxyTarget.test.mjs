@@ -15,6 +15,7 @@ test("admin review proxy sends credentials only to the validated target", async 
     "TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED",
     "TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN",
     "RAILWAY_PRIVATE_DOMAIN",
+    "PORT",
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   const originalFetch = globalThis.fetch;
@@ -24,6 +25,7 @@ test("admin review proxy sends credentials only to the validated target", async 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = syncSecret;
   process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED = "true";
   process.env.RAILWAY_PRIVATE_DOMAIN = privateDomain;
+  process.env.PORT = "8080";
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), headers: new Headers(init?.headers) });
     return Response.json({ success: true });
@@ -40,6 +42,12 @@ test("admin review proxy sends credentials only to the validated target", async 
     process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = privateOrigin;
     assert.equal((await forwardAmuxAdminReviewCommand(browserRequest, { action: "detail" })).status, 200);
     assert.equal(calls.at(-1).url, `${privateOrigin}/api/internal/amux/review`);
+    assert.equal(calls.at(-1).headers.get("authorization"), `Bearer ${syncSecret}`);
+    assert.equal(calls.at(-1).headers.get("cookie"), "__Secure-next-auth.session-token=session");
+
+    process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = "http://127.0.0.1:8080";
+    assert.equal((await forwardAmuxAdminReviewCommand(browserRequest, { action: "detail" })).status, 200);
+    assert.equal(calls.at(-1).url, "http://127.0.0.1:8080/api/internal/amux/review");
     assert.equal(calls.at(-1).headers.get("authorization"), `Bearer ${syncSecret}`);
     assert.equal(calls.at(-1).headers.get("cookie"), "__Secure-next-auth.session-token=session");
 

@@ -47,6 +47,7 @@ test("approval readiness is conditional and names missing settings without value
   assert.deepEqual(amuxReviewApprovalReadiness({}), { ready: true, enabled: false, missing: [] });
   assert.deepEqual(amuxReviewApprovalReadiness({
     RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    PORT: "8080",
     TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://sibling.railway.internal:8080",
   }), {
     ready: false,
@@ -71,6 +72,7 @@ test("approval readiness is conditional and names missing settings without value
     AMUX_REVIEW_GITHUB_READ_TOKEN: "token",
     NEXTAUTH_URL: "https://example.test",
     RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    PORT: "8080",
     TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://tomverse.railway.internal:8080",
   }), { ready: true, enabled: true, missing: [] });
 
@@ -80,6 +82,7 @@ test("approval readiness is conditional and names missing settings without value
     AMUX_REVIEW_GITHUB_READ_TOKEN: "token",
     NEXTAUTH_URL: "https://example.test",
     RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    PORT: "8080",
     TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://sibling.railway.internal:8080",
   }), {
     ready: false,
