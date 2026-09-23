@@ -204,12 +204,17 @@ const compilerOptions = parsedConfig.options;
 // runtime closure does not gain a file. That call is an ordinary call, not a
 // computed element access. Count 228, position-free hash unchanged. A repin
 // of the position-sensitive digest only.
+//
+// 2026-09-23, the review fix: variant slugs, an environment allowlist read
+// as a static property, and catalogue refusals for the deployment hosts.
+// No new element access. Count 228, position-free hash unchanged. A repin
+// of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f53cf735edd89fa18706bafe222cfdda",
-  "f3aabbbdb29a051160b2d2b865a5c62a",
+  "39702d94387272502e486bac5dfae54e",
+  "ed8acc701f7b8a689c63f2fb1b7494f6",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

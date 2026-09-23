@@ -7,11 +7,13 @@ import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { AiModel } from "@/lib/models";
 import {
   decideOpenRouterDispatch,
+  DeploymentHostRefusal,
   openRouterPinnedFetch,
   OpenRouterDispatchError,
   PROVIDER_API_CONFIGURATION,
+  readOpenRouterRecipientAllowlist,
   resolveProviderApiKey,
-  type OpenRouterAdmission,
+  type OpenRouterRequest,
 } from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
@@ -33,7 +35,7 @@ const runtimeConfiguration = (model: AiModel) => {
 
 export const getActiveAiModel = (
   model: AiModel,
-  openRouterAdmission?: OpenRouterAdmission
+  openRouterRequest?: OpenRouterRequest
 ) => {
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
@@ -68,22 +70,21 @@ export const getActiveAiModel = (
     case "zhipu":
       return createOpenAI(configuration).chat(model.apiModel);
     case "deepinfra":
-      // An inference host for open-weight models (multi-provider routing
-      // ADR v2.1, provider pool). OpenAI-compatible, so the chat adapter; the
-      // generic adapter drops `reasoning_content`, as it does for the direct
-      // DeepSeek route. No catalogue model routes here yet: a hosted copy of
-      // a model is a ModelDeployment, not a new catalogue id.
-      return createOpenAI(configuration).chat(model.apiModel);
     case "together":
-      // Independent open-weight fallback host (ADR v2.1 provider pool).
-      // Same adapter limit as DeepInfra: reasoning_content is dropped.
-      // No catalogue model routes here; a hosted copy is a ModelDeployment.
-      return createOpenAI(configuration).chat(model.apiModel);
+      // Inference hosts (ADR v2.1 provider pool). A catalogue model must not
+      // call them: the price on the catalogue row is the direct connection's
+      // price, and the destination row for these hosts is unproven. A hosted
+      // copy is a deployment, and this function is the catalogue adapter.
+      throw new DeploymentHostRefusal();
     case "openrouter": {
-      // Emergency aggregator. The pin is applied inside the fetch, and a
-      // missing admission throws before any client is built. The gate lives
+      // Emergency aggregator. The pin is applied inside the fetch. The
+      // allowlist is the operator environment variable, not the request.
+      // A missing request throws before any client is built. The gate lives
       // in lib/modelRegistryShared.ts, which this file already imports.
-      const decision = decideOpenRouterDispatch(openRouterAdmission);
+      if (!openRouterRequest) throw new OpenRouterDispatchError("OPENROUTER_ADMISSION_REQUIRED");
+      const allowlist = readOpenRouterRecipientAllowlist();
+      if (!allowlist.ok) throw new OpenRouterDispatchError(allowlist.code);
+      const decision = decideOpenRouterDispatch(openRouterRequest, allowlist.allowlist);
       if (!decision.ok) throw new OpenRouterDispatchError(decision.code);
       return createOpenAI({
         ...configuration,

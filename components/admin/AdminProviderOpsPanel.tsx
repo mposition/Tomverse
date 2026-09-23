@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, RotateCcw, ShieldAlert } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import type { AiModel, AiProvider } from "@/lib/models";
+import { AI_PROVIDERS } from "@/lib/modelRegistryShared";
 import { adminProviderOpsMessages } from "@/lib/adminMessages/providerOps";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
@@ -40,23 +41,7 @@ type Props = {
   checks: ProviderHealthCheckRow[];
 };
 
-const providers: AiProvider[] = [
-  "openai",
-  "anthropic",
-  "google",
-  "groq",
-  "xai",
-  "deepseek",
-  "mistral",
-  "moonshot",
-  "minimax",
-  "qwen",
-  "zhipu",
-  "perplexity",
-  "deepinfra",
-  "together",
-  "openrouter",
-];
+const providers: readonly AiProvider[] = AI_PROVIDERS;
 
 const providerLabel: Record<AiProvider, string> = {
   openai: "OpenAI",
