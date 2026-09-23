@@ -1021,7 +1021,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 판정 (§14.13). 행 UPDATE와 알림 발송은 없음 |
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | 참조·시각·resolver (§14.14). 행은 읽지 않음. BYOK 배선은 없음 |
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
-| §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 일부 |
+| §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 판정 (§14.16). 가중합은 없음. 행은 쓰지 않음 |
 | Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
 | 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 없음 (R6은 `lib/failureDomain.ts` 일부) |
 | §10.2 | pre-commit buffer | 없음, 선택 항목 |
@@ -1345,6 +1345,26 @@ import하지 않습니다. 행을 쓰지 않습니다.
 남을 열이 생긴 지금 셉니다. 직전 secret 보고는 30, 약 60%였습니다.
 §14.3의 약 50단위에서 완료는 31, **약 62%(추정)**입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.16 Replay, faults, and promotion (2026-09-23)
+
+ADR §15.2·§15.3·§15.5의 판정이 `lib/routingReplay.ts`에 있습니다. 요청
+경로는 import하지 않습니다. 행을 쓰지 않습니다.
+
+- 재계산은 `rankCandidates`의 어휘순입니다. weight, softmax 온도,
+  routing penalty는 입력이 아닙니다. 이 빌드의 score policy 버전이 아닌
+  버전은 거절입니다. 그 버전의 순서를 짐작하지 않습니다.
+- 가격 결함은 옛 비용을 빼는 것이지 새 가격을 넣는 것이 아닙니다. 캐시
+  적중률 변화도 숫자를 만들지 않습니다. 넣을 조정이 없습니다.
+- 5xx는 `server_error` 종류입니다. 횟수는 없습니다. latency는 관측이
+  유한하고 0 이상일 때만 2배 또는 5배입니다.
+- 승격은 draft, offline replay, fault simulation, shadow, small canary,
+  wider canary, active의 다음 한 칸입니다. 건너뛰기와 되돌리기는 거절입니다.
+  비율은 고르지 않습니다.
+
+이 세 가지가 한 줄입니다. 승격만으로는 세지 않습니다. 직전 pin 보고는 31,
+약 62%였습니다. §14.3의 약 50단위에서 완료는 32, **약 64%(추정)**입니다.
+검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
