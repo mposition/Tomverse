@@ -183,16 +183,19 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
  * be evidence that we showed somebody a promise we had already broken, which
  * is the FTC Section 5 exposure section 5.5 cites rather than a wording nit.
  *
- * The two decisions are the owner's and only the owner can choose between
- * them. Until then this file takes the reading that cannot cause harm:
- * **showing this notice to an address retires the override for that address.**
- * It can only mean fewer sends, never a broken promise, and
- * `consentCopyPromisesNoUnrequestedSend()` is what a send path asks so the
- * choice is enforced rather than remembered.
+ * The owner chose on 2026-09-23: the cohort is not shown this notice, and the
+ * override stays. So the promise is only ever made to people it is true of,
+ * and the wording needs no change.
  *
- * The alternatives, for whoever decides: exclude the cohort from this notice,
- * or approve a new version whose wording does not promise it. Editing this
- * one is not among them (section 9).
+ * `consentCopyPromisesNoUnrequestedSend()` is how a surface asks whether the
+ * version it is about to render carries that promise, so the exclusion is
+ * enforced rather than remembered. The refusal itself lives in
+ * `noticeStateForUser()`, which answers `covered_by_approval` for a sealed and
+ * unwithdrawn membership.
+ *
+ * This decided who is shown the wording. It did not make a consent record:
+ * section 5.6 rule 1 says we do not write `ConsentRecord(granted)` for these
+ * accounts, and section 9.1.1 of the approved document records why.
  */
 export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
   new Set(["2026-09-23"]);
