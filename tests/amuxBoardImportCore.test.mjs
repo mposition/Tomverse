@@ -22,6 +22,8 @@ import {
   boardImportAuditEntryHashMatches,
   boardImportCardData,
   boardImportCardWrites,
+  BOARD_IMPORT_CONFLICT_REASON_CODES,
+  boardImportConflictLedger,
   boardImportConflictReasons,
   boardImportContentTypeAccepted,
   boardImportFailureIsAmbiguous,
@@ -226,6 +228,35 @@ test("drift and an active execution are counted apart and do not change the refu
     activeExecution: 2,
     otherConflict: 1,
   });
+  assert.deepEqual(boardImportConflictLedger(manifest, existing), [
+    { key: "example_board:CHAT-01", reasons: ["source_drift"] },
+    { key: "example_board:CHAT-02", reasons: ["active_execution"] },
+    { key: "example_board:CHAT-03", reasons: ["other_conflict"] },
+    { key: "example_board:CHAT-04", reasons: ["active_execution", "source_drift"] },
+  ]);
+  const omitted = boardImportConflictLedger(manifest, [
+    ...existing,
+    {
+      sourceSystem: "example_board",
+      sourceKey: "CHAT-99",
+      sourceVersion: COMMIT,
+      sourceDigest: "c".repeat(64),
+      sourceSnapshot: null,
+      status: "todo",
+      owner: "someone",
+      claimedAt: "2026-09-22T00:00:00.000Z",
+      attemptCount: 1,
+      deliveryCount: 0,
+      routeDecisionCount: 0,
+    },
+  ]);
+  assert.equal(omitted.some((entry) => entry.key.endsWith("CHAT-99")), false);
+  const ledger = boardImportConflictLedger(manifest, existing);
+  assert.ok(
+    ledger.every((entry) =>
+      entry.reasons.every((reason) => BOARD_IMPORT_CONFLICT_REASON_CODES.includes(reason)),
+    ),
+  );
   const classification = classifyBoardImport(manifest, existing);
   assert.equal(classification.conflict.length, 4);
   assert.equal(boardImportSubmissionRefusal(classification), "conflict");
@@ -426,6 +457,8 @@ test("preview does not write, apply is not latched on, and the worker boundary i
   const applyBody = service.slice(service.indexOf("export async function applyBoardImport"));
   assert.equal(applyBody.includes("boardImportSourceMissing"), false);
   assert.equal(applyBody.includes("boardImportConflictReasons"), false);
+  assert.equal(applyBody.includes("boardImportConflictLedger"), false);
+  assert.match(service, /conflictLedger,/);
   assert.match(service, /sourceDriftCount: conflictReasons.sourceDrift/);
   assert.equal(applyBody.includes("findUnique"), false);
   assert.match(service, /boardImportItemBindingsDigest\(bindings\)/);
