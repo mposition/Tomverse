@@ -5863,6 +5863,32 @@ model ModelDeployment {
   @@index([logicalModelId, enabled])
 }
 
+/// A ceiling on the published routing snapshot, approved by a named person.
+///
+/// Dark. Section 8.5 controls size when the configuration is approved rather
+/// than by discarding evidence when a turn runs, and T4 scopes it to the
+/// published snapshot only -- the staging registry may grow.
+///
+/// A row of its own, cited by a manifest, so the ceiling exists before and
+/// independently of what is being published. Append-only by trigger: an
+/// approval edited afterwards could not answer what the limit was when a
+/// manifest was published under it.
+///
+/// No User relation. Deleting the approver's account must not rewrite what
+/// they approved -- the reasoning EndpointResidencyApproval records.
+model RoutingSnapshotCeilingApproval {
+  id          String   @id @default(cuid())
+  ceiling     Int
+  approvedBy  String
+  approvedAt  DateTime
+  evidenceRef String?
+  createdAt   DateTime @default(now())
+
+  manifests RoutingIdentityManifest[]
+
+  @@index([approvedAt])
+}
+
 /// One published snapshot of the routing identity configuration.
 ///
 /// Dark. Nothing publishes a manifest and nothing reads one.
@@ -5890,25 +5916,30 @@ model ModelDeployment {
 /// lib/routingIdentityManifest.ts, so changing what a manifest commits to is
 /// a change to that file rather than a silent effect of adding a column.
 model RoutingIdentityManifest {
-  id              String   @id @default(cuid())
-  version         Int
+  id                String @id @default(cuid())
+  version           Int
   /// sha256, lowercase hex. The database checks the shape; that it describes
   /// the deployments it was computed over is checked where they are visible.
-  digest          String
-  entryCount      Int
-  /// The largest manifest this configuration was approved to publish.
+  digest            String
+  entryCount        Int
+  /// The approved ceiling this manifest is published under, by id, and a
+  /// copy of its value.
   ///
-  /// Stored rather than read from a setting, for the reason the digest is
-  /// stored beside the manifest id: a later reader asks what the limit was
-  /// *then*, and a ceiling raised since would make an older manifest look as
-  /// though it had room it did not have.
+  /// A separate approval rather than a number supplied with the entries: a
+  /// limit the publisher picks to fit is not the ceiling section 8.5 means.
+  /// The copy is kept because a later reader asks what the limit was then,
+  /// and a trigger refuses a copy that does not match the approval, or an
+  /// approval dated after the publication.
   ///
   /// No default. A ceiling is an approval, and an absent approval is not an
   /// unlimited one.
-  approvedCeiling Int
+  ceilingApprovalId String
+  approvedCeiling   Int
+
+  ceilingApproval RoutingSnapshotCeilingApproval @relation(fields: [ceilingApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approvedBy      String
   approvedAt      DateTime
-  createdAt       DateTime @default(now())
+  createdAt       DateTime                       @default(now())
 
   attempts RoutingAttempt[]
   entries  RoutingIdentityManifestEntry[]

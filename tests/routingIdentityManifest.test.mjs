@@ -78,7 +78,11 @@ const manifest = (entries, overrides = {}) => ({
     version: 1,
     digest: manifestDigest(entries),
     entryCount: entries.length,
-    approvedCeiling: 50,
+    ceilingApproval: {
+        id: "ceil_1",
+        ceiling: 50,
+        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+    },
     entries,
     approvedBy: "@mposition",
     approvedAt: new Date("2026-09-23T00:00:00.000Z"),
@@ -378,58 +382,125 @@ test("a manifest says when it was published", () => {
     );
 });
 
-test("a manifest is published under a ceiling, and there is no default", () => {
-    // Section 5: size is controlled when the configuration is approved, not
-    // when a turn runs. A ceiling is an approval, and an absent approval is
-    // not an unlimited one.
+test("a manifest cites an approved ceiling, and there is no default", () => {
+    // A ceiling is an approval, and an absent approval is not an unlimited
+    // one.
+    assert.ok(
+        manifestProblems(manifest([entry()], { ceilingApproval: null })).includes(
+            "a manifest is published under an approved ceiling"
+        )
+    );
     for (const ceiling of [0, -1, 2.5]) {
         assert.ok(
-            manifestProblems(manifest([entry()], { approvedCeiling: ceiling })).includes(
-                "a manifest is published under an approved ceiling"
-            ),
+            manifestProblems(
+                manifest([entry()], {
+                    ceilingApproval: {
+                        id: "c",
+                        ceiling,
+                        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+                    },
+                })
+            ).includes("an approved ceiling is a whole number from one"),
             String(ceiling)
         );
     }
-    assert.ok(
-        manifestProblems({
-            ...manifest([entry()]),
-            approvedCeiling: undefined,
-        }).includes("a manifest is published under an approved ceiling")
-    );
 });
 
-test("a manifest over its ceiling is refused rather than trimmed", () => {
+test("the ceiling is not a number the publisher supplies", () => {
+    // The first version took the ceiling from the publisher in the same
+    // call as the entries, and a hundred deployments with a ceiling of a
+    // hundred passed. The input no longer has anywhere to put such a
+    // number: the ceiling arrives as a cited approval row.
+    const source = readFileSync(
+        new URL("../lib/routingIdentityManifest.ts", import.meta.url),
+        "utf8"
+    );
+    const inputType = /export type ManifestInput = \{([\s\S]*?)\n\};/.exec(source);
+    assert.ok(inputType, "ManifestInput is declared");
+    const fields = [...inputType[1].matchAll(/^\s{4}(\w+)\??:/gm)].map((m) => m[1]);
+    assert.ok(fields.includes("ceilingApproval"));
+    assert.ok(!fields.includes("approvedCeiling"), "no free-standing ceiling number");
+});
+
+test("a manifest over its ceiling is reported, not trimmed", () => {
     // Whichever cut you take when trimming throws away either the
-    // lowest-ranked candidates or a particular rejection reason, which is the
-    // answer to "why was this deployment not picked". A newly added
-    // deployment is cut first, and it is the one most in need of an answer.
+    // lowest-ranked candidates or a particular rejection reason. This
+    // function reports the problem; it does not refuse a write -- there is
+    // no publisher yet.
     const entries = [
         entry({ modelDeploymentId: "dep_a" }),
         entry({ modelDeploymentId: "dep_b" }),
         entry({ modelDeploymentId: "dep_c" }),
     ];
-    assert.deepEqual(manifestProblems(manifest(entries, { approvedCeiling: 3 })), []);
-    assert.deepEqual(manifestProblems(manifest(entries, { approvedCeiling: 2 })), [
-        "3 deployments is over the approved ceiling of 2",
-    ]);
+    const approval = (ceiling) => ({
+        id: "c",
+        ceiling,
+        approvedAt: new Date("2026-09-22T00:00:00.000Z"),
+    });
+    assert.deepEqual(
+        manifestProblems(manifest(entries, { ceilingApproval: approval(3) })),
+        []
+    );
+    assert.deepEqual(
+        manifestProblems(manifest(entries, { ceilingApproval: approval(2) })),
+        ["3 deployments is over the approved ceiling of 2"]
+    );
 });
 
-test("the database says the same thing about the stored count", () => {
-    // `manifestProblems()` compares the entries it was handed, which the
-    // database never sees. This compares the count that was stored, so a row
-    // cannot claim a ceiling it exceeded.
+test("a ceiling approved after the publication cannot be cited", () => {
+    assert.ok(
+        manifestProblems(
+            manifest([entry()], {
+                ceilingApproval: {
+                    id: "c",
+                    ceiling: 50,
+                    approvedAt: new Date("2026-09-24T00:00:00.000Z"),
+                },
+            })
+        ).includes("the ceiling was approved after this manifest was published")
+    );
+});
+
+test("the database refuses a copy that does not match the cited approval", () => {
+    // This is the part that makes the ceiling an approval: without it the
+    // stored copy could be written to fit whatever was being published.
     const sql = ceilingMigration();
-    assert.match(sql, /ADD COLUMN "approvedCeiling" INTEGER NOT NULL;/);
-    assert.match(sql, /RoutingIdentityManifest_approvedCeiling_positive_check/);
+    assert.match(sql, /CREATE TABLE "RoutingSnapshotCeilingApproval"/);
+    assert.match(
+        sql,
+        /FOREIGN KEY \("ceilingApprovalId"\) REFERENCES "RoutingSnapshotCeilingApproval"\("id"\)\s*\n\s*ON DELETE RESTRICT/
+    );
+    const trigger = /FUNCTION "routing_identity_manifest_cites_its_ceiling"\(\)([\s\S]*?)\$\$ LANGUAGE plpgsql;/.exec(
+        sql
+    );
+    assert.ok(trigger, "the citing trigger is in the migration");
+    assert.match(trigger[1], /NEW\."approvedCeiling" <> approved_ceiling/);
+    assert.match(trigger[1], /approved_at > NEW\."approvedAt"/);
+    assert.match(trigger[1], /IF NOT FOUND THEN/);
+    assert.match(sql, /BEFORE INSERT ON "RoutingIdentityManifest"/);
+});
+
+test("the stored count check is about two integers on one row", () => {
+    // It does not see the entry rows; `entryCount` is tied to them only by
+    // manifestProblems(), the same limit the digest has. What it adds is
+    // that a row cannot record a ceiling it exceeded.
+    const sql = ceilingMigration();
     assert.match(
         sql,
         /RoutingIdentityManifest_within_ceiling_check"\s*\n\s*CHECK \("entryCount" <= "approvedCeiling"\)/
     );
-    // NOT NULL with no default: a configuration nobody set a ceiling for
-    // cannot be published.
     assert.ok(!/approvedCeiling" INTEGER NOT NULL DEFAULT/.test(sql));
 });
 
+test("an approved ceiling cannot be rewritten", () => {
+    const sql = ceilingMigration();
+    assert.match(
+        sql,
+        /CREATE TRIGGER "routing_snapshot_ceiling_approval_is_immutable_trigger"/
+    );
+    assert.match(sql, /BEFORE UPDATE OR DELETE ON "RoutingSnapshotCeilingApproval"/);
+    assert.match(sql, /BEFORE TRUNCATE ON "RoutingSnapshotCeilingApproval"/);
+});
 test("every digest field is a column of the entry table", () => {
     // The review's rejection was that a digest proves values were not altered
     // while you still have the values, and ModelDeployment and

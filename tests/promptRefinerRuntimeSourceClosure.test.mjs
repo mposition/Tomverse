@@ -187,12 +187,17 @@ const compilerOptions = parsedConfig.options;
 // type-level index this inventory does not collect. The count is still 228 and
 // the position-free inventory still hashes to the value above, so this is a
 // repin and not a review.
+//
+// 2026-09-23, the routing snapshot ceiling: another review note above the
+// watched-schema fingerprint in `lib/marketingAutomationAccess.ts`, comment
+// only, and the accesses below it move down. Count 228, position-free hash
+// unchanged. A repin.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "21d448943f260fcf4c6a96c4ac2ebcf3",
-  "6bc000bfc8b58d81382ff055aff6d849",
+  "99cdb3506d9912046ef875a42b72c717",
+  "f2bd3f035419f52685991983301cd8fa",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

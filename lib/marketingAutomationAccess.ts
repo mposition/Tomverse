@@ -270,9 +270,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * back-relations only -- `User` gains two and `Conversation` gains one, and
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
+ *
+ * 2026-09-23, the routing snapshot ceiling: RoutingSnapshotCeilingApproval,
+ * and two columns on RoutingIdentityManifest that cite it. Both dark, neither
+ * a marketing model, nothing here touches the descriptor, the config
+ * snapshot, a webhook writer or an admission decision.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5eb56650762ab88ae15bded9422cadfcdf75162e7b5975f4b61dbea50e5e79a2";
+  "e7a3ba9f4c6db9b1410431195b4f542f9b17536b210c2355f65203f948811f5e";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
