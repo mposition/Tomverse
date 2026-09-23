@@ -1024,7 +1024,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 판정 (§14.16). 가중합은 없음. 행은 쓰지 않음 |
 | Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
 | 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 판정 (§14.17). 길이와 기한의 숫자는 호출자. 라우터는 열에 쓰지 않음 |
-| §10.2 | pre-commit buffer | 없음, 선택 항목 |
+| §10.2 | pre-commit buffer | 판정 (§14.19). 길이는 호출자. 라우터는 열에 쓰지 않음 |
 
 의도적으로 제외한 것은 그대로입니다: §5 가중합 목적함수(어휘순 유지), §7.2의 prior
 shrinkage(관측이 부족하면 판단 보류), malformed 같은 deployment 재시도와
@@ -1420,6 +1420,25 @@ major 하나는 테스트의 삼치 논리가 NULL 통과와 FALSE 거절을 같
 접어서, 고치기 전 식도 통과시켰다는 것입니다. 테스트는 이제 옛 식이 절반
 쌍을 저장하고 대체 식은 FALSE로 거절함을 둘 다 단언합니다. 완료 수는 33,
 **약 66%(추정)** 그대로입니다. 이 줄은 새 단위가 아닙니다.
+
+## 14.19 Pre-commit buffer (2026-09-23)
+
+ADR §10.2의 판정이 `lib/routingPrecommitBuffer.ts`에 있습니다. 요청
+경로는 import하지 않습니다. 행을 쓰지 않습니다.
+
+- 첫 chunk를 붙잡는 시간은 호출자가 준 양수 밀리초입니다. 없으면 null이고,
+  null은 "지금 보내라"도 "계속 붙잡아라"도 아닙니다. 0과 음수는 시간이
+  아닙니다.
+- 창은 시각보다 엄격히 앞일 때 열려 있습니다. 그 시각에 닿으면 보낼 수
+  있고, 보내는 순간이 §10.1의 commit입니다. 붙잡고 있는 chunk는 commit이
+  아닙니다.
+- 모드 이름에 시간을 대응시키지 않습니다. 그 표는 이 모듈에 없습니다.
+- `RoutingRun`의 열은 nullable이고 기본값이 없습니다. 이미 있는 행은
+  null입니다. null은 길이 0이 아닙니다.
+
+이 줄이 §14.3의 pre-commit buffer 항목입니다. 직전 보고는 33, 약 66%였습니다.
+§14.3의 약 50단위에서 완료는 34, **약 68%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

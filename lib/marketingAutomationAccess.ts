@@ -290,9 +290,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * affinity columns on the dark cache-affinity table. None is a marketing
  * model and none touches a webhook writer. The digest moves because the
  * schema file is watched whole.
+ *
+ * 2026-09-23, a nullable pre-commit buffer duration on RoutingRun. The
+ * column is not a marketing model and does not touch a webhook writer.
+ * The digest moves because the schema file is watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "a31cb3d2f218630c3018dc605f4b7e02a7cbc66668d2e5544a8bfb2410a4f1b9";
+  "1da42ab48f9dc6914d19a9df0309a31b541f45076c5da1e7264b192079813204";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

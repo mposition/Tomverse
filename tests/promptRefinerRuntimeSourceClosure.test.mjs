@@ -234,12 +234,18 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-23, affinity epoch and a request deadline. Another dated note in
 // `lib/marketingAutomationAccess.ts`, comment only. Count 228, position-free
 // hash unchanged. A repin of the position-sensitive digest only.
+//
+// 2026-09-23, a pre-commit buffer column. Another dated note in
+// `lib/marketingAutomationAccess.ts`, comment only, and a field on
+// RoutingRun in `prisma/schema.prisma`. No computed access. Count 228,
+// position-free hash unchanged. A repin of the position-sensitive digest
+// only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "3dff3f6f816767ee976637eb649618c2",
-  "8cec068b292af212e9cd6f23d2077f82",
+  "bd68b367ef0d1d9c97e0d70026e7eee0",
+  "95c3823371767a2f595ca3354061a946",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -96,6 +96,13 @@ const DARK_COLUMNS = [
         on: "RoutingRun",
         exempt: ["lib/routingResidualControls.ts"],
     },
+    // How long the first chunk may be withheld. The module names the column
+    // because it is the value that column will store. It does not write a row.
+    {
+        column: "precommitBufferMs",
+        on: "RoutingRun",
+        exempt: ["lib/routingPrecommitBuffer.ts"],
+    },
     // The attempt's binding to a published manifest. Both names are spelled
     // only by the module that defines the manifest shape.
     {
