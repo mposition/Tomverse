@@ -2159,67 +2159,22 @@ test("the exception adds no drafted-to-scheduled edge", async () => {
   );
 });
 
-test("evidence withdrawn before the transaction starts is a refusal", async () => {
-  // The deterministic half, and the one that matters most: the store re-asks
-  // at write time whether each claim the decision relied on has been
-  // published, and answers from what the database says now.
+test("a serialization failure is one the retry loop recognises", async () => {
+  // Not about the admission, and not named as though it were. Two overlapping
+  // `SERIALIZABLE` transactions each read what the other writes, which is the
+  // shape SSI exists to catch; whether it catches this particular pair is
+  // PostgreSQL's business and not something to assert.
   //
-  // Written with the withdrawal already committed, so there is no race to
-  // observe and nothing to flake. What it proves is the query: that the
-  // statement in `insertAutonomousScheduledMarketingPost` reads the columns
-  // and statuses it means to, against a real PostgreSQL rather than a fake
-  // that returns whatever the test handed it.
-  const account = await channel();
-  const published = await publishedPost(account.id);
-  await prisma.marketingPost.update({
-    where: { id: published.id },
-    data: { claimIds: ["claim.shared"] },
-  });
-
-  const priorUse = async () =>
-    (
-      await prisma.$queryRaw<Array<{ value: string }>>(Prisma.sql`
-        SELECT DISTINCT used."value" AS "value"
-        FROM "MarketingPost" AS post,
-             unnest(post."claimIds") AS used("value")
-        WHERE post."channelId" = ${account.id}
-          AND post."status" IN ('publishing', 'published', 'outcome_unknown', 'verified', 'removed_by_platform')
-          AND used."value" IN ('claim.shared')
-      `)
-    ).map((row) => row.value);
-
-  assert.deepEqual(await priorUse(), ["claim.shared"]);
-
-  await prisma.marketingPost.update({
-    where: { id: published.id },
-    data: { status: "deleted", deletedAt: new Date() },
-  });
-
-  // `deleted` is not one of the prior-use statuses, so the evidence is gone
-  // and the store's check finds nothing -- which is the refusal.
-  assert.deepEqual(await priorUse(), []);
-});
-
-test("the whole admission is read at one serialization point", async () => {
-  // What `SERIALIZABLE` actually buys this transaction, stated as narrowly as
-  // it is true.
+  // What is asserted is the property the bounded retry depends on: if
+  // PostgreSQL does refuse to order two of these, it says so in a way
+  // `marketingSerializationFailure()` recognises. That predicate was wrong
+  // once -- it compared `error.code` to "40001", which a Prisma caller never
+  // sees -- and a conflict the classifier does not recognise is a conflict
+  // nothing retries.
   //
-  // It is not that a concurrent unpublish cannot commit: a history where this
-  // transaction goes first and the unpublish second is a legal serial order,
-  // and PostgreSQL will allow both. The post is then scheduled on evidence
-  // that was true at its serialization point, which is the right answer.
-  //
-  // What it buys is that there is a serialization point at all. The admission
-  // reads the switches, the channel, the template and the prior use in four
-  // separate statements, and under read committed each sees whatever had
-  // committed by the moment it ran -- so a decision could be admitted against
-  // switches from before an operator turned publishing off and prior use from
-  // after. Here the four are one instant or the transaction does not commit.
-  //
-  // So the property asserted is the one the retry depends on: when PostgreSQL
-  // does refuse to order two of these, it says so in a way
-  // `marketingSerializationFailure()` recognises. A conflict the classifier
-  // does not recognise is a conflict nothing retries.
+  // The store's own refusal on withdrawn evidence, and the row the trigger
+  // accepts, are proved end to end in marketing-templates.db.test.ts, which
+  // calls the store rather than a copy of its SQL.
   const account = await channel();
   const first = await publishedPost(account.id);
   const second = await publishedPost(account.id);
@@ -2243,10 +2198,6 @@ test("the whole admission is read at one serialization point", async () => {
       { isolationLevel: "Serializable" },
     );
 
-  // Each transaction reads what the other writes, which is the shape SSI
-  // exists to catch. Whether it catches this particular pair is PostgreSQL's
-  // business; what is asserted is that if it does, the failure is one the
-  // retry loop recognises, and that otherwise both simply succeed.
   const results = await Promise.all([
     bump(first.id, "claim.one").catch((error: unknown) => error),
     bump(second.id, "claim.two").catch((error: unknown) => error),

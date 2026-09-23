@@ -2343,13 +2343,17 @@ export async function insertAutonomousScheduledMarketingPost(
   // that arrived. Both ask "which of these", not "is any of these": any is not
   // what the decision rested on.
   //
-  // Asking it here is also what lets the isolation level work: a
-  // `SERIALIZABLE` transaction detects a conflict only against a read it
-  // performed. The caller runs this whole function at that isolation
-  // (`runMarketingTransaction`'s `isolationLevel`), so a concurrent unpublish
-  // becomes a 40001 rather than a post written on evidence that was being
-  // deleted as it was read -- and the caller may retry it, having made no
-  // external call.
+  // Asking it here, rather than trusting what the decision recorded, is the
+  // whole check: the answer is taken from what the database says now.
+  //
+  // It is also the read that the isolation level needs in order to have
+  // anything to say, since SSI detects a dependency only against a read a
+  // transaction actually performed -- but that is a smaller claim than it
+  // sounds, and `runMarketingTransaction`'s `isolationLevel` spells out how
+  // small. A concurrent unpublish does not have to become a serialization
+  // failure: this transaction committing first is a legal order and the post
+  // is then right as of that point. What the isolation level buys is that this
+  // read and the three before it are one instant.
   const reliedOnClaimIds = facts.claims
     .filter((claim) => claim.usedBefore === true)
     .map((claim) => claim.claimId);
