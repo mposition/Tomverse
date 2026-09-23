@@ -41,7 +41,8 @@ export type AdminNavBadgeKey =
   | "automation"
   | "alerts"
   | "modelLifecycle"
-  | "emailCampaigns";
+  | "emailCampaigns"
+  | "marketing";
 
 export type AdminNavTab = {
   id: string;
@@ -464,6 +465,59 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "marketing",
+    label: "Marketing",
+    href: "/admin/marketing",
+    description:
+      "Draft queue, published posts, brand accounts, and what the automation reported",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "marketing",
+    aliases: [
+      "social",
+      "posts",
+      "linkedin",
+      "zernio",
+      "campaign",
+      "brand account",
+      "draft queue",
+      "guard",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Queue",
+        description: "Drafts waiting on a person, and what the Guard said about each",
+      },
+      {
+        id: "published",
+        label: "Publish state",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
+      },
+      {
+        id: "accounts",
+        label: "Accounts",
+        description: "Brand accounts, their mode, and why a paused one is paused",
+      },
+      {
+        id: "experiments",
+        label: "Experiments",
+        description: "Landing copy experiments and their results",
+      },
+      {
+        id: "reports",
+        label: "Reports",
+        description: "Weekly summaries, competitor facts, and retention runs",
+      },
+      {
+        id: "comments",
+        label: "Comments",
+        description: "Comment alerts the monitor raised and nobody has answered",
+      },
+    ],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",
@@ -607,6 +661,18 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
   ADMIN_NAVIGATION.find((item) => matchesRoute(pathname, item.href)) || null;
 
 export const ADMIN_DETAIL_ROUTES = [
+  {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // catalog import is owner-only and must not be advertised to roles that
+    // receive a 404 from the page and the API.
+    id: "amux-board-import",
+    pattern: /^\/admin\/amux-board-import$/,
+    label: "AMUX catalog import",
+    description: "Owner-only preview and approval. Apply stays off on this screen.",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
   {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // those tables feed the palette for every admin role, while this one-shot

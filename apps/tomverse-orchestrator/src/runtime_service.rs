@@ -1,46 +1,24 @@
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc,
-        RwLock,
-    },
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
-use anyhow::{
-    anyhow,
-    bail,
-    Context,
-    Result,
-};
+use anyhow::{anyhow, bail, Context, Result};
 use tokio::task::JoinSet;
-use tracing::{
-    info,
-    warn,
-};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    board_driver::{
-        BoardDriver,
-        DriveOutcome,
-        RuntimeIdentity,
-        WorkerAdapter,
-    },
+    board_driver::{BoardDriver, DriveOutcome, RuntimeIdentity, WorkerAdapter},
     executor::CommandAgentExecutor,
     tomverse_api::TomverseApi,
-    worker_protocol::{
-        WorkerPollOutcome,
-        WorkerProtocol,
-        DEFAULT_WORKER_HEARTBEAT_INTERVAL,
-    },
+    worker_protocol::{WorkerPollOutcome, WorkerProtocol, DEFAULT_WORKER_HEARTBEAT_INTERVAL},
 };
 
-const BOARD_TICK_INTERVAL:
-    Duration = Duration::from_secs(1);
+const BOARD_TICK_INTERVAL: Duration = Duration::from_secs(1);
 
-const WORKER_POLL_INTERVAL:
-    Duration = Duration::from_secs(2);
+const WORKER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 enum RuntimeState {
@@ -53,31 +31,18 @@ enum RuntimeState {
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeRegistry {
-    entries:
-        Arc<RwLock<BTreeMap<String, RuntimeState>>>,
+    entries: Arc<RwLock<BTreeMap<String, RuntimeState>>>,
 }
 
 impl RuntimeRegistry {
-    fn insert_live(
-        &self,
-        worker: String,
-        identity: RuntimeIdentity,
-    ) -> Result<()> {
-        let mut entries =
-            self.entries
-                .write()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry write lock poisoned"
-                        )
-                    },
-                )?;
+    fn insert_live(&self, worker: String, identity: RuntimeIdentity) -> Result<()> {
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|_| anyhow!("AMUX runtime registry write lock poisoned"))?;
 
         if entries.contains_key(&worker) {
-            bail!(
-                "AMUX worker already exists in this runtime process"
-            );
+            bail!("AMUX worker already exists in this runtime process");
         }
 
         entries.insert(
@@ -91,101 +56,57 @@ impl RuntimeRegistry {
         Ok(())
     }
 
-    fn set_boundary(
-        &self,
-        worker: &str,
-        boundary: bool,
-    ) -> Result<()> {
-        let mut entries =
-            self.entries
-                .write()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry write lock poisoned"
-                        )
-                    },
-                )?;
+    fn set_boundary(&self, worker: &str, boundary: bool) -> Result<()> {
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|_| anyhow!("AMUX runtime registry write lock poisoned"))?;
 
-        let Some(state) =
-            entries.get_mut(worker)
-        else {
-            bail!(
-                "AMUX worker is absent from runtime registry"
-            );
+        let Some(state) = entries.get_mut(worker) else {
+            bail!("AMUX worker is absent from runtime registry");
         };
 
         match state {
             RuntimeState::Live {
-                boundary:
-                    stored_boundary,
+                boundary: stored_boundary,
                 ..
             } => {
-                *stored_boundary =
-                    boundary;
+                *stored_boundary = boundary;
                 Ok(())
             }
 
             RuntimeState::Quarantined => {
-                bail!(
-                    "AMUX worker is quarantined"
-                )
+                bail!("AMUX worker is quarantined")
             }
         }
     }
 
-    fn quarantine(
-        &self,
-        worker: &str,
-    ) -> Result<()> {
-        let mut entries =
-            self.entries
-                .write()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry write lock poisoned"
-                        )
-                    },
-                )?;
+    fn quarantine(&self, worker: &str) -> Result<()> {
+        let mut entries = self
+            .entries
+            .write()
+            .map_err(|_| anyhow!("AMUX runtime registry write lock poisoned"))?;
 
-        entries.insert(
-            worker.to_owned(),
-            RuntimeState::Quarantined,
-        );
+        entries.insert(worker.to_owned(), RuntimeState::Quarantined);
 
         Ok(())
     }
 }
 
 impl WorkerAdapter for RuntimeRegistry {
-    async fn is_running(
-        &self,
-        worker: &str,
-    ) -> Result<bool> {
-        let entries =
-            self.entries
-                .read()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry read lock poisoned"
-                        )
-                    },
-                )?;
+    async fn is_running(&self, worker: &str) -> Result<bool> {
+        let entries = self
+            .entries
+            .read()
+            .map_err(|_| anyhow!("AMUX runtime registry read lock poisoned"))?;
 
         Ok(matches!(
             entries.get(worker),
-            Some(RuntimeState::Live {
-                ..
-            })
+            Some(RuntimeState::Live { .. })
         ))
     }
 
-    async fn start_for_dispatch(
-        &self,
-        worker: &str,
-    ) -> Result<()> {
+    async fn start_for_dispatch(&self, worker: &str) -> Result<()> {
         /*
          * Worker processes are registered exactly once by RuntimeService
          * startup. BoardDriver never creates or re-registers a worker.
@@ -193,117 +114,67 @@ impl WorkerAdapter for RuntimeRegistry {
          * A worker may have appeared between is_running() and this call; that
          * race is harmless, so accept only that already-live case.
          */
-        if self
-            .is_running(worker)
-            .await?
-        {
+        if self.is_running(worker).await? {
             return Ok(());
         }
 
-        bail!(
-            "AMUX worker service is not live; automatic start/re-registration is disabled"
-        )
+        bail!("AMUX worker service is not live; automatic start/re-registration is disabled")
     }
 
-    async fn at_boundary(
-        &self,
-        worker: &str,
-    ) -> Result<bool> {
-        let entries =
-            self.entries
-                .read()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry read lock poisoned"
-                        )
-                    },
-                )?;
+    async fn at_boundary(&self, worker: &str) -> Result<bool> {
+        let entries = self
+            .entries
+            .read()
+            .map_err(|_| anyhow!("AMUX runtime registry read lock poisoned"))?;
 
         Ok(matches!(
             entries.get(worker),
-            Some(RuntimeState::Live {
-                boundary: true,
-                ..
-            })
+            Some(RuntimeState::Live { boundary: true, .. })
         ))
     }
 
-    async fn runtime_identity(
-        &self,
-        worker: &str,
-    ) -> Result<Option<RuntimeIdentity>> {
-        let entries =
-            self.entries
-                .read()
-                .map_err(
-                    |_| {
-                        anyhow!(
-                            "AMUX runtime registry read lock poisoned"
-                        )
-                    },
-                )?;
+    async fn runtime_identity(&self, worker: &str) -> Result<Option<RuntimeIdentity>> {
+        let entries = self
+            .entries
+            .read()
+            .map_err(|_| anyhow!("AMUX runtime registry read lock poisoned"))?;
 
         Ok(match entries.get(worker) {
             Some(RuntimeState::Live {
                 identity,
                 boundary: true,
-            }) => {
-                Some(identity.clone())
-            }
+            }) => Some(identity.clone()),
 
             _ => None,
         })
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PollDisposition {
     Boundary,
     Busy,
     Quarantine,
 }
 
-fn poll_disposition(
-    outcome: &WorkerPollOutcome,
-) -> PollDisposition {
+fn poll_disposition(outcome: &WorkerPollOutcome) -> PollDisposition {
     match outcome {
-        WorkerPollOutcome::Idle => {
-            PollDisposition::Boundary
-        }
+        WorkerPollOutcome::Idle => PollDisposition::Boundary,
 
-        WorkerPollOutcome::WaitingForDelivery => {
-            PollDisposition::Busy
-        }
+        WorkerPollOutcome::WaitingForDelivery => PollDisposition::Busy,
 
         WorkerPollOutcome::Settled {
             idle_accepted: true,
             ..
-        } => {
-            PollDisposition::Boundary
-        }
+        } => PollDisposition::Boundary,
 
         WorkerPollOutcome::Settled {
             idle_accepted: false,
             ..
         }
-        | WorkerPollOutcome::AckRefused {
-            ..
-        }
-        | WorkerPollOutcome::LeaseLost {
-            ..
-        }
-        | WorkerPollOutcome::SettleRefused {
-            ..
-        } => {
-            PollDisposition::Quarantine
-        }
+        | WorkerPollOutcome::AckRefused { .. }
+        | WorkerPollOutcome::LeaseLost { .. }
+        | WorkerPollOutcome::SettleRefused { .. } => PollDisposition::Quarantine,
     }
 }
 
@@ -314,28 +185,18 @@ pub struct RuntimeService {
 }
 
 impl RuntimeService {
-    pub fn new(
-        api: TomverseApi,
-        executor: CommandAgentExecutor,
-    ) -> Self {
+    pub fn new(api: TomverseApi, executor: CommandAgentExecutor) -> Self {
         Self {
             api,
             executor,
-            registry:
-                RuntimeRegistry::default(),
+            registry: RuntimeRegistry::default(),
         }
     }
 
-    pub async fn run(
-        self,
-    ) -> Result<()> {
-        let workers =
-            self.executor.worker_names();
+    pub async fn run(self) -> Result<()> {
+        let workers = self.executor.worker_names();
 
-        let mut protocols =
-            Vec::with_capacity(
-                workers.len(),
-            );
+        let mut protocols = Vec::with_capacity(workers.len());
 
         /*
          * Initial registration is deliberate and one-shot.
@@ -345,39 +206,25 @@ impl RuntimeService {
          * re-registers it inside this process.
          */
         for worker in workers {
-            let instance_id =
-                Uuid::new_v4()
-                    .to_string();
+            let instance_id = Uuid::new_v4().to_string();
 
-            let protocol =
-                WorkerProtocol::register(
-                    self.api.clone(),
-                    self.executor.clone(),
-                    worker.clone(),
-                    instance_id,
-                    DEFAULT_WORKER_HEARTBEAT_INTERVAL,
-                )
-                .await
-                .with_context(
-                    || {
-                        format!(
-                            "failed to register AMUX worker {worker}"
-                        )
-                    },
-                )?;
+            let protocol = WorkerProtocol::register(
+                self.api.clone(),
+                self.executor.clone(),
+                worker.clone(),
+                instance_id,
+                DEFAULT_WORKER_HEARTBEAT_INTERVAL,
+            )
+            .await
+            .with_context(|| format!("failed to register AMUX worker {worker}"))?;
 
-            self.registry
-                .insert_live(
-                    worker.clone(),
-                    RuntimeIdentity {
-                        instance_id:
-                            protocol
-                                .instance_id()
-                                .to_owned(),
-                        generation:
-                            protocol.generation(),
-                    },
-                )?;
+            self.registry.insert_live(
+                worker.clone(),
+                RuntimeIdentity {
+                    instance_id: protocol.instance_id().to_owned(),
+                    generation: protocol.generation(),
+                },
+            )?;
 
             info!(
                 worker = %worker,
@@ -391,49 +238,25 @@ impl RuntimeService {
             protocols.push(protocol);
         }
 
-        let mut tasks =
-            JoinSet::new();
+        let mut tasks = JoinSet::new();
 
         for protocol in protocols {
-            let registry =
-                self.registry.clone();
+            let registry = self.registry.clone();
 
-            tasks.spawn(
-                async move {
-                    run_worker_loop(
-                        protocol,
-                        registry,
-                    )
-                    .await
-                },
-            );
+            tasks.spawn(async move { run_worker_loop(protocol, registry).await });
         }
 
         {
-            let api =
-                self.api.clone();
+            let api = self.api.clone();
 
-            let registry =
-                self.registry.clone();
+            let registry = self.registry.clone();
 
-            tasks.spawn(
-                async move {
-                    run_board_loop(
-                        api,
-                        registry,
-                    )
-                    .await
-                },
-            );
+            tasks.spawn(async move { run_board_loop(api, registry).await });
         }
 
         loop {
-            let Some(joined) =
-                tasks.join_next().await
-            else {
-                bail!(
-                    "all AMUX runtime service tasks exited"
-                );
+            let Some(joined) = tasks.join_next().await else {
+                bail!("all AMUX runtime service tasks exited");
             };
 
             match joined {
@@ -442,22 +265,15 @@ impl RuntimeService {
                      * A quarantined worker task may end normally. Other worker
                      * tasks and the BoardDriver remain live.
                      */
-                    warn!(
-                        "an AMUX runtime task exited"
-                    );
+                    warn!("an AMUX runtime task exited");
                 }
 
                 Ok(Err(error)) => {
-                    return Err(error)
-                        .context(
-                            "AMUX runtime task failed",
-                        );
+                    return Err(error).context("AMUX runtime task failed");
                 }
 
                 Err(error) => {
-                    return Err(anyhow!(
-                        "AMUX runtime task join failure: {error}"
-                    ));
+                    return Err(anyhow!("AMUX runtime task join failure: {error}"));
                 }
             }
         }
@@ -465,17 +281,10 @@ impl RuntimeService {
 }
 
 async fn run_worker_loop(
-    protocol:
-        WorkerProtocol<
-            TomverseApi,
-            CommandAgentExecutor,
-        >,
+    protocol: WorkerProtocol<TomverseApi, CommandAgentExecutor>,
     registry: RuntimeRegistry,
 ) -> Result<()> {
-    let worker =
-        protocol
-            .worker_name()
-            .to_owned();
+    let worker = protocol.worker_name().to_owned();
 
     loop {
         /*
@@ -483,49 +292,32 @@ async fn run_worker_loop(
          * a stable positive boundary from which it may start exactly one
          * execution. The server runtime/attempt CAS remains authoritative.
          */
-        tokio::time::sleep(
-            WORKER_POLL_INTERVAL,
-        )
-        .await;
+        tokio::time::sleep(WORKER_POLL_INTERVAL).await;
 
-        registry
-            .set_boundary(
-                &worker,
-                false,
-            )?;
+        registry.set_boundary(&worker, false)?;
 
-        let outcome =
-            match protocol
-                .poll_once()
-                .await
-            {
-                Ok(outcome) => outcome,
+        let outcome = match protocol.poll_once().await {
+            Ok(outcome) => outcome,
 
-                Err(error) => {
-                    registry
-                        .quarantine(
-                            &worker,
-                        )?;
+            Err(_) => {
+                registry.quarantine(&worker)?;
 
-                    warn!(
-                        worker = %worker,
-                        %error,
-                        "AMUX worker poll failed; worker quarantined without re-registration"
-                    );
+                warn!(
+                    worker = %worker,
+                    incident_id = %uuid::Uuid::new_v4(),
+                    error_code = "AMUX_WORKER_POLL_UNVERIFIED",
+                    "AMUX worker poll outcome unknown; entire process run stops for read-back and human handoff"
+                );
 
-                    return Ok(());
-                }
-            };
+                return Err(anyhow!(
+                    "AMUX worker poll outcome unknown; process run dormant"
+                ));
+            }
+        };
 
-        match poll_disposition(
-            &outcome,
-        ) {
+        match poll_disposition(&outcome) {
             PollDisposition::Boundary => {
-                registry
-                    .set_boundary(
-                        &worker,
-                        true,
-                    )?;
+                registry.set_boundary(&worker, true)?;
             }
 
             PollDisposition::Busy => {
@@ -536,10 +328,7 @@ async fn run_worker_loop(
             }
 
             PollDisposition::Quarantine => {
-                registry
-                    .quarantine(
-                        &worker,
-                    )?;
+                registry.quarantine(&worker)?;
 
                 warn!(
                     worker = %worker,
@@ -553,27 +342,19 @@ async fn run_worker_loop(
     }
 }
 
-async fn run_board_loop(
-    api: TomverseApi,
-    registry: RuntimeRegistry,
-) -> Result<()> {
-    let driver =
-        BoardDriver::new(
-            api,
-            registry,
-        );
+async fn run_board_loop(api: TomverseApi, registry: RuntimeRegistry) -> Result<()> {
+    let driver = BoardDriver::new(api, registry);
 
     loop {
         match driver.tick().await {
             Ok(outcomes) => {
                 for outcome in outcomes {
-                    if let
-                        DriveOutcome::ExecutionStarted {
-                            task_id,
-                            worker,
-                            attempt_id,
-                            task_revision,
-                        } = outcome
+                    if let DriveOutcome::ExecutionStarted {
+                        task_id,
+                        worker,
+                        attempt_id,
+                        task_revision,
+                    } = outcome
                     {
                         info!(
                             task_id = %task_id,
@@ -586,252 +367,163 @@ async fn run_board_loop(
                 }
             }
 
-            Err(error) => {
+            Err(_) => {
                 /*
                  * A lost execution_start HTTP response may still represent a
                  * committed server transaction. Never compensate locally.
-                 * WorkerProtocol may consume the atomic durable delivery.
+                 * WorkerProtocol may consume the atomic durable delivery, but
+                 * this process may not make another scheduling decision until
+                 * authoritative read-back and human reconciliation.
                  */
                 warn!(
-                    %error,
-                    "AMUX BoardDriver tick failed"
+                    incident_id = %uuid::Uuid::new_v4(),
+                    error_code = "AMUX_BOARD_TICK_UNVERIFIED",
+                    "AMUX BoardDriver tick outcome unknown; process run stopped for read-back and human handoff"
                 );
+                return Err(anyhow!(
+                    "AMUX board tick outcome unknown; process run dormant"
+                ));
             }
         }
 
-        tokio::time::sleep(
-            BOARD_TICK_INTERVAL,
-        )
-        .await;
+        tokio::time::sleep(BOARD_TICK_INTERVAL).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     fn identity() -> RuntimeIdentity {
         RuntimeIdentity {
-            instance_id:
-                "00000000-0000-4000-8000-000000000099"
-                    .into(),
+            instance_id: "00000000-0000-4000-8000-000000000099".into(),
             generation: 9,
         }
     }
 
     #[tokio::test]
     async fn registry_exposes_identity_only_at_dispatch_boundary() {
-        let registry =
-            RuntimeRegistry::default();
+        let registry = RuntimeRegistry::default();
 
-        registry
-            .insert_live(
-                "worker-a".into(),
-                identity(),
-            )
-            .unwrap();
+        registry.insert_live("worker-a".into(), identity()).unwrap();
+
+        assert_eq!(registry.is_running("worker-a",).await.unwrap(), true,);
+
+        assert_eq!(registry.at_boundary("worker-a",).await.unwrap(), true,);
 
         assert_eq!(
-            registry
-                .is_running(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            true,
-        );
-
-        assert_eq!(
-            registry
-                .at_boundary(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            true,
-        );
-
-        assert_eq!(
-            registry
-                .runtime_identity(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
+            registry.runtime_identity("worker-a",).await.unwrap(),
             Some(identity()),
         );
 
-        registry
-            .set_boundary(
-                "worker-a",
-                false,
-            )
-            .unwrap();
+        registry.set_boundary("worker-a", false).unwrap();
 
-        assert_eq!(
-            registry
-                .runtime_identity(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            None,
-        );
+        assert_eq!(registry.runtime_identity("worker-a",).await.unwrap(), None,);
     }
 
     #[tokio::test]
     async fn quarantined_worker_cannot_reenter_dispatch_in_same_process() {
-        let registry =
-            RuntimeRegistry::default();
+        let registry = RuntimeRegistry::default();
 
-        registry
-            .insert_live(
-                "worker-a".into(),
-                identity(),
-            )
-            .unwrap();
+        registry.insert_live("worker-a".into(), identity()).unwrap();
 
-        registry
-            .quarantine(
-                "worker-a",
-            )
-            .unwrap();
+        registry.quarantine("worker-a").unwrap();
 
-        assert_eq!(
-            registry
-                .is_running(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            false,
-        );
+        assert_eq!(registry.is_running("worker-a",).await.unwrap(), false,);
 
-        assert_eq!(
-            registry
-                .at_boundary(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            false,
-        );
+        assert_eq!(registry.at_boundary("worker-a",).await.unwrap(), false,);
 
-        assert_eq!(
-            registry
-                .runtime_identity(
-                    "worker-a",
-                )
-                .await
-                .unwrap(),
-            None,
-        );
+        assert_eq!(registry.runtime_identity("worker-a",).await.unwrap(), None,);
 
-        assert!(
-            registry
-                .insert_live(
-                    "worker-a".into(),
-                    identity(),
-                )
-                .is_err()
-        );
+        assert!(registry
+            .insert_live("worker-a".into(), identity(),)
+            .is_err());
     }
 
     #[tokio::test]
     async fn board_adapter_never_autostarts_an_absent_worker() {
-        let registry =
-            RuntimeRegistry::default();
+        let registry = RuntimeRegistry::default();
 
-        assert!(
-            registry
-                .start_for_dispatch(
-                    "worker-a",
-                )
-                .await
-                .is_err()
-        );
+        assert!(registry.start_for_dispatch("worker-a",).await.is_err());
 
-        assert_eq!(
-            registry
-                .is_running(
-                    "worker-a",
-                )
+        assert_eq!(registry.is_running("worker-a",).await.unwrap(), false,);
+    }
+
+    #[tokio::test]
+    async fn failed_board_tick_stops_this_process_run_without_another_poll() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.readable().await;
+            let _ = stream.try_read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
                 .await
-                .unwrap(),
-            false,
+                .unwrap();
+        });
+        let api = TomverseApi::for_test_with_timeouts(
+            format!("http://{address}"),
+            Duration::from_millis(300),
+            Duration::from_millis(700),
         );
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_board_loop(api, RuntimeRegistry::default()),
+        )
+        .await
+        .expect("board loop must stop after an ambiguous tick");
+        assert!(result.is_err());
+        tokio::time::timeout(Duration::from_secs(1), server)
+            .await
+            .expect("test server must exit")
+            .unwrap();
     }
 
     #[test]
     fn fenced_or_ambiguous_poll_outcomes_quarantine_worker() {
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::Idle,
-            ),
+            poll_disposition(&WorkerPollOutcome::Idle,),
             PollDisposition::Boundary,
         );
 
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::WaitingForDelivery,
-            ),
+            poll_disposition(&WorkerPollOutcome::WaitingForDelivery,),
             PollDisposition::Busy,
         );
 
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::LeaseLost {
-                    attempt_id: None,
-                    reason:
-                        Some(
-                            "fenced_out"
-                                .into(),
-                        ),
-                },
-            ),
+            poll_disposition(&WorkerPollOutcome::LeaseLost {
+                attempt_id: None,
+                reason: Some("fenced_out".into(),),
+            },),
             PollDisposition::Quarantine,
         );
 
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::AckRefused {
-                    attempt_id:
-                        "attempt-a".into(),
-                    reason:
-                        Some(
-                            "fenced_out"
-                                .into(),
-                        ),
-                },
-            ),
+            poll_disposition(&WorkerPollOutcome::AckRefused {
+                attempt_id: "attempt-a".into(),
+                reason: Some("fenced_out".into(),),
+            },),
             PollDisposition::Quarantine,
         );
 
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::SettleRefused {
-                    attempt_id:
-                        "attempt-a".into(),
-                    reason:
-                        Some(
-                            "fenced_out"
-                                .into(),
-                        ),
-                },
-            ),
+            poll_disposition(&WorkerPollOutcome::SettleRefused {
+                attempt_id: "attempt-a".into(),
+                reason: Some("fenced_out".into(),),
+            },),
             PollDisposition::Quarantine,
         );
 
         assert_eq!(
-            poll_disposition(
-                &WorkerPollOutcome::Settled {
-                    attempt_id:
-                        "attempt-a".into(),
-                    to_status:
-                        "done".into(),
-                    idle_accepted: false,
-                },
-            ),
+            poll_disposition(&WorkerPollOutcome::Settled {
+                attempt_id: "attempt-a".into(),
+                to_status: "done".into(),
+                idle_accepted: false,
+            },),
             PollDisposition::Quarantine,
         );
     }

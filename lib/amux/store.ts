@@ -1,6 +1,12 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { writeSystemAuditLog } from "@/lib/adminAudit";
+import {
+  AMUX_SYSTEM_AUDIT_ACTOR,
+  type AmuxClaimAuditRefusalReason,
+} from "@/lib/amux/auditContract";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 import {
   scoreAmuxScheduler,
@@ -25,21 +31,34 @@ import {
   amuxResourceRefs,
 } from "@/lib/amux/resourcePolicyCore";
 
+export const AMUX_QUEUE_MAX_ITEMS = 512;
+export const AMUX_OWNED_QUEUE_MAX_ITEMS = 512;
+export const PRISMA_INT_MAX = 2_147_483_647;
+
+export class AmuxQueueCapacityError extends Error {
+  readonly code = "AMUX_QUEUE_CAPACITY_EXCEEDED";
+
+  constructor(readonly queue: "selection" | "owned") {
+    super(`AMUX ${queue} queue exceeds the complete-response item ceiling`);
+    this.name = "AmuxQueueCapacityError";
+  }
+}
+
 const satisfiedDependencyStatuses = (): string[] => ["done"];
-const terminalDependentStatuses = (): string[] => ["done", "cancelled"];
+const nonScoringDependentStatuses = (): string[] => [
+  "backlog",
+  "done",
+  "cancelled",
+];
 
 export type AmuxQueueTask = {
   id: string;
-  title: string;
-  status: string;
   kind: string;
   priority: string;
   pinned: boolean;
   drag: number;
-  owner: string | null;
   revision: number;
   created_at: string;
-  dependencies: string[];
   dependent_count: number;
   scheduler_score: number;
   scoring_version: typeof AMUX_GLOBAL_PRIORITY_VERSION;
@@ -95,6 +114,7 @@ const deadlineForRow = (row: SchedulerRow): AmuxDeadlineParse | undefined =>
 
 const schedulerInputsForRows = async <T extends SchedulerRow>(
   rows: readonly T[],
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) => {
   const projectKeys = [
     ...new Set(rows.flatMap((row) => (row.projectKey ? [row.projectKey] : []))),
@@ -103,7 +123,7 @@ const schedulerInputsForRows = async <T extends SchedulerRow>(
     ...new Set(rows.flatMap((row) => (row.teamKey ? [row.teamKey] : []))),
   ];
   const [policies, active] = await Promise.all([
-    prisma.amuxResourcePolicy.findMany({
+    db.amuxResourcePolicy.findMany({
       where: {
         active: true,
         capacityPoints: { not: null },
@@ -114,7 +134,7 @@ const schedulerInputsForRows = async <T extends SchedulerRow>(
       },
       select: { scope: true, key: true, capacityPoints: true },
     }),
-    prisma.amuxWorkItem.findMany({
+    db.amuxWorkItem.findMany({
       where: {
         archivedAt: null,
         OR: [{ status: "doing" }, { status: "todo", owner: { not: null } }],
@@ -185,6 +205,23 @@ export type AmuxClaimInput = {
   signals: Prisma.InputJsonValue;
 };
 
+export type AmuxClaimOutcome =
+  | {
+      claimed: true;
+      revision: number;
+      decisionId: string;
+    }
+  | {
+      claimed: false;
+      reason: "cas_lost" | "incident_admission_blocked" | "wip_limit_reached";
+    };
+
+type AmuxClaimRefusalContext = {
+  taskId?: string;
+  worker?: string;
+  expectedRevision?: number;
+};
+
 const runnableDependencyFilter =
   (): Prisma.AmuxWorkDependencyListRelationFilter => ({
     every: {
@@ -205,89 +242,87 @@ const runnableDependencyFilter =
  * scoring. The caller ranks the whole returned set deterministically.
  */
 export async function listDispatchable(): Promise<AmuxQueueTask[]> {
-  const incidentRow = await prisma.appSetting.findUnique({
-    where: { key: AMUX_INCIDENT_SETTING_KEY },
-    select: { value: true },
-  });
-  if (parseAmuxIncidentSetting(incidentRow?.value).blocks_admission) return [];
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.queueRead,
+    async (tx, { dbNow }) => {
+      const incidentRow = await tx.appSetting.findUnique({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+        select: { value: true },
+      });
+      if (parseAmuxIncidentSetting(incidentRow?.value).blocks_admission) {
+        return [];
+      }
 
-  const rows = await prisma.amuxWorkItem.findMany({
-    where: {
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      dueParseState: { in: ["none", "valid"] },
-      dependencies: runnableDependencyFilter(),
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      kind: true,
-      priority: true,
-      pinned: true,
-      drag: true,
-      owner: true,
-      revision: true,
-      createdAt: true,
-      dueAt: true,
-      duePrecision: true,
-      dueSource: true,
-      dueRaw: true,
-      projectKey: true,
-      teamKey: true,
-      effortPoints: true,
-      dependencies: {
-        select: {
-          dependencyId: true,
+      const rows = await tx.amuxWorkItem.findMany({
+        where: {
+          status: "todo",
+          owner: null,
+          archivedAt: null,
+          dueParseState: { in: ["none", "valid"] },
+          dependencies: runnableDependencyFilter(),
         },
-        orderBy: {
-          dependencyId: "asc",
-        },
-      },
-      _count: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
-          dependents: {
-            where: {
-              task: {
-                archivedAt: null,
-                status: {
-                  notIn: terminalDependentStatuses(),
+          id: true,
+          kind: true,
+          priority: true,
+          pinned: true,
+          drag: true,
+          revision: true,
+          createdAt: true,
+          dueAt: true,
+          duePrecision: true,
+          dueSource: true,
+          dueRaw: true,
+          projectKey: true,
+          teamKey: true,
+          effortPoints: true,
+          _count: {
+            select: {
+              dependents: {
+                where: {
+                  task: {
+                    archivedAt: null,
+                    status: {
+                      notIn: nonScoringDependentStatuses(),
+                    },
+                  },
                 },
               },
             },
           },
         },
-      },
+        take: AMUX_QUEUE_MAX_ITEMS + 1,
+      });
+
+      if (rows.length > AMUX_QUEUE_MAX_ITEMS) {
+        throw new AmuxQueueCapacityError("selection");
+      }
+
+      const schedulerInputs = await schedulerInputsForRows(rows, tx);
+
+      return rows.map((row) => {
+        const input = schedulerInputs.get(row);
+        if (!input) {
+          throw new Error(`AMUX scheduler inputs missing for ${row.id}`);
+        }
+        const score = scoreAmuxScheduler({ ...input, now: dbNow });
+        return {
+          id: row.id,
+          kind: row.kind,
+          priority: row.priority,
+          pinned: row.pinned,
+          drag: row.drag,
+          revision: row.revision,
+          created_at: row.createdAt.toISOString(),
+          dependent_count: row._count.dependents,
+          scheduler_score: score.total,
+          scoring_version: AMUX_GLOBAL_PRIORITY_VERSION,
+          scheduler_signals: score,
+        };
+      });
     },
-  });
-
-  const schedulerInputs = await schedulerInputsForRows(rows);
-  const observedAt = new Date();
-
-  return rows.map((row) => {
-    const input = schedulerInputs.get(row);
-    if (!input) throw new Error(`AMUX scheduler inputs missing for ${row.id}`);
-    const score = scoreAmuxScheduler({ ...input, now: observedAt });
-    return {
-      id: row.id,
-      title: row.title,
-      status: row.status,
-      kind: row.kind,
-      priority: row.priority,
-      pinned: row.pinned,
-      drag: row.drag,
-      owner: row.owner,
-      revision: row.revision,
-      created_at: row.createdAt.toISOString(),
-      dependencies: row.dependencies.map((edge) => edge.dependencyId),
-      dependent_count: row._count.dependents,
-      scheduler_score: score.total,
-      scoring_version: AMUX_GLOBAL_PRIORITY_VERSION,
-      scheduler_signals: score,
-    };
-  });
+  );
 }
 
 /**
@@ -298,24 +333,29 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
 export async function getRoutingSnapshotTask(
   taskId: string,
   expectedRevision: number,
+  transaction?: Prisma.TransactionClient,
 ): Promise<{
   classification: Prisma.JsonValue | null;
   requiredRoutingRole: string | null;
 } | null> {
-  return prisma.amuxWorkItem.findFirst({
-    where: {
-      id: taskId,
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      revision: expectedRevision,
-      dependencies: runnableDependencyFilter(),
-    },
-    select: {
-      classification: true,
-      requiredRoutingRole: true,
-    },
-  });
+  const read = (tx: Prisma.TransactionClient) =>
+    tx.amuxWorkItem.findFirst({
+      where: {
+        id: taskId,
+        status: "todo",
+        owner: null,
+        archivedAt: null,
+        revision: expectedRevision,
+        dependencies: runnableDependencyFilter(),
+      },
+      select: {
+        classification: true,
+        requiredRoutingRole: true,
+      },
+    });
+  return transaction
+    ? read(transaction)
+    : withAmuxDbBoundary(AMUX_DB_BOUNDARIES.routingTaskRead, read);
 }
 
 /**
@@ -328,45 +368,51 @@ export async function getRoutingSnapshotTask(
 export async function getAuthoritativeSchedulerFacts(
   taskId: string,
   expectedRevision: number,
+  transaction?: Prisma.TransactionClient,
 ): Promise<AmuxAuthoritativeSchedulerInput | null> {
-  const row = await prisma.amuxWorkItem.findFirst({
-    where: {
-      id: taskId,
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      revision: expectedRevision,
-      dependencies: runnableDependencyFilter(),
-    },
-    select: {
-      pinned: true,
-      createdAt: true,
-      kind: true,
-      priority: true,
-      drag: true,
-      dueAt: true,
-      duePrecision: true,
-      dueSource: true,
-      dueRaw: true,
-      projectKey: true,
-      teamKey: true,
-      effortPoints: true,
-      _count: {
-        select: {
-          dependents: {
-            where: {
-              task: {
-                archivedAt: null,
-                status: { notIn: terminalDependentStatuses() },
+  const read = async (tx: Prisma.TransactionClient) => {
+    const row = await tx.amuxWorkItem.findFirst({
+      where: {
+        id: taskId,
+        status: "todo",
+        owner: null,
+        archivedAt: null,
+        revision: expectedRevision,
+        dependencies: runnableDependencyFilter(),
+      },
+      select: {
+        pinned: true,
+        createdAt: true,
+        kind: true,
+        priority: true,
+        drag: true,
+        dueAt: true,
+        duePrecision: true,
+        dueSource: true,
+        dueRaw: true,
+        projectKey: true,
+        teamKey: true,
+        effortPoints: true,
+        _count: {
+          select: {
+            dependents: {
+              where: {
+                task: {
+                  archivedAt: null,
+                  status: { notIn: nonScoringDependentStatuses() },
+                },
               },
             },
           },
         },
       },
-    },
-  });
-  if (!row) return null;
-  return (await schedulerInputsForRows([row])).get(row) ?? null;
+    });
+    if (!row) return null;
+    return (await schedulerInputsForRows([row], tx)).get(row) ?? null;
+  };
+  return transaction
+    ? read(transaction)
+    : withAmuxDbBoundary(AMUX_DB_BOUNDARIES.routingTaskRead, read);
 }
 
 /**
@@ -377,13 +423,35 @@ export async function getAuthoritativeSchedulerFacts(
  */
 export async function claimUnownedTodo(
   input: AmuxClaimInput,
-): Promise<{ revision: number; decisionId: string } | null> {
+): Promise<AmuxClaimOutcome> {
   const worker = input.worker.trim();
-  if (!worker) return null;
+  const refusalContext = {
+    taskId: input.taskId,
+    worker,
+    expectedRevision: input.expectedRevision,
+  };
+  if (
+    !worker ||
+    input.expectedRevision < 0 ||
+    input.expectedRevision >= PRISMA_INT_MAX
+  ) {
+    await recordAmuxClaimRefusal("cas_lost", refusalContext);
+    return { claimed: false, reason: "cas_lost" };
+  }
 
-  return prisma.$transaction(async (tx) => {
-    const incident = await lockAmuxAdmissionAndReadIncident(tx);
-    if (incident.blocks_admission) return null;
+  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claim, async (tx, context) => {
+    const incident = await lockAmuxAdmissionAndReadIncident(tx, context.dbNow);
+    if (incident.blocks_admission) {
+      await writeAmuxClaimRefusalAudit(
+        tx,
+        "incident_admission_blocked",
+        refusalContext,
+      );
+      return {
+        claimed: false as const,
+        reason: "incident_admission_blocked" as const,
+      };
+    }
 
     const planning = await tx.amuxWorkItem.findFirst({
       where: {
@@ -397,13 +465,22 @@ export async function claimUnownedTodo(
       },
       select: { projectKey: true, teamKey: true },
     });
-    if (!planning) return null;
+    if (!planning) {
+      await writeAmuxClaimRefusalAudit(tx, "cas_lost", refusalContext);
+      return { claimed: false as const, reason: "cas_lost" as const };
+    }
     const policies = await lockAmuxResourcePolicies(
       tx,
       amuxResourceRefs(planning),
     );
     const wip = await evaluateLockedAmuxWip(tx, policies);
-    if (!wip.allowed) return null;
+    if (!wip.allowed) {
+      await writeAmuxClaimRefusalAudit(tx, "wip_limit_reached", refusalContext);
+      return {
+        claimed: false as const,
+        reason: "wip_limit_reached" as const,
+      };
+    }
 
     const claim = await tx.amuxWorkItem.updateMany({
       where: {
@@ -419,7 +496,7 @@ export async function claimUnownedTodo(
       },
       data: {
         owner: worker,
-        claimedAt: new Date(),
+        claimedAt: context.dbNow,
         revision: {
           increment: 1,
         },
@@ -427,7 +504,8 @@ export async function claimUnownedTodo(
     });
 
     if (claim.count !== 1) {
-      return null;
+      await writeAmuxClaimRefusalAudit(tx, "cas_lost", refusalContext);
+      return { claimed: false as const, reason: "cas_lost" as const };
     }
 
     const decision = await tx.amuxRouteDecision.create({
@@ -454,23 +532,78 @@ export async function claimUnownedTodo(
       },
     });
 
+    const revision = input.expectedRevision + 1;
+
+    await writeSystemAuditLog({
+      systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      action: "amux.claim.assigned",
+      targetType: "AmuxWorkItem",
+      targetId: input.taskId,
+      summary: `Claimed AMUX work item ${input.taskId} for ${worker}.`,
+      metadata: {
+        decision_id: decision.id,
+        worker,
+        prior_task_revision: input.expectedRevision,
+        task_revision: revision,
+        scheduler_score: input.schedulerScore,
+        scoring_version: input.scoringVersion,
+        measured: true,
+        verdict: "claimed",
+      },
+      tx,
+    });
+
     return {
-      revision: input.expectedRevision + 1,
+      claimed: true as const,
+      revision,
       decisionId: decision.id,
     };
   });
 }
 
+/**
+ * Record an authenticated system refusal without retaining the request body.
+ */
+export async function recordAmuxClaimRefusal(
+  reason: AmuxClaimAuditRefusalReason,
+  context: AmuxClaimRefusalContext = {},
+): Promise<void> {
+  await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claimRefusal, async (tx) => {
+    await writeAmuxClaimRefusalAudit(tx, reason, context);
+  });
+}
+
+async function writeAmuxClaimRefusalAudit(
+  tx: Prisma.TransactionClient,
+  reason: AmuxClaimAuditRefusalReason,
+  context: AmuxClaimRefusalContext,
+): Promise<void> {
+  const taskId = context.taskId?.trim() || null;
+  const worker = context.worker?.trim() || null;
+
+  await writeSystemAuditLog({
+    systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+    action: "amux.claim.refused",
+    targetType: taskId ? "AmuxWorkItem" : "AmuxClaimRequest",
+    targetId: taskId,
+    summary: "Refused an authenticated AMUX claim request.",
+    metadata: {
+      reason,
+      ...(worker ? { worker } : {}),
+      ...(context.expectedRevision === undefined
+        ? {}
+        : { expected_revision: context.expectedRevision }),
+      measured: true,
+      verdict: "refused",
+    },
+    tx,
+  });
+}
+
 export type AmuxOwnedTodo = {
   id: string;
-  title: string;
-  description: string | null;
-  kind: string;
-  priority: string;
   owner: string;
   revision: number;
-  claimed_at: string | null;
-  created_at: string;
 };
 
 /**
@@ -481,52 +614,49 @@ export type AmuxOwnedTodo = {
  * execution-start CAS.
  */
 export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
-  const rows = await prisma.amuxWorkItem.findMany({
-    where: {
-      status: "todo",
-      owner: {
-        not: null,
-      },
-      archivedAt: null,
-      dependencies: runnableDependencyFilter(),
-    },
-    orderBy: [
-      {
-        claimedAt: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-      {
-        id: "asc",
-      },
-    ],
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      kind: true,
-      priority: true,
-      owner: true,
-      revision: true,
-      claimedAt: true,
-      createdAt: true,
-    },
-  });
+  const rows = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.ownedQueueRead,
+    (tx) =>
+      tx.amuxWorkItem.findMany({
+        where: {
+          status: "todo",
+          owner: {
+            not: null,
+          },
+          archivedAt: null,
+          dependencies: runnableDependencyFilter(),
+        },
+        orderBy: [
+          {
+            claimedAt: "asc",
+          },
+          {
+            createdAt: "asc",
+          },
+          {
+            id: "asc",
+          },
+        ],
+        select: {
+          id: true,
+          owner: true,
+          revision: true,
+        },
+        take: AMUX_OWNED_QUEUE_MAX_ITEMS + 1,
+      }),
+  );
+
+  if (rows.length > AMUX_OWNED_QUEUE_MAX_ITEMS) {
+    throw new AmuxQueueCapacityError("owned");
+  }
 
   return rows.flatMap((row) =>
     row.owner
       ? [
           {
             id: row.id,
-            title: row.title,
-            description: row.description,
-            kind: row.kind,
-            priority: row.priority,
             owner: row.owner,
             revision: row.revision,
-            claimed_at: row.claimedAt?.toISOString() ?? null,
-            created_at: row.createdAt.toISOString(),
           },
         ]
       : [],

@@ -3,20 +3,28 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
+import {
+  AMUX_PRISMA_INT_MAX,
+  amuxMachineIdSchema,
+} from "@/lib/amux/claimContract";
+import {
+  AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
+import {
+  amuxInternalErrorResponse,
+  amuxJsonNoStore,
+  isAmuxInputError,
+} from "@/lib/amux/internalRoute";
 import { pullAmuxWorkDelivery } from "@/lib/amux/delivery";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 
 const requestSchema = z
   .object({
-    worker: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[A-Za-z0-9._:-]+$/),
+    worker: amuxMachineIdSchema,
     instance_id: z.string().uuid(),
-    generation: z.number().int().min(1),
+    generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   })
   .strict();
 
@@ -44,51 +52,49 @@ export async function POST(request: Request) {
     );
   }
 
-  try {
-    const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
+  return withAmuxRouteBudget(async () => {
+    try {
+      const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
 
-    const outcome = await pullAmuxWorkDelivery({
-      worker: body.worker,
-      instanceId: body.instance_id,
-      generation: body.generation,
-    });
-
-    if (!outcome.available) {
-      return Response.json(outcome, {
-        status:
-          outcome.reason === "runtime_not_ready" ? 409 : 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
+      const outcome = await pullAmuxWorkDelivery({
+        worker: body.worker,
+        instanceId: body.instance_id,
+        generation: body.generation,
       });
-    }
 
-    return Response.json(
-      {
-        available: true,
-        delivery: {
-          attempt_id: outcome.delivery.attemptId,
-          task_id: outcome.delivery.taskId,
-          worker: outcome.delivery.worker,
-          task_revision: outcome.delivery.taskRevision,
-          prompt: outcome.delivery.prompt,
-          receipt_id: outcome.delivery.receiptId,
-          lease_expires_at: outcome.delivery.leaseExpiresAt.toISOString(),
+      if (!outcome.available) {
+        return Response.json(outcome, {
+          status: outcome.reason === "runtime_not_ready" ? 409 : 200,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+
+      return Response.json(
+        {
+          available: true,
+          delivery: {
+            attempt_id: outcome.delivery.attemptId,
+            task_id: outcome.delivery.taskId,
+            worker: outcome.delivery.worker,
+            task_revision: outcome.delivery.taskRevision,
+            prompt: outcome.delivery.prompt,
+            receipt_id: outcome.delivery.receiptId,
+            lease_expires_at: outcome.delivery.leaseExpiresAt.toISOString(),
+          },
         },
-      },
-      {
-        headers: {
-          "Cache-Control": "no-store",
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
         },
-      },
-    );
-  } catch {
-    return Response.json(
-      { error: "Invalid request." },
-      {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
+      );
+    } catch (error) {
+      if (isAmuxInputError(error)) {
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      }
+      return amuxInternalErrorResponse("delivery_pull", error);
+    }
+  }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
 }

@@ -7,6 +7,7 @@ import {
   evaluateAmuxQuotaTelemetry,
   type AmuxObservedMetric,
 } from "@/lib/amux/planningCore";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 
 type WorkerIdentity = { worker_name: string; provider: string };
@@ -42,12 +43,13 @@ const median = (values: readonly number[]) => {
 export async function getAmuxWorkerTelemetry(
   workers: readonly WorkerIdentity[],
   now = new Date(),
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
   if (workers.length === 0) return new Map();
   const names = workers.map((worker) => worker.worker_name);
   const cutoff = new Date(now.getTime() - 90 * 86_400_000);
   const [attempts, quotaRows] = await Promise.all([
-    prisma.$queryRaw<HistoricalAttemptRow[]>`
+    db.$queryRaw<HistoricalAttemptRow[]>`
       SELECT
         ranked."worker",
         ranked."outcome",
@@ -77,7 +79,7 @@ export async function getAmuxWorkerTelemetry(
       WHERE ranked."workerRowNumber" <= 200
       ORDER BY ranked."worker" ASC, ranked."endedAt" DESC
     `,
-    prisma.$queryRaw<QuotaObservationRow[]>`
+    db.$queryRaw<QuotaObservationRow[]>`
       SELECT DISTINCT ON (observation."worker")
         observation."worker",
         observation."provider",
@@ -221,9 +223,24 @@ export async function getAmuxWorkerTelemetry(
  * remove rows no AMUX decision can consume. The database trigger enforces the
  * same lower bound, so a clock or caller error cannot shorten retention.
  */
+export const AMUX_QUOTA_SWEEP_BATCH_SIZE = 200;
+
 export async function sweepExpiredAmuxQuotaObservations() {
-  return prisma.$executeRaw`
-    DELETE FROM "AmuxQuotaObservation"
-    WHERE "createdAt" <= clock_timestamp() - INTERVAL '90 days'
-  `;
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.quotaObservationSweep,
+    async (tx) =>
+      tx.$executeRaw`
+        WITH expired AS MATERIALIZED (
+          SELECT "id"
+          FROM "AmuxQuotaObservation"
+          WHERE "createdAt" <= clock_timestamp() - INTERVAL '90 days'
+          ORDER BY "createdAt" ASC, "id" ASC
+          LIMIT ${AMUX_QUOTA_SWEEP_BATCH_SIZE}
+          FOR UPDATE SKIP LOCKED
+        )
+        DELETE FROM "AmuxQuotaObservation" AS observation
+        USING expired
+        WHERE observation."id" = expired."id"
+      `,
+  );
 }

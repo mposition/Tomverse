@@ -119,6 +119,64 @@ import { createHash } from "node:crypto";
 
 import ts from "typescript";
 
+/**
+ * Tables whose append-only claim a row trigger cannot defend on its own.
+ *
+ * The permission ledger and the consent ledger refuse UPDATE and DELETE by
+ * trigger. TRUNCATE is neither: it fires no row trigger, and
+ * `TRUNCATE ... CASCADE` on a table these point at reaches them through their
+ * foreign keys. A BEFORE TRUNCATE trigger would close it and would also break
+ * 84 of the 138 DB integration suites, which reset by truncating `User` and
+ * `EmailDelivery`; revoking the privilege reaches every table in the schema
+ * and belongs with whoever owns the database roles
+ * (prisma/migrations/20260921170000_email_permission_ledger).
+ *
+ * What is closed here is the vector this repository controls.
+ */
+export const APPEND_ONLY_LEDGER_TABLES = [
+  "EmailPermissionEvent",
+  "EmailSendApproval",
+  "EmailSendApprovalMember",
+  "EmailSendApprovalRevocation",
+  "EmailPermissionDecision",
+  "EmailPermissionDecisionEvidence",
+  "ConsentRecord",
+];
+
+/**
+ * Every SQL TRUNCATE in scanned source, whatever it names.
+ *
+ * Categorical rather than a search for the seven table names, and that is the
+ * point: `TRUNCATE "User" CASCADE` names none of them and empties four, and a
+ * statement long enough to push its table list past any window would have
+ * slipped a name-matching scan. No production code in this repository
+ * truncates anything -- the scanned set excludes tests/ -- so "none at all" is
+ * a rule that costs nothing and has no gap to reason about.
+ *
+ * Matches the SQL statement, not the CSS class: `TRUNCATE` followed by TABLE,
+ * ONLY, or a quoted identifier. `className="truncate"` and "do not truncate
+ * sentences" are neither.
+ *
+ * Case-insensitive. This repository writes SQL in upper case, so the first
+ * version only matched that -- and `truncate table "User"` would have passed a
+ * rule whose whole value is that it has no gap to reason about. The suffix is
+ * what keeps the CSS class out, at either case.
+ */
+export const SQL_TRUNCATE_PATTERN = /\bTRUNCATE\s+(?:TABLE\b|ONLY\b|")/gi;
+
+export const findTruncateStatements = ({ sources }) => {
+  const findings = [];
+  for (const { path, text } of sources) {
+    SQL_TRUNCATE_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = SQL_TRUNCATE_PATTERN.exec(text)) !== null) {
+      const line = text.slice(0, match.index).split("\n").length;
+      findings.push({ path, line });
+    }
+  }
+  return findings;
+};
+
 export const PROTECTED_TABLES = [
   {
     table: "AdminAuditLog",
@@ -269,6 +327,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/marketingStore.ts",
+    table: "MarketingChannel",
+    tableMentions: 2,
+    writeVerbs: 7,
+    reason:
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name.",
+  },
+  {
+    path: "lib/marketingStore.ts",
+    table: "MarketingPost",
+    tableMentions: 7,
+    writeVerbs: 7,
+    reason:
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. The last two are written out separately rather than as one statement with the column interpolated, because a runtime column name is what this rule exists to refuse. None interpolates a table name and every write is a delegate call.",
+  },
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
@@ -466,10 +540,24 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
   },
+  {
+    path: "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER TABLE that follows it, and the count in the error message. Both write verbs are that one statement's own ALTER TABLE and ALTER COLUMN -- this migration issues no UPDATE and no DELETE, because the disposition of a row with no digest is an operator's decision carried out separately.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
+    count: 10,
+    reason:
+      "Ten trigger bodies read a sibling ledger table with EXECUTE over a name built from TG_TABLE_SCHEMA -- the schema the trigger own table is in. The alternative was an unqualified name, which resolves against the session search path, where a temporary table of the same name answers for the real one and the seal, cohort and evidence checks read it instead. A hard-coded public. was wrong too: the runtime reads ?schema= from DATABASE_URL and sets a search_path with no public fallback (lib/postgresConnectionConfigCore.mjs). The schema is the trigger own, never input, and it is quoted with %I; every value is bound with USING.",
+  },
   {
     path: "prisma/migrations/20260918090000_admin_audit_log_append_only/migration.sql",
     count: 1,

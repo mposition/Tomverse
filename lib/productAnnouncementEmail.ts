@@ -8,18 +8,235 @@ import {
   assistantKnowledgeGuideUrl,
   ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL,
 } from "@/lib/assistantKnowledgeGuide";
+import { isStaticMarketingPathname } from "@/lib/marketingRoutes";
 
-export type ProductAnnouncementPayload = {
+/**
+ * The only destinations a release-notes email may link to.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md section 8 --
+ * "`link` is a product path id. It is chosen from a fixed table, and pricing,
+ * billing and upgrade paths are not in the table."
+ *
+ * ## Why this is not `MARKETING_APPROVED_LINKS`
+ *
+ * That table exists and looks like the same thing. It is not, and the
+ * difference is one entry: it contains `/pricing`, and this one must not.
+ *
+ * The reason is the rule these emails are written under. ACMA's Lululemon
+ * decision (2026-03) puts it plainly: the simplest way to comply is to keep
+ * transactional and service messages separate from sales content and links.
+ * A release-notes email is marketing by classification and is read as product
+ * news by the person receiving it; a price link inside one is the sales
+ * content that decision is about. A social post has no such constraint --
+ * nobody receives it in a mailbox they did not choose to open.
+ *
+ * So the two tables answer different questions and are allowed to hold the
+ * same values where they agree. What is forbidden is deriving one from the
+ * other: a subset expression would make the email table follow every future
+ * addition to the marketing one, and the next commercial page added there
+ * would appear here without anybody deciding it should.
+ * `commercialLinkIdsInReleaseNotes()` below is the check that they have not
+ * drifted into agreeing by accident.
+ *
+ * ## Why it lives in this file
+ *
+ * It was its own module for one commit. That module was a new import into a
+ * file inside the sealed Prompt Refiner runtime closure, which is pinned at
+ * 188 entries and validated in the database, so the split cost an
+ * owner-approved contract and bought a file boundary. The table describes the
+ * destinations a release-notes email may link to; this file is the
+ * release-notes email.
+ *
+ * Pure: no server-only import, no network, no Prisma.
+ */
+
+/**
+ * Where a release-notes item can send a reader.
+ *
+ * The ids are stable and the paths are not: a page can move and the emails
+ * already sent keep meaning what they meant, because what they recorded is the
+ * id.
+ *
+ * Frozen for the same reason the marketing table is: `as const` is a
+ * compile-time claim, and an assignment to one of these entries would be a
+ * destination nobody approved.
+ */
+export const RELEASE_NOTES_APPROVED_LINKS = Object.freeze({
+  "release.home": "/",
+  "release.models": "/models",
+  "release.compare-models": "/compare-ai-models",
+  "release.answer-review": "/ai-answer-review",
+  "release.file-analysis": "/ai-for-file-analysis",
+  "release.faq": "/faq",
+  "release.support": "/support",
+  "release.help-centre": "/support/help-centre",
+  "release.safety": "/safety",
+  "release.safety.approach": "/safety/approach",
+  "release.safety.security-privacy": "/safety/security-privacy",
+  "release.safety.trust-transparency": "/safety/trust-transparency",
+} as const);
+
+/** Where release-notes links point. One origin, and it is ours. */
+export const RELEASE_NOTES_PUBLIC_ORIGIN = "https://tomverse.app";
+
+export type ReleaseNotesLinkId = keyof typeof RELEASE_NOTES_APPROVED_LINKS;
+
+/**
+ * The same table, as a lookup.
+ *
+ * The object above is the declaration: it is what a reader reads, and its
+ * `as const` is what gives `ReleaseNotesLinkId` its twelve members. This is
+ * how the three functions below ask it a question, and it is a `Map` rather
+ * than computed property access on the object for a reason worth writing down.
+ *
+ * This file is inside the Prompt Refiner runtime closure
+ * (`PROMPT_REFINER_RUNTIME_SOURCE_PATHS`), and that closure pins an inventory
+ * of every non-static element access in it --  currently 228, a number which
+ * has only ever been repinned for moved lines and has never once changed.
+ * `tests/promptRefinerRuntimeSourceClosure.test.mjs` fails when it does, so
+ * that somebody looks at each new one.
+ *
+ * Somebody looked. Three lookups on a frozen table, each keyed by a value that
+ * came from `Object.keys()` of that same table or from
+ * `isReleaseNotesLinkId()`, are safe -- and they are also not worth being the
+ * first entries ever added to that inventory, on behalf of a marketing link
+ * table that has nothing to do with the Refiner. A `Map` asks the same
+ * question without enlarging the surface the gate is watching.
+ */
+const RELEASE_NOTES_LINK_PATHS: ReadonlyMap<string, string> = new Map(
+  Object.entries(RELEASE_NOTES_APPROVED_LINKS)
+);
+
+export const RELEASE_NOTES_LINK_IDS: readonly ReleaseNotesLinkId[] =
+  Object.freeze(
+    Object.keys(RELEASE_NOTES_APPROVED_LINKS) as ReleaseNotesLinkId[]
+  );
+
+export const isReleaseNotesLinkId = (
+  value: unknown
+): value is ReleaseNotesLinkId =>
+  typeof value === "string" && RELEASE_NOTES_LINK_PATHS.has(value);
+
+/**
+ * The path an id names, or `null`.
+ *
+ * `null` rather than a throw: the caller is validating a payload somebody
+ * composed, and an unknown id is a draft to refuse with a message rather than
+ * a crash to report.
+ */
+export const releaseNotesLinkPath = (id: string): string | null =>
+  RELEASE_NOTES_LINK_PATHS.get(id) ?? null;
+
+/**
+ * Paths this table must never contain.
+ *
+ * Prefix matches, because `/pricing`, `/pricing/annual` and `/pricing?plan=max`
+ * are the same decision. Held as a list rather than as one regular expression
+ * so that a reader can see which four things are excluded and a sixth is a
+ * line somebody added on purpose.
+ */
+export const COMMERCIAL_PATH_PREFIXES = Object.freeze([
+  "/pricing",
+  "/billing",
+  "/upgrade",
+  "/checkout",
+] as const);
+
+export const isCommercialPath = (path: string): boolean => {
+  // The query and the fragment come off first. The comment above has said
+  // `/pricing?plan=max` is the same decision as `/pricing` since this file was
+  // written, and until 2026-09-23 it was not: the comparison saw the whole
+  // string and answered false. Nothing in the table has a query today, which
+  // is exactly why it went unnoticed.
+  const pathname = path.split(/[?#]/)[0];
+  return COMMERCIAL_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+};
+
+/**
+ * Any id in this table whose path is a commercial one.
+ *
+ * Empty is the only acceptable answer, and the test asserts that. It exists as
+ * a function rather than as a comment because the table will grow: the entry
+ * somebody adds without thinking about section 8 is the one this catches.
+ */
+export const commercialLinkIdsInReleaseNotes = (): ReleaseNotesLinkId[] =>
+  RELEASE_NOTES_LINK_IDS.filter((id) =>
+    isCommercialPath(RELEASE_NOTES_LINK_PATHS.get(id) ?? "")
+  );
+
+/** Whether every approved path is still a route this app serves. */
+export const unservedReleaseNotesLinkIds = (): ReleaseNotesLinkId[] =>
+  RELEASE_NOTES_LINK_IDS.filter(
+    (id) => !isStaticMarketingPathname(RELEASE_NOTES_LINK_PATHS.get(id) ?? "")
+  );
+
+/**
+ * The absolute URL a path names.
+ *
+ * The origin is compared **after** assembly rather than the path inspected
+ * before it, for the reason `lib/marketingLinks.ts` records: a path is not the
+ * safe input to `new URL(path, origin)` that it looks like. `//evil.test/x` is
+ * protocol-relative and resolves to another host, `https://evil.test` replaces
+ * the base outright, and a backslash is normalised to a slash by the parser
+ * before either is visible. Inspecting the string first means enumerating
+ * those; asking the parser what it actually built is the thing that matters.
+ *
+ * The table above already restricts the input to twelve frozen entries, so
+ * this is the check that would still hold if that table were wrong.
+ */
+export const releaseNotesLinkUrl = (path: string, field: string): string => {
+  const url = new URL(path, RELEASE_NOTES_PUBLIC_ORIGIN);
+  if (url.origin !== RELEASE_NOTES_PUBLIC_ORIGIN) {
+    throw new Error(`${field} resolves outside ${RELEASE_NOTES_PUBLIC_ORIGIN}.`);
+  }
+  if (isCommercialPath(url.pathname)) {
+    throw new Error(`${field} resolves to a commercial path.`);
+  }
+  return url.toString();
+};
+
+
+/**
+ * A feature as it is written, before anything is resolved.
+ *
+ * The destination is an id and a label; `MarketingFeature.link` is what the
+ * parser builds from them. They were the same type until 2026-09-23 and that
+ * was wrong in three ways at once: a literal declared with this type could not
+ * carry `linkId` at all, because the excess property check refuses it; a
+ * feature carrying an already-resolved `link` type-checked and the parser
+ * silently dropped it, so an approved destination disappeared without an
+ * error; and feeding a parsed payload back through the parser produced a mail
+ * with no feature links and no complaint.
+ */
+export type ProductAnnouncementFeatureInput = {
+  title: string;
+  body: string;
+  linkId?: string;
+  linkLabel?: string;
+};
+
+/** A message as it is written. What the composer holds and the literals below. */
+export type ProductAnnouncementContent = {
   subject: string;
   preheader: string;
   eyebrow: string;
   headline: string;
   intro: string;
   media?: MarketingEmailMedia | null;
-  features: MarketingFeature[];
+  features: ProductAnnouncementFeatureInput[];
   closing?: string | null;
   ctaLabel: string;
   ctaUrl: string;
+};
+
+/** A message as it renders. Every destination resolved to a URL we built. */
+export type ProductAnnouncementPayload = Omit<
+  ProductAnnouncementContent,
+  "features"
+> & {
+  features: MarketingFeature[];
 };
 
 const requiredText = (
@@ -50,9 +267,59 @@ export const parseProductAnnouncementPayload = (
       throw new Error(`features[${index}] must be an object.`);
     }
     const item = feature as Record<string, unknown>;
+
+    // An already-resolved destination is not an input.
+    //
+    // Refused rather than ignored: dropping it produced a feature with no link
+    // and no error, so an approved destination vanished exactly as quietly as
+    // a commercial one would have. The caller that sent it believes the link
+    // went out.
+    // Written out rather than looped over the two names: a loop indexes with a
+    // variable, and this file is inside the Prompt Refiner runtime closure,
+    // whose pinned inventory of non-static element accesses has never gained
+    // an entry. Two lines are not worth being the first.
+    if (item.link !== undefined) {
+      throw new Error(
+        `features[${index}].link is a rendered value; write linkId and linkLabel instead.`
+      );
+    }
+    if (item.url !== undefined) {
+      throw new Error(
+        `features[${index}].url is a rendered value; write linkId and linkLabel instead.`
+      );
+    }
+
+    // The destination is a path id, never a URL.
+    //
+    // A validator over a URL somebody wrote can only answer "does this look
+    // acceptable"; the question section 8 asks is "is this one of the places
+    // we decided to send people", and only a table can answer that. The
+    // commercial paths are the ones it must not contain, and the table at the
+    // top of this file holds that rule with its own test.
+    let link: { label: string; url: string } | null = null;
+    if (item.linkId !== undefined && item.linkId !== null) {
+      const path = releaseNotesLinkPath(String(item.linkId));
+      if (path === null) {
+        throw new Error(
+          `features[${index}].linkId is not an approved release-notes destination.`
+        );
+      }
+      link = {
+        label: requiredText(item.linkLabel, `features[${index}].linkLabel`, 80),
+        url: releaseNotesLinkUrl(path, `features[${index}].linkId`),
+      };
+    } else if (item.linkLabel !== undefined && item.linkLabel !== null) {
+      // A label with nowhere to go renders as text that looks like a link and
+      // is not one, which is worse than no label at all.
+      throw new Error(
+        `features[${index}].linkLabel needs a linkId to go with it.`
+      );
+    }
+
     return {
       title: requiredText(item.title, `features[${index}].title`, 100),
       body: requiredText(item.body, `features[${index}].body`, 500),
+      link,
     };
   });
 
@@ -108,7 +375,7 @@ export const buildProductAnnouncementEmail = (
   return { subject: payload.subject, ...rendered };
 };
 
-export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementPayload = {
+export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementContent = {
   subject: "{{subject}}",
   preheader: "{{preheader}}",
   eyebrow: "{{eyebrow}}",
@@ -128,7 +395,7 @@ export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementPayload = {
 /** Starter copy for Tomverse's first product newsletter. */
 export const ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT: Record<
   "ko" | "en" | "zh",
-  ProductAnnouncementPayload
+  ProductAnnouncementContent
 > = {
   ko: {
     subject: "나를 이해하는 AI, 내 지식과 함께 시작하세요",

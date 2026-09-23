@@ -4,11 +4,10 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
-import { prisma } from "@/lib/prisma";
+import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
-
-const AMUX_DELIVERY_SYSTEM_ACTOR = "tomverse-amux-orchestrator";
 
 type RuntimeLockRow = {
   workerName: string;
@@ -39,6 +38,8 @@ type TaskLockRow = {
 };
 
 type DeliveryLockRow = {
+  runtimeLeaseExpiresAt: Date;
+  attemptLeaseExpiresAt: Date;
   attemptId: string;
   taskId: string;
   worker: string;
@@ -211,84 +212,74 @@ export async function pullAmuxWorkDelivery(input: {
   generation: number;
   now?: Date;
 }): Promise<AmuxPulledDelivery> {
-  const now = input.now ?? new Date();
-
-  return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(tx, input.worker);
-
-    if (!runtimeMatches(runtime, input, now)) {
-      return {
-        available: false as const,
-        reason: "runtime_not_ready" as const,
-      };
-    }
-
-    const candidates = await tx.amuxWorkDelivery.findMany({
-      where: {
-        worker: input.worker,
-        workerInstanceId: input.instanceId,
-        workerGeneration: input.generation,
-        status: {
-          in: ["queued", "leased"],
-        },
-      },
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          attemptId: "asc",
-        },
-      ],
-      take: 20,
-      select: {
-        attemptId: true,
-      },
-    });
-
-    for (const candidate of candidates) {
-      const attempt = await lockAttempt(tx, candidate.attemptId);
-
-      if (
-        !attempt ||
-        !attemptMatches(
-          attempt,
-          {
-            attemptId: candidate.attemptId,
-            worker: input.worker,
-            instanceId: input.instanceId,
-            generation: input.generation,
-            taskRevision: attempt.taskRevision,
-          },
-          now,
-        )
-      ) {
-        continue;
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.deliveryPull,
+    async (tx, context) => {
+      const now = input.now ?? context.dbNow;
+      const runtime = await lockRuntime(tx, input.worker);
+      if (!runtimeMatches(runtime, input, now)) {
+        return {
+          available: false as const,
+          reason: "runtime_not_ready" as const,
+        };
       }
 
-      const task = await lockTask(tx, attempt.taskId);
+      const rows = await tx.$queryRaw<DeliveryLockRow[]>`
+      SELECT
+        r."leaseExpiresAt" AS "runtimeLeaseExpiresAt",
+        a."leaseExpiresAt" AS "attemptLeaseExpiresAt",
+        d."attemptId",
+        d."taskId",
+        d."worker",
+        d."workerInstanceId",
+        d."workerGeneration",
+        d."taskRevision",
+        d."prompt",
+        d."status",
+        d."receiptId",
+        d."leasedAt",
+        d."leaseExpiresAt",
+        d."acknowledgedAt",
+        d."cancelledAt"
+      FROM "AmuxWorkerRuntime" r
+      JOIN "AmuxWorkDelivery" d
+        ON d."worker" = r."workerName"
+       AND d."workerInstanceId" = r."instanceId"
+       AND d."workerGeneration" = r."generation"
+      JOIN "AmuxExecutionAttempt" a
+        ON a."id" = d."attemptId"
+       AND a."taskId" = d."taskId"
+       AND a."worker" = d."worker"
+       AND a."workerInstanceId" = d."workerInstanceId"
+       AND a."workerGeneration" = d."workerGeneration"
+       AND a."taskRevision" = d."taskRevision"
+      JOIN "AmuxWorkItem" t
+        ON t."id" = d."taskId"
+       AND t."owner" = d."worker"
+       AND t."revision" = d."taskRevision"
+      WHERE r."workerName" = ${input.worker}
+        AND r."instanceId" = ${input.instanceId}
+        AND r."generation" = ${input.generation}
+        AND r."status" = 'busy'
+        AND r."leaseExpiresAt" > ${now}
+        AND a."endedAt" IS NULL
+        AND a."leaseExpiresAt" > ${now}
+        AND t."status" = 'doing'
+        AND t."archivedAt" IS NULL
+        AND d."status" IN ('queued', 'leased')
+        AND d."acknowledgedAt" IS NULL
+        AND d."cancelledAt" IS NULL
+      ORDER BY d."createdAt" ASC, d."attemptId" ASC
+      LIMIT 1
+      FOR UPDATE OF r, d, a, t SKIP LOCKED
+    `;
+      const delivery = rows[0] ?? null;
 
-      if (!taskMatches(task, attempt)) {
-        continue;
-      }
-
-      const delivery = await lockDelivery(tx, candidate.attemptId);
-
-      if (
-        !delivery ||
-        (delivery.status !== "queued" && delivery.status !== "leased")
-      ) {
-        continue;
-      }
-
-      if (
-        delivery.taskId !== attempt.taskId ||
-        delivery.worker !== input.worker ||
-        delivery.workerInstanceId !== input.instanceId ||
-        delivery.workerGeneration !== input.generation ||
-        delivery.taskRevision !== attempt.taskRevision
-      ) {
-        continue;
+      if (!delivery) {
+        return {
+          available: false as const,
+          reason: "none" as const,
+        };
       }
 
       /*
@@ -304,6 +295,9 @@ export async function pullAmuxWorkDelivery(input: {
         delivery.leaseExpiresAt !== null &&
         delivery.leaseExpiresAt.getTime() > now.getTime()
       ) {
+        context.requireLeaseAt(delivery.runtimeLeaseExpiresAt);
+        context.requireLeaseAt(delivery.attemptLeaseExpiresAt);
+        context.requireLeaseAt(delivery.leaseExpiresAt);
         const receiptId = delivery.receiptId;
         const leaseExpiresAt = delivery.leaseExpiresAt;
 
@@ -346,9 +340,31 @@ export async function pullAmuxWorkDelivery(input: {
       });
 
       if (leased.count !== 1) {
-        continue;
+        return {
+          available: false as const,
+          reason: "none" as const,
+        };
       }
 
+      await writeSystemAuditLog({
+        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.delivery.receipt_issued",
+        targetType: "AmuxWorkItem",
+        targetId: delivery.taskId,
+        summary: "Issued a fenced AMUX delivery receipt.",
+        metadata: {
+          attempt_id: delivery.attemptId,
+          receipt_id: receiptId,
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: delivery.taskRevision,
+        },
+        tx,
+      });
+
+      context.requireLeaseAt(delivery.runtimeLeaseExpiresAt);
+      context.requireLeaseAt(delivery.attemptLeaseExpiresAt);
       return {
         available: true as const,
         delivery: {
@@ -361,15 +377,9 @@ export async function pullAmuxWorkDelivery(input: {
           leaseExpiresAt: deliveryLeaseExpiresAt,
         },
       };
-    }
-
-    return {
-      available: false as const,
-      reason: "none" as const,
-    };
-  });
+    },
+  );
 }
-
 export async function acknowledgeAmuxWorkDelivery(input: {
   attemptId: string;
   receiptId: string;
@@ -388,115 +398,123 @@ export async function acknowledgeAmuxWorkDelivery(input: {
       reason: "fenced_out";
     }
 > {
-  const now = input.now ?? new Date();
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.deliveryAck,
+    async (tx, context) => {
+      const now = input.now ?? context.dbNow;
+      const runtime = await lockRuntime(tx, input.worker);
 
-  return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(tx, input.worker);
+      if (!runtimeMatches(runtime, input, now)) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
 
-    if (!runtimeMatches(runtime, input, now)) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
+      const attempt = await lockAttempt(tx, input.attemptId);
 
-    const attempt = await lockAttempt(tx, input.attemptId);
+      if (!attemptMatches(attempt, input, now)) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
 
-    if (!attemptMatches(attempt, input, now)) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
+      const task = await lockTask(tx, attempt.taskId);
 
-    const task = await lockTask(tx, attempt.taskId);
+      if (!taskMatches(task, attempt)) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
 
-    if (!taskMatches(task, attempt)) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
+      const delivery = await lockDelivery(tx, input.attemptId);
 
-    const delivery = await lockDelivery(tx, input.attemptId);
+      if (
+        !delivery ||
+        delivery.worker !== input.worker ||
+        delivery.workerInstanceId !== input.instanceId ||
+        delivery.workerGeneration !== input.generation ||
+        delivery.taskRevision !== input.taskRevision ||
+        delivery.receiptId !== input.receiptId
+      ) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
 
-    if (
-      !delivery ||
-      delivery.worker !== input.worker ||
-      delivery.workerInstanceId !== input.instanceId ||
-      delivery.workerGeneration !== input.generation ||
-      delivery.taskRevision !== input.taskRevision ||
-      delivery.receiptId !== input.receiptId
-    ) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
+      if (delivery.status === "acknowledged") {
+        return {
+          acknowledged: true as const,
+          idempotent: true,
+        };
+      }
 
-    if (delivery.status === "acknowledged") {
+      if (
+        delivery.status !== "leased" ||
+        delivery.leaseExpiresAt === null ||
+        delivery.leaseExpiresAt.getTime() <= now.getTime()
+      ) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
+
+      const receiptLeaseExpiresAt = delivery.leaseExpiresAt;
+
+      const acknowledged = await tx.amuxWorkDelivery.updateMany({
+        where: {
+          attemptId: input.attemptId,
+          status: "leased",
+          receiptId: input.receiptId,
+          leaseExpiresAt: receiptLeaseExpiresAt,
+        },
+        data: {
+          status: "acknowledged",
+          leaseExpiresAt: null,
+          acknowledgedAt: now,
+        },
+      });
+
+      if (acknowledged.count !== 1) {
+        return {
+          acknowledged: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
+
+      await writeSystemAuditLog({
+        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.delivery.acknowledged",
+        targetType: "AmuxWorkItem",
+        targetId: attempt.taskId,
+        summary: `Acknowledged durable AMUX delivery ${input.attemptId}.`,
+        metadata: {
+          attempt_id: input.attemptId,
+          receipt_id: input.receiptId,
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: input.taskRevision,
+        },
+        tx,
+      });
+
+      if (runtime === null || attempt.leaseExpiresAt === null) {
+        throw new Error("AMUX delivery acknowledgement lease invariant lost");
+      }
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(attempt.leaseExpiresAt);
+      context.requireLeaseAt(receiptLeaseExpiresAt);
       return {
         acknowledged: true as const,
-        idempotent: true,
+        idempotent: false,
       };
-    }
-
-    if (
-      delivery.status !== "leased" ||
-      delivery.leaseExpiresAt === null ||
-      delivery.leaseExpiresAt.getTime() <= now.getTime()
-    ) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
-
-    const receiptLeaseExpiresAt = delivery.leaseExpiresAt;
-
-    const acknowledged = await tx.amuxWorkDelivery.updateMany({
-      where: {
-        attemptId: input.attemptId,
-        status: "leased",
-        receiptId: input.receiptId,
-        leaseExpiresAt: receiptLeaseExpiresAt,
-      },
-      data: {
-        status: "acknowledged",
-        leaseExpiresAt: null,
-        acknowledgedAt: now,
-      },
-    });
-
-    if (acknowledged.count !== 1) {
-      return {
-        acknowledged: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
-
-    await writeSystemAuditLog({
-      systemActor: AMUX_DELIVERY_SYSTEM_ACTOR,
-      action: "amux.delivery.acknowledged",
-      targetType: "AmuxWorkItem",
-      targetId: attempt.taskId,
-      summary: `Acknowledged durable AMUX delivery ${input.attemptId}.`,
-      metadata: {
-        attempt_id: input.attemptId,
-        receipt_id: input.receiptId,
-        worker: input.worker,
-        worker_instance_id: input.instanceId,
-        worker_generation: input.generation,
-        task_revision: input.taskRevision,
-      },
-      tx,
-    });
-
-    return {
-      acknowledged: true as const,
-      idempotent: false,
-    };
-  });
+    },
+  );
 }
 
 export async function cancelPendingAmuxWorkDelivery(

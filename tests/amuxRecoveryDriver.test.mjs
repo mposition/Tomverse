@@ -14,13 +14,19 @@ const recoverRoutePath = new URL(
   "../app/api/internal/amux/execution/recover/route.ts",
   import.meta.url,
 );
+const telemetryPath = new URL("../lib/amux/telemetry.ts", import.meta.url);
+const boundaryPath = new URL("../lib/amux/dbBoundary.ts", import.meta.url);
 
 test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cadence", async () => {
-  const [scheduler, api, recoverRoute] = await Promise.all([
-    readFile(schedulerPath, "utf8"),
-    readFile(apiPath, "utf8"),
-    readFile(recoverRoutePath, "utf8"),
-  ]);
+  const [scheduler, api, recoverRoute, telemetry, boundary] = await Promise.all(
+    [
+      readFile(schedulerPath, "utf8"),
+      readFile(apiPath, "utf8"),
+      readFile(recoverRoutePath, "utf8"),
+      readFile(telemetryPath, "utf8"),
+      readFile(boundaryPath, "utf8"),
+    ],
+  );
 
   assert.match(
     scheduler,
@@ -39,4 +45,12 @@ test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cade
     recoverRoute.indexOf("await sweepExpiredAmuxQuotaObservations()") <
       recoverRoute.indexOf("if (!isAmuxExecutionApiEnabled())"),
   );
+  assert.match(recoverRoute, /\}, AMUX_LIFECYCLE_ROUTE_BUDGET_MS\);/);
+  assert.match(telemetry, /AMUX_QUOTA_SWEEP_BATCH_SIZE = 200/);
+  assert.match(
+    telemetry,
+    /withAmuxDbBoundary\(\s*AMUX_DB_BOUNDARIES\.quotaObservationSweep/,
+  );
+  assert.match(telemetry, /LIMIT \$\{AMUX_QUOTA_SWEEP_BATCH_SIZE\}/);
+  assert.match(boundary, /quotaObservationSweep:[\s\S]*?prismaCallCeiling: 3/);
 });

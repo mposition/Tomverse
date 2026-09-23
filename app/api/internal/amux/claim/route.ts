@@ -1,7 +1,17 @@
 export const dynamic = "force-dynamic";
 
-import { z } from "zod";
-import { readLimitedJson } from "@/lib/apiSecurity";
+import { ApiSecurityError, readLimitedJson } from "@/lib/apiSecurity";
+import {
+  amuxClaimRequestSchema,
+  type AmuxClaimRequest,
+  type AmuxRoutingEvidence,
+} from "@/lib/amux/claimContract";
+import {
+  AMUX_CLAIM_ROUTE_BUDGET_MS,
+  anchorAmuxClaimDeadline,
+} from "@/lib/amux/claimDeadline";
+import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   compareAmuxRoutingRank,
@@ -21,114 +31,20 @@ import {
 import {
   claimUnownedTodo,
   getAuthoritativeSchedulerFacts,
+  recordAmuxClaimRefusal,
 } from "@/lib/amux/store";
+import { amuxInternalErrorResponse } from "@/lib/amux/internalRoute";
 
-const schedulerSignalsSchema = z
-  .object({
-    pin: z.number().int().min(0).max(10_000),
-    age_hours: z.number().int().min(0).max(1_000_000),
-    type_weight: z.number().int().min(0).max(40),
-    priority_weight: z.number().int().min(0).max(40),
-    dependents: z.number().int().min(0).max(1_000_000),
-    dependent_weight: z.number().int().min(0).max(5_000_000),
-    drag: z.number().int().min(0).max(8),
-  })
-  .strict();
+const noStoreHeaders = { "Cache-Control": "no-store" } as const;
 
-const schedulerV2SignalsSchema = schedulerSignalsSchema.extend({
-  urgency: z.number().int().min(0).max(240),
-  capacity_weight: z.number().int().min(0).max(20),
-  incident_bonus: z.number().int().min(0).max(80),
-  total: z.number().int().optional(),
-});
+const jsonNoStore = (body: unknown, status: number = 200) =>
+  Response.json(body, { status, headers: noStoreHeaders });
 
-const unitScore = z.number().min(0).max(1);
-
-const metricSchema = z
-  .object({
-    value: unitScore,
-    observed: z.boolean(),
-  })
-  .strict();
-
-const taskFitSchema = z
-  .object({
-    role_fit: unitScore,
-    provider_fit: unitScore,
-    combined: unitScore,
-    large_task: z.boolean(),
-  })
-  .strict();
-
-const candidateSchema = z
-  .object({
-    worker_name: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[A-Za-z0-9._:-]+$/),
-    provider: z.string().trim().min(1).max(80),
-    breakdown: z
-      .object({
-        task_fit: taskFitSchema,
-        predicted_success: metricSchema,
-        quota_remaining: metricSchema,
-        expected_speed: metricSchema,
-        low_rework: metricSchema,
-        low_human_attention: metricSchema,
-        cost_efficiency: metricSchema,
-        selected_score: unitScore,
-        intrinsic_score: unitScore,
-        operationally_allowed: z.boolean(),
-        provider_exhausted: z.boolean(),
-        selected_eligible: z.boolean(),
-      })
-      .strict(),
-  })
-  .strict();
-
-const routingEvidenceSchema = z
-  .object({
-    // Accept the previous client version during a rolling deployment. The
-    // persisted decision is always recomputed and stamped with the current
-    // server version below.
-    scoring_version: z.enum([
-      "amux-worker-router-v1",
-      "amux-worker-router-v2",
-    ]),
-    preferred_worker: z.string().trim().min(1).max(120).nullable(),
-    selected_worker: z.string().trim().min(1).max(120).nullable(),
-    preferred_score: unitScore.nullable(),
-    selected_score: unitScore.nullable(),
-    candidates: z.array(candidateSchema).min(1).max(128),
-  })
-  .strict();
-
-const signalsSchema = z
-  .object({
-    scheduler: z.union([schedulerSignalsSchema, schedulerV2SignalsSchema]),
-    routing: routingEvidenceSchema,
-  })
-  .strict();
-
-const requestSchema = z
-  .object({
-    task_id: z.string().trim().min(1).max(120),
-    worker: z.string().trim().min(1).max(120),
-    expected_revision: z.number().int().min(0),
-    decision: z
-      .object({
-        scheduler_score: z.number().int(),
-        scoring_version: z.enum([
-          "amux-global-priority-v1",
-          "amux-global-priority-v2",
-        ]),
-        signals: signalsSchema,
-      })
-      .strict(),
-  })
-  .strict();
+const isClaimInputError = (error: unknown): error is ApiSecurityError =>
+  error instanceof ApiSecurityError &&
+  ["INVALID_JSON", "INVALID_REQUEST", "REQUEST_BODY_TOO_LARGE"].includes(
+    error.code,
+  );
 
 // Rust and JavaScript both persist the server-authoritative full precision,
 // but caller parity is compared as basis points. Cross-language floating-point
@@ -140,7 +56,7 @@ const scoreEqual = (left: number, right: number) =>
 
 const validateRoutingEvidence = (
   worker: string,
-  routing: z.infer<typeof routingEvidenceSchema>,
+  routing: AmuxRoutingEvidence,
 ) => {
   const names = routing.candidates.map((candidate) => candidate.worker_name);
 
@@ -228,7 +144,7 @@ const validateRoutingEvidence = (
 };
 
 const routingMatchesAuthoritative = (
-  client: z.infer<typeof routingEvidenceSchema>,
+  client: AmuxRoutingEvidence,
   authoritative: AmuxRoutingScoreResult,
 ) => {
   if (
@@ -322,278 +238,318 @@ const routingMatchesAuthoritative = (
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
-    return Response.json(
-      { error: "Unauthorized" },
-      {
-        status: 401,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
+    return jsonNoStore({ error: "Unauthorized" }, 401);
   }
 
-  try {
-    const body = await readLimitedJson(request, 256 * 1_024, requestSchema);
+  return withAmuxRouteBudget(async () => {
+    try {
+      await anchorAmuxClaimDeadline();
+      if (!isAmuxExecutionApiEnabled()) {
+        await recordAmuxClaimRefusal("execution_api_disabled");
+        return jsonNoStore(
+          { claimed: false, reason: "execution_api_disabled" },
+          409,
+        );
+      }
 
-    const scheduler = body.decision.signals.scheduler;
+      let body: AmuxClaimRequest;
+      try {
+        body = await readLimitedJson(
+          request,
+          256 * 1_024,
+          amuxClaimRequestSchema,
+        );
+      } catch (error) {
+        if (!isClaimInputError(error)) throw error;
+        await recordAmuxClaimRefusal("invalid_request");
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
 
-    if (scheduler.dependent_weight !== scheduler.dependents * 5) {
-      return Response.json(
-        { error: "Invalid decision signals." },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      const scheduler = body.decision.signals.scheduler;
 
-    const recomputedSchedulerScore =
-      scheduler.pin +
-      scheduler.age_hours +
-      scheduler.type_weight +
-      scheduler.priority_weight +
-      scheduler.dependent_weight +
-      scheduler.drag +
-      ("urgency" in scheduler ? scheduler.urgency : 0) +
-      ("capacity_weight" in scheduler ? scheduler.capacity_weight : 0) +
-      ("incident_bonus" in scheduler ? scheduler.incident_bonus : 0);
+      if (scheduler.dependent_weight !== scheduler.dependents * 5) {
+        await recordAmuxClaimRefusal("dependent_weight_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
 
-    if (
-      recomputedSchedulerScore !== body.decision.scheduler_score ||
-      ("total" in scheduler &&
-        scheduler.total !== undefined &&
-        scheduler.total !== recomputedSchedulerScore)
-    ) {
-      return Response.json(
-        { error: "Invalid scheduler score." },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      const recomputedSchedulerScore =
+        scheduler.pin +
+        scheduler.age_hours +
+        scheduler.type_weight +
+        scheduler.priority_weight +
+        scheduler.dependent_weight +
+        scheduler.drag +
+        ("urgency" in scheduler ? scheduler.urgency : 0) +
+        ("capacity_weight" in scheduler ? scheduler.capacity_weight : 0) +
+        ("incident_bonus" in scheduler ? scheduler.incident_bonus : 0);
 
-    /*
-     * Re-read server-owned task/catalog facts immediately before ownership.
-     * The later store mutation performs the authoritative revision CAS again.
-     */
-    const schedulerObservedAt = new Date();
-    const [authoritativeSnapshot, schedulerFacts] = await Promise.all([
-      buildAmuxRoutingSnapshot(body.task_id, body.expected_revision),
-      getAuthoritativeSchedulerFacts(body.task_id, body.expected_revision),
-    ]);
+      if (
+        recomputedSchedulerScore !== body.decision.scheduler_score ||
+        ("total" in scheduler &&
+          scheduler.total !== undefined &&
+          scheduler.total !== recomputedSchedulerScore)
+      ) {
+        await recordAmuxClaimRefusal("scheduler_score_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return jsonNoStore({ error: "Invalid request." }, 400);
+      }
 
-    if (!schedulerFacts) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "scheduler_facts_unavailable",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      /*
+       * Re-read server-owned task/catalog facts immediately before ownership.
+       * The later store mutation performs the authoritative revision CAS again.
+       */
+      const schedulerObservedAt = new Date();
+      const [authoritativeSnapshot, schedulerFacts] = await Promise.all([
+        buildAmuxRoutingSnapshot(body.task_id, body.expected_revision),
+        getAuthoritativeSchedulerFacts(body.task_id, body.expected_revision),
+      ]);
 
-    const authoritativeScheduler = scoreAmuxScheduler({
-      ...schedulerFacts,
-      now: schedulerObservedAt,
-    });
-    const authoritativeSchedulerSignals = authoritativeScheduler;
-    const schedulerMatchesAuthority =
-      scheduler.pin === authoritativeScheduler.pin &&
-      scheduler.age_hours === authoritativeScheduler.age_hours &&
-      scheduler.type_weight === authoritativeScheduler.type_weight &&
-      scheduler.priority_weight === authoritativeScheduler.priority_weight &&
-      scheduler.dependents === authoritativeScheduler.dependents &&
-      scheduler.dependent_weight === authoritativeScheduler.dependent_weight &&
-      scheduler.drag === authoritativeScheduler.drag &&
-      "urgency" in scheduler &&
-      scheduler.urgency === authoritativeScheduler.urgency &&
-      scheduler.capacity_weight === authoritativeScheduler.capacity_weight &&
-      scheduler.incident_bonus === authoritativeScheduler.incident_bonus;
+      if (!schedulerFacts) {
+        await recordAmuxClaimRefusal("not_eligible", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: "not_eligible",
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
 
-    if (
-      body.decision.scheduler_score !== authoritativeScheduler.total ||
-      !schedulerMatchesAuthority
-    ) {
-      console.info(
-        JSON.stringify({
-          subsystem: "amux",
-          event: "scheduler_evidence_recomputed",
-          task_id: body.task_id,
-          expected_revision: body.expected_revision,
-          scoring_version: body.decision.scoring_version,
-          proposed_score: body.decision.scheduler_score,
-          authoritative_score: authoritativeScheduler.total,
-          observed_at: schedulerObservedAt.toISOString(),
-        }),
-      );
-    }
+      const authoritativeScheduler = scoreAmuxScheduler({
+        ...schedulerFacts,
+        now: schedulerObservedAt,
+      });
+      const authoritativeSchedulerSignals = authoritativeScheduler;
+      const schedulerMatchesAuthority =
+        scheduler.pin === authoritativeScheduler.pin &&
+        scheduler.age_hours === authoritativeScheduler.age_hours &&
+        scheduler.type_weight === authoritativeScheduler.type_weight &&
+        scheduler.priority_weight === authoritativeScheduler.priority_weight &&
+        scheduler.dependents === authoritativeScheduler.dependents &&
+        scheduler.dependent_weight ===
+          authoritativeScheduler.dependent_weight &&
+        scheduler.drag === authoritativeScheduler.drag &&
+        "urgency" in scheduler &&
+        scheduler.urgency === authoritativeScheduler.urgency &&
+        scheduler.capacity_weight === authoritativeScheduler.capacity_weight &&
+        scheduler.incident_bonus === authoritativeScheduler.incident_bonus;
 
-    if (!authoritativeSnapshot.eligible) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: authoritativeSnapshot.reason,
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
+      if (
+        body.decision.scheduler_score !== authoritativeScheduler.total ||
+        !schedulerMatchesAuthority
+      ) {
+        console.info(
+          JSON.stringify({
+            subsystem: "amux",
+            event: "scheduler_evidence_recomputed",
+            task_id: body.task_id,
+            expected_revision: body.expected_revision,
+            scoring_version: body.decision.scoring_version,
+            proposed_score: body.decision.scheduler_score,
+            authoritative_score: authoritativeScheduler.total,
+            observed_at: schedulerObservedAt.toISOString(),
+          }),
+        );
+      }
 
-    const authoritativeRouting = scoreAmuxWorkers(
-      authoritativeSnapshot.task,
-      authoritativeSnapshot.candidates,
-    );
+      if (!authoritativeSnapshot.eligible) {
+        await recordAmuxClaimRefusal(authoritativeSnapshot.reason, {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: authoritativeSnapshot.reason,
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
 
-    if (authoritativeRouting.selected_worker === null) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "no_authoritative_worker",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    if (authoritativeRouting.selected_worker !== body.worker) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "authoritative_worker_mismatch",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    if (
-      !isSelectedAmuxWorkerOwnershipReady(
+      const authoritativeRouting = scoreAmuxWorkers(
+        authoritativeSnapshot.task,
         authoritativeSnapshot.candidates,
-        body.worker,
-      )
-    ) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "selected_worker_not_ownership_ready",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
       );
+
+      if (authoritativeRouting.selected_worker === null) {
+        await recordAmuxClaimRefusal("no_authoritative_worker", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: "no_authoritative_worker",
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+
+      if (authoritativeRouting.selected_worker !== body.worker) {
+        await recordAmuxClaimRefusal("authoritative_worker_mismatch", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: "authoritative_worker_mismatch",
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+
+      if (
+        !isSelectedAmuxWorkerOwnershipReady(
+          authoritativeSnapshot.candidates,
+          body.worker,
+        )
+      ) {
+        await recordAmuxClaimRefusal("no_authoritative_worker", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: "no_authoritative_worker",
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+
+      const evidenceDecision = decideAmuxClaimEvidence({
+        internally_consistent: validateRoutingEvidence(
+          body.worker,
+          body.decision.signals.routing,
+        ),
+        matches_claim_time_authority: routingMatchesAuthoritative(
+          body.decision.signals.routing,
+          authoritativeRouting,
+        ),
+      });
+      if (!evidenceDecision.allowed) {
+        await recordAmuxClaimRefusal("invalid_routing_evidence", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return jsonNoStore(
+          { claimed: false, reason: "invalid_routing_evidence" },
+          409,
+        );
+      }
+
+      /*
+       * Historical and quota metrics are time-dependent. The routing snapshot
+       * fetched by the orchestrator and this claim-time snapshot cannot be
+       * byte-for-byte equal even when both are honest. The selected worker was
+       * already checked against the claim-time authoritative result above, and
+       * only that authoritative result is persisted below. Caller drift is
+       * diagnostic evidence, never an admission failure.
+       */
+      if (evidenceDecision.record_drift) {
+        console.info(
+          JSON.stringify({
+            subsystem: "amux",
+            event: "routing_evidence_recomputed",
+            task_id: body.task_id,
+            expected_revision: body.expected_revision,
+            proposed_worker: body.decision.signals.routing.selected_worker,
+            authoritative_worker: authoritativeRouting.selected_worker,
+            observed_at: schedulerObservedAt.toISOString(),
+          }),
+        );
+      }
+
+      // Do not claim unless the lifecycle has at least one live specialist path.
+      if (!authoritativeSnapshot.execution_ready) {
+        await recordAmuxClaimRefusal("execution_lifecycle_unavailable", {
+          taskId: body.task_id,
+          worker: body.worker,
+          expectedRevision: body.expected_revision,
+        });
+        return Response.json(
+          {
+            claimed: false,
+            reason: "execution_lifecycle_unavailable",
+          },
+          {
+            status: 409,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+
+      const claim = await claimUnownedTodo({
+        taskId: body.task_id,
+        worker: body.worker,
+        expectedRevision: body.expected_revision,
+        schedulerScore: authoritativeScheduler.total,
+        scoringVersion: AMUX_GLOBAL_PRIORITY_VERSION,
+        signals: {
+          scheduler: authoritativeSchedulerSignals,
+          planning: {
+            deadline: schedulerFacts.deadline
+              ? {
+                  due_at: schedulerFacts.deadline.due_at,
+                  precision: schedulerFacts.deadline.precision,
+                  source: schedulerFacts.deadline.source,
+                }
+              : null,
+            capacity_weight: schedulerFacts.capacityWeight,
+          },
+          routing: {
+            scoring_version: AMUX_WORKER_ROUTER_VERSION,
+            ...authoritativeRouting,
+          },
+          telemetry: authoritativeSnapshot.telemetry,
+        },
+      });
+
+      if (!claim.claimed) {
+        return claim.reason === "cas_lost"
+          ? jsonNoStore({ claimed: false })
+          : jsonNoStore({ claimed: false, reason: claim.reason }, 409);
+      }
+
+      return jsonNoStore({
+        claimed: true,
+        revision: claim.revision,
+        decision_id: claim.decisionId,
+      });
+    } catch (error) {
+      return amuxInternalErrorResponse("claim", error);
     }
-
-    const evidenceDecision = decideAmuxClaimEvidence({
-      internally_consistent: validateRoutingEvidence(
-        body.worker,
-        body.decision.signals.routing,
-      ),
-      matches_claim_time_authority: routingMatchesAuthoritative(
-        body.decision.signals.routing,
-        authoritativeRouting,
-      ),
-    });
-    if (!evidenceDecision.allowed) {
-      return Response.json(
-        {
-          error: "Routing evidence is internally inconsistent.",
-        },
-        {
-          status: 400,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    /*
-     * Historical and quota metrics are time-dependent. The routing snapshot
-     * fetched by the orchestrator and this claim-time snapshot cannot be
-     * byte-for-byte equal even when both are honest. The selected worker was
-     * already checked against the claim-time authoritative result above, and
-     * only that authoritative result is persisted below. Caller drift is
-     * diagnostic evidence, never an admission failure.
-     */
-    if (evidenceDecision.record_drift) {
-      console.info(
-        JSON.stringify({
-          subsystem: "amux",
-          event: "routing_evidence_recomputed",
-          task_id: body.task_id,
-          expected_revision: body.expected_revision,
-          proposed_worker: body.decision.signals.routing.selected_worker,
-          authoritative_worker: authoritativeRouting.selected_worker,
-          observed_at: schedulerObservedAt.toISOString(),
-        }),
-      );
-    }
-
-    // Do not claim unless the lifecycle has at least one live specialist path.
-    if (!authoritativeSnapshot.execution_ready) {
-      return Response.json(
-        {
-          claimed: false,
-          reason: "execution_lifecycle_unavailable",
-        },
-        {
-          status: 409,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    }
-
-    const claim = await claimUnownedTodo({
-      taskId: body.task_id,
-      worker: body.worker,
-      expectedRevision: body.expected_revision,
-      schedulerScore: authoritativeScheduler.total,
-      scoringVersion: AMUX_GLOBAL_PRIORITY_VERSION,
-      signals: {
-        scheduler: authoritativeSchedulerSignals,
-        planning: {
-          deadline: schedulerFacts.deadline
-            ? {
-                due_at: schedulerFacts.deadline.due_at,
-                precision: schedulerFacts.deadline.precision,
-                source: schedulerFacts.deadline.source,
-              }
-            : null,
-          capacity_weight: schedulerFacts.capacityWeight,
-        },
-        routing: {
-          scoring_version: AMUX_WORKER_ROUTER_VERSION,
-          ...authoritativeRouting,
-        },
-        telemetry: authoritativeSnapshot.telemetry,
-      },
-    });
-
-    return Response.json(
-      claim
-        ? {
-            claimed: true,
-            revision: claim.revision,
-            decision_id: claim.decisionId,
-          }
-        : { claimed: false },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch {
-    return Response.json(
-      { error: "Invalid request." },
-      {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
+  }, AMUX_CLAIM_ROUTE_BUDGET_MS);
 }

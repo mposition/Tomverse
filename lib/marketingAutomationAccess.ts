@@ -33,7 +33,8 @@ export const MARKETING_AUTOMATION_FEATURES = [
 export type MarketingAutomationFeature =
   (typeof MARKETING_AUTOMATION_FEATURES)[number];
 
-export type MarketingAutomationInputName = keyof MarketingAutomationAccessInputs;
+export type MarketingAutomationInputName =
+  keyof MarketingAutomationAccessInputs;
 
 export type MarketingAutomationAccessReason =
   | `input_unreadable:${MarketingAutomationInputName}`
@@ -66,10 +67,8 @@ export const TOMVERSE_DEPLOY_ENV = "TOMVERSE_DEPLOY_ENV";
 export const APP_ENV = "APP_ENV";
 export const RAILWAY_ENVIRONMENT_NAME = "RAILWAY_ENVIRONMENT_NAME";
 
-export const MARKETING_DRAFTS_KEY =
-  "marketingAutomation.draftsEnabled";
-export const MARKETING_PUBLISH_KEY =
-  "marketingAutomation.publishEnabled";
+export const MARKETING_DRAFTS_KEY = "marketingAutomation.draftsEnabled";
+export const MARKETING_PUBLISH_KEY = "marketingAutomation.publishEnabled";
 export const MARKETING_AUTO_PUBLISH_KEY =
   "marketingAutomation.autoPublishEnabled";
 export const MARKETING_EXPERIMENTS_KEY =
@@ -93,8 +92,7 @@ export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
  */
 export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = false;
 
-export const MARKETING_WEBHOOK_SCHEMA_VERSION =
-  "marketing-webhook-shadow-v1";
+export const MARKETING_WEBHOOK_SCHEMA_VERSION = "marketing-webhook-shadow-v1";
 export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [] as const;
 
 /** Only pipeline files that exist in S1. S2 must extend this closed list. */
@@ -138,7 +136,9 @@ const canonicalPipelinePath = (value: string): string => {
     /^[A-Za-z]:\//.test(path) ||
     path.split("/").some((part) => part === "" || part === "." || part === "..")
   ) {
-    throw new Error(`Marketing webhook pipeline path is not relative POSIX: ${value}`);
+    throw new Error(
+      `Marketing webhook pipeline path is not relative POSIX: ${value}`,
+    );
   }
   return path;
 };
@@ -154,7 +154,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
     }))
     .sort((left, right) => codePointCompare(left.path, right.path));
 
-  if (new Set(canonicalFiles.map((file) => file.path)).size !== canonicalFiles.length) {
+  if (
+    new Set(canonicalFiles.map((file) => file.path)).size !==
+    canonicalFiles.length
+  ) {
     throw new Error("Marketing webhook pipeline file paths must be unique.");
   }
 
@@ -219,17 +222,60 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  *
  * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
- * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
- * evidence backs a separate NOT NULL transition. Webhook admission never reads
- * this column; the fingerprint moves because the schema is watched as a whole.
+ * `MarketingPost.factsDigest`, nullable for rows predating the column. S2b3
+ * (2026-09-23) made it NOT NULL once both databases read zero. Webhook
+ * admission never reads it; the fingerprint moves because the schema is watched.
  *
  * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
  * columns and a new attempt check to the same schema. Those additions do not
  * touch a marketing model or admission decision; the watched-file digest still
  * moves so the dependency is reviewed explicitly.
+ *
+ * 2026-09-23, S2b1: `MARKETING_PAUSE_REASON_CODES` and its type moved into
+ * the watched schema module from `lib/marketingStore.ts`, which is server-only
+ * and therefore unreadable by the console that has to offer the list. The
+ * store re-exports the same names, so no caller changed and no value changed.
+ * Webhook admission reads none of it -- the pause reasons are not an input to
+ * any webhook decision -- but the file is watched whole, so the digest moves
+ * and the move is recorded here rather than absorbed.
+ *
+ * 2026-09-22: AMUX backlog default and source-provenance columns change only
+ * `AmuxWorkItem`. They do not change a marketing model, webhook writer, or
+ * admission decision; the whole-schema fingerprint moves by design.
+ *
+ * 2026-09-22: the catalog-import approval table is another `Amux*` model on
+ * the same watched schema. It does not change a marketing model, webhook
+ * writer, or admission decision. The digest moves because the schema file
+ * is watched as a whole.
+ *
+ * 2026-09-21, the permission ledger (S3): six more tables on the same watched
+ * schema -- EmailPermissionEvent, EmailSendApproval with its cohort and
+ * revocations, EmailPermissionDecision and its evidence. None is a marketing
+ * model, none changes the descriptor, the config snapshot or an admission
+ * decision, and nothing this pipeline stores or reads is different. The one
+ * shared edge is ConsentRecord, which gains a back-relation and no column.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side of
+ * the conflict -- the merged tree is the only one that will exist.
+ *
+ * 2026-09-23, the multi-provider routing identity schema: twelve tables --
+ * ProviderEndpoint, EndpointResidencyApproval, ModelDeployment,
+ * RoutingIdentityManifest and its entries, DeploymentCacheAffinity,
+ * ProviderRegistryEntry, QuotaScope, CredentialBinding,
+ * RoutingCandidateVerdict, QuotaCapacityState, AvailabilityObservation --
+ * plus columns on RoutingRun, RoutingAttempt, ProviderProbeResult and
+ * ModelDeployment. Every one of them is dark: `npm run check:dark-tables`
+ * fails if any runtime source reads or writes one.
+ *
+ * None is a marketing model, none touches the descriptor, the config
+ * snapshot, a webhook writer or an admission decision. The shared edges are
+ * back-relations only -- `User` gains two and `Conversation` gains one, and
+ * neither gains a column. The digest moves because the schema file is
+ * watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "0b6176cf9a23368db901b33764f66a8ec314a32c7a401c4202a39827f67b5b44";
+  "9db95fb341a63aaeef26a79d59595154ee2c3ed6704eb62ba7bb7a615f219414";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -251,10 +297,12 @@ export const marketingWebhookEnvDigests = (
   names: readonly string[],
 ): Readonly<Record<string, string | null>> =>
   Object.fromEntries(
-    [...names].sort(codePointCompare).map((name) => [
-      name,
-      env[name] === undefined ? null : sha256(env[name]),
-    ]),
+    [...names]
+      .sort(codePointCompare)
+      .map((name) => [
+        name,
+        env[name] === undefined ? null : sha256(env[name]),
+      ]),
   );
 
 const sameSortedStrings = (
@@ -308,7 +356,9 @@ export const computeMarketingWebhookConfigSnapshotDigest = (
   );
   return sha256(
     canonicalMarketingWebhookJson({
-      acceptedEventTypes: [...snapshot.acceptedEventTypes].sort(codePointCompare),
+      acceptedEventTypes: [...snapshot.acceptedEventTypes].sort(
+        codePointCompare,
+      ),
       appSettings,
       envDigests,
       schemaVersion: snapshot.schemaVersion,
@@ -405,6 +455,37 @@ export const marketingWebhookApplyScopeSchema = z
     scope: uniqueScope(marketingWebhookScopeEntrySchema),
   })
   .strict();
+
+/**
+ * What a stored apply-scope value is, judged exactly as `readJson` judges it.
+ *
+ * Exported so a screen can report the document's state without arriving at a
+ * different answer from the decision. The Admin console's switch strip got
+ * this wrong twice by reading the raw string: an empty string is a *stored*
+ * document this module refuses, and a BOM-prefixed document is one it accepts,
+ * so "non-empty" and "parses as JSON" are both the wrong test.
+ *
+ * `absent` is the only state the decision does not distinguish -- it refuses a
+ * missing value and a malformed one alike -- and it is the distinction an
+ * operator needs, because one of the two is somebody's mistake sitting in a
+ * row that nothing else would mention.
+ */
+export type MarketingWebhookApplyScopeStatus = "absent" | "valid" | "invalid";
+
+export const marketingWebhookApplyScopeStatus = (
+  value: string | null | undefined,
+): MarketingWebhookApplyScopeStatus => {
+  if (typeof value !== "string") return "absent";
+  try {
+    return marketingWebhookApplyScopeSchema.safeParse(
+      JSON.parse(canonicalMarketingWebhookFileText(value)),
+    ).success
+      ? "valid"
+      : "invalid";
+  } catch {
+    return "invalid";
+  }
+};
 
 type WebhookScopeEntry = z.infer<typeof marketingWebhookScopeEntrySchema>;
 
@@ -556,12 +637,17 @@ const webhookApplyDecision = (
     marketingWebhookVerificationSignatureSchema,
   );
 
-  if (record && record.pipelineFingerprint !== MARKETING_WEBHOOK_PIPELINE_FINGERPRINT) {
+  if (
+    record &&
+    record.pipelineFingerprint !== MARKETING_WEBHOOK_PIPELINE_FINGERPRINT
+  ) {
     add(reasons, "webhook_pipeline_fingerprint_stale");
   }
   if (!input.webhookConfigSnapshot.ok) {
     add(reasons, "input_unreadable:webhookConfigSnapshot");
-  } else if (!isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)) {
+  } else if (
+    !isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)
+  ) {
     add(reasons, "webhook_config_snapshot_invalid");
   } else if (record) {
     const currentConfigDigest = computeMarketingWebhookConfigSnapshotDigest(
@@ -608,7 +694,9 @@ const webhookApplyDecision = (
     if (
       configured.scope.some(
         (entry) =>
-          !record.observedScope.some((observed) => sameScopeEntry(entry, observed)),
+          !record.observedScope.some((observed) =>
+            sameScopeEntry(entry, observed),
+          ),
       )
     ) {
       add(reasons, "webhook_scope_not_observed");

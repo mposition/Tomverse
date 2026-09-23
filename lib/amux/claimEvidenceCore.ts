@@ -42,7 +42,9 @@ export const isSelectedAmuxWorkerOwnershipReady = (
       !candidate.worker.paused &&
       !candidate.worker.isolated &&
       !candidate.worker.blocked &&
-      candidate.worker.running &&
-      candidate.worker.status.toLowerCase() === "idle" &&
-      candidate.worker.dispatch_ready,
+      !(
+        candidate.worker.running &&
+        candidate.worker.status.toLowerCase() === "idle" &&
+        !candidate.worker.dispatch_ready
+      ),
   );

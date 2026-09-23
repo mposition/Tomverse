@@ -44,7 +44,7 @@ test("sub-basis-point routing differences remain ordered by the real score", () 
   assert.equal(candidates[0]?.worker, "z-worker");
 });
 
-test("global lifecycle readiness cannot substitute for the selected worker", () => {
+test("ownership readiness recognizes startable workers but rejects an unsafe idle boundary", () => {
   const worker = (worker_name, overrides = {}) => ({
     worker: {
       worker_name,
@@ -69,10 +69,7 @@ test("global lifecycle readiness cannot substitute for the selected worker", () 
     worker("isolated-worker", { isolated: true }),
   ];
   assert.equal(
-    isSelectedAmuxWorkerOwnershipReady(
-      candidates,
-      "selected-without-boundary",
-    ),
+    isSelectedAmuxWorkerOwnershipReady(candidates, "selected-without-boundary"),
     false,
   );
   assert.equal(
@@ -81,7 +78,7 @@ test("global lifecycle readiness cannot substitute for the selected worker", () 
   );
   assert.equal(
     isSelectedAmuxWorkerOwnershipReady(candidates, "startable-worker"),
-    false,
+    true,
   );
   assert.equal(
     isSelectedAmuxWorkerOwnershipReady(candidates, "isolated-worker"),
@@ -89,7 +86,7 @@ test("global lifecycle readiness cannot substitute for the selected worker", () 
   );
 });
 
-test("server routing chooses the idle worker below busy preferred demand", () => {
+test("server routing preserves busy preferred demand for the execution starter", () => {
   const candidate = (worker_name, provider, roles, overrides = {}) => ({
     worker: {
       worker_name,
@@ -124,5 +121,5 @@ test("server routing chooses the idle worker below busy preferred demand", () =>
     ],
   );
   assert.equal(result.preferred_worker, "devin-worker");
-  assert.equal(result.selected_worker, "codex-impl");
+  assert.equal(result.selected_worker, "devin-worker");
 });

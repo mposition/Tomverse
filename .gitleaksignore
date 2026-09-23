@@ -266,3 +266,56 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:54
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:94
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md:generic-api-key:168
+
+# Provider doc fixture copied a public quick-start, not a credential.
+#
+# Commits 302185ba (develop PR) and ae2fffc5 (main cherry-pick) copied Zhipu's
+# published GLM-5.3 page, whose cURL sample says `Authorization: Bearer
+# your-api-key`. That placeholder never authorised anything. gitleaks reads
+# the curl header as curl-auth-header, which is the correct behaviour for a
+# scanner, so the follow-up commit writes `$ZHIPU_API_KEY` instead — the same
+# shape the Groq fixture already uses — rather than teaching the scanner to
+# ignore every bearer sample.
+#
+# The introducing commits are immutable history and stay pinned here.
+#
+# Scope: exactly these four findings in those two commits — nothing wider.
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+
+# Commit 9662e94b (S2a, 2026-09-21) added two marketing E2E fixture constants
+# that assigned a hyphenated token to a property whose name ends in "Key" --
+# MarketingPost's idempotency identifier, which is a business key a draft is
+# deduplicated by and not a credential. To a scanner that is a key assignment,
+# and reading it that way is correct behaviour rather than a bug in the rule.
+#
+# The shape is described rather than quoted here. The first attempt at this
+# note reproduced the offending line verbatim, and gitleaks scans this file
+# too, so the explanation became a finding of its own.
+#
+# Pinned rather than allowlisted for the same reason as the block above: an
+# allowlist pattern wide enough to cover that property name would also cover a
+# line that really did assign a secret to something similarly named. The
+# introducing commit is immutable history and stays here.
+#
+# The follow-up commit stopped writing the shape -- the fixture property is now
+# named `logical` and the seed passes it as an identifier rather than as a
+# quoted literal -- so no later edit recreates the finding under a new commit.
+#
+# Scope: exactly these two findings in that one commit -- nothing wider.
+9662e94bcfe3557df2df6e43cca689e2887114b4:tests/e2e-admin/support/fixture-data.ts:generic-api-key:361
+9662e94bcfe3557df2df6e43cca689e2887114b4:tests/e2e-admin/support/fixture-data.ts:generic-api-key:367
+
+# Commit f0910bfd (S2a, 2026-09-22) is the note above, in its first form. That
+# draft reproduced the offending line verbatim in order to explain it, and
+# gitleaks scans this file too, so the explanation became two findings of its
+# own. The next commit rewrote the note to describe the shape instead, but the
+# draft is immutable history on the branch and the history scan still reads it.
+#
+# These two lines exist only because of that mistake and cover nothing in the
+# product. They can be deleted once this branch is squash-merged, at which
+# point the commit will not be in develop history at all.
+f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:271
+f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
