@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "marketing-admission-code-manifest-v1",
+  "roots": [
+    "lib/marketingAutomationAccess.ts",
+    "lib/marketingGuardCore.ts",
+    "lib/marketingFacts.ts",
+    "lib/marketingStore.ts"
+  ],
+  "digest": "2dc827cffb421e258408369f2cc750410708557914d2f9a90907dd37bbab1de4",
+  "totalSizeBytes": 371969,
+  "files": [
+    {
+      "path": "lib/adminAudit.ts",
+      "sizeBytes": 9441,
+      "sha256": "d49515bc1e7ba0d5562fe6e2dddf680e09c32339056e99fb3f13ef1bc5bcdd99"
+    },
+    {
+      "path": "lib/adminAuditIntegrityCore.ts",
+      "sizeBytes": 6854,
+      "sha256": "dd460238a2f838fd6e2b6d01270e82b14fe8d56382845bd7664b78eb9e4af69e"
+    },
+    {
+      "path": "lib/adminAuditSystemActors.ts",
+      "sizeBytes": 3143,
+      "sha256": "5625c52b4d0e5099d9d17ed0d1170dc1f245c0e0db3ac032ffe9a7c2e59c2b39"
+    },
+    {
+      "path": "lib/clientIp.ts",
+      "sizeBytes": 2596,
+      "sha256": "ef33d641ecb0f1f45b668d61e4a5df91be4d3a22b39e28d2cadfd0145e6bc95f"
+    },
+    {
+      "path": "lib/deploymentEnvironment.ts",
+      "sizeBytes": 4353,
+      "sha256": "322127ee5d1105ad532f4aa76523a99c282621c98249c500198d538e3f893d09"
+    },
+    {
+      "path": "lib/marketingAuditEvidence.ts",
+      "sizeBytes": 9816,
+      "sha256": "3eb055b2ad783a15def3f4942db243420514cbabe448cc5041c66cde4a406309"
+    },
+    {
+      "path": "lib/marketingAutomationAccess.ts",
+      "sizeBytes": 30889,
+      "sha256": "cc50744653d60d71bfb94a5ced1bb65b3faffa268f49bdfb6e70734ffe4c7f47"
+    },
+    {
+      "path": "lib/marketingAutomationSchema.ts",
+      "sizeBytes": 30616,
+      "sha256": "3c72dc347094a20c51406e97478e00821dfc31853a6446dec5fa027712ac706b"
+    },
+    {
+      "path": "lib/marketingBannedClaims.ts",
+      "sizeBytes": 5860,
+      "sha256": "09538814072d86d2da504466d40599cb3da43658e9b1d9441a26d741fe514197"
+    },
+    {
+      "path": "lib/marketingClaimVerbs.ts",
+      "sizeBytes": 4633,
+      "sha256": "2e8e74463f68f0f1ddca51ae9578420905f111d36fb0b3bb6ba7184c979547f7"
+    },
+    {
+      "path": "lib/marketingFacts.ts",
+      "sizeBytes": 6923,
+      "sha256": "6d3510d2b80e58b7f899ce13ff6eecec6ead05862333a6a94aef93d8123d4e8a"
+    },
+    {
+      "path": "lib/marketingGuardCore.ts",
+      "sizeBytes": 47448,
+      "sha256": "50415089075502625a4d47cc0b187b52453b651db6adaa4fdd6bfbba2c75527e"
+    },
+    {
+      "path": "lib/marketingGuardNormalise.ts",
+      "sizeBytes": 22591,
+      "sha256": "6ea57f95c4fd660afd62e5343b3007f1a9bc8313e310284de6ff1336104d214b"
+    },
+    {
+      "path": "lib/marketingGuardRules.ts",
+      "sizeBytes": 18953,
+      "sha256": "0e4fc64e7dd2383ee910001386d27db5afd6c32c6d886beeb3177e1a52bd99fa"
+    },
+    {
+      "path": "lib/marketingKoreanClaims.ts",
+      "sizeBytes": 8904,
+      "sha256": "0e91f8f8c3b75f729e2a798a9495dabc185e3633872632c939dc1b0ce69a20f8"
+    },
+    {
+      "path": "lib/marketingMemoryClaims.ts",
+      "sizeBytes": 21038,
+      "sha256": "9c436437fcb2fbb0b54d0bae4e5406367e9bbc2f6c4be873f3af7ae5934259f9"
+    },
+    {
+      "path": "lib/marketingMinorsClaims.ts",
+      "sizeBytes": 12528,
+      "sha256": "6671d50b56a5b9267daf6e986117be10e94ac750451de5da4289032561b68e32"
+    },
+    {
+      "path": "lib/marketingNegation.ts",
+      "sizeBytes": 14940,
+      "sha256": "b3507d290a045a7eb74635aac6231ecc984d4fc37541fc6570ac026e957b8b66"
+    },
+    {
+      "path": "lib/marketingStore.ts",
+      "sizeBytes": 105248,
+      "sha256": "682461448c1b86c2ccc5350e2647ebb174a7092dea4fb0ddaabaeaebb915bea4"
+    },
+    {
+      "path": "lib/postgresConnectionConfigCore.mjs",
+      "sizeBytes": 3924,
+      "sha256": "994dc017e8d9744e0c903b17ad452c4752bd3c292c77fdbf2c087618f8e73154"
+    },
+    {
+      "path": "lib/prisma.ts",
+      "sizeBytes": 1271,
+      "sha256": "c3245196e95f7c9198b0d6834f221969eeede43b9bf59bf01c8d77000056bedc"
+    }
+  ]
+}
