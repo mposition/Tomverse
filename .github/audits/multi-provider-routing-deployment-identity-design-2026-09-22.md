@@ -938,7 +938,7 @@ workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 wo
 | 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
 | 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
 | 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료(`RoutingCandidateVerdict`), ceiling 미착수 |
-| 9 | sticky·score snapshot grain 전환, 그 뒤 shadow 검증 | 미착수 |
+| 9 | sticky·score snapshot grain 전환, 그 뒤 shadow 검증 | 판정 (`lib/routingStickyGrain.ts`, §14.21). 저장된 id는 그대로. 라우터는 호출하지 않음 |
 | 10 | decision grain을 `deploymentId`로 원자 전환 | §8.1 선행조건 5개가 선행 |
 | 11 | scope·capacity 준비 후 2-attempt fallback 활성화 | 미착수 |
 | 12 | provider attestation 입증 시 equivalence class 재검토 | 미착수 |
@@ -1466,6 +1466,31 @@ ADR 풀의 Vertex AI와 Azure OpenAI가 `lib/regionPinHosts.ts`에 있습니다.
 이 두 호스트가 §14.3의 남은 호스트 단위입니다. 직전 pre-commit 보고는
 34, 약 68%였습니다. §14.3의 약 50단위에서 완료는 36, **약 72%(추정)**입니다.
 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.21 Sticky와 score snapshot은 logical grain으로 읽습니다 (2026-09-24)
+
+판정이 `lib/routingStickyGrain.ts`에 있습니다. 요청 경로는 import하지
+않습니다. 행을 쓰지 않습니다. 대화의 sticky·recovery id를 deployment id로
+바꾸지 않고, 카탈로그 score snapshot도 다시 쓰지 않습니다.
+
+- 저장된 id는 호출자가 준 logical 목록에 정확히 있을 때만 logical입니다.
+  deployment 목록에만 있으면 거절입니다. 양쪽에 있으면 거절입니다. 어느
+  쪽에도 없으면 거절입니다. 빈 문자열은 거절입니다. null은 비어 있는
+  sticky이고 거절이 아닙니다.
+- 앞뒤 공백을 잘라 다른 id를 같은 것으로 만들지 않습니다.
+- logical 행의 provider는 deployment가 아닙니다. binding이 없으면 그 행은
+  deployment 점수로 복사되지 않고 기권입니다. binding이 둘 이상인데 어느
+  쪽도 자기 evidence가 없으면 기권입니다. 자기 evidence가 있는 binding만
+  deployment 칸이 됩니다. 부족한 신호를 prior로 채우지 않습니다.
+- shadow는 같은 멤버가 다른 순서일 때만 diverge입니다. 기권, 빈 순서,
+  짝이 안 맞는 집합은 inconclusive입니다. match는 모델을 고르지 않습니다.
+  한 logical 모델의 deployment가 둘이면 그 비교는 inconclusive입니다.
+  logical 순서가 그 둘을 표현하지 못하기 때문입니다.
+
+이 줄이 §14의 9번입니다. 직전 region-pin 보고는 36, 약 72%였습니다.
+§14.3의 약 50단위에서 완료는 37, **약 74%(추정)**입니다. 10번의 원자
+전환은 하지 않습니다. §8.1의 선행조건은 그대로입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
