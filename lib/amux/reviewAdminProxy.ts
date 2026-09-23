@@ -19,11 +19,29 @@ const transportUnresolved = () =>
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 
-const proxyConfigurationError = (code: string) =>
-  Response.json(
+const proxyConfigurationError = (code: string) => {
+  console.error("AMUX review proxy configuration refused", { code });
+  return Response.json(
     { success: false, code },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
+};
+
+const safeUpstreamCode = async (response: Response) => {
+  try {
+    const body = await response.clone().json() as { code?: unknown };
+    return typeof body.code === "string" ? body.code : null;
+  } catch {
+    return null;
+  }
+};
+
+const safeTransportCauseCode = (error: unknown) => {
+  if (!(error instanceof Error) || !("cause" in error)) return null;
+  const cause = error.cause;
+  if (!cause || typeof cause !== "object" || !("code" in cause)) return null;
+  return typeof cause.code === "string" ? cause.code : null;
+};
 
 /**
  * Admin cookies never reach the browser-facing internal credential. Only the
@@ -102,6 +120,12 @@ export async function forwardAmuxAdminReviewCommand(
       // One protected detail may require three bounded GitHub reads (PR, diff, PR).
       signal: AbortSignal.timeout(30_000),
     });
+    if (!response.ok) {
+      console.error("AMUX review proxy upstream refused", {
+        status: response.status,
+        code: await safeUpstreamCode(response),
+      });
+    }
     if (response.status >= 300 && response.status < 400)
       return proxyConfigurationError("AMUX_REVIEW_PROXY_REDIRECT_REFUSED");
     return new Response(response.body, {
@@ -111,7 +135,11 @@ export async function forwardAmuxAdminReviewCommand(
         "Cache-Control": "no-store",
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("AMUX review proxy transport unresolved", {
+      error: error instanceof Error ? error.name : "unknown",
+      causeCode: safeTransportCauseCode(error),
+    });
     // A timed-out resolve can have committed. Do not claim it was disabled or
     // that no decision was made; freeze further writes and query decision ID
     // plus subject digest before any operator retries.
