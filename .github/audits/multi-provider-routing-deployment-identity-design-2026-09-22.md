@@ -1014,7 +1014,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 없음 |
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | benchmark version·마지막 검증 시각은 §14.7. stale 전환과 drift 재검증은 없음 |
-| §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 없음 |
+| §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | provider 단위만 |
 | §8.5 | load guard | 없음 |
@@ -1124,12 +1124,30 @@ enabled인 행의 pin과 benchmark 이름을 identity trigger가 고정합니다
 - `qualityLastVerifiedAt`은 같은 benchmark를 다시 잰 시각입니다. enabled인
   채로 갱신할 수 있습니다. manifest에는 들어가서 발행 시점의 시각이 남습니다.
 
-이 필드가 §14.3의 version gate 항목입니다. pin hard gate와, 만료를 `stale`로
-돌리는 운영 전환은 아직입니다.
+이 필드가 §14.3의 version gate 항목입니다. pin의 요청 경로 연결과, 만료를
+`stale`로 돌리는 운영 전환은 아직입니다. 판정 함수는 §14.8입니다.
 
 §14.3의 약 50단위에서 완료는 24, **약 48%(추정)**입니다. 직전 OpenRouter
 등록 보고는 23, 약 46%였습니다. 검증·독립 검토·병합·배포는 별도입니다.
 production 배포는 0%입니다.
+
+## 14.8 Pin hard gate의 판정 (2026-09-23)
+
+ADR §3.5의 판정이 `lib/routingPinGate.ts`에 있습니다. 요청 경로는
+import하지 않습니다. 후보를 고르는 코드는 아직 이 함수를 부르지 않습니다.
+
+- scope는 `provider`와 `deployment`입니다.
+- pin이 있으면 explore rate는 0입니다.
+- fallback의 기본은 `error`입니다. `allow`만, 그리고 pin이 거절한 후보에
+  한해서, 일반 pool로 나갈 수 있습니다.
+- 철자가 다른 fallback 값은 `error`로 읽습니다.
+- capability·quality·version·residency·credential gate는 그대로 적용됩니다.
+  이 함수는 그 답을 대신하지 않습니다.
+- `pinPolicyVersionHeld()`는 요청 시작 때 잡은 정책 버전과 현재 버전이
+  같을 때만 참입니다. 그 버전을 요청에 저장하는 곳은 아직 없습니다.
+
+이 줄은 §14.3의 pin 항목을 완료로 세지 않습니다. 완료 수는 24, **약 48%(추정)**
+그대로입니다.
 
 ## 15. 되돌릴 수 없는 것
 
