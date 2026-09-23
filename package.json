@@ -168,6 +168,7 @@
     "report:marketing-reach": "node --conditions=react-server --import tsx scripts/report-marketing-reach.mjs",
     "report:gdpr-article-27-presence": "node --conditions=react-server --import tsx scripts/report-gdpr-article-27-presence.mjs",
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
+    "report:routing-attempt-error-classes": "node --conditions=react-server --import tsx scripts/report-routing-attempt-error-classes.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "report:anthropic-cache-efficiency": "node --conditions=react-server --import tsx scripts/report-anthropic-cache-efficiency.mjs",
     "diagnose:admin-audit-entry": "node --conditions=react-server --import tsx scripts/diagnose-admin-audit-entry.mjs",
