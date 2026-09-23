@@ -351,16 +351,19 @@ test("the marker decision is left where it already lives", () => {
     // A dispatcher consulting a capability column instead of
     // lib/anthropicPromptCaching.ts would be a second answer to the same
     // question, and the two would drift without either saying so.
-    const module = readFileSync(
+    // `source`, not `module`: assigning to that name trips
+    // @next/next/no-assign-module-variable, which runs over the whole
+    // repository and does not care that this is a test.
+    const source = readFileSync(
         new URL("../lib/deploymentCacheAffinity.ts", import.meta.url),
         "utf8"
     );
-    assert.match(module, /lib\/anthropicPromptCaching\.ts/);
+    assert.match(source, /lib\/anthropicPromptCaching\.ts/);
     // The marker travels in providerOptions. Naming cache_control in prose is
     // how this module points at the decision it does not take; building one
     // would be it taking that decision.
     assert.ok(
-        !module.includes("providerOptions"),
+        !source.includes("providerOptions"),
         "this module does not build provider options"
     );
 });
