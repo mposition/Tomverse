@@ -496,7 +496,37 @@ test("the country on the row is the one the caller says it showed", async () => 
   });
 });
 
-test("two candidates leave the country undetermined rather than picking one", async () => {
+test("a resolution that settles nothing renders nothing, and is still recorded", async () => {
+  // Draft section 5.3 wants the IP country kept as a second candidate, and
+  // says in the same passage that S0 must amend the approved contract first --
+  // which it has not. So today an unresolved account has no rule to render,
+  // and the list is empty rather than holding a country no signal placed the
+  // person in.
+  //
+  // It is still recorded. Dismissing the notice has to leave `notice_shown`
+  // behind whatever the jurisdiction was, or the notice returns on every
+  // sign-in for exactly the people we could not place.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [],
+    resolved: {
+      countryCode: "ZZ",
+      profileKey: "ZZ",
+      confidence: "unknown",
+      source: "unresolved",
+    },
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "ZZ");
+  assert.equal(row.jurisdictionSource, "unresolved");
+  assert.deepEqual((row.evidence as { candidates: unknown[] }).candidates, []);
+});
+
+test("an inferred country is rendered on its own, without the IP country", async () => {
   // Section 5.3: an uncertain estimate keeps both and evaluates both, because
   // somebody who might be in Korea has to pass Korea's rule too. The column
   // holds one value, so it holds the true one -- `ZZ` -- and the candidates
@@ -516,34 +546,26 @@ test("two candidates leave the country undetermined rather than picking one", as
         ruleVersion: 2,
         copyHash: "sha256:kr-device",
       },
-      {
-        country: "US",
-        signal: "inferred",
-        ruleVersion: 1,
-        copyHash: "sha256:us-device",
-      },
     ],
     resolved: {
-      // What the resolver actually returns when nothing settles: the sentinel
-      // in the column, and the countries it did see elsewhere. Draft section
-      // 5.3 keeps both candidates in exactly this case.
       countryCode: "KR",
       profileKey: "KR",
       confidence: "low",
       source: "inferred",
-      observedIpCountry: "US",
     },
   });
 
   const row = await prisma.emailPermissionEvent.findFirstOrThrow({
     where: { userId: user.id, kind: "notice_shown" },
   });
+  // The column folds to the sentinel because an inference does not settle a
+  // jurisdiction; the country it did infer stays in the evidence.
   assert.equal(row.jurisdiction, "ZZ");
   assert.equal(row.jurisdictionSource, "unresolved");
   const evidence = row.evidence as { candidates: { country: string }[] };
   assert.deepEqual(
     evidence.candidates.map((candidate) => candidate.country),
-    ["KR", "US"]
+    ["KR"]
   );
 });
 
@@ -694,13 +716,18 @@ test("a conflict has to name the countries that disagreed, and they have to be o
     );
   }
 
+  // Half a conflict. This used to be accepted, because the settled-singleton
+  // rule does not run when the column is `ZZ` -- and a conflict's column is
+  // always `ZZ`. The row then claimed a conflict while naming one side, so
+  // Korea's prefix would never have attached to this account, and writing it
+  // again with both is refused as a different fact.
   await assert.rejects(
     recordNoticeShown({
       ...noticeInput(user),
       candidates: [twoRules[0]!],
       resolved: { ...conflicted, conflicts: ["AU", "KR"] },
     }),
-    /AU is settled, so it is the only rule|KR is not a country|is not a country this resolution involved/
+    /KR is a country this resolution involved/
   );
 
   await recordNoticeShown({
@@ -741,7 +768,11 @@ test("a settled country is the only rule the screen should have rendered", async
         },
       ],
     }),
-    /AU is settled, so it is the only rule/
+    // The membership check answers first, because nothing named Korea at
+    // all. The singleton rule is what would catch a resolution that named a
+    // country *alongside* a settled one, which no current resolver output
+    // does -- it stays as its own statement rather than as live cover.
+    /KR is not a country this resolution involved/
   );
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
@@ -1009,10 +1040,9 @@ test("a retry carrying different candidates is refused, not silently dropped", a
         profileKey: "KR",
         confidence: "low",
         source: "inferred",
-        observedIpCountry: "AU",
       },
     }),
-    /describes something else/
+    /AU is not a country this resolution involved/
   );
 
   const rows = await prisma.emailPermissionEvent.findMany({

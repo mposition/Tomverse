@@ -15,6 +15,8 @@ import {
   normalizeEmailAddress,
 } from "@/lib/emailSuppressionCore";
 import {
+  DETERMINATIVE_JURISDICTION_SOURCES,
+  NOTICE_CANDIDATE_SIGNALS,
   canonicalJson,
   inProductNoticeOffer,
   noticeJurisdictionColumns,
@@ -229,15 +231,6 @@ type RecordInput = {
      * countries the conflict was between.
      */
     conflicts?: readonly string[];
-    /**
-     * The IP country the resolver observed and set aside.
-     *
-     * Also part of `ResolvedJurisdiction`. It is not a jurisdiction -- the
-     * approved contract keeps it for measurement -- but it is a country whose
-     * rule a screen may legitimately have rendered, because draft section 5.3
-     * makes it one of the two candidates an uncertain estimate keeps.
-     */
-    observedIpCountry?: string | null;
   };
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
@@ -252,11 +245,7 @@ const recordNoticeEvent = async (
       "An in-product notice event must carry the hash of the words that were on the screen."
     );
   }
-  if (input.candidates.length === 0) {
-    throw new Error(
-      "An in-product notice event must carry the country whose rule was shown."
-    );
-  }
+
 
   const db = input.client ?? prisma;
   const record = noticeRecordFor(action);
@@ -272,9 +261,9 @@ const recordNoticeEvent = async (
         `"${candidate.country}" is not a country code; an in-product notice event cannot record it.`
       );
     }
-    if (candidate.signal.trim().length === 0) {
+    if (!NOTICE_CANDIDATE_SIGNALS.has(candidate.signal)) {
       throw new Error(
-        "An in-product notice event must carry where each candidate country came from."
+        `"${candidate.signal}" is not a signal a candidate can come from.`
       );
     }
     if (candidate.copyHash.trim().length === 0) {
@@ -325,6 +314,19 @@ const recordNoticeEvent = async (
       "An in-product notice event cannot record a conflict on one of the source and the confidence but not the other."
     );
   }
+  // `high` is a claim only three sources can make (approved contract
+  // sections 6.1 to 6.3). An inference is `low` by construction, so
+  // `high` + `inferred` is a pair the resolver never produces -- and one
+  // that would have settled the column on a guess, with a real profile behind
+  // it so the override's `country_undetermined` would not have stopped it.
+  if (
+    resolved.confidence === "high" &&
+    !DETERMINATIVE_JURISDICTION_SOURCES.has(resolved.source)
+  ) {
+    throw new Error(
+      `A ${resolved.source} resolution cannot be high confidence.`
+    );
+  }
 
   const jurisdiction = noticeJurisdictionColumns(resolved);
 
@@ -346,28 +348,30 @@ const recordNoticeEvent = async (
   const namedCountries = new Set<string>();
   if (resolved.countryCode !== "ZZ") namedCountries.add(resolved.countryCode);
 
-  // A conflict names exactly two, and they are where the countries live when
-  // the column cannot hold them.
+  // A conflict names exactly two, and the screen rendered exactly those two.
+  //
+  // Equality rather than membership, and the difference was a real hole:
+  // `conflicts: ["AU", "KR"]` with only Australia rendered was accepted,
+  // because the settled-singleton rule below does not run when the column is
+  // `ZZ` -- and a conflict's column is always `ZZ`. The row then said a
+  // conflict happened while its evidence named one side, so Korea's
+  // `(광고)` prefix would never attach to that account. Writing it again
+  // with both is refused as a different fact, so the first write is final.
   if (resolved.confidence === "conflict") {
-    const conflicts = input.resolved.conflicts ?? [];
-    const normalized = conflicts.map((country) => normalizeCountry(country));
+    const conflicts = (input.resolved.conflicts ?? []).map((country) =>
+      normalizeCountry(country)
+    );
     if (
-      normalized.length !== 2 ||
-      normalized.some((country) => country === null || country === "ZZ") ||
-      normalized[0] === normalized[1]
+      conflicts.length !== 2 ||
+      conflicts.some((country) => country === null || country === "ZZ") ||
+      conflicts[0] === conflicts[1]
     ) {
       throw new Error(
         "A conflicting resolution must name exactly two different countries that disagreed."
       );
     }
-    for (const country of normalized) namedCountries.add(country!);
+    for (const country of conflicts) namedCountries.add(country!);
   }
-
-  // The observed IP country is not a jurisdiction, and it is a country whose
-  // rule the screen may have rendered: draft section 5.3 makes it one of the
-  // two candidates an uncertain estimate keeps.
-  const observed = normalizeCountry(input.resolved.observedIpCountry ?? null);
-  if (observed !== null && observed !== "ZZ") namedCountries.add(observed);
 
   const candidateCountries = new Set(
     candidates.map((candidate) => candidate.country)
@@ -375,11 +379,14 @@ const recordNoticeEvent = async (
 
   // Every rendered rule belongs to a country the resolution involved.
   //
-  // The other direction from the one this started as, and the one that catches
-  // the case a settled-only check could not: a low-confidence `KR` with
-  // Singapore also on screen, where nothing named Singapore. The display
-  // duties are the union of the rendered list, so that row attaches
-  // Singapore's prefix to somebody the resolver never placed there.
+  // The observed IP country is deliberately **not** in that set. Draft section
+  // 5.3 wants it as a second candidate, and says in the same passage that S0
+  // must amend the approved contract first; the approved contract still says
+  // an IP is observational and does not decide a jurisdiction (sections 6.2
+  // and 6.3). Admitting it here would write records that contract does not
+  // allow, permanently -- an unresolved account could be recorded with a
+  // hotel's country as the only rule it was shown, and every later send would
+  // attach that country's display duties. S8b adds it back with S0.
   for (const country of candidateCountries) {
     if (!namedCountries.has(country)) {
       throw new Error(
@@ -387,8 +394,12 @@ const recordNoticeEvent = async (
       );
     }
   }
-  if (namedCountries.size > 0 && candidateCountries.size === 0) {
-    throw new Error("An in-product notice event must render at least one rule.");
+  for (const country of namedCountries) {
+    if (!candidateCountries.has(country)) {
+      throw new Error(
+        `${country} is a country this resolution involved, so its rule should have been rendered.`
+      );
+    }
   }
 
   // And a settled country is the *only* rule that should have been rendered.
@@ -400,6 +411,12 @@ const recordNoticeEvent = async (
   // Korea left in the list, gets Korea's `(광고)` prefix attached, or is
   // refused as `display_unsatisfiable` when two prefixes collide.
   // Permanently: this row is written once.
+  //
+  // The equality above already forces this for every resolution the resolver
+  // produces, since a settled one names one country. It stays as its own
+  // refusal because it is a different statement -- that a settled country is
+  // exclusive -- and it is the one that would catch a future resolution shape
+  // naming a country alongside a settled one.
   if (jurisdiction.country !== "ZZ") {
     if (
       candidateCountries.size !== 1 ||

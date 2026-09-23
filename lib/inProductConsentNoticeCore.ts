@@ -276,3 +276,40 @@ export const canonicalJson = (value: unknown): string => {
   };
   return JSON.stringify(canonical(value));
 };
+
+/**
+ * The signals a rendered candidate may name.
+ *
+ * The same six `ResolvedJurisdiction.source` uses, because a candidate says
+ * which signal put that country's rule on the screen and there is no other
+ * place a signal could come from.
+ *
+ * Closed because the evidence is append-only. `signal` was checked for being
+ * non-empty, so `"self-declared"` with a hyphen went in and stayed, and a
+ * later reader counting by signal would simply not see it.
+ */
+export const NOTICE_CANDIDATE_SIGNALS: ReadonlySet<string> = new Set([
+  "billing",
+  "self_declared",
+  "consent",
+  "inferred",
+  "conflict",
+  "unresolved",
+]);
+
+/**
+ * The sources that can carry `high` confidence.
+ *
+ * The approved contract's sections 6.1 to 6.3: what the person said, the
+ * billing country, and the jurisdiction recorded at their last consent. An
+ * inference is `low` by construction, so `high` plus `inferred` is a pair
+ * `resolveEmailJurisdiction()` never produces -- and one that would have
+ * settled the column on a guess, with `profileForCountry()` finding a real
+ * profile so the override's `country_undetermined` would not have stopped it
+ * either.
+ */
+export const DETERMINATIVE_JURISDICTION_SOURCES: ReadonlySet<string> = new Set([
+  "billing",
+  "self_declared",
+  "consent",
+]);

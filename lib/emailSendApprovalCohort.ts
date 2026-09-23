@@ -157,6 +157,22 @@ export const sealRiskAcceptedApproval = async (input: {
     // The decision was taken about the people who existed when it was taken.
     // Somebody who arrived four days later was not among them, whatever a
     // list handed to this function says.
+    // A null signup date is its own refusal, not a crash.
+    //
+    // `User.createdAt` is nullable, so the map holds the key with no date and
+    // the missing-account check above passes. Calling `.getTime()` on it threw
+    // inside the transaction -- which rolled the seal back, so no wrong anchor
+    // was written, but the message said nothing about what had happened and
+    // one such account killed the seal for all the others with it.
+    const undated = input.candidates
+      .map((candidate) => candidate.userId)
+      .filter((userId) => !signupAt.get(userId));
+    if (undated.length > 0) {
+      throw new Error(
+        `${undated.length} account(s) have no signup date, so the two-year notice has no reference date.`
+      );
+    }
+
     const tooLate = input.candidates.filter((candidate) => {
       const createdAt = signupAt.get(candidate.userId)!;
       return createdAt.getTime() > input.approvedAt.getTime();
