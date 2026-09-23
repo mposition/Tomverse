@@ -482,6 +482,40 @@ test("repeating an unsubscribe is a no-op, not a second withdrawal", async () =>
   );
 });
 
+test("unsubscribing from a purpose that was never on still suppresses it, once", async () => {
+  // Nothing to withdraw and no transition, but "do not send me this" is still
+  // an answer: a send that does not rest on consent (the risk_accepted
+  // override) would otherwise keep going. One purpose cause, however often
+  // the link is followed.
+  const user = await someone();
+  for (let i = 0; i < 2; i += 1) {
+    const result = await setPreference({
+      userId: user.id,
+      purpose: "promotions",
+      enabled: false,
+      capturedVia: "unsubscribe_page",
+      source: "unsubscribe_link",
+      viaToken: true,
+    });
+    assert.deepEqual(result, { changed: false, reason: "already_set" });
+  }
+
+  assert.equal(
+    await prisma.suppressionCause.count({
+      where: { emailAddress: user.email!, scope: "purpose", purposeKey: "promotions", reason: "unsubscribe", releasedAt: null },
+    }),
+    1
+  );
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.emailPreferenceTransition.count({ where: { userId: user.id } }), 0);
+  const verdict = await suppressionCheck({
+    emailAddress: user.email!,
+    classification: "marketing",
+    purpose: "promotions",
+  });
+  assert.equal(verdict.allowed, false);
+});
+
 test("a token cannot switch anything on", async () => {
   const user = await someone();
 

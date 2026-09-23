@@ -405,9 +405,53 @@ export async function applyPreferenceChange(
       });
       return "cancelled" as const;
     }
-    // Idempotent: the unsubscribe link is followed twice, the form is
-    // double-submitted, the one-click header and the confirmation page both
-    // fire. None of those should add a second entry to the history.
+    // Switching off what is already off still says "do not send me this", and
+    // that has to be written down somewhere a send reads. A preference that
+    // was never on has no consent to withdraw and no transition to record, so
+    // without this the refusal left no trace at all -- and a person the
+    // `risk_accepted` override mails without consent (draft section 5.6), who
+    // clicks unsubscribe, is exactly that person. The override cannot cross a
+    // suppression, so a purpose-scoped `unsubscribe` cause is what makes the
+    // click stop the mail (docs/policy/email-product-news-redesign-draft.md
+    // section 11.2: immediate and permanent).
+    //
+    // Idempotent by state rather than by key: the link is followed twice, the
+    // form is double-submitted, the one-click header and the confirmation
+    // page both fire, and only the first finds no live cause. A fixed key
+    // would not do -- once released by the person switching the purpose on,
+    // it would stay released through the next unsubscribe. The address lock
+    // taken above serialises this read with every other cause writer.
+    // No history row either way: nothing about the preference changed.
+    if (!input.enabled) {
+      const live = await tx.suppressionCause.findFirst({
+        where: {
+          emailAddress: normalizeSuppressionAddress(email),
+          scope: "purpose",
+          purposeKey: purpose,
+          reason: "unsubscribe",
+          releasedAt: null,
+        },
+        select: { id: true },
+      });
+      if (!live) {
+        await recordSuppression(
+          {
+            emailAddress: email,
+            purposeKey: purpose,
+            reason: "unsubscribe",
+            source:
+              input.suppressionSource ??
+              (input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center"),
+            sourceDeliveryId: input.deliveryId ?? null,
+            occurredAt: now,
+            sourceEventKey:
+              input.suppressionEventKey ??
+              `preference-unchanged:${input.userId}:${purpose}:${now.getTime()}`,
+          },
+          tx
+        );
+      }
+    }
     return "already_set" as const;
   }
 

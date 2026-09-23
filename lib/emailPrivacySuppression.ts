@@ -50,10 +50,12 @@ export async function lockPrivacyIntake(
 /**
  * Intake of a deletion request, in the transaction that creates it.
  *
- * A withdrawal alone is not enough: a preference that is already off writes no
- * row, and an account in the `risk_accepted` cohort has no consent to withdraw,
- * so the cohort override would keep sending. A suppression is a blocker the
- * override cannot pass.
+ * A withdrawal alone is not enough: an account in the `risk_accepted` cohort
+ * has no consent to withdraw, so the cohort override would keep sending. A
+ * suppression is a blocker the override cannot pass. (Switching off a purpose
+ * that is already off does now write a purpose suppression -- see
+ * `applyPreferenceChange()` -- but a deletion request stops every purpose and
+ * is written here, before any preference changes, rather than relying on it.)
  */
 export async function recordPrivacyIntake(
   tx: Prisma.TransactionClient,

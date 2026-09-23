@@ -15,6 +15,7 @@ import {
   recordNoticeShown,
 } from "@/lib/inProductConsentNotice";
 import { noticePurposes } from "@/lib/inProductConsentNoticeCore";
+import { withdrawAllMarketing } from "@/lib/emailPreferences";
 
 /**
  * The ledger's first real writers, against the real database.
@@ -1121,7 +1122,59 @@ test("default preference rows do not take a member out of the cohort", async () 
   });
 });
 
-test("a member who withdrew a confirmed consent is not mailed under the override", async () => {
+test("a member who unsubscribes without ever consenting is not mailed under the override", async () => {
+  // The cohort's ordinary state: marketing off by default, no consent, mailed
+  // only because of the override. Unsubscribing from that used to write
+  // nothing -- the preference was already off, so there was no transition,
+  // no withdrawal and no suppression -- and the override kept mailing. Now
+  // the click leaves a purpose suppression, which the override cannot cross.
+  const user = await createUser();
+  await settleCountry(user.id, "AU");
+  await sealFor([user]);
+
+  await withdrawAllMarketing({
+    userId: user.id,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+  });
+
+  for (const purpose of noticePurposes()) {
+    assert.equal(
+      await prisma.suppressionCause.count({
+        where: { emailAddress: user.email!, scope: "purpose", purposeKey: purpose, reason: "unsubscribe", releasedAt: null },
+      }),
+      1,
+      `${purpose} has one live unsubscribe cause`
+    );
+  }
+  // Not hidden as covered: the override no longer mails them, and the offer
+  // names the suppression that stopped it.
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: false,
+    refusal: "suppressed",
+  });
+
+  // A second click finds the live cause and writes nothing more.
+  await withdrawAllMarketing({
+    userId: user.id,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+  });
+  for (const purpose of noticePurposes()) {
+    assert.equal(
+      await prisma.suppressionCause.count({
+        where: { emailAddress: user.email!, scope: "purpose", purposeKey: purpose, reason: "unsubscribe" },
+      }),
+      1
+    );
+  }
+});
+
+test("a withdrawal in the ledger alone keeps a member out of the override", async () => {
+  // The ledger signal on its own: a confirmed grant, then a withdrawal, and
+  // no suppression. `setPreference()` writes both together, so the real path
+  // is refused as `suppressed` (the test above); this pins that the ledger
+  // is read even where the suppression has since been lifted.
   // The state `setPreference()` leaves behind: a confirmed grant, then a
   // withdrawal in the ledger. Section 5.6 says the override cannot cross it.
   // The person is not mailed, so the notice is theirs to see.

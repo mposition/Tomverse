@@ -136,10 +136,10 @@ import {
  *   left no basis, no route to one and no mail, and the wording was true of
  *   them all along.
  *
- * Objection and suppression are not re-checked here, because the offer
- * answers for them earlier and they cannot change this result. A withdrawal
- * is, because the offer deliberately treats it as "not consented yet" and
- * asks again. Obligation status is not checked either: it is the
+ * Suppression and withdrawal are read here (below): each takes a purpose out
+ * of what the override would send. Objection is not: the offer refuses an
+ * objector before it asks this, and `overrideBlockers()` refuses the override
+ * for one at send time. Obligation status is not checked either: it is the
  * send's gate (S9), it is not knowable here, and the two mistakes are not
  * symmetrical -- hiding the notice wrongly writes nothing and is undone the
  * moment the state behind it changes, while showing it wrongly writes a
@@ -219,7 +219,9 @@ const overrideWouldSend = async (input: {
   // A **suppression** at the purpose, classification or global scope, asked
   // through `suppressionCheck()` with the purpose -- the same call the offer
   // makes. A person switching a purpose off through `setPreference()` writes
-  // one alongside the withdrawal.
+  // one whether or not there was a consent to withdraw -- including an
+  // unsubscribe from a purpose that was never on, which is the cohort's
+  // ordinary state and the one case the ledger has nothing to say about.
   //
   // And **the promise itself**. A `notice_shown` means this person has been
   // told we will not send unless asked; `overrideBlockers()` refuses the
@@ -232,7 +234,7 @@ const overrideWouldSend = async (input: {
         FROM "ConsentRecord"
         WHERE "emailAddress" = ${input.emailAddress}
           AND purpose = ANY(${[...input.purposes]}::text[])
-        ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
+        ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC, id DESC
       ) latest
       WHERE action = 'withdrawn'
     `,
