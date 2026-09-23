@@ -267,3 +267,38 @@ test("the worker refuses to run without its secret", async () => {
   assert.equal(outcome.killedAtDeadline, false);
   assert.equal(outcome.code, 1);
 });
+
+test("the worker is handed its two variables, not the platform's whole environment", async () => {
+  // Railway injects its own variables into every service. A worker that
+  // inherited them all would hold whatever the platform chose to add; the
+  // plan's list is two names.
+  const directory = mkdtempSync(join(tmpdir(), "publisher-supervisor-"));
+  const out = join(directory, "env.json");
+  const probe = join(directory, "probe.mjs");
+  writeFileSync(
+    probe,
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(out)}, JSON.stringify(Object.keys(process.env)));\n`,
+  );
+
+  await superviseMarketingPublisherRun({
+    worker: probe,
+    deadlineMs: 10_000,
+    env: {
+      PATH: process.env.PATH ?? "",
+      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "",
+      MARKETING_PUBLISH_SECRET: "x".repeat(40),
+      MARKETING_PUBLISH_URL: "https://example.test",
+      RAILWAY_SOMETHING_INJECTED: "platform value",
+      DATABASE_URL: "postgres://must-never-reach-the-worker",
+    } as unknown as NodeJS.ProcessEnv,
+    stdio: "ignore",
+  });
+
+  const seen = new Set(JSON.parse(readFileSync(out, "utf8")) as string[]);
+  assert.ok(seen.has("MARKETING_PUBLISH_SECRET"));
+  assert.ok(seen.has("MARKETING_PUBLISH_URL"));
+  assert.ok(seen.has("MARKETING_PUBLISHER_RUN_ID"));
+  assert.ok(seen.has("MARKETING_PUBLISHER_DEADLINE"));
+  assert.ok(!seen.has("RAILWAY_SOMETHING_INJECTED"), "a platform variable reached the worker");
+  assert.ok(!seen.has("DATABASE_URL"), "a database credential reached the worker");
+});

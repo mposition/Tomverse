@@ -34,6 +34,32 @@ export const DEFAULT_WORKER = fileURLToPath(
 );
 
 /**
+ * The worker's environment: its two variables and what Node itself needs.
+ *
+ * Not the whole of this process's environment. Railway injects its own
+ * variables into every service, and a worker that inherited all of them would
+ * hold whatever the platform chose to add; the plan's list is two names, and
+ * that is what the worker gets. `PATH` and, on Windows, `SystemRoot` are
+ * there because a Node process without them cannot resolve its own tools or
+ * open a network socket -- not because the worker reads them.
+ */
+const WORKER_VARIABLES = [
+  "MARKETING_PUBLISH_SECRET",
+  "MARKETING_PUBLISH_URL",
+  "PATH",
+  "SystemRoot",
+  "SYSTEMROOT",
+];
+
+const workerEnvironment = (env) =>
+  Object.fromEntries(
+    WORKER_VARIABLES.filter((name) => typeof env[name] === "string").map((name) => [
+      name,
+      env[name],
+    ]),
+  );
+
+/**
  * Start one run's worker and kill it at the deadline.
  *
  * Resolves with how the worker ended: an exit code, or the signal that ended
@@ -54,7 +80,7 @@ export const superviseMarketingPublisherRun = ({
 
     const child = spawn(process.execPath, [worker], {
       env: {
-        ...env,
+        ...workerEnvironment(env),
         MARKETING_PUBLISHER_RUN_ID: runId,
         MARKETING_PUBLISHER_DEADLINE: deadline.toISOString(),
       },

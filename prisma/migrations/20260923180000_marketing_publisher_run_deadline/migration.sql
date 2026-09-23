@@ -23,6 +23,15 @@
 -- from the process's clock; for a row with a deadline the trigger overwrites
 -- it, because a caller that could choose its own completion time could choose
 -- one before its deadline.
+--
+-- Two refusals carry their own SQLSTATE, because the application branches on
+-- them and a branch on message text breaks the day a driver rewords it:
+--
+--   TMDL1  a run that closed after its deadline asked to be `succeeded`
+--   TMDL2  a run asked to start after its own deadline
+--
+-- The rest are `check_violation`: they mean the caller is wrong, and nothing
+-- is expected to catch them.
 
 ALTER TABLE "ScheduledJobRun" ADD COLUMN "deadlineAt" TIMESTAMP(3);
 ALTER TABLE "ScheduledJobRun" ADD COLUMN "heartbeatAt" TIMESTAMP(3);
@@ -61,7 +70,7 @@ BEGIN
         NEW."completedAt" := NULL;
         IF NEW."deadlineAt" <= database_now THEN
             RAISE EXCEPTION 'ScheduledJobRun % cannot start after its own deadline', NEW."id"
-                USING ERRCODE = 'check_violation';
+                USING ERRCODE = 'TMDL2';
         END IF;
         RETURN NEW;
     END IF;
@@ -95,7 +104,7 @@ BEGIN
     IF NEW."status" = 'succeeded' AND NEW."completedAt" > NEW."deadlineAt" THEN
         RAISE EXCEPTION 'ScheduledJobRun % finished at % after its deadline % and cannot be recorded as succeeded',
             OLD."id", NEW."completedAt", NEW."deadlineAt"
-            USING ERRCODE = 'check_violation';
+            USING ERRCODE = 'TMDL1';
     END IF;
     RETURN NEW;
 END;

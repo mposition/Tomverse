@@ -16,6 +16,8 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import { databaseErrorMetadata } from "@/lib/databaseError";
+
 import {
   MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
   MARKETING_PUBLISHER_JOB_KEY,
@@ -24,6 +26,20 @@ import {
   MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
   MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
 } from "@/lib/marketingPublisherRunCore";
+
+/**
+ * The SQLSTATEs the deadline trigger raises for the two refusals this module
+ * acts on. Matched on the driver's code, which is stable, and only then on the
+ * message, which is a fallback for a driver that does not pass the code
+ * through.
+ */
+export const MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE = "TMDL1";
+export const MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE = "TMDL2";
+
+const raisedWith = (error: unknown, sqlstate: string, fallback: RegExp): boolean => {
+  if (databaseErrorMetadata(error).driverCode === sqlstate) return true;
+  return error instanceof Error && fallback.test(error.message);
+};
 
 /** A run request the route has already parsed and checked. */
 export type MarketingPublisherRunStart = {
@@ -35,7 +51,11 @@ export type MarketingPublisherRunStartResult =
   | { readonly started: true; readonly runId: string }
   | {
       readonly started: false;
-      readonly reason: "already_running" | "already_closed" | "deadline_mismatch";
+      readonly reason:
+        | "already_running"
+        | "already_closed"
+        | "deadline_mismatch"
+        | "deadline_passed_at_database";
     };
 
 /**
@@ -64,6 +84,19 @@ export async function startMarketingPublisherRun(
     });
     return { started: true, runId: input.runId };
   } catch (error) {
+    // The route checked the deadline against its own clock; the trigger
+    // checks it against the database's. When the two disagree -- a skewed
+    // clock, or a request that sat in a queue -- the database is right, and
+    // the answer is that this run cannot start, not a 500.
+    if (
+      raisedWith(
+        error,
+        MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE,
+        /cannot start after its own deadline/,
+      )
+    ) {
+      return { started: false, reason: "deadline_passed_at_database" };
+    }
     if (
       !(error instanceof Prisma.PrismaClientKnownRequestError) ||
       error.code !== "P2002"
@@ -124,20 +157,26 @@ export async function finishMarketingPublisherRun(
   client: PrismaClient,
   runId: string,
   outcome: MarketingPublisherRunOutcome,
-): Promise<{ readonly status: "succeeded" | "failed" }> {
-  const close = (data: Prisma.ScheduledJobRunUpdateManyMutationInput) =>
-    client.scheduledJobRun.updateMany({
-      where: {
-        id: runId,
-        jobKey: MARKETING_PUBLISHER_JOB_KEY,
-        status: "running",
-      },
-      data,
-    });
+): Promise<{ readonly status: "succeeded" | "failed" | "not_running" }> {
+  // Each close says how many rows it closed. Zero is not success: it means
+  // the run was already closed -- by a concurrent request, or by an earlier
+  // attempt at this one -- or never existed, and reporting "succeeded" for it
+  // would have the route say something the row does not.
+  const close = async (data: Prisma.ScheduledJobRunUpdateManyMutationInput) =>
+    (
+      await client.scheduledJobRun.updateMany({
+        where: {
+          id: runId,
+          jobKey: MARKETING_PUBLISHER_JOB_KEY,
+          status: "running",
+        },
+        data,
+      })
+    ).count === 1;
 
   if (outcome.status === "succeeded") {
     try {
-      await close({
+      const closed = await close({
         status: "succeeded",
         processedCount: outcome.processedCount,
         result: outcome.result,
@@ -145,31 +184,32 @@ export async function finishMarketingPublisherRun(
         // Overwritten by the trigger with the database clock.
         completedAt: new Date(),
       });
-      return { status: "succeeded" };
+      return { status: closed ? "succeeded" : "not_running" };
     } catch (error) {
-      if (!isDeadlineRefusal(error)) throw error;
-      await close({
+      if (
+        !raisedWith(error, MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE, /after its deadline/)
+      ) {
+        throw error;
+      }
+      const closed = await close({
         status: "failed",
         error: "deadline_exceeded",
         result: outcome.result,
         processedCount: outcome.processedCount,
         completedAt: new Date(),
       });
-      return { status: "failed" };
+      return { status: closed ? "failed" : "not_running" };
     }
   }
 
-  await close({
+  const closed = await close({
     status: "failed",
     error: outcome.error.slice(0, 4_000),
     ...(outcome.result === undefined ? {} : { result: outcome.result }),
     completedAt: new Date(),
   });
-  return { status: "failed" };
+  return { status: closed ? "failed" : "not_running" };
 }
-
-const isDeadlineRefusal = (error: unknown): boolean =>
-  error instanceof Error && /after its deadline/.test(error.message);
 
 /** Why a bounded transaction refused to run or to continue. */
 export class MarketingPublisherTransactionRefusedError extends Error {
@@ -269,6 +309,13 @@ export async function runBoundedMarketingTransaction<T>(
  * Every model delegate call and every raw query is one statement. Counted on
  * the call, not on completion, so a statement that is slow still spends its
  * place.
+ *
+ * What it counts is what the plan names: statements *in application code*.
+ * One Prisma call can send more than one SQL statement -- an `include` is a
+ * second query -- and work that reaches for the module-level client instead of
+ * the `tx` it was given is outside this transaction entirely. Neither is
+ * something a proxy can see, which is exactly why the derived maximum is an
+ * application figure and `transaction_timeout` is the bound that holds.
  */
 const countingTransaction = (tx: Prisma.TransactionClient): Prisma.TransactionClient => {
   let issued = 0;
@@ -291,6 +338,17 @@ const countingTransaction = (tx: Prisma.TransactionClient): Prisma.TransactionCl
   };
   return new Proxy(tx, {
     get(target, key) {
+      // A transaction inside this one would be a place for statements the
+      // counter does not see. Prisma does not support nesting on a
+      // transaction client anyway; refusing it here says why.
+      if (key === "$transaction") {
+        return () => {
+          throw new MarketingPublisherTransactionRefusedError(
+            "statement_budget_exhausted",
+            "A publisher transaction cannot open another transaction inside its budget",
+          );
+        };
+      }
       if (typeof key === "string" && key.startsWith("$")) {
         return wrapFunction(target, key);
       }

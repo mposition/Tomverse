@@ -12,8 +12,12 @@ import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 
 import {
+  finishMarketingPublisherRun,
+  MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE,
+  MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE,
   MarketingPublisherTransactionRefusedError,
   runBoundedMarketingTransaction,
+  startMarketingPublisherRun,
 } from "@/lib/marketingPublisherRun";
 import {
   MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
@@ -167,4 +171,111 @@ test("the wrapper's own settings are not charged to the work", async () => {
   });
   assert.equal(seen.settings.length, 3);
   assert.equal(seen.workStatements, MARKETING_PUBLISHER_MAX_STATEMENTS);
+});
+
+test("the work cannot open a transaction inside its budget", async () => {
+  // A nested transaction would be somewhere for statements the counter does
+  // not see.
+  const { client } = fakeClient(170002);
+  await assert.rejects(
+    runBoundedMarketingTransaction(client, async (tx) =>
+      (tx as unknown as { $transaction(): unknown }).$transaction(),
+    ),
+    (error: unknown) => error instanceof MarketingPublisherTransactionRefusedError,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Opening and closing the run row
+// ---------------------------------------------------------------------------
+
+/** An error shaped the way the Prisma driver adapter surfaces a RAISE. */
+const raised = (sqlstate: string, message: string) =>
+  Object.assign(new Error(message), {
+    cause: { kind: "QueryError", originalCode: sqlstate, originalMessage: message },
+  });
+
+test("a close that closed nothing is not reported as a success", async () => {
+  // Round one: the close's row count was ignored, so a run already closed by
+  // something else -- or never opened -- came back "succeeded" and the route
+  // said so.
+  for (const outcome of [
+    { status: "succeeded" as const, processedCount: 0, result: {} },
+    { status: "failed" as const, error: "test" },
+  ]) {
+    const client = {
+      scheduledJobRun: { updateMany: async () => ({ count: 0 }) },
+    } as unknown as PrismaClient;
+    assert.deepEqual(
+      await finishMarketingPublisherRun(client, "run-1", outcome),
+      { status: "not_running" },
+    );
+  }
+});
+
+test("a late success is recognised by its SQLSTATE, whatever the message says", async () => {
+  // The point of giving the refusal its own code: a driver that rewords the
+  // message must not turn a recognised late run into an unexplained failure.
+  const writes: Record<string, unknown>[] = [];
+  let calls = 0;
+  const client = {
+    scheduledJobRun: {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        calls += 1;
+        writes.push(data);
+        if (calls === 1) {
+          throw raised(MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE, "a message nobody wrote");
+        }
+        return { count: 1 };
+      },
+    },
+  } as unknown as PrismaClient;
+  assert.deepEqual(
+    await finishMarketingPublisherRun(client, "run-1", {
+      status: "succeeded",
+      processedCount: 0,
+      result: {},
+    }),
+    { status: "failed" },
+  );
+  assert.equal(writes[1]?.status, "failed");
+  assert.equal(writes[1]?.error, "deadline_exceeded");
+});
+
+test("any other refusal on close is not mistaken for a late run", async () => {
+  const client = {
+    scheduledJobRun: {
+      updateMany: async () => {
+        throw raised("23514", "something else entirely");
+      },
+    },
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    finishMarketingPublisherRun(client, "run-1", {
+      status: "succeeded",
+      processedCount: 0,
+      result: {},
+    }),
+    /something else entirely/,
+  );
+});
+
+test("a start the database says is already past its deadline is an answer", async () => {
+  // The route checks the deadline with its own clock; the trigger with the
+  // database's. When they disagree the database is right, and the service
+  // should hear "this run cannot start", not a framework 500.
+  const client = {
+    scheduledJobRun: {
+      create: async () => {
+        throw raised(MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE, "reworded");
+      },
+    },
+  } as unknown as PrismaClient;
+  assert.deepEqual(
+    await startMarketingPublisherRun(client, {
+      runId: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      deadlineAt: new Date(Date.now() + 60_000),
+    }),
+    { started: false, reason: "deadline_passed_at_database" },
+  );
 });

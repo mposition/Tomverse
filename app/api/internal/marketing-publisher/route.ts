@@ -86,15 +86,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const started = await startMarketingPublisherRun(prisma, { runId, deadlineAt });
+  let started;
+  try {
+    started = await startMarketingPublisherRun(prisma, { runId, deadlineAt });
+  } catch (error) {
+    // Opening the row failed for a reason that is not an answer. No row
+    // exists, so there is no run to close; say so rather than hand the
+    // service a framework 500 with no code.
+    console.error("Marketing publisher run could not start:", error);
+    return NextResponse.json(
+      { runId, code: "run_start_failed" },
+      { status: 503 },
+    );
+  }
   if (!started.started) {
     // A duplicate id is never a second run. A retry of the same request while
-    // it runs is answered without doing the work again; anything else is a
-    // conflict.
-    return NextResponse.json(
-      { runId, code: started.reason },
-      { status: started.reason === "already_running" ? 202 : 409 },
-    );
+    // it runs is answered without doing the work again. A deadline the
+    // database's own clock says has passed is the caller's to fix. Anything
+    // else is a conflict.
+    const status =
+      started.reason === "already_running"
+        ? 202
+        : started.reason === "deadline_passed_at_database"
+          ? 400
+          : 409;
+    return NextResponse.json({ runId, code: started.reason }, { status });
   }
 
   try {
@@ -105,6 +121,14 @@ export async function POST(request: Request) {
       processedCount: 0,
       result: { skipped },
     });
+    if (closed.status === "not_running") {
+      // The row was closed by something else while this request held it --
+      // it is not this request's to report as done.
+      return NextResponse.json(
+        { runId, status: closed.status, code: "run_not_running" },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ runId, status: closed.status, skipped });
   } catch (error) {
     await finishMarketingPublisherRun(prisma, runId, {
