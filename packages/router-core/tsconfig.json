@@ -1,0 +1,29 @@
+{
+  // Deliberately NOT extending the repository root config.
+  //
+  // The root config carries the Next.js language-service plugin, the `@/*`
+  // path alias that reaches back into the app, and `"lib": ["dom", ...]`.
+  // Inheriting any of those would make this package type-check only because
+  // the app happens to be around it, which is the exact property this
+  // package is supposed to prove it does not have.
+  //
+  // `lib` is ES2022 with no `dom` and no `types`, so `window`, `document`,
+  // `HTMLElement`, `process` and `Buffer` are all unresolved identifiers
+  // here. That is a second, independent net beside the ESLint
+  // no-restricted-imports rule: ESLint catches a forbidden *import*, this
+  // catches a forbidden *global*.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

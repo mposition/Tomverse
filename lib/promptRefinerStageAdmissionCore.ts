@@ -38,7 +38,7 @@ export const PROMPT_REFINER_STAGE_CONFIRMATION =
   "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES" as const;
 export const PROMPT_REFINER_STAGE_REASON =
   "bounded_staging_shadow_cost_approval" as const;
-export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 188 as const;
+export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 189 as const;
 export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -67,6 +67,7 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
   "apps/mobile/package.json",
   "packages/chat-core/package.json",
+  "packages/router-core/package.json",
   "packages/ui-tokens/package.json",
   "app/api/admin/prompt-refiner/shadow-stage/route.ts",
   "lib/accountEmails.ts",

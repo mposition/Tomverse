@@ -26,7 +26,8 @@
       // TypeScript source rather than a build output it does not have. The
       // package is published to nothing and built by nothing -- consumers
       // compile it themselves (`transpilePackages` in next.config.ts).
-      "@tomverse/chat-core": ["./packages/chat-core/src/index.ts"]
+      "@tomverse/chat-core": ["./packages/chat-core/src/index.ts"],
+      "@tomverse/router-core": ["./packages/router-core/src/index.ts"]
     }
   },
   "include": [
