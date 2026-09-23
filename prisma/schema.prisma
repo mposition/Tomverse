@@ -3984,6 +3984,12 @@ model RoutingRun {
   controlPlaneVersion  String?
   accountPolicyVersion String?
 
+  /// How long this request may run, in milliseconds, captured when it
+  /// started. ADR v2.1 appendix R3. Null means nobody supplied one. It is
+  /// not zero and it is not a default this schema chose. Dark: the request
+  /// path does not write it.
+  requestDeadlineMs Int?
+
   /// The task profile, as labels and booleans.
   profileKind             String
   profileConfidence       String
@@ -6027,6 +6033,13 @@ model DeploymentCacheAffinity {
   modelDeploymentId String
   lastServedAt      DateTime
   servedTurns       Int      @default(1)
+  /// How many times capacity displaced this placement. Null means no
+  /// displacement has been recorded, which is not epoch zero. Appendix R1.
+  /// Dark with the rest of this table.
+  affinityEpoch     Int?
+  /// The instant a displacement is allowed again. Null means no window was
+  /// supplied. It is not a duration this schema chose.
+  holdDownUntil     DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

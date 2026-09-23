@@ -89,6 +89,13 @@ const DARK_COLUMNS = [
         on: "RoutingRun",
         exempt: ["lib/routingPinGate.ts"],
     },
+    // The deadline captured when a request starts. The module names it
+    // because it is the value the column will store. It does not write a row.
+    {
+        column: "requestDeadlineMs",
+        on: "RoutingRun",
+        exempt: ["lib/routingResidualControls.ts"],
+    },
     // The attempt's binding to a published manifest. Both names are spelled
     // only by the module that defines the manifest shape.
     {

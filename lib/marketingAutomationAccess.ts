@@ -285,9 +285,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * neighbour only by living in the same schema file. The columns are not
  * marketing models and do not touch a webhook writer. The digest moves
  * because the schema file is watched whole.
+ *
+ * 2026-09-23, a nullable millisecond deadline on RoutingRun and two nullable
+ * affinity columns on the dark cache-affinity table. None is a marketing
+ * model and none touches a webhook writer. The digest moves because the
+ * schema file is watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "de53319fb28b59db825cfb8f4cc31d51dc4a1eba2b1f0a7183de20b16cdd68e5";
+  "a31cb3d2f218630c3018dc605f4b7e02a7cbc66668d2e5544a8bfb2410a4f1b9";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

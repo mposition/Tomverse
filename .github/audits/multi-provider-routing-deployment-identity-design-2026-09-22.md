@@ -1023,7 +1023,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 판정 (§14.16). 가중합은 없음. 행은 쓰지 않음 |
 | Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
-| 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 없음 (R6은 `lib/failureDomain.ts` 일부) |
+| 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 판정 (§14.17). 길이와 기한의 숫자는 호출자. 라우터는 열에 쓰지 않음 |
 | §10.2 | pre-commit buffer | 없음, 선택 항목 |
 
 의도적으로 제외한 것은 그대로입니다: §5 가중합 목적함수(어휘순 유지), §7.2의 prior
@@ -1365,6 +1365,30 @@ ADR §15.2·§15.3·§15.5의 판정이 `lib/routingReplay.ts`에 있습니다. 
 이 세 가지가 한 줄입니다. 승격만으로는 세지 않습니다. 직전 pin 보고는 31,
 약 62%였습니다. §14.3의 약 50단위에서 완료는 32, **약 64%(추정)**입니다.
 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.17 Affinity hold-down, deadline, failure domain (2026-09-23)
+
+ADR 부록 R1·R3·R6의 판정이 `lib/routingResidualControls.ts`에 있습니다.
+요청 경로는 import하지 않습니다. 행을 쓰지 않습니다.
+
+- 첫 배치는 epoch 0입니다. 같은 deployment에 남는 것은 epoch를 쓰지
+  않습니다. 다른 deployment로 옮기려면 호출자가 준 창이 있어야 하고, 그
+  창은 시각보다 엄격히 앞일 때 열려 있습니다. 창이 없으면 옮기지 않습니다.
+  길이를 고르지 않습니다.
+- Retry-After는 이 요청을 재우지 않습니다. capacity 거절은 그 자격증명을
+  이번 요청에서 빼는 것이고, 시각은 다음 요청의 용량에 남습니다. 시도
+  상한은 이미 있던 fallback 예산에 1을 더한 2입니다. 여기서 다시 정하지
+  않습니다.
+- deadline은 양수 밀리초일 때만 판정합니다. 없거나 0이면 null이고, null은
+  "아직 안 지났다"가 아닙니다.
+- fallback chain은 실패한 attempt와 장애 영역이 다른 후보를 앞에 둡니다.
+  영역 안에서는 받은 순서를 유지합니다. primary 순위는 이 함수의 입력이
+  아닙니다. 태그 어휘를 새로 만들지 않습니다. 영역은 이미 있던 host와
+  credential입니다.
+
+이 세 가지가 한 줄입니다. 직전 replay 보고는 32, 약 64%였습니다.
+§14.3의 약 50단위에서 완료는 33, **약 66%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

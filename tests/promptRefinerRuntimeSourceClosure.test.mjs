@@ -230,12 +230,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-23, request-start policy columns. Another dated note in
 // `lib/marketingAutomationAccess.ts`, comment only. Count 228, position-free
 // hash unchanged. A repin of the position-sensitive digest only.
+//
+// 2026-09-23, affinity epoch and a request deadline. Another dated note in
+// `lib/marketingAutomationAccess.ts`, comment only. Count 228, position-free
+// hash unchanged. A repin of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e82fa25c4205503f63f7118494ac471c",
-  "151ff285e1fc30e503e7b7510ad65ad0",
+  "3dff3f6f816767ee976637eb649618c2",
+  "8cec068b292af212e9cd6f23d2077f82",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
