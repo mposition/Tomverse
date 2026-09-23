@@ -3891,3 +3891,61 @@ commit 사이의 좁은 틈, 또는 대기열 테이블을 건드리지 않는 c
 **남는 것.** `scripts/close-filtered-model-lifecycle-items.mjs`는 계속 사유 코드 없이
 `note`만으로 닫습니다(제외됨 보기에 "사유 기록 없이 종료됨"으로 표시). 재검토한
 prerelease item은 그 스크립트를 다시 `--apply`하면 다시 닫힐 수 있습니다.
+
+## 52. 발견 대기열 분석 품질과 공급자 문서 확대 (2026-09-21 · 완료)
+
+**운영자 신고.** GLM 5.2를 서비스하는 상태에서 Zhipu 후보 다섯(`glm-4.5-air`, `glm-5-turbo`,
+`ZHIPU/GLM-5.3`, `glm-5.3-flash`, `glm-5.3-flashx`)이 올라왔고, 대기열은 **다섯 줄에 같은 문단**을
+썼습니다. 같은 질문을 받은 ChatGPT는 모델별 판정과 도입 순서까지 답했습니다. 차이의 절반은
+저희가 쓰지 않던 사실(ID가 말하는 세대·tier), 나머지 절반은 저희가 읽지 않던 출처(공급자 문서)
+였습니다.
+
+### 52.1 ID가 말하는 것을 쓴다
+
+- `modelTier()` — tier 단어 표 하나. `modelLine()`은 tier를 라인 이름에 포함하므로
+  `glm-4.5-air`는 `glm-air` 라인이 되어 `glm-5.2`와 비교되지 않았습니다.
+- `modelGenerationFamily()` — 라인에서 tier를 뺀 세대 family.
+- `modelPortfolioRelation()` — 같은 제작사·같은 family 안에서 후보와 서비스 모델의 세대를 비교하고,
+  **후보와 같은 tier를 먼저** 비교합니다(다른 tier의 상위 버전과 비교해 상위 세대 후보가 `low`로
+  숨던 문제).
+- `chatRole()`이 같은 tier 표를 읽습니다. `speed`는 role로 올리지 않습니다 — `gpt-4-turbo`와
+  `glm-5-turbo`가 같은 단어를 다르게 씁니다.
+- 같은 스캔의 형제 후보(`siblingWavePoints`)를 읽어 기본형 우선과 한 글자 차이 tier(`flash`/`flashx`)
+  확인을 말합니다. 파생형은 같은 세대 기본형이 대기열에 있으면 `recommended`로 올리지 않습니다.
+- wave는 **조회 view와 무관하게** 열린 항목 전체에서 만듭니다. 화면(`open`)과 제외 재계산
+  (`excludable`)이 다른 집합을 보면 fingerprint가 어긋나 제외가 영구히 409가 됩니다.
+
+### 52.2 판정을 먼저 쓴다
+
+`ModelTriageAssessment`가 `verdictKo`(한 줄 판정) · `pointsKo[]`(근거) · `nextStepKo`(다음 행동)로
+나뉘고, `analysisKo`는 그 셋을 join한 값입니다(제외 스냅샷·fingerprint 호환). 빠진 값은 이름으로
+말하고, 그 공급자가 그 필드를 자동 수집하는지까지 밝힙니다.
+
+### 52.3 공급자 문서를 12곳 전부에 적용한다
+
+`lib/providerModelDocSources.ts`가 12개 공급자의 소스 표입니다. **1차 출처(공급자 자기 문서)만**
+허용합니다 — 집계 사이트는 저희가 과금할 숫자를 제3자가 옮겨 적은 것이고, 벤치마크 점수는 품질
+주장이라 이 표가 담는 사실이 아닙니다.
+
+| 자동 수집 | openai, anthropic(가격만), zhipu, xai, groq |
+|---|---|
+| 사람이 확인 | perplexity(산문), moonshot(MDX), google · mistral · deepseek · minimax · qwen(HTML) |
+
+수집 대상이 아닌 공급자는 `humanUrl`만 갖고, 큐 문구가 "사람이 확인해야 한다"고 말하며 그 주소를
+같이 줍니다. HTML을 긁지 않는 이유는 빈 값보다 조용히 틀린 값이 나쁘기 때문입니다.
+
+`lib/providerModelDocTables.ts`가 범용 마크다운 표 리더입니다.
+
+- 행은 이름 열 파싱이 아니라 **줄 전체에서 id 경계 일치**로 찾습니다(Groq는 id가 링크 안에만
+  있고, `glm-5.3`이 `glm-5.3-flash` 행을 먹으면 가격이 뒤바뀝니다).
+- `Free` · `ContactSales` · 비USD 통화 · 프로모션 표기 셀은 사유와 함께 거절합니다. combined 셀은
+  **쪼개기 전에** 셀 전체를 판정합니다.
+- 한 모델에 두 행이면 장문 tier로 읽되, 두 행이 **같은 경계의 반대쪽**이어야 하고 캐시 열이
+  입력과 다르게 움직이면 tier를 포기합니다. `< N`은 포함 상한 `N-1`로 저장합니다.
+- 200 응답의 "404 - Page Not Found" 본문은 문서가 아닙니다(Groq `/docs/pricing.md`).
+
+수집기는 공유 문서를 공급자별로 **동시에** 읽고, 모델별 작업을 공급자 교차 순서로 처리합니다.
+순차 실행에서는 느린 공급자 하나가 45초 예산을 다 써 나머지가 매일 `time_budget`으로 남았습니다.
+
+프로모션 문장 탐지는 표의 **값 셀**만 건너뜁니다. 표 안의 안내 문장은 그대로 잡힙니다.
+파서 버전은 `2026-09-22.44`이며, 이전 버전으로 저장된 증거는 재수집 전까지 무시됩니다.

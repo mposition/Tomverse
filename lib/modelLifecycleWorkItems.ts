@@ -11,6 +11,7 @@ import {
     DOC_EVIDENCE_MAX_AGE_MS,
     docEvidenceIsFresh,
     docParseFromStored,
+    docProblemWithholdsPrice,
 } from "@/lib/providerModelDocsCore";
 import {
     OPEN_WORK_ITEM_STATUSES,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/modelLifecycleWorkItemCore";
 import {
     assessModelLifecycleItem,
+    modelGenerationFamily,
     modelStage,
     supersedingServedModel,
     type ModelCandidateEvidence,
@@ -810,6 +812,13 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     reviewPriority: ModelReviewPriority;
     reviewKind: ModelReviewKind;
     product: ModelProductSurface;
+    /** One line: what this candidate is to the catalogue Tomverse runs. */
+    verdictKo: string;
+    /** Supporting facts, each checkable on its own. */
+    pointsKo: string[];
+    /** What to do next, and what would change the answer. */
+    nextStepKo: string;
+    /** The three above joined; what the decision snapshot records. */
     analysisKo: string;
     /** The exclusion that closed this item; only in the excluded view. */
     exclusion: WorkItemExclusionSummary | null;
@@ -914,7 +923,7 @@ const candidateEvidenceForFamily = (
         // sound enough to rank a model in this compact queue sentence.
         const docPriceUsable =
             parsed?.status === "parsed" &&
-            parsed.problems.length === 0 &&
+            !parsed.problems.some(docProblemWithholdsPrice) &&
             doc?.promotional === null;
         return {
             contextWindowTokens:
@@ -1036,7 +1045,8 @@ export async function listModelDiscoveryQueue(options?: {
     // These reads are independent. Keeping them in one parallel round avoids
     // making a remote database pay a second network latency merely to derive
     // the exact observation pairs from the work-item evidence.
-    const [rows, total, registry, latestRuns, entries, docRows] = await Promise.all([
+    const [rows, total, registry, latestRuns, entries, waveRows, docRows] =
+        await Promise.all([
         prisma.modelLifecycleWorkItem.findMany({
             where: rowWhere,
             orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
@@ -1106,6 +1116,33 @@ export async function listModelDiscoveryQueue(options?: {
                 lifecycle: true,
                 metadata: true,
             },
+        }),
+        // Every open item, whichever view asked. The wave a row belongs to is
+        // a fact about the queue, not about the question being asked of it: an
+        // exclusion re-computes this analysis to compare it with what the
+        // operator saw, and a wave that changed shape between the two reads is
+        // a decision that can never be made.
+        prisma.modelLifecycleWorkItem.findMany({
+            // Ordered, because the wave is read into the analysis text and an
+            // unordered read made the same queue item describe its siblings
+            // differently between the panel and the exclusion re-check --
+            // which the fingerprint then refused as ANALYSIS_CHANGED.
+            orderBy: { apiModel: "asc" },
+            // Deliberately uncapped. A cap would make the wave depend on which
+            // rows the database happened to return, which is the same defect
+            // as making it depend on the view: two reads would disagree and
+            // the decision bound to the first could never be made. Two columns
+            // of the open queue is a small read, and the queue is bounded by
+            // what the scan files in the first place.
+            // Additions only. A wave is the set of models somebody may adopt
+            // together; an open retirement of the base model is the opposite
+            // fact, and counting it as "the base model is queued too" pushed
+            // the derivative out of the recommended view for the wrong reason.
+            where: {
+                status: { in: [...OPEN_WORK_ITEM_STATUSES] },
+                action: "add",
+            },
+            select: { apiModel: true },
         }),
         prisma.providerModelDocEvidence.findMany({
             // Analysis uses the same freshness boundary as adoption prefill.
@@ -1265,6 +1302,18 @@ export async function listModelDiscoveryQueue(options?: {
         const family = decisionIdentity(row.apiModel);
         familyCounts.set(family, (familyCounts.get(family) ?? 0) + 1);
     }
+    // The other ids of the same release wave that are open in this queue.
+    // Grouped once rather than re-derived per row: a provider shipping a
+    // generation as a set is the common case, and every row of that set needs
+    // to name the others.
+    const waveByGenerationFamily = new Map<string, string[]>();
+    for (const row of waveRows) {
+        const { family } = modelGenerationFamily(row.apiModel);
+        if (!family) continue;
+        const wave = waveByGenerationFamily.get(family);
+        if (wave) wave.push(row.apiModel);
+        else waveByGenerationFamily.set(family, [row.apiModel]);
+    }
 
     // The exclusion each excluded item was closed by: its latest move into
     // closed_no_action. Read only for that view; an open item has none.
@@ -1354,6 +1403,10 @@ export async function listModelDiscoveryQueue(options?: {
             ),
             servedModels:
                 servedModelsByOwner.get(modelOwner(row.apiModel)) ?? [],
+            siblingApiModels:
+                waveByGenerationFamily.get(
+                    modelGenerationFamily(row.apiModel).family
+                ) ?? [],
         });
         return {
             id: row.id,
@@ -1377,6 +1430,9 @@ export async function listModelDiscoveryQueue(options?: {
             reviewPriority: assessment.priority,
             reviewKind: assessment.kind,
             product: assessment.product,
+            verdictKo: assessment.verdictKo,
+            pointsKo: assessment.pointsKo,
+            nextStepKo: assessment.nextStepKo,
             analysisKo: assessment.analysisKo,
             exclusion: exclusionByItem.get(row.id) ?? null,
         };
