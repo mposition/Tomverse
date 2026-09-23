@@ -17,6 +17,7 @@ type PreviewBody = {
   sourceDriftCount?: number;
   activeExecutionCount?: number;
   otherConflictCount?: number;
+  conflictLedger?: { key?: string; reasons?: string[] }[];
   applyPermitted?: boolean;
   approvalId?: string;
   status?: string;
@@ -73,6 +74,18 @@ export function AmuxBoardImportPanel() {
   const classification = result?.classification;
 
   const missingSentence = result ? sourceMissingSentence(messages, result) : null;
+  const ledgerLines = (result?.conflictLedger ?? []).flatMap((entry) => {
+    if (typeof entry?.key !== "string" || entry.key.length === 0) return [];
+    const codes = Array.isArray(entry.reasons) ? entry.reasons : [];
+    const reasons = codes.flatMap((code) => {
+      if (code === "source_drift") return [messages.reasonSourceDrift];
+      if (code === "active_execution") return [messages.reasonActiveExecution];
+      if (code === "other_conflict") return [messages.reasonOtherConflict];
+      return [];
+    });
+    const rendered = reasons.length === 0 ? messages.reasonUnknown : reasons.join(", ");
+    return [messages.conflictLedgerLine(entry.key, rendered)];
+  });
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-import-panel">
@@ -194,6 +207,9 @@ export function AmuxBoardImportPanel() {
           {typeof result.otherConflictCount === "number" ? (
             <p>{messages.otherConflict(result.otherConflictCount)}</p>
           ) : null}
+          {ledgerLines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
         </div>
       ) : null}
     </section>
