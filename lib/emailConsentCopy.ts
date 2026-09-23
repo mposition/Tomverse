@@ -166,6 +166,40 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
   }),
 ]);
 
+/**
+ * Versions whose wording promises we have not been sending, and will not
+ * without being asked.
+ *
+ * The in-product notice opens with exactly that, in all seven languages, and
+ * it is the right thing to say to somebody being asked for the first time
+ * (draft section 5.5: these accounts have no basis anywhere, and a
+ * policy-change notice does not create one).
+ *
+ * It is also incompatible with the other approved decision about the same
+ * people. The owner decided on 2026-09-16 to send to the existing accounts
+ * under `risk_accepted` -- without consent, because detection is unlikely.
+ * One such send makes "will not unless you ask" false, and after it "has not
+ * sent you" is false too. The `copyHash` stored beside the notice would then
+ * be evidence that we showed somebody a promise we had already broken, which
+ * is the FTC Section 5 exposure section 5.5 cites rather than a wording nit.
+ *
+ * The two decisions are the owner's and only the owner can choose between
+ * them. Until then this file takes the reading that cannot cause harm:
+ * **showing this notice to an address retires the override for that address.**
+ * It can only mean fewer sends, never a broken promise, and
+ * `consentCopyPromisesNoUnrequestedSend()` is what a send path asks so the
+ * choice is enforced rather than remembered.
+ *
+ * The alternatives, for whoever decides: exclude the cohort from this notice,
+ * or approve a new version whose wording does not promise it. Editing this
+ * one is not among them (section 9).
+ */
+export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
+  new Set(["2026-09-23"]);
+
+export const consentCopyPromisesNoUnrequestedSend = (version: string) =>
+  PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(version);
+
 /** The version a new render uses. Older versions stay readable above. */
 export const CURRENT_CONSENT_COPY_VERSION =
   CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1]!.version;

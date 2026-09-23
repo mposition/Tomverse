@@ -25,6 +25,19 @@ export const consentCopyForLanguage = (
 ): Readonly<Record<ConsentCopyKey, string>> =>
   Object.freeze(
     Object.fromEntries(
-      CONSENT_COPY_KEYS.map((key) => [key, consentCopy(key, language) ?? ""])
+      CONSENT_COPY_KEYS.map((key) => {
+        const text = consentCopy(key, language);
+        if (text === null) {
+          // An empty string here renders an empty checkbox label, and
+          // `consentCopyHash()` answers null for the same gap -- so the screen
+          // would ask for consent with nothing written on it and the ledger
+          // would have no hash to record. Both silent. The table is complete,
+          // so a gap is a bug in a new version and this is where it surfaces.
+          throw new Error(
+            `No approved consent copy for ${key} in ${language}.`
+          );
+        }
+        return [key, text];
+      })
     ) as Record<ConsentCopyKey, string>
   );

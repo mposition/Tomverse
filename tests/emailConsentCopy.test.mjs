@@ -19,6 +19,12 @@ import {
   consentCopyForHash,
   consentCopyHash,
 } from "../lib/emailConsentCopyHash.ts";
+import {
+  CONSENT_COPY_DIGESTS,
+  consentCopyDigestKey,
+} from "../lib/emailConsentCopyDigests.ts";
+import { consentCopyPromisesNoUnrequestedSend } from "../lib/emailConsentCopy.ts";
+import { consentCopyForLanguage } from "../lib/emailConsentCopyLocale.ts";
 
 test("every device has every approved language", () => {
   // Section 2's approved choice: the four consent devices carry all seven,
@@ -59,23 +65,69 @@ test("no device label tries to sell the thing it describes", () => {
   }
 });
 
-test("the notice says the three kinds of mail that keep coming", () => {
-  // Contract section 3's classification boundary, said on the screen rather
-  // than only in the policy: somebody who reads "turned off" as "no more mail"
-  // treats the next sign-in code as a violation.
-  assert.match(consentCopy("signupNotice", "en"), /Sign-in codes/);
-  assert.match(consentCopy("signupNotice", "en"), /receipts/);
-  assert.match(consentCopy("signupNotice", "en"), /service notices/);
-  assert.match(consentCopy("signupNotice", "ko"), /로그인 코드/);
-  assert.match(consentCopy("signupNotice", "ko"), /영수증/);
+// What each language has to say, so the checks below cover all seven.
+//
+// They were English and Korean only, and a translation that dropped the
+// sign-in-code sentence would have passed -- leaving that language's screen
+// reading as "turn this off and the mail stops", so the next sign-in code
+// looks like a violation.
+const REQUIRED_PHRASES = {
+  // Contract section 3's classification boundary, said on the screen.
+  keepsComing: {
+    ko: [/로그인 코드/, /영수증/, /서비스 공지/],
+    en: [/Sign-in codes/, /receipts/, /service notices/],
+    de: [/Anmeldecodes/, /(Rechnungsbelege|Belege)/, /Servicehinweise/],
+    es: [/códigos de acceso/, /recibos/, /avisos de servicio/],
+    fr: [/codes de connexion/, /reçus/, /avis de service/],
+    pt: [/[Cc]ódigos de acesso/, /recibos/, /avisos de serviço/],
+    zh: [/登录验证码/, /(收据|账单收据)/, /服务通知/],
+  },
+  // Korea's guidance and the approved contract section 11.3.
+  noSignIn: {
+    ko: [/로그인 없이/],
+    en: [/without signing in/],
+    de: [/ohne Anmeldung/],
+    es: [/sin iniciar sesión/],
+    fr: [/sans vous connecter/],
+    pt: [/sem fazer login/],
+    zh: [/无需登录/],
+  },
+};
+
+test("every language names the three kinds of mail that keep coming", () => {
+  for (const [language, patterns] of Object.entries(
+    REQUIRED_PHRASES.keepsComing
+  )) {
+    for (const pattern of patterns) {
+      assert.match(
+        consentCopy("signupNotice", language),
+        pattern,
+        `signupNotice.${language}`
+      );
+      assert.match(
+        consentCopy("noticeBody", language),
+        pattern,
+        `noticeBody.${language}`
+      );
+    }
+  }
 });
 
-test("both notices say unsubscribing needs no sign-in", () => {
-  // Korea's guidance and the approved contract section 11.3.
-  assert.match(consentCopy("signupNotice", "en"), /without signing in/);
-  assert.match(consentCopy("noticeBody", "en"), /without signing in/);
-  assert.match(consentCopy("signupNotice", "ko"), /로그인 없이/);
-  assert.match(consentCopy("noticeBody", "ko"), /로그인 없이/);
+test("every language says unsubscribing needs no sign-in", () => {
+  for (const [language, patterns] of Object.entries(REQUIRED_PHRASES.noSignIn)) {
+    for (const pattern of patterns) {
+      assert.match(
+        consentCopy("signupNotice", language),
+        pattern,
+        `signupNotice.${language}`
+      );
+      assert.match(
+        consentCopy("noticeBody", language),
+        pattern,
+        `noticeBody.${language}`
+      );
+    }
+  }
 });
 
 test("the in-product notice opens by saying we have not been sending", () => {
@@ -84,6 +136,64 @@ test("the in-product notice opens by saying we have not been sending", () => {
   // already happening. A policy-change notice does not create a permission.
   assert.match(consentCopy("noticeBody", "en"), /^Tomverse has not sent you/);
   assert.match(consentCopy("noticeBody", "ko"), /^Tomverse는 지금까지/);
+});
+
+test("the opening sentence is about the reader, where the language marks that", () => {
+  // "We have not sent product news" without a recipient is a claim about the
+  // world, and it is not one we could keep. Six of the seven mark the reader
+  // with a pronoun; Korean marks it with the honorific verb form instead, and
+  // an explicit pronoun there would read as stilted rather than as careful.
+  const marksTheReader = {
+    en: /sent you/,
+    de: /Ihnen/,
+    es: /te ha enviado/,
+    fr: /vous a pas envoyé/,
+    zh: /向您发送/,
+    ko: /보내드린/,
+  };
+  for (const [language, pattern] of Object.entries(marksTheReader)) {
+    assert.match(
+      consentCopy("noticeBody", language),
+      pattern,
+      `noticeBody.${language} does not mark the reader`
+    );
+  }
+});
+
+test("the wording defects waiting on a new version are the ones we know about", () => {
+  // Portuguese is the one language whose opening sentence has no recipient:
+  // `A Tomverse não enviou novidades do produto` reads literally as a claim
+  // about everybody. The other five pronoun languages name the reader.
+  //
+  // It is not corrected here, and that restraint is the point. Section 9 says
+  // approved wording is versioned rather than edited, and this string is
+  // approved. Nothing has rendered it yet, so no evidence points at it, which
+  // makes the correction cheap -- but cheap is not the same as ours to make.
+  //
+  // This test exists so the defect cannot be forgotten between now and that
+  // decision, and so it fails the day somebody silently fixes it without
+  // adding a version.
+  // The first clause only. The second one ("a menos que você peça") does name
+  // the reader, which is what makes this read as a slip rather than a choice.
+  const firstClause = consentCopy("noticeBody", "pt").split(" e não enviará")[0];
+  assert.equal(firstClause, "A Tomverse não enviou novidades do produto");
+  assert.ok(
+    !/você|lhe |te /.test(firstClause),
+    "the Portuguese opening now names the reader; record the new version rather than editing this test"
+  );
+});
+
+test("this wording promises something the override contradicts", () => {
+  // Not a style note. The notice promises we have not sent and will not
+  // without being asked; the owner's other approved decision sends to these
+  // same accounts under `risk_accepted`, without consent. One such send makes
+  // the promise false and the stored `copyHash` evidence that we showed it.
+  //
+  // Only the owner can choose between two decisions they made. Until then the
+  // reading that cannot cause harm is enforced: showing this notice retires
+  // the override for that address.
+  assert.equal(consentCopyPromisesNoUnrequestedSend("2026-09-23"), true);
+  assert.equal(consentCopyPromisesNoUnrequestedSend("not-a-version"), false);
 });
 
 test("dismissing and refusing are different labels in every language", () => {
@@ -150,18 +260,73 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
-test("every approved string appears in the approved document", () => {
+test("every approved string is its own cell in the approved document", () => {
   // The document is what the owner signed. If this file drifts from it, the
-  // hash names words nobody approved -- and the drift would be invisible,
-  // because nothing else compares them.
+  // hash names words nobody approved, and nothing else compares them.
+  //
+  // A whole table cell, not a substring. `받지 않겠습니다` is a substring of
+  // `광고성 이메일을 받지 않겠습니다`, so shortening a label would have left it
+  // findable in the document and the check green.
   const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
+  const cells = new Set(
+    doc
+      .split("\n")
+      .filter((line) => line.startsWith("|"))
+      .flatMap((line) =>
+        line
+          .split("|")
+          .map((cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1"))
+      )
+  );
   for (const key of CONSENT_COPY_KEYS) {
     for (const language of CONSENT_COPY_LANGUAGES) {
       const text = consentCopy(key, language);
       assert.ok(
-        doc.includes(text),
-        `${key}.${language} is not in the approved document: ${text.slice(0, 40)}`
+        cells.has(text),
+        `${key}.${language} is not a cell in the approved document: ${text.slice(0, 40)}`
       );
+    }
+  }
+});
+
+test("no approved byte has moved since it was approved", () => {
+  // The guard above compares code with document, and an editor changing both
+  // -- which is what anybody fixing wording would do -- left it green while
+  // the version name stayed `2026-09-23`. Every `copyHash` already stored
+  // against that version then resolved to nothing, silently. This is the check
+  // that cannot be satisfied by editing two files instead of one.
+  for (const row of allConsentCopyHashes()) {
+    const pinned =
+      CONSENT_COPY_DIGESTS[
+        consentCopyDigestKey(row.version, row.key, row.language)
+      ];
+    assert.equal(
+      row.hash,
+      pinned,
+      `${row.version}/${row.key}/${row.language} changed; approved wording is versioned, not edited`
+    );
+  }
+});
+
+test("the pinned list covers every approved string and nothing else", () => {
+  const live = new Set(
+    allConsentCopyHashes().map((row) =>
+      consentCopyDigestKey(row.version, row.key, row.language)
+    )
+  );
+  assert.deepEqual(
+    [...Object.keys(CONSENT_COPY_DIGESTS)].sort(),
+    [...live].sort()
+  );
+});
+
+test("a missing string is an error rather than an empty label", () => {
+  // An empty label would ask for consent with nothing written on it, and the
+  // hash would be null for the same gap. Both silent.
+  for (const language of CONSENT_COPY_LANGUAGES) {
+    const table = consentCopyForLanguage(language);
+    for (const key of CONSENT_COPY_KEYS) {
+      assert.ok(table[key].length > 0, `${key}.${language} is empty`);
     }
   }
 });
