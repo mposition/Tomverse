@@ -266,15 +266,17 @@ Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사
 틀립니다. 2026-09-23에 두 지리를 나눴고, 어휘(`mode`의 여섯 값, 보관 다섯 항목,
 `null`은 0이 아님)는 외부 공급자 개인정보 검토 인수본 v2.0의 schema를 그대로
 씁니다. 그 인수본의 공급자별 V1 참고값은 재검증되지 않은 주장과 내부 권고를 담고
-있어 이 공개 저장소에 옮기지 않았습니다. 이 목록의 행은 전부 `UNKNOWN`에서
-시작합니다.
+있어 이 공개 저장소에 옮기지 않았습니다. 이 목록의 행은 전부 `status: unproven`
+이고, 각 사실은 `UNKNOWN` 또는 `null`에서 시작합니다.
 
 다른 서비스(OpenRouter·Duck.ai·Poe)가 공개한 공급자 정책은 **그 서비스의 계약**을
 설명합니다. 같은 endpoint를 불러도 그 조건을 승계하지 않으므로 `evidenceRef`가 될
 수 없고, 이 공급자가 그런 조건을 제공하기는 한다는 단서로만 쓸 수 있습니다.
 
-`ProviderEndpoint.destinationRegions` 컬럼(dark)도 같은 저장 alias로 읽어야 합니다.
-컬럼을 저장·처리로 나누는 것은 migration이 필요하므로 별도 단계로 남깁니다.
+`ProviderEndpoint.destinationRegions` 컬럼(dark)은 **다른 필드**입니다. schema
+주석은 "이 endpoint가 닿는 region"이고, 이 목록의 저장 alias와 같은 뜻이라고 읽으면
+안 됩니다. 그 컬럼을 저장·처리로 나눌지는 migration이 필요한 별도 결정이며, 그때까지
+아무 코드도 그 컬럼을 eligibility에 읽지 않습니다(`lib/routingIdentityManifest.ts`).
 
 규칙 넷:
 

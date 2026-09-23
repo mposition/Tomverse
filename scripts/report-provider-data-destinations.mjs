@@ -19,6 +19,7 @@
 import {
     PROVIDER_DATA_DESTINATIONS,
     RETENTION_COMPONENTS,
+    destinationIsDisclosable,
     destinationShapeProblems,
     provenDestinationProblems,
 } from "../lib/providerDataDestinations.ts";
@@ -87,8 +88,11 @@ for (const [label, count, total] of coverage) {
 }
 
 console.log("");
+// Disclosable, not "may serve": serving a residency-constrained request is
+// decided by an approval in force (lib/deploymentIdentity.ts), and a row a
+// notice could print is only what such an approval may be made on.
 console.log(
-    `May serve a residency-constrained request: ${proven.length} of ${rows.length}.`
+    `Disclosable, and so open to a residency approval: ${rows.filter(destinationIsDisclosable).length} of ${rows.length}.`
 );
 
 if (unproven.length > 0) {
