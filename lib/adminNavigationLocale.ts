@@ -249,7 +249,7 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
 > = {
   "amux-board-import": {
     label: "AMUX 카탈로그 이관",
-    description: "owner 전용 미리보기와 승인. 이 화면에서 운영 적용은 꺼져 있다.",
+    description: "owner 전용 카탈로그 미리보기와 승인, 꺼진 운영 적용",
   },
   "user-detail": {
     label: "고객 상세",

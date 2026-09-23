@@ -622,7 +622,7 @@ export const ADMIN_DETAIL_ROUTES = [
     id: "amux-board-import",
     pattern: /^\/admin\/amux-board-import$/,
     label: "AMUX catalog import",
-    description: "Owner-only preview and approval. Apply stays off on this screen.",
+    description: "Owner-only catalog preview and approval, with apply left off",
     parentLabel: "Overview",
     parentHref: "/admin/overview",
     group: "Command Center" as const,
