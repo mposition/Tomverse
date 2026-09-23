@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
+import { normalizeCountry } from "@/lib/emailJurisdictionCore";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import {
@@ -42,12 +43,32 @@ import {
  * without one: a `notice_shown` row that cannot say which words were on the
  * screen is a record that we asked, with no way to ever show what we asked.
  *
- * ## The country is reported, not derived
+ * ## The country is reported, not derived -- and there may be two of them
  *
  * This function does not ask `jurisdictionForUser()` anything. The caller
- * passes the country it actually applied, where that country came from, and
- * the version of the rule whose device it rendered -- and the write is refused
- * without all three.
+ * passes the candidates it actually applied: for each one the country, the
+ * signal it came from, the version of the rule whose device was rendered, and
+ * the hash of that device's words.
+ *
+ * A list rather than a single country, because section 5.3 says an uncertain
+ * estimate keeps both candidates and evaluates both -- a person who might be
+ * in Korea has to pass Korea's rule too. A scalar could not express that, so a
+ * caller written against a scalar would have had to pick one before the
+ * evaluation that is supposed to consider both, and the picked one would have
+ * been permanent: this writer returns the existing row rather than adding a
+ * second, so the first write wins for ever.
+ *
+ * The `jurisdiction` column holds a country only when there is exactly one.
+ * With two it holds `ZZ` and the source says `conflict`, which is not a
+ * placeholder but the true answer: the country is not determined. Section
+ * 5.6's override cannot cross `ZZ` for precisely this reason -- we cannot
+ * work out which display duties attach. The candidates themselves persist in
+ * `evidence`, which is where section 5.3 says they follow the person from the
+ * attempt through to the send snapshot.
+ *
+ * Countries go through `normalizeCountry()`. Without it `" AU"`, `"kr"`,
+ * `"Korea"` and `"inferred"` were all accepted, stored raw, and compared
+ * against later with `===`.
  *
  * Deriving it here was wrong, and the way it was wrong is worth keeping. An
  * account that has never declared a country resolves through language and
@@ -94,10 +115,30 @@ export const noticeStateForUser = async (input: {
   // account can have been shown the notice, not consented and not objected,
   // and that combination is the ordinary one -- somebody who closed it.
   const [consent, shown, objected, suppressions] = await Promise.all([
-    db.consentRecord.findFirst({
-      where: { emailAddress, purpose: { in: purposes }, action: "granted" },
-      select: { id: true },
-    }),
+    // The newest row per purpose, and only then what it says.
+    //
+    // `ConsentRecord` is append-only, so somebody who granted and then
+    // withdrew has both rows -- and asking for any `granted` row found the
+    // first one and called them a consenting subscriber for ever. They would
+    // never be offered the notice again, with the reason recorded as
+    // `already_consented`, and the in-product notice is the only place an
+    // existing account can actually give consent (section 5.4). Any later
+    // reader that treats that refusal as express consent sends marketing to an
+    // address that withdrew.
+    //
+    // `lib/marketingReach.ts` counts the same table the same way, and says so
+    // for the same reason.
+    db.$queryRaw<{ purpose: string }[]>`
+      SELECT purpose FROM (
+        SELECT DISTINCT ON (purpose) purpose, action
+        FROM "ConsentRecord"
+        WHERE "emailAddress" = ${emailAddress}
+          AND purpose = ANY(${[...purposes]}::text[])
+        ORDER BY purpose, "occurredAt" DESC, "createdAt" DESC
+      ) latest
+      WHERE action IN ('granted', 'reconfirmed')
+      LIMIT 1
+    `,
     db.emailPermissionEvent.findFirst({
       where: { userId: input.userId, kind: "notice_shown" },
       select: { id: true },
@@ -128,7 +169,7 @@ export const noticeStateForUser = async (input: {
 
   return inProductNoticeOffer({
     emailAddress,
-    hasExpressConsent: consent !== null,
+    hasExpressConsent: consent.length > 0,
     noticeAlreadyShown: shown !== null,
     // Keyed by address rather than by account: a refusal follows the mailbox,
     // for the same reason a suppression does.
@@ -137,6 +178,16 @@ export const noticeStateForUser = async (input: {
     // in the set is a refusal of the question being put.
     suppressed: suppressions.some((verdict) => !verdict.allowed),
   });
+};
+
+/** One country whose rule was applied when the notice was rendered. */
+export type NoticeCandidate = {
+  country: string;
+  /** Where this candidate came from: `self_declared`, `inferred`, ... */
+  signal: string;
+  ruleVersion: number;
+  /** The hash of the words this candidate's rule put on the screen. */
+  copyHash: string;
 };
 
 type RecordInput = {
@@ -149,16 +200,13 @@ type RecordInput = {
   surface: string;
   copyHash: string;
   /**
-   * The country whose rule the person was actually shown, where that country
-   * came from, and which version of the rule it was.
+   * The candidates whose rules the person was actually shown.
    *
-   * All three are required and none is derived here. A row that cannot say
-   * which rule applied is a record that we asked with no way to say what we
-   * asked under, and it can never be corrected.
+   * At least one, and none of it is derived here. A row that cannot say which
+   * rule applied is a record that we asked with no way to say what we asked
+   * under, and it can never be corrected.
    */
-  appliedCountry: string;
-  appliedCountrySource: string;
-  ruleVersion: number;
+  candidates: readonly NoticeCandidate[];
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
 };
@@ -172,16 +220,40 @@ const recordNoticeEvent = async (
       "An in-product notice event must carry the hash of the words that were on the screen."
     );
   }
-  if (input.appliedCountry.trim().length === 0) {
+  if (input.candidates.length === 0) {
     throw new Error(
       "An in-product notice event must carry the country whose rule was shown."
     );
   }
-  if (input.appliedCountrySource.trim().length === 0) {
-    throw new Error(
-      "An in-product notice event must carry where the applied country came from."
-    );
-  }
+  const candidates = input.candidates.map((candidate) => {
+    const country = normalizeCountry(candidate.country);
+    if (country === null) {
+      throw new Error(
+        `"${candidate.country}" is not a country code; an in-product notice event cannot record it.`
+      );
+    }
+    if (candidate.signal.trim().length === 0) {
+      throw new Error(
+        "An in-product notice event must carry where each candidate country came from."
+      );
+    }
+    if (candidate.copyHash.trim().length === 0) {
+      throw new Error(
+        "An in-product notice event must carry the hash of the words each candidate's rule put on the screen."
+      );
+    }
+    return {
+      country,
+      signal: candidate.signal,
+      ruleVersion: candidate.ruleVersion,
+      copyHash: candidate.copyHash,
+    };
+  });
+
+  // One candidate names the country. Two mean it is not determined, and `ZZ`
+  // with `conflict` is the honest pair for that -- not a placeholder. Section
+  // 5.6's override cannot cross `ZZ`, which is the correct consequence.
+  const single = candidates.length === 1 ? candidates[0]! : null;
   const db = input.client ?? prisma;
   const record = noticeRecordFor(action);
   if (record.kind === "consent") {
@@ -231,13 +303,13 @@ const recordNoticeEvent = async (
         occurredAt: input.occurredAt ?? new Date(),
         capturedVia: "in_product_notice",
         sourceEventKey,
-        jurisdiction: input.appliedCountry,
-        jurisdictionSource: input.appliedCountrySource,
+        jurisdiction: single ? single.country : "ZZ",
+        jurisdictionSource: single ? single.signal : "conflict",
         policyVersionId,
         evidence: {
           surface: input.surface,
           copyHash: input.copyHash,
-          ruleVersion: input.ruleVersion,
+          candidates,
         },
       },
     });

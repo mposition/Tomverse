@@ -9,14 +9,13 @@ import {
   normalizeEmailAddress,
 } from "@/lib/emailSuppressionCore";
 import {
+  approvalScopeRefusal,
   cohortMismatchReason,
   type CohortMismatchReason,
 } from "@/lib/emailPermissionLedgerCore";
 import {
-  approvalStandingRefusal,
   sealRefusal,
   type ApprovalCohortMember,
-  type ApprovalStandingRefusal,
 } from "@/lib/emailSendApprovalCohortCore";
 
 /**
@@ -166,10 +165,7 @@ export const sealRiskAcceptedApproval = async (input: {
 
 export type CohortStanding =
   | { inCohort: true; approvalId: string }
-  | {
-      inCohort: false;
-      reason: CohortMismatchReason | ApprovalStandingRefusal | "no_approval";
-    };
+  | { inCohort: false; reason: CohortMismatchReason | string };
 
 /**
  * Whether this delivery is inside the sealed cohort, and why not when it is
@@ -192,6 +188,17 @@ export const cohortStanding = async (input: {
   userId: string | null;
   /** The address the delivery was pinned to at enqueue. */
   deliveryEmailAddress: string | null;
+  /**
+   * The purpose and policy version this send is being judged under.
+   *
+   * Required, and checked against the approval's own scope. An approval
+   * sealed for one purpose does not cover another, and one given under an
+   * earlier policy version does not carry forward -- section 7.6. Leaving
+   * them out was how a newsletter approval came to answer "covered" for a
+   * promotions send.
+   */
+  purpose: string;
+  policyVersionId: string;
   client?: Prisma.TransactionClient;
 }): Promise<CohortStanding> => {
   const db = input.client ?? prisma;
@@ -239,18 +246,42 @@ export const cohortStanding = async (input: {
 
   const approval = await db.emailSendApproval.findUnique({
     where: { id: input.approvalId },
-    select: { sealedAt: true, _count: { select: { revocations: true } } },
+    select: {
+      approvalType: true,
+      sealedAt: true,
+      policyVersionId: true,
+      ruleKey: true,
+      ruleVersion: true,
+      country: true,
+      obligationKey: true,
+      purposeKey: true,
+      _count: { select: { revocations: true } },
+    },
   });
 
   // The approval is judged before the account: being a member of a withdrawn
-  // approval is not a weaker form of being covered, and answering "no account"
-  // about one names the wrong fact.
+  // or out-of-scope approval is not a weaker form of being covered, and
+  // answering "no account" about one names the wrong fact.
   if (!approval) return { inCohort: false, reason: "no_approval" };
-  const standing = approvalStandingRefusal({
-    sealedAt: approval.sealedAt,
-    revocationCount: approval._count.revocations,
-  });
-  if (standing) return { inCohort: false, reason: standing };
+  const scope = approvalScopeRefusal(
+    {
+      approvalType: approval.approvalType as "risk_accepted" | "obligation_waiver",
+      sealedAt: approval.sealedAt,
+      revoked: approval._count.revocations > 0,
+      policyVersionId: approval.policyVersionId,
+      ruleKey: approval.ruleKey,
+      ruleVersion: approval.ruleVersion,
+      country: approval.country,
+      obligationKey: approval.obligationKey,
+      purposeKey: approval.purposeKey,
+    },
+    {
+      approvalType: "risk_accepted",
+      policyVersionId: input.policyVersionId,
+      purpose: input.purpose,
+    }
+  );
+  if (scope) return { inCohort: false, reason: scope };
 
   if (!input.userId) {
     return { inCohort: false, reason: "no_account" };
@@ -286,6 +317,9 @@ export const riskAcceptedApprovalSummary = async (input: {
   client?: Prisma.TransactionClient;
 }) => {
   const db = input.client ?? prisma;
+  // An obligation waiver has no membership, so summarising one produces a
+  // cohort of nobody -- which on a screen headed "who this covers" reads as a
+  // decision that covers nobody rather than as the wrong kind of row.
   const approval = await db.emailSendApproval.findUnique({
     where: { id: input.approvalId },
     select: {
@@ -301,7 +335,7 @@ export const riskAcceptedApprovalSummary = async (input: {
       _count: { select: { members: true, revocations: true } },
     },
   });
-  if (!approval) return null;
+  if (!approval || approval.approvalType !== "risk_accepted") return null;
 
   return {
     ...approval,

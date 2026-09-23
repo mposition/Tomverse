@@ -10,9 +10,11 @@ import {
   sealRiskAcceptedApproval,
 } from "@/lib/emailSendApprovalCohort";
 import {
+  noticeStateForUser,
   recordNoticeObjection,
   recordNoticeShown,
 } from "@/lib/inProductConsentNotice";
+import { noticePurposes } from "@/lib/inProductConsentNoticeCore";
 
 /**
  * The ledger's first real writers, against the real database.
@@ -52,6 +54,12 @@ const policyVersionId = async () => {
 };
 
 const approvedAt = new Date("2026-09-16T00:00:00.000Z");
+
+/** The scope a send is judged under, which every standing query must carry. */
+const scopeFor = async () => ({
+  purpose: "product_updates",
+  policyVersionId: await policyVersionId(),
+});
 
 const sealFor = async (users: { id: string; email: string | null }[]) =>
   sealRiskAcceptedApproval({
@@ -162,6 +170,7 @@ test("the same mailbox in a different case is the same member", async () => {
     approvalId: approval.id,
     userId: users[0]!.id,
     deliveryEmailAddress: users[0]!.email!.toUpperCase(),
+    ...(await scopeFor()),
   });
   assert.deepEqual(standing, { inCohort: true, approvalId: approval.id });
 });
@@ -182,6 +191,7 @@ test("changing the address after the seal takes the delivery out", async () => {
     // three-digest rule exists for: the approval was about a mailbox this
     // person has since left.
     deliveryEmailAddress: users[0]!.email!,
+    ...(await scopeFor()),
   });
   assert.deepEqual(standing, {
     inCohort: false,
@@ -200,6 +210,7 @@ test("a withdrawn approval covers nobody, including its own members", async () =
     approvalId: approval.id,
     userId: users[0]!.id,
     deliveryEmailAddress: users[0]!.email!,
+    ...(await scopeFor()),
   });
   assert.equal(before.inCohort, true);
 
@@ -218,6 +229,7 @@ test("a withdrawn approval covers nobody, including its own members", async () =
       approvalId: approval.id,
       userId: users[0]!.id,
       deliveryEmailAddress: users[0]!.email!,
+      ...(await scopeFor()),
     }),
     { inCohort: false, reason: "revoked" }
   );
@@ -229,6 +241,7 @@ test("an approval that does not exist is not a missing account", async () => {
       approvalId: "no-such-approval",
       userId: null,
       deliveryEmailAddress: null,
+      ...(await scopeFor()),
     }),
     { inCohort: false, reason: "no_approval" }
   );
@@ -243,6 +256,7 @@ test("an account that joined after the seal is in no cohort", async () => {
     approvalId: approval.id,
     userId: latecomer.id,
     deliveryEmailAddress: latecomer.email!,
+    ...(await scopeFor()),
   });
   assert.deepEqual(standing, { inCohort: false, reason: "not_a_member" });
 });
@@ -255,9 +269,14 @@ const noticeInput = (user: { id: string; email: string | null }) => ({
   surface: "in-product-consent-notice",
   copyHash: "sha256:placeholder-until-S2-approves-the-wording",
   // Reported by the caller that rendered the device, never derived here.
-  appliedCountry: "AU",
-  appliedCountrySource: "self_declared",
-  ruleVersion: 1,
+  candidates: [
+    {
+      country: "AU",
+      signal: "self_declared",
+      ruleVersion: 1,
+      copyHash: "sha256:au-device",
+    },
+  ],
 });
 
 test("recording the same render twice leaves one row", async () => {
@@ -378,9 +397,14 @@ test("the country on the row is the one the caller says it showed", async () => 
   const user = await createUser();
   await recordNoticeShown({
     ...noticeInput(user),
-    appliedCountry: "SG",
-    appliedCountrySource: "self_declared",
-    ruleVersion: 4,
+    candidates: [
+      {
+        country: "SG",
+        signal: "self_declared",
+        ruleVersion: 4,
+        copyHash: "sha256:sg-device",
+      },
+    ],
   });
 
   const row = await prisma.emailPermissionEvent.findFirstOrThrow({
@@ -391,24 +415,148 @@ test("the country on the row is the one the caller says it showed", async () => 
   assert.deepEqual(row.evidence, {
     surface: "in-product-consent-notice",
     copyHash: "sha256:placeholder-until-S2-approves-the-wording",
-    ruleVersion: 4,
+    candidates: [
+      {
+        country: "SG",
+        signal: "self_declared",
+        ruleVersion: 4,
+        copyHash: "sha256:sg-device",
+      },
+    ],
   });
 });
 
-test("a notice event without an applied country is refused", async () => {
+test("two candidates leave the country undetermined rather than picking one", async () => {
+  // Section 5.3: an uncertain estimate keeps both and evaluates both, because
+  // somebody who might be in Korea has to pass Korea's rule too. The column
+  // holds one value, so it holds the true one -- `ZZ` -- and the candidates
+  // persist in the evidence. Picking one would have been permanent: this
+  // writer returns the existing row rather than adding a second.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [
+      {
+        country: "KR",
+        signal: "inferred",
+        ruleVersion: 2,
+        copyHash: "sha256:kr-device",
+      },
+      {
+        country: "US",
+        signal: "inferred",
+        ruleVersion: 1,
+        copyHash: "sha256:us-device",
+      },
+    ],
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "ZZ");
+  assert.equal(row.jurisdictionSource, "conflict");
+  const evidence = row.evidence as { candidates: { country: string }[] };
+  assert.deepEqual(
+    evidence.candidates.map((candidate) => candidate.country),
+    ["KR", "US"]
+  );
+});
+
+test("a country that is not a country code is refused", async () => {
+  // `" AU"`, `"kr"`, `"Korea"` and `"inferred"` were all accepted, stored
+  // raw on an append-only row, and compared against later with `===`.
+  const user = await createUser();
+  for (const country of [" ", "Korea", "inferred", "AUS"]) {
+    await assert.rejects(
+      recordNoticeShown({
+        ...noticeInput(user),
+        candidates: [
+          {
+            country,
+            signal: "self_declared",
+            ruleVersion: 1,
+            copyHash: "sha256:device",
+          },
+        ],
+      }),
+      /is not a country code/
+    );
+  }
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
+test("a country is normalised before it is written down", async () => {
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [
+      {
+        country: " au ",
+        signal: "self_declared",
+        ruleVersion: 1,
+        copyHash: "sha256:au-device",
+      },
+    ],
+  });
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  assert.equal(row.jurisdiction, "AU");
+});
+
+test("a notice event with no candidate at all is refused", async () => {
   const user = await createUser();
   await assert.rejects(
-    recordNoticeShown({ ...noticeInput(user), appliedCountry: " " }),
+    recordNoticeShown({ ...noticeInput(user), candidates: [] }),
     /country whose rule was shown/
-  );
-  await assert.rejects(
-    recordNoticeShown({ ...noticeInput(user), appliedCountrySource: "" }),
-    /where the applied country came from/
   );
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
     0
   );
+});
+
+test("a withdrawn consent does not count as consent", async () => {
+  // `ConsentRecord` is append-only, so asking for any `granted` row found the
+  // first one and called somebody who had since withdrawn a consenting
+  // subscriber for ever -- never offered the notice again, and recorded as
+  // `already_consented`. The in-product notice is the only place an existing
+  // account can actually give consent.
+  const user = await createUser();
+  const policyId = await policyVersionId();
+
+  const before = await noticeStateForUser({ userId: user.id });
+  assert.deepEqual(before, { offered: true, purposes: noticePurposes() });
+
+  const consentRow = (action: string, occurredAt: Date) => ({
+    userId: user.id,
+    emailAddress: user.email!,
+    purpose: noticePurposes()[0]!,
+    action,
+    occurredAt,
+    jurisdiction: "AU",
+    jurisdictionSource: "self_declared",
+    policyVersionId: policyId,
+    capturedVia: "preference_center",
+  });
+
+  await prisma.consentRecord.create({
+    data: consentRow("granted", new Date("2026-09-01T00:00:00.000Z")),
+  });
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: false,
+    refusal: "already_consented",
+  });
+
+  await prisma.consentRecord.create({
+    data: consentRow("withdrawn", new Date("2026-09-02T00:00:00.000Z")),
+  });
+  const after = await noticeStateForUser({ userId: user.id });
+  assert.deepEqual(after, { offered: true, purposes: noticePurposes() });
 });
 
 test("an approval sealed with no reason is refused", async () => {

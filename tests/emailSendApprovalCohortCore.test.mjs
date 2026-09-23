@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  approvalStandingRefusal,
   overrideBlockers,
   overrideNeeded,
   sealRefusal,
@@ -252,87 +251,9 @@ test("a rule change is never reported as an address the recipient changed", () =
 });
 
 // --- the approval itself -------------------------------------------------
-
-test("a sealed approval with no withdrawal authorises", () => {
-  assert.equal(
-    approvalStandingRefusal({ sealedAt, revocationCount: 0 }),
-    null
-  );
-});
-
-test("an unsealed approval is a draft, not a weak approval", () => {
-  assert.equal(
-    approvalStandingRefusal({ sealedAt: null, revocationCount: 0 }),
-    "not_sealed"
-  );
-});
-
-test("a withdrawn approval covers nobody", () => {
-  // Section 5.6 rule 6: the sends it already authorised stand, the next one
-  // does not. Being a member of it is not a smaller form of being covered.
-  assert.equal(
-    approvalStandingRefusal({ sealedAt, revocationCount: 1 }),
-    "revoked"
-  );
-});
-
-test("an unsealed approval is reported as unsealed even if withdrawn", () => {
-  // A withdrawal cannot exist against an unsealed row -- the database refuses
-  // it -- so reaching this state means something else is wrong, and naming the
-  // seal is what points at it.
-  assert.equal(
-    approvalStandingRefusal({ sealedAt: null, revocationCount: 1 }),
-    "not_sealed"
-  );
-});
-
-test("a deletion request's suppression is a blocker, not an unmapped scope", () => {
-  // Section 7.4 writes it at the classification scope precisely because
-  // withdrawing consent alone does not stop a risk_accepted send. With only a
-  // purpose and a global boolean it mapped to neither, and the address of
-  // somebody who had asked to be deleted would have been mailed.
-  assert.deepEqual(
-    overrideBlockers({ ...clear, suppressedForClassification: true }),
-    ["suppressed_classification"]
-  );
-});
-
-test("all three suppression scopes are reported together", () => {
-  assert.deepEqual(
-    overrideBlockers({
-      ...clear,
-      suppressedForPurpose: true,
-      suppressedForClassification: true,
-      suppressedGlobally: true,
-    }),
-    ["suppressed_purpose", "suppressed_classification", "suppressed_globally"]
-  );
-});
-
-test("an approval cannot be sealed without saying why", () => {
-  // The schema accepts an empty string and the seal makes it permanent, so an
-  // approval would exist for ever without the pair section 5.6 is built
-  // around. A screen would refuse an empty box; a script would not.
-  assert.equal(
-    sealRefusal({
-      alreadySealed: false,
-      ...decision,
-      reason: "   ",
-      members: [member("u1")],
-      approvedAt,
-      sealedAt,
-    }),
-    "no_reason"
-  );
-  assert.equal(
-    sealRefusal({
-      alreadySealed: false,
-      ...decision,
-      reviewCondition: "",
-      members: [member("u1")],
-      approvedAt,
-      sealedAt,
-    }),
-    "no_review_condition"
-  );
-});
+//
+// There is no `approvalStandingRefusal()` any more. It checked the seal and
+// the withdrawal, and `approvalScopeRefusal()` in the ledger core already
+// checked those plus the type, the policy version and the purpose -- so having
+// both meant the send used the one that skipped three of the five.
+// `tests/emailPermissionLedgerCore.test.mjs` covers the surviving function.

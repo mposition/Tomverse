@@ -199,24 +199,15 @@ export const sealRefusal = (input: {
 /**
  * Why an approval does not authorise anything, whoever is in its cohort.
  *
- * These are facts about the approval rather than about the recipient, and they
- * are checked before membership because membership in a withdrawn approval is
- * not a smaller version of being covered -- it is not being covered.
+ * There is no such function here, and that is the point. It was
+ * `approvalStandingRefusal()`, which looked at the seal and the withdrawal --
+ * and `approvalScopeRefusal()` in `lib/emailPermissionLedgerCore.ts` already
+ * looked at those two plus the type, the policy version and the purpose.
  *
- * `not_sealed` because a row without a seal is a draft being assembled
- * (section 5.6: the approval exists before the send, and it is the seal that
- * makes it exist). `revoked` because section 5.6's rule 6 says withdrawing an
- * approval adds an `EmailSendApprovalRevocation` event and later verdicts are
- * taken without the override. The sends it already authorised stand; the next
- * one does not.
+ * Having both meant the send used the narrower one, so an approval sealed for
+ * `purposeKey: "newsletter"` answered "covered" for a promotions send: a
+ * decision taken about one kind of mail silently covered every other kind.
+ * Section 7.6 requires the scope to match, and a second function that checks
+ * two of the five fields is not a smaller version of that -- it is a way to
+ * skip three.
  */
-export type ApprovalStandingRefusal = "not_sealed" | "revoked";
-
-export const approvalStandingRefusal = (input: {
-  sealedAt: Date | null;
-  revocationCount: number;
-}): ApprovalStandingRefusal | null => {
-  if (input.sealedAt === null) return "not_sealed";
-  if (input.revocationCount > 0) return "revoked";
-  return null;
-};
