@@ -1022,7 +1022,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | 참조·시각·resolver (§14.14). 행은 읽지 않음. BYOK 배선은 없음 |
 | §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 판정 (§14.16). 가중합은 없음. 행은 쓰지 않음 |
-| Phase 1 | health·capacity·quality 운영 대시보드 | 없음 |
+| Phase 1 | health·capacity·quality 운영 대시보드 | 집계 (`lib/routingOpsSummary.ts`, §14.23). 화면은 없음. 분모 0은 0%가 아님 |
 | 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 판정 (§14.17). 길이와 기한의 숫자는 호출자. 라우터는 열에 쓰지 않음 |
 | §10.2 | pre-commit buffer | 판정 (§14.19). 길이는 호출자. 라우터는 열에 쓰지 않음 |
 
@@ -1504,6 +1504,41 @@ ceiling 자체는 그 브랜치에서 이미 검토를 거쳤습니다. 이 절�
 이 줄이 §14의 8번 가운데 남아 있던 ceiling입니다. verdict는 이미 세어
 있었습니다. 직전 sticky 보고는 37, 약 74%였습니다. §14.3의 약 50단위에서
 완료는 38, **약 76%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다.
+production 배포는 0%입니다.
+
+## 14.23 Health·capacity·quality 집계 (2026-09-24)
+
+Phase 1 대시보드의 집계가 `lib/routingOpsSummary.ts`에 있습니다. 요청
+경로는 import하지 않습니다. 행을 읽지 않습니다. 운영 화면은 없습니다.
+
+- health 비율은 실패 수를 적격 시도 수로 나눈 값입니다. 적격 시도가 1
+  미만이거나, 수가 정수가 아니거나, 실패가 시도보다 많으면 insufficient
+  입니다. 그 경우를 0으로 바꾸지 않습니다.
+- capacity는 호출자가 준 limited 여부입니다. 없으면 insufficient입니다.
+  이 함수는 Retry-After를 정하지 않습니다.
+- quality는 `passed`·`stale`·`pending`·`failed` 중 하나일 때만 보입니다.
+  다른 문자열은 insufficient입니다.
+- 셋 중 하나라도 보이면 안 되는 상태면 summary를 만들지 않고, 빠진 축의
+  이름을 돌려줍니다. 비율은 건강한지 판단이 아닙니다. 임계값은 없습니다.
+
+이 줄이 §14.3의 대시보드 항목입니다. 직전 ceiling 보고는 38, 약 76%였습니다.
+§14.3의 약 50단위에서 완료는 39, **약 78%(추정)**입니다. 검증·독립 검토·
+병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.24 호스트 사본의 capability gate (2026-09-24)
+
+판정이 `lib/hostCopyCapability.ts`에 있습니다. 요청 경로는 import하지
+않습니다. 행을 읽지 않습니다. 가격을 비교하지 않습니다.
+
+같은 이름은 같은 모델이 아닙니다. 카탈로그 출력 한도와 context가 양의
+정수로 있고, 호스트가 그 두 한도를 각각 그보다 짧지 않게 말했을 때만
+대체를 허용합니다. 호스트 한도가 없으면 unproven이고, unproven은 같음이
+아닙니다. 더 짧은 한도는 거절입니다. 다른 logical model은 거절입니다.
+
+이 줄은 Phase 1 hard gate 가운데 quality·version·pin·residency 다음에
+남아 있던 capability입니다. 호스트 dark 등록을 다시 세지 않습니다. 직전
+대시보드 보고는 39, 약 78%였습니다. §14.3의 약 50단위에서 완료는 40,
+**약 80%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다.
 production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
