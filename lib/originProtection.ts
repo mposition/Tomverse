@@ -45,6 +45,7 @@ const isLocalHost = (host: string) =>
   host.startsWith("[::1]:");
 
 export type AmuxReviewProxyEnvironment = {
+  [key: string]: string | undefined;
   TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?: string;
   RAILWAY_PRIVATE_DOMAIN?: string;
 };
