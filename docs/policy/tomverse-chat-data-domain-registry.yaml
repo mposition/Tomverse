@@ -1231,6 +1231,97 @@ domains:
   # Neither holds a secret. A credential binding names where a key is kept and
   # who pays for calls made with it; the key itself is not in this database.
 
+  # Two approver identities, both `actor` and neither with a User relation.
+  #
+  # `approvedBy` is a durable operator identifier, which is what the sweep
+  # started reading on 2026-09-21. These two rows exist because it does: the
+  # whole value of an approval is that somebody is answerable for it, and one
+  # that cannot say who gave it is not an approval.
+  #
+  # Deliberately no relation to User. Deleting the approver's account must
+  # not rewrite the record of what they approved -- the same reasoning
+  # AdminAuditLog, the Prompt Refiner stage and EmailSendApproval record.
+
+  - domain: endpointResidencyApproval
+    prismaModel: EndpointResidencyApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 4.4 (approval versions are stored) and section 14 step 3
+    subjectReference:
+      kind: none
+    minimisationFields:
+      - approvedBy
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        A named person's decision that a provider endpoint may receive
+        personal data, and which recipients and regions that covers. Under
+        APP 8 the disclosure is Tomverse's to account for, so the record of
+        who authorised it is the accountability itself. The row is
+        append-only by trigger for the same reason: an approval that could be
+        edited afterwards could not answer what was allowed at the time.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-23"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject of the row is the approver, not any exporting account.
+      Returning it would hand one account another person's identity and
+      reasoning, and the approval is not about the exporter at all -- it is
+      about an endpoint.
+    note: >-
+      `kind: none` rather than a reference: this row is about an endpoint and
+      an approver, and there is no subject account it points at. Dark --
+      nothing writes one yet, held by `npm run check:dark-tables` -- and
+      registered anyway, because a row arriving before its registry entry is
+      one nobody graded, and the first arrives the day somebody enables the
+      identity config writer.
+
+  - domain: routingIdentityManifest
+    prismaModel: RoutingIdentityManifest
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 14 step 5 (A-5, the atomic config manifest)
+    subjectReference:
+      kind: none
+    minimisationFields:
+      - approvedBy
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Who published one version of the routing identity configuration, and
+        when. A routing decision names a manifest version, so this is what
+        lets anybody say afterwards what a request was decided against and on
+        whose authority. Immutable by trigger -- a version that could be
+        edited would make every decision citing it unanswerable.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-23"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject is the publisher, not any exporting account. The manifest
+      describes infrastructure -- placements, endpoints and the approvals
+      they run under -- and holds nothing an account wrote.
+    note: >-
+      `kind: none`: the row is about a configuration and its publisher, with
+      no subject account. Its entries (RoutingIdentityManifestEntry) carry no
+      identity at all and so are not a data domain. Dark, and registered
+      anyway for the reason the row above records.
+
   - domain: credentialBinding
     prismaModel: CredentialBinding
     # The row is about the account whose key it is -- the BYOK case -- and

@@ -577,6 +577,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Which placement a conversation\u2019s turns last went to, and when. Infrastructure routing state, held so a later turn can return to the placement holding its prefix; it carries no digest of that prefix and nothing else the person wrote. Deleted with the account.",
   },
   {
+    domain: "endpointResidencyApproval",
+    publicName: "endpoint_residency_approvals",
+    prismaModel: "EndpointResidencyApproval",
+    state: "excluded",
+    exclusionReason:
+      "A named person’s decision that a provider endpoint may receive personal data, and which recipients and regions that covers. The subject of the row is the approver, not any exporting account, and the approval is about an endpoint rather than about the person asking. Retained under legal hold: under APP 8 the disclosure is Tomverse’s to account for.",
+  },
+  {
+    domain: "routingIdentityManifest",
+    publicName: "routing_identity_manifests",
+    prismaModel: "RoutingIdentityManifest",
+    state: "excluded",
+    exclusionReason:
+      "Who published one version of the routing identity configuration, and when. Infrastructure — placements, endpoints and the approvals they run under — with nothing an account wrote. The subject is the publisher, not the exporter.",
+  },
+  {
     domain: "credentialBinding",
     publicName: "credential_bindings",
     prismaModel: "CredentialBinding",

@@ -45,6 +45,7 @@ CREATE TABLE "ProviderEndpoint" (
     "region" TEXT,
     "endpointUrl" TEXT,
     "resourceId" TEXT,
+    "cloudAccountId" TEXT,
     "residencyClass" TEXT NOT NULL DEFAULT 'unproven',
     "destinationRegions" JSONB,
     "routingPolicyDigest" TEXT,
