@@ -158,6 +158,15 @@ const compilerOptions = parsedConfig.options;
 // is back to 228 and the position-free inventory still hashes to the value
 // above, so this is a repin and not a review.
 //
+// 2026-09-23, S7 alongside: the release-notes link table moved into
+// `lib/productAnnouncementEmail.ts` and pushed the access below it down that
+// file. It brought none of its own -- the id lookups ask a `Map`, the rejected
+// field names are written out, and the type predicate asks that `Map` rather
+// than `Object.prototype.hasOwnProperty.call`, which this closure's
+// prototype-capability check refuses outright. The count is still 228 and the
+// position-free inventory still hashes to the value above, so this is a repin
+// and not a review.
+//
 // Both notes stand because both changes are in this tree, and the value below
 // is recomputed over the merged tree rather than taken from either side of the
 // conflict.
@@ -165,8 +174,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "fa8b16ea4a83762a158ee1d4fd3410c6",
-  "8772c89ca44192de0893f7168ae19b0d",
+  "d6b5de08379a269e937d89ca643e9132",
+  "e9e6c7b9c83267b4c054a9a7265155ec",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
