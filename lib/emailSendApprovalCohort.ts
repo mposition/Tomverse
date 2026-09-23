@@ -196,41 +196,55 @@ export const cohortStanding = async (input: {
 }): Promise<CohortStanding> => {
   const db = input.client ?? prisma;
 
-  // The approval and its membership come from one statement.
+  // The approval is read last, and that ordering is the whole guarantee.
   //
-  // They were two, and under READ COMMITTED that is a window rather than an
-  // ordering: the first query could see "sealed, nothing withdrawn", a
-  // withdrawal could commit, and the second query would still find a matching
-  // member -- so a send taken immediately after the decision was reversed went
-  // out carrying the override. Opening a transaction earlier does not help,
-  // because READ COMMITTED takes a fresh snapshot per statement rather than
-  // per transaction.
+  // It cannot be one statement. A nested relation read is a single Prisma call
+  // but two SQL statements unless the `relationJoins` preview feature is on,
+  // and this schema does not enable it -- so under READ COMMITTED, which takes
+  // a fresh snapshot per statement, an `include` buys nothing here. Claiming
+  // one instant in a comment would have been worse than the gap it described.
   //
-  // One statement makes the two facts one instant. It does not make the answer
-  // permanent, and nothing could: section 7.6 is why permission is decided
-  // again immediately before the provider call rather than trusted from
-  // enqueue.
+  // What makes the order sufficient is that the two facts age differently. A
+  // sealed approval's membership is immutable: the database refuses to change
+  // a member row or add one after the seal. So a membership read taken a
+  // moment ago is as true as one taken now, and the only row that can have
+  // moved underneath us is the approval itself -- which is therefore the one
+  // read last. A withdrawal committed before that read is seen.
   //
-  // The approval is still judged before the account, because being a member of
-  // a withdrawn approval is not a weaker form of being covered, and answering
-  // "no account" about a withdrawn approval names the wrong fact.
+  // A withdrawal committed after it is not, and no single read could see it.
+  // That is what section 7.6 is for: permission is decided again immediately
+  // before the provider call rather than carried from enqueue.
+  const member = input.userId
+    ? await db.emailSendApprovalMember.findUnique({
+        where: {
+          approvalId_userId: {
+            approvalId: input.approvalId,
+            userId: input.userId,
+          },
+        },
+        select: {
+          userId: true,
+          addressDigest: true,
+          addressNormalizationVersion: true,
+        },
+      })
+    : null;
+
+  const user = input.userId
+    ? await db.user.findUnique({
+        where: { id: input.userId },
+        select: { email: true },
+      })
+    : null;
+
   const approval = await db.emailSendApproval.findUnique({
     where: { id: input.approvalId },
-    select: {
-      sealedAt: true,
-      _count: { select: { revocations: true } },
-      members: input.userId
-        ? {
-            where: { userId: input.userId },
-            select: {
-              userId: true,
-              addressDigest: true,
-              addressNormalizationVersion: true,
-            },
-          }
-        : undefined,
-    },
+    select: { sealedAt: true, _count: { select: { revocations: true } } },
   });
+
+  // The approval is judged before the account: being a member of a withdrawn
+  // approval is not a weaker form of being covered, and answering "no account"
+  // about one names the wrong fact.
   if (!approval) return { inCohort: false, reason: "no_approval" };
   const standing = approvalStandingRefusal({
     sealedAt: approval.sealedAt,
@@ -241,12 +255,6 @@ export const cohortStanding = async (input: {
   if (!input.userId) {
     return { inCohort: false, reason: "no_account" };
   }
-
-  const member = approval.members?.[0] ?? null;
-  const user = await db.user.findUnique({
-    where: { id: input.userId },
-    select: { email: true },
-  });
 
   const reason = cohortMismatchReason({
     member,
