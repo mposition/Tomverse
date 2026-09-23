@@ -24,7 +24,7 @@ const positiveIntegerMs = (value: unknown): value is number =>
 export type PrecommitBufferDecision = "hold" | "release" | "undecided";
 
 /**
- * Whether the first chunk is still withheld.
+ * Hold, release, or leave the first chunk undecided.
  *
  * `hold` while `now` is strictly before the window ends. `release` once
  * `now` has reached that instant: the caller may flush, and that flush is
