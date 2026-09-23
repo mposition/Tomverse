@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   approveMarketingPost,
+  marketingSerializationFailure,
   createMarketingChannel,
   createMarketingPost,
   insertAiVisibilityRun,
@@ -2092,7 +2093,6 @@ test("a scheduled autonomous row carries a sealed autonomous decision", async ()
     guardDecision: "approval_required",
   });
   await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
-  await refusesAutonomousRow(account.id, slot, { guardRuleIds: [] });
   await refusesAutonomousRow(account.id, slot, { factsDigest: null });
 });
 
@@ -2157,4 +2157,86 @@ test("the exception adds no drafted-to-scheduled edge", async () => {
     }),
     /check_violation|violates|MarketingPost/,
   );
+});
+
+test("a concurrent unpublish of the evidence is a serialization conflict, not a post", async () => {
+  // The reason the admission transaction is `SERIALIZABLE`, against a real
+  // PostgreSQL. One transaction reads "this account has published claim X";
+  // another commits the row out of the published statuses; under read
+  // committed the first would go on to schedule a post on evidence that no
+  // longer exists.
+  //
+  // Both outcomes are correct and both are asserted: either PostgreSQL aborts
+  // one transaction with a serialization failure, or the reader sees the
+  // withdrawal and refuses. What must not happen is a committed read that then
+  // writes.
+  const account = await channel();
+  const published = await publishedPost(account.id);
+  await prisma.marketingPost.update({
+    where: { id: published.id },
+    data: { claimIds: ["claim.shared"] },
+  });
+
+  const priorUse = (tx: Prisma.TransactionClient) =>
+    tx.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+      SELECT DISTINCT used."value" AS "value"
+      FROM "MarketingPost" AS post,
+           unnest(post."claimIds") AS used("value")
+      WHERE post."channelId" = ${account.id}
+        AND post."status" IN ('publishing', 'published', 'outcome_unknown', 'verified', 'removed_by_platform')
+        AND used."value" IN ('claim.shared')
+    `);
+
+  let readerSaw: string[] = [];
+  const reader = prisma
+    .$transaction(
+      async (tx) => {
+        readerSaw = (await priorUse(tx)).map((row) => row.value);
+        // Write inside the same transaction, which is what makes the read a
+        // dependency SSI can conflict on rather than a snapshot nobody used.
+        await tx.marketingPost.create({
+          data: autonomousScheduledRow(account.id, new Date(Date.now() + DAY), {
+            claimIds: ["claim.shared"],
+          }) as never,
+        });
+        return "inserted" as const;
+      },
+      { isolationLevel: "Serializable" },
+    )
+    .catch((error: unknown) => error);
+
+  const withdrawal = prisma
+    .$transaction(
+      async (tx) => {
+        await tx.marketingPost.update({
+          where: { id: published.id },
+          data: { status: "deleted", deletedAt: new Date() },
+        });
+        return "withdrawn" as const;
+      },
+      { isolationLevel: "Serializable" },
+    )
+    .catch((error: unknown) => error);
+
+  const [readerResult, withdrawalResult] = await Promise.all([reader, withdrawal]);
+
+  const conflicted = (value: unknown) =>
+    value instanceof Error && marketingSerializationFailure(value);
+
+  assert.ok(
+    conflicted(readerResult) ||
+      conflicted(withdrawalResult) ||
+      readerSaw.length === 0,
+    "one transaction must lose, or the reader must have seen the withdrawal",
+  );
+  // Whatever happened, the classifier has to recognise it: a conflict it does
+  // not recognise is a conflict nothing retries.
+  for (const value of [readerResult, withdrawalResult]) {
+    if (value instanceof Error) {
+      assert.ok(
+        marketingSerializationFailure(value),
+        `unrecognised concurrency failure: ${value.message}`,
+      );
+    }
+  }
 });

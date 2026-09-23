@@ -55,7 +55,19 @@ import {
   MARKETING_SERIALIZATION_RETRIES,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
-import { marketingConfigGeneration } from "@/lib/marketingAutonomousAdmission";
+import {
+  marketingConfigGeneration,
+  resolveAutonomousAdmission,
+} from "@/lib/marketingAutonomousAdmission";
+// The key strings come from the module that owns them. Written out here, a
+// renamed key would leave every assertion below passing -- a missing setting
+// reads as off, which is the same false the test was looking for.
+import {
+  MARKETING_AUTO_PUBLISH_KEY,
+  MARKETING_DRAFTS_KEY,
+  MARKETING_PUBLISH_KEY,
+} from "@/lib/marketingAutomationAccess";
+import { MARKETING_CONFIG_GENERATION_KEY } from "@/lib/appSettings";
 
 /**
  * The one cast in this file.
@@ -525,13 +537,84 @@ test("refuses a channel whose lifecycle moved off autonomous mode", async () => 
   }
 });
 
-test("refuses a budget or switch that says no, whatever else is true", async () => {
-  // The resolver's answer is the whole budget question at this layer: it is
-  // what reads the provider budget, and a false from it is final here.
+test("a resolver that says no is final, whatever else about the row is right", async () => {
+  // What this covers is the store's half: every other condition holds and the
+  // row is still not written. Which *input* said no is the resolver's half,
+  // and it is covered separately below rather than asserted here by a name.
   assert.equal(
     await refusal({}, { resolveAdmission: admission({ autonomousPublish: false }) }),
     "autonomous_insert_not_admitted",
   );
+});
+
+test("the switches and the budget are what the resolver actually reads", async () => {
+  // The resolver's half. A fake AppSetting read stands in for the `FOR SHARE`
+  // statement, and the answer is checked against the input that produced it --
+  // so a switch turned off is a named reason rather than a bare false.
+  const settings = (values: Record<string, string>) =>
+    ({
+      async $queryRaw() {
+        return Object.entries(values).map(([key, value]) => ({ key, value }));
+      },
+    }) as unknown as MarketingTransaction;
+
+  const locked = {
+    id: CHANNEL_ID,
+    channel: "linkedin" as const,
+    status: "autonomous_mode" as const,
+    connectionGeneration: 1,
+  };
+
+  const all = {
+    [MARKETING_DRAFTS_KEY]: "true",
+    [MARKETING_PUBLISH_KEY]: "true",
+    [MARKETING_AUTO_PUBLISH_KEY]: "true",
+    [MARKETING_CONFIG_GENERATION_KEY]: JSON.stringify({ generation: 3 }),
+  };
+
+  const resolved = await resolveAutonomousAdmission(settings(all), locked);
+  assert.equal(resolved.configGeneration, 3);
+  // False today, and the reasons say which inputs are missing rather than
+  // leaving an operator to guess. The platform budget is one of them: nothing
+  // reads it until S2d2, and an answer of true would be a claim about a
+  // capability this build does not have.
+  assert.equal(resolved.autonomousPublish, false);
+  assert.ok(resolved.reasons.includes("input_unreadable:platformBudgetAvailable"));
+  assert.ok(resolved.reasons.includes("input_unreadable:adapterHealthy"));
+
+  // The switch on is the control: without it, a renamed or unread key would
+  // produce the same false and the assertion below would mean nothing.
+  assert.ok(!resolved.reasons.includes("input_false:publishEnabled"));
+  const publishOff = await resolveAutonomousAdmission(
+    settings({ ...all, [MARKETING_PUBLISH_KEY]: "false" }),
+    locked,
+  );
+  assert.ok(publishOff.reasons.includes("input_false:publishEnabled"));
+
+  assert.ok(!resolved.reasons.includes("input_false:autoPublishEnabled"));
+  const autoOff = await resolveAutonomousAdmission(
+    settings({ ...all, [MARKETING_AUTO_PUBLISH_KEY]: "false" }),
+    locked,
+  );
+  assert.ok(autoOff.reasons.includes("input_false:autoPublishEnabled"));
+
+  const noGeneration = await resolveAutonomousAdmission(
+    settings({
+      [MARKETING_PUBLISH_KEY]: "true",
+      [MARKETING_AUTO_PUBLISH_KEY]: "true",
+    }),
+    locked,
+  );
+  assert.ok(noGeneration.reasons.includes("config_generation_unreadable"));
+  assert.equal(noGeneration.configGeneration, 0);
+
+  // The mode is read off the locked row, so an account that is not in
+  // autonomous mode is refused by the resolver as well as by the store.
+  const paused = await resolveAutonomousAdmission(settings(all), {
+    ...locked,
+    status: "paused",
+  });
+  assert.ok(paused.reasons.includes("input_invalid:channelMode"));
 });
 
 test("refuses when an AppSetting generation moved after the decision", async () => {

@@ -138,11 +138,14 @@ export async function runMarketingTransaction<T>(
     /**
      * The isolation the work needs, when the default is not enough.
      *
-     * The autonomous insert counts rows it must not see appear -- a post that
-     * was not there when the prior-use question was asked and is there when
-     * the answer is written is the phantom `SERIALIZABLE` exists to stop. Read
-     * committed would let two concurrent admissions each see no prior use and
-     * both write one.
+     * The autonomous insert reads rows that must still be there when it
+     * writes. It asks whether this account has already published each claim
+     * the decision named, and an autonomous decision named only claims that
+     * had been -- so what `SERIALIZABLE` exists to stop here is the answer
+     * disappearing: a concurrent unpublish, delete or retention purge of the
+     * last row carrying one, committed between the read and the write. Read
+     * committed would let that transaction commit underneath this one and the
+     * post would be scheduled on evidence that no longer exists.
      */
     isolationLevel?: Prisma.TransactionIsolationLevel;
   },
@@ -237,6 +240,14 @@ export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_auto
  * rule: the caller says what the decision was made under, the resolver says
  * what is true now, and this module refuses the difference.
  */
+/** The locked channel row, as the admission resolver is given it. */
+export type MarketingAdmissionChannel = {
+  readonly id: string;
+  readonly channel: MarketingChannelName;
+  readonly status: MarketingChannelStatus;
+  readonly connectionGeneration: number;
+};
+
 export type MarketingAutonomousAdmission = {
   readonly autonomousPublish: boolean;
   /** The digest of the code that decided, over the admission manifest. */
@@ -2089,8 +2100,19 @@ export async function insertAutonomousScheduledMarketingPost(
      * Resolved inside this transaction, by this function, rather than handed
      * in already answered.
      */
+    /**
+     * Resolved inside this transaction, against the row this function locked.
+     *
+     * The locked channel is handed over rather than looked up again, and
+     * rather than taken from whatever the caller believed: this transaction
+     * holds that row `FOR UPDATE`, so it is the only description of the
+     * account that cannot change under the answer. A resolver reading the
+     * caller's copy would be judging a mode that was true when the caller
+     * assembled its arguments.
+     */
     readonly resolveAdmission: (
       database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
     ) => Promise<MarketingAutonomousAdmission>;
     /**
      * The facts the decision was sealed over.
@@ -2381,7 +2403,12 @@ export async function insertAutonomousScheduledMarketingPost(
   }
 
   // Resolved here, inside this transaction, by this function.
-  const admission = await resolveAdmission(database);
+  const admission = await resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
 
   // **The decision was made under one build, one configuration and one
   // deployment; the write happens under whatever is running now.** The caller

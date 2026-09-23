@@ -46,17 +46,14 @@ import {
   type MarketingAutomationAccessReason,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
-import {
-  MARKETING_NO_AUTONOMY_CHANNELS,
-  type MarketingChannel,
-  type MarketingChannelStatus,
-} from "@/lib/marketingAutomationSchema";
+import { MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
 import {
   insertAutonomousScheduledMarketingPost,
   marketingHealthIsFresh,
   marketingSerializationFailure,
   runMarketingTransaction,
   MARKETING_SERIALIZATION_RETRIES,
+  type MarketingAdmissionChannel,
   type MarketingAutonomousAdmission,
   type MarketingHealthObservation,
   type MarketingTransaction,
@@ -120,14 +117,6 @@ export const readMarketingAdmissionSettings = async (
 
 const unreadable: ReadResult<never> = { ok: false };
 
-export type AutonomousAdmissionSubject = {
-  readonly channelId: string;
-  readonly channel: MarketingChannel;
-  readonly connectionGeneration: number;
-  /** The status of the row this transaction has already locked. */
-  readonly status: MarketingChannelStatus;
-};
-
 /**
  * The two answers this module decides that the shared resolver does not.
  *
@@ -153,13 +142,14 @@ export type AutonomousAdmissionResolution = MarketingAutonomousAdmission & {
 /**
  * Resolve `autonomousPublish` against rows this transaction holds.
  *
- * The channel comes from the caller because the insert has already locked it
- * `FOR UPDATE`; reading it again here would be a second read of a row this
- * transaction owns, and the two answers could only ever differ by a bug.
+ * The channel is the row the insert locked `FOR UPDATE` and passed in, not a
+ * copy the caller assembled and not a second read: a second read of a row this
+ * transaction owns could only differ by a bug, and a caller's copy could differ
+ * by being older than the lock.
  */
 export const resolveAutonomousAdmission = async (
   database: MarketingTransaction,
-  subject: AutonomousAdmissionSubject,
+  subject: MarketingAdmissionChannel,
   health: MarketingHealthObservation | null = null,
   now: Date = new Date(),
 ): Promise<AutonomousAdmissionResolution> => {
@@ -169,7 +159,7 @@ export const resolveAutonomousAdmission = async (
   );
 
   const healthy = marketingHealthIsFresh(health, now, {
-    channelId: subject.channelId,
+    channelId: subject.id,
     connectionGeneration: subject.connectionGeneration,
   });
 
@@ -294,11 +284,9 @@ type AutonomousInsertInput = Parameters<
 export const scheduleAutonomousMarketingPost = async (
   client: PrismaClient,
   input: Omit<AutonomousInsertInput, "resolveAdmission"> & {
-    readonly subject: AutonomousAdmissionSubject;
     readonly health?: MarketingHealthObservation | null;
   },
 ): Promise<{ id: string }> => {
-  const subject = input.subject;
   const health = input.health ?? null;
 
   let lastSerializationFailure: unknown = null;
@@ -309,8 +297,8 @@ export const scheduleAutonomousMarketingPost = async (
         (tx) =>
           insertAutonomousScheduledMarketingPost(tx, {
             ...input,
-            resolveAdmission: (database) =>
-              resolveAutonomousAdmission(database, subject, health),
+            resolveAdmission: (database, channel) =>
+              resolveAutonomousAdmission(database, channel, health),
           }),
         { isolationLevel: "Serializable" },
       );
