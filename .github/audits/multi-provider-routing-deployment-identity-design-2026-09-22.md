@@ -251,10 +251,30 @@ Tomverse는 **호주 법인**이고 APP 8(해외 공개)이 적용됩니다. 사
 | 필드 | 의미 |
 |---|---|
 | `provider` | `AiProvider` |
-| `recipientEntity` | 데이터를 받는 법인 |
-| `destinationRegions` | 처리되는 region |
+| `recipientEntity` · `recipientCountryCodes` | 데이터를 받는 법인과 그 법인의 국가 |
+| `customerContentStorage` · `processing` | 저장 지리와 처리 지리. 각각 `mode`(6값) · `countryCodes` · `macroRegions` · 근거 |
+| `destinationRegions` | **저장 지리의 호환 alias**. 저장 필드와 다르면 거절됩니다 |
+| `trainsOnCustomerContent` | 학습 여부. `null`은 미확인이지 "아니오"가 아닙니다 |
+| `retention` | 내용·안전로그·캐시·기능 상태·system metadata 다섯 가지를 따로 |
+| `zeroDataRetention` | 약관상 ZDR. strict route의 조건이며 고지 가능 여부의 조건은 아닙니다 |
+| `independentCommercialUseProhibited` | 제3자의 독자적 상업 이용 제한. 학습 금지와 별개 질문 |
 | `evidenceRef` | 그렇게 말할 수 있는 근거 (계약·DPA·공식 문서) |
 | `status` | **`proven` \| `unproven`** |
+
+처음 판에서는 `destinationRegions`를 "처리되는 region"이라고 적었습니다. 저장과
+처리는 다른 답이고, 저장 위치로 처리 위치를 채우면 고지가 되돌릴 수 없는 방향으로
+틀립니다. 2026-09-23에 두 지리를 나눴고, 어휘(`mode`의 여섯 값, 보관 다섯 항목,
+`null`은 0이 아님)는 외부 공급자 개인정보 검토 인수본 v2.0의 schema를 그대로
+씁니다. 그 인수본의 공급자별 V1 참고값은 재검증되지 않은 주장과 내부 권고를 담고
+있어 이 공개 저장소에 옮기지 않았습니다. 이 목록의 행은 전부 `UNKNOWN`에서
+시작합니다.
+
+다른 서비스(OpenRouter·Duck.ai·Poe)가 공개한 공급자 정책은 **그 서비스의 계약**을
+설명합니다. 같은 endpoint를 불러도 그 조건을 승계하지 않으므로 `evidenceRef`가 될
+수 없고, 이 공급자가 그런 조건을 제공하기는 한다는 단서로만 쓸 수 있습니다.
+
+`ProviderEndpoint.destinationRegions` 컬럼(dark)도 같은 저장 alias로 읽어야 합니다.
+컬럼을 저장·처리로 나누는 것은 migration이 필요하므로 별도 단계로 남깁니다.
 
 규칙 넷:
 
