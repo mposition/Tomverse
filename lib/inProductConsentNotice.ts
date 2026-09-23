@@ -5,9 +5,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
 import { cohortStanding } from "@/lib/emailSendApprovalCohort";
-import { overrideBlockers } from "@/lib/emailSendApprovalCohortCore";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import {
+  marketingJurisdictionVerdict,
   normalizeCountry,
   profileForCountry,
 } from "@/lib/emailJurisdictionCore";
@@ -127,21 +127,21 @@ import {
  *   address fell out of the override and was still hidden from the notice.
  *   Membership is now asked the send's way, through `cohortStanding()`.
  * - "is the member in scope" is still wider than "is mail going out". The
- *   override does not send when `overrideBlockers()` objects, and the one
- *   blocker the notice cannot already see is an undetermined country: a
- *   member in Japan, or with no country at all, is in the cohort, is never
- *   mailed, and -- outside the ten countries the preference centre accepts --
- *   is refused there with `COUNTRY_UNSUPPORTED`. Hiding the notice from them
+ *   send also asks `marketingJurisdictionVerdict()`, which refuses an
+ *   undetermined country, one with no reviewed profile, and one outside
+ *   `MARKETING_ALLOWED_COUNTRIES`. A member in Japan, the Netherlands, or
+ *   with no country at all is in the cohort and is never mailed -- and the
+ *   preference centre refuses the same countries. Hiding the notice from them
  *   left no basis, no route to one and no mail, and the wording was true of
  *   them all along.
  *
- * The recipient's own decisions (objected, suppressed, withdrawn) are passed
- * as false because the offer answers for them earlier and they cannot change
- * this result. Obligation status is assumed decided: it is the send's gate
- * (S9), it is not knowable here, and the two mistakes are not symmetrical --
- * hiding the notice wrongly writes nothing and is undone the moment the
- * state behind it changes, while showing it wrongly writes a permanent
- * `copyHash` of a promise we have broken.
+ * The recipient's own decisions (objected, suppressed, withdrawn) are not
+ * re-checked here, because the offer answers for them earlier and they cannot
+ * change this result. Obligation status is not checked either: it is the
+ * send's gate (S9), it is not knowable here, and the two mistakes are not
+ * symmetrical -- hiding the notice wrongly writes nothing and is undone the
+ * moment the state behind it changes, while showing it wrongly writes a
+ * permanent `copyHash` of a promise we have broken.
  *
  * `jurisdictionForUser()` reads on the global client. That is a read in a
  * different snapshot from a caller's transaction, not a write that escapes
@@ -173,19 +173,19 @@ const overrideWouldSend = async (input: {
   });
   if (memberships.length === 0) return false;
 
+  // The send's own jurisdiction gate, not an assembly of its parts.
+  //
+  // This was `overrideBlockers()` fed a confidence-folded country, which
+  // caught an undetermined country and a missing profile -- and missed
+  // `MARKETING_ALLOWED_COUNTRIES`. A cohort member in the Netherlands resolves
+  // high confidence to the `EU` profile, so no blocker fired, the notice was
+  // hidden, and `marketingJurisdictionVerdict()` refused the send with
+  // `marketing_country_not_allowed`. Never mailed, never asked, and the
+  // preference centre refuses the same country. The function that decides
+  // whether marketing may go to a jurisdiction already existed; asking it is
+  // the whole fix.
   const jurisdiction = await jurisdictionForUser({ userId: input.userId });
-  const blockers = overrideBlockers({
-    hasObjected: false,
-    consentWithdrawn: false,
-    suppressedForPurpose: false,
-    suppressedForClassification: false,
-    suppressedGlobally: false,
-    // Below high confidence the approved contract holds marketing (sections
-    // 6.2 and 6.3), so the override has no country to send under.
-    country: jurisdiction.confidence === "high" ? jurisdiction.countryCode : "ZZ",
-    obligationsDecided: true,
-  });
-  if (blockers.length > 0) return false;
+  if (!marketingJurisdictionVerdict(jurisdiction).allowed) return false;
 
   for (const { approvalId } of memberships) {
     for (const purpose of input.purposes) {

@@ -1044,6 +1044,20 @@ test("a cohort member in a country with no reviewed profile is offered the notic
   });
 });
 
+test("a cohort member outside the marketing countries is offered the notice", async () => {
+  // The Netherlands resolves high confidence to the EU profile, so no
+  // override blocker fires -- and `marketingJurisdictionVerdict()` refuses it
+  // with `marketing_country_not_allowed`. Never mailed. Asking the send's own
+  // gate is what catches it; hand-assembling the gate from its parts did not.
+  const user = await createUser();
+  await settleCountry(user.id, "NL");
+  await sealFor([user]);
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
 test("a render cannot be recorded for somebody the override mails", async () => {
   // A route that asks `noticeStateForUser()` first never tries this. The
   // writer refuses anyway, because the row would be permanent evidence that we
