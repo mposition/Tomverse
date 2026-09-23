@@ -113,6 +113,7 @@ const completeInputs = () => ({
   }),
   webhookConfigSnapshot: readable(configSnapshot),
   webhookEvent: readable(scopeEntry),
+  configGeneration: readable(1),
 });
 
 const BOOLEAN_REQUIREMENTS = {
@@ -185,6 +186,47 @@ test("the complete admitted inputs enable every S1 feature except apply", () => 
       feature,
     );
   }
+});
+
+test("only autonomous publishing asks which configuration it was decided under", () => {
+  // The question is about a gap. A person acting in the console decides and
+  // writes in the same moment, so "have the settings changed since" has no
+  // since to ask about; an autonomous post is sealed by a Guard and written
+  // later, and the generation is what closes that interval.
+  for (const value of [
+    { ok: false },
+    readable(0),
+    readable(-1),
+    readable(1.5),
+  ]) {
+    const inputs = completeInputs();
+    inputs.configGeneration = value;
+    const decisions = resolveMarketingAutomationAccess(inputs);
+    assert.equal(decisions.autonomousPublish.enabled, false, JSON.stringify(value));
+    assert.equal(
+      decisions.approvalPublish.enabled,
+      true,
+      "the approval path does not depend on the generation",
+    );
+    assert.equal(decisions.manualApproval.enabled, true);
+  }
+
+  const unreadable = completeInputs();
+  unreadable.configGeneration = { ok: false };
+  assert.ok(
+    resolveMarketingAutomationAccess(unreadable).autonomousPublish.reasons.includes(
+      "input_unreadable:configGeneration",
+    ),
+  );
+
+  const invalid = completeInputs();
+  invalid.configGeneration = readable(0);
+  assert.ok(
+    resolveMarketingAutomationAccess(invalid).autonomousPublish.reasons.includes(
+      "input_invalid:configGeneration",
+    ),
+    "zero is a number no writer stored: the setting starts at one",
+  );
 });
 
 test("manual approval does not depend on the LLM generation budget", () => {

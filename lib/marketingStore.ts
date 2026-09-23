@@ -83,7 +83,11 @@ import {
   MARKETING_AUDIT_PROBLEMS,
   verifyMarketingAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
-import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
+import {
+  marketingFactsDigest,
+  marketingFactsScopeDigest,
+  type MarketingGuardFacts,
+} from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
@@ -127,13 +131,44 @@ export type MarketingTransaction = Prisma.TransactionClient & {
 export async function runMarketingTransaction<T>(
   client: PrismaClient,
   run: (tx: MarketingTransaction) => Promise<T>,
-  options?: { maxWait?: number; timeout?: number },
+  options?: {
+    maxWait?: number;
+    timeout?: number;
+    /**
+     * The isolation the work needs, when the default is not enough.
+     *
+     * The autonomous insert counts rows it must not see appear -- a post that
+     * was not there when the prior-use question was asked and is there when
+     * the answer is written is the phantom `SERIALIZABLE` exists to stop. Read
+     * committed would let two concurrent admissions each see no prior use and
+     * both write one.
+     */
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  },
 ): Promise<T> {
   return client.$transaction(
     (tx) => run(tx as unknown as MarketingTransaction),
     options,
   );
 }
+
+/**
+ * Whether a failure is PostgreSQL saying "try again", rather than "no".
+ *
+ * A serialization failure is not a refusal: nothing was wrong with the write,
+ * two transactions simply could not both be true. The caller may retry it --
+ * but only before anything has left the database, which for the autonomous
+ * insert means before any vendor call exists at all (that is S2d2). Retrying
+ * after an external effect would repeat the effect.
+ */
+export const marketingSerializationFailure = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { code?: unknown }).code === "40001";
+
+/** How many times a serialization failure may be retried before it is an answer. */
+export const MARKETING_SERIALIZATION_RETRIES = 3;
 
 /** A write refused before it reached the database. */
 export class MarketingStoreRefusedError extends Error {
@@ -158,6 +193,51 @@ export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_auto
  * table is the approved S2b1 inventory and a test compares it whole, so adding
  * to it would say S2b1 grew an action it was never approved for.
  */
+/**
+ * The statuses that mean this account has already put a claim in front of
+ * people.
+ *
+ * "Used before" is a question about publication, not about intent, so a
+ * `scheduled` post does not answer it yes -- nothing has left yet, and two
+ * posts may legitimately be queued for the same claim before either goes. The
+ * boundary is the moment a request leaves for the platform, which is why
+ * `publishing` and `outcome_unknown` count: for the first we do not yet know
+ * the answer and for the second we never will, and in both cases claiming the
+ * account has never published it would be asserting something we cannot see.
+ * `failed` does not count -- the adapter confirmed nothing was published.
+ *
+ * The facts resolver that fills `usedBefore` must ask over this same list.
+ * Two lists would let a decision be made against one meaning of "published"
+ * and written against another.
+ */
+/**
+ * What the admission resolver has to report back, not just decide.
+ *
+ * `autonomousPublish` is the answer. The other three are what the answer was
+ * computed against, and they are here because the store cannot read them for
+ * itself without importing the composition that gathers them -- which would
+ * put the store downstream of its own caller. Reporting them instead keeps one
+ * rule: the caller says what the decision was made under, the resolver says
+ * what is true now, and this module refuses the difference.
+ */
+export type MarketingAutonomousAdmission = {
+  readonly autonomousPublish: boolean;
+  /** The digest of the code that decided, over the admission manifest. */
+  readonly admissionCodeDigest: string;
+  /** `marketingAutomation.configGeneration`, read inside this transaction. */
+  readonly configGeneration: number;
+  /** The Railway deployment this process belongs to. */
+  readonly deploymentId: string;
+};
+
+export const MARKETING_PRIOR_USE_STATUSES = [
+  "publishing",
+  "published",
+  "outcome_unknown",
+  "verified",
+  "removed_by_platform",
+] as const;
+
 export const MARKETING_S2B2_ACTIONS = Object.freeze({
   postAutonomousScheduled: "marketing_post.autonomous_scheduled",
 } as const);
@@ -266,6 +346,12 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   autonomous_insert_channel_has_no_autonomy: 409,
   autonomous_insert_slot_not_future: 409,
   autonomous_insert_slot_unreadable: 409,
+  autonomous_insert_facts_mismatch: 422,
+  autonomous_insert_claim_no_longer_used: 409,
+  autonomous_insert_asset_no_longer_used: 409,
+  autonomous_insert_code_digest_changed: 409,
+  autonomous_insert_config_generation_changed: 409,
+  autonomous_insert_deployment_changed: 409,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -1935,7 +2021,17 @@ export async function insertAutonomousScheduledMarketingPost(
      */
     readonly resolveAdmission: (
       database: MarketingTransaction,
-    ) => Promise<{ autonomousPublish: boolean }>;
+    ) => Promise<MarketingAutonomousAdmission>;
+    /**
+     * The facts the decision was sealed over.
+     *
+     * Not taken on trust: both digests are recomputed below, and the sealed
+     * decision carries them, so a facts object that is not the one the Guard
+     * read fails before it is used. It is needed because the decision records
+     * only the digests, and `usedBefore` -- the one answer in there that another
+     * transaction can invalidate -- has to be re-asked at write time.
+     */
+    readonly facts: MarketingGuardFacts;
     readonly admissionCodeDigest: string;
     readonly configGeneration: number;
     readonly deploymentId: string;
@@ -2083,8 +2179,137 @@ export async function insertAutonomousScheduledMarketingPost(
     );
   }
 
+  // **The facts are the ones the decision was sealed over.** The decision
+  // records two digests and nothing else, so this is where a facts object
+  // stops being an argument and starts being the thing the Guard read.
+  const facts = rawInput.facts;
+  // One comparison, not two. `marketingFactsDigest()` covers the account, the
+  // channel, the locale, every claim and asset answer, both registry versions
+  // and the snapshot digest -- so a facts object that passes it is the one the
+  // decision was sealed over, and the scope digest is already checked against
+  // the post's own columns in `admitMarketingPostInput()`. A second check over
+  // a subset of the same bytes would look like a further guarantee and be none.
+  if (marketingFactsDigest(facts) !== factsDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_facts_mismatch",
+      "These are not the facts the decision was made from",
+    );
+  }
+
+  // **The one answer in the facts another transaction can turn false.**
+  //
+  // Which way round matters, and it is the opposite of the obvious one. An
+  // autonomous decision has `usedBefore: true` for every claim and asset it
+  // names -- `guardDraft()` raises `first_use_of_claim` otherwise and the
+  // verdict stops being autonomous -- so a *new* prior use cannot hurt this
+  // post. What can is prior use going away: a concurrent unpublish, delete or
+  // retention purge of the last row that carried the claim leaves nothing
+  // saying this account ever published it, and the autonomy rested on that
+  // exact sentence.
+  //
+  // Refusing then is not conservatism. The Guard re-run on the same facts
+  // would say `first_use_of_claim`, and first use of a claim is a thing the
+  // policy sends to a person.
+  //
+  // Two queries rather than one with the column interpolated: a runtime
+  // column name is a thing `check:protected-table-writers` refuses on sight,
+  // and it is right to -- it cannot tell a literal chosen here from a string
+  // that arrived. Both ask "which of these", not "is any of these": any is not
+  // what the decision rested on.
+  //
+  // Asking it here is also what lets the isolation level work: a
+  // `SERIALIZABLE` transaction detects a conflict only against a read it
+  // performed. The caller runs this whole function at that isolation
+  // (`runMarketingTransaction`'s `isolationLevel`), so a concurrent unpublish
+  // becomes a 40001 rather than a post written on evidence that was being
+  // deleted as it was read -- and the caller may retry it, having made no
+  // external call.
+  const reliedOnClaimIds = facts.claims
+    .filter((claim) => claim.usedBefore === true)
+    .map((claim) => claim.claimId);
+  const reliedOnAssetIds = facts.assets
+    .filter((asset) => asset.usedBefore === true)
+    .map((asset) => asset.assetId);
+
+  const publishedClaims =
+    reliedOnClaimIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."claimIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnClaimIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingClaim = reliedOnClaimIds.find((id) => !publishedClaims.has(id));
+  if (missingClaim !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_claim_no_longer_used",
+      "A claim this decision relied on having been published no longer has been",
+    );
+  }
+
+  const publishedAssets =
+    reliedOnAssetIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."assetIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnAssetIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingAsset = reliedOnAssetIds.find((id) => !publishedAssets.has(id));
+  if (missingAsset !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_asset_no_longer_used",
+      "An asset this decision relied on having been published no longer has been",
+    );
+  }
+
   // Resolved here, inside this transaction, by this function.
   const admission = await resolveAdmission(database);
+
+  // **The decision was made under one build, one configuration and one
+  // deployment; the write happens under whatever is running now.** The caller
+  // carries what it saw when the decision was sealed, the resolver reports what
+  // it just read, and a difference means the decision is about a world that has
+  // moved. Checked before the admission answer itself: an answer produced under
+  // a configuration the decision never saw is not the answer the decision was
+  // given, whichever way it came out.
+  if (admission.admissionCodeDigest !== provenance.admissionCodeDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_code_digest_changed",
+      "The admission code is not the build this decision was made under",
+    );
+  }
+  if (admission.configGeneration !== provenance.configGeneration) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_config_generation_changed",
+      "A setting that affects admission changed after this decision was made",
+    );
+  }
+  if (admission.deploymentId !== provenance.deploymentId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_changed",
+      "This decision was made on a deployment that is no longer the one running",
+    );
+  }
+
   if (!admission.autonomousPublish) {
     throw new MarketingStoreRefusedError(
       "autonomous_insert_not_admitted",

@@ -1957,3 +1957,174 @@ test("the S2b1 cap writer refuses an effective increase before the DB trigger", 
     "cap_change_raises_limit",
   );
 });
+
+// ---------------------------------------------------------------------------
+// S1 r7 amendment 2: the one row that may be inserted already scheduled
+// ---------------------------------------------------------------------------
+//
+// The store's own refusals are unit-tested against a fake
+// (tests/marketingS2b2AutonomousInsert.test.ts). These are the other half: the
+// trigger's, against a real PostgreSQL, because the whole reason the exception
+// is written in SQL is that it holds for a write that never goes near the
+// store module.
+
+/** The shape the exception is defined as, with nothing else set. */
+const autonomousScheduledRow = (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown> = {},
+) => ({
+  channelId,
+  locale: "en",
+  kind: "social",
+  logicalKey: `auto-${Math.random().toString(36).slice(2)}`,
+  envelope: envelope({ scheduledAt: slot.toISOString() }),
+  envelopeDigest: DIGEST,
+  rendererVersion: "r1",
+  templateId: "template-1",
+  templateDigest: OTHER_DIGEST,
+  claimIds: [],
+  assetIds: [],
+  claimRegistryVersion: 1,
+  assetRegistryVersion: 1,
+  factSnapshot,
+  factsDigest: DIGEST,
+  guardDecision: "autonomous_eligible",
+  guardCodes: [] as string[],
+  guardRuleIds: ["rule.template"],
+  status: "scheduled",
+  mode: "autonomous",
+  scheduledAt: slot,
+  history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+  historyVersion: 0,
+  ...overrides,
+});
+
+const refusesAutonomousRow = async (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown>,
+) =>
+  assert.rejects(
+    prisma.marketingPost.create({
+      data: autonomousScheduledRow(channelId, slot, overrides) as never,
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+
+test("an autonomous scheduled row of the right shape is accepted", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  const created = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot) as never,
+  });
+  assert.equal(created.status, "scheduled");
+  assert.equal(created.mode, "autonomous");
+  assert.equal(created.historyVersion, 0);
+  // The trigger still stamps `createdAt` from the server clock. The exception
+  // widens which statuses may be inserted; it does not hand the caller the
+  // clock.
+  assert.ok(Math.abs(created.createdAt.getTime() - Date.now()) < 60_000);
+});
+
+test("the exception is exactly scheduled-and-autonomous, not either half", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // `scheduled` with an approval-mode row is the ordinary refusal, unchanged.
+  await refusesAutonomousRow(account.id, slot, {
+    mode: "approval",
+    guardDecision: "approval_required",
+  });
+  // And an autonomous row that is not scheduled is not this exception either:
+  // it falls back to the draft rule, which permits only two statuses.
+  await refusesAutonomousRow(account.id, slot, {
+    status: "approved",
+    scheduledAt: null,
+  });
+});
+
+test("a scheduled autonomous row goes out when its envelope says, or not at all", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // The column and the envelope disagreeing is the case this clause exists
+  // for: the publisher acts on the column and the Guard judged the envelope.
+  await refusesAutonomousRow(account.id, slot, {
+    scheduledAt: new Date(slot.getTime() + DAY),
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    envelope: envelope({ scheduledAt: null }),
+  });
+  await refusesAutonomousRow(account.id, slot, { scheduledAt: null });
+});
+
+test("a scheduled autonomous row carries a sealed autonomous decision", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    guardDecision: "approval_required",
+  });
+  await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
+  await refusesAutonomousRow(account.id, slot, { guardRuleIds: [] });
+  await refusesAutonomousRow(account.id, slot, { factsDigest: null });
+});
+
+test("autonomy is only ever inside a named template", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, { templateId: null });
+  await refusesAutonomousRow(account.id, slot, { templateDigest: null });
+});
+
+test("a scheduled autonomous row cannot mint its own approval", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { approvalAuditLogId: "audit-1" },
+    { approvedAt: new Date() },
+    { approvedDigest: DIGEST },
+    { approvalExpiresAt: new Date(Date.now() + DAY) },
+    // Nor become the source another autonomous post inherits from.
+    { reusableAsTemplate: true },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("a scheduled autonomous row arrives unclaimed and without an outcome", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { slotDate: new Date() },
+    { claimToken: "token-1" },
+    { leaseUntil: new Date(Date.now() + 60_000) },
+    { externalUrl: "https://www.tomverse.app/p/1" },
+    { verifiedPublicAt: new Date() },
+    { verificationMethod: "api_lookup" },
+    { errorCode: "provider_rejected" },
+    { outcomeUnknownAt: new Date() },
+    { deletedAt: new Date() },
+    { legalHold: true },
+    // The clauses outside the exception still apply to it.
+    { publishedAt: new Date() },
+    { publishAttempt: 1 },
+    { providerRequestKey: "key-1" },
+    { externalPostId: "external-1" },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("the exception adds no drafted-to-scheduled edge", async () => {
+  // The other half of "this is not a lifted refusal". A post that started as a
+  // draft still cannot walk to `scheduled`: the only route is to be inserted
+  // as one.
+  const account = await channel();
+  const draft = await post(account.id);
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { status: "scheduled", mode: "autonomous" },
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+});
