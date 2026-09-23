@@ -18,6 +18,7 @@ export const amuxReviewApprovalReadiness = (env: {
   NEXTAUTH_URL?: string;
   TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?: string;
   RAILWAY_PRIVATE_DOMAIN?: string;
+  PORT?: string;
 }) => {
   const enabled = isAmuxAgentApprovalEnabled(env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED);
   const invalidPrivateOrigin = Boolean(

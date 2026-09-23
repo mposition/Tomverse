@@ -45,10 +45,12 @@ requests·Contents 읽기 전용 `AMUX_REVIEW_GITHUB_READ_TOKEN`, 기존
 
 공개 origin이 Cloudflare Access 같은 identity-aware proxy 뒤에 있으면 app의
 self-call도 로그인 redirect를 받는다. 이 경우에만
-`TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`을 같은 app service의 Railway private
-origin(`http://<RAILWAY_PRIVATE_DOMAIN>:<port>`)으로 설정한다. 코드는 Railway가
-주입한 `RAILWAY_PRIVATE_DOMAIN`과 hostname이 정확히 같은 경우만 허용하고,
-다른 private service나 외부 host에는 Admin cookie·sync secret을 보내지 않는다.
+`TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`을 같은 process의 loopback
+origin(`http://127.0.0.1:<PORT>`)으로 설정한다. Railway private DNS를 써야 한다면
+같은 app service의 `http://<RAILWAY_PRIVATE_DOMAIN>:<PORT>`만 허용한다. 코드는
+Railway가 주입한 `PORT`와 명시적 port가 정확히 같고, hostname도 loopback 또는
+`RAILWAY_PRIVATE_DOMAIN`과 정확히 같은 경우만 허용한다. 다른 private service나
+외부 host에는 Admin cookie·sync secret을 보내지 않는다.
 `NEXTAUTH_URL`은 공개 로그인 origin으로 유지한다.
 
 **lane은 빈 환경에서 시작한다.** orchestrator는 `env_clear()` 뒤 그 lane이

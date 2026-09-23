@@ -9,11 +9,11 @@ const privateDomain = "tomverse-amux-validation.railway.internal";
 const privateHost = `${privateDomain}:8080`;
 const secret = "x".repeat(48);
 
-const request = (pathname, { method = "POST", originSecret } = {}) =>
-  new NextRequest(new Request(`http://${privateHost}${pathname}`, {
+const request = (pathname, { method = "POST", originSecret, host = privateHost } = {}) =>
+  new NextRequest(new Request(`http://${host}${pathname}`, {
     method,
     headers: {
-      host: privateHost,
+      host,
       ...(originSecret ? { "x-tomverse-origin-verify": originSecret } : {}),
     },
   }));
@@ -22,12 +22,14 @@ test("private AMUX review host is confined to one POST route and always needs th
   const previous = Object.fromEntries([
     "TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN",
     "RAILWAY_PRIVATE_DOMAIN",
+    "PORT",
     "CLOUDFLARE_ORIGIN_SECRET",
     "REQUIRE_CLOUDFLARE_ORIGIN_SECRET",
   ].map((key) => [key, process.env[key]]));
 
   process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = `http://${privateHost}`;
   process.env.RAILWAY_PRIVATE_DOMAIN = privateDomain;
+  process.env.PORT = "8080";
   process.env.CLOUDFLARE_ORIGIN_SECRET = secret;
 
   try {
@@ -74,6 +76,32 @@ test("private AMUX review host is confined to one POST route and always needs th
         },
       ));
       assert.equal(proxy(siblingRequest).status, 421);
+    }
+
+    const loopbackHost = "127.0.0.1:8080";
+    process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN = `http://${loopbackHost}`;
+    for (const requireSecret of ["false", "true"]) {
+      process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET = requireSecret;
+      assert.equal(proxy(request("/api/internal/amux/review", {
+        host: loopbackHost,
+        originSecret: secret,
+      })).status, 200);
+      assert.equal(proxy(request("/api/internal/amux/review", {
+        host: loopbackHost,
+      })).status, 421);
+      assert.equal(proxy(request("/api/internal/amux/review", {
+        host: loopbackHost,
+        originSecret: "wrong",
+      })).status, 421);
+      assert.equal(proxy(request("/api/internal/amux/review", {
+        host: loopbackHost,
+        method: "GET",
+        originSecret: secret,
+      })).status, 421);
+      assert.equal(proxy(request("/api/admin/amux/routing", {
+        host: loopbackHost,
+        originSecret: secret,
+      })).status, 421);
     }
   } finally {
     for (const [key, value] of Object.entries(previous)) {

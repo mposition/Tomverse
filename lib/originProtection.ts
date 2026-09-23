@@ -48,6 +48,7 @@ export type AmuxReviewProxyEnvironment = {
   [key: string]: string | undefined;
   TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?: string;
   RAILWAY_PRIVATE_DOMAIN?: string;
+  PORT?: string;
 };
 
 const railwayPrivateDomain = (value: string | undefined) => {
@@ -60,8 +61,9 @@ const railwayPrivateDomain = (value: string | undefined) => {
 /**
  * The optional review proxy carries an administrator cookie and the AMUX sync
  * credential, so its target is narrower than the application's normal host
- * allowlist: it must be this exact Railway service, including an explicit
- * listener port. Sibling services are not part of the trust boundary.
+ * allowlist: it must be this process's IPv4 loopback or this exact Railway
+ * service, on the process's explicit listener port. Sibling services are not
+ * part of the trust boundary.
  */
 export const amuxReviewPrivateProxyOrigin = (
   env: AmuxReviewProxyEnvironment,
@@ -70,14 +72,22 @@ export const amuxReviewPrivateProxyOrigin = (
   if (!raw) return null;
 
   const expectedHostname = railwayPrivateDomain(env.RAILWAY_PRIVATE_DOMAIN);
-  if (!expectedHostname) return null;
+  const expectedPort = env.PORT?.trim() ?? "";
+  if (!/^\d{1,5}$/.test(expectedPort)) return null;
+  const portNumber = Number(expectedPort);
+  if (portNumber < 1 || portNumber > 65_535) return null;
 
   try {
     const url = new URL(raw);
+    const loopback = url.hostname === "127.0.0.1";
+    const sameRailwayService = Boolean(
+      expectedHostname && url.hostname.toLowerCase() === expectedHostname,
+    );
     if (
       !["http:", "https:"].includes(url.protocol) ||
-      url.hostname.toLowerCase() !== expectedHostname ||
-      !url.port ||
+      (!loopback && !sameRailwayService) ||
+      (loopback && url.protocol !== "http:") ||
+      url.port !== expectedPort ||
       url.username ||
       url.password ||
       url.pathname !== "/" ||

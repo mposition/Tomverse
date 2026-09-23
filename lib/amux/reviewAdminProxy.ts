@@ -67,9 +67,10 @@ export async function forwardAmuxAdminReviewCommand(
       return proxyConfigurationError("AMUX_REVIEW_PROXY_CONFIG_INVALID");
 
     // Identity-aware proxies may protect the public origin from the app
-    // itself. The optional private target is still the exact same Railway
-    // service; originProtection rejects sibling services and external
-    // hosts before the session cookie or sync secret is attached.
+    // itself. The optional target is the same process over IPv4 loopback, or
+    // the exact same Railway service; originProtection rejects other ports,
+    // sibling services and external hosts before the session cookie or sync
+    // secret is attached.
     internalUrl = new URL(
       "/api/internal/amux/review",
       privateOrigin ?? publicOrigin.origin,

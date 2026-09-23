@@ -165,13 +165,17 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const isPrivateAmuxReviewHost = isAllowedAmuxReviewPrivateHost(
+    request.headers.get("host")
+  );
   const isPrivateAmuxReviewRequest =
     request.method === "POST" &&
     request.nextUrl.pathname === "/api/internal/amux/review" &&
-    isAllowedAmuxReviewPrivateHost(request.headers.get("host"));
+    isPrivateAmuxReviewHost;
   const requestHostAllowed =
-    isAllowedRequestHost(request.headers.get("host")) ||
-    isPrivateAmuxReviewRequest;
+    isPrivateAmuxReviewRequest ||
+    (!isPrivateAmuxReviewHost &&
+      isAllowedRequestHost(request.headers.get("host")));
   const originSecretAllowed = isPrivateAmuxReviewRequest
     ? hasValidOriginSecret(request.headers)
     : hasRequiredOriginSecret(request.headers);
