@@ -594,43 +594,6 @@ export type DocumentUnits = {
  * read on evidence.
  */
 /**
- * A declaration that covers the whole page: "All prices are in USD."
- *
- * Only this form, not any sentence with a currency in it. A pricing page says
- * "we will charge a $0.05 fee" in passing, and reading every line as a
- * declaration made a page refuse itself.
- */
-/**
- * A sentence whose subject is the page's prices, rather than one charge
- * mentioned in passing.
- *
- * "A separate usage fee is charged in USD" says nothing about the table, and
- * reading it as a declaration made an undeclared page read as US dollars.
- */
-const PAGE_DECLARATION_SUBJECT =
-    /^\s*(?:all\s+)?(?:prices?|amounts?|rates?|fees?|charges?|costs?)\b/i;
-
-/**
- * A sentence that says a currency is *not* the one it names.
- *
- * "Prices are not in USD" contains "in USD", and reading only that made the
- * sentence say the opposite of itself.
- */
-const NEGATED_DECLARATION =
-    /\b(?:not|never|no\s+longer|isn't|aren't|won't|used\s+to|previously|formerly|until)\b/i;
-
-/**
- * A declaration that speaks for one table rather than the page.
- *
- * "All prices in the table below are in USD" says nothing about the table
- * three headings further down. It may still refuse -- a refusal is safe
- * wherever it lands -- but it may not establish this currency for a table it
- * never claimed.
- */
-const SCOPED_DECLARATION =
-    /\b(?:table|section|list|chart|tier|plan|feature|tool|image|video|audio|search|below|above|following|preceding)\b/i;
-
-/**
  * What the page says its prices are in: this currency, another one, or
  * nothing.
  *
@@ -1055,23 +1018,6 @@ export const documentUnits = (markdown: string | null): DocumentUnits => {
 };
 
 /** What the table's own heading and preamble state, over the page's currency. */
-/**
- * Whether a denial stands between a sentence's subject and this currency.
- *
- * "All prices are in USD and do not include taxes" denies the taxes; "Prices
- * are not tax-inclusive in USD" denies something this reader cannot name.
- * Only the second may take the declaration away, and blocking any context
- * that contains a denial took the first one too.
- */
-const deniesBeforeCurrency = (context: string) => {
-    for (const sentence of declarationSentences(context)) {
-        const at = sentence.search(USD_AT);
-        if (at < 0) continue;
-        if (DENIES_SOMETHING.test(sentence.slice(0, at))) return true;
-    }
-    return false;
-};
-
 const tableUnits = (table: DocTable, page: DocumentUnits): DocumentUnits => {
     const context = `${table.heading} ${table.preamble}`;
     // Nearest first, and each on its own. Joining the heading to the preamble

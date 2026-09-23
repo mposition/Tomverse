@@ -130,7 +130,7 @@ The following is a full sample code to help you onboard GLM-5.3 with ease.
     ```bash theme={null}
     curl -X POST "https://api.z.ai/api/paas/v4/chat/completions" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer your-api-key" \
+    -H "Authorization: Bearer $ZHIPU_API_KEY" \
     -d '{
       "model": "glm-5.3",
       "messages": [
@@ -157,7 +157,7 @@ The following is a full sample code to help you onboard GLM-5.3 with ease.
     ```bash theme={null}
     curl -X POST "https://api.z.ai/api/paas/v4/chat/completions" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer your-api-key" \
+    -H "Authorization: Bearer $ZHIPU_API_KEY" \
     -d '{
       "model": "glm-5.3",
       "messages": [
