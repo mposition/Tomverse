@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { classifyStreamFailure } from "../lib/routingStreamFailure.ts";
+import { ROUTING_ATTEMPT_ERROR_CLASSES } from "../lib/routingAttemptStore.ts";
+import { DISPATCH_OUTCOMES_COUNTED } from "../lib/routerSignalCore.ts";
 import { decideFallback } from "../lib/routingFallbackPolicy.ts";
 
 // The claim under test is the one §9.1 of the rollout note had to withdraw:
@@ -165,4 +167,187 @@ test("an unrecognisable error is still a provider failure, not a shrug", () => {
   const classified = classify({ error: "a string, somehow" });
   assert.equal(classified.failureLayer, "provider");
   assert.equal(classified.outcome, "failed_pre_token");
+});
+
+/**
+ * The provider category the classification now keeps.
+ *
+ * `classifyProviderFailure` produced one for every provider failure and this
+ * function read it, kept `PAYMENT_REQUIRED` and dropped the rest, so a rate
+ * limit, a 5xx, a DNS failure and an unrecognised error all arrived in the
+ * attempt record as one `failureLayer: "provider"` and nothing else. Telling
+ * capacity apart from availability is a later change; it cannot be made from
+ * records that never kept the difference.
+ *
+ * The layer and the outcome are deliberately unchanged. `decideFallback` reads
+ * those, so nothing about what runs is different.
+ */
+
+const providerError = (code, status) =>
+    Object.assign(new Error("upstream"), { code, status });
+
+test("a rate limit and an outage are no longer the same record", () => {
+    const rateLimited = classifyStreamFailure({
+        error: providerError(undefined, 429),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    const serverError = classifyStreamFailure({
+        error: providerError(undefined, 503),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+
+    assert.equal(rateLimited.errorClass, "provider_rate_limited");
+    assert.equal(serverError.errorClass, "provider_server_error");
+    assert.notEqual(rateLimited.errorClass, serverError.errorClass);
+
+    // And the parts that decide are identical, which is the point: this is a
+    // record keeping a difference, not a routing change.
+    assert.equal(rateLimited.failureLayer, serverError.failureLayer);
+    assert.equal(rateLimited.outcome, serverError.outcome);
+    assert.equal(rateLimited.providerRefusal, serverError.providerRefusal);
+});
+
+test("every classification carries a class from the closed vocabulary", () => {
+    const observations = [
+        { error: new Error("x"), phase: "read", visibleTokenEmitted: false, downstreamOpen: false },
+        { error: Object.assign(new Error("x"), { name: "AbortError" }), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: new Error("x"), phase: "emit", visibleTokenEmitted: true, downstreamOpen: true },
+        { error: new Error("x"), phase: "completion", visibleTokenEmitted: true, downstreamOpen: true },
+        { error: providerError(undefined, 402), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: providerError(undefined, 401), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: providerError("ENOTFOUND"), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+        { error: new Error("x"), phase: "read", visibleTokenEmitted: false, downstreamOpen: true },
+    ];
+    for (const observation of observations) {
+        const classification = classifyStreamFailure(observation);
+        assert.ok(
+            ROUTING_ATTEMPT_ERROR_CLASSES.includes(classification.errorClass),
+            `${observation.phase}: ${classification.errorClass}`
+        );
+    }
+});
+
+test("a client that went away is not filed as a provider failure", () => {
+    const gone = classifyStreamFailure({
+        error: new Error("x"),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: false,
+    });
+    assert.equal(gone.errorClass, "client_gone");
+    assert.equal(gone.failureLayer, "stream");
+    assert.ok(!gone.errorClass.startsWith("provider_"));
+});
+
+/**
+ * A lost connection is not a person changing their mind.
+ *
+ * `TimeoutError` and `ECONNRESET` share the *verdict* with a client abort --
+ * neither is substituted -- and the module says in as many words that they are
+ * not user cancellations. Filing them under `client_gone` would put a cause in
+ * the record that nobody observed, and would contradict provider health, which
+ * classifies the same event as `NETWORK`.
+ */
+test("a lost connection is not recorded as the client going away", () => {
+    for (const error of [
+        Object.assign(new Error("x"), { name: "TimeoutError" }),
+        Object.assign(new Error("x"), { code: "ECONNRESET" }),
+    ]) {
+        const classification = classifyStreamFailure({
+            error,
+            phase: "read",
+            visibleTokenEmitted: false,
+            downstreamOpen: true,
+        });
+        assert.equal(classification.errorClass, "provider_network");
+        // The verdict it shares with an abort is unchanged.
+        assert.equal(classification.outcome, "cancelled");
+        assert.equal(classification.failureLayer, "stream");
+    }
+});
+
+test("a real client abort still says so", () => {
+    for (const error of [
+        Object.assign(new Error("x"), { name: "AbortError" }),
+        Object.assign(new Error("x"), { code: "ABORT_ERR" }),
+    ]) {
+        const classification = classifyStreamFailure({
+            error,
+            phase: "read",
+            visibleTokenEmitted: false,
+            downstreamOpen: true,
+        });
+        assert.equal(classification.errorClass, "client_gone");
+        assert.equal(classification.outcome, "cancelled");
+    }
+});
+
+/**
+ * The verdict and the observation are two values now.
+ *
+ * `outcome` answers "may this be substituted" and is conservative: a lost
+ * connection is `cancelled` there so no second model is tried. Recording that
+ * as what happened told the success rate the person had changed their mind,
+ * which is true of an abort and false of a dropped connection.
+ */
+test("a lost connection is observed as a failure and disposed of as a cancellation", () => {
+    const lost = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { code: "ECONNRESET" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    assert.equal(lost.outcome, "cancelled", "not substituted");
+    assert.equal(lost.observedOutcome, "failed_pre_token", "nobody cancelled");
+    assert.ok(DISPATCH_OUTCOMES_COUNTED.includes(lost.observedOutcome));
+});
+
+test("a turn the person abandoned is observed as a cancellation", () => {
+    const abandoned = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { name: "AbortError" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    assert.equal(abandoned.outcome, "cancelled");
+    assert.equal(abandoned.observedOutcome, "cancelled");
+    assert.ok(!DISPATCH_OUTCOMES_COUNTED.includes(abandoned.observedOutcome));
+});
+
+test("the refusal says which of the two it was", () => {
+    const refusal = (classification) =>
+        decideFallback({
+            attempt: {
+                modelId: "m",
+                outcome: classification.outcome,
+                observedOutcome: classification.observedOutcome,
+                failureLayer: classification.failureLayer,
+                providerRefusal: classification.providerRefusal,
+            },
+            run: { passThroughUsed: false, rerouteCount: 0, visibleTokenEmitted: false },
+            nextCandidateModelIds: ["other"],
+        });
+
+    const lost = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { code: "ECONNRESET" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+    const abandoned = classifyStreamFailure({
+        error: Object.assign(new Error("x"), { name: "AbortError" }),
+        phase: "read",
+        visibleTokenEmitted: false,
+        downstreamOpen: true,
+    });
+
+    // Both refuse. They say different things about why.
+    assert.equal(refusal(lost).action, "terminate");
+    assert.equal(refusal(lost).reason, "connection_lost");
+    assert.equal(refusal(abandoned).action, "terminate");
+    assert.equal(refusal(abandoned).reason, "cancelled");
 });

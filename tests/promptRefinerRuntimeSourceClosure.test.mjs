@@ -170,12 +170,29 @@ const compilerOptions = parsedConfig.options;
 // Both notes stand because both changes are in this tree, and the value below
 // is recomputed over the merged tree rather than taken from either side of the
 // conflict.
+//
+// 2026-09-23, the routing ADR branch alongside: three closure files gain
+// lines and everything below them moves down.
+//
+//   lib/routingAttemptStore.ts        the error class vocabulary, as an array
+//                                     literal, and `model_output` added to the
+//                                     failure layers;
+//   lib/chatAttemptCostLedger.ts      one parameter typed to that vocabulary
+//                                     instead of `string`;
+//   lib/marketingAutomationAccess.ts  a review note above the watched-schema
+//                                     fingerprint, which is comment only.
+//
+// None of them brought a computed access. The vocabulary is a literal array
+// of string literals and the one bracket beside it is `(typeof …)[number]`, a
+// type-level index this inventory does not collect. The count is still 228 and
+// the position-free inventory still hashes to the value above, so this is a
+// repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "d6b5de08379a269e937d89ca643e9132",
-  "e9e6c7b9c83267b4c054a9a7265155ec",
+  "21d448943f260fcf4c6a96c4ac2ebcf3",
+  "6bc000bfc8b58d81382ff055aff6d849",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
