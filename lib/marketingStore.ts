@@ -45,7 +45,8 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { databaseErrorMetadata } from "@/lib/databaseError";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -83,11 +84,17 @@ import {
   MARKETING_AUDIT_PROBLEMS,
   verifyMarketingAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
-import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
+import {
+  marketingFactsDigest,
+  marketingFactsScopeDigest,
+  type MarketingGuardFacts,
+} from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
+  marketingTemplateWriteConditions,
   type MarketingGuardDecision as GuardDecision,
+  type MarketingTemplateBinding,
 } from "@/lib/marketingGuardCore";
 
 /**
@@ -125,13 +132,68 @@ export type MarketingTransaction = Prisma.TransactionClient & {
 export async function runMarketingTransaction<T>(
   client: PrismaClient,
   run: (tx: MarketingTransaction) => Promise<T>,
-  options?: { maxWait?: number; timeout?: number },
+  options?: {
+    maxWait?: number;
+    timeout?: number;
+    /**
+     * The isolation the work needs, when the default is not enough.
+     *
+     * Stated narrowly, because it is easy to claim more than it gives. The
+     * autonomous admission asks four questions in four statements -- the
+     * switches, the channel, the template, the prior use -- and under read
+     * committed each is answered as of the moment it runs. A decision could be
+     * admitted against switches read before an operator turned publishing off
+     * and prior use read after, which is an answer that was never true at any
+     * single instant.
+     *
+     * `SERIALIZABLE` makes the four one instant, or the transaction does not
+     * commit. It does not make a concurrent unpublish impossible: this
+     * transaction committing before that one is a legal order, and the post is
+     * then scheduled on evidence that was true at its serialization point,
+     * which is the right answer. What it removes is the mixture.
+     */
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  },
 ): Promise<T> {
   return client.$transaction(
     (tx) => run(tx as unknown as MarketingTransaction),
     options,
   );
 }
+
+/**
+ * Whether a failure is PostgreSQL saying "try again", rather than "no".
+ *
+ * A serialization failure is not a refusal: nothing was wrong with the write,
+ * two transactions simply could not both be true. The caller may retry it --
+ * but only before anything has left the database, which for the autonomous
+ * insert means before any vendor call exists at all (that is S2d2). Retrying
+ * after an external effect would repeat the effect.
+ *
+ * Read through `databaseErrorMetadata()` rather than off `error.code`,
+ * because a caller never sees SQLSTATE 40001 here: Prisma turns a serialization
+ * conflict in an interactive transaction into `P2034` with a
+ * `TransactionWriteConflict` driver cause, and the raw code survives only as
+ * the cause's `originalCode`. A predicate that compared `error.code` to
+ * "40001" was false for every conflict that actually happens, so the bounded
+ * retry the plan requires would never have run once.
+ *
+ * A deadlock (40P01) counts too, and for the same reason: it is the other way
+ * two transactions taking the same locks can fail to both be true, nothing
+ * was wrong with either, and neither has made an external call.
+ */
+export const marketingSerializationFailure = (error: unknown): boolean => {
+  const metadata = databaseErrorMetadata(error);
+  return (
+    metadata.errorCode === "P2034" ||
+    metadata.driverKind === "TransactionWriteConflict" ||
+    metadata.driverCode === "40001" ||
+    metadata.driverCode === "40P01"
+  );
+};
+
+/** How many times a serialization failure may be retried before it is an answer. */
+export const MARKETING_SERIALIZATION_RETRIES = 3;
 
 /** A write refused before it reached the database. */
 export class MarketingStoreRefusedError extends Error {
@@ -149,6 +211,122 @@ const asJson = (value: unknown): Prisma.InputJsonValue =>
 
 /** The audit actions that authorise the two operator-only movements. */
 export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_autonomous";
+/**
+ * The one action S2b2 writes.
+ *
+ * Its own constant, not a thirtieth entry in `MARKETING_S2B1_ACTIONS`: that
+ * table is the approved S2b1 inventory and a test compares it whole, so adding
+ * to it would say S2b1 grew an action it was never approved for.
+ */
+/**
+ * The statuses that mean this account has already put a claim in front of
+ * people.
+ *
+ * "Used before" is a question about publication, not about intent, so a
+ * `scheduled` post does not answer it yes -- nothing has left yet, and two
+ * posts may legitimately be queued for the same claim before either goes. The
+ * boundary is the moment a request leaves for the platform, which is why
+ * `publishing` and `outcome_unknown` count: for the first we do not yet know
+ * the answer and for the second we never will, and in both cases claiming the
+ * account has never published it would be asserting something we cannot see.
+ * `failed` does not count -- the adapter confirmed nothing was published.
+ *
+ * The facts resolver that fills `usedBefore` must ask over this same list.
+ * Two lists would let a decision be made against one meaning of "published"
+ * and written against another.
+ */
+/**
+ * What the admission resolver has to report back, not just decide.
+ *
+ * `autonomousPublish` is the answer. The other three are what the answer was
+ * computed against, and they are here because the store cannot read them for
+ * itself without importing the composition that gathers them -- which would
+ * put the store downstream of its own caller. Reporting them instead keeps one
+ * rule: the caller says what the decision was made under, the resolver says
+ * what is true now, and this module refuses the difference.
+ */
+/** The locked channel row, as the admission resolver is given it. */
+export type MarketingAdmissionChannel = {
+  readonly id: string;
+  readonly channel: MarketingChannelName;
+  readonly status: MarketingChannelStatus;
+  readonly connectionGeneration: number;
+};
+
+export type MarketingAutonomousAdmission = {
+  readonly autonomousPublish: boolean;
+  /** The digest of the code that decided, over the admission manifest. */
+  readonly admissionCodeDigest: string;
+  /** `marketingAutomation.configGeneration`, read inside this transaction. */
+  readonly configGeneration: number;
+  /** The Railway deployment this process belongs to. */
+  readonly deploymentId: string;
+};
+
+/**
+ * How recently a health observation must have been made to count.
+ *
+ * Sixty seconds, and positive by construction. Health is the one admission
+ * input that is about the outside world rather than about a row, so an old
+ * observation is not a weaker answer -- it is an answer about a different
+ * moment.
+ *
+ * Here rather than beside the composition that reads it, because it decides an
+ * admission and therefore belongs to the bytes `admissionCodeDigest` covers.
+ * This module is a manifest root; the composition cannot be one, since it
+ * carries the digest itself. It is also not in the Prompt Refiner's runtime
+ * source closure, which `lib/marketingAutomationAccess.ts` -- the other
+ * obvious home -- is, and a sealed snapshot there is repinned by a person.
+ */
+export const MARKETING_HEALTH_FRESHNESS_SECONDS = 60;
+
+export type MarketingHealthObservation = {
+  readonly channelId: string;
+  readonly connectionGeneration: number;
+  readonly healthy: boolean;
+  readonly observedAt: Date;
+};
+
+/**
+ * Whether an observation may be used as this channel's health, at this clock.
+ *
+ * Missing, stale, future-dated or about another channel or connection
+ * generation is false -- each for the same reason, that it is not an
+ * observation of the thing being asked about now. A future-dated row is not
+ * "very fresh": it is a clock disagreement, and treating it as the freshest
+ * answer would make a broken clock look like a healthy adapter.
+ */
+export const marketingHealthIsFresh = (
+  observation: MarketingHealthObservation | null,
+  now: Date,
+  expect: { readonly channelId: string; readonly connectionGeneration: number },
+  thresholdSeconds: number = MARKETING_HEALTH_FRESHNESS_SECONDS,
+): boolean => {
+  if (observation === null) return false;
+  if (!(thresholdSeconds > 0)) return false;
+  if (observation.channelId !== expect.channelId) return false;
+  if (observation.connectionGeneration !== expect.connectionGeneration) {
+    return false;
+  }
+  const age = now.getTime() - observation.observedAt.getTime();
+  if (!Number.isFinite(age)) return false;
+  if (age < 0) return false;
+  if (age > thresholdSeconds * 1000) return false;
+  return observation.healthy;
+};
+
+export const MARKETING_PRIOR_USE_STATUSES = [
+  "publishing",
+  "published",
+  "outcome_unknown",
+  "verified",
+  "removed_by_platform",
+] as const;
+
+export const MARKETING_S2B2_ACTIONS = Object.freeze({
+  postAutonomousScheduled: "marketing_post.autonomous_scheduled",
+} as const);
+
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
 /** Exact S2b1 action names. These strings are audit/store contracts. */
@@ -243,6 +421,28 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   resume_drain_required: 409,
   drain_not_stopped: 409,
   identity_change_needs_connection: 409,
+  autonomous_insert_not_eligible: 409,
+  autonomous_insert_has_codes: 409,
+  autonomous_insert_not_scheduled: 409,
+  autonomous_insert_without_template: 409,
+  autonomous_insert_template_mismatch: 409,
+  autonomous_insert_template_digest_mismatch: 409,
+  autonomous_insert_channel_not_autonomous: 409,
+  autonomous_insert_channel_has_no_autonomy: 409,
+  autonomous_insert_slot_not_future: 409,
+  autonomous_insert_slot_unreadable: 409,
+  autonomous_insert_facts_mismatch: 422,
+  autonomous_insert_claim_no_longer_used: 409,
+  autonomous_insert_asset_no_longer_used: 409,
+  autonomous_insert_code_digest_changed: 409,
+  autonomous_insert_config_generation_changed: 409,
+  autonomous_insert_deployment_changed: 409,
+  autonomous_insert_deployment_unknown: 503,
+  autonomous_insert_binding_expired: 409,
+  autonomous_insert_binding_not_sealed: 409,
+  autonomous_insert_template_gone: 409,
+  autonomous_insert_template_changed: 409,
+  autonomous_insert_not_admitted: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -1457,7 +1657,21 @@ export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
     .digest("hex");
 }
 
-export async function createMarketingPost(
+/**
+ * What every marketing post has to satisfy before it is written, whoever is
+ * writing it.
+ *
+ * This was the first half of `createMarketingPost` while there was one
+ * writer. S2b2 adds a second -- the autonomous scheduled insert -- and the two
+ * differ in exactly two places: one refuses a sealed `autonomous_eligible`
+ * decision and a scheduled envelope, the other requires both. Everything
+ * before that is the same question and is asked once, here, because the same
+ * checks written twice are two places to get them right and one place to get
+ * them wrong quietly.
+ *
+ * It reads the channel, so it takes a database. It writes nothing.
+ */
+async function admitMarketingPostInput(
   database: MarketingDatabase,
   rawInput: CreateMarketingPostInput,
 ) {
@@ -1586,16 +1800,6 @@ export async function createMarketingPost(
     );
   }
 
-  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
-  // has a column for one, and a create that set the first and not the second
-  // left two answers to the same question.
-  if (envelopeForDigest.scheduledAt !== null) {
-    throw new MarketingStoreRefusedError(
-      "envelope_scheduled_at_create",
-      "A post is scheduled by an append, not by the envelope it is created with",
-    );
-  }
-
   // The account the envelope names has to be the account being written to.
   // `accountSlug` is what a publisher posts from, and the Guard checked the
   // channel this row belongs to.
@@ -1611,6 +1815,34 @@ export async function createMarketingPost(
     throw new MarketingStoreRefusedError(
       "envelope_account_not_this_channel",
       "The envelope names an account other than the one this post belongs to",
+    );
+  }
+
+  return {
+    input,
+    envelope: envelopeForDigest,
+    verdict,
+    guardCodes,
+    guardRuleIds,
+    factsDigest,
+    account,
+  };
+}
+
+export async function createMarketingPost(
+  database: MarketingDatabase,
+  rawInput: CreateMarketingPostInput,
+) {
+  const { input, envelope: envelopeForDigest, verdict, guardCodes, guardRuleIds, factsDigest } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
+  // has a column for one, and a create that set the first and not the second
+  // left two answers to the same question.
+  if (envelopeForDigest.scheduledAt !== null) {
+    throw new MarketingStoreRefusedError(
+      "envelope_scheduled_at_create",
+      "A post is scheduled by an append, not by the envelope it is created with",
     );
   }
 
@@ -1833,6 +2065,466 @@ export type MarketingRequeueEvidence = { auditLogId: string };
  * arrived some other way would otherwise be carried forward by every later
  * append, with this module's name on the write.
  */
+
+/**
+ * The only writer that may insert a post already scheduled, already
+ * autonomous, with nobody having looked at it.
+ *
+ * Authority: S1 plan r7 amendment 2 and the S2 plan's "Autonomous insert:
+ * complete shape", both approved 2026-09-23. The insert trigger carries the
+ * half of the contract that is a property of the row; this carries the half
+ * that needs other rows, and the two halves are checked in the same
+ * transaction as the write so neither can be true at a different moment than
+ * the other.
+ *
+ * What it does, in the order it matters:
+ *
+ * 1. Locks the channel. It is the per-channel mutex the caps rest on, and it
+ *    is what stops the account changing mode underneath the decision.
+ * 2. Reads the database's clock. The binding's window is judged against that
+ *    clock and no other -- a caller's clock is one nobody agreed on.
+ * 3. Holds the template row with `FOR SHARE` and writes against every
+ *    condition `marketingTemplateWriteConditions()` returns. Autonomy is only
+ *    ever inside an approved template, so a template that has been edited,
+ *    purged, un-marked or moved on a version is not one this may reuse.
+ * 4. Resolves admission *here*, by calling the resolver this function was
+ *    handed, inside this transaction. Taking a resolved answer as an argument
+ *    would let it be resolved anywhere, at any time, against anything.
+ * 5. Inserts, and writes the system audit row in the same transaction.
+ *
+ * The audit metadata is what dispatch compares against later: the code digest,
+ * the configuration generation and the deployment id. A post admitted by one
+ * build is not dispatched by another without being admitted again.
+ */
+export async function insertAutonomousScheduledMarketingPost(
+  database: MarketingTransaction,
+  rawInput: CreateMarketingPostInput & {
+    /** The sealed proof that this template was a template, and when. */
+    readonly binding: MarketingTemplateBinding;
+    /**
+     * Resolved inside this transaction, by this function, rather than handed
+     * in already answered.
+     */
+    /**
+     * Resolved inside this transaction, against the row this function locked.
+     *
+     * The locked channel is handed over rather than looked up again, and
+     * rather than taken from whatever the caller believed: this transaction
+     * holds that row `FOR UPDATE`, so it is the only description of the
+     * account that cannot change under the answer. A resolver reading the
+     * caller's copy would be judging a mode that was true when the caller
+     * assembled its arguments.
+     */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+    ) => Promise<MarketingAutonomousAdmission>;
+    /**
+     * The facts the decision was sealed over.
+     *
+     * Not taken on trust: both digests are recomputed below, and the sealed
+     * decision carries them, so a facts object that is not the one the Guard
+     * read fails before it is used. It is needed because the decision records
+     * only the digests, and `usedBefore` -- the one answer in there that another
+     * transaction can invalidate -- has to be re-asked at write time.
+     */
+    readonly facts: MarketingGuardFacts;
+    readonly admissionCodeDigest: string;
+    readonly configGeneration: number;
+    readonly deploymentId: string;
+    readonly commitSha: string;
+  },
+) {
+  const binding = rawInput.binding;
+  const resolveAdmission = rawInput.resolveAdmission;
+  // Copied field by field, here, for the reason everything else in this module
+  // is: a property can be an accessor. `marketingFactsDigest()` reads
+  // `claims` and the prior-use check below reads it again, and an object whose
+  // getter answered one list to the digest and another to the check would have
+  // its digest verified against facts that were never used. There is one list
+  // from here on and the argument is not read again.
+  const facts: MarketingGuardFacts = {
+    channelId: String(rawInput.facts.channelId),
+    channel: String(rawInput.facts.channel),
+    locale: String(rawInput.facts.locale),
+    claims: [...rawInput.facts.claims].map((claim) => ({ ...claim })),
+    assets: [...rawInput.facts.assets].map((asset) => ({ ...asset })),
+    claimRegistryVersion: Number(rawInput.facts.claimRegistryVersion),
+    assetRegistryVersion: Number(rawInput.facts.assetRegistryVersion),
+    factSnapshotDigest:
+      rawInput.facts.factSnapshotDigest === null
+        ? null
+        : String(rawInput.facts.factSnapshotDigest),
+  };
+  const provenance = {
+    admissionCodeDigest: String(rawInput.admissionCodeDigest),
+    configGeneration: Number(rawInput.configGeneration),
+    deploymentId: String(rawInput.deploymentId),
+    commitSha: String(rawInput.commitSha),
+  };
+
+  // **The audit chain lock, before any row lock.** `lib/adminAudit.ts` takes
+  // this lock inside every append, and `lib/marketingAdminMutations.ts` takes
+  // it first in its transaction and says so: every other audit write in the
+  // process queues behind it. This function writes its audit entry last,
+  // because it needs the id of the row it creates -- so without this line it
+  // would take the channel's row lock first and the chain lock last, the exact
+  // reverse of the admin path, and two of them running at once would deadlock.
+  // Taking it here costs an ordering, not a second lock: it is the same
+  // transaction-scoped advisory lock the append will ask for again.
+  await takeAuditChainLock(database);
+
+  const { input, envelope, guardRuleIds, factsDigest, verdict, guardCodes } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // The opposite of the draft path in both directions: this one requires the
+  // verdict a person never saw, and requires the slot the draft path refuses.
+  if (verdict !== "autonomous_eligible") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_eligible",
+      "Only an autonomous-eligible decision may be inserted already scheduled",
+    );
+  }
+  if (guardCodes.length > 0) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_has_codes",
+      "An autonomous-eligible decision carries no codes",
+    );
+  }
+  if (envelope.scheduledAt === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_scheduled",
+      "An autonomous post is inserted with the slot its envelope names",
+    );
+  }
+  if (input.templateId === null || input.templateDigest === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_without_template",
+      "Autonomy is only ever inside an approved template",
+    );
+  }
+  if (input.templateId !== binding.templateId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_mismatch",
+      "The binding proves a different template than the post names",
+    );
+  }
+  if (input.templateDigest !== binding.approvedDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_digest_mismatch",
+      "The binding proves a different approved digest than the post names",
+    );
+  }
+
+  // The per-channel mutex, and the thing that stops the account changing mode
+  // under the decision.
+  const channel = await lockMarketingChannel(database, input.channelId);
+  if (channel.status !== "autonomous_mode") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_not_autonomous",
+      "Only an account in autonomous mode may be written to without a person",
+    );
+  }
+  if (
+    (MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(channel.channel)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_has_no_autonomy",
+      "This channel is posted by hand and has no autonomous path",
+    );
+  }
+
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  // The slot is in the future at the database's clock. A post inserted for an
+  // instant that has already passed is due the moment it exists, which is a
+  // way of publishing now while appearing to schedule.
+  const slot = new Date(envelope.scheduledAt);
+  if (!Number.isFinite(slot.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_unreadable",
+      "The envelope's scheduled instant is not a time",
+    );
+  }
+  if (slot.getTime() <= now.getTime()) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_not_future",
+      "An autonomous post is scheduled for a time that has not happened yet",
+    );
+  }
+
+  // The binding's window is judged against that clock and no other.
+  const conditions = marketingTemplateWriteConditions(binding, now);
+  if (!conditions.ok) {
+    // Two throws, each with its code where the reader and the check both
+    // look for it: immediately after the constructor. Assembling the code
+    // from a fragment made it ungreppable, and putting it behind a ternary
+    // made it invisible to the sweep that gives every refusal an HTTP
+    // meaning -- both of which read, from outside, as a status for a
+    // refusal nothing raises.
+    if (conditions.refusal === "binding_expired") {
+      throw new MarketingStoreRefusedError(
+        "autonomous_insert_binding_expired",
+        "The template binding proof has aged out at the database clock",
+      );
+    }
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_binding_not_sealed",
+      "The template binding is not a write condition at the database's clock",
+    );
+  }
+
+  // Held, not looked at. `FOR SHARE` keeps the template as the binding proved
+  // it until this transaction ends, so an edit or a purge in flight loses the
+  // race rather than winning it silently.
+  const held = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingPost" WHERE "id" = ${binding.templateId} FOR SHARE
+  `);
+  if (held.length !== 1) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_gone",
+      "The template this post reuses no longer exists",
+    );
+  }
+  const template = await database.marketingPost.findFirst({
+    where: conditions.where,
+    select: { id: true },
+  });
+  if (!template) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_changed",
+      "The template no longer matches the binding that proved it",
+    );
+  }
+
+  // **The facts are the ones the decision was sealed over.** The decision
+  // records two digests and nothing else, so this is where a facts object
+  // stops being an argument and starts being the thing the Guard read.
+  // One comparison, not two. `marketingFactsDigest()` covers the account, the
+  // channel, the locale, every claim and asset answer, both registry versions
+  // and the snapshot digest -- so a facts object that passes it is the one the
+  // decision was sealed over, and the scope digest is already checked against
+  // the post's own columns in `admitMarketingPostInput()`. A second check over
+  // a subset of the same bytes would look like a further guarantee and be none.
+  if (marketingFactsDigest(facts) !== factsDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_facts_mismatch",
+      "These are not the facts the decision was made from",
+    );
+  }
+
+  // **The one answer in the facts another transaction can turn false.**
+  //
+  // Which way round matters, and it is the opposite of the obvious one. An
+  // autonomous decision has `usedBefore: true` for every claim and asset it
+  // names -- `guardDraft()` raises `first_use_of_claim` otherwise and the
+  // verdict stops being autonomous -- so a *new* prior use cannot hurt this
+  // post. What can is prior use going away: a concurrent unpublish, delete or
+  // retention purge of the last row that carried the claim leaves nothing
+  // saying this account ever published it, and the autonomy rested on that
+  // exact sentence.
+  //
+  // Refusing then is not conservatism. The Guard re-run on the same facts
+  // would say `first_use_of_claim`, and first use of a claim is a thing the
+  // policy sends to a person.
+  //
+  // Two queries rather than one with the column interpolated: a runtime
+  // column name is a thing `check:protected-table-writers` refuses on sight,
+  // and it is right to -- it cannot tell a literal chosen here from a string
+  // that arrived. Both ask "which of these", not "is any of these": any is not
+  // what the decision rested on.
+  //
+  // Asking it here, rather than trusting what the decision recorded, is the
+  // whole check: the answer is taken from what the database says now.
+  //
+  // It is also the read that the isolation level needs in order to have
+  // anything to say, since SSI detects a dependency only against a read a
+  // transaction actually performed -- but that is a smaller claim than it
+  // sounds, and `runMarketingTransaction`'s `isolationLevel` spells out how
+  // small. A concurrent unpublish does not have to become a serialization
+  // failure: this transaction committing first is a legal order and the post
+  // is then right as of that point. What the isolation level buys is that this
+  // read and the three before it are one instant.
+  const reliedOnClaimIds = facts.claims
+    .filter((claim) => claim.usedBefore === true)
+    .map((claim) => claim.claimId);
+  const reliedOnAssetIds = facts.assets
+    .filter((asset) => asset.usedBefore === true)
+    .map((asset) => asset.assetId);
+
+  const publishedClaims =
+    reliedOnClaimIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."claimIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnClaimIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingClaim = reliedOnClaimIds.find((id) => !publishedClaims.has(id));
+  if (missingClaim !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_claim_no_longer_used",
+      "A claim this decision relied on having been published no longer has been",
+    );
+  }
+
+  const publishedAssets =
+    reliedOnAssetIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."assetIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnAssetIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingAsset = reliedOnAssetIds.find((id) => !publishedAssets.has(id));
+  if (missingAsset !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_asset_no_longer_used",
+      "An asset this decision relied on having been published no longer has been",
+    );
+  }
+
+  // Resolved here, inside this transaction, by this function.
+  const admission = await resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
+
+  // **The decision was made under one build, one configuration and one
+  // deployment; the write happens under whatever is running now.** The caller
+  // carries what it saw when the decision was sealed, the resolver reports what
+  // it just read, and a difference means the decision is about a world that has
+  // moved. Checked before the admission answer itself: an answer produced under
+  // a configuration the decision never saw is not the answer the decision was
+  // given, whichever way it came out.
+  if (admission.admissionCodeDigest !== provenance.admissionCodeDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_code_digest_changed",
+      "The admission code is not the build this decision was made under",
+    );
+  }
+  if (admission.configGeneration !== provenance.configGeneration) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_config_generation_changed",
+      "A setting that affects admission changed after this decision was made",
+    );
+  }
+  // Refused before the comparison, because an empty deployment id compares
+  // equal to an empty deployment id: with the variable unset on both sides the
+  // fence passes every time and the audit records a fence that was never one.
+  // "We do not know which deployment this is" is not a match.
+  if (provenance.deploymentId === "" || admission.deploymentId === "") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_unknown",
+      "There is no deployment identity to fence this decision to",
+    );
+  }
+  if (admission.deploymentId !== provenance.deploymentId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_changed",
+      "This decision was made on a deployment that is no longer the one running",
+    );
+  }
+
+  if (!admission.autonomousPublish) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_admitted",
+      "Autonomous publishing is not admitted right now",
+    );
+  }
+
+  const draftEntry = marketingHistoryEntrySchema.parse({
+    at: input.draftedAt.toISOString(),
+    type: "draft",
+    envelopeDigest: input.envelopeDigest,
+  });
+
+  const created = await database.marketingPost.create({
+    data: {
+      channelId: input.channelId,
+      locale: input.locale,
+      kind: input.kind,
+      logicalKey: input.logicalKey,
+      envelope: asJson(envelope),
+      envelopeDigest: input.envelopeDigest,
+      rendererVersion: input.rendererVersion,
+      templateId: input.templateId,
+      templateDigest: input.templateDigest,
+      claimIds: [...input.claimIds],
+      assetIds: [...input.assetIds],
+      claimRegistryVersion: input.claimRegistryVersion,
+      assetRegistryVersion: input.assetRegistryVersion,
+      factSnapshot: asJson(input.factSnapshot),
+      factsDigest,
+      // Derived from the decision, never from the caller.
+      guardDecision: "autonomous_eligible",
+      guardCodes: [],
+      guardRuleIds: [...guardRuleIds],
+      status: "scheduled",
+      mode: "autonomous",
+      scheduledAt: slot,
+      history: asJson([draftEntry]),
+    },
+    select: { id: true },
+  });
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-guard",
+    action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+    targetType: "MarketingPost",
+    targetId: created.id,
+    summary: "Scheduled a marketing post without a person, inside an approved template.",
+    metadata: {
+      channelId: input.channelId,
+      factsDigest,
+      factsScopeDigest: rawInput.decision.factsScopeDigest,
+      templateId: binding.templateId,
+      templateDigest: binding.approvedDigest,
+      // What dispatch compares against. A post admitted by one build of the
+      // admission code, one configuration generation or one deployment is not
+      // dispatched by another without being admitted again. The commit is
+      // provenance: Git identity alone does not prove what bytes ran.
+      admissionCodeDigest: provenance.admissionCodeDigest,
+      configGeneration: provenance.configGeneration,
+      deploymentId: provenance.deploymentId,
+      commitSha: provenance.commitSha,
+      scheduledAt: slot.toISOString(),
+    },
+  });
+
+  return { id: created.id };
+}
+
 export async function appendMarketingPostHistory(
   database: MarketingDatabase,
   rawInput: {
