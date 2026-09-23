@@ -33,6 +33,17 @@ import {
   runMarketingTransaction,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
+import {
+  finishMarketingPublisherRun,
+  heartbeatMarketingPublisherRun,
+  runBoundedMarketingTransaction,
+  startMarketingPublisherRun,
+} from "@/lib/marketingPublisherRun";
+import {
+  MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
+  MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
+  MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
+} from "@/lib/marketingPublisherRunCore";
 
 // The marketing tables' invariants against a real database.
 //
@@ -2647,4 +2658,204 @@ test("a claim token and its lease are set together or not at all", async () => {
     where: { id: postId },
     data: { claimToken: null, leaseUntil: null },
   });
+});
+
+// ---------------------------------------------------------------------------
+// S2d1: a publisher run's deadline, enforced by the database
+// ---------------------------------------------------------------------------
+//
+// The one rule the plan calls mandatory: a run that finished after its
+// deadline is not recorded as a success. The route cannot promise that --
+// a COMMIT can become durable after the deadline on 16 and 17 alike -- so the
+// table does.
+
+const runUuid = () => crypto.randomUUID();
+const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+
+test("a publisher run starts on the database's clock and closes on it", async () => {
+  const runId = runUuid();
+  const deadlineAt = minutesFromNow(4);
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: true,
+    runId,
+  });
+
+  const opened = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(opened.status, "running");
+  assert.ok(opened.heartbeatAt, "the trigger stamps the first heartbeat");
+  assert.equal(opened.completedAt, null);
+
+  assert.equal(await heartbeatMarketingPublisherRun(prisma, runId), true);
+
+  const closed = await finishMarketingPublisherRun(prisma, runId, {
+    status: "succeeded",
+    processedCount: 0,
+    result: { skipped: "no_adapter_implemented" },
+  });
+  assert.deepEqual(closed, { status: "succeeded" });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.ok(row.completedAt);
+  assert.ok(row.completedAt <= deadlineAt);
+});
+
+test("a run that closes after its deadline is failed, never succeeded", async () => {
+  // The deadline is moved into the past directly, because the only other way
+  // is to wait four minutes. The trigger refuses to move a deadline once set,
+  // so it is done with the trigger off, in a disposable test database, and
+  // put straight back.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    await prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60_000) },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+
+  // Straight at the table: the trigger itself refuses.
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { status: "succeeded", completedAt: new Date() },
+    }),
+    /after its deadline/,
+  );
+
+  // Through the module: the refusal is caught and the run closed failed,
+  // rather than left running for the silence monitor to misreport as a dead
+  // worker.
+  const closed = await finishMarketingPublisherRun(prisma, runId, {
+    status: "succeeded",
+    processedCount: 0,
+    result: {},
+  });
+  assert.deepEqual(closed, { status: "failed" });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "failed");
+  assert.equal(row.error, "deadline_exceeded");
+});
+
+test("a deadline cannot be moved, removed, or started already past", async () => {
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  // Moving it later would make a late run punctual; removing it would take
+  // the row out of every rule the trigger applies.
+  for (const deadlineAt of [minutesFromNow(60), null]) {
+    await assert.rejects(
+      prisma.scheduledJobRun.update({ where: { id: runId }, data: { deadlineAt } }),
+      /deadline cannot change/,
+    );
+  }
+  await assert.rejects(
+    prisma.scheduledJobRun.create({
+      data: {
+        id: runUuid(),
+        jobKey: "marketing_publisher",
+        status: "running",
+        deadlineAt: new Date(Date.now() - 1_000),
+      },
+    }),
+    /cannot start after its own deadline/,
+  );
+});
+
+test("a closed run stays closed", async () => {
+  // Otherwise a failed run could be flipped to succeeded afterwards, and the
+  // late-run rule would be a rule about the first write only.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  await finishMarketingPublisherRun(prisma, runId, {
+    status: "failed",
+    error: "test",
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { status: "succeeded" },
+    }),
+    /already closed/,
+  );
+});
+
+test("a duplicate run id is never a second run", async () => {
+  const runId = runUuid();
+  const deadlineAt = minutesFromNow(4);
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt });
+  // The same request again, while it runs: answered, not repeated.
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: false,
+    reason: "already_running",
+  });
+  // The same id with another deadline is not a retry of anything.
+  assert.deepEqual(
+    await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(3) }),
+    { started: false, reason: "deadline_mismatch" },
+  );
+  await finishMarketingPublisherRun(prisma, runId, { status: "failed", error: "test" });
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: false,
+    reason: "already_closed",
+  });
+});
+
+test("a scheduled job with no deadline is untouched by the publisher's rules", async () => {
+  // The trigger is scoped to rows that carry a deadline. Every other job
+  // writes this table without one, stamps its own completion time, and may be
+  // closed in any order -- none of which this slice has authority to change.
+  const row = await prisma.scheduledJobRun.create({
+    data: { jobKey: "retention_cleanup", status: "running" },
+  });
+  const chosen = new Date("2020-01-01T00:00:00.000Z");
+  const closed = await prisma.scheduledJobRun.update({
+    where: { id: row.id },
+    data: { status: "succeeded", completedAt: chosen },
+  });
+  assert.deepEqual(closed.completedAt, chosen, "a job without a deadline keeps its own clock");
+});
+
+test("the bounded transaction arms all three timeouts on this server", async () => {
+  // What the fake in tests/marketingPublisherTransaction.test.ts cannot show:
+  // that PostgreSQL took the settings. On 16 the first of them does not exist
+  // and the wrapper refuses, which is why CI runs 17 for this slice.
+  const shown = await runBoundedMarketingTransaction(prisma, async (tx) =>
+    tx.$queryRaw<Array<{ transaction: string; statement: string; idle: string }>>`
+      SELECT
+        current_setting('transaction_timeout') AS "transaction",
+        current_setting('statement_timeout') AS "statement",
+        current_setting('idle_in_transaction_session_timeout') AS "idle"
+    `,
+  );
+  const settings = shown[0];
+  assert.ok(settings);
+  // PostgreSQL reports these with units; compare in milliseconds.
+  const ms = (value: string) => {
+    const match = /^(\d+)(ms|s|min)?$/.exec(value.trim());
+    assert.ok(match, `unreadable setting: ${value}`);
+    const n = Number(match[1]);
+    return match[2] === "s" ? n * 1000 : match[2] === "min" ? n * 60_000 : n;
+  };
+  assert.equal(ms(settings.transaction), MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS);
+  assert.equal(ms(settings.statement), MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS);
+  assert.equal(ms(settings.idle), MARKETING_PUBLISHER_IDLE_TIMEOUT_MS);
+});
+
+test("the statement ceiling is armed, not merely set", async () => {
+  // The ordering trap made concrete: a statement longer than the ceiling is
+  // cancelled. If transaction_timeout had been set below statement_timeout,
+  // PostgreSQL would have switched the ceiling off and this would sleep for
+  // the full six seconds.
+  await assert.rejects(
+    runBoundedMarketingTransaction(prisma, async (tx) =>
+      tx.$queryRaw`SELECT pg_sleep(${(MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS + 1_000) / 1000})`,
+    ),
+    /statement timeout|canceling statement/i,
+  );
 });
