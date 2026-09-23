@@ -1324,6 +1324,598 @@ domains:
       holds the consent wording's hash and a screen identifier, never the
       request.
 
+# Twenty-one tables the actor rule named on 2026-09-21.
+  #
+  # None of them is new. What was new is the rule: it had been reading one
+  # exact column name, `approvedBy`, and everything that spelled its operator
+  # column differently -- `approvedByEmail`, `reviewerEmail`, `actorEmail` --
+  # was invisible to it. The rule now reads any address column, the same
+  # pattern `isDirectIdentifier` already used for minimisation, so a column
+  # this file calls a direct identifier in one place cannot be invisible in
+  # the other.
+  #
+  # They are registered `unverified` on every axis. That is not a placeholder
+  # and not an exemption: it is what this registry says when nobody has
+  # established what happens yet, it keeps each table inside every count and
+  # workflow, and it holds PRIVACY-01/02 blocked -- which they already were.
+  # The alternative was twenty-one invented owners, legal bases and retention
+  # periods, and a registry whose whole value is that it holds no claims
+  # cannot be filled with plausible ones.
+  #
+  # Each row comes off `unverified` when somebody decides it.
+  - domain: adminActionApproval
+    prismaModel: AdminActionApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The administrator who requested a second-person approval and the one who granted it, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminAlertPolicy
+    prismaModel: AdminAlertPolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed an alerting policy, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminNotificationLog
+    prismaModel: AdminNotificationLog
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who an operational notification was sent to or about, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminOperationReport
+    prismaModel: AdminOperationReport
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who ran an operational report, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminOperationalCheckpoint
+    prismaModel: AdminOperationalCheckpoint
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who recorded an operational checkpoint, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminProviderIncident
+    prismaModel: AdminProviderIncident
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who opened, updated or closed a provider incident, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminRetentionRun
+    prismaModel: AdminRetentionRun
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who started a retention run, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: adminSlackTemplate
+    prismaModel: AdminSlackTemplate
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a Slack notification template, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailCampaign
+    prismaModel: EmailCampaign
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who created and who approved a campaign, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailCampaignAttestation
+    prismaModel: EmailCampaignAttestation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who attested to a campaign's audience or copy, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailLoginAttempt
+    prismaModel: EmailLoginAttempt
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+    note: >-
+      The address a login code was requested for, which is the person themselves rather than an operator -- and which is why this one is not an actor row but is undecided in the same way. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: emailPolicyVersion
+    prismaModel: EmailPolicyVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who approved an email policy version, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: infrastructureCreditConfig
+    prismaModel: InfrastructureCreditConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed the infrastructure credit configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelLifecycleWorkItem
+    prismaModel: ModelLifecycleWorkItem
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The reviewer and the owner of a model lifecycle item, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelLifecycleWorkItemEvent
+    prismaModel: ModelLifecycleWorkItemEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who moved a model lifecycle item between states, by address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: modelRegistryEntry
+    prismaModel: ModelRegistryEntry
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a model's registry row, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerBillingConfig
+    prismaModel: ProviderBillingConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed a provider's billing configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerCreditConfig
+    prismaModel: ProviderCreditConfig
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last changed a provider's credit configuration, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: providerHealthCheck
+    prismaModel: ProviderHealthCheck
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who ran or acknowledged a provider health check, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: stripeWebhookEventLog
+    prismaModel: StripeWebhookEventLog
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who replayed a Stripe webhook event, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  - domain: templateVersion
+    prismaModel: TemplateVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who published an email template version, by id and address. Registered on 2026-09-21 when the actor rule
+      widened past one column name. Every axis is unverified: nobody has
+      decided this one yet, and that is what the state means.
+
+  # The two suppression tables, registered 2026-09-22.
+  #
+  # They were outside this registry because the identifier pattern read
+  # `email` or something ending in `Email`, and theirs is `emailAddress` --
+  # the two tables whose entire purpose is to remember a mailbox after the
+  # account is gone were the ones the pattern could not see.
+  #
+  # Deletion and retention are decided: docs/policy/email-notifications.md
+  # section 13.3 keys suppression by address precisely so that closing an
+  # account and signing up again does not clear it. The export axis is not
+  # decided, and saying so is the point of `unverified`.
+
+  - domain: suppressionCause
+    prismaModel: SuppressionCause
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        One cause of a suppression, append-only, and the record every send
+        decision reads. It is keyed by address rather than by account on
+        purpose: a spam complaint follows the mailbox, so deleting an account
+        and signing up again must not clear it
+        (docs/policy/email-notifications.md section 13.3). A suppression that
+        disappeared with the account would mean sending again to the person
+        who complained, which is the outcome the whole table exists to
+        prevent.
+      retentionStartsFrom: "occurredAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: unverified
+    note: >-
+      No User relation, by design. The export axis is unverified rather than
+      decided: this registry's export is scoped to an account, and a
+      suppression is scoped to an address, so returning one means resolving
+      the account's current address -- which would miss a suppression against
+      a previous address and disclose one against an address the account no
+      longer holds. Whether an account is entitled to be told it is suppressed,
+      and against which address, is a decision nobody has made.
+
+  - domain: suppressionEntry
+    prismaModel: SuppressionEntry
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        What the suppression list looked like before causes existed. Nothing
+        writes it since deploy C (migration 20260921090000) and nothing reads
+        it in a send decision, but the rows are the record of why addresses
+        were suppressed before 2026-09, which the cause rows derived from them
+        do not independently prove.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: unverified
+    note: >-
+      Frozen: no writer remains. Registered for the same reason as
+      suppressionCause and carrying the same open export question; a table
+      nothing writes is still a table holding addresses.
+
+  - domain: emailPermissionEvent
+    prismaModel: EmailPermissionEvent
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        The facts a sending basis rests on that are not a consent: a notice
+        shown, an objection, a relationship starting and ending. Australia puts
+        the burden of proving an inferred consent on the sender, so these carry
+        the same burden ConsentRecord carries for express consent -- and for the
+        same reason they cannot leave with the account, because the addresses
+        most likely to be complained about are the ones most likely to have
+        closed first. Establishing this against GDPR Article 17(3) and PIPA
+        Article 21 is contract question Q6, the same one consentRecord waits on.
+      retentionStartsFrom: "occurredAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Append-only, and the database enforces it: the one update the row accepts
+      is the foreign key's own SET NULL when the account goes, which is the
+      anonymisation recorded here. Everything else raises. emailAddress stays
+      because the fact attaches to a mailbox rather than to an account, exactly
+      as it does in consentRecord; evidence holds a screen identifier and the
+      notice copy's hash, never the request and never message content.
+
+  - domain: emailSendApproval
+    prismaModel: EmailSendApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    subjectReference:
+      kind: child_rows
+      childModel: EmailSendApprovalMember
+      childColumn: approvalId
+    minimisationFields:
+      - approvedByEmail
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        An owner's decision to send without a basis, or to not perform a display
+        duty. The identity kept is the approver's, and it is kept on purpose:
+        the whole value of the row is that somebody is answerable for it, and an
+        approval that cannot say who gave it is not an approval. The address is
+        held beside the account id because an account can be renamed and a
+        reader a year later needs the second. Deleting the approver's account
+        must not rewrite it, which is why there is no User relation -- the same
+        reasoning as AdminAuditLog and the Prompt Refiner stage.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject of the row is the approver, not the exporting account.
+      Returning it would hand one account another person's identity and
+      reasoning. An account's own presence in what was approved is exported
+      through emailSendApprovalMember, which carries the approval's type, scope
+      and dates without the approver.
+    note: >-
+      Sealed: once sealedAt is set, triggers refuse every update and delete on
+      the row and on its cohort. An approver asking for their own data or its
+      erasure is a manual PrivacyRequest rather than an automated path: the row
+      is immutable audit evidence under legal hold, so the answer is the
+      retention basis above and not a deletion. The cohort is the link to the
+      people the decision was about.
+
+  - domain: emailSendApprovalMember
+    prismaModel: EmailSendApprovalMember
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - addressDigest
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Which accounts an approval covered. "78 accounts" is the description and
+        this list is the scope, so removing a row would silently widen or narrow
+        a decision that was already made -- and the question the row answers,
+        "was this send within what was approved", is asked after the fact and
+        often about an account that has since closed.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Deliberately has no foreign key to User, which is why deletion is retain
+      rather than a cascade or a SET NULL: the cohort is what an approval
+      covered at the moment it was sealed, and a membership that changed when an
+      account closed would no longer be that. The address is held only as a
+      SHA-256 of its normalised form -- enough to refuse a send to a mailbox the
+      approval was not about, not enough to be a second copy of the mailing
+      list. addressNormalizationVersion records which rule produced it.
+
+  - domain: emailSendApprovalRevocation
+    prismaModel: EmailSendApprovalRevocation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    subjectReference:
+      kind: parent_row
+      parentColumn: approvalId
+      parentModel: EmailSendApproval
+    minimisationFields:
+      - revokedByEmail
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Withdrawal of an approval, kept for as long as the approval it
+        withdraws, and holding the revoking person's identity for the same
+        reason the approval holds the approver's. A revocation that could be
+        deleted would let a withdrawn approval look live again, which is the one
+        direction this ledger must never move in.
+      retentionStartsFrom: "revokedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The identity in it is the revoking person's, not the exporting account's.
+      The people the withdrawn approval was about reach it through the
+      approval's cohort, which is exported.
+    note: >-
+      Append-only by trigger; the approval row is never touched. Erasure or
+      access for the revoking person is a manual PrivacyRequest against the
+      retention basis above, as it is for the approval itself.
+
+  - domain: emailPermissionDecision
+    prismaModel: EmailPermissionDecision
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - authorities
+      - blockers
+      - countryCandidates
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Why one message was or was not permitted. It is the answer to a
+        regulator's question and to a complaint, both of which arrive after the
+        send and often after the account has closed. It holds no message content
+        -- only which authorities were applied, how each ended, and which rows it
+        rested on.
+      retentionStartsFrom: "evaluatedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Effectively immutable: after insert the row accepts exactly one of four
+      transitions, each once -- the account detaching (the SET NULL recorded
+      here), the delivery detaching when it is purged, the evidence set
+      sealing, and the provider submission being recorded. Anything else
+      raises. The delivery link is SET NULL rather than
+      RESTRICT because a delivery is purged on its own schedule and the verdict
+      is what outlives it: losing the message must not take the reason it was
+      permitted with it.
+
   - domain: emailCampaignRecipient
     prismaModel: EmailCampaignRecipient
     userLinkageRole: subject
@@ -1476,3 +2068,34 @@ domains:
       `mobileAuthEvents` retention policy and its maintenance step. That is an
       age limit on a live account's rows, not a period anything survives a
       deletion for, which is why this row's retentionPolicy is `immediate`.
+
+  - domain: amuxBoardImportApproval
+    prismaModel: AmuxBoardImportApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one catalog-import attempt. The row
+        names the administrator who prepared it and is retained for security
+        investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-22"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. It stores source identities and
+      digests, not a customer's prompt or file. Operator requests are handled
+      through the manual PrivacyRequest path, together with the linked
+      tamper-evident AdminAuditLog entry.

@@ -245,6 +245,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-board-import": {
+    label: "AMUX 카탈로그 이관",
+    description: "owner 전용 미리보기와 승인. 이 화면에서 운영 적용은 꺼져 있다.",
+  },
   "prompt-refiner-shadow": {
     label: "Prompt Refiner shadow 실행",
     description: "동결된 합성 shadow run의 owner 전용 승인과 실행",

@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  APPEND_ONLY_LEDGER_TABLES,
   PROTECTED_TABLES,
   checkProtectedTableWriters,
+  findTruncateStatements,
   describeFindings,
   selectScannedPaths,
 } from "./check-protected-table-writers-core.mjs";
@@ -53,6 +55,21 @@ const sources = paths.map((path) => ({
 
 const findings = checkProtectedTableWriters({ sources });
 
+const truncateFindings = findTruncateStatements({ sources });
+if (truncateFindings.length > 0) {
+  console.error(
+    "Protected table writer check failed: a SQL TRUNCATE outside tests/.\n" +
+      truncateFindings
+        .map(({ path, line }) => `  - ${path}:${line}`)
+        .join("\n") +
+      "\n\nThe permission and consent ledgers are append-only and TRUNCATE is " +
+      "the one verb their triggers cannot refuse -- including through a " +
+      "CASCADE from a table that names none of them. A fixture may truncate " +
+      "and says so by living under tests/."
+  );
+  process.exit(1);
+}
+
 if (findings.length > 0) {
   console.error(describeFindings(findings));
   process.exit(1);
@@ -63,5 +80,5 @@ console.log(
     PROTECTED_TABLES.map(
       (entry) => `no direct ${entry.table} write found outside ${entry.writers.join(", ")}`
     ).join("; ") +
-    "."
+    `; no SQL TRUNCATE outside tests, which is what keeps ${APPEND_ONLY_LEDGER_TABLES.length} append-only table(s) append-only.`
 );
