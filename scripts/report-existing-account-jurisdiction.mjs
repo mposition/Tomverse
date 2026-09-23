@@ -33,11 +33,18 @@
 // release. This says so, per reason, before anybody amends a contract to find
 // out.
 //
-// ## Output
+// ## Output, and what it can and cannot protect
 //
 // Counts only -- no address, no id, no country. A population below
-// `--min-population` (default 10) is refused rather than printed, because at
-// that size a row of the table describes a person.
+// `--min-population` is refused, and any bucket holding fewer than that many
+// accounts prints as "<N" rather than its count, because a row of one is a
+// person. The floor cannot be set below 5.
+//
+// That protects a single run. It does not make two runs safe to compare: the
+// people in scope here are the existing accounts, who largely know each other,
+// and differencing two populations can still isolate one. So
+// `--created-before` takes whole days only -- the granularity an approval
+// date actually has -- and the output is for internal use, not for anywhere.
 //
 // Writes nothing. Exits 0 whatever it finds, 2 on a bad argument.
 
@@ -48,28 +55,34 @@ const argValue = (name) => {
   return at >= 0 ? process.argv[at + 1] : undefined;
 };
 
-// A bare date means the whole of that UTC day. `new Date("2026-09-16")` is
-// midnight at the start of it, so an inclusive comparison against that instant
-// silently dropped everybody who signed up later the same day while the
-// output claimed the day was included.
+// A whole UTC day and nothing finer. `new Date("2026-09-16")` is midnight at
+// the start of the day, so an inclusive comparison against it silently dropped
+// everybody who signed up later that day while the output claimed the day was
+// included. Finer instants are refused as well: they are what lets two runs be
+// differenced down to one person, and an approval date has no time of day.
+const createdBeforeFlag = process.argv.includes("--created-before");
 const createdBeforeArg = argValue("--created-before");
 let createdBeforeExclusive = null;
-if (createdBeforeArg !== undefined) {
-  const dayOnly = /^\d{4}-\d{2}-\d{2}$/.test(createdBeforeArg);
-  const parsed = new Date(dayOnly ? `${createdBeforeArg}T00:00:00.000Z` : createdBeforeArg);
-  if (Number.isNaN(parsed.getTime())) {
-    console.error("--created-before needs a date such as 2026-09-16 or an ISO instant.");
+if (createdBeforeFlag) {
+  if (!createdBeforeArg || !/^\d{4}-\d{2}-\d{2}$/.test(createdBeforeArg)) {
+    console.error("--created-before needs a whole day in the form 2026-09-16.");
     process.exit(2);
   }
-  createdBeforeExclusive = dayOnly
-    ? new Date(parsed.getTime() + 86_400_000)
-    : new Date(parsed.getTime() + 1);
+  const start = new Date(`${createdBeforeArg}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== createdBeforeArg) {
+    console.error(`${createdBeforeArg} is not a real calendar day.`);
+    process.exit(2);
+  }
+  createdBeforeExclusive = new Date(start.getTime() + 86_400_000);
 }
 
+const MIN_POPULATION_FLOOR = 5;
 const minPopulationArg = argValue("--min-population");
 const minPopulation = minPopulationArg === undefined ? 10 : Number(minPopulationArg);
-if (!Number.isInteger(minPopulation) || minPopulation < 1) {
-  console.error("--min-population needs a positive whole number.");
+if (!Number.isInteger(minPopulation) || minPopulation < MIN_POPULATION_FLOOR) {
+  console.error(
+    `--min-population needs a whole number of at least ${MIN_POPULATION_FLOOR}.`
+  );
   process.exit(2);
 }
 
@@ -88,12 +101,24 @@ const { marketingJurisdictionVerdict } = await import(
 // The three rows of section 6.3's table that share one skip reason are split
 // here, because they are released by different things -- and for one of them
 // neither the country confirmation nor an IP amendment does anything.
+//
+// The low-confidence bucket is split once more, by asking the same verdict a
+// hypothetical: *if* the guessed country were settled, would it be allowed?
+// That is the ceiling on what the S0 IP amendment could release, and it is far
+// lower than "every unconfirmed account" -- the language-and-timezone guesses
+// include JP and CN, which have no reviewed profile, and ES and PT, which are
+// outside the ten. It is still only a ceiling: the draft's two-candidate rule
+// also requires the IP country to agree, and IP is not recorded to check.
 const bucketFor = (resolved) => {
   const verdict = marketingJurisdictionVerdict(resolved);
   if (verdict.allowed) return "jurisdiction_allows";
   if (verdict.skipReason !== "jurisdiction_unconfirmed") return verdict.skipReason;
   if (resolved.confidence === "high") return "unconfirmed_no_reviewed_profile";
-  if (resolved.confidence === "low") return "unconfirmed_low_confidence";
+  if (resolved.confidence === "low") {
+    return marketingJurisdictionVerdict({ ...resolved, confidence: "high" }).allowed
+      ? "unconfirmed_low_guess_allowed_if_settled"
+      : "unconfirmed_low_guess_not_allowed_if_settled";
+  }
   return "unconfirmed_unknown";
 };
 
@@ -101,11 +126,13 @@ const REMEDY = {
   jurisdiction_allows:
     "Jurisdiction would not stop the send. Consent, suppression and the risk_accepted override are decided before this and are not counted here.",
   unconfirmed_unknown:
-    "No country signal at all. Released by the person confirming a country in the preference centre (section 11.2). An IP estimate would also do it, once the outstanding S0 amendment is approved.",
-  unconfirmed_low_confidence:
-    "Only a language and timezone guess. Released the same ways as above: a confirmed country, or an IP estimate once S0 allows it.",
+    "No country signal at all. Released if the person confirms one of the ten allowed countries in the preference centre (section 11.2). What an IP estimate would do cannot be counted: no IP is recorded, and it would release the account only if that country were one of the ten.",
+  unconfirmed_low_guess_allowed_if_settled:
+    "A language-and-timezone guess naming one of the ten. The ceiling on what the S0 IP amendment could release: it still needs the IP country to agree (draft section 5.3), which cannot be checked here. A country confirmation releases it outright.",
+  unconfirmed_low_guess_not_allowed_if_settled:
+    "A guess naming a country outside the ten or without a reviewed profile (JP, CN, ES, PT among them). The S0 amendment does not release it; only a confirmed allowed country does.",
   unconfirmed_no_reviewed_profile:
-    "A settled, high-confidence country with no reviewed profile. Neither a country confirmation nor the S0 amendment releases it -- confirming the same country leaves the profile empty. It needs that country's profile reviewed and added.",
+    "A settled, high-confidence country with no reviewed profile. Neither a country confirmation nor the S0 amendment releases it. A reviewed profile is not enough either: the country also needs its country-level record and a place in MARKETING_ALLOWED_COUNTRY_CODES, or it moves to marketing_country_not_allowed.",
   jurisdiction_conflict:
     "Billing country and declaration disagree. The person confirms which is current.",
   marketing_country_not_allowed:
@@ -142,11 +169,16 @@ try {
     result = {
       scope,
       total: accounts.length,
-      buckets: Object.keys(REMEDY).map((bucket) => ({
-        bucket,
-        accounts: counts.get(bucket) ?? 0,
-        remedy: REMEDY[bucket],
-      })),
+      // A bucket of one is a person, whatever the total. Zero is shown as
+      // zero, because "nobody is in this state" identifies nobody.
+      buckets: Object.keys(REMEDY).map((bucket) => {
+        const count = counts.get(bucket) ?? 0;
+        return {
+          bucket,
+          accounts: count > 0 && count < minPopulation ? `<${minPopulation}` : count,
+          remedy: REMEDY[bucket],
+        };
+      }),
       ...(unexpected.length > 0 ? { unexpectedReasons: unexpected } : {}),
     };
   }
