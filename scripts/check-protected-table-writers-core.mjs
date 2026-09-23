@@ -331,17 +331,17 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
     tableMentions: 2,
-    writeVerbs: 7,
+    writeVerbs: 8,
     reason:
-      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name.",
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do.",
   },
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 7,
-    writeVerbs: 7,
+    tableMentions: 11,
+    writeVerbs: 8,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. The last two are written out separately rather than as one statement with the column interpolated, because a runtime column name is what this rule exists to refuse. None interpolates a table name and every write is a delegate call.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -531,6 +531,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 1,
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
+  },
+  {
+    path: "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
   },
 ];
 

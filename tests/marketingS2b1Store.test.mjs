@@ -412,6 +412,50 @@ test("requeue refuses an audit older than the failure it answers", async () => {
   );
 });
 
+test("a requeue ends the failed attempt's claim and keeps its day", async () => {
+  // S2c round three. The worker that dispatched a failed post has concluded,
+  // so its token and lease describe nothing; left set, they hid a post an
+  // operator had just re-approved behind a dead lease for up to fifteen
+  // minutes. The day stays: a retry the same day renews it, a retry later
+  // moves it, and that is the claim's decision when the claim happens.
+  const row = failedPost();
+  const audit = signedAudit({
+    action: MARKETING_S2B1_ACTIONS.postRequeueAfterFailure,
+    targetId: row.id,
+    metadata: { digest: DIGEST },
+    createdAt: new Date("2026-09-22T00:05:00.000Z"),
+  });
+  let written;
+  await withAuditKey(() =>
+    requeueMarketingPostAfterFailure(
+      {
+        $queryRaw: async () => [row],
+        adminAuditLog: auditReader(audit),
+        marketingPost: {
+          updateMany: async ({ data }) => {
+            written = data;
+            return { count: 1 };
+          },
+        },
+      },
+      {
+        id: row.id,
+        expectedEnvelopeDigest: DIGEST,
+        expectedHistoryVersion: 4,
+        auditLogId: audit.id,
+      },
+    ),
+  );
+  assert.ok(written, "the requeue wrote nothing");
+  assert.equal(written.status, "scheduled");
+  assert.equal(written.claimToken, null);
+  assert.equal(written.leaseUntil, null);
+  assert.ok(
+    !("slotDate" in written),
+    "a requeue leaves the day for the next claim to renew or move",
+  );
+});
+
 test("requeue refuses reuse of the previous approval audit id", async () => {
   const row = failedPost();
   await assert.rejects(
