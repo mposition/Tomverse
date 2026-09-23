@@ -32,7 +32,8 @@
 // and change with refactors; a file a user downloaded two years ago should
 // still parse.
 
-export type ExportDomainState = "included" | "included_filtered" | "excluded" | "unverified";
+export type ExportDomainState =
+  "included" | "included_filtered" | "excluded" | "unverified";
 
 export type ExportDomainDeclaration = {
   domain: string;
@@ -48,28 +49,48 @@ export type ExportDomainDeclaration = {
 
 export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   // --- wholly the user's own data ------------------------------------------
-  { domain: "userSettings", publicName: "settings", prismaModel: "UserSettings", state: "included" },
+  {
+    domain: "userSettings",
+    publicName: "settings",
+    prismaModel: "UserSettings",
+    state: "included",
+  },
   {
     domain: "userMemorySettings",
     publicName: "memory_settings",
     prismaModel: "UserMemorySettings",
     state: "included",
   },
-  { domain: "conversation", publicName: "conversations", prismaModel: "Conversation", state: "included" },
+  {
+    domain: "conversation",
+    publicName: "conversations",
+    prismaModel: "Conversation",
+    state: "included",
+  },
   {
     domain: "conversationProject",
     publicName: "projects",
     prismaModel: "ConversationProject",
     state: "included",
   },
-  { domain: "memoryItem", publicName: "memories", prismaModel: "MemoryItem", state: "included" },
+  {
+    domain: "memoryItem",
+    publicName: "memories",
+    prismaModel: "MemoryItem",
+    state: "included",
+  },
   {
     domain: "creditPurchase",
     publicName: "credit_purchases",
     prismaModel: "CreditPurchase",
     state: "included",
   },
-  { domain: "feedback", publicName: "feedback", prismaModel: "Feedback", state: "included" },
+  {
+    domain: "feedback",
+    publicName: "feedback",
+    prismaModel: "Feedback",
+    state: "included",
+  },
   // Registered on 2026-08-27 having escaped the sweep entirely: both carry
   // actorUserId but no User relation. "unverified" is the honest state -- what
   // the export should do with a child row of an anonymised parent has not been
@@ -316,6 +337,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A content-free, immutable administrator decision ledger linked to the tamper-evident administrator audit record. It stores actor and proposal identifiers, digests and outcome but no review prose. Operator access requests are reviewed through the manual PrivacyRequest path under the approved Admin audit retention policy; automatic unified export could expose other operators or tasks.",
   },
   {
+    domain: "amuxBoardImportApproval",
+    publicName: "amux_board_import_approvals",
+    prismaModel: "AmuxBoardImportApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for a catalog import, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
     domain: "adminNote",
     publicName: "admin_notes",
     prismaModel: "AdminNote",
@@ -492,9 +521,15 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
 ];
 
 /** Domains whose data reaches the export at all. */
-export const EXPORTED_STATES: ExportDomainState[] = ["included", "included_filtered"];
+export const EXPORTED_STATES: ExportDomainState[] = [
+  "included",
+  "included_filtered",
+];
 
-export const isExportedState = (state: ExportDomainState) => EXPORTED_STATES.includes(state);
+export const isExportedState = (state: ExportDomainState) =>
+  EXPORTED_STATES.includes(state);
 
 export const exportDomainState = (domain: string) =>
-  EXPORT_DOMAIN_DECLARATIONS.find((declaration) => declaration.domain === domain);
+  EXPORT_DOMAIN_DECLARATIONS.find(
+    (declaration) => declaration.domain === domain,
+  );

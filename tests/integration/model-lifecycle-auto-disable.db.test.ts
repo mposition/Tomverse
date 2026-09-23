@@ -486,7 +486,18 @@ test("the discovery queue does not recommend a current model without decision ev
   assert.equal(queue.truncated, false);
   assert.equal(queue.items[0].availability, "current");
   assert.equal(queue.items[0].reviewPriority, "review");
-  assert.match(queue.items[0].analysisKo, /공급자 모델 목록만으로는/);
+  assert.match(
+    queue.items[0].analysisKo,
+    /openai의 모델 목록은 이 후보의 컨텍스트·출력·모달리티·가격을 담고 있지 않습니다/
+  );
+  assert.match(
+    queue.items[0].analysisKo,
+    /공급자 근거가 후보의 제품 역할을 분류할 만큼 충분하지 않습니다/
+  );
+  assert.doesNotMatch(
+    queue.items[0].analysisKo,
+    /최근 모델 API 확인이 실패|더 이상 확인되지/
+  );
 });
 
 // ML-13: the report reads the sightings back, and falls back honestly when an

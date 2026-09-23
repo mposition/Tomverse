@@ -247,6 +247,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-board-import": {
+    label: "AMUX 카탈로그 이관",
+    description: "owner 전용 카탈로그 미리보기와 승인, 꺼진 운영 적용",
+  },
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
