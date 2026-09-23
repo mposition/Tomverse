@@ -5740,8 +5740,9 @@ model MarketingPost {
   assetRegistryVersion Int
   factSnapshot         Json
   /// Full digest of every resolver answer used by the recorded Guard decision.
-  /// Nullable only for rows that predate the expand migration; every new write sets it.
-  factsDigest          String?
+  /// NOT NULL since 20260923140000: the expand migration left it nullable for rows
+  /// that predate the column, and that migration refuses to run while any remain.
+  factsDigest          String
   guardDecision        String
   guardCodes           String[]
   guardRuleIds         String[]

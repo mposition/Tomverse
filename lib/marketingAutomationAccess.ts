@@ -219,9 +219,9 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  *
  * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
- * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
- * evidence backs a separate NOT NULL transition. Webhook admission never reads
- * this column; the fingerprint moves because the schema is watched as a whole.
+ * `MarketingPost.factsDigest`, nullable for rows predating the column. S2b3
+ * (2026-09-23) made it NOT NULL once both databases read zero. Webhook
+ * admission never reads it; the fingerprint moves because the schema is watched.
  *
  * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
  * columns and a new attempt check to the same schema. Those additions do not
@@ -257,7 +257,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * the conflict -- the merged tree is the only one that will exist.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "cd0abe25870db017baf9b7d1b995a1a04a4009b301ee8bb10b86652d0d2aaa40";
+  "34e897e5257f43fb44e8b2824cf75f43257a50d73177d67dc44cbb04b390e9e0";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

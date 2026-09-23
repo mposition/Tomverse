@@ -532,6 +532,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
   },
+  {
+    path: "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER COLUMN itself, and the count in the error message. The write verbs are UPDATE and DELETE inside the prose above the statements, naming what this migration deliberately does not do -- the disposition of such rows is an operator's decision, carried out separately.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

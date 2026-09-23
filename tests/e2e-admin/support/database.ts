@@ -1069,6 +1069,11 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     claimRegistryVersion: 1,
     assetRegistryVersion: 1,
     factSnapshot: {},
+    // Not optional since 20260923140000. A post records which resolver answers
+    // its Guard decision was made from, and a row without one is a decision
+    // nobody can reconstruct -- so the fixture states it rather than leaving a
+    // shape the database would refuse.
+    factsDigest: digest,
     guardDecision: "approval_required",
     guardCodes: [FIXTURE_MARKETING.pending.guardCode],
     guardRuleIds: [],

@@ -1957,3 +1957,44 @@ test("the S2b1 cap writer refuses an effective increase before the DB trigger", 
     "cap_change_raises_limit",
   );
 });
+
+test("a marketing post cannot be written without its facts digest", async () => {
+  // S2b3. The column was nullable while rows predating it might exist; the
+  // migration establishes there are none and the database now says so for
+  // every future row.
+  //
+  // Against a real PostgreSQL rather than against Prisma's types, because the
+  // types are regenerated from the schema and would agree with a schema the
+  // database had not been given. Twice in this slice's review a rule the code
+  // and its types agreed on turned out to be one the database did not have.
+  const account = await channel();
+  await assert.rejects(
+    prisma.$executeRaw`
+      INSERT INTO "MarketingPost" (
+        "id", "channelId", "locale", "kind", "logicalKey",
+        "envelope", "envelopeDigest", "rendererVersion",
+        "claimIds", "assetIds", "claimRegistryVersion", "assetRegistryVersion",
+        "factSnapshot", "factsDigest",
+        "guardDecision", "guardCodes", "guardRuleIds",
+        "status", "mode", "history", "historyVersion", "updatedAt"
+      ) VALUES (
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${account.id}, 'en', 'social',
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${JSON.stringify(envelope())}::jsonb, ${DIGEST}, 'r1',
+        ARRAY[]::text[], ARRAY[]::text[], 1, 1,
+        ${JSON.stringify(factSnapshot)}::jsonb, NULL,
+        'approval_required', ARRAY[]::text[], ARRAY[]::text[],
+        'drafted', 'approval',
+        ${JSON.stringify([historyEntry("draft", { envelopeDigest: DIGEST })])}::jsonb,
+        0, now()
+      )
+    `,
+    /factsDigest|not-null|null value/i,
+  );
+
+  // And the ordinary fixture, which does set it, still goes in -- so the test
+  // above is about the digest and not about the statement being malformed.
+  const written = await post(account.id);
+  assert.equal(written.factsDigest, DIGEST);
+});
