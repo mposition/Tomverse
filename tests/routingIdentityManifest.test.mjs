@@ -27,6 +27,15 @@ const migration = () =>
         "utf8"
     );
 
+const ceilingMigration = () =>
+    readFileSync(
+        new URL(
+            "../prisma/migrations/20260923340000_routing_manifest_ceiling_dark/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
+
 const identityMigration = () =>
     readFileSync(
         new URL(
@@ -69,6 +78,7 @@ const manifest = (entries, overrides = {}) => ({
     version: 1,
     digest: manifestDigest(entries),
     entryCount: entries.length,
+    approvedCeiling: 50,
     entries,
     approvedBy: "@mposition",
     approvedAt: new Date("2026-09-23T00:00:00.000Z"),
@@ -366,6 +376,58 @@ test("a manifest says when it was published", () => {
             "a manifest says when it was published"
         )
     );
+});
+
+test("a manifest is published under a ceiling, and there is no default", () => {
+    // Section 5: size is controlled when the configuration is approved, not
+    // when a turn runs. A ceiling is an approval, and an absent approval is
+    // not an unlimited one.
+    for (const ceiling of [0, -1, 2.5]) {
+        assert.ok(
+            manifestProblems(manifest([entry()], { approvedCeiling: ceiling })).includes(
+                "a manifest is published under an approved ceiling"
+            ),
+            String(ceiling)
+        );
+    }
+    assert.ok(
+        manifestProblems({
+            ...manifest([entry()]),
+            approvedCeiling: undefined,
+        }).includes("a manifest is published under an approved ceiling")
+    );
+});
+
+test("a manifest over its ceiling is refused rather than trimmed", () => {
+    // Whichever cut you take when trimming throws away either the
+    // lowest-ranked candidates or a particular rejection reason, which is the
+    // answer to "why was this deployment not picked". A newly added
+    // deployment is cut first, and it is the one most in need of an answer.
+    const entries = [
+        entry({ modelDeploymentId: "dep_a" }),
+        entry({ modelDeploymentId: "dep_b" }),
+        entry({ modelDeploymentId: "dep_c" }),
+    ];
+    assert.deepEqual(manifestProblems(manifest(entries, { approvedCeiling: 3 })), []);
+    assert.deepEqual(manifestProblems(manifest(entries, { approvedCeiling: 2 })), [
+        "3 deployments is over the approved ceiling of 2",
+    ]);
+});
+
+test("the database says the same thing about the stored count", () => {
+    // `manifestProblems()` compares the entries it was handed, which the
+    // database never sees. This compares the count that was stored, so a row
+    // cannot claim a ceiling it exceeded.
+    const sql = ceilingMigration();
+    assert.match(sql, /ADD COLUMN "approvedCeiling" INTEGER NOT NULL;/);
+    assert.match(sql, /RoutingIdentityManifest_approvedCeiling_positive_check/);
+    assert.match(
+        sql,
+        /RoutingIdentityManifest_within_ceiling_check"\s*\n\s*CHECK \("entryCount" <= "approvedCeiling"\)/
+    );
+    // NOT NULL with no default: a configuration nobody set a ceiling for
+    // cannot be published.
+    assert.ok(!/approvedCeiling" INTEGER NOT NULL DEFAULT/.test(sql));
 });
 
 test("every digest field is a column of the entry table", () => {

@@ -286,6 +286,25 @@ export type ManifestInput = {
      * disagreed.
      */
     entryCount: number;
+    /**
+     * The largest manifest this configuration was approved to publish.
+     *
+     * Section 5's rule, and it is about *where* size is controlled. An
+     * earlier draft capped the candidate verdicts written per run, and
+     * whichever cut you take there throws away either the lowest-ranked
+     * candidates or a particular rejection reason -- which is exactly the
+     * answer to "why was this deployment not picked". A newly added
+     * deployment is cut first, and it is the one most in need of an answer.
+     *
+     * So size is controlled when the configuration is approved, not when a
+     * turn runs. A manifest over its ceiling is refused publication and the
+     * last approved snapshot stands; nothing is discarded at execution time.
+     *
+     * There is no default. A configuration nobody set a ceiling for cannot
+     * be published, because a ceiling is an approval and an absent approval
+     * is not an unlimited one.
+     */
+    approvedCeiling: number;
     entries: readonly ManifestDeploymentEntry[];
     approvedBy?: string | null;
     approvedAt?: Date | null;
@@ -331,6 +350,20 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
 
     if (input.entryCount !== input.entries.length) {
         problems.push("the count does not match these deployments");
+    }
+
+    // A ceiling is an approval. Zero, a fraction or a negative is not one,
+    // and neither is a missing number -- there is no default, because an
+    // absent approval is not an unlimited one.
+    if (!Number.isInteger(input.approvedCeiling) || input.approvedCeiling < 1) {
+        problems.push("a manifest is published under an approved ceiling");
+    } else if (input.entries.length > input.approvedCeiling) {
+        // Refused, and the last approved snapshot stands. The alternative --
+        // publishing and trimming -- discards the evidence at the moment it
+        // starts to matter.
+        problems.push(
+            `${input.entries.length} deployments is over the approved ceiling of ${input.approvedCeiling}`
+        );
     }
 
     const ids = new Set<string>();

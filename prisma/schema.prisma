@@ -5890,15 +5890,25 @@ model ModelDeployment {
 /// lib/routingIdentityManifest.ts, so changing what a manifest commits to is
 /// a change to that file rather than a silent effect of adding a column.
 model RoutingIdentityManifest {
-  id         String   @id @default(cuid())
-  version    Int
+  id              String   @id @default(cuid())
+  version         Int
   /// sha256, lowercase hex. The database checks the shape; that it describes
   /// the deployments it was computed over is checked where they are visible.
-  digest     String
-  entryCount Int
-  approvedBy String
-  approvedAt DateTime
-  createdAt  DateTime @default(now())
+  digest          String
+  entryCount      Int
+  /// The largest manifest this configuration was approved to publish.
+  ///
+  /// Stored rather than read from a setting, for the reason the digest is
+  /// stored beside the manifest id: a later reader asks what the limit was
+  /// *then*, and a ceiling raised since would make an older manifest look as
+  /// though it had room it did not have.
+  ///
+  /// No default. A ceiling is an approval, and an absent approval is not an
+  /// unlimited one.
+  approvedCeiling Int
+  approvedBy      String
+  approvedAt      DateTime
+  createdAt       DateTime @default(now())
 
   attempts RoutingAttempt[]
   entries  RoutingIdentityManifestEntry[]
@@ -6566,11 +6576,11 @@ model AmuxWorkItem {
   description    String?
   /// New rows default to non-dispatchable backlog. This schema imports no
   /// cards and does not promote backlog rows to runnable Todo.
-  status         String   @default("backlog")
-  kind           String   @default("unknown")
-  priority       String   @default("p3")
-  pinned         Boolean  @default(false)
-  drag           Int      @default(0)
+  status         String    @default("backlog")
+  kind           String    @default("unknown")
+  priority       String    @default("p3")
+  pinned         Boolean   @default(false)
+  drag           Int       @default(0)
   owner          String?
   classification Json?
   revision       Int       @default(0)
@@ -6584,18 +6594,18 @@ model AmuxWorkItem {
   sourceVersion  String?
   sourceDigest   String?
   sourceSnapshot Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
   routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
 
+  @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
-  @@unique([sourceSystem, sourceKey])
 }
 
 model AmuxWorkDependency {
