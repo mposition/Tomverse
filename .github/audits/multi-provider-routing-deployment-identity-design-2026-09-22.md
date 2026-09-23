@@ -1390,6 +1390,31 @@ ADR 부록 R1·R3·R6의 판정이 `lib/routingResidualControls.ts`에 있습니
 §14.3의 약 50단위에서 완료는 33, **약 66%(추정)**입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
 
+## 14.18 Policy-freeze check (2026-09-23)
+
+Windows Claude가 `3b4155d66`을 reject했습니다. blocker는 하나였습니다.
+`RoutingRun_policy_freeze_pair_check`의 긍정 분기가 nullable 열에 `~`를
+써서, 한쪽만 NULL인 행에서 식이 NULL이 되고 CHECK가 그 행을 통과시켰습니다.
+같은 표의 allocation migration이 이미 `~`는 NULL을 만들지 않는 비교가
+아니라고 적어 둔 규칙입니다.
+
+고친 것은 이후 migration입니다. 이미 넣은 `20260923430000`은 고치지
+않습니다. 대체 제약은 두 열이 모두 `IS NOT NULL`일 때만 정규식을 보고,
+한쪽이 없으면 FALSE입니다. 기존 행은 둘 다 null이라 검증 스캔이 값을
+바꾸지 않습니다. `NOT VALID`로 남기지 않습니다. 그러면 구멍이 검증 전까지
+열려 있습니다.
+
+반환된 고정 객체는 덮어쓸 수 없습니다. pin의 `named()`는 다시 문자열만
+받습니다.
+
+남겨 둔 minor는 둘입니다. JavaScript `trim`이 보는 유니코드 공백과 SQL
+문자 클래스가 보는 ASCII 여섯 자는 다릅니다. 그리고 통합 테스트용
+Postgres가 이 환경에 없어, 절반 행을 실제로 INSERT하는 테스트는 없습니다.
+삼치 논리의 재현과 `IS NOT NULL` 문구가 그 구멍을 테스트가 다시 통과시키지
+못하게 합니다.
+
+완료 수는 33, **약 66%(추정)** 그대로입니다. 이 줄은 새 단위가 아닙니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

@@ -46,7 +46,10 @@ export type PinDecision =
           fallbackPolicy: PinFallbackPolicy;
       };
 
-const named = (value: unknown): value is string =>
+const named = (value: string | null | undefined): value is string =>
+    typeof value === "string" && value.trim().length > 0;
+
+const present = (value: unknown): value is string =>
     typeof value === "string" && value.trim().length > 0;
 
 const fallbackPolicy = (value: string | null | undefined): PinFallbackPolicy =>
@@ -103,10 +106,10 @@ export const pinPolicyVersionHeld = (input: {
     named(input.admittedPolicyVersion) &&
     input.admittedPolicyVersion === input.currentPolicyVersion;
 
-export type RequestPolicyFreeze = {
+export type RequestPolicyFreeze = Readonly<{
     controlPlaneVersion: string;
     accountPolicyVersion: string;
-};
+}>;
 
 /**
  * Capture both versions, or capture nothing.
@@ -119,13 +122,13 @@ export const freezeRequestPolicy = (observed: {
     controlPlaneVersion: unknown;
     accountPolicyVersion: unknown;
 }): RequestPolicyFreeze | null => {
-    if (!named(observed.controlPlaneVersion) || !named(observed.accountPolicyVersion)) {
+    if (!present(observed.controlPlaneVersion) || !present(observed.accountPolicyVersion)) {
         return null;
     }
-    return {
+    return Object.freeze({
         controlPlaneVersion: observed.controlPlaneVersion,
         accountPolicyVersion: observed.accountPolicyVersion,
-    };
+    });
 };
 
 /**
@@ -140,10 +143,10 @@ export const policyVersionsForDecision = (
     if (!freeze || !named(freeze.controlPlaneVersion) || !named(freeze.accountPolicyVersion)) {
         return null;
     }
-    return {
+    return Object.freeze({
         controlPlaneVersion: freeze.controlPlaneVersion,
         accountPolicyVersion: freeze.accountPolicyVersion,
-    };
+    });
 };
 
 /**
