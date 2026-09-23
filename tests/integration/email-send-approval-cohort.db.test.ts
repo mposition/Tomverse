@@ -891,11 +891,14 @@ test("a country is normalised before it is written down", async () => {
   assert.equal(row.jurisdiction, "AU");
 });
 
-test("a notice event with no candidate at all is refused", async () => {
+test("a settled country with nothing rendered is refused", async () => {
+  // The relationship is equality, so an empty list is right only when the
+  // resolution named nothing. Against a settled AU it is the other side of
+  // the same check.
   const user = await createUser();
   await assert.rejects(
     recordNoticeShown({ ...noticeInput(user), candidates: [] }),
-    /country whose rule was shown/
+    /AU is a country this resolution involved/
   );
   assert.equal(
     await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
@@ -918,6 +921,50 @@ test("an account in a sealed cohort is not offered the notice", async () => {
   assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
     offered: false,
     refusal: "covered_by_approval",
+  });
+});
+
+test("changing address puts the notice back, because the override stopped", async () => {
+  // The first version asked "is there a member row", which is wider than the
+  // thing it stood in for. A member who changes address falls out of the
+  // override -- no basis on the new mailbox -- and the notice went on hiding
+  // from them on every sign-in, for ever, with withdrawing the whole approval
+  // the only way back. Section 5.4's consent route closed for exactly the
+  // person the override had stopped covering.
+  const user = await createUser();
+  await sealFor([user]);
+  assert.equal((await noticeStateForUser({ userId: user.id })).offered, false);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { email: `moved-${randomUUID()}@example.test` },
+  });
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
+  });
+});
+
+test("an approval scoped to one purpose does not hide the notice", async () => {
+  // The notice asks about every consent purpose. An approval covering one of
+  // them leaves the others without a basis, and the notice is how somebody
+  // grants one.
+  const user = await createUser();
+  await sealRiskAcceptedApproval({
+    approvedById: user.id,
+    approvedByEmail: user.email!,
+    approvedAt,
+    reason: "Owner decision, newsletter only.",
+    reviewCondition: "Re-decide on the first organic signup.",
+    policyVersionId: await policyVersionId(),
+    purposeKey: "newsletter",
+    candidates: [{ userId: user.id, emailAddress: user.email! }],
+  });
+
+  assert.deepEqual(await noticeStateForUser({ userId: user.id }), {
+    offered: true,
+    purposes: noticePurposes(),
   });
 });
 

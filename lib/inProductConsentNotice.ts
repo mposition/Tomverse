@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
+import { cohortStanding } from "@/lib/emailSendApprovalCohort";
 import {
   normalizeCountry,
   profileForCountry,
@@ -129,6 +130,7 @@ export const noticeStateForUser = async (input: {
   }
 
   const purposes = noticePurposes();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
 
   // The three states are read separately because they are three facts. An
   // account can have been shown the notice, not consented and not objected,
@@ -184,23 +186,56 @@ export const noticeStateForUser = async (input: {
         })
       )
     ),
-    // A sealed, unwithdrawn `risk_accepted` membership.
+    // Whether an approval actually covers this person, asked the way a send
+    // asks it.
     //
-    // Sealed, because an unsealed approval is a draft being assembled and
-    // nobody is covered by a draft. Unwithdrawn, because withdrawing is how
-    // the override stops -- and an account whose approval has been withdrawn
-    // is back to having no basis, which is exactly who this notice is for.
-    db.emailSendApprovalMember.findFirst({
-      where: {
-        userId: input.userId,
-        approval: {
-          approvalType: "risk_accepted",
-          sealedAt: { not: null },
-          revocations: { none: {} },
+    // Not "is there a member row". That was the first version and it was
+    // wider than the thing it was standing in for: the send also requires the
+    // address digests to match, the purpose to be in scope, and the policy
+    // version to agree (`cohortStanding()`). So somebody in the cohort who
+    // changed their address fell out of the override -- no basis on the new
+    // mailbox -- while the notice went on hiding from them, on every sign-in,
+    // for ever. The only way back was to withdraw the whole approval. Section
+    // 5.4's consent route closed for exactly the person the override had
+    // stopped covering.
+    //
+    // Asking `cohortStanding()` means there is one definition of "covered"
+    // rather than two that drift. The current address stands in for the
+    // delivery address because no delivery exists yet, which is the same
+    // comparison the send makes at enqueue.
+    db.emailSendApprovalMember
+      .findMany({
+        where: {
+          userId: input.userId,
+          approval: {
+            approvalType: "risk_accepted",
+            sealedAt: { not: null },
+            revocations: { none: {} },
+          },
         },
-      },
-      select: { id: true },
-    }),
+        select: { approvalId: true },
+      })
+      .then(async (memberships) => {
+        for (const { approvalId } of memberships) {
+          // Every purpose the notice asks about. An approval scoped to one of
+          // them leaves the others without a basis, and the notice is how
+          // somebody grants one.
+          const covers = await Promise.all(
+            purposes.map((purpose) =>
+              cohortStanding({
+                approvalId,
+                userId: input.userId,
+                deliveryEmailAddress: emailAddress,
+                purpose,
+                policyVersionId,
+                ...(input.client ? { client: input.client } : {}),
+              })
+            )
+          );
+          if (covers.every((standing) => standing.inCohort)) return true;
+        }
+        return false;
+      }),
   ]);
 
   return inProductNoticeOffer({
@@ -213,7 +248,7 @@ export const noticeStateForUser = async (input: {
     // Any one of them. The notice asks about the set, so a refusal anywhere
     // in the set is a refusal of the question being put.
     suppressed: suppressions.some((verdict) => !verdict.allowed),
-    coveredByRiskAcceptedApproval: covered !== null,
+    coveredByRiskAcceptedApproval: covered,
   });
 };
 
@@ -239,9 +274,10 @@ type RecordInput = {
   /**
    * The candidates whose rules the person was actually shown.
    *
-   * At least one, and none of it is derived here. A row that cannot say which
-   * rule applied is a record that we asked with no way to say what we asked
-   * under, and it can never be corrected.
+   * Empty when nothing resolved, and exactly the countries the resolution
+   * involved otherwise. None of it is derived here: a row that cannot say
+   * which rule applied is a record that we asked with no way to say what we
+   * asked under, and it can never be corrected.
    */
   candidates: readonly NoticeCandidate[];
   /**
