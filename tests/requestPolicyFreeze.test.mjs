@@ -149,6 +149,9 @@ test("the columns are nullable and the pair check rejects a half pair", () => {
     );
     assert.match(added, /ADD COLUMN "controlPlaneVersion" TEXT/);
     assert.match(added, /ADD COLUMN "accountPolicyVersion" TEXT/);
+    assert.match(added, /"controlPlaneVersion" ~/);
+    assert.match(added, /"accountPolicyVersion" ~/);
+    assert.doesNotMatch(added, /IS NOT NULL/);
     assert.doesNotMatch(added, /DEFAULT/);
     assert.doesNotMatch(added, /UPDATE\s+"RoutingRun"/i);
 
