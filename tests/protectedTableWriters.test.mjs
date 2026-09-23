@@ -5,13 +5,17 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import {
+  APPEND_ONLY_LEDGER_TABLES,
   DELEGATE_NAME_ALLOWLIST,
   EXCLUDED_PREFIXES,
   PROTECTED_TABLES,
   RAW_SQL_ALLOWLIST,
   RETENTION_SETTING_ALLOWLIST,
   RUNTIME_SQL_ALLOWLIST,
+  PROTECTED_EXPORT_ALLOWLIST,
+  TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST,
   checkProtectedTableWriters,
+  findTruncateStatements,
   selectScannedPaths,
   sourceFingerprint,
   sqlWithoutComments,
@@ -32,6 +36,12 @@ const realAllowlistPaths = new Set([
   ...RAW_SQL_ALLOWLIST.map((entry) => entry.path),
   ...RUNTIME_SQL_ALLOWLIST.map((entry) => entry.path),
   ...RETENTION_SETTING_ALLOWLIST.map((entry) => entry.path),
+  // Every allowlist, every time. A fixture run holds none of the real files,
+  // so each one reports "allowlist says N, found 0" -- and an allowlist left
+  // out of this set puts that finding into all twenty fixtures at once. Which
+  // is what happened when the seal rule was added: seven unrelated tests went
+  // red and the rule itself had no test at all.
+  ...PROTECTED_EXPORT_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -469,4 +479,240 @@ test("the repository passes the check as it stands", () => {
     { cwd: ROOT, encoding: "utf8" }
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+// The seal rule, in both directions.
+//
+// `sealMarketingTemplateProof()` mints the Guard's only evidence that a human
+// approved these exact words, so who may call it is the difference between a
+// post a person approved and a post nobody saw. The first version counted the
+// name as a string; every case below is one the review got past it.
+
+const sealSource = (body) => [{ path: "lib/attacker.ts", text: body }];
+
+const SEAL_IMPORT =
+  'import { sealMarketingTemplateProof } from "@/lib/marketingGuardCore";\n';
+
+test("the seal rule counts calls, and refuses every way of moving the value", () => {
+  const escapes = [
+    // The review's own bypass: an alias exported from a file allowed to call
+    // it, so the mention count in both files stayed exactly right.
+    SEAL_IMPORT + "export const mint = sealMarketingTemplateProof;",
+    // The same idea without the export.
+    SEAL_IMPORT + "const mint = sealMarketingTemplateProof;\nmint({});",
+    // Renamed on the way in, so the call is written under another name.
+    'import { sealMarketingTemplateProof as mint } from "@/lib/marketingGuardCore";\nmint({});',
+    // Handed on rather than used.
+    SEAL_IMPORT + "export { sealMarketingTemplateProof };",
+    // Passed as an argument, which puts it wherever the callee keeps it.
+    SEAL_IMPORT + "register(sealMarketingTemplateProof);",
+    // Through a namespace, which the name-counting rule never saw at all.
+    'import * as guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
+    // The whole module re-exported, which writes the name down nowhere.
+    'export * from "@/lib/marketingGuardCore";',
+    'export * as guard from "@/lib/marketingGuardCore";',
+    // A second declaration: same name, different function, same effect.
+    "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
+    // A computed key, which puts the name in a string where an identifier rule
+    // never looks. The fourth review called the seal through this.
+    'import * as guard from "@/lib/marketingGuardCore";\nguard["sealMarketingTemplateProof"]({});',
+    'const guard = require("@/lib/marketingGuardCore");\nguard["sealMarketingTemplateProof"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, "sealMarketingTemplateProof");',
+    // The module bound to a name at run time rather than at parse time.
+    'const guard = await import("@/lib/marketingGuardCore");\nguard.sealMarketingTemplateProof({});',
+    'import guard from "@/lib/marketingGuardCore";\nguard.sealMarketingTemplateProof({});',
+    // The module path and the property name held in constants, which is how
+    // the fifth review wrote it: every rule was reading an identifier where it
+    // wanted a literal, and the file came back with nothing at all.
+    'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = await import(p);\ng[k]({});',
+    'const p = "@/lib/marketingGuardCore";\nconst k = "sealMarketingTemplateProof";\nconst g = require(p);\ng[k]({});',
+    'const k = "sealMarketingTemplateProof";\nimport * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, k);',
+    // The sixth review split both strings with a `+`, which the constant map
+    // read as two halves of nothing.
+    'const p = "@/lib/" + "marketingGuardCore";\nconst k = "sealMarketing" + "TemplateProof";\nconst g = await import(p);\ng[k]({});',
+    'const g = await import(`@/lib/${"marketingGuardCore"}`);\ng["sealMarketingTemplateProof"]({});',
+    // Neither half readable: which module and which key are both unknown, and
+    // one of the pairs it could be is the seal.
+    'const g = await import(`@/lib/${name}`);\ng[key]({});',
+    // The eighth review's shape: the name is in the binding pattern rather
+    // than in a property access, and the rule was watching the variable.
+    'const p = getPath();\nconst k = getKey();\nconst { [k]: mint } = await import(p);\nmint({});',
+    'const { ["sealMarketingTemplateProof"]: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
+    'const { sealMarketingTemplateProof: mint } = await import("@/lib/marketingGuardCore");\nmint({});',
+    // The ninth review's three: the module through a second variable, the
+    // assignment form, and a rest binding that hands on every export at once.
+    'const g = await import(p);\nconst { [k]: mint } = g;\nmint({});',
+    'let mint;\n({ [k]: mint } = await import(p));\nmint({});',
+    'const { ...rest } = await import(p);\nrest[k]({});',
+    // The tenth review: the same bypass one name along. The computed-access
+    // rules were written for the template proof and the facts seal was added
+    // beside them rather than into them.
+    'const g = await import(p);\ng["sealMarketingFacts"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nguard["sealMarketingFacts"]({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nconst mint = Reflect.get(guard, "sealMarketingFacts");',
+    // The eleventh review: a namespace export has an exportClause, and a
+    // descriptor or enumeration reaches the value without a member access.
+    'import * as guard from "@/lib/marketingGuardCore";\nObject.getOwnPropertyDescriptor(guard, "sealMarketingFacts").value({});',
+    'import * as guard from "@/lib/marketingGuardCore";\nObject.getOwnPropertyDescriptor(guard, "sealMarketingTemplateProof").value({});',
+    'const guard = await import(p);\nfor (const value of Object.values(guard)) use(value);',
+    'const guard = await import(p);\nfor (const key in guard) use(guard[key]);',
+    // A third protected mint joins the same list and therefore inherits every
+    // escape rule instead of growing a third checker beside the first two.
+    'const guard = await import(p);\nguard["sealMarketingGuardContext"]({});',
+  ];
+
+  for (const text of escapes) {
+    const findings = check(sealSource(text));
+    assert.ok(
+      findings.some((finding) => finding.rule === "guard-seal"),
+      `should be a guard-seal finding: ${JSON.stringify(text)}`
+    );
+  }
+});
+
+test("a direct call is counted, and an allowlisted file may make exactly its own", () => {
+  const unlisted = check(
+    sealSource(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});")
+  );
+  assert.equal(
+    unlisted.filter((finding) => finding.rule === "guard-seal").length,
+    1,
+    JSON.stringify(unlisted)
+  );
+
+  const listed = PROTECTED_EXPORT_ALLOWLIST.find(
+    (entry) => entry.name === "sealMarketingTemplateProof",
+  );
+  const sealFindings = (text) =>
+    checkProtectedTableWriters({
+      sources: [{ path: listed.path, text }],
+    }).filter(
+      (finding) =>
+        finding.rule === "guard-seal" && finding.path === listed.path,
+    );
+
+  assert.deepEqual(
+    sealFindings(SEAL_IMPORT + "export const proof = sealMarketingTemplateProof({});"),
+    []
+  );
+
+  const overTheLimit = sealFindings(
+    SEAL_IMPORT +
+      "export const a = sealMarketingTemplateProof({});\n" +
+      "export const b = sealMarketingTemplateProof({});"
+  );
+  assert.equal(overTheLimit.length, 1, JSON.stringify(overTheLimit));
+});
+
+test("mentioning the seal without calling it is not a finding", () => {
+  // A comment and a string are not calls, and a rule that fired on them would
+  // be switched off by whoever wrote the next comment.
+  const quiet = check(
+    sealSource(
+      "// sealMarketingTemplateProof is documented here.\n" +
+        'const name = "sealMarketingTemplateProof";\n' +
+        "export const note = name;"
+    )
+  );
+  assert.deepEqual(
+    quiet.filter((finding) => finding.rule === "guard-seal"),
+    []
+  );
+});
+
+test("the declaring file may declare it and is not required to call it", () => {
+  const declared = checkProtectedTableWriters({
+    sources: [
+      {
+        path: "lib/marketingGuardCore.ts",
+        text: "export function sealMarketingTemplateProof(proof) {\n  return proof;\n}",
+      },
+    ],
+  }).filter(
+    (finding) =>
+      finding.rule === "guard-seal" &&
+      finding.path === "lib/marketingGuardCore.ts"
+  );
+  assert.deepEqual(declared, [], JSON.stringify(declared));
+});
+
+test("a computed key on an unreadable module is refused, and named files are not", () => {
+  // The text in front of a hole fixes nothing: `@/locales/${segment}` reaches
+  // this module when `segment` is `../lib/marketingGuardCore`, and the first
+  // version of this rule read the prefix as a fence. So every unreadable
+  // specifier is possible...
+  const loader =
+    "const bundle = await import(`../locales/${locale}.ts`);\n" +
+    "export const strings = bundle[locale];";
+
+  const findings = check(sealSource(loader));
+  assert.ok(
+    findings.some((finding) => finding.rule === "guard-seal"),
+    JSON.stringify(findings)
+  );
+
+  // ...and the two files that legitimately do this are named, which is a
+  // decision somebody wrote down rather than a shape somebody guessed.
+  for (const path of TEMPLATE_SEAL_DYNAMIC_KEY_ALLOWLIST) {
+    const quiet = checkProtectedTableWriters({
+      sources: [{ path, text: loader }],
+    }).filter(
+      (finding) => finding.rule === "guard-seal" && finding.path === path
+    );
+    assert.deepEqual(quiet, [], path);
+  }
+});
+
+// TRUNCATE, which no row trigger can refuse.
+//
+// Added 2026-09-23 with the permission ledger. The rule is categorical rather
+// than a search for the seven table names, because `TRUNCATE "User" CASCADE`
+// names none of them and empties four of them.
+
+test("a SQL TRUNCATE anywhere in scanned source is refused", () => {
+  const findings = findTruncateStatements({
+    sources: [
+      { path: "lib/a.ts", text: 'await prisma.$executeRawUnsafe(`TRUNCATE TABLE "User" CASCADE`);' },
+      { path: "lib/b.ts", text: 'const q = `TRUNCATE "EmailPermissionDecision"`;' },
+      { path: "lib/c.ts", text: "const q = `TRUNCATE ONLY \"ConsentRecord\"`;" },
+    ],
+  });
+  assert.equal(findings.length, 3);
+  assert.deepEqual(
+    findings.map((f) => f.path),
+    ["lib/a.ts", "lib/b.ts", "lib/c.ts"]
+  );
+});
+
+test("the CSS class and the English word are not SQL", () => {
+  // `className="truncate"` appears on dozens of components, and the review
+  // prompts talk about truncating sentences.
+  const findings = findTruncateStatements({
+    sources: [
+      { path: "components/x.tsx", text: '<span className="min-w-0 truncate">{name}</span>' },
+      { path: "lib/y.ts", text: '"Do not truncate sentences."' },
+      { path: "lib/z.ts", text: "export const truncateText = (s) => s.slice(0, 10);" },
+    ],
+  });
+  assert.deepEqual(findings, []);
+});
+
+test("every append-only ledger table is one the migration protects", () => {
+  // The list here and the tables the migration makes append-only are the same
+  // decision; a table added to one and not the other is a table whose claim
+  // nothing keeps.
+  const sql = readFileSync(
+    new URL(
+      "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  for (const table of APPEND_ONLY_LEDGER_TABLES) {
+    assert.match(
+      sql,
+      new RegExp(`BEFORE (INSERT OR )?UPDATE( OR DELETE)? ON "${table}"`),
+      `${table} has no append-only trigger in the migration`
+    );
+  }
 });

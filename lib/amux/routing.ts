@@ -1,6 +1,8 @@
 import "server-only";
 
 import { z } from "zod";
+import { amuxMachineIdSchema } from "@/lib/amux/claimContract";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { getRoutingSnapshotTask } from "@/lib/amux/store";
 import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
 
@@ -26,12 +28,7 @@ const classificationSchema = z
 
 const workerCatalogEntrySchema = z
   .object({
-    worker_name: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[A-Za-z0-9._:-]+$/),
+    worker_name: amuxMachineIdSchema,
     provider: z.string().trim().min(1).max(80),
     model: z.string().trim().min(1).max(160).nullable().optional(),
     routing_roles: z
@@ -60,10 +57,7 @@ export type AmuxRoutingSnapshot =
   | {
       eligible: false;
       execution_ready: false;
-      reason:
-        | "not_eligible"
-        | "unclassified"
-        | "worker_catalog_unavailable";
+      reason: "not_eligible" | "unclassified" | "worker_catalog_unavailable";
       task: null;
       candidates: [];
     }
@@ -102,10 +96,7 @@ export type AmuxRoutingSnapshot =
     };
 
 const unavailable = (
-  reason:
-    | "not_eligible"
-    | "unclassified"
-    | "worker_catalog_unavailable",
+  reason: "not_eligible" | "unclassified" | "worker_catalog_unavailable",
 ): AmuxRoutingSnapshot => ({
   eligible: false,
   execution_ready: false,
@@ -133,7 +124,7 @@ const parseWorkerCatalog = () => {
   const seen = new Set<string>();
 
   const workers = parsed.data.map((entry) => {
-    const workerName = entry.worker_name.trim();
+    const workerName = entry.worker_name;
 
     if (seen.has(workerName)) {
       throw new Error(`Duplicate AMUX worker name: ${workerName}`);
@@ -170,9 +161,7 @@ const parseWorkerCatalog = () => {
     };
   });
 
-  return workers.sort((a, b) =>
-    a.worker_name.localeCompare(b.worker_name),
-  );
+  return workers.sort((a, b) => a.worker_name.localeCompare(b.worker_name));
 };
 
 export const getConfiguredAmuxWorkerCatalog = () => {
@@ -187,85 +176,85 @@ export async function buildAmuxRoutingSnapshot(
   taskId: string,
   expectedRevision: number,
 ): Promise<AmuxRoutingSnapshot> {
-  const row = await getRoutingSnapshotTask(taskId, expectedRevision);
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.routingSnapshot,
+    async (tx, { dbNow }) => {
+      const row = await getRoutingSnapshotTask(taskId, expectedRevision, tx);
 
-  if (!row) {
-    return unavailable("not_eligible");
-  }
+      if (!row) {
+        return unavailable("not_eligible");
+      }
 
-  const classification = classificationSchema.safeParse(
-    row.classification,
-  );
+      const classification = classificationSchema.safeParse(row.classification);
 
-  if (!classification.success) {
-    return unavailable("unclassified");
-  }
+      if (!classification.success) {
+        return unavailable("unclassified");
+      }
 
-  const workers = getConfiguredAmuxWorkerCatalog();
+      const workers = getConfiguredAmuxWorkerCatalog();
 
-  if (!workers) {
-    return unavailable("worker_catalog_unavailable");
-  }
+      if (!workers) {
+        return unavailable("worker_catalog_unavailable");
+      }
 
-  const now = new Date();
+      const runtimeByWorker = await amuxWorkerRuntimeByName(
+        workers.map((worker) => worker.worker_name),
+        tx,
+      );
 
-  const runtimeByWorker = await amuxWorkerRuntimeByName(
-    workers.map((worker) => worker.worker_name),
-  );
+      const filesExpected = classification.data.files_expected;
 
-  const filesExpected = classification.data.files_expected;
-
-  const filesExpectedCount =
-    Array.isArray(filesExpected)
-      ? filesExpected.length
-      : typeof filesExpected === "number"
-        ? filesExpected
-        : null;
-
-  return {
-    eligible: true,
-    execution_ready: false,
-    reason: null,
-    task: {
-      task_kind: classification.data.task_kind.trim().toLowerCase(),
-      complexity: classification.data.complexity,
-      risk: classification.data.risk,
-      files_expected: filesExpectedCount,
-    },
-    candidates: workers.map((worker) => {
-      const runtime = runtimeByWorker.get(worker.worker_name);
-
-      const fresh =
-        runtime !== undefined &&
-        runtime.leaseExpiresAt.getTime() > now.getTime();
-
-      const running =
-        fresh && runtime.status !== "stopped";
-
-      const dispatchReady =
-        running &&
-        runtime.status === "idle" &&
-        runtime.dispatchReady &&
-        !worker.archived &&
-        !worker.paused &&
-        !worker.isolated &&
-        !worker.blocked;
+      const filesExpectedCount = Array.isArray(filesExpected)
+        ? filesExpected.length
+        : typeof filesExpected === "number"
+          ? filesExpected
+          : null;
 
       return {
-        worker: {
-          ...worker,
-          running,
-          status: running ? runtime.status : "stopped",
-          dispatch_ready: dispatchReady,
+        eligible: true,
+        execution_ready: false,
+        reason: null,
+        task: {
+          task_kind: classification.data.task_kind.trim().toLowerCase(),
+          complexity: classification.data.complexity,
+          risk: classification.data.risk,
+          files_expected: filesExpectedCount,
         },
-        predicted_success: null,
-        quota_remaining: null,
-        expected_speed: null,
-        low_rework: null,
-        low_human_attention: null,
-        cost_efficiency: null,
-        provider_exhausted: false,
+        candidates: workers.map((worker) => {
+          const runtime = runtimeByWorker.get(worker.worker_name);
+
+          const fresh =
+            runtime !== undefined &&
+            runtime.leaseExpiresAt.getTime() > dbNow.getTime();
+
+          const running = fresh && runtime.status !== "stopped";
+
+          const dispatchReady =
+            running &&
+            runtime.status === "idle" &&
+            runtime.dispatchReady &&
+            !worker.archived &&
+            !worker.paused &&
+            !worker.isolated &&
+            !worker.blocked;
+
+          return {
+            worker: {
+              ...worker,
+              running,
+              status: running ? runtime.status : "stopped",
+              dispatch_ready: dispatchReady,
+            },
+            predicted_success: null,
+            quota_remaining: null,
+            expected_speed: null,
+            low_rework: null,
+            low_human_attention: null,
+            cost_efficiency: null,
+            provider_exhausted: false,
+          };
+        }),
       };
-    }),
-  };
+    },
+  );
 }

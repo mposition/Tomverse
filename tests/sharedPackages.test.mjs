@@ -38,7 +38,6 @@ test("there is at least one shared package to enforce the boundary on", () => {
     "PACKAGE-01 measures a boundary; packages/ must not be empty."
   );
 });
-
 const forbidden = [
   ["a framework import", 'import Link from "next/link";'],
   ["the framework root", 'import { after } from "next";'],
@@ -266,5 +265,38 @@ test("the root manifest declares the workspace", () => {
   assert.ok(
     (manifest.workspaces ?? []).includes("packages/*"),
     "packages/* must be a workspace or the specifier above resolves to nothing."
+  );
+});
+
+test("the AMUX Rust crate stays in the Cargo workspace outside PACKAGE-01 packages", () => {
+  const crateManifest = join(root, "crates", "amux-core", "Cargo.toml");
+  const formerPackageManifest = join(
+    root,
+    "packages",
+    "amux-core",
+    "Cargo.toml"
+  );
+
+  assert.equal(
+    existsSync(crateManifest),
+    true,
+    "crates/amux-core must remain the authoritative Rust crate location"
+  );
+  assert.equal(
+    existsSync(formerPackageManifest),
+    false,
+    "a Rust crate under packages/* would silently enter PACKAGE-01's JavaScript package population"
+  );
+
+  const cargoWorkspace = readFileSync(join(root, "Cargo.toml"), "utf8");
+  const orchestratorManifest = readFileSync(
+    join(root, "apps", "tomverse-orchestrator", "Cargo.toml"),
+    "utf8"
+  );
+
+  assert.match(cargoWorkspace, /"crates\/amux-core"/);
+  assert.match(
+    orchestratorManifest,
+    /amux-core\s*=\s*\{\s*path\s*=\s*"\.\.\/\.\.\/crates\/amux-core"\s*\}/
   );
 });

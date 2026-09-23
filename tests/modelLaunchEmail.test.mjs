@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { MARKETING_SUPERLATIVE_WORDS } from "../lib/marketingBannedClaims.ts";
+
 import { buildModelLaunchEmail } from "../lib/modelLaunchEmail.ts";
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
 import {
@@ -59,25 +61,10 @@ test("an unknown language falls back to English rather than throwing", () => {
 test("no locale claims a model is best, fastest or smartest", () => {
   // The English list plus the words the other six would reach for. Nothing here
   // is measured anywhere in this repository, so none of it can be written.
-  const forbidden = [
-    "best",
-    "fastest",
-    "smartest",
-    "most powerful",
-    "most advanced",
-    "state of the art",
-    "최고",
-    "가장 빠른",
-    "가장 똑똑",
-    "최강",
-    "最好",
-    "最强",
-    "最快",
-    "le meilleur",
-    "das beste",
-    "el mejor",
-    "o melhor",
-  ];
+  // lib/marketingBannedClaims.ts: one list, because three copies of it
+  // disagreed. The shared list carries "meilleur", "beste", "mejor" and
+  // "melhor" without their articles, which matches the same copy and more.
+  const forbidden = MARKETING_SUPERLATIVE_WORDS;
   for (const language of SUPPORTED_LANGUAGES) {
     const { subject, text } = buildModelLaunchEmail(PAYLOAD, language);
     const body = `${subject}\n${text}`.toLowerCase();

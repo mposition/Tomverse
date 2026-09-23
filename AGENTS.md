@@ -1081,6 +1081,21 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **Instagram·TikTok은 자율 모드로 졸업하지 않습니다**(정책 문서의 O15).
 - 구현 단계와 각 단계의 대상 경로는 docs/policy/marketing-automation.md §14를 따르며, 새 경로는 그 단계의 PR이
   이 절에 추가합니다.
+- **S2a(읽기)**: `app/(site)/(application)/admin/marketing/**`,
+  `app/api/admin/marketing/route.ts`, `lib/marketingConsoleRead.ts`,
+  `lib/marketingConsoleSections.ts`, `components/admin/AdminMarketingPanel.tsx`,
+  `lib/adminMessages/marketing.ts`. 읽기는 일반 관리자 인증만 요구합니다
+  (docs/policy/marketing-automation.md §6.1의 기록 열람). `marketing:write`도 step-up도 요구하지 않습니다 — 재인증이 만료된
+  운영자가 "왜 아무것도 안 나갔지"를 보러 왔을 때 거절하면 막힌 파이프라인이
+  아니라 고장 난 콘솔로 읽힙니다.
+- **S2b1(계정 쓰기)**: `app/api/admin/marketing/accounts/**`,
+  `app/api/admin/marketing/settings/route.ts`, `lib/marketingAdminMutations.ts`.
+  **모든 변경 route는 `runMarketingAdminMutation`을 지납니다** — 권한·step-up·
+  스위치 판정·감사와 상태 변경의 같은 트랜잭션이 거기 한 곳에 있고,
+  `tests/marketingS2b1Store.test.mjs`의 sweep이 우회를 실패로 만듭니다.
+  게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
+  (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
+  스위치가 거절할 수 있는 정지는 정지가 아닙니다.
 
 # AI Review (교차검토) 품질과 M5
 

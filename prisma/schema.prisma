@@ -102,12 +102,18 @@ model User {
   emailPreferenceTransitions           EmailPreferenceTransition[]
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
+  emailPermissionEvents                EmailPermissionEvent[]
+  emailPermissionDecisions             EmailPermissionDecision[]
   campaignRecipients                   EmailCampaignRecipient[]
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
+  quotaScopes                          QuotaScope[]
+  credentialBindings                   CredentialBinding[]
+  deploymentCacheAffinities            DeploymentCacheAffinity[]
+  routingCandidateVerdicts             RoutingCandidateVerdict[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -375,6 +381,7 @@ model Conversation {
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
+  cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -397,7 +404,7 @@ model Conversation {
   /// pinned conversation under 오늘 and tell the reader it was answered today.
   /// `app/api/conversations/[conversationId]/pin/route.ts` writes this column
   /// with raw SQL for exactly that reason.
-  pinnedAt              DateTime?
+  pinnedAt         DateTime?
   /// The sequence of the last pin write this conversation accepted. A write
   /// carries its own sequence and applies only if it is greater, so the last
   /// tap is the last write in whatever order the requests arrive.
@@ -427,9 +434,9 @@ model Conversation {
   ///
   /// Written by the same raw statement as `pinnedAt`, so it moves `updatedAt`
   /// no more than that column does.
-  pinSeq                Float     @default(0)
-  password              String?
-  importedGuestKey      String?
+  pinSeq           Float     @default(0)
+  password         String?
+  importedGuestKey String?
 
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
@@ -1070,6 +1077,29 @@ model ProviderProbeResult {
   diagnosticCode      String?
   createdAt           DateTime @default(now())
 
+  /// Which placement this sample came from. Dark, and null on every row.
+  ///
+  /// Routing needs health per deployment and this table samples per
+  /// provider, which is the first of the five things section 8.1 of the
+  /// identity design lists before the candidate filter can cut over. The
+  /// columns close that gap in the schema and nothing else: no writer
+  /// produces a value until a per-deployment canary exists.
+  ///
+  /// No backfill. There is no record of which placement served a past
+  /// sample and no rule that could recover one.
+  ///
+  /// RESTRICT on both: this is a historical record, and the way to stop
+  /// routing to a placement is to disable it, not to delete the rows
+  /// saying it answered turns.
+  providerEndpointId String?
+  modelDeploymentId  String?
+
+  probedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  probedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The migration makes the two grain indexes partial on IS NOT NULL,
+  // which Prisma cannot express: every row is null until a canary writes
+  // one, so a full index would be one entry per sample for nothing.
+
   @@index([provider, createdAt])
   @@index([provider, modelId, createdAt])
   @@index([runId])
@@ -1079,15 +1109,15 @@ model ProviderProbeResult {
 // `scopeKey` is either "new" or the conversation id. Attachment references
 // are ordered opaque ids only; route validation owns their exact JSON shape.
 model ChatComposerDraft {
-  id                   String       @id @default(cuid())
+  id                   String   @id @default(cuid())
   userId               String
   scopeKey             String
   conversationId       String?
-  text                  String       @default("")
+  text                 String   @default("")
   attachmentReferences Json
-  revision              Int          @default(1)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  revision             Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1101,7 +1131,7 @@ model ChatComposerDraft {
 // Message because claim must precede provider and reservation work, while the
 // assistant Message is committed only later.
 model ChatResponseAttempt {
-  assistantMessageId  String   @id
+  assistantMessageId  String    @id
   userId              String
   conversationId      String
   sourceUserMessageId String
@@ -1109,16 +1139,16 @@ model ChatResponseAttempt {
   requestedModelId    String
   actualModelId       String?
   provider            String?
-  status              String   @default("claimed")
-  partialContent      String   @default("")
-  checkpointRevision  Int      @default(0)
+  status              String    @default("claimed")
+  partialContent      String    @default("")
+  checkpointRevision  Int       @default(0)
   ownerId             String
   leaseExpiresAt      DateTime
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1951,81 +1981,81 @@ model Feedback {
 /// human -- it never modifies code, never pushes a branch, never opens a PR.
 /// llmConfidence is observational only and stays null in Phase 2.
 model FeedbackAutoFixCase {
-  id                  String    @id @default(cuid())
-  feedbackId          String    @unique
-  feedback            Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  traceId             String
+  id                     String    @id @default(cuid())
+  feedbackId             String    @unique
+  feedback               Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId                String
   /// Trusted occurrence identity from the verified token, when one existed.
-  occurrenceId        String?
+  occurrenceId           String?
   /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
-  fingerprint         String?
-  sourceRelease       String?
+  fingerprint            String?
+  sourceRelease          String?
   /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
   /// written with compare-and-swap conditional updates.
-  state               String    @default("received")
+  state                  String    @default("received")
   /// One of AUTOFIX_CLASSIFICATION once classified.
-  classification      String?
-  ineligibilityReason String?
+  classification         String?
+  ineligibilityReason    String?
   /// Reserved for a future LLM diagnosis pass; observational, never a gate.
-  llmConfidence       Float?
+  llmConfidence          Float?
   /// Bounded technical facts only -- no user text, no prompts, no tokens.
-  diagnosticSummary   Json?
-  attemptCount        Int       @default(0)
-  claimedAt           DateTime?
-  heartbeatAt         DateTime?
+  diagnosticSummary      Json?
+  attemptCount           Int       @default(0)
+  claimedAt              DateTime?
+  heartbeatAt            DateTime?
   /// Doubles as the not-before instant while state = evidence_delayed.
-  leaseExpiresAt      DateTime?
-  terminalReason      String?
-  closedAt            DateTime?
+  leaseExpiresAt         DateTime?
+  terminalReason         String?
+  closedAt               DateTime?
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
-  fixBranch           String?
+  fixBranch              String?
   /// The running fix attempt's server-minted id. Every heartbeat and result
   /// must present it; a claim replaces it and a reclaim or a terminal result
   /// clears it, so a late callback from an expired run matches nothing.
-  fixAttemptId        String?
-  fixPrNumber         Int?
-  fixPrUrl            String?
+  fixAttemptId           String?
+  fixPrNumber            Int?
+  fixPrUrl               String?
   /// Read back from GitHub after the human-approved merge; never inferred
   /// from enabling auto-merge.
-  mergeSha            String?
-  stagingSha          String?
+  mergeSha               String?
+  stagingSha             String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
-  redGreenProof       Json?
+  redGreenProof          Json?
   /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
   /// The develop PR head and its change manifest digest, read from GitHub by
   /// the server (lib/feedbackAutoFixChangeManifest.ts).
-  fixHeadSha          String?
-  fixManifestDigest   String?
+  fixHeadSha             String?
+  fixManifestDigest      String?
   /// The manifest itself: path, base blob and head blob per changed file.
-  fixManifest         Json?
+  fixManifest            Json?
   /// Root cause, fix and test summaries from the fix run: bounded, technical,
   /// derived only from the diagnostic summary -- never the report body.
-  fixReport           Json?
+  fixReport              Json?
   /// --- Owner approval, bound to one head and one manifest --------------------
   /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
   /// here: the case keeps no account identifier of its own.
-  approvedAt          DateTime?
-  approvedHeadSha     String?
+  approvedAt             DateTime?
+  approvedHeadSha        String?
   approvedManifestDigest String?
   /// --- Promotion: every value observed by the server itself -----------------
-  stagingDeploymentId String?
-  stagingFirstSeenAt  DateTime?
-  stagingVerifiedAt   DateTime?
-  productionBranch    String?
-  productionPrNumber  Int?
-  productionPrUrl     String?
-  productionPrHeadSha String?
-  productionMergeSha  String?
+  stagingDeploymentId    String?
+  stagingFirstSeenAt     DateTime?
+  stagingVerifiedAt      DateTime?
+  productionBranch       String?
+  productionPrNumber     Int?
+  productionPrUrl        String?
+  productionPrHeadSha    String?
+  productionMergeSha     String?
   productionDeploymentId String?
   productionFirstSeenAt  DateTime?
   productionVerifiedAt   DateTime?
   /// The last observer pass that read this case and why it did not advance:
   /// what the console shows as "observation delayed".
-  promotionObservedAt DateTime?
-  promotionObservation String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  promotionObservedAt    DateTime?
+  promotionObservation   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([state, leaseExpiresAt])
   @@index([createdAt])
@@ -3892,6 +3922,11 @@ model RoutingRun {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
   /// `shadow` while the user's selection stays authoritative.
+  ///
+  /// This is whether the decision was acted on. It is not how the candidate
+  /// was picked -- that is `allocationMode` below, and the two are
+  /// independent. A value like `shadow_explore` here would have to be pulled
+  /// apart again by every reader.
   mode       String   @default("shadow")
   traceId    String
   /// Set for a signed-in account; a guest run carries only its subject key.
@@ -3911,6 +3946,21 @@ model RoutingRun {
   candidateFilterVersion String
   selectionVersion       String
   estimatorVersion       String
+
+  /// How the candidate was picked, and what the pick was seeded on.
+  ///
+  /// Dark. Both null on every existing row, because every existing row was
+  /// written before an allocator existed and no backfill can say what one
+  /// would have done. Null rather than `deterministic`: reading a missing
+  /// record as "we took the top candidate" invents a decision nobody made.
+  ///
+  /// The seed grain sits here because a per-request seed re-rolls every turn
+  /// and so never returns a conversation to the placement holding its
+  /// prefix. `DeploymentCacheAffinity` records where turns landed; this
+  /// records what the allocator was seeded on. Together they say whether
+  /// affinity was broken on purpose.
+  allocationMode      String?
+  allocationSeedGrain String?
 
   /// The scoring policy the selection ran under: quality bands, tie-break
   /// order, switch margin, hysteresis and the cost/latency thresholds, all
@@ -4035,11 +4085,16 @@ model RoutingRun {
   conversationId String?
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
-  routingAttempts RoutingAttempt[] @relation("RunAttempts")
-  updatedAt       DateTime         @default(now()) @updatedAt
+  routingAttempts          RoutingAttempt[]          @relation("RunAttempts")
+  updatedAt                DateTime                  @default(now()) @updatedAt
+  routingCandidateVerdicts RoutingCandidateVerdict[]
 
   @@index([createdAt])
   @@index([mode, createdAt])
+  // Exploration rate is counted by allocationMode over a window. The
+  // migration makes that index partial on allocationMode IS NOT NULL, which
+  // Prisma cannot express: every row is null until the allocator ships, so a
+  // full index would be one entry per run for nothing.
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
   @@index([productKey, createdAt])
@@ -4214,11 +4269,16 @@ model RoutingAttempt {
   /// Not `failed_pre_token`, which would be a claim about a provider call
   /// nobody observed.
   outcome      String @default("pending")
-  /// planner | adapter | manifest | billing | process | provider | stream | none
+  /// planner | adapter | manifest | billing | process | storage | application |
+  /// model_output | provider | stream | none
   ///
   /// `process` is this process stopping, which is not a provider failure --
   /// filing a host restart under `provider` would move conversations off a
   /// model that did nothing wrong.
+  ///
+  /// `model_output` is the provider answering with something unusable, which
+  /// is not an availability failure either: the call succeeded. Keeping it
+  /// apart is what stops a quality problem being counted as an outage.
   failureLayer String @default("none")
 
   /// Copied from the manifest at finalization, in the same transaction.
@@ -4234,11 +4294,59 @@ model RoutingAttempt {
   actualInputTokens   Int?
   actualOutputTokens  Int?
   /// A fixed classification, never provider error text.
+  ///
+  /// The list is `ROUTING_ATTEMPT_ERROR_CLASSES` in lib/routingAttemptStore.ts.
+  /// The `provider_*` half mirrors `ProviderFailureCategory`, which the routing
+  /// layer computed and then discarded: telling a rate limit apart from an
+  /// outage is a later change, and it cannot be made from records that never
+  /// kept the difference.
+  ///
+  /// The CHECK is NOT VALID until a production report shows the historical
+  /// values are the ones the list believes them to be.
   errorClass          String?
 
   manifest  ContextManifest?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+
+  /// The identity configuration this attempt was decided against. Dark, and
+  /// null on every row.
+  ///
+  /// The id and the digest together, deliberately. The foreign key says
+  /// which manifest; the digest is the check on that manifest's entries,
+  /// which are the rows that hold the values. A disagreement between the
+  /// stored digest and one recomputed from the entries is the finding -- a
+  /// published manifest edited after the fact.
+  ///
+  /// Not a reconstruction on its own. The digest tells you something moved;
+  /// `RoutingIdentityManifestEntry` tells you what it was.
+  ///
+  /// RESTRICT: an attempt is a historical record, and deleting the manifest it
+  /// names must not drop the attribution.
+  identityManifestId     String?
+  identityManifestDigest String?
+
+  identityManifest RoutingIdentityManifest? @relation(fields: [identityManifestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Which placement served this attempt. Dark, and null on every row.
+  ///
+  /// Routing needs dispatch signals per deployment and this table records
+  /// them per provider, which is the first of the five things section 8.1 of
+  /// the identity design lists before the candidate filter can cut over. No
+  /// writer produces a value yet.
+  ///
+  /// No backfill: there is no record of which placement served a past
+  /// attempt and no rule that could recover one.
+  ///
+  /// RESTRICT on both: an attempt says what happened, and deleting the
+  /// placement it names must not delete it or drop the attribution.
+  providerEndpointId String?
+  modelDeploymentId  String?
+
+  dispatchedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  dispatchedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The migration makes the two grain indexes partial on IS NOT NULL, which
+  // Prisma cannot express: every row is null until a writer produces one.
 
   @@unique([runId, attemptIndex])
   @@index([outcome, createdAt])
@@ -4372,6 +4480,10 @@ model EmailPolicyVersion {
   countryMap     JurisdictionCountryMap[]
   consentRecords ConsentRecord[]
   deliveries     EmailDelivery[]
+
+  permissionEvents    EmailPermissionEvent[]
+  permissionDecisions EmailPermissionDecision[]
+  sendApprovals       EmailSendApproval[]
 
   @@index([status, activatedAt])
 }
@@ -4869,6 +4981,8 @@ model ConsentRecord {
 
   createdAt DateTime @default(now())
 
+  decisionEvidence EmailPermissionDecisionEvidence[]
+
   @@index([userId, purpose, occurredAt])
   @@index([emailAddress, occurredAt])
   @@index([policyVersionId])
@@ -5171,13 +5285,9 @@ model EmailDelivery {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  permissionDecisions EmailPermissionDecision[]
+
   @@unique([eventId, recipientKey])
-  @@index([status, lane, nextAttemptAt])
-  @@index([eventId, status])
-  @@index([userId, createdAt])
-  @@index([emailAddress, createdAt])
-  @@index([status, snapshotPurgedAt])
-  @@index([unsubscribeKeyVersion, sentAt])
   /// A message id identifies a delivery within an account. Plain rather than
   /// partial: Postgres does not compare nulls, so a delivery that never reached
   /// the provider -- no account, no message id -- conflicts with nothing, which
@@ -5186,6 +5296,12 @@ model EmailDelivery {
   /// and the drift check read this file and not migration SQL; a partial index
   /// is invisible to both (see 20260801190000_plan_change_pending_slot).
   @@unique([providerAccount, providerMessageId], map: "EmailDelivery_providerAccount_providerMessageId_key")
+  @@index([status, lane, nextAttemptAt])
+  @@index([eventId, status])
+  @@index([userId, createdAt])
+  @@index([emailAddress, createdAt])
+  @@index([status, snapshotPurgedAt])
+  @@index([unsubscribeKeyVersion, sentAt])
 }
 
 /// One inert unsubscribe token per key version, minted with that key the first
@@ -5208,7 +5324,7 @@ model EmailUnsubscribeKeyAdoption {
   id          String   @id @default(cuid())
   keyVersions String[]
   adoptedAt   DateTime @default(now())
-  singleton   Boolean  @default(true) @unique
+  singleton   Boolean  @unique @default(true)
 }
 
 /// Raw provider callbacks, stored before they are acted on.
@@ -5576,6 +5692,615 @@ model PromptRefinerReservation {
   @@index([stageId, status, expiresAt])
 }
 
+/// Where a provider actually serves a request from.
+///
+/// Dark. Nothing writes this, nothing routes from it, and no request consults
+/// it. It exists so that the identity the routing work needs can be added
+/// before the facts that fill it arrive, which is the order the independent
+/// review asked for: additive schema first, activation separately.
+///
+/// Separate from `ModelDeployment` because a region is infrastructure and a
+/// model is not. One Azure resource serves several model deployments under one
+/// credential, and the question "which jurisdiction processed this" is answered
+/// here rather than once per model.
+///
+/// Design: .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+model ProviderEndpoint {
+  id                  String   @id @default(cuid())
+  /// The provider the request is sent to.
+  gatewayProvider     String
+  /// The provider that actually serves the model.
+  ///
+  /// Null when an aggregator will not say, or can change it. Equal to
+  /// `gatewayProvider` on a direct route. There is deliberately no single
+  /// `provider` column: a reader could not tell which of the two it meant.
+  servingProvider     String?
+  /// The region this endpoint serves from, when it is known.
+  region              String?
+  endpointUrl         String?
+  /// The cloud account or resource this endpoint belongs to.
+  resourceId          String?
+  /// The cloud account or project this resource belongs to.
+  cloudAccountId      String?
+  /// proven | unproven
+  ///
+  /// `unproven` is the honest default and not a gap: it says nobody has read a
+  /// contract that names where the data goes. An unproven endpoint carries no
+  /// residency-constrained traffic. There is no third value for "probably" --
+  /// whoever needed one would read it as a yes.
+  residencyClass      String   @default("unproven")
+  /// The regions this endpoint can reach, as fixed identifiers.
+  destinationRegions  Json?
+  /// A digest of the routing configuration we send an aggregator.
+  ///
+  /// Our intent, never their fact: it proves what was asked for and says
+  /// nothing about where the broker ran it. Eligibility is decided from the
+  /// approval below, not from this.
+  routingPolicyDigest String?
+  enabled             Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  deployments                    ModelDeployment[]
+  approvals                      EndpointResidencyApproval[]
+  credentialBindings             CredentialBinding[]
+  quotaScopes                    QuotaScope[]
+  providerProbeResults           ProviderProbeResult[]
+  routingAttempts                RoutingAttempt[]
+  availabilityObservations       AvailabilityObservation[]
+  routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+
+  @@index([gatewayProvider, enabled])
+  @@index([residencyClass])
+}
+
+/// What was approved, and on what basis, at a point in time.
+///
+/// Append-only. An approval is never edited: a change is a new row, so that
+/// "what was allowed when this request ran" has an answer that cannot be
+/// rewritten afterwards. An operator who could edit a destination could make a
+/// past disclosure look compliant.
+///
+/// The routing gate reads this, not `ProviderEndpoint.region`, so that a legal
+/// question has one source rather than two that can disagree.
+model EndpointResidencyApproval {
+  id                   String    @id @default(cuid())
+  providerEndpointId   String
+  /// Fixed identifier of what permits this -- a contract, a DPA, a published
+  /// sub-processor page. Never prose: a later reader checks the reference
+  /// rather than trusting the row.
+  evidenceRef          String
+  /// The legal entities that receive the data.
+  allowedRecipients    Json
+  /// The regions the data may be processed in.
+  allowedRegions       Json
+  /// What makes the pin hold -- an endpoint URL, a request option, an account
+  /// setting. A region nothing enforces is a hope.
+  enforcementMechanism String
+  effectiveFrom        DateTime
+  effectiveTo          DateTime?
+  /// The person who approved it.
+  approvedBy           String
+  createdAt            DateTime  @default(now())
+
+  endpoint                       ProviderEndpoint               @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+
+  @@index([providerEndpointId, effectiveFrom])
+}
+
+/// One routable placement of a logical model.
+///
+/// Dark, as above. The same logical model on two endpoints is two rows here
+/// and one model to the person using it: `logicalModelId` stays the product's
+/// own model id, because a user's saved model must not become an
+/// infrastructure identifier.
+model ModelDeployment {
+  id                     String    @id @default(cuid())
+  /// The catalogue model a person selects. Not a foreign key: the catalogue is
+  /// partly static, and a deployment must not be deleted by a registry edit.
+  logicalModelId         String
+  providerEndpointId     String
+  /// What the provider calls it, which is not what we call it. Azure's own
+  /// word for this is "deployment", which is why the column says whose.
+  upstreamDeploymentName String
+  modelVersion           String?
+  modelRevision          String?
+  quantization           String?
+  tokenizerRevision      String?
+  /// The quality tier this placement claims. Curation, never a measurement.
+  qualityTier            String?
+  /// Quality evidence is per-deployment until an attestation survey shows that
+  /// two placements can honestly share it. Reusing evidence across regions
+  /// without that would hide drift.
+  qualityGateStatus      String    @default("pending")
+  /// The digest reads this as an ISO instant, so a row can reproduce the
+  /// digest computed from it. As a free string the same instant spelled two
+  /// ways digested differently and this column kept only one of them.
+  qualityGateExpiresAt   DateTime?
+  /// Capability declarations, as the candidate filter would read them.
+  capabilities           Json?
+  enabled                Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  /// What this placement is known to do with a repeated prefix.
+  ///
+  /// `unproven` is the default and a third answer, not a synonym for either
+  /// of the others: a deployment nobody has checked is not no-cache, and it
+  /// is not a cache. The figures beside it stay null until a verification
+  /// produces them, which the database holds.
+  ///
+  /// These columns do not decide whether a request carries a cache marker.
+  /// That is lib/anthropicPromptCaching.ts, gating on provider identity
+  /// because createAnthropic() also builds the MiniMax client. A dispatcher
+  /// reading this instead would be a second answer to the same question.
+  ///
+  /// The word `automatic` means something else in that module: it says
+  /// "automatic prompt caching" about a path that sends a top-level
+  /// cache_control marker, which in this column is `verified_explicit`. An
+  /// Anthropic deployment written as `verified_automatic` because of that
+  /// sentence reads as one needing no marker and paying no write premium.
+  ///
+  /// The evidence reference is a path or an identifier, capped at 512
+  /// characters by the database. The cap is what stops it becoming somewhere
+  /// to paste the prefix that was tested.
+  promptCacheSupport         String    @default("unproven")
+  promptCacheMinPrefixTokens Int?
+  promptCacheTtlSeconds      Int?
+  promptCacheVerifiedAt      DateTime?
+  promptCacheEvidenceRef     String?
+
+  endpoint                       ProviderEndpoint               @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaScopes                    QuotaScope[]
+  cacheAffinities                DeploymentCacheAffinity[]
+  providerProbeResults           ProviderProbeResult[]
+  routingAttempts                RoutingAttempt[]
+  availabilityObservations       AvailabilityObservation[]
+  routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+
+  @@unique([providerEndpointId, upstreamDeploymentName])
+  @@index([logicalModelId, enabled])
+}
+
+/// One published snapshot of the routing identity configuration.
+///
+/// Dark. Nothing publishes a manifest and nothing reads one.
+///
+/// The identity design forbids four things until this exists: enabling the
+/// config writer, recording a canary, judging eligibility, and making a
+/// deployment-level decision. All four share one failure -- a decision made
+/// against configuration that has since moved, with nothing able to say
+/// afterwards what it was made against. Mutable rows cannot answer what was
+/// allowed at the time, and the residency question puts a legal judgement on
+/// top of that answer.
+///
+/// Published once and never edited, held by a trigger. `version` is unique;
+/// `digest` is not, because two versions may publish identical configuration
+/// -- a republish after a stopped rollout -- and that is a different
+/// publication rather than a duplicate.
+///
+/// The entries are `RoutingIdentityManifestEntry`, and the digest is a check
+/// on them rather than a substitute for them. A digest proves a set of values
+/// was not altered if you still have the values, and ModelDeployment and
+/// ProviderEndpoint are mutable rows that will have moved by the time anybody
+/// asks -- so section 4.4's question needs a reconstruction, not a hash.
+///
+/// What the digest covers is the fixed field list in
+/// lib/routingIdentityManifest.ts, so changing what a manifest commits to is
+/// a change to that file rather than a silent effect of adding a column.
+model RoutingIdentityManifest {
+  id         String   @id @default(cuid())
+  version    Int
+  /// sha256, lowercase hex. The database checks the shape; that it describes
+  /// the deployments it was computed over is checked where they are visible.
+  digest     String
+  entryCount Int
+  approvedBy String
+  approvedAt DateTime
+  createdAt  DateTime @default(now())
+
+  attempts RoutingAttempt[]
+  entries  RoutingIdentityManifestEntry[]
+
+  @@unique([version])
+  @@index([approvedAt])
+}
+
+/// What one published manifest held about one deployment.
+///
+/// Dark. Copied at publication, because the rows it describes are mutable:
+/// the first version of the manifest stored only a digest, and a digest
+/// proves values were not altered only while you still have the values.
+///
+/// The field list is wider than that first draft because the repository
+/// already says what identity means and the draft was smaller than that.
+/// `model_deployment_gate_follows_identity()` names nine columns and five
+/// were missing, which let capabilities change under a stable digest:
+/// disable (the digest moves), edit capabilities, re-enable and restore the
+/// gate status. ProviderEndpoint has no such trigger at all, so its gateway,
+/// serving provider, URL and enabled flag move under a stable id.
+///
+/// The residency approval is a key rather than a copy. That table is
+/// append-only, so its recipients, regions, enforcement mechanism, evidence
+/// and dates are already immutable where they are.
+model RoutingIdentityManifestEntry {
+  id         String @id @default(cuid())
+  manifestId String
+
+  /// The placement, as it stood.
+  modelDeploymentId      String
+  logicalModelId         String
+  upstreamDeploymentName String
+  modelVersion           String?
+  modelRevision          String?
+  quantization           String?
+  tokenizerRevision      String?
+  qualityTier            String?
+  /// Canonical JSON from `canonicalCapabilities()`. Text rather than Json
+  /// because the digest covers these exact bytes, and jsonb does not promise
+  /// to return the bytes it was given.
+  capabilities           String
+  qualityGateStatus      String
+  qualityGateExpiresAt   DateTime?
+  deploymentEnabled      Boolean
+
+  /// The endpoint it was served from, as it stood.
+  providerEndpointId     String
+  gatewayProvider        String
+  servingProvider        String?
+  endpointUrl            String?
+  endpointResidencyClass String
+  endpointEnabled        Boolean
+
+  /// What it was allowed by. Null while an endpoint has no approval, which
+  /// is every endpoint today.
+  residencyApprovalId String?
+
+  createdAt DateTime @default(now())
+
+  /// Cascade to the publication it belongs to; RESTRICT to everything it
+  /// describes. The cascade never fires -- the manifest's trigger refuses
+  /// DELETE -- and says the entries belong to the publication rather than
+  /// sitting beside it.
+  manifest            RoutingIdentityManifest    @relation(fields: [manifestId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  publishedDeployment ModelDeployment            @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  publishedEndpoint   ProviderEndpoint           @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  publishedApproval   EndpointResidencyApproval? @relation(fields: [residencyApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The approval index is partial on IS NOT NULL in the migration, which
+  // Prisma cannot express.
+
+  @@unique([manifestId, modelDeploymentId])
+  @@index([modelDeploymentId])
+}
+
+/// Which deployment the turns of a conversation have been landing on.
+///
+/// Dark. Two facts rather than one probability: the ADR asks for
+/// `P(cache_hit | session, deployment)` folded into an effective cost, and
+/// that is both a change to the lexicographic objective and a number nothing
+/// here can compute -- a cache hit needs a byte-identical prefix, and no
+/// table records a prefix or a digest of one.
+///
+/// So this says where turns went and when, and `ModelDeployment` says what
+/// the window is. Together they answer whether the last serve is inside the
+/// window, which is a comparison of clocks and not a prediction.
+///
+/// The logical model is part of the key because a person can switch models
+/// inside one conversation; a single row per conversation would have the
+/// second model overwrite the first and then report it as the place to
+/// return to.
+///
+/// There is no prefix digest and there will not be one. It is derived from
+/// what the person wrote, and it confirms a guess.
+model DeploymentCacheAffinity {
+  id                String   @id @default(cuid())
+  conversationId    String
+  /// The catalogue model the person chose, not the placement that served it.
+  logicalModelId    String
+  modelDeploymentId String
+  lastServedAt      DateTime
+  servedTurns       Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  /// Cascade on both sides, for the same reason and not by default. Without
+  /// the conversation the row is an affinity for a thread that is gone and
+  /// still names its id, which is a half-anonymisation after a person
+  /// deletes; without the deployment it points at a placement that is gone.
+  /// Denormalised from the parent so this is a data domain in its own right.
+  ///
+  /// The registry sweep decides a table holds user data from a User relation
+  /// or a `*userId` column, and it is symmetric -- it refuses a registry row
+  /// for a model the schema does not show holding any. Reaching a person
+  /// through the parent was not enough, and the same note sits beside
+  /// RoutingAttempt and ContextManifest for the same reason.
+  ///
+  /// Nullable because a guest has no account row. Cascade rather than
+  /// SetNull: what is left after a null userId still names the person.
+  userId String?
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  user         User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deployment   ModelDeployment @relation(fields: [modelDeploymentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([conversationId, logicalModelId])
+  @@index([modelDeploymentId, lastServedAt])
+}
+
+/// A provider Tomverse can reach, as a row.
+///
+/// Dark. The catalogue's `AiProvider` union stays the product's list; this
+/// exists so that a quota scope can name a provider with a foreign key rather
+/// than a string nothing checks. A scope pointing at a provider that was
+/// renamed or removed is a limit applying to nothing, which reads as no limit.
+model ProviderRegistryEntry {
+  id        String   @id
+  /// Display name for operators. Never used to match anything.
+  name      String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotaScopes QuotaScope[]
+}
+
+/// What a capacity limit is counted against.
+///
+/// Dark. Five kinds, and each names exactly the columns its kind needs -- the
+/// database holds that, so a row cannot be a `workspace` scope carrying a
+/// credential or a `provider` scope carrying nothing. A single opaque string
+/// would have allowed a scope id that matched no row, and a limit on nothing
+/// is indistinguishable from no limit until somebody spends against it.
+///
+/// `account` rather than `workspace`: BYOK ownership is the account, so there
+/// is no workspace entity for a scope to point at.
+model QuotaScope {
+  id        String @id @default(cuid())
+  /// credential | endpoint_credential | deployment_credential | account | provider
+  scopeKind String
+
+  /// Set on `credential`, `endpoint_credential` and `deployment_credential`.
+  credentialBindingId String?
+  /// Set on `endpoint_credential`.
+  providerEndpointId  String?
+  /// Set on `deployment_credential`.
+  modelDeploymentId   String?
+  /// Set on `account`.
+  accountId           String?
+  /// Set on `provider`.
+  providerId          String?
+
+  createdAt DateTime @default(now())
+
+  credentialBinding  CredentialBinding?     @relation(fields: [credentialBindingId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  endpoint           ProviderEndpoint?      @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  deployment         ModelDeployment?       @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  account            User?                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider           ProviderRegistryEntry? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaCapacityState QuotaCapacityState?
+
+  @@index([scopeKind])
+}
+
+/// A credential's access to an endpoint, and who pays for it.
+///
+/// Dark. Deliberately not part of deployment identity: one deployment is
+/// reachable by several credentials -- Tomverse's own and an account's -- and
+/// folding the credential in would split quality, version and health samples
+/// by key count, which is a measurement problem rather than a modelling one.
+///
+/// The secret itself is never here. `secretRef` names where it lives.
+model CredentialBinding {
+  id                      String   @id @default(cuid())
+  providerEndpointId      String
+  /// Where the secret actually lives. Never the secret.
+  secretRef               String
+  /// tomverse | account
+  billingOwner            String
+  /// Set when `billingOwner` is `account`. The account whose key this is.
+  accountId               String?
+  /// Which Tomverse provider-budget account this spends against.
+  ///
+  /// Stable across key rotation, which a credential id is not: rotating a key
+  /// must not reset a spend total.
+  ///
+  /// **No foreign key, because the table it should point at does not exist.**
+  /// Not `User` -- that is `accountId`, and a Tomverse-funded row leaves it
+  /// null. Not `ProviderRegistryEntry` -- that is the provider, not a budget
+  /// account, and the whole reason for this column is to survive a key
+  /// rotation the provider does not know about. So it carries the same hole
+  /// this schema refused for quota scopes: a name that may point at nothing.
+  ///
+  /// It is harmless while the column is unread. The first writer that passes
+  /// this string to `incrementUsage` creates a spend bucket under whatever it
+  /// happens to contain, so a `ProviderBudgetAccount` table and a foreign key
+  /// come before that, not after.
+  providerBudgetAccountId String?
+  status                  String   @default("disabled")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  endpoint ProviderEndpoint @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  account  User?            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  quotaScopes QuotaScope[]
+
+  @@index([providerEndpointId, status])
+  @@index([accountId])
+}
+
+/// Why each candidate was or was not chosen, frozen at decision time.
+///
+/// Dark. `RoutingRun.rejectedByReason` records counts per reason, on the
+/// stated ground that which models were refused is stable catalogue
+/// information a reader can reconstruct. It is not: candidates come from the
+/// runtime registry, where `enabled`, `catalogDeleted`, `minimumPlan`, the
+/// context window and backend readiness all move, and the health and credit
+/// verdicts are that moment's state. Nothing about a past decision can be
+/// rebuilt from a count.
+///
+/// One row per candidate, and it records the eligible ones too -- a table that
+/// held only rejections could not answer why a model that passed every filter
+/// still lost, which is the question it exists for.
+///
+/// Content-free: identifiers, a fixed reason, a rank. No prompt, no balance,
+/// no provider text.
+model RoutingCandidateVerdict {
+  id                      String   @id @default(cuid())
+  routingRunId            String
+  /// The product model, which is what a person selects.
+  logicalModelId          String
+  /// The placement, once deployments route. Null while nothing has one.
+  modelDeploymentId       String?
+  /// eligible | rejected
+  verdict                 String
+  /// A fixed `CandidateRejection`. Null exactly when the verdict is eligible.
+  reason                  String?
+  /// Where this candidate came in the ranking. Null when it was rejected.
+  rank                    Int?
+  /// The bucket the ranking put it in, so a tie is legible as a tie.
+  rankBucket              Int?
+  /// The decision inputs as they stood, so health and cost do not have to be
+  /// reconstructed from tables that have since moved.
+  decisionInputSnapshotId String?
+  createdAt               DateTime @default(now())
+
+  /// Denormalised from the parent so this is a data domain in its own right.
+  ///
+  /// The registry sweep decides a table holds user data from a User relation
+  /// or a `*userId` column, and it is symmetric -- it refuses a registry row
+  /// for a model the schema does not show holding any. Reaching a person
+  /// through the parent was not enough, and the same note sits beside
+  /// RoutingAttempt and ContextManifest for the same reason.
+  ///
+  /// Nullable because a guest has no account row. Cascade rather than
+  /// SetNull: what is left after a null userId still names the person.
+  userId String?
+
+  run  RoutingRun @relation(fields: [routingRunId], references: [id], onDelete: Cascade)
+  user User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // The uniqueness is two partial indexes in the migration, which Prisma
+  // cannot express: PostgreSQL treats NULLs as distinct, so one index over the
+  // three columns would accept two rows for the same model with no deployment.
+  @@index([routingRunId, verdict])
+  @@index([reason])
+}
+
+/// How much room a quota scope has left, right now.
+///
+/// Dark. Capacity, not health, and the separation is the point of the table:
+/// a 429 says this key is spending too fast, and a 5xx says the provider could
+/// not serve the request. Today both increment one counter
+/// (`ProviderHealthState.consecutiveFailures`), so a peak-hour rate limit
+/// marches a healthy provider toward a breaker and pushes its traffic onto a
+/// fallback that is about to hit the same wall.
+///
+/// Nothing here reaches provider health, and nothing in provider health
+/// reaches here.
+///
+/// One row per scope: the scope already says what is being counted, and a
+/// second row would be a second answer to how much is left.
+model QuotaCapacityState {
+  id           String @id @default(cuid())
+  quotaScopeId String @unique
+
+  /// How many rate-limit answers this scope has had in the current window.
+  rateLimitedCount Int       @default(0)
+  /// When the window those counts belong to started.
+  windowStartedAt  DateTime?
+
+  /// What the provider asked us to wait until, when it said so.
+  ///
+  /// Read from `Retry-After` when a provider sends one. The chat path does not
+  /// read that header today, which is why this can only be filled by the work
+  /// that starts reading it.
+  retryAfterUntil DateTime?
+
+  /// How long this scope stays at the back of the queue.
+  ///
+  /// An expiry, not a counter -- which is the difference from health. A
+  /// demotion that ends by itself cannot leave a scope permanently behind
+  /// because of one busy afternoon, and there is no recovery probe to write.
+  deprioritizeUntil DateTime?
+
+  /// Requests this scope may have in flight, and has.
+  ///
+  /// Null and zero are different answers. Null is no declared limit -- the
+  /// provider never told us one and nothing here may invent it. Zero is a
+  /// declared limit of none, which is how a scope is held closed without
+  /// deleting it. A reader that treats null as zero stops every scope whose
+  /// provider is simply quiet about concurrency.
+  concurrencyLimit Int?
+  concurrencyInUse Int  @default(0)
+
+  /// Tokens left in a local bucket, when one is being kept.
+  tokenBucketRemaining  Int?
+  tokenBucketRefilledAt DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  scope QuotaScope @relation(fields: [quotaScopeId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([deprioritizeUntil])
+  @@index([retryAfterUntil])
+}
+
+/// One availability observation, written once and never rewritten.
+///
+/// Dark. The canonical record the deployment, endpoint and provider rollups
+/// are derived from -- one event in, three summaries out, all of them
+/// idempotent on `eventId` so a projection that failed half way can be run
+/// again without double-counting.
+///
+/// Today the same fact is written twice in two shapes: real traffic increments
+/// `ProviderHealthState` and a probe inserts a `ProviderProbeResult`, with no
+/// identifier in common. Neither is deleted or changed by this table; it is
+/// the grain the routing work needs and they are the grain the public status
+/// page and the operator recovery path already read.
+model AvailabilityObservation {
+  id      String @id @default(cuid())
+  /// The idempotency key. A projection applies an event at most once.
+  eventId String @unique
+
+  /// real_traffic | synthetic_probe | operator_verification
+  ///
+  /// Three streams, kept apart for the reason `ProviderHealthState` already
+  /// keeps them apart in columns: an operator proving the API answers is not
+  /// the same claim as "real user traffic is being served".
+  source String
+
+  /// Null until deployments route. Nothing is backfilled: a past observation
+  /// genuinely had no deployment, and inventing one would be a claim nobody
+  /// made.
+  modelDeploymentId  String?
+  providerEndpointId String?
+  /// The gateway provider, which is knowable for every observation.
+  provider           String
+
+  /// succeeded | failed
+  outcome    String
+  /// A fixed `RoutingAttemptErrorClass`, or null on success.
+  errorClass String?
+  latencyMs  Int?
+
+  observedAt DateTime
+  createdAt  DateTime @default(now())
+
+  /// The foreign keys this table should have had when it was added. Without
+  /// them the two columns accept an id matching no row, and an observation
+  /// attributed to nothing is indistinguishable from one attributed to
+  /// something until somebody joins.
+  observedEndpoint   ProviderEndpoint? @relation(fields: [providerEndpointId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  observedDeployment ModelDeployment?  @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([provider, observedAt])
+  @@index([providerEndpointId, observedAt])
+  @@index([modelDeploymentId, observedAt])
+  @@index([source, observedAt])
+}
+
 /// One separately approved, content-free Prompt Refiner staging shadow.
 /// The run contract digest is unique so v1 can execute at most once; a retry
 /// after an unknown outcome requires a new reviewed contract rather than a
@@ -5613,8 +6338,8 @@ model PromptRefinerShadowRun {
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
-  stage                 PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  attempts              PromptRefinerShadowAttempt[]
+  stage    PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempts PromptRefinerShadowAttempt[]
 
   @@index([stageId, status])
 }
@@ -5656,8 +6381,9 @@ model PromptRefinerShadowAttempt {
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
-  run              PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  reservation      PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run         PromptRefinerShadowRun   @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reservation PromptRefinerReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
   @@unique([runId, caseId])
   @@unique([runId, caseIndex])
   @@index([status, dispatchIntentAt])
@@ -5728,6 +6454,10 @@ model MarketingPost {
   claimRegistryVersion Int
   assetRegistryVersion Int
   factSnapshot         Json
+  /// Full digest of every resolver answer used by the recorded Guard decision.
+  /// NOT NULL since 20260923140000: the expand migration left it nullable for rows
+  /// that predate the column, and that migration refuses to run while any remain.
+  factsDigest          String
   guardDecision        String
   guardCodes           String[]
   guardRuleIds         String[]
@@ -5816,15 +6546,15 @@ model AiVisibilityRun {
 }
 
 model AmuxWorkerRuntime {
-  workerName    String   @id
-  instanceId    String
-  generation    Int      @default(1)
-  status        String   @default("starting")
-  dispatchReady Boolean  @default(false)
-  heartbeatAt   DateTime
+  workerName     String   @id
+  instanceId     String
+  generation     Int      @default(1)
+  status         String   @default("starting")
+  dispatchReady  Boolean  @default(false)
+  heartbeatAt    DateTime
   leaseExpiresAt DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([leaseExpiresAt])
   @@index([status, dispatchReady, leaseExpiresAt])
@@ -5832,30 +6562,41 @@ model AmuxWorkerRuntime {
 }
 
 model AmuxWorkItem {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   title          String
   description    String?
-  status         String   @default("todo")
+  /// New rows default to non-dispatchable backlog. This schema imports no
+  /// cards and does not promote backlog rows to runnable Todo.
+  status         String   @default("backlog")
   kind           String   @default("unknown")
   priority       String   @default("p3")
   pinned         Boolean  @default(false)
   drag           Int      @default(0)
   owner          String?
   classification Json?
-  revision       Int      @default(0)
+  revision       Int       @default(0)
   claimedAt      DateTime?
   archivedAt     DateTime?
+  /// Null together for pre-migration or independently created cards. Imported
+  /// cards supply canonical lowercase source system, uppercase source key,
+  /// printable non-whitespace version, SHA-256 digest, and a nonempty object snapshot.
+  sourceSystem   String?
+  sourceKey      String?
+  sourceVersion  String?
+  sourceDigest   String?
+  sourceSnapshot Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  dependencies   AmuxWorkDependency[] @relation("AmuxTaskDependencies")
-  dependents     AmuxWorkDependency[] @relation("AmuxTaskDependents")
-  routeDecisions     AmuxRouteDecision[]
+  dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
+  dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
+  routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
 
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
+  @@unique([sourceSystem, sourceKey])
 }
 
 model AmuxWorkDependency {
@@ -5872,28 +6613,28 @@ model AmuxWorkDependency {
 
 model AmuxExecutionAttempt {
   /// Server-minted execution fence. A worker never chooses this id.
-  id                 String   @id
-  taskId             String
-  worker             String
-  workerInstanceId   String
-  workerGeneration   Int
+  id               String @id
+  taskId           String
+  worker           String
+  workerInstanceId String
+  workerGeneration Int
   /// Task revision after the atomic todo -> doing transition.
-  taskRevision       Int
+  taskRevision     Int
 
-  heartbeatAt        DateTime
-  leaseExpiresAt     DateTime?
-  startedAt          DateTime
-  endedAt            DateTime?
+  heartbeatAt    DateTime
+  leaseExpiresAt DateTime?
+  startedAt      DateTime
+  endedAt        DateTime?
 
   /// Null while running; succeeded | failed | blocked | expired when terminal.
-  outcome            String?
+  outcome  String?
   /// todo | review | done | blocked | cancelled when terminal.
-  toStatus           String?
-  endedBy            String?
-  reason             String?
+  toStatus String?
+  endedBy  String?
+  reason   String?
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
   delivery AmuxWorkDelivery?
@@ -5921,7 +6662,7 @@ model AmuxWorkDelivery {
 
   /// Minted on pull. Retries while the receipt lease is live reuse it; after
   /// expiry the server rotates to a fresh receipt so stale ACKs are fenced.
-  receiptId      String? @unique
+  receiptId      String?   @unique
   leasedAt       DateTime?
   leaseExpiresAt DateTime?
 
@@ -5939,18 +6680,385 @@ model AmuxWorkDelivery {
 }
 
 model AmuxRouteDecision {
-  id               String   @id @default(cuid())
-  taskId           String
-  worker           String
-  schedulerScore   Int
-  scoringVersion   String
-  taskRevision     Int
-  signals          Json
-  createdAt        DateTime @default(now())
+  id             String   @id @default(cuid())
+  taskId         String
+  worker         String
+  schedulerScore Int
+  scoringVersion String
+  taskRevision   Int
+  signals        Json
+  createdAt      DateTime @default(now())
 
   task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict)
 
   @@index([taskId, createdAt])
   @@index([worker, createdAt])
   @@index([scoringVersion, createdAt])
+}
+
+/// The facts that are neither consent nor a send decision, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 6.
+///
+/// ConsentRecord answers "what did they agree to". This answers everything
+/// else a basis can rest on: that a notice was shown, that somebody objected,
+/// and when a relationship began and ended. Two ledgers never compete for the
+/// same fact -- consent is said once, by ConsentRecord, and nothing here
+/// records a consent.
+///
+/// Australia's inferred consent ends on an event, not on a clock (draft
+/// section 4.4), so the relationship's start and end have to be facts with
+/// times rather than a field somebody recomputes.
+model EmailPermissionEvent {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The address as it was. Kept when the account changes address, for the
+  /// same reason ConsentRecord keeps it: the fact attached to a mailbox.
+  emailAddress String
+
+  /// Which normalisation produced the address above and the digests a cohort
+  /// is compared by. Stored rather than assumed: changing the rule changes
+  /// which rows match, and a ledger that cannot say which rule it used cannot
+  /// be re-derived after the rule moves.
+  addressNormalizationVersion String
+
+  /// notice_shown | objected | relationship_started | relationship_ended
+  ///   | basis_ended
+  kind String
+
+  /// The purpose or classification the fact is about, or "*" when it is about
+  /// the address itself. Not nullable: a null here would make "about
+  /// everything" and "nobody filled it in" the same row.
+  scopeKey String
+
+  /// When it happened, which is not when we wrote it down.
+  occurredAt DateTime
+
+  /// signup_form | preference_center | unsubscribe_page | in_product_notice
+  ///   | admin | system | provider_complaint
+  capturedVia String
+
+  /// Stable per writer so a retried write adds nothing.
+  sourceEventKey String
+
+  /// Resolved at the time and never rewritten when the account later moves
+  /// (docs/policy/email-notifications.md section 6.4).
+  jurisdiction       String?
+  jurisdictionSource String?
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// Screen identifier, notice copy hash, relationship reason. Never the raw
+  /// request and never message content.
+  evidence Json?
+
+  createdAt DateTime @default(now())
+
+  decisionEvidence EmailPermissionDecisionEvidence[]
+
+  @@unique([kind, sourceEventKey], map: "EmailPermissionEvent_kind_source_event_key")
+  @@index([userId, kind, occurredAt])
+  @@index([emailAddress, kind, occurredAt])
+  @@index([policyVersionId])
+}
+
+/// A human decision, written once and never edited.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 5.6
+/// and 7.8.
+///
+/// Two kinds, and they are not variants of one thing. `risk_accepted` is the
+/// owner deciding to send without a basis; `obligation_waiver` is the owner
+/// deciding a display or notice duty will not be performed. Both are business
+/// decisions recorded as themselves -- neither invents a consent, and neither
+/// turns a refusal into a permission. A send verdict references this row; it
+/// never copies it.
+///
+/// The row and its whole membership are written in one transaction and closed
+/// with sealedAt, after which triggers refuse every update, insert and delete.
+/// Withdrawal is an EmailSendApprovalRevocation beside it, because an approval
+/// that can be edited proves nothing about what was approved.
+model EmailSendApproval {
+  id String @id @default(cuid())
+
+  /// risk_accepted | obligation_waiver
+  approvalType String
+
+  /// Who decided, by account and by the address at the time. Both, because an
+  /// account can be renamed and a reader a year later needs the second.
+  approvedById    String
+  approvedByEmail String
+  approvedAt      DateTime
+
+  /// Why, in the approving person's words, and what would make us look again.
+  /// Neither is optional: an approval with no review condition is a permanent
+  /// one nobody decided to make permanent.
+  reason          String
+  reviewCondition String
+
+  /// Scope. Every member is compared exactly; a mismatch on any one of them
+  /// means the approval does not apply (section 7.8). Not nullable: an
+  /// approval that does not say which policy version it was given under
+  /// applies to every later one, which is the opposite of a scope.
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// The country rule and country an obligation_waiver is about.
+  ruleKey       String?
+  ruleVersion   Int?
+  country       String?
+  obligationKey String?
+
+  /// The purpose a risk_accepted approval covers, or "*" for all of them.
+  purposeKey String?
+
+  /// Closes the row and its membership. Nothing may change afterwards.
+  sealedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  members     EmailSendApprovalMember[]
+  revocations EmailSendApprovalRevocation[]
+  decisions   EmailPermissionDecision[]
+
+  /// Carried so a verdict's override can name (id, approvalType) as a
+  /// composite foreign key. Referencing the id alone would let a verdict claim
+  /// a `risk_accepted` override while pointing at an obligation waiver, and
+  /// the CHECK on overrideType would not notice.
+  @@unique([id, approvalType], map: "EmailSendApproval_id_type_key")
+  @@index([approvalType, approvedAt])
+  @@index([policyVersionId])
+}
+
+/// One account inside an approval's cohort.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6.
+///
+/// "78 accounts" is the description; this list is the scope. The address is
+/// held as a digest of the normalised address rather than the address, so the
+/// membership proves what was approved without being a second copy of the
+/// mailing list.
+model EmailSendApprovalMember {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  userId String
+
+  /// SHA-256 of the normalised address at approval time, and which rule
+  /// normalised it. A send compares the delivery's pinned address and the
+  /// account's current address against this; either differing means the
+  /// override does not apply.
+  addressDigest               String
+  addressNormalizationVersion String
+
+  /// The date the two-year confirmation notice counts from for this member,
+  /// and where that date came from (section 5.6 rule 5).
+  noticeAnchorAt     DateTime
+  noticeAnchorSource String
+
+  createdAt DateTime @default(now())
+
+  @@unique([approvalId, userId])
+  @@index([approvalId, addressDigest])
+  @@index([userId])
+}
+
+/// Withdrawal of an approval, append-only.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 5.6
+/// rule 6. The approval row is never touched; from the first revocation
+/// onwards every verdict is taken without the override.
+model EmailSendApprovalRevocation {
+  id         String            @id @default(cuid())
+  approvalId String
+  approval   EmailSendApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  revokedById    String
+  revokedByEmail String
+  revokedAt      DateTime
+  reason         String
+
+  createdAt DateTime @default(now())
+
+  @@index([approvalId, revokedAt])
+}
+
+/// What one send decided, and on what.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md, sections 6 and
+/// 7.6.
+///
+/// Two rows per delivery, not one: the permission is decided again immediately
+/// before the message is handed to the provider, and a single policyVersionId
+/// cannot describe both moments. phase says which one this is.
+///
+/// legalAllowed stays false when an override was used. Writing true would
+/// erase the only row that can answer "why did this go out", and an admin
+/// screen showing it as allowed is how the next person reads a business
+/// decision as a consent.
+model EmailPermissionDecision {
+  /// The delivery this verdict was taken for. SetNull rather than Restrict:
+  /// a delivery is purged on its own retention schedule and the verdict is
+  /// what outlives it, so losing the message must not take the reason it was
+  /// permitted with it.
+  deliveryId String?
+  delivery   EmailDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  id String @id @default(cuid())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// enqueue | send
+  phase String
+
+  purpose        String
+  classification String
+
+  /// The address the verdict was taken for, and the rule that normalised it.
+  emailAddress                String
+  addressNormalizationVersion String
+
+  /// Every authority applied and how each ended, as
+  /// [{ authority, basis, verdict, reason }]. Evidence ids are rows in
+  /// EmailPermissionDecisionEvidence rather than ids inside this blob, so a
+  /// deleted event cannot leave a dangling reference nobody can resolve.
+  authorities Json
+
+  /// All authorities allowed. Independent of the override.
+  legalAllowed Boolean
+
+  /// Set only when an override was applied; the approval is referenced, never
+  /// copied. The pair is a composite foreign key onto (id, approvalType), so
+  /// the approval this names is necessarily of the type claimed here.
+  overrideApprovalId String?
+  overrideType       String?
+  /// Restrict, not the optional relation's default of SetNull: clearing the
+  /// pair would turn a verdict that used an override into one that did not,
+  /// which is the single fact this row exists to keep. The migration says the
+  /// same, and the schema drift check compares the two.
+  overrideApproval   EmailSendApproval? @relation(fields: [overrideApprovalId, overrideType], references: [id, approvalType], onDelete: Restrict)
+
+  /// Reasons the send is refused regardless of the override, sorted. Empty
+  /// array when there are none -- null would not distinguish "none" from
+  /// "not computed".
+  blockers Json
+
+  /// (legalAllowed || override applied) && blockers is empty.
+  allowed Boolean
+
+  /// The display contract as pinned at enqueue and as required now.
+  pinnedDisplayContractHash   String?
+  requiredDisplayContractHash String?
+  displayContractSatisfied    Boolean?
+
+  /// Country candidates and their rule versions, as resolved for this verdict.
+  countryCandidates Json?
+  ruleVersions      Json?
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// When suppression was last read for this verdict, and when the message was
+  /// handed to the provider. The gap between them is the race section 7.4 is
+  /// about, and it cannot be measured without both.
+  suppressionCheckedAt DateTime?
+  providerSubmittedAt  DateTime?
+
+  /// Closes the evidence set. The verdict and every row it rests on are
+  /// written in one transaction and then sealed; afterwards no evidence may be
+  /// added. Without it a verdict could acquire support after the fact, which
+  /// is the same defect as an editable approval.
+  sealedAt DateTime?
+
+  evaluatedAt DateTime
+  createdAt   DateTime @default(now())
+
+  evidence EmailPermissionDecisionEvidence[]
+
+  @@unique([deliveryId, phase], map: "EmailPermissionDecision_delivery_phase")
+  @@index([userId, evaluatedAt])
+  @@index([emailAddress, evaluatedAt])
+  @@index([overrideApprovalId])
+  @@index([policyVersionId])
+}
+
+/// What a verdict rested on, append-only and sealed with the verdict.
+///
+/// A join table rather than an array of ids inside the verdict: the database
+/// then refuses to lose the row a verdict cites, and "what did this rest on"
+/// is a query rather than a parse.
+///
+/// Two possible sources, exactly one per row. A consent lives in
+/// ConsentRecord and nothing else may hold it, so an express-consent verdict
+/// has to be able to cite that ledger directly rather than through a second
+/// copy of the fact.
+model EmailPermissionDecisionEvidence {
+  id         String                  @id @default(cuid())
+  decisionId String
+  decision   EmailPermissionDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  eventId String?
+  event   EmailPermissionEvent? @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  consentRecordId String?
+  consentRecord   ConsentRecord? @relation(fields: [consentRecordId], references: [id], onDelete: Restrict)
+
+  /// Which authority cited it.
+  authority String
+
+  createdAt DateTime @default(now())
+
+  @@unique([decisionId, authority, eventId], map: "EmailPermissionDecisionEvidence_event_key")
+  @@unique([decisionId, authority, consentRecordId], map: "EmailPermissionDecisionEvidence_consent_key")
+  @@index([eventId])
+  @@index([consentRecordId])
+}
+
+/// Operator evidence for one catalog-import attempt. No User foreign key:
+/// deleting an operator must not rewrite the row. Apply stays off until a
+/// separate latch is enabled; this table existing is not that enablement.
+model AmuxBoardImportApproval {
+  id                           String    @id
+  status                       String
+  actorUserId                  String
+  authorizationAuditLogId      String    @unique
+  manifestDigest               String
+  canonicalizerVersion         String
+  sourceCommit                 String
+  boardDigest                  String
+  sourceVerificationMode       String
+  sourceAttestedAt             DateTime
+  activeItemCount              Int
+  sectionCount                 Int
+  recommendationReferenceCount Int
+  createKeys                   Json
+  noOpKeys                     Json
+  conflictKeys                 Json
+  excludeKeys                  Json
+  executionBriefDigests        Json
+  itemBindings                 Json
+  itemBindingsDigest           String
+  plannerVersion               String
+  validatorVersion             String
+  scannerVersion               String
+  scannerRulesetDigest         String
+  policyVersion                Int
+  rawBodyDigest                String
+  outcomeUnknownAt             DateTime?
+  preparedAt                   DateTime
+  approvedAt                   DateTime?
+  consumedAt                   DateTime?
+  rejectedAt                   DateTime?
+  expiredAt                    DateTime?
+  expiresAt                    DateTime
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
 }

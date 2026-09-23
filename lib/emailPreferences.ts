@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import {
+  BULK_UNSUBSCRIBE_PURPOSES,
   EMAIL_PURPOSES,
   LOCKED_EMAIL_PURPOSES,
   consentActionFor,
@@ -603,11 +604,20 @@ export async function applyPreferenceChange(
 }
 
 /**
- * Turns every consent-based purpose off in one action.
+ * Turns every marketing purpose off in one action.
  *
  * Present because making somebody flip five switches to stop hearing from us
  * is the kind of friction the Australian rule against extra steps exists to
  * prevent, even where it is not literally prohibited.
+ *
+ * The scope comes from BULK_UNSUBSCRIBE_PURPOSES, which is derived from the
+ * classification table rather than from the consent-required set. Those two
+ * hold the same purposes today and are answers to different questions: one
+ * asks what class of mail it is, the other whether an explicit consent is
+ * needed before sending it. Reading the second here would mean that a country
+ * rule making a marketing purpose sendable without consent would quietly drop
+ * it out of "unsubscribe from everything" (invariant 5,
+ * docs/policy/email-product-news-redesign-draft.md section 7.1).
  */
 export async function withdrawAllMarketing(input: {
   userId: string;
@@ -619,8 +629,7 @@ export async function withdrawAllMarketing(input: {
   now?: Date;
 }) {
   const results: PreferenceChangeResult[] = [];
-  for (const purpose of EMAIL_PURPOSES) {
-    if (!recordsConsent(purpose)) continue;
+  for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
     results.push(
       await setPreference({
         ...input,

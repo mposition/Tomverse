@@ -4,14 +4,107 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v28 (2026-09-21).** 판정 기준 설정 **행**의 삭제(D-2)를 조건부로
-  보류합니다. 0절 참조.
-- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
-  전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
+- 개정: **v29 (2026-09-21).** marketing 권한을 전역 opt-in에서 **국가 rule +
+  호주 발신자 authority의 이중 판정**으로 개정합니다(승인 A·C·F). 0절 참조.
+- **`R1`·`R2`·`R3`은 초안 §13의 미해결 질문 번호입니다.** 20절 위험 표의
+  R1·R2·R3과 **다른 것**이며(그쪽은 위험 항목), 그래서 이 문서에서는 이름을
+  함께 적습니다.
+- 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록 중 **아직 열린 것이 막는
+  범위**를 전제로 씁니다 — 2026-09-16 개정(승인 A) 이후 전체 활성화의 선행 조건은
+  **발송 도메인 평판**(초안 §13 R2)과 **싱가포르 수신거부 주소**(초안 §13 R3)이고,
+  **EEA·영국은 그
+  위에 두 가지가 더** 있습니다: soft opt-in을 근거로 쓰는 것은 **G**가, DE·FR·
+  AT·CH 밖 국가로 보내는 것은 **21절 Q1의 잔여 국가별 확인**이 각각 막습니다(15.2).
 
 ---
 
 ## 0. 개정 이력
+
+### v29 (2026-09-21) — marketing 권한은 국가 rule이 정합니다(S0, 승인 A·C·F 반영)
+
+제품 소식 재설계 초안(docs/policy/email-product-news-redesign-draft.md) §11에서
+소유자가 2026-09-16에 승인한 것을 **상위 계약에 반영**합니다. 결정은 그날
+내려졌고, 이 개정은 그 결정을 계약이 말하게 하는 일입니다 — **새로 정하는 것이
+없습니다.**
+
+1. **C1이 바뀝니다.** "marketing은 전역 opt-in"에서 **"수신자 국가 rule + 호주
+   발신자 authority, 둘 다 통과해야 발송"** 으로. 출발 값 표는 5.1.1에 새로
+   넣었습니다. 값의 출처는 초안 §4.3이지만 **정본은 5.1.1의 표**이고, 거기에
+   고정된 것은 **2026-09-16에 승인된 그 시점의 값**(초안 §11 A·C·F)입니다.
+   초안은 문서 전체가 승인되지 않은 상태이므로 **그쪽 편집이 이 계약을 바꾸지
+   못합니다** — 바꾸려면 이 ADR의 새 개정과 승인이 필요합니다. 표를 옮겨 적는
+   것은 두 번째 진실을 만드는 일이므로, **무엇이 정본이고 값이 어디서 왔는지를
+   표 옆에 적었습니다.**
+
+2. **C8이 바뀝니다.** "묵시적 동의 미사용"에서 **"국가 rule이 허용하는 곳에서만"**
+   으로. 실질은 **호주의 추론 동의 하나**입니다(초안 4.4의 관계 lifecycle).
+   **EEA·영국 soft opt-in은 열리지 않았습니다** — G(외부 자문, 초안 §13 R1)가 회원국별로
+   확인하기 전까지 `express_consent`로 닫혀 있습니다.
+
+3. **5.6의 논거는 지우지 않고 범위를 좁혔습니다.** 그 절이 든 이유들 — 취득 맥락을
+   사용자마다 저장해야 한다, 회원국별 해석이 갈린다 — 은 **EEA·영국에 대해서는
+   그대로 유효하고**, 그래서 그곳이 닫혀 있는 이유이자 G의 질문지입니다. 바뀐 것은
+   "전역"이라는 범위뿐입니다. 호주에서는 그 "맥락 저장"이 회피 대상이 아니라
+   **설계 그 자체**(사건을 저장하는 관계 모델)이고, 미국·싱가포르는 원래 그 절의
+   대상이 아니었습니다. **틀린 논거를 지우는 것과 옳은 논거의 적용 범위를 줄이는
+   것은 다른 일이고, 이것은 뒤쪽입니다.**
+
+4. **D4가 개정으로 표시됩니다.** 2026-09-15 승인(v8, Q2 해소)은 **그 시점의
+   결정으로 유효**하고, 2026-09-16 승인 A·C가 그것을 개정했습니다. 21절 Q2는
+   개정 이전 상태에 대한 해소로 남습니다 — 승인 기록을 지우면 "왜 한 번 그렇게
+   정했었나"에 답할 수 없게 됩니다.
+
+5. **`risk_accepted`는 국가 rule의 값이 아닙니다.** 승인 F(기존 78계정 전원 발송)는
+   국가 rule **위에서** 내린 결정이고 초안 5.6에 따라 그렇게 기록됩니다. 근거가
+   아니라 기록이며, **동의 기록을 지어내지 않습니다.** 5.1.1이 이것을 표 밑에
+   적습니다 — 표 안에 한 줄로 넣으면 국가 rule처럼 읽히기 때문입니다.
+
+6. **분류표가 우회로를 닫습니다.** 3.1의 6행(기능 업데이트)이 `service(동의 기반)`
+   으로 적혀 있었습니다. `classification === "marketing"` **하나**가 발송 스트림·
+   kill switch·한국 `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를
+   켜므로, 낮춰 적으면 그 전부가 꺼집니다 — 제품 소식이 새 C1·C8을 지나지 않고
+   나가는 길이 계약 안에 있었다는 뜻입니다. `release_notes`의 classification은
+   **`marketing`**입니다(초안 §3). purpose는 여전히 뉴스레터와 별개이고, 분류가
+   같다는 것과 스위치가 같다는 것은 다른 이야기입니다.
+
+7. **권한 층과 표시·운영 층을 가릅니다.** 5.1의 "가장 엄격한 요건을 전역
+   기본값으로"와 5.2의 "국가별 분기는 일곱 개가 전부"는 **표시·운영에 대해서는
+   그대로 참**이고, 권한에 대해서만 거짓이 됐습니다. 두 절에 그 구분을 적었습니다 —
+   한 표에 섞으면 "수신거부 링크를 어떻게 그리는가"와 "보내도 되는가"가 같은
+   무게로 읽힙니다.
+
+8. **15.2와 21절 Q1이 Q1을 전역 차단으로 말하고 있었습니다.** 전역 차단은
+   아닙니다. 다만 **Q1 안에는 질문이 둘** 있고 개정이 답한 것은 하나뿐입니다 —
+   승인 A/G가 정한 것은 **근거**(EEA·영국에서 soft opt-in을 쓸 수 있는가)이고,
+   Q1이 남긴 **"DE·FR·AT·CH 밖 국가의 첫 캠페인 전 국가별 확인"은 근거가 아니라
+   공통 baseline으로 아직 입증하지 못한 국가별 의무**에 대한 것이라
+   `express_consent`로 보내는 EEA 발송에도 그대로 걸립니다. 활성화 전에 닫아야
+   하는 것은 싱가포르 수신거부 주소(초안 §13 R3)와 발송 도메인 평판(초안 §13 R2)이고, **EEA·영국은
+   그 위에 G와 Q1 잔여를 각각** 닫아야 합니다. 22절 A5는 전제가 사라져 개정 전
+   기록으로 표시했습니다.
+
+9. **A18을 아직 열린 결정으로 말하던 다섯 곳을 정정했습니다.** A18은 2026-09-14에
+   **별도 Resend 계정**으로 결정됐고(22절), 1절 요약 8번·8.1·8.5·8.8·R23은 그
+   전의 문장을 그대로 갖고 있었습니다. marketing 활성화의 선행 조건 목록에서 이것이 빠지므로,
+   15.2의 남은 선행 조건은 발송 도메인 평판·싱가포르 수신거부 주소(초안 §13
+   R2·R3, 그리고 EEA·영국의 G와 Q1 잔여)입니다.
+
+**이 개정은 S0의 전부가 아닙니다.** 초안 §12의 S0 행이 담은 것 중 여기서 한
+것은 **권한 계약(C1·C8·5.1.1·5.6)과 분류표, 그리고 그 둘이 만든 층 구분**입니다.
+나머지는 아래 표에 있고, 각자의 gate와 함께 남습니다. (§12 자체는 일정이라
+5.1.1의 snapshot이 고정하지 않으므로, 그 행이 늘어나면 이 표를 다시 맞춥니다.)
+
+| 남은 S0 항목 | 언제까지 |
+|---|---|
+| **IP 추정 국가** — 6.1·6.2와 `AGENTS.md` | **IP 추정을 구현하기 전에.** 지금 6절은 fail-closed이고 추정 국가를 쓰지 않습니다 |
+| **기록 세 층과 승인 원장** — 10.2의 데이터 모델 | **S3 구현 전에** |
+| **7.7·7.8** 한국 의무와 의무 상태 기록 | 해당 단계(S6) 전에 |
+| **webhook·suppression 절 동기화** — 9.6, 12.3, 12.4, 13.5, 13.7, 14.4 | 해당 단계 전에. 13.2·13.3·10.1·10.2는 v26~v28이 이미 옮겼습니다 |
+
+**코드는 이 개정으로 바뀌지 않습니다.** `CONSENT_REQUIRED_PURPOSES`는 여전히 세
+marketing purpose를 기본 off로 두고, 국가 rule을 읽는 모델(`ReleaseNotesCountryRule`)은
+아직 존재하지 않습니다(초안 §12 S5). 계약이 먼저 바뀌고 구현이 따라옵니다 —
+반대로 하면 구현이 무엇을 구현하는 것인지 적힌 곳이 없습니다.
 
 ### v28 (2026-09-21) — 설정 행은 당분간 남깁니다(deploy D-2 보류)
 
@@ -1047,7 +1140,7 @@ marketing을 포함하지 않는다는 범위 결정.
 앞에 **동의(consent) / 억제(suppression) / 관할권(jurisdiction) 판정 계층**을 세우고,
 큐 밖에서 직접 발송되는 경로들을 outbox로 모으는 일입니다.
 
-여섯 가지 판단:
+여덟 가지 판단:
 
 1. **제공자는 바꾸지 않습니다.** Resend를 유지하고, `lib/email.ts` 자리에 얇은
    provider port를 둡니다. 차선책은 Postmark(transactional/broadcast 스트림이 제품
@@ -1067,7 +1160,11 @@ marketing을 포함하지 않는다는 범위 결정.
    그 경계를 8절과 15절에서 명시합니다.
 5. **MVP는 marketing을 포함하지 않습니다.** 1단계는 transactional/service 경로의
    신뢰성(outbox, suppression, 감사 스냅샷)과 preference center의 뼈대까지입니다.
-   marketing 발송은 인프라를 만들되 flag로 잠근 채 법률 검토를 기다립니다.
+   marketing 발송은 인프라를 만들되 flag로 잠급니다. **무엇을 기다리는지는
+   2026-09-16 개정으로 좁아졌습니다** — 법률 검토 전체가 아니라 발송 도메인
+   평판과 싱가포르 수신거부 주소(초안 §13 R2·R3)이고,
+   **EEA·영국은 그 위에 G(근거)와 Q1 잔여(국가별 의무 확인)를 각각** 기다립니다
+   (15.2).
 6. **가장 큰 현재 리스크는 마케팅이 아니라 유실입니다.** 로그인 코드, 환영 메일,
    Stripe 결제 확인 메일이 지금 큐 밖에서 fire-and-forget으로 나갑니다. 실패하면
    사용자는 로그인하지 못하고 아무도 그것을 모릅니다.
@@ -1077,8 +1174,10 @@ marketing을 포함하지 않는다는 범위 결정.
    있어 worker가 메일을 재구성할 수 없습니다.** 권고는 요청 안 재시도 + 실패를
    숨기지 않는 응답 + 상시 노출되는 "다시 보내기"입니다(9.4a).
 8. **Resend의 suppression은 계정 전체에 걸립니다.** 서브도메인을 나눠도 marketing
-   complaint가 로그인 코드를 막습니다(5.3.1). MVP는 영향받지 않지만(marketing
-   없음), **marketing을 켜기 전에 계정 분리 여부를 결정해야 합니다.**
+   complaint가 로그인 코드를 막습니다(5.3.1). MVP는 영향받지 않고(marketing 없음),
+   ~~marketing을 켜기 전에 계정 분리 여부를 결정해야 합니다~~ — **A18이
+   2026-09-14에 결정했습니다: 별도 Resend 계정**(22절). 활성화 전에 남은 것은
+   결정이 아니라 **그 분리가 실제로 배포됐는지 확인**하는 일입니다.
 
 **즉시 결정이 필요한 항목(22절 상세):** 서비스 유형(B2C/B2B), 우선 국가 확정,
 일본·중국 시장 포함 여부, 예상 발송량, EU 데이터 리전 요구 여부.
@@ -1257,11 +1356,30 @@ marketing을 포함하지 않는다는 범위 결정.
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
-| 6 | 사용자가 명시적으로 구독한 기능 업데이트 | service(동의 기반) | 불가 | 불가 | **필수** | P2 | 표준 | marketing |
-| 7 | 신규 기능 소개, 뉴스레터 | marketing | 불가 | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
-| 8 | 프로모션, 할인, 재참여 | marketing | 불가 | 불가 | **필수** | P3 | 관대 | marketing |
+| 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | **조건부**(아래) | 불가 | **필수** | P2 | 표준 | marketing |
+| 7 | 신규 기능 소개, 뉴스레터 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
+| 8 | 프로모션, 할인, 재참여 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대 | marketing |
 | 9 | 관리자 긴급 공지 | 내용에 따라 갈림 | 조건부 | 조건부 | 조건부 | P0 | 공격적 | transactional |
 | 10 | 법정 통지 | legal | 가능 | **가능(필수)** | **금지** | P0 | 공격적 + 대체 채널 | transactional |
+
+**marketing 세 행의 "조건부"** — 2026-09-16 개정(승인 A) 전에는 `불가`였고,
+전역 opt-in이 사라지면서 조건이 생겼습니다. 조건은 하나의 식입니다.
+
+> `(수신자 authority 통과 AND 호주 발신자 authority 통과) OR 유효한 override`,
+> 그리고 `blockers`가 비어 있을 것 (5.1.1, 초안 7.6)
+
+**세 경로를 따로 나열하지 않는 이유**는 그것이 독립된 통과 근거로 읽히기
+때문입니다. 미국의 `opt_out`은 **수신자 authority만** 통과시키고, 호주 발신자
+authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred_consent`는
+관계가 활성일 때 한쪽을 채우는 근거이고, 명시적 동의 하나가 양쪽을 다 채우는
+경우도 있습니다 — 그때는 그 사실이 기록에 남습니다(초안 §4.2).
+
+승인 F의 `risk_accepted`는 **authority를 통과시키지 않습니다.** 판정에는
+`legalAllowed: false`가 그대로 남고 `overrideApplied`가 옆에 붙으며, 위 식의
+`OR` 가지에만 들어갑니다.
+
+**"marketing 거부자에게도" 열은 여전히 `불가`입니다** — 거부는 어느 경로로도
+넘지 못합니다.
 
 ### 3.2 유형별 상세
 
@@ -1314,22 +1432,62 @@ marketing을 포함하지 않는다는 범위 결정.
   marketing 거부자에게 못 보내게 되어 **법적 통지 의무를 스스로 깨뜨립니다.**
   이것이 이 문서에서 가장 강조하고 싶은 실패 모드입니다.
 
-#### 6. 사용자가 명시적으로 구독한 기능 업데이트
-- 동의 기반이므로 동의 없이는 불가. **unsubscribe 필수.**
-- 7번(뉴스레터)과 **별개 preference**여야 합니다. "기능 업데이트만 받고 프로모션은
-  안 받겠다"가 가능해야 합니다. 이것이 목적별 opt-in의 핵심 사례입니다.
+#### 6. 기능 업데이트 / 릴리스 노트
+
+이 행은 한때 "사용자가 **명시적으로 구독한** 기능 업데이트"였습니다. 그 이름은
+권한 근거를 유형 이름에 박아 넣은 것이고, 2026-09-16 개정 이후로는 **승인된 수신
+경로를 배제합니다** — 호주의 추론 동의로 받는 사람, 미국의 `opt_out`으로 받는
+사람, 승인 F의 `risk_accepted`로 받는 사람은 어느 쪽도 "명시적으로 구독"하지
+않았습니다. 유형은 **무엇을 보내는가**이고, 누구에게 보내도 되는가는 5.1.1이
+정합니다.
+
+- **classification은 `marketing`입니다**(승인 A, 제품 소식 재설계 초안 §3).
+- **이 행의 purpose identifier는 `product_updates`입니다.** v29를 쓸 때는
+  열려 있었고 — 초안 §3이 `release_notes`를 **새로 만든다**고 적으면서
+  `product_updates`를 언급하지 않았습니다 — **S3의 purpose 분류표가 닫았습니다**
+  (10.2.1). 새 purpose를 만들지 않은 이유는 그쪽이 기존 선택을 데려오지 못하기
+  때문입니다: 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되고, 그것이
+  불변식 5가 막으려는 실패입니다. 초안의 이름은
+  `lib/emailPreferenceCore.ts`의 `draftPurposeName`과 `purposeForDraftName()`이
+  해석합니다. 이 값이 철회 대상을 가르므로 — `withdrawAllMarketing()`이 그 표로
+  대상을 고릅니다 — 정해진 것이 중요하고, 분류가 `marketing`이라는 것은 그와
+  무관하게 참이었습니다.
+  이 표는 한때 `service(동의 기반)`이라고 적었고 그것은 **우회로**였습니다:
+  `classification === "marketing"` **하나**가 발송 스트림·kill switch·한국
+  `(광고)`·싱가포르 `<ADV>`·unsubscribe 강제·관할권 fail-closed를 켜므로,
+  낮춰 적으면 그 전부가 꺼집니다. 한국 사용자가 동의를 마치고 받은 메일에 라벨이
+  붙지 않는 것이 그 결과입니다.
+- **purpose는 별개입니다.** 7번(뉴스레터)과 **다른 preference**여야 하고,
+  "기능 업데이트만 받고 프로모션은 안 받겠다"가 가능해야 합니다 — 분류가 같다는
+  것과 스위치가 같다는 것은 다른 이야기입니다. 이것이 목적별 opt-in의 핵심
+  사례입니다.
+- **철회의 단일 source는 purpose 표의 classification입니다.**
+  `withdrawAllMarketing()`이 `recordsConsent(purpose)`로 대상을 고르므로
+  (`lib/emailPreferences.ts`), 템플릿 정의와 purpose 표가 어긋나면 철회가 이
+  purpose를 건너뜁니다. 정적 검사가 그 일치를 강제합니다(초안 §3).
 - **국가별 차이:** EU/UK/캐나다/일본/싱가포르에서 이 유형이 CEM/특정전자메일에
   해당하는지는 내용에 따라 갈립니다. 판촉 요소가 없는 순수 릴리스 노트라도
-  **자사 서비스 홍보로 읽히면 광고성**입니다. 보수적으로 marketing 스트림으로
-  보냅니다.
+  **자사 서비스 홍보로 읽히면 광고성**입니다. 그 불확실성을 매 캠페인마다 판정하지
+  않기 위해 분류를 marketing으로 고정합니다.
 
 #### 7. 신규 기능 소개 / 뉴스레터, #8. 프로모션 / 할인 / 재참여
 - **완전한 marketing.** 사전 동의 필요(관할권별 예외는 5절).
 - **반드시 포함:** 발신자 법인명, 유효한 물리적 우편 주소, 명확한 수신거부 방법,
   왜 이 메일을 받는지, 관할권별 광고 표시(한국 `(광고)`, 싱가포르 `<ADV>`).
-- **재참여(re-engagement) 특유의 위험:** 오래 접속하지 않은 사용자에게 보내는
-  것이므로 **동의가 이미 만료된 사람**을 대상으로 하기 쉽습니다. 한국의 2년 재확인,
-  캐나다의 묵시적 동의 만료(2년/6개월)가 정확히 여기서 문제가 됩니다.
+- **재참여(re-engagement) 특유의 위험:** 오래 접속하지 않은 사용자를 대상으로
+  하므로, **근거가 이미 끝난 사람**에게 보내기 쉽습니다. 다만 그 끝나는 방식은
+  관할권마다 다르고, "동의 만료" 하나로 묶으면 세 가지가 섞입니다.
+
+  - **캐나다** — 만료가 없습니다. 5.1.1이 `express_consent`로 두고 해제 조건을
+    주지 않으므로, CASL의 2년/6개월 묵시적 동의 시계는 **적용할 대상이 없습니다**
+    (E6).
+  - **한국** — 2년은 **고지 주기이지 만료가 아닙니다**(5.5, E7). 고지를 보내지
+    않은 것이 문제이지 동의가 사라진 것이 아닙니다.
+  - **호주** — 추론 동의는 시간이 아니라 **관계 종료 사건**으로 끝납니다. 휴면
+    기준 초과가 종료 사건이므로(초안 §4.4), **오래 접속하지 않았다는 사실 자체가
+    근거를 끝낼 수 있습니다.** 재참여에서 실제로 걸리는 것은 여기이고, 그래서
+    판정을 관계 기록으로 다시 물어야 합니다 — 마지막 발송 때 통과했다는 것은
+    근거가 아닙니다.
 
 #### 9. 관리자가 보내는 긴급 공지
 - **분류가 내용으로 결정됩니다.** 시스템이 이것을 판단해서는 안 됩니다.
@@ -1523,16 +1681,26 @@ marketing을 포함하지 않는다는 범위 결정.
 국가별 분기를 최소화하는 방법은 **가장 엄격한 요건을 전역 기본값으로 삼는 것**입니다.
 분기가 필요한 곳은 그렇게 해도 남는 곳뿐이고, 그 수는 놀랄 만큼 적습니다.
 
+**단, 2026-09-16 개정(승인 A) 이후 이 원칙은 두 층으로 갈립니다.**
+
+- **권한**(누구에게 보내도 되는가)은 더 이상 전역 기본값이 아닙니다. 국가 rule이
+  정하고 호주 발신자 authority가 함께 걸립니다(C1, 5.1.1).
+- **표시·운영 요건**(C2~C14 — 수신거부 수단과 기한, 표시 항목, 스트림 분리,
+  기록)은 **그대로 전역 최대공배수**입니다. 개정된 것은 C1과 C8뿐입니다.
+
+이 구분이 5.2의 "일곱 개"가 여전히 맞는 이유이기도 합니다 — 그 일곱은 표시·운영
+예외이지 권한 분기가 아닙니다.
+
 | # | 공통 규칙 | 어느 관할권에서 왔는가 |
 |---|---|---|
-| C1 | marketing은 **전역 opt-in**. opt-out 체제 국가(미국, 싱가포르)에도 opt-in 적용 | EU/UK/KR/CA/AU/JP |
+| C1 | marketing 권한은 **수신자 국가 rule**이 정하고, 그 위에 **호주 발신자 authority**가 함께 걸립니다. 둘 다 통과해야 보냅니다. 출발 값은 5.1.1 | 제품 소식 재설계 초안 4.2·4.3, 승인 A(2026-09-16) |
 | C2 | 수신거부는 **로그인 없이, 1클릭 이내**, 추가 정보 요구 없음 | 호주(로그인 요구 금지), 미국(1페이지 원칙) |
 | C3 | 수신거부 반영은 **즉시(동기)**. SLA는 24시간, 상한은 **5 영업일** | 호주 5영업일이 최단 |
 | C4 | 모든 marketing 메일에 **법인명 + 물리적 우편 주소 + 수신거부 링크 + 수신 이유** | 미국(주소), 호주(법인명/ABN), CASL |
 | C5 | `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) 헤더를 **marketing에만** 부착 | Gmail/Yahoo 대량 발신자 요건 + C2 |
 | C6 | 동의는 **시각, 출처, 정책 버전, 관할권, 증거**를 함께 기록 | CASL/호주 입증책임, GDPR 제7조(1) |
 | C7 | 동의 **확인 고지 주기 2년** 전역 적용 (고지 의무이지 만료가 아님) | 한국 제50조제8항 + 시행령 제62조의3 |
-| C8 | 묵시적 동의는 **쓰지 않습니다** (soft opt-in 미사용) | 아래 5.6 |
+| C8 | 묵시적 동의를 **국가 rule이 허용하는 곳에서만** 씁니다 — 호주의 추론 동의(초안 §4.4 관계 lifecycle, 승인 C의 조건 아래). EEA·영국 soft opt-in은 **G(외부 자문, 초안 §13 R1)가 닫힐 때까지 쓰지 않습니다** | 아래 5.6, 5.1.1 |
 | C9 | 발송 수단은 **transactional / marketing 도메인·스트림 분리** (효과 범위는 5.3 참조 — 완전 분리가 아님) | 전 관할권 + deliverability |
 | C10 | transactional에는 unsubscribe 링크도 `List-Unsubscribe` 헤더도 **넣지 않음** | 오분류 방지 |
 | C11 | 모든 메일에 **plain-text 대체본** 제공 | 접근성 + deliverability |
@@ -1540,10 +1708,97 @@ marketing을 포함하지 않는다는 범위 결정.
 | C13 | 발신자 정보는 발송 후 **최소 30일간** 유효 | 호주 |
 | C14 | 수신거부 수단은 발송 후 **최소 30일간** 동작 | 미국 |
 
+### 5.1.1 수신자 authority 출발 값
+
+승인 A(2026-09-16)가 C1의 전역 opt-in을 국가 rule로 바꿨습니다. 아래는 **수신자
+authority**이고, 모든 행 위에 **호주 발신자 authority**(명시적 또는 추론 동의)가
+함께 걸립니다 — 둘 다 통과해야 보냅니다.
+
+**이 표가 정본입니다.** 값의 출처는 제품 소식 재설계 초안 §4.3이되, 고정된 것은
+**2026-09-16에 승인된 그 시점의 값**(초안 §11 A·C·F)입니다. 초안은 **문서 전체가
+승인되지 않은 상태**이므로, 그 문서가 나중에 §4.3을 고쳐도 **이 계약은 따라
+바뀌지 않습니다** — 바꾸려면 이 ADR의 새 개정과 그에 대한 승인이 필요합니다.
+이 개정의 첫 초안은 "값이 갈리면 초안이 이긴다"고 적었고 그것은 틀렸습니다 —
+승인되지 않은 문서의 편집이 승인된 권한 계약을 조용히 바꾸는 길을 열어 두는
+것이었습니다.
+
+**표만 고정하는 것으로는 부족합니다.** 이 계약은 초안의 몇 절을 **규범적으로**
+참조하고, 그 절들은 아직 이 문서로 옮겨지지 않았습니다 — 호주 관계 lifecycle
+(§4.4), authority별 판정 기록(§4.2), 기존 계정의 근거 없음(§5.5), `risk_accepted`
+기록 규칙(§5.6), 발송 판정 계약(§7.6). 그래서 **snapshot을 명시합니다.**
+
+> 이 ADR이 참조하는 초안은 blob `6965d519322620c17ea93f2cf680d994a260211f`
+> (`docs/policy/email-product-news-redesign-draft.md`, commit
+> `39d33135b345f75ec2fffc881b9cdee4f4a6fec4`)입니다. **이 snapshot 이후의 초안
+> 편집은 이 ADR의 권한 계약을 바꾸지 않습니다.** 반영하려면 이 문서의 새 개정과
+> 그에 대한 승인이 필요합니다.
+
+승인 시점(2026-09-16, commit `7af2a2a8e288053bcec49eb68c11ee6755cf818d`)과 이
+snapshot 사이에 **§4.3·§4.4·§5.1·§5.5·§5.6·§11은 바이트 단위로 같습니다**
+(section별 SHA-256 대조). §7.6은 한 줄이 달라졌고, 그것은 suppression 입력을
+"주소 전역 + purpose"에서 "활성 원인: 전역 + classification + purpose"로 적은
+주석입니다 — 2026-09-21에 배포한 원인 모델(deploy C)을 따라 적은 것이지 판정
+규칙의 변경이 아닙니다. §12(구현 순서)는 그 뒤로 여러 번 바뀌었습니다
+(승인 시점 3,532바이트 → 지금 5,153바이트). **그것은 일정이지 계약 조건이
+아니며, 이 문서는 §12에서 어떤 권한도 gate도 유도하지 않습니다** — 15.2와 0절이
+§12를 가리키는 것은 "무엇을 먼저 만드는가"를 한 곳에서 관리하기 위해서이고,
+그 포인터는 **일부러 초안의 현재 상태를 따릅니다.** 순서가 바뀌었다고 보내도
+되는 대상이 바뀌지는 않습니다. 권한·gate를 말하는 절(§4.2·§4.3·§4.4·§5.1·
+§5.5·§5.6·§7.6)만 위 snapshot에 고정됩니다.
+
+| 국가 | 수신자 authority 출발 값 | 해제 조건 |
+|---|---|---|
+| **US** | `opt_out` | 수신자 측은 이것으로 충분. 발송 가능 여부는 호주 authority가 정합니다 |
+| **AU** | 초안 §4.4의 관계가 서면 `inferred_consent`. **승인 C의 조건: 초안 §4.4의 관계 모델이 구현되고 E(방침·약관 개정)가 시행된 뒤에 발효합니다** | 초안 §4.4의 여섯 항목 |
+| **SG** | `express_consent` | PDPA가 direct marketing에 opt-in을 요구. SCA의 `<ADV>`·수신거부 이메일 요건은 별도 표시 의무 |
+| **KR** | `express_consent` | 가입 화면 동의 + DOI. 법정 의무는 초안 7.7의 의무별 상태 |
+| **EEA(AT·IE 제외)·GB** | `express_consent` | **G(외부 자문, 초안 §13 R1)** 가 회원국별로 확인하면 soft opt-in |
+| **AT** | `express_consent` | ECG-Liste 대조 없이는 해제 없음. **이번 범위에서 soft opt-in 대상이 아닙니다** |
+| **IE** | `express_consent` | 12개월 창·형사범. **이번 범위에서 soft opt-in 대상이 아닙니다** |
+| **CH·CA** | `express_consent` | CH는 FDPIC, CA는 CASL. 해제 없음 |
+| **ZZ**(국가 미상) | **발송 안 함** | — |
+
+**신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 초안 5.1의 고지를
+본 계정에만 성립합니다. 그 전에 가입한 계정은 초안 5.5·5.6이 다룹니다.
+
+**`risk_accepted`는 이 표의 값이 아닙니다.** 국가 rule은 그대로 두고, 그 위에서
+내린 결정으로 초안 5.6에 따라 기록됩니다 — 승인 F(기존 78계정 전원 발송)가
+그것입니다. 기록이지 근거가 아니며, **동의 기록을 지어내지 않습니다.**
+
+**그리고 "전원"이 무조건이라는 뜻이 아닙니다.** override가 넘는 것은 **authority의
+근거 부족**(동의·관계 없음) **하나뿐**이고, 아래는 넘지 못합니다(초안 5.6).
+
+- **철회·거부(`objected`)**, purpose 또는 주소에 걸린 **전역 suppression**
+- **국가 미확정(`ZZ`)** — 표시 의무를 정할 수 없으므로 보내지 않습니다
+- **의무 상태가 정해지지 않은 rule** — 초안 7.8의 `implemented`·`deferred`·
+  `waived` 중 하나가 없으면 그 국가 rule은 막힙니다
+- **kill switch · send flag · readiness**
+- **cohort 밖** — 범위는 승인 시점의 `userId` + 정규화 주소 digest 쌍이고,
+  **현재 주소의 digest가 목록과 다르면 제외**합니다. 검사는 enqueue와 send
+  **양쪽**에서 하며, enqueue 뒤에 주소를 바꾸면 옛 주소로 고정된 delivery도
+  나가지 않습니다. 계정 삭제·주소 없음·불일치는 전부 차단입니다
+- **승인 이후 가입한 계정**은 어떤 경로로도 들어가지 않습니다
+- **유효하고 철회되지 않은 승인**일 때만 적용됩니다. 승인을 거두면
+  `EmailSendApprovalRevocation` 사건을 **추가**하고 이후 판정은 override 없이
+  합니다 — 승인 행 자체는 고치지 않습니다
+
+**override는 authority 판정을 바꾸지 않습니다.** authority는 거부 그대로 남고,
+발송별 판정이 `legalAllowed: false`와 `overrideApplied: { approvalId, type:
+"risk_accepted" }`를 **따로** 담습니다(초안 4.2·7.6). 판정을 허용으로 덮어쓰면
+"왜 나갔는가"에 답할 수 있는 행이 사라지고, admin 화면에도 그대로 보여야 합니다 —
+숨기면 다음 사람이 그것을 동의로 읽습니다.
+
+동의가 들어오면 덮입니다 — 그 주소가 초안 5.4의 안내나 설정에서 동의하면
+`legalAllowed: true`가 되고 override는 더 이상 쓰이지 않습니다.
+
 ### 5.2 국가별로 남는 진짜 예외 (일곱 개)
 
-C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **이것이 "정말 필요한
-국가별 분기"의 전부입니다.**
+C1~C14를 적용하고 나면 **표시·운영의** 국가별 분기는 일곱 개만 남습니다.
+**이것이 "정말 필요한 표시·운영 분기"의 전부입니다.**
+
+**권한 분기는 이 표에 없습니다.** 2026-09-16 개정 이후 누구에게 보내도 되는가는
+5.1.1의 국가 rule이 정하며, 그것은 이 일곱과 **별개 층**입니다. 한 표에 섞으면
+"수신거부 링크를 어떻게 그리는가"와 "보내도 되는가"가 같은 무게로 읽힙니다.
 
 | # | 예외 | 적용 국가 | 구현 위치 |
 |---|---|---|---|
@@ -1552,7 +1807,7 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 | E3 | **footer에 표시할 사업자 정보 집합** (호주: ABN / 기타: 법인명+주소) | AU, 기타 | `JurisdictionProfile.footerBlocks[]`. **한국의 사업자등록번호·통신판매업 신고번호는 2026-09-14에 KR profile에서 제거했습니다** — 시행령 별표 6이 요구하는 것은 명칭·연락처·수신거부 방법이고, 두 번호는 전자상거래법상 통신판매업자의 표시 의무입니다. 발송 주체가 호주 법인이며 한국 통신판매업 신고 대상이 아님을 확인했으므로(2026-09-14) 그 번호가 존재하지 않고, 값을 가질 수 없는 block을 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. renderer는 block을 그대로 들고 있으므로 신고 번호가 생기면 seed 한 줄과 새 policy version으로 되살립니다 |
 | E4 | **수신거부 처리 SLA 표기** (5/10 영업일) | AU=5, US/CA/SG=10 | `JurisdictionProfile.unsubscribeSlaBusinessDays` — 표기용. 실제 처리는 항상 즉시 |
 | E5 | **야간 발송 억제 창** (21:00~08:00 현지) | ~~KR~~ **해당 국가 없음**(Q4 해소 2026-09-16: 시행령 제61조제2항이 전자우편을 야간 제한 대상 매체에서 제외) | `JurisdictionProfile.quietHours`. 창을 읽고 지연시키는 기계는 lane에 그대로 있고, 창은 정책 버전 데이터입니다 — 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version이며 코드 변경이 아닙니다. **이메일 밖 채널(SMS·푸시)은 별개 판정이고 이 표가 답하지 않습니다** |
-| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | C8로 인해 **미사용**. profile에 필드만 남기고 비활성 |
+| E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | **미사용.** 근거는 C8이 아니라 **5.1.1이 캐나다를 `express_consent`로 두고 해제 조건을 주지 않는 것**입니다(2026-09-16 개정 이후). profile에 필드만 남기고 비활성 |
 | E7 | **동의 확인 고지 주기** | KR=24개월 | `JurisdictionProfile.consentNoticeIntervalMonths`. 만료가 아니라 고지. 5.5 |
 
 **나머지는 전부 공통입니다.** 템플릿 본문, 레이아웃, 버튼, 언어, 브랜딩은 국가로
@@ -1650,10 +1905,13 @@ Azure AD, 그리고 `login-methods` 경로가 마지막 로그인 수단 제거�
 아무도 끄지 못합니다. 목록 위생 목적으로 채택할 수 있으나 그것은 **별도 결정**
 입니다(22절 A14).
 
-캐나다의 묵시적 동의 만료는 진짜 만료지만, C8로 묵시적 동의를 쓰지 않으므로
-충돌하지 않습니다.
+캐나다의 묵시적 동의 만료는 진짜 만료지만, **5.1.1이 캐나다를
+`express_consent`로 두고 해제 조건을 주지 않으므로** 충돌하지 않습니다.
+(2026-09-16 개정 전에는 C8이 그 근거였습니다. 개정된 C8이 허용하는 묵시적 동의는
+호주의 추론 동의 하나이고, 그것은 시간이 아니라 **관계 종료 사건**으로 끝납니다 —
+초안 §4.4.)
 
-### 5.6 soft opt-in을 쓰지 않기로 하는 이유
+### 5.6 EEA·영국에서 soft opt-in을 아직 쓰지 않는 이유
 
 EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건을 정확히 만족시키는
 비용이 얻는 것보다 큽니다.**
@@ -1662,13 +1920,28 @@ EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건�
   이들은 판매가 아닙니다. 즉 사용자마다 취득 맥락을 구분해 저장해야 합니다.
 - "자사의 유사한 상품/서비스"의 범위 판정이 매 캠페인마다 필요합니다.
 - 회원국별로 해석이 다릅니다(4.3 EU 주의).
-- **미국·싱가포르를 제외한 나머지 관할권에는 이 예외가 없습니다.** 따라서 soft
-  opt-in을 쓰면 사용자 집합이 관할권별로 갈라지고, 관할권 판정이 틀리면 곧바로
-  위반입니다.
+- **미국·싱가포르를 제외한 나머지 관할권에는 EU/UK식 soft opt-in 예외가
+  없습니다.** 따라서 그것을 쓰면 사용자 집합이 관할권별로 갈라지고, 관할권 판정이
+  틀리면 곧바로 위반입니다. (호주는 EU/UK식 soft opt-in이 아니라 **Spam Act의
+  추론 동의**이고, 별개 제도입니다 — 5.1.1과 초안 §4.4.)
 
-**결론: C8. soft opt-in 미사용.** 전원 명시적 opt-in. 이 결정 하나가 관할권 판정
-오류의 법적 결과를 크게 줄입니다 — 관할권을 틀려도 opt-in한 사람에게만 보내기
-때문입니다. (**단, 이것은 사업적 결정이기도 합니다. 22절 A5.**)
+**이 절의 결론은 2026-09-16에 개정됐습니다.** 위 이유들은 **EEA·영국에 대해서는
+그대로 유효하고**, 그래서 그 두 곳은 G(외부 자문, 초안 §13 R1)가 회원국별로 확인하기 전까지
+`express_consent`로 닫혀 있습니다 — 위 목록이 그 자문의 질문지입니다.
+
+바뀐 것은 **"전역"** 이라는 범위입니다. 호주는 사정이 다릅니다: ACMA가 계정 관계를
+추론 동의의 근거로 인정하고, 그 관계는 **함수로 추론하는 것이 아니라 사건으로
+저장**됩니다(초안 4.4). 즉 위에서 걱정한 "취득 맥락을 사용자마다 구분해 저장해야
+한다"가 호주에서는 회피 대상이 아니라 **설계 그 자체**입니다. 미국·싱가포르는
+원래 이 절의 대상이 아니었습니다.
+
+그래서 C8은 "묵시적 동의 미사용"에서 **"국가 rule이 허용하는 곳에서만 사용"** 이
+됐습니다. 관할권을 틀리면 곧바로 위반이라는 위 지적은 사라지지 않았고, 그것이
+4.2의 **이중 authority**와 `ZZ`(국가 미상 → 발송 안 함)가 존재하는 이유입니다.
+
+승인 A·C(2026-09-16), 제품 소식 재설계 초안 §11. (**사업적 결정이기도 했습니다** —
+22절 A5는 "전역 opt-in의 비용을 감수한다"였고, 전역 opt-in이 사라지면서 그 항목
+자체가 없어졌습니다. 취소선으로 남겨 둡니다.)
 
 ---
 
@@ -1728,9 +2001,20 @@ marketing을 **보내지 않고 보류**합니다.
 
 **규칙 2 — 그래서 marketing opt-in 시점에 국가를 필수로 수집합니다.**
 이것이 규칙 1을 실무적으로 감당 가능하게 만드는 짝입니다. 수신 동의를 받을 때
-국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록하면, **marketing 수신자는
-정의상 항상 확정된 관할권을 가집니다.** 보류는 예외 상황(청구 국가가 나중에
-바뀌어 충돌이 생긴 경우)에만 발생합니다.
+국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록합니다.
+
+**다만 "그래서 marketing 수신자는 정의상 항상 확정된 관할권을 가진다"는 2026-09-16
+개정 이후 참이 아닙니다.** 동의를 받는 경로가 유일한 경로가 아니게 됐기
+때문입니다 — 미국의 `opt_out`, 호주의 추론 동의, 승인 F의 `risk_accepted`로
+받는 사람은 동의 화면을 지나지 않았고, 따라서 그 화면이 묻는 국가도 없습니다.
+
+**그 경로들은 지금 고신뢰 국가 신호가 없으면 fail-closed입니다.** 6.1의 신호
+우선순위에서 확정되지 않으면 marketing은 보류이고(`ZZ`는 발송 안 함), IP 추정
+국가를 근거로 쓰는 계약은 **아직 이 문서에 없습니다** — 초안 §12 S0의 남은 항목
+이며 6.1·6.2와 `AGENTS.md`를 함께 고칠 때 들어옵니다. 그 전까지 동의 없는
+경로의 수신자는 **국가가 확정될 때까지 받지 못합니다.**
+
+보류는 그래서 예외 상황이 아니라 **그 경로들의 기본 상태**입니다.
 
 | confidence | marketing | service | legal | transactional |
 |---|---|---|---|---|
@@ -1757,9 +2041,19 @@ marketing을 **보내지 않고 보류**합니다.
 - 청구 국가가 바뀌면 -> **재동의를 요구하지 않고**, 새 관할권 profile을 다음
   발송부터 적용합니다. 기존 `ConsentRecord`는 그대로 유효하되 `jurisdiction`
   필드는 **동의 당시 값을 보존**합니다(감사 기록이므로 소급 변경 금지).
-- 다만 **새 관할권이 기존 동의로는 부족한 경우**(예: opt-out 체제에서 동의를 받아
-  놓고 opt-in 체제로 이동)는 재동의가 필요합니다. C1(전역 opt-in)을 채택하면 이
-  경우가 발생하지 않습니다 — **C8과 C1이 함께 관할권 이동 문제를 없앱니다.**
+- 다만 **새 관할권이 기존 근거로는 부족한 경우**는 재동의가 필요합니다.
+  **2026-09-16 개정(승인 A) 전에는 이 경우가 발생하지 않았습니다** — C1이 전역
+  opt-in이라 어디로 옮겨도 근거가 더 강했기 때문입니다. **개정 이후에는
+  발생합니다.** 5.1.1이 국가마다 다른 출발 값을 두므로, `US`(`opt_out`)나
+  `AU`(`inferred_consent`)에서 `KR`·`EEA`·`GB`·`CH`·`CA`·`SG`
+  (`express_consent`)로 옮기면 **가지고 있던 근거가 새 관할권에서는 부족합니다.**
+
+  그때 하는 것은 셋입니다 — 다음 발송부터 **새 국가 rule로 판정**하고(근거가
+  모자라면 그 판정은 거부이며 조용히 통과시키지 않습니다), 동의를 받을 수 있으면
+  초안 5.4의 경로로 **요청**하며, 받기 전까지 그 주소에는 **보내지 않습니다.**
+  기존 `ConsentRecord`는 그대로 유효하고 `jurisdiction`은 동의 당시 값을
+  보존합니다 — 그 기록이 "그때는 충분했다"를 말하는 유일한 것이기 때문입니다.
+  판정은 발송 시점 국가로 하고, 기록은 취득 시점 국가로 남습니다.
 
 ### 6.5 기존 analytics 판정과의 관계
 
@@ -1859,11 +2153,13 @@ Braze/Customer.io는 요구사항의 상당 부분(preference center, suppressio
   `eu-central-1`). 단 운영 부담을 감수해야 합니다.
 - **marketing은 별도 도메인으로 시작하되, 그것만으로는 부족합니다(v3 정정).**
   `mail.tomverse.app`(transactional) vs `news.tomverse.app`(marketing)은 도메인
-  평판을 가르지만 **suppression을 가르지 못합니다**(5.3.1). marketing을 켜기
-  전에 **별도 Resend team/region 또는 별도 provider**를 쓸지 결정해야 하며,
-  이는 8절의 "단일 제공자" 권고를 **발송 계정 수준에서는** 완화하는 것입니다.
-  제품 선택은 여전히 하나여도 되고, 계정이 둘이면 우리 코드에는 API 키가 하나
-  더 생길 뿐입니다.
+  평판을 가르지만 **suppression을 가르지 못합니다**(5.3.1). ~~marketing을 켜기
+  전에 별도 Resend team/region 또는 별도 provider를 쓸지 결정해야 하며~~ —
+  **A18이 2026-09-14에 결정했습니다: 별도 Resend 계정**(22절, 5.3.1 결정 2).
+  같은 계정 안의 team 추가는 유료 플랜을 요구해 채택하지 않았고, 로그인이 다른
+  두 번째 계정을 만들었습니다. 이는 8절의 "단일 제공자" 권고를 **발송 계정
+  수준에서는** 완화한 것입니다. 제품 선택은 여전히 하나이고, 우리 코드에는 API
+  키가 하나 더 생겼습니다(`MARKETING_RESEND_API_KEY`).
 - 발송량이 월 수십만 통을 넘거나 세그먼트 기반 여정이 실제로 필요해질 때
   전용 marketing platform을 재검토합니다.
 
@@ -1914,7 +2210,7 @@ EmailProviderPort {
 | 다중 provider 자동 failover | 구현체가 하나입니다. 16절 |
 | 전용 IP | 월 수십만 통 미만에서는 **오히려 도달률이 나빠집니다**(warm-up 트래픽 부족) |
 | RTL 언어 지원 | ar/he locale이 없습니다. 다만 렌더러가 `dir` 속성을 **받을 수 있게만** 설계 |
-| 국가별 템플릿 본문 분기 | 5.2에서 확인했듯 진짜 분기는 6개뿐이며 전부 footer/제목입니다 |
+| 국가별 템플릿 본문 분기 | 5.2에서 확인했듯 국가별 차이는 **본문이 아니라 제목 접두어·footer·발송 시간·SLA·동의/고지 상태**에 한정됩니다(E1~E7 일곱 개) |
 | SMS/푸시 다채널 | 알림 오케스트레이션은 별도 문제. `EmailPreference`를 `NotificationPreference`로 일반화만 해두고 채널은 이메일만 |
 | 자체 unsubscribe 랜딩의 재구독 유도 UI | 호주 "추가 단계 요구 금지"와 충돌할 수 있습니다 |
 
@@ -1932,8 +2228,8 @@ EmailProviderPort {
 | | transactional/legal | marketing |
 |---|---|---|
 | 발송 도메인 | `mail.tomverse.app` | `news.tomverse.app` |
+| Resend **계정** | 별도 — ~~MVP에서는 하나, marketing 활성화 전 결정~~ **A18이 2026-09-14에 별도 계정으로 결정**(5.3.1, 22절). 같은 계정 안의 team 추가는 유료 플랜을 요구해 채택하지 않았습니다 | 별도 |
 | Resend API 키 | 별도 | 별도 |
-| Resend **계정(team)** | MVP에서는 하나. marketing 활성화 전 결정(5.3.1) | 동일 |
 | suppression 조회 (우리 DB) | hard bounce + 출처가 transactional인 complaint 관측 | hard bounce + complaint + **모든 목적별 opt-out** |
 | unsubscribe 링크 | **없음** | **필수** |
 | `List-Unsubscribe` 헤더 | **없음** | **필수** |
@@ -1983,7 +2279,7 @@ EmailProviderPort {
 
 | 대안 | 기각 사유 |
 |---|---|
-| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 억제 기록(`SuppressionCause`)이 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. Phase 2 착수 시 재평가(A18) |
+| **transactional provider + 별도 marketing platform** | 지금 보낼 marketing이 없으므로 MVP에서는 기각. **다만 v3에서 근거가 한쪽으로 기울었습니다**(5.3.1): 계정을 공유하면 marketing complaint가 로그인 코드를 막습니다. 원래의 기각 사유(suppression 동기화 실패 시 거부한 사람에게 메일이 감)는 여전히 유효하지만, 이제 반대 방향의 비용이 생겼습니다. **동기화는 단방향으로 풀립니다** — 우리 억제 기록(`SuppressionCause`)이 유일한 판정 근거이고 양쪽 제공자에 밀어 넣기만 하면 됩니다. ~~Phase 2 착수 시 재평가(A18)~~ — **A18은 2026-09-14에 결정됐습니다: 별도 Resend 계정**(22절). 별도 provider를 쓰는 이 선택지는 그 결정이 답한 문제를 이미 해결하므로, 다시 열려면 다른 이유가 필요합니다 |
 | **customer engagement platform 중심** | 7.3의 네 가지 이유. 특히 감사 스냅샷과 정책 이중화 문제 |
 | **자체 abstraction을 둔 multi-provider** | 구현체가 하나인 추상화는 추상화가 아닙니다. 그리고 **중복 발송 없는 provider 전환은 abstraction이 아니라 outbox의 idempotency key가 보장**합니다 — 우리는 그것을 먼저 만듭니다 |
 | **AWS SES로 즉시 이전** | 비용 절감액(월 $15 수준)이 운영 부담을 정당화하지 못합니다. 데이터 위치가 요구사항이 되면 그때 |
@@ -2554,13 +2850,17 @@ userAgentHash      String?
 id
 profileKey         String   // "KR" | "US" | "CA" | "AU" | "GB" | "SG" | "EU" | "ZZ"
 policyVersionId -> EmailPolicyVersion
-marketingBasis     "opt_in" | "opt_out"     // 우리는 전역 opt_in(C1)이나 기록은 사실대로
+marketingBasis     "opt_in" | "opt_out"     // 그 나라 제도의 사실. 우리 권한 판정은
+                                            // 이 필드가 아니라 5.1.1의 국가 rule과
+                                            // 호주 발신자 authority가 함께 정합니다
+                                            // (승인 A). S5의 ReleaseNotesCountryRule
 subjectPrefix      String?  // "(광고)" | "<ADV> "
 footerBlocks       Json     // ["legal_name","postal_address","business_registration",...]
 unsubscribeSlaBusinessDays Int
 consentNoticeIntervalMonths Int?  // E7. KR=24. 고지 주기이지 만료 기한이 아님
 quietHours         Json?    // { start:"21:00", end:"08:00", tz:"local" }
-impliedConsentDays Json?    // CASL. C8로 비활성
+impliedConsentDays Json?    // CASL. 비활성 — 5.1.1이 CA를 express_consent로 두고
+                            // 해제 조건을 주지 않습니다. 기록만 남깁니다
 notes              String   // 근거 출처와 확인일
 @@unique([profileKey, policyVersionId])
 ```
@@ -2748,6 +3048,176 @@ payload            Json     // 원본 보존
 processingError    String?
 @@unique([provider, providerEventId])
 ```
+
+#### 10.2.1 기록 세 층과 승인 원장
+
+제품 소식 재설계 초안 §6이 정한 것을 이 문서의 엔터티 목록에 반영합니다.
+**S0의 남은 항목 중 "기록 세 층과 승인 원장"이 이것이고, S3 구현의 선행
+조건이었습니다.**
+
+**초안 §3의 `release_notes`는 새 purpose가 아니라 `product_updates`입니다.**
+초안은 "`release_notes` purpose를 만들라"고 적었지만, 그 purpose는 이미
+`product_updates`라는 이름으로 존재합니다 — 같은 메일, 같은 스위치, 7개 언어의
+문구, DB CHECK, 그리고 사용자들이 이미 설정해 둔 행. 두 번째 purpose를 만들면
+**한 종류의 메일에 스위치가 둘**이 되고, 더 나쁘게는 **기존 선택이 따라오지
+않습니다** — 제품 소식을 꺼 둔 사람이 새 이름으로 다시 받게 되며, 그것이 바로
+불변식 5가 막으려는 실패입니다. 그래서 초안의 이름은 이미 그 일을 하는 purpose로
+해석하고, 그 대응을 `lib/emailPreferenceCore.ts`의 `draftPurposeName`과
+`purposeForDraftName()`에 적어 둡니다. 다음 읽는 사람이 이름이 다르다는 이유로
+행을 하나 더 만들지 않도록.
+
+**층이 셋인 이유는 같은 사실을 두 장부가 말하지 않게 하기 위해서입니다.**
+동의는 `ConsentRecord` 하나가 말하고, 고지·거부·관계 같은 나머지 사실은
+`EmailPermissionEvent`가 말하며, 그 둘을 읽어 내린 결론은
+`EmailPermissionDecision`이 말합니다. 한 층이 다른 층의 값을 복사하면
+어느 쪽이 맞는지 물을 수 없게 됩니다.
+
+**`EmailPermissionEvent`** — 동의가 아닌 사실(불변, append-only)
+```
+id, userId -> User (SetNull)
+emailAddress       String   // 당시 주소
+kind               "notice_shown" | "objected" | "relationship_started"
+                   | "relationship_ended" | "basis_ended"
+scopeKey           String   // purpose·classification, 주소 자체면 "*". NULL 불가
+occurredAt         DateTime // 일어난 시각. 쓴 시각이 아님
+capturedVia        "signup_form" | "preference_center" | "unsubscribe_page"
+                   | "in_product_notice" | "admin" | "system"
+                   | "provider_complaint"
+sourceEventKey     String   // writer별 안정 key. 재시도가 행을 늘리지 않음
+addressNormalizationVersion String  // 위 주소를 만든 정규화 rule
+jurisdiction, jurisdictionSource
+policyVersionId    String   // NOT NULL
+evidence           Json?    // 화면 id, 고지 문안 hash. 원본 요청·본문은 금지
+@@unique([kind, sourceEventKey])
+```
+- **`basis_ended`와 `relationship_ended`는 다른 사건입니다.** 국가 rule이 바뀌어
+  근거가 끝나는 것과 그 계정이 관계를 끝내는 것은 같지 않고, "왜 발송을
+  멈췄는가"를 나중에 되짚으려면 둘을 구분해야 합니다.
+- **update·delete는 DB trigger가 거부합니다.** 응용 계층에만 있는 append-only는
+  한 번의 실수로 덮이고, 덮이는 그 행이 발송이 허용됐다는 증거입니다.
+- **예외는 딱 하나, 계정이 떨어져 나가는 전이입니다.** FK의 `ON DELETE SET NULL`은
+  referencing 행의 **UPDATE로 수행**되므로, 통째로 막으면 장부 행이 하나라도
+  있는 계정은 삭제가 실패합니다. `userId`가 값에서 `NULL`로 가고 **다른 컬럼은
+  움직이지 않는** 그 전이만 허용하며, 그것이 data domain registry가 적은
+  anonymisation입니다. 되붙이는 것은 거부합니다.
+- **정규화 rule을 저장합니다.** rule이 바뀌면 어느 행이 일치하는지가 바뀌고,
+  자기가 어느 rule을 썼는지 말하지 못하는 장부는 rule이 움직인 뒤 다시 유도할 수
+  없습니다.
+
+**`EmailSendApproval`** — 사람의 결정(봉인 후 불변)
+```
+id
+approvalType       "risk_accepted" | "obligation_waiver"
+approvedById, approvedByEmail, approvedAt
+reason, reviewCondition            // 둘 다 필수
+policyVersionId    String   // NOT NULL. 어느 policy version 아래 내려진 결정인지
+ruleKey, ruleVersion, country, obligationKey   // obligation_waiver의 범위
+purposeKey                                      // risk_accepted의 범위. "*" 가능
+sealedAt           DateTime?   // 닫히는 시각. 이후 아무것도 바뀌지 않음
+```
+- **두 유형은 한 가지의 변종이 아닙니다.** `risk_accepted`는 근거 없이 보내는
+  결정(초안 5.6), `obligation_waiver`는 표시·고지 의무를 하지 않기로 하는
+  결정(초안 7.8)입니다. 범위 컬럼이 서로 다르고 CHECK가 유형별로 강제하므로,
+  한쪽 범위를 실은 다른 유형의 행은 저장되지 않습니다.
+- **승인 행과 cohort 전체는 한 transaction에서 쓰고 `sealedAt`으로 닫습니다.**
+  봉인 뒤의 update·delete, 그리고 member의 insert·update·delete를 trigger가
+  거부합니다. 봉인하는 그 update도 **다른 컬럼을 함께 바꾸지 못합니다** —
+  그러지 않으면 "닫는다"가 곧 "고치고 닫는다"가 됩니다.
+- **row 수준 BEFORE trigger만으로는 부족합니다.** data-modifying CTE는
+  sub-statement와 main query가 **같은 snapshot**을 보므로,
+  `WITH s AS (UPDATE ... SET sealedAt ... RETURNING id) INSERT member ... FROM s`
+  에서 trigger는 봉인 **전** 값을 읽고 insert를 통과시킵니다. 그래서 statement가
+  끝날 때 부모의 최종 상태를 보는 **constraint trigger**를 함께 겁니다. BEFORE
+  trigger는 평범한 경우를 정확한 메시지와 잠금으로 막고, constraint trigger는
+  snapshot이 가린 것을 막습니다.
+- **`sealedAt`은 `approvedAt`·`createdAt`보다 뒤여야 합니다.** 과거 시각으로
+  봉인하면 봉인이 승인의 일부처럼 보이고, 한 번 잘못 쓴 행을 올바른 행과 구분할
+  수 없게 됩니다.
+- **`policyVersionId`는 NOT NULL입니다.** 어느 policy version 아래 내려진
+  결정인지 말하지 않는 승인은 이후의 모든 version에 적용되며, 그것은 범위의
+  반대입니다.
+- **철회는 `EmailSendApprovalRevocation` 행 추가**입니다. 승인 행은 건드리지
+  않습니다. 고칠 수 있는 승인은 무엇이 승인됐는지 증명하지 못합니다.
+
+**`EmailSendApprovalMember`** — cohort
+```
+id, approvalId -> EmailSendApproval (Restrict)
+userId
+addressDigest      String    // 승인 시점 정규화 주소의 SHA-256
+addressNormalizationVersion String
+noticeAnchorAt, noticeAnchorSource
+@@unique([approvalId, userId])
+```
+- **"78명"은 설명이고 이 목록이 범위입니다.** 주소는 digest로 담습니다 —
+  승인이 무엇을 덮는지 증명하면서 발송 목록의 두 번째 사본이 되지 않게.
+
+**`EmailPermissionDecision`** — 발송별 판정(생성 후 사실상 불변)
+```
+id
+deliveryId?        -> EmailDelivery (SetNull)
+userId?            -> User (SetNull)
+phase              "enqueue" | "send"
+purpose, classification, emailAddress
+addressNormalizationVersion String
+authorities        Json      // [{ authority, basis, verdict, reason }]
+legalAllowed       Boolean
+overrideApprovalId?, overrideType?   // 참조. 승인 내용을 복사하지 않음
+blockers           Json      // 정렬된 배열. 없으면 [] 이며 NULL이 아님
+allowed            Boolean
+pinnedDisplayContractHash?, requiredDisplayContractHash?, displayContractSatisfied?
+countryCandidates?, ruleVersions?
+policyVersionId    String   // NOT NULL
+suppressionCheckedAt?, providerSubmittedAt?
+sealedAt?          // evidence 집합을 닫는 시각
+evaluatedAt
+@@unique([deliveryId, phase])
+```
+- **한 delivery에 판정이 둘입니다**(초안 7.6). enqueue의 판정과 provider 제출
+  직전의 판정이고, `policyVersionId` 하나로 두 시점을 말할 수 없습니다.
+- **override를 썼어도 `legalAllowed`는 `false`로 남습니다.** CHECK가 이것을
+  강제합니다 — `true`로 적으면 "왜 나갔는가"에 답할 행이 사라지고, admin 화면에
+  허용으로 보이는 순간 다음 사람이 사업 결정을 동의로 읽습니다.
+- **`allowed`는 파생값이고 DB도 같은 식을 계산합니다** —
+  `(legalAllowed OR override) AND blockers가 비어 있음`. 두 곳에 있는 것이
+  요점입니다: 하나는 caller가 그 행을 만드는 것을 막고, 하나는 그래도 만들어진
+  행을 막습니다.
+- **override는 `(id, approvalType)` 복합 FK로 결속합니다.** id만 가리키면
+  `overrideType: "risk_accepted"`라고 적힌 판정이 실제로는 의무 면제를 가리킬 수
+  있고, `overrideType`의 CHECK는 그것을 알아채지 못합니다.
+- **insert 뒤에 허용되는 전이는 넷이고 각각 한 번뿐입니다** — 계정이 떨어지는
+  것, delivery가 떨어지는 것, evidence가 닫히는 것(`sealedAt`), provider 제출이
+  기록되는 것. **그 밖의 변경은 조용히 되돌리지 않고 예외를 냅니다** — 아무 일도
+  안 한 쓰기는 성공처럼 보이고, caller는 행이 말하지 않는 것을 말한다고 믿은 채
+  계속 갑니다.
+- **delivery는 Restrict가 아니라 SetNull입니다.** delivery는 자기 보존 주기에
+  따라 지워지고 **판정이 그보다 오래 남습니다.** 메일을 잃는 것이 그것을 허용한
+  이유까지 가져가서는 안 됩니다.
+- **`sealedAt` 전에는 provider에 넘길 수 없습니다.** CHECK가 강제합니다 —
+  evidence가 닫히기 전에 나간 메일은 나중에 근거가 붙을 수 있고, 그것은 고칠 수
+  있는 승인과 같은 결함입니다.
+
+**`EmailPermissionDecisionEvidence`** — 판정이 딛고 선 사건
+```
+id
+decisionId       -> EmailPermissionDecision (Cascade)
+eventId?         -> EmailPermissionEvent (Restrict)
+consentRecordId? -> ConsentRecord (Restrict)
+authority        String
+@@unique([decisionId, authority, eventId])
+@@unique([decisionId, authority, consentRecordId])
+```
+- 판정 안의 id 배열이 아니라 join 표입니다. 그래야 DB가 **판정이 인용한 행을
+  잃지 않고**, "이 판정은 무엇에 근거했나"가 파싱이 아니라 질의가 됩니다.
+  한 사건이 두 authority를 받칠 수 있습니다.
+- **출처는 둘이고 한 행에 정확히 하나입니다.** 동의는 `ConsentRecord` 하나가
+  말하므로 express-consent 판정은 그 장부를 **직접** 인용할 수 있어야 하고, 둘
+  다 가리키는 행은 한 사실이 두 장부에 있는 것이라 이 세 층 구조가 막으려는
+  바로 그것입니다. 둘 다 비면 근거 없는 주장입니다. CHECK가 양쪽을 막습니다.
+- **evidence는 판정과 함께 닫힙니다.** 판정과 그것이 딛고 선 행을 한
+  transaction에서 쓰고 `sealedAt`을 찍으면, 이후 evidence는 더해지지 않습니다.
+  없으면 판정이 **사후에 근거를 얻을 수** 있습니다. 여기에도 cohort와 같은
+  constraint trigger를 걸어 CTE 한 statement가 봉인과 insert를 함께 하는 경우를
+  막습니다.
 
 ### 10.3 발송 내용의 audit snapshot
 
@@ -3007,7 +3477,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
    ( ) transactional   ( ) service   ( ) legal   ( ) marketing
 
    -> 선택 즉시 화면 전체가 바뀝니다:
-      marketing:  수신자 = opt-in 사용자만. unsubscribe 강제. 승인 필수.
+      marketing:  수신자 = (수신자 authority 통과 AND 호주 발신자 authority 통과)
+                  OR 유효한 override. 그리고 blockers가 비어 있어야 합니다.
+                  override는 authority를 통과시키지 않습니다 — 판정에는
+                  legalAllowed: false가 그대로 남습니다(5.1.1, 초안 7.6).
+                  unsubscribe 강제. 승인 필수.
       legal:      수신자 = 전원(hard bounce 제외). unsubscribe 없음. 승인 필수.
       service:    수신자 = service_status ON. 승인 필요(단일 승인).
 
@@ -3453,19 +3927,25 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | M13 | 분류별 재시도 정책 | 9.4 표대로. legal abandoned가 critical incident |
 | M14 | 감사 로그 + 발송 이력 조회 | 13.7의 모든 항목 |
 
-### 15.2 MVP에 만들되 **비활성**으로 두는 것 (법률 검토 대기)
+### 15.2 MVP에 만들되 **비활성**으로 두는 것
 
-`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **활성화는 법률 검토 완료 후.**
+`AppSetting`의 flag 뒤에 fail-closed로 둡니다. **2026-09-16 개정(승인 A) 전에는
+"법률 검토 완료 후"가 활성화 조건이었습니다.** 지금은 항목마다 다르고, 아래 표가
+그것입니다 — marketing 발송의 선행 조건은 **발송 도메인 평판·싱가포르 수신거부
+주소**(초안 §13 R2·R3)이며, **EEA·영국에는 두 개가
+더** 걸립니다: **G**(soft opt-in을 근거로 쓰는 것)와 **21절 Q1의 잔여**(DE·FR·
+AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하므로
+`express_consent` 발송도 막습니다.
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1** 회신 하나만 남았습니다. Q8·Q12는 2026-09-14, **Q2는 2026-09-15** 해소 |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | **2026-09-16 개정(승인 A) 이후 Q1은 전역 차단이 아닙니다** — G가 막는 것은 **EEA·영국에서 soft opt-in을 근거로 쓰는 것**입니다(초안 §11 G). 그 밖의 국가는 5.1.1의 국가 rule이 정하고, 활성화 전에 닫아야 하는 것은 **싱가포르 수신거부 이메일 주소**(초안 §13 R3)와 **발송 도메인 평판**(초안 §13 R2)입니다. 구현 순서는 초안 §12를 **참고로** 따릅니다 — 일정이지 활성화 조건이 아니고, 5.1.1의 snapshot 고정 대상도 아닙니다. **다만 21절 Q1이 남긴 "그 넷 밖 국가의 첫 캠페인 전 국가별 확인"은 별개 질문이고 없어지지 않았습니다** — 그것은 근거에 대한 것이 아니라 **공통 baseline으로 아직 입증하지 못한 국가별 의무** 전반에 대한 것이라 `express_consent`로 보내는 EEA 발송에도 그대로 걸립니다. EU 지침은 국가법 전환을 요구하고, ePrivacy 제13조도 동의와 **별개로** 발신자 신원과 유효한 거부 주소를 요구합니다. 실제로 읽은 것은 DE·FR·AT·CH 넷뿐입니다. 즉 EEA는 **근거(G)와 국가별 의무 확인(Q1 잔여)** 두 가지가 **각각** 열려야 합니다. Q8·Q12는 2026-09-14, Q2는 2026-09-15 해소(그 뒤 승인 A가 개정) |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
-| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
+| `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | **한국 `(광고)`는 면제로 결정됐습니다**(초안 7.7 — 승인 D의 의무별 결정). 싱가포르 `<ADV>`는 **싱가포르 수신거부 주소(초안 §13 R3)와 함께** 확인합니다. ~~Q4~~는 야간 발송 창에 대한 질문이었고 2026-09-16에 해소됐습니다 — 접두어와 무관합니다 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
-| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | Q4 — 회신이 "전자우편은 예외 매체"이면 KR profile의 `quietHours`를 비우는 새 policy version 하나로 끕니다 |
+| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | ~~Q4~~ **해소 (2026-09-16)** — 시행령 제61조제2항이 전자우편을 야간 제한 대상에서 제외하므로 KR profile의 `quietHours`는 비어 있습니다. 기계는 그대로 두고, 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version입니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면
 나중에 급하게 만들게 되고, 급하게 만든 동의 시스템이 정확히 이 문서가 막으려는
@@ -3484,11 +3964,14 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 ## 16. 2단계 및 장기 로드맵
 
-### Phase 2 (법률 검토 완료 후, 약 1~2개월)
+### Phase 2 (약 1~2개월)
+
+**"법률 검토 완료 후"가 이 단계의 조건이었습니다. 2026-09-16 개정(승인 A) 이후
+그렇지 않습니다** — 조건은 항목마다 다르고 15.2의 표가 그것입니다.
 
 | 항목 | 내용 |
 |---|---|
-| marketing 발송 활성화 | **선행 조건: 5.3.1의 결정 2**(별도 Resend team/region 또는 별도 provider, 아니면 한 계정 유지 + 이메일 외 복구 수단 필수화)를 먼저 확정. 그 다음 flag 해제, `news.` 도메인 warm-up 시작(14.6) |
+| marketing 발송 활성화 | ~~5.3.1의 결정 2를 먼저 확정~~ — **A18이 2026-09-14에 해소됐습니다**(별도 Resend 계정, 22절). 남은 전역 선행 조건은 **싱가포르 수신거부 이메일 주소**(초안 §13 R3)·**발송 도메인 평판**(초안 §13 R2)이고, 그 다음 flag 해제와 `news.` 도메인 warm-up(14.6)입니다. **EEA·영국은 그 위에 두 개가 더** 있습니다 — soft opt-in을 근거로 쓰는 것은 **G**, DE·FR·AT·CH 밖 국가로 보내는 것은 **21절 Q1의 잔여**(공통 baseline으로 아직 입증하지 못한 국가별 의무)가 각각 막고, 뒤의 것은 근거와 무관해 `express_consent` 발송에도 걸립니다 |
 | 관리자 캠페인 UI | 12.2의 전체 플로우 + 이중 승인 |
 | 동의 2년 **확인 고지** 배치 | `nextConfirmationNoticeAt` 도래 시 고지 발송 -> `ConsentRecord("confirmation_notice_sent")` + 다음 주기로 이동. **동의는 유지됩니다.** 자동 opt-out은 `feature.emailConsentLapseAutoOptOut`이 켜진 경우에만(기본 OFF, 22절 A14) |
 | DMARC 강화 | `p=none` -> `p=quarantine` -> `p=reject` |
@@ -3603,8 +4086,60 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - **모든 지원 언어에 대해 published `TemplateVersion`이 존재.** 없으면 빌드 실패
   (현재 `normalizeLanguage`가 조용히 `en`으로 떨어지는 문제의 근본 해결).
 
-**gating (단위)**
-- marketing + opt-in 없음 -> `skipped:no_consent`
+**gating (단위)** — 판정은 5.1.1의 국가 rule과 호주 발신자 authority가 함께
+합니다. basis별로 갈립니다.
+
+- marketing + `express_consent` 국가(KR·EEA·GB·CH·CA·SG) + opt-in 없음 ->
+  `skipped:no_consent`
+- marketing + `opt_out` 국가(US) + 거부 없음 -> 수신자 authority 통과.
+  **발송 여부는 호주 발신자 authority가 정합니다**
+- marketing + `inferred_consent`(AU) + 관계 활성 -> 통과. 관계 종료 사건이
+  기록돼 있으면 -> `skipped:no_consent`
+- marketing + 국가 미확정(`ZZ`) -> 발송 안 함
+- marketing + 근거 없음 + 유효한 `risk_accepted` 승인의 cohort -> 발송하되
+  판정에는 `legalAllowed: false`와 `overrideApplied`가 남습니다(5.1.1)
+
+**위 목록만으로는 부족합니다.** 각 basis를 따로 통과시키는 구현은 물론이고,
+**override를 먼저 반환하거나 호주 발신자 authority를 아예 빼먹은 구현도** 그
+목록을 전부 통과합니다. 그래서 **합성과 우선순위를 따로 고정합니다.**
+
+- **US `opt_out` 통과 + 호주 발신자 authority 없음 -> 차단.** 같은 수신자에게
+  호주 authority가 생기면 -> 통과. 이 한 쌍이 "수신자 authority만 보는 구현"을
+  잡습니다
+- **`express_consent` 국가에서 동의가 있을 때도 양쪽을 모두 확인** — 동의 하나가
+  두 authority를 다 충족한다면 **그 사실이 기록에 남아야** 하고, 확인 없이
+  통과시키는 것과 구분됩니다(초안 §4.2)
+- **US + `objected` -> 차단.** `opt_out` 국가에서 거부는 거부입니다
+- **`risk_accepted` 양성 사례는 좁게** — 고신뢰 국가, 의무 상태가 정해진 rule,
+  blocker 없음일 때만 통과합니다
+- **같은 override에 blocker를 하나씩 따로 결합하면 전부 차단**입니다. 묶어서 한
+  번만 시험하면 그중 하나만 구현한 코드가 통과하고, 조기 반환 구현은 목록의
+  앞쪽만 만족시켜도 통과합니다. 초안 7.6의 `blockers` 전체입니다.
+
+  | 결합한 blocker | 기대 |
+  |---|---|
+  | `objected`(철회·거부) | 차단 |
+  | suppression — 전역 · classification · purpose **각각** | 차단 |
+  | 국가 미확정 `ZZ` | 차단 |
+  | `jurisdiction_conflict`(후보 충돌) | 차단 |
+  | 의무 상태 **미결** | 차단 |
+  | 의무 상태 **실패** | 차단 |
+  | kill switch | 차단 |
+  | send flag — `marketing` · `releaseNotes` · `collection` **각각** | 차단 |
+  | readiness 미충족 | 차단 |
+  | `display_unsatisfiable` — 후보의 표시 의무를 합성할 수 없음 | 차단 |
+  | 표시 계약 변경(`display_contract_changed`) | skip + 현재 version으로 재enqueue |
+  | 승인 유형이 `risk_accepted`가 아님 | override 미적용 → 차단 |
+  | 승인 scope 밖 — policy version · rule · country · obligation key **각각** | override 미적용 → 차단 |
+  | 승인 철회(`EmailSendApprovalRevocation`) | override 미적용 → 차단 |
+  | cohort 불일치 — `userId` · delivery에 고정된 주소 · send 시점 현재 주소 **각각** | 차단 |
+  | enqueue 이후 주소 변경 | 차단 |
+  | 계정 삭제 | 차단 |
+  | 주소 없음 | 차단 |
+
+  `allowed`는 `(legalAllowed || overrideApplied) && blockers가 비어 있음`이고,
+  **`blockers`는 override가 넘지 못합니다**(초안 7.6, 5.6의 표). 위 표의 모든
+  행이 그 한 문장을 각각 한 번씩 시험합니다.
 - marketing + `nextConfirmationNoticeAt` 경과 -> **발송됨**(동의는 유지). 별도로
   확인 고지가 큐에 들어감
 - marketing + `feature.emailConsentLapseAutoOptOut` ON + 고지 후 무응답 ->
@@ -3757,11 +4292,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | # | 위험 | 영향 | 완화 |
 |---|---|---|---|
 | R1 | **legal/service 메일에 프로모션을 섞어 marketing이 됨** | 법적 통지가 opt-out 사용자에게 도달하지 못함. 이중 위반 | 8.5 타입 분리, 12.2 분류 선점, 18.2 정적 검사 |
-| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 marketing 보류(정렬 시도 폐기), opt-in 시 국가 필수 수집, C1 전역 opt-in, C8 soft opt-in 미사용 |
+| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 marketing 보류(정렬 시도 폐기), opt-in 시 국가 필수 수집, **5.1.1의 국가 rule + 호주 발신자 authority의 이중 판정**(둘 다 통과해야 발송), 국가 미확정(`ZZ`)은 발송 안 함. ~~C1 전역 opt-in, C8 soft opt-in 미사용~~ — 2026-09-16 개정 전의 완화책이었고, **전역 opt-in이 사라지면서 관할권 오판의 비용이 다시 생겼습니다.** 그것을 받는 것이 이중 authority입니다 |
 | R3 | complaint suppression이 로그인 코드를 막음 | 사용자가 계정에서 잠김 | 13.3 출처별 억제(`sourceStream`), 우리 억제 목록이 판정 근거 |
 | R4 | marketing complaint가 transactional 도달률을 깎음 | 로그인 코드 미도달 | C9 **도메인** 평판만 분리. **IP·제공자 계정·suppression은 분리 안 됨**(5.3.1). 14.5 marketing 자동 중단, R23/R25로 이어짐 |
 | R5 | **한국 2년 확인 고지 누락** | 3천만원 이하 과태료 | C7/E7 전역 적용, 배치 자동화, `EmailPreference.nextConfirmationNoticeAt` 인덱스 |
-| R6 | 캐나다 묵시적 동의 만료 후 발송 | CASL 위반 | C8로 묵시적 동의 미사용 |
+| R6 | 캐나다 묵시적 동의 만료 후 발송 | CASL 위반 | **캐나다는 5.1.1에서 `express_consent`이고 해제 조건이 없습니다.** 개정된 C8이 허용하는 묵시적 동의는 **호주의 추론 동의 하나**이며, 그것은 초안 §4.4의 관계 lifecycle이 종료 사건을 기록해 **그 순간부터 발송 불가**로 만듭니다 — 만료를 시간으로 계산하지 않습니다 |
 | R7 | 호주 5영업일 초과 | Spam Act 위반 | C3 즉시 처리(SLA 24시간) |
 | R8 | unsubscribe token 유출 | 타인 설정 변경 | 11.4 끄기 전용, 범위 제한, URL 로그 마스킹 |
 | R9 | **provider 데이터 리전(미국)이 EU 요구와 충돌** | GDPR 이전 문제 | DPF + SCC 의존. **22절 A2에서 결정.** 필요 시 SES/MailerSend |
@@ -3778,7 +4313,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **R20** | **만료된 로그인 코드가 뒤늦게 도착** | 사용자가 입력해 실패 -> 계정 문제로 오해 | 9.4a — 발송 직전 소스 행 재확인, `skipped:credential_expired` |
 | **R21** | **nullable unique로 중복 발송** | 게스트 수신자에게 같은 메일 반복 | 10.2 `recipientKey`, `purposeKey` non-null |
 | **R22** | **감사 시 발송 본문을 재구성하지 못함** | 입증책임(CASL/호주) 대응 불가 | 10.3 `renderDataSnapshot`, 재현 창/검증 창 분리 |
-| **R23** | **제공자 계정 수준 억제가 transactional을 차단** — 추정이 아니라 **확인된 동작** | marketing을 켠 뒤, 프로모션을 스팸 신고한 사용자가 **이메일로 로그인 불가** | 5.3.1 — MVP는 Resend transactional 전용. marketing 전 계정 분리 결정(A18). 한 계정 유지 시 이메일 외 복구 수단 필수화 + suppression 등재 탐지 |
+| **R23** | **제공자 계정 수준 억제가 transactional을 차단** — 추정이 아니라 **확인된 동작** | marketing을 켠 뒤, 프로모션을 스팸 신고한 사용자가 **이메일로 로그인 불가** | 5.3.1 — **A18이 2026-09-14에 별도 Resend 계정으로 결정**했으므로 이 위험의 경로가 끊깁니다(22절). "한 계정 유지 시 이메일 외 복구 수단 필수화"는 그 선택지를 유지했을 때의 조건이었고, 적용되지 않습니다. 남은 것은 계정 분리가 실제로 배포됐는지 확인하는 일입니다 |
 | **R25** | **이메일이 유일한 로그인 수단인 사용자가 suppression에 오름** | 계정 접근 상실. 도달률 문제가 아니라 접근 문제 | 5.3.1 결정 3. OAuth 연결 유도, `login-methods` 카운터 활용, 지원 경로. **marketing 활성화 전에는 발생 불가**(complaint 원천이 없음) |
 | **R26** | **자격증명 payload를 저장했다가 백업·WAL로 유출** | 로그인 코드/매직링크 노출 | **방식 B 권고(미저장).** 방식 A를 택하면 9.4a-2의 네 조건 전부 + 키를 DB 밖에 보관. 라이브 테이블 밖은 파기되지 않음을 명시 |
 | **R27** | 자격증명이 담긴 본문의 단순 해시가 역산됨 | 6자리 코드 노출(10^6 공간) | 9.4a-4, 10.3 — `renderedHash`를 전 분류 HMAC으로 |
@@ -3790,7 +4325,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | # | 질문 | 왜 중요한가 | 막히는 것 |
 |---|---|---|---|
-| **Q1 (부분 해소 2026-09-14)** | **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
+| **Q1 (부분 해소 2026-09-14 · 2026-09-16 이후 근거 부분은 EEA·영국 한정)** | **2026-09-16 개정(승인 A)이 답한 것은 이 질문의 근거 부분입니다** — EEA·영국에서 soft opt-in을 근거로 쓰는 것은 G가 막고(초안 §11 G), 다른 국가는 5.1.1의 국가 rule이 정합니다. **근거가 아닌 부분은 그대로 남습니다**: 이 행의 "남은 것" 칸이 말하는 국가별 확인은 **공통 baseline으로 아직 입증하지 못한 국가별 의무**에 대한 것이고, 근거와 무관하므로 `express_consent`로 보내는 EEA 발송에도 걸립니다. **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
 | ~~Q2~~ | **해소 (2026-09-15 승인, 승인자 `mposition`, 효력일 2026-09-15). 선택지 A — C1 + C8 현행 유지.** 근거는 운영 실측입니다: 계정 78개, 세 marketing purpose 모두 `enabled` **0**, `provable` 0, `unprovable` 0, `sendable` 0(2026-09-15 03:15Z, `GET /api/admin/marketing-reach`). **영향란이 전제한 "크게 줄어들 대상"이 존재하지 않았습니다** — C1·C8이 치르는 것은 지금 잃는 사람이 아니라 앞으로 모으는 속도이고, 대안(soft opt-in, 미국·싱가포르 opt-out)도 소급되지 않아 같은 0에서 시작합니다 | [Q2 도달 범위 결정 기록](../ops/q2-marketing-reach-decision.md) §2.1 | 해소. **코드 변경 없음** — 이미 구현된 상태를 승인한 것입니다. 부수 확인: `unprovable` 0이므로 DOI 도입 시 재동의가 필요한 인구가 없습니다 |
 | Q3 | 약관/개인정보처리방침/가격 변경 시 **사전 통지 기간**이 관할권별로 얼마인가? | 5번 유형의 발송 시점을 정함 | 정책 변경 프로세스 |
 | ~~Q4~~ | **해소 (2026-09-16). 예 — 전자우편은 예외 매체입니다.** 제50조제3항 단서의 "대통령령으로 정하는 매체"를 **시행령 제61조제2항이 전자우편으로 정합니다.** 근거는 방송미디어통신위원회·KISA 「불법스팸 방지를 위한 정보통신망법 안내서」(KISA-GD-2025-0037, 2025.12)이며, 전자우편은 수신 확인의 즉시성이 낮아 이용자 통제가 쉽다는 이유를 적고 있습니다. **따라서 E5는 어느 profile에도 적용되지 않고, KR profile의 `quietHours`를 비웠습니다**(seed 버전 `2026-09-16.jurisdictions.2`). 지연 기계는 lane에 남습니다 — 창은 정책 버전 데이터이고, 필요해지면 seed 한 줄입니다 | 4.3 한국 항목, 5.2 E5 | 해소. **남는 것 둘:** ① 시행령 원문 관보 대조(안내서 재수록과 2차 출처 일치로만 확인) ② **이메일 밖 채널** — 같은 내용을 SMS·푸시·알림톡으로 보내면 그쪽은 여전히 야간 별도 동의 대상이며 이 결론이 덮지 않습니다 |
@@ -3822,7 +4357,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **A2** | **EU 데이터 리전이 요구사항이 아니다** | 현재 Resend(미국 저장, DPF+SCC)를 이미 쓰고 있음 | **요구사항이라면 제공자 추천이 SES(`eu-central-1`) 또는 MailerSend로 바뀜. 8절 전체 재작성** |
 | **A3** | **일본은 현재 서비스 대상이 아니다** | `ja` locale 없음, JPY 통화 없음 (2.5, 2.7) | 대상이면 locale 추가 + 특정전자메일법 profile + 동의 기록 보존 규칙(Q5) |
 | **A4** | **중국은 현재 marketing 대상이 아니다** | 조사하지 않음. 그러나 **CNY 통화와 zh locale이 이미 존재** | **CNY 결제 사용자가 중국 거주자라면 PIPL/광고법 대응 없이 마케팅을 보내게 됨. 별도 규제 조사 필수** |
-| **A5** | **전역 opt-in의 사업적 비용을 감수한다** | 5.3의 법적 논거 | 마케팅 도달 가능 사용자가 크게 줄어듦. Q2 |
+| ~~**A5**~~ | ~~**전역 opt-in의 사업적 비용을 감수한다**~~ — **2026-09-16 개정(승인 A)으로 전제가 사라졌습니다.** 권한은 국가 rule이 정하므로 "전역 opt-in의 비용"이라는 항목 자체가 없어졌습니다. 개정 전 기록으로 남깁니다 | 5.3의 법적 논거 | 당시 근거였던 "크게 줄어듦"은 2026-09-15 실측에서 **줄어들 대상이 0**으로 확인됐습니다(Q2) |
 | A6 | 월 발송량 5만 통 미만, 사용자 수 수만 명 규모 | 미제공. 저장소 규모와 단일 Postgres 구성에서 추정 | 10배 이상이면 전용 IP와 발송 인프라 재검토 |
 | A7 | 제공자 가격이 2026-08-21 공개 정보와 일치 | 7.1 주석 | 계약 시 재확인 |
 | A8 | 지원 언어는 현행 7개(en/ko/zh/fr/de/es/pt) | `locales/` 조사 | 언어 추가 시 M2가 그것을 쉽게 만듦 |
@@ -3956,10 +4491,15 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 **2026-08-21 승인.** 이 문서는 이 시점부터 **ADR**이며, 아래 결정은 변경하려면
 새 개정과 재승인이 필요합니다.
 
-**v1에서 조건부 승인된 것 (재확인만):**
+**v1(2026-08-21)에서 조건부 승인된 것 — 당시의 기록이며, 그중 하나는 이후
+개정됐습니다:**
 1. 8절의 제공자 결정 (Resend 유지 + 얇은 port)
 2. outbox / consent / suppression / jurisdiction 계층 분리
-3. 5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)
+3. ~~5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)~~ — **2026-09-16 승인 A·C가
+   개정했습니다**(v29, D4). 지금의 C1은 **수신자 국가 rule + 호주 발신자
+   authority의 이중 판정**이고 C8은 **국가 rule이 허용하는 곳에서만 묵시적 동의**
+   입니다(5.1.1). 이 줄을 지우지 않는 이유는 22절의 다른 승인 기록과 같습니다 —
+   한 번 그렇게 정했다는 사실이 없어지면 왜 개정했는지에 답할 수 없습니다
 4. 15절의 MVP 범위와 "만들되 끄는" 항목 목록
 
 ### 확정된 결정
@@ -3969,7 +4509,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D1 | 제공자는 **Resend 유지**, `lib/email.ts` 자리에 얇은 `EmailProviderPort`. 구현체는 하나 | 8.1, 8.2 |
 | D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
-| D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 — **승인됨 (2026-09-15, `mposition`).** 21절 Q2 |
+| D4 | ~~**전역 opt-in(C1)**, **soft opt-in 미사용(C8)**~~ → **국가 rule + 호주 발신자 authority의 이중 판정** | 5.1, 5.1.1, 5.6 — **2026-09-15 승인(`mposition`) 뒤 2026-09-16에 개정됐습니다**(승인 A·C, 제품 소식 재설계 초안 §11). 21절 Q2는 개정 이전 상태에 대한 해소입니다 |
 | D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
@@ -3978,9 +4518,10 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 
 ### 착수 전 남은 것
 
-1. **`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13). 이 문서에서
-   유일하게 남은 미확인 항목입니다. Route Handler 시그니처, `after()` 지원 여부,
-   캐시 기본값을 읽고 9.7의 배치를 확정합니다.
+1. ~~**`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13)~~ — **해소
+   (2026-08-21).** Route Handler는 기본 비캐시이고 `after()`는 응답 이후 실행이라
+   credential lane에 부적합하다는 것을 읽었습니다. 결과는 9.7에, 해소 기록은 22절
+   A13에 있습니다.
 2. **21절 법률 질문 후속.** Q8은 해소됐습니다 — 사업자 정보 실제 값이
    2026-09-14 production에 배포됐고 `/api/ready`의 `emailBusinessIdentity`가
    `true`입니다(`docs/ops/email-sending-domains.md` §1.3). Q11은 Customer 법적 명칭과 확인 가능한 최초 계정·결제일의 내부 기록,
@@ -3990,17 +4531,23 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
    Q18은 production aggregate 확인까지 완료했고 저장된 EEA 신호는 모두 0이었습니다.
    대표는 2026-09-14 **EU 출시 유지 + EU 대리인을 최대한 빠른 시일 내 지정**을
    승인했습니다. 사업 경로 결정은 끝났고 provider·요금제 선택, 서면 위임과
-   `/privacy` 반영이 남았습니다. 이 결정은 EU marketing의 Q1·Q8·Q12와 A18을
-   자동 해소하지 않습니다.
-3. **브랜치 정책 확인.** 현재 브랜치 `claude/saas-email-notification-architecture-764951`은
-   이름에 `to-develop` 경로 조각이 없어 develop 자동 PR 대상이 아닙니다
-   (AGENTS.md). 구현은 `claude/to-develop/...` 브랜치에서 진행하는 것을 권고합니다.
+   `/privacy` 반영이 남았습니다. 이 결정은 EU marketing의 Q1을 자동 해소하지
+   않습니다. **Q8·Q12·A18은 각자 따로 해소됐습니다** — Q8은 2026-09-14(사업자
+   정보 배포), Q12는 2026-09-14(`/privacy`의 이메일 처리 고지), A18은
+   2026-09-14(별도 Resend 계정). 셋 다 이 D9 결정이 해소한 것이 아니라 같은 무렵
+   별개로 닫힌 것이고, 그래서 여기에 묶여 있었습니다.
+3. **브랜치 정책 확인.** 이 문서의 작업은 `claude/to-develop/...` 브랜치에서
+   진행합니다 — `to-develop` 경로 조각이 있는 브랜치만 develop 자동 PR 대상입니다
+   (AGENTS.md). v1을 쓸 당시의 브랜치는 그 조각이 없었고, 그 이름은 더 이상
+   존재하지 않아 지웠습니다.
 
 ### marketing 활성화 전에 결정할 것 (MVP 착수를 막지 않음)
 
 - ~~**A18**~~ — **결정됨 (2026-09-14): 별도 계정.** 위 22절 참조.
 - **A14**(자동 opt-out 채택), **A2**(EU 리전), **A3**(일본), **A4**(중국),
-  **A1**(B2C/B2B), **A5**(opt-in 비용). ~~**A17**~~(profile 개수 — v5에서 9개로 확정).
+  **A1**(B2C/B2B) — **다섯이 남았습니다**. ~~**A5**~~(opt-in 비용)는 2026-09-16
+  개정으로 전제가 사라져 결정할 것이 없고, ~~**A17**~~(profile 개수)은 v5에서
+  9개로 확정됐습니다.
 
 ### 참고 — v2에서 승인된 항목
 5. **9.4a credential synchronous lane** — 세 행 한 트랜잭션, 만료 코드 미발송,
@@ -4023,6 +4570,7 @@ MVP 착수를 차단하지 않습니다. SCC/UK Addendum에 대한 Resend 서면
 fallback 재검토 조건이 발생할 때만 실행합니다.
 
 **MVP 착수는 위 A/B 결정만 있으면 가능합니다.** 5.3.1의 계정 분리 결정(A18)은
-marketing 활성화의 선행 조건이지 MVP의 선행 조건이 아닙니다 — MVP가 marketing을
-포함하지 않기 때문입니다. 다만 M1b가 "marketing 도메인·API 키를 만들지 않는다"를
+marketing 활성화의 선행 조건이었고 **2026-09-14에 내려졌습니다**(별도 Resend
+계정). 애초에 MVP의 선행 조건은 아니었습니다 — MVP가 marketing을 포함하지 않기
+때문입니다. 다만 M1b가 "marketing 도메인·API 키를 만들지 않는다"를
 산출물 기준으로 못박습니다.

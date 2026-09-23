@@ -1,0 +1,47 @@
+{
+  "task_id": "TASK-1",
+  "worker": "codex-a",
+  "expected_revision": 1,
+  "decision": {
+    "scheduler_score": 32,
+    "scoring_version": "amux-global-priority-v1",
+    "signals": {
+      "scheduler": {
+        "pin": 0,
+        "age_hours": 0,
+        "type_weight": 12,
+        "priority_weight": 20,
+        "dependents": 0,
+        "dependent_weight": 0,
+        "drag": 0
+      },
+      "routing": {
+        "scoring_version": "amux-worker-router-v1",
+        "preferred_worker": "codex-a",
+        "selected_worker": "codex-a",
+        "preferred_score": 0.6875,
+        "selected_score": 0.65,
+        "candidates": [
+          {
+            "worker_name": "codex-a",
+            "provider": "codex",
+            "breakdown": {
+              "task_fit": { "role_fit": 1, "provider_fit": 1, "combined": 1, "large_task": false },
+              "predicted_success": { "value": 0.5, "observed": false },
+              "quota_remaining": { "value": 0.5, "observed": false },
+              "expected_speed": { "value": 0.5, "observed": false },
+              "low_rework": { "value": 0.5, "observed": false },
+              "low_human_attention": { "value": 0.5, "observed": false },
+              "cost_efficiency": { "value": 0.5, "observed": false },
+              "selected_score": 0.65,
+              "intrinsic_score": 0.6875,
+              "operationally_allowed": true,
+              "provider_exhausted": false,
+              "selected_eligible": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}

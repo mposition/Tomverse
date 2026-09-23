@@ -5,7 +5,21 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { createMarketingChannel } from "@/lib/marketingStore";
+import { createHash } from "node:crypto";
+
+import {
+  createMarketingChannel,
+  insertAutonomousScheduledMarketingPost,
+  marketingEnvelopeDigest,
+  runMarketingTransaction,
+  MarketingStoreRefusedError,
+} from "@/lib/marketingStore";
+import {
+  guardDraft,
+  sealMarketingFacts,
+  sealMarketingGuardContext,
+  sealMarketingTemplateProof,
+} from "@/lib/marketingGuardCore";
 import {
   MARKETING_POST_APPROVE_ACTION,
   MARKETING_POST_EDIT_ACTION,
@@ -161,6 +175,7 @@ async function approvedPost(channelId: string, digest = DIGEST) {
         modelRegistryRows: [],
         evidenceDigests: [],
       },
+      factsDigest: DIGEST,
       guardDecision: "approval_required",
       guardCodes: [],
       guardRuleIds: [],
@@ -237,6 +252,7 @@ async function autonomousPost(
         modelRegistryRows: [],
         evidenceDigests: [],
       },
+      factsDigest: DIGEST,
       guardDecision: "autonomous_eligible",
       guardCodes: [],
       guardRuleIds: [],
@@ -368,6 +384,22 @@ test("a post approved and then marked reusable is a template", async () => {
     result.template.markedReusableAt.getTime() >
       result.template.approvedAt.getTime(),
     "the marking is the later of the two decisions",
+  );
+
+  // The proof carries the scope the approval was actually given in, and the
+  // revision every check above was made against. Without the first, one
+  // account's approval published from another account in another language;
+  // without the second, the publish has nothing to make its write conditional
+  // on and an edit landing in between goes out as approved words.
+  assert.equal(result.template.proof.templateId, post.id);
+  assert.equal(result.template.proof.channelId, row.id);
+  assert.equal(result.template.proof.channel, "linkedin");
+  assert.equal(result.template.proof.locale, "en");
+  assert.equal(result.template.proof.historyVersion, 0);
+  assert.equal(result.template.proof.approvedDigest, DIGEST);
+  assert.ok(
+    result.template.proof.provenAt <= Date.now(),
+    "the proof is stamped when it is minted, not by whoever asked for it",
   );
 });
 
@@ -538,6 +570,7 @@ test("a post that is not approved, purged or deleted is not a template", async (
         modelRegistryRows: [],
         evidenceDigests: [],
       },
+      factsDigest: DIGEST,
       guardDecision: "approval_required",
       guardCodes: [],
       guardRuleIds: [],
@@ -1032,4 +1065,267 @@ test("an inherited actorHadMarketingWrite is not a recorded permission", async (
   } finally {
     delete (Object.prototype as Record<string, unknown>).actorHadMarketingWrite;
   }
+});
+
+// ---------------------------------------------------------------------------
+// The autonomous insert, end to end, against a real database
+// ---------------------------------------------------------------------------
+//
+// The unit suite proves the store's refusals against a fake that answers what
+// the test handed it. This proves the two things a fake cannot: that the
+// statements the store actually writes read the columns and statuses it means
+// them to, and that the row it produces satisfies the trigger. Twice now a
+// rule that the code and its fakes agreed on turned out to be one PostgreSQL
+// refused -- so the path that matters is exercised here rather than described.
+
+const AUTONOMOUS_TEXT = "Three answers to one question, side by side.";
+const AUTONOMOUS_CLAIM = "claim.compare";
+const AUTONOMOUS_ASSET = "asset.hero";
+
+/** A channel that has graduated, which is the only kind autonomy may write to. */
+async function autonomousChannel() {
+  const row = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      status: "autonomous_mode",
+      graduatedAt: new Date(),
+      graduationSnapshot: {
+        graduationEpoch: 0,
+        approvedPostCount: 20,
+        guardRejectionRate: 0,
+        operatorEditRate: 0,
+        observedFromAt: new Date().toISOString(),
+        observedUntilAt: new Date().toISOString(),
+        approvalAuditLogId: "audit-graduation",
+        policyVersion: 1,
+      },
+    },
+  });
+  return row;
+}
+
+/** A post this account has published, carrying the claim and the asset. */
+async function publishedCarrying(channelId: string) {
+  const post = await approvedPost(channelId, OTHER_DIGEST);
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      status: "scheduled",
+      claimIds: [AUTONOMOUS_CLAIM],
+      assetIds: [AUTONOMOUS_ASSET],
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: post.id },
+    data: {
+      status: "publishing",
+      publishAttempt: 1,
+      providerRequestKey: post.logicalKey,
+    },
+  });
+  return prisma.marketingPost.update({
+    where: { id: post.id },
+    data: { status: "published", publishedAt: new Date() },
+  });
+}
+
+/**
+ * Everything `insertAutonomousScheduledMarketingPost` needs, built from the
+ * rows that are actually in the database.
+ *
+ * The template proof is made from the stored row rather than from constants,
+ * so a fixture that drifted from what the approval wrote would fail the
+ * store's own binding check instead of quietly testing a different row.
+ */
+async function autonomousInsertInput(accountId: string, templateId: string) {
+  const template = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: templateId },
+  });
+  const account = await prisma.marketingChannel.findUniqueOrThrow({
+    where: { id: accountId },
+  });
+
+  const slot = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const envelope = {
+    channel: "linkedin" as const,
+    accountSlug: account.accountSlug,
+    locale: "en" as const,
+    renderedText: AUTONOMOUS_TEXT,
+    claimIds: [AUTONOMOUS_CLAIM],
+    assets: [{ assetId: AUTONOMOUS_ASSET, altKey: "alt.hero" }],
+    finalUrl: null,
+    scheduledAt: slot.toISOString(),
+    disclosureFlags: [] as ("advertising" | "ai_generated_asset" | "paid_partnership")[],
+  };
+  const factSnapshot = {
+    catalogue: null,
+    evidenceDigests: [],
+    modelRegistryRows: [],
+    priceRows: [],
+  };
+  const facts = sealMarketingFacts({
+    channelId: accountId,
+    channel: "linkedin",
+    locale: "en",
+    claims: [
+      {
+        claimId: AUTONOMOUS_CLAIM,
+        type: "feature",
+        known: true,
+        featurePublic: true,
+        evidenceStatement: AUTONOMOUS_TEXT,
+        usedBefore: true,
+      },
+    ],
+    assets: [{ assetId: AUTONOMOUS_ASSET, known: true, usedBefore: true }],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(factSnapshot), "utf8")
+      .digest("hex"),
+  });
+
+  const decision = guardDraft({
+    draft: {
+      templateId: template.id,
+      renderedText: AUTONOMOUS_TEXT,
+      locale: "en",
+      channel: "linkedin",
+      channelId: accountId,
+      claimIds: [AUTONOMOUS_CLAIM],
+      assetIds: [AUTONOMOUS_ASSET],
+    },
+    facts,
+    templates: [
+      sealMarketingTemplateProof({
+        templateId: template.id,
+        channelId: accountId,
+        channel: "linkedin",
+        locale: template.locale,
+        historyVersion: template.historyVersion,
+        status: template.status,
+        approvedDigest: template.approvedDigest ?? "",
+        renderedTextDigest: createHash("sha256")
+          .update(AUTONOMOUS_TEXT, "utf8")
+          .digest("hex"),
+        slotsFromRegistry: true,
+        claimIds: [AUTONOMOUS_CLAIM],
+        assetIds: [AUTONOMOUS_ASSET],
+      }),
+    ],
+    context: sealMarketingGuardContext({
+      priceFallbackAlertReady: true,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    }),
+  });
+  assert.equal(
+    decision.verdict,
+    "autonomous_eligible",
+    `fixture is not autonomous: ${JSON.stringify(
+      "codes" in decision ? decision.codes : [],
+    )}`,
+  );
+  if (!("templateBinding" in decision)) throw new Error("no binding");
+
+  return {
+    channelId: accountId,
+    locale: "en" as const,
+    kind: "social" as const,
+    logicalKey: `auto-${Math.random().toString(36).slice(2)}`,
+    envelope,
+    envelopeDigest: marketingEnvelopeDigest(envelope),
+    rendererVersion: "r1",
+    templateId: template.id,
+    templateDigest: template.approvedDigest ?? "",
+    claimIds: [AUTONOMOUS_CLAIM],
+    assetIds: [AUTONOMOUS_ASSET],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshot,
+    decision,
+    draftedAt: new Date(),
+    binding: decision.templateBinding,
+    facts,
+    admissionCodeDigest: "c".repeat(64),
+    configGeneration: 3,
+    deploymentId: "deployment-under-test",
+    commitSha: "a".repeat(40),
+    resolveAdmission: async () => ({
+      autonomousPublish: true,
+      admissionCodeDigest: "c".repeat(64),
+      configGeneration: 3,
+      deploymentId: "deployment-under-test",
+    }),
+  };
+}
+
+test("the store writes an autonomous scheduled post the trigger accepts", async () => {
+  const account = await autonomousChannel();
+  const template = await approvedPost(account.id);
+  await markReusable(template.id);
+  await publishedCarrying(account.id);
+
+  const input = await autonomousInsertInput(account.id, template.id);
+  const created = await runMarketingTransaction(
+    prisma,
+    (tx) => insertAutonomousScheduledMarketingPost(tx, input as never),
+    { isolationLevel: "Serializable" },
+  );
+
+  const row = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: created.id },
+  });
+  assert.equal(row.status, "scheduled");
+  assert.equal(row.mode, "autonomous");
+  assert.equal(row.guardDecision, "autonomous_eligible");
+  assert.deepEqual(row.guardRuleIds, []);
+  assert.equal(row.historyVersion, 0);
+  assert.equal(row.approvalAuditLogId, null);
+  assert.equal(row.reusableAsTemplate, false);
+
+  // And its audit entry is in the chain, in the same transaction.
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "marketing_post.autonomous_scheduled", targetId: row.id },
+  });
+  assert.ok(audit, "the insert wrote no audit entry");
+});
+
+test("the store refuses when the claim's prior publication is gone", async () => {
+  const account = await autonomousChannel();
+  const template = await approvedPost(account.id);
+  await markReusable(template.id);
+  const evidence = await publishedCarrying(account.id);
+
+  // Out of the published statuses, which is what an unpublish or a retention
+  // delete does. The decision was sealed while it was still there.
+  const input = await autonomousInsertInput(account.id, template.id);
+  await prisma.marketingPost.update({
+    where: { id: evidence.id },
+    data: { status: "deleted", deletedAt: new Date() },
+  });
+
+  await assert.rejects(
+    runMarketingTransaction(
+      prisma,
+      (tx) => insertAutonomousScheduledMarketingPost(tx, input as never),
+      { isolationLevel: "Serializable" },
+    ),
+    (error: unknown) =>
+      error instanceof MarketingStoreRefusedError &&
+      error.code === "autonomous_insert_claim_no_longer_used",
+  );
+
+  // Nothing was written: the refusal aborts the transaction the audit entry
+  // would have been part of.
+  const written = await prisma.marketingPost.count({
+    where: { channelId: account.id, status: "scheduled" },
+  });
+  assert.equal(written, 0);
 });
