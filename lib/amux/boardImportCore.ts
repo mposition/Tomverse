@@ -674,9 +674,18 @@ export const boardImportConflictLedger = (
       card.deliveryCount > 0 ||
       card.routeDecisionCount > 0;
     const reasons = BOARD_IMPORT_CONFLICT_REASON_CODES.filter((code) => {
-      if (code === "active_execution") return active;
-      if (code === "other_conflict") return !drifted && !active;
-      return drifted;
+      switch (code) {
+        case "active_execution":
+          return active;
+        case "other_conflict":
+          return !drifted && !active;
+        case "source_drift":
+          return drifted;
+        default: {
+          const unreachable: never = code;
+          return unreachable;
+        }
+      }
     });
     entries.push({ key, reasons });
   }
