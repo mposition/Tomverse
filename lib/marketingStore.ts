@@ -2688,7 +2688,7 @@ type LockedMarketingPost = {
   claimRegistryVersion: number;
   assetRegistryVersion: number;
   factSnapshot: Prisma.JsonValue;
-  factsDigest: string | null;
+  factsDigest: string;
 };
 
 async function lockMarketingPost(
