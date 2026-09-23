@@ -5027,18 +5027,28 @@ model AmuxWorkItem {
   id             String    @id @default(cuid())
   title          String
   description    String?
-  status         String    @default("todo")
-  kind           String    @default("unknown")
-  priority       String    @default("p3")
-  pinned         Boolean   @default(false)
-  drag           Int       @default(0)
+  /// New rows default to non-dispatchable backlog. This schema imports no
+  /// cards and does not promote backlog rows to runnable Todo.
+  status         String   @default("backlog")
+  kind           String   @default("unknown")
+  priority       String   @default("p3")
+  pinned         Boolean  @default(false)
+  drag           Int      @default(0)
   owner          String?
   classification Json?
   revision       Int       @default(0)
   claimedAt      DateTime?
   archivedAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  /// Null together for pre-migration or independently created cards. Imported
+  /// cards supply canonical lowercase source system, uppercase source key,
+  /// printable non-whitespace version, SHA-256 digest, and a nonempty object snapshot.
+  sourceSystem   String?
+  sourceKey      String?
+  sourceVersion  String?
+  sourceDigest   String?
+  sourceSnapshot Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
@@ -5048,6 +5058,7 @@ model AmuxWorkItem {
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
+  @@unique([sourceSystem, sourceKey])
 }
 
 model AmuxWorkDependency {
