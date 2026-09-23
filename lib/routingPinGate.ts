@@ -1,5 +1,5 @@
 /**
- * Provider / deployment pin, ADR v2.1 §3.5.
+ * Provider / deployment pin.
  *
  * A pin is a hard override. It shrinks the candidate set to its target and
  * turns exploration off. Capability, quality, version, residency and
@@ -11,7 +11,7 @@
  * general pool, and only for a candidate the pin itself did not accept.
  *
  * The request path does not call this. `freezeRequestPolicy` is the pair a
- * request holds from the moment it starts (ADR v2.1 §2.1): the control-plane
+ * request holds from the moment it starts: the control-plane
  * manifest and the account policy, together. The two columns on RoutingRun
  * are dark. This module does not write them. There is no workspace in this
  * product, so the ADR's workspace policy is the account policy.

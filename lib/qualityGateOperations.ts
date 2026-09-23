@@ -1,5 +1,5 @@
 /**
- * Quality-gate expiry and drift scheduling, ADR v2.1 §3.2 and §9.
+ * Quality-gate expiry and drift scheduling.
  *
  * Pure. Nothing reads a deployment row. The status stored on a row and the
  * status a request may trust diverge once the expiry instant has passed: the
@@ -17,7 +17,7 @@ import {
 } from "@/lib/deploymentIdentity";
 
 /**
- * The signals §9.3 names. A report uses one of these. Anything else is not
+ * The signals a drift report may name. A report uses one of these. Anything else is not
  * evidence that the gate is still current.
  */
 export const QUALITY_DRIFT_SIGNALS = [
@@ -78,7 +78,7 @@ const namedTier = (value: string | null | undefined): string | null => {
 };
 
 /**
- * ADR §3.2, using the effective status rather than the stored one.
+ * Using the effective status rather than the stored one.
  *
  * The required tier and the deployment tier both have to be present and
  * equal. Blank is not a tier. Eligibility also requires a pass that has not

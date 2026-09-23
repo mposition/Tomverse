@@ -1,11 +1,11 @@
 /**
- * Resolving a credential secret from a reference, ADR v2.1 §12.1 and §12.2.
+ * Resolving a credential secret from a reference.
  *
  * The row holds a reference, a billing owner and a status. The secret is
  * looked up by that reference from a caller-supplied vault. This function
  * does not open a database, does not read an environment variable, and does
  * not accept a secret field on the facts: a plaintext key beside the
- * reference would be the thing §12.1 forbids.
+ * reference would store the secret itself, which this module does not do.
  *
  * A missing expiry is not treated as expired. Choosing a lifetime would be
  * inventing one. A missing rotation instant does not refuse the lookup.

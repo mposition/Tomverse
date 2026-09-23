@@ -1,5 +1,5 @@
 /**
- * Load guard, ADR v2.1 §8.5.
+ * Load guard.
  *
  * The sentence is: check credential capacity and deployment load before and
  * after softmax; treat a momentary saturation by decaying weight; do not move

@@ -1,6 +1,6 @@
 /**
  * Counterfactual replay, the named fault list, and config promotion.
- * ADR v2.1 §15.2, §15.3 and §15.5.
+ * Counterfactual replay, named faults, and one-step promotion.
  *
  * The objective stays lexicographic. A weighted objective is not an input,
  * and this module does not compute one.
@@ -94,7 +94,7 @@ const band = (value: unknown): value is RouterQualityBand =>
     (ROUTER_QUALITY_BANDS as readonly number[]).includes(value);
 
 /**
- * The next state in §15.5, and only the next one.
+ * The next promotion state, and only the next one.
  *
  * Draft, offline replay, fault simulation, shadow, small canary, wider
  * canary, active. Skipping, repeating and moving backwards are the same

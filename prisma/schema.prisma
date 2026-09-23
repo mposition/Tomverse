@@ -3975,7 +3975,7 @@ model RoutingRun {
   selectionPolicyVersion String?
 
   /// The control-plane manifest and the account policy, read once when the
-  /// request started (ADR v2.1 §2.1). A promotion during the request is a
+  /// request started. A promotion during the request is a
   /// different policy and is not written back here.
   ///
   /// Both null, or both set. Null is not the policy that is active now, and

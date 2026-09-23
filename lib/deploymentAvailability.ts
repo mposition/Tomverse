@@ -1,5 +1,5 @@
 /**
- * Deployment availability, ADR v2.1 §7.2 and §7.3.
+ * Deployment availability and its breaker.
  *
  * Capacity is not this. A 429 and a malformed output do not move the
  * breaker and do not enter the failure risk. Quality drift is a separate

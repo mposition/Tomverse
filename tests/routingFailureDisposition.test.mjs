@@ -17,7 +17,7 @@ const at = (result, overrides = {}) =>
         ...overrides,
     });
 
-test("each §11.2 row has one disposition, and an unknown result has none", () => {
+test("each classification row has one disposition, and an unknown result has none", () => {
     assert.equal(at("rate_limited").otherDeployment, "required");
     assert.equal(at("rate_limited").breaker, false);
 

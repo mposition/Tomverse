@@ -1,5 +1,5 @@
 /**
- * What a classified routing failure is allowed to do, ADR v2.1 §11.1 and §11.2.
+ * What a classified routing failure is allowed to do.
  *
  * This is not a second error taxonomy. `lib/providerErrorClassification.ts`
  * already says what the provider call was. The question here is the next
@@ -7,7 +7,7 @@
  * Nothing in this file classifies an HTTP status, sends an alert, or writes
  * a row.
  *
- * `transport_corruption` is not named in the §11.2 row. §7.3 names it as a
+ * `transport_corruption` is not named in the classification table. The breaker names it as a
  * breaker subject beside 5xx, connection failure and pre-commit timeout, so
  * it takes that same row. Leaving it out would disagree with the breaker.
  *
@@ -43,7 +43,7 @@ export type RoutingFailureDisposition = {
     otherDeployment: OtherDeployment;
     disableCredentialScope: boolean;
     alert: boolean;
-    /** No row in §11.2 grants a retry that ignores the failure class. */
+    /** No classification row grants a retry that ignores the failure class. */
     blindRetry: false;
     sameDeploymentRetry: boolean;
     qualityDrift: boolean;
@@ -79,7 +79,7 @@ const quiet = (
 /**
  * The action for one classified result.
  *
- * `committed` is the §10.1 commit point. `sameDeploymentRetriesUsed` counts
+ * `committed` is the streaming commit point. `sameDeploymentRetriesUsed` counts
  * retries already spent on this deployment for this result. An unknown
  * result, a non-boolean commit flag, or a retry count that is not a
  * non-negative integer returns null. A post-commit stream failure reported
@@ -140,7 +140,7 @@ export const routingFailureDisposition = (input: {
 };
 
 /**
- * The row write §11.2 names for 401, 403 and billing, stated and not performed.
+ * The row write named for 401, 403 and billing, stated and not performed.
  *
  * `disabled` is the CredentialBinding status that means inactive. `revoked`
  * is a different word in the same check, and this row does not say it.
