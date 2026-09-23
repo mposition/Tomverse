@@ -68,7 +68,7 @@ const nextConfig: NextConfig = {
   // That is the point: a package with its own build step would need its own
   // target decisions, and the first thing to diverge would be exactly the
   // chat behaviour these packages exist to keep identical.
-  transpilePackages: ["@tomverse/chat-core", "@tomverse/router-core"],
+  transpilePackages: ["@tomverse/chat-core"],
   experimental: {
     sri: {
       algorithm: "sha384",

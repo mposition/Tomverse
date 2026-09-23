@@ -796,21 +796,111 @@ ADR Phase 2A의 `allocation_mode`는 **새 컬럼**입니다. `RoutingRun.mode`�
 
 | 무엇 | 어디 | 이유 |
 |---|---|---|
-| 순위 정련 구성 — 분할 정련, group-scoped 기권, anchored epsilon, partitioner가 멤버를 잃지 않았는지 검사 | `packages/router-core` | 이 제품에 관한 것이 하나도 없습니다. 기권하는 기준들로 전순서를 만드는 문제는 어느 client에나 같습니다. |
+| 순위 정련 구성 — 분할 정련, group-scoped 기권, anchored epsilon, partitioner가 멤버를 잃지 않았는지 검사 | **언젠가** `packages/router-core`. 지금은 `lib/routerSelection.ts` | 이 제품에 관한 것이 하나도 없으므로 옮길 자리는 맞습니다. 옮기는 **시점**은 §14.1a입니다 — 두 번째 client가 생긴 뒤입니다. |
 | 어떤 기준이 있고, 각각 무엇을 읽고, epsilon이 얼마인가 | `lib/routerScorePolicy.ts` | 제품 결정입니다. package가 import하는 순간 그것은 `packages/`에 사는 Tomverse Chat package이고, 다음 client는 자기가 내리지 않은 결정을 물려받습니다. |
 | 카탈로그 enrolment(`ROUTER_SCORE_SNAPSHOT`), `AiProvider` | `lib/routerScorePolicy.ts` | 제품 데이터입니다. |
 | deployment identity, quota scope, capacity, availability, cache affinity, allocation 축 | 앱 DB + `lib/` | 전부 Tomverse의 운영 사실이며 스키마를 가집니다. package는 스키마를 갖지 않습니다. |
 | tie 안 배분(`allocateWithinTie`) | `lib/routingAllocation.ts` | 지금은 앱입니다. 순위와 seed만 받으므로 옮길 수 있지만, 옮길 근거는 두 번째 client가 생길 때 생깁니다. |
 
-`4b0fefb02`이 첫 줄을 실행했습니다. re-export shim은 두지 않았습니다 —
-`docs/policy/shared-packages.md` §7이 금지하며, shim이 있으면 옛 import 경로가
-계속 동작해 경계를 강제하는 것이 아무것도 없게 됩니다.
+`4b0fefb02`이 첫 줄을 실행했다가 `481789520`이 되돌렸습니다. 옮길 때
+re-export shim은 두지 않았습니다 — `docs/policy/shared-packages.md` §7이
+금지하며, shim이 있으면 옛 import 경로가 계속 동작해 경계를 강제하는 것이
+아무것도 없게 됩니다. 되돌릴 때도 같은 이유로 `lib/routerSelection.ts`가 구성을
+다시 inline으로 갖습니다.
 
-**PACKAGE-01의 승인은 이 package를 덮지 않습니다.** 그 승인이 덮는 범위는
+**PACKAGE-01의 승인은 그 package를 덮지 않습니다.** 그 승인이 덮는 범위는
 2026-08-12 한 commit에서 package 둘이 framework-neutral했다는 것까지이고
-(AGENTS.md), 세 번째는 새 사실입니다. `npm run check:shared-packages`가
-셋 모두에 대해 통과하는 것이 기계적인 절반이고, 나머지 절반은 소유자의
-서명입니다.
+(AGENTS.md), 세 번째는 새 사실입니다. 지금은 package가 둘이므로 그 승인이
+현재 트리를 그대로 덮고, 재승인은 §14.1a의 시점까지 미룹니다.
+
+### 14.1a 그래서 지금은 옮기지 않습니다 (2026-09-23, 독립 검토 후)
+
+위 표의 첫 줄 — 순위 정련 구성을 `packages/router-core`로 — 는 한 번
+실행했다가 되돌렸습니다. 두 번입니다. 한 번은 PR #1615에서 CI가 막아서,
+한 번은 그 뒤 독립 검토(Grok 4.7 xHigh)가 **(b) 두 번째 client가 생길 때까지
+`lib/routerSelection.ts`에 두라**고 권고해서.
+
+#### 막는 것은 package가 아니라 workspace 열거입니다
+
+Prompt Refiner의 runtime source closure는 **모든 workspace `package.json`**을
+담습니다. refiner가 그 package를 import 하는지와 무관합니다 —
+`apps/mobile/package.json`이 그 증거로, 아무도 import 하지 않는데 목록에
+있습니다. 규칙이 "closure가 import하는 package"가 아니라 "모든 workspace"인
+이유는 **`@tomverse/*` 이름이 늘어나면 resolver가 받아들이는 집합이 바뀌기**
+때문입니다.
+
+그래서 `packages/router-core`의 **소스는** closure에 들어가지 않습니다.
+들어가는 것은 `package.json` 하나뿐이고, 그것으로 충분히 계약이 움직입니다.
+
+#### 옮겼을 때 치르는 것
+
+188이라는 수가 묶인 곳은 처음 센 네 곳이 아니라 **열 곳 이상**입니다.
+
+| 어디 | 무엇 |
+|---|---|
+| `lib/promptRefinerStageAdmissionCore.ts` | 상수와 순서 있는 경로 배열 |
+| `prisma/schema.prisma` | 주석 |
+| `20260918130000` migration | `expected_paths` 187개 — **적용됨** |
+| `20260921100000` migration | v3 wrapper, 그리고 stage 행의 exact JSON — **적용됨** |
+| `docs/ops/prompt-refiner-durable-stage-writer-contract.md` | 파일 수, 경로 수, 178개 분할, "나머지 10개" |
+| `docs/ops/prompt-refiner-durable-stage-writer-task.md` | |
+| `docs/ops/tomverse-chat-progress.md` | |
+| `docs/policy/prompt-refiner-durable-stage-writer-threat-model.md` | |
+| `docs/ops/prompt-refiner-confirmatory-shadow-v4.md` | 총수와 "188개 중 178개" |
+| `docs/policy/prompt-refiner-observability.md` | |
+
+"나머지 10개"라는 문장은 어느 테스트도 잡지 않습니다. 세대를 올리면 12로
+같이 고쳐야 하고, 잊으면 아무도 말해 주지 않습니다.
+
+#### `fileCount: 188`은 역사 기록이 아닙니다
+
+이것이 제가 틀렸던 부분이고, 검토가 정정했습니다.
+
+`20260921100000`의 첫 줄이 "완료된 stage를 변경하지 않는다"고 적기에 그 행의
+`fileCount`를 승인 당시의 기록으로 읽었습니다. **아닙니다.** admission이
+TypeScript 상수를 그대로 execution manifest에 넣고, 저장된 행과 현재
+checkout의 manifest가 다르면 reserve/consume이 **실패합니다**. 테스트가 SQL의
+`fileCount`를 상수에 묶는 것은 과한 단언이 아니라 그 잠금입니다.
+
+그 행의 `executionManifest` UPDATE는 trigger가 거절합니다. 그러므로 수를
+올리는 방법은 그 행을 고치는 것이 아니라 **새 stage id**에 새 JSON을 두는
+것입니다.
+
+#### closure 스캔을 좁히는 우회는 쓰지 않습니다
+
+workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 workspace
+밖에 두는 것 — 둘 다 같은 구멍을 다른 경로로 엽니다. `package.json`을 digest
+밖에 두면 **import가 생기기 전까지 digest가 그대로**이고, 그 사이 resolver가
+받아들이는 집합은 이미 달라져 있습니다.
+
+#### 두 번째 client가 생기면, 이 순서로
+
+한 변경 안에서 합니다.
+
+1. 중간 상태를 만들지 않습니다. 상수만 올리고 SQL이 188인 트리에서는 검사를
+   돌리지 않습니다 — 그 수는 아무것도 통과하지 못합니다.
+2. **적용된 두 migration은 수정하지 않습니다.** 새 migration이 v4처럼 wrapper를
+   더하고, v1의 187과 v2의 188 분기는 남깁니다. 새 수는 **새 stage id**의
+   exact JSON에 둡니다.
+3. `fixedNonImportPaths`와 `PROMPT_REFINER_RUNTIME_SOURCE_PATHS`에 새 migration
+   경로와 `packages/router-core/package.json`을 넣습니다. 상수는 **190**입니다
+   — package.json 하나와 migration 자신 하나. `packages/router-core/src/**`는
+   import closure에 넣지 않습니다.
+4. closure 테스트는 **새 migration 파일명을 직접** 가리키게 고칩니다. "최신
+   migration"을 찾는 방식으로 바꾸지 않습니다 — 그러면 관계없는 다음
+   migration이 권위가 됩니다. 경로 하드코딩은 봉인이지 실수가 아닙니다.
+5. 위 표의 문서 전부와 "나머지 10개" 문장을 190과 metadata 12에 맞춥니다.
+6. `docs/policy/shared-packages.md`에 **이미 공유된 코드가 아닌데 seed했다는
+   예외**를 그 변경 안에 적습니다. §7은 이미 공유 중인 코드만 seed하라고
+   합니다.
+
+#### 지금 얻는 것과 잃는 것
+
+얻을 것은 caller가 하나뿐인 코드에 대한 ESLint·tsconfig 경계입니다. 치를 것은
+봉인된 stage 세대 하나, 새 migration, 그리고 위 표 전부입니다.
+
+**그 교환은 지금 성립하지 않습니다.** `docs/policy/shared-packages.md` §7이
+"이미 공유되는 코드를 옮겨서 seed 하라"고 적는 이유가 이것입니다.
 
 ## 14.2 남은 것은 소유자 결정입니다 (2026-09-23, A-5 이후 갱신)
 
