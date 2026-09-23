@@ -327,6 +327,113 @@ export const MARKETING_S2B2_ACTIONS = Object.freeze({
   postAutonomousScheduled: "marketing_post.autonomous_scheduled",
 } as const);
 
+/**
+ * The two actions S2c writes.
+ *
+ * Both are the publisher's, and both are about a slot rather than about a
+ * publication. A claim says this worker intends to publish this post in this
+ * day's slot and nobody else should; a release says it no longer does. Neither
+ * touches `status`, `history`, `publishAttempt` or `providerRequestKey`,
+ * because none of those is true yet -- the post is still `scheduled` and
+ * nothing has left for the platform.
+ */
+export const MARKETING_S2C_ACTIONS = Object.freeze({
+  postClaimed: "marketing_post.claimed",
+  postClaimReleased: "marketing_post.claim_released",
+} as const);
+
+/**
+ * How long a claim is good for before a sweep may take it back.
+ *
+ * A lease, not a lock: the process holding it can die, and something has to be
+ * able to say so without asking it. Fifteen minutes is longer than any publish
+ * this system will make and shorter than the gap between two of them, and the
+ * reconciliation that reclaims an expired one is S2d1's.
+ */
+/**
+ * Why a claim was not taken.
+ *
+ * Every one of these is an ordinary answer rather than a failure. A publisher
+ * that finds nothing due, or an account at its cap, has done its job; returning
+ * a reason rather than throwing is what lets the caller log it once and go
+ * round again without a handler that has to tell errors from non-events apart.
+ *
+ * A refusal that *is* wrong -- an empty token, a lease in the past -- is thrown
+ * instead, because it says the caller is broken rather than that the world is
+ * busy.
+ */
+export type MarketingClaimRefusal =
+  | "channel_not_publishing"
+  | "channel_posts_by_hand"
+  | "not_admitted"
+  | "nothing_due"
+  | "daily_cap_reached"
+  | "weekly_cap_reached"
+  | "claim_conflict";
+
+/**
+ * Why a slot was given back.
+ *
+ * Closed, and recorded in the audit entry, because "a claim was released" on
+ * its own does not say whether the worker was shutting down tidily or the
+ * account was paused underneath it -- and those read very differently in a
+ * week's worth of entries.
+ */
+export const MARKETING_CLAIM_RELEASE_REASONS = [
+  /** The lease would expire before the publish could finish. */
+  "lease_too_short",
+  /** The admission resolver answered no on the re-check before the call. */
+  "no_longer_admitted",
+  /** The worker is stopping, and is giving back what it has not used. */
+  "worker_shutdown",
+  /** The adapter this account needs does not exist in this build. */
+  "adapter_unavailable",
+] as const;
+
+export type MarketingClaimReleaseReason =
+  (typeof MARKETING_CLAIM_RELEASE_REASONS)[number];
+
+export const MARKETING_CLAIM_LEASE_MS = 15 * 60 * 1000;
+
+/**
+ * The statuses that have taken a slot in a day.
+ *
+ * A claim counts, because the whole point of taking one is that nobody else
+ * takes it; everything from `publishing` onwards counts because it has been
+ * used. `failed` counts too: a post that went out and was refused by the
+ * platform still consumed the account's attempt for that day, and not counting
+ * it would let a bad run spend a week's allowance in an afternoon.
+ */
+const MARKETING_SLOT_HOLDING_STATUSES = [
+  "scheduled",
+  "publishing",
+  "published",
+  "outcome_unknown",
+  "verified",
+  "removed_by_platform",
+  "failed",
+] as const;
+
+/** The caps in force for an account: the policy's, unless an operator lowered them. */
+export const marketingChannelCaps = (channel: {
+  readonly channel: string;
+  readonly dailyCapOverride: number | null;
+  readonly weeklyCapOverride: number | null;
+}): { readonly daily: number; readonly weekly: number } | null => {
+  const policy =
+    MARKETING_CHANNEL_CAPS[channel.channel as MarketingChannelName] ?? null;
+  // A channel with no policy cap is one that is posted by hand. An override
+  // cannot create a cap where the policy has none, because there is no
+  // automated posting to cap.
+  if (policy === null) return null;
+  const lower = (cap: number, override: number | null) =>
+    override === null ? cap : Math.min(cap, override);
+  return {
+    daily: lower(policy.daily, channel.dailyCapOverride),
+    weekly: lower(policy.weekly, channel.weeklyCapOverride),
+  };
+};
+
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
 /** Exact S2b1 action names. These strings are audit/store contracts. */
@@ -438,6 +545,15 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   autonomous_insert_config_generation_changed: 409,
   autonomous_insert_deployment_changed: 409,
   autonomous_insert_deployment_unknown: 503,
+  // The three the claim path throws rather than answers. A publisher asking
+  // for a slot with an empty token or a lease that has already expired is not
+  // describing a busy world, it is describing itself being wrong -- and a
+  // request nobody can fix by changing it is a 500. They are here because no
+  // HTTP route raises them today and one might, and a refusal with no meaning
+  // is how the last two slices found their own gaps.
+  claim_token_empty: 500,
+  claim_lease_not_positive: 500,
+  claim_release_reason_unknown: 500,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -2523,6 +2639,297 @@ export async function insertAutonomousScheduledMarketingPost(
   });
 
   return { id: created.id };
+}
+
+/**
+ * One post this account is due to publish, locked, or nothing.
+ *
+ * `SKIP LOCKED` is what makes several workers useful rather than a queue with
+ * extra steps: a row another worker is already holding is not waited for, it is
+ * passed over. `FOR UPDATE OF p` locks the post and not the channel joined to
+ * it, because the channel is locked separately and deliberately -- see
+ * `claimDueMarketingPost`.
+ *
+ * Due means the slot has arrived at the database's clock and nobody is
+ * currently holding it: either no claim, or a claim whose lease has run out.
+ * An expired lease is a claim whose worker is gone, and reclaiming it is the
+ * only way a post whose process died ever goes out.
+ */
+async function lockDueMarketingPost(
+  database: MarketingTransaction,
+  channelId: string,
+  now: Date,
+): Promise<{ id: string } | null> {
+  const rows = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT p."id"
+    FROM "MarketingPost" AS p
+    WHERE p."channelId" = ${channelId}
+      AND p."status" = 'scheduled'
+      AND p."scheduledAt" IS NOT NULL
+      AND p."scheduledAt" <= ${now}
+      AND p."deletedAt" IS NULL
+      AND p."contentPurgedAt" IS NULL
+      AND (p."claimToken" IS NULL OR p."leaseUntil" IS NULL OR p."leaseUntil" <= ${now})
+    ORDER BY p."scheduledAt" ASC, p."id" ASC
+    LIMIT 1
+    FOR UPDATE OF p SKIP LOCKED
+  `);
+  return rows[0] ?? null;
+}
+
+/**
+ * Take the next due post's slot for this worker.
+ *
+ * **A claim is not a dispatch.** The row stays `scheduled`, its history and
+ * history version do not move, and `publishAttempt` and `providerRequestKey`
+ * are untouched -- those three are what say a request left for the platform,
+ * and nothing has. What this writes is `slotDate`, `claimToken` and
+ * `leaseUntil`: which day the post is spending, who is spending it, and until
+ * when that is true.
+ *
+ * The order of locks is the channel first, then the post. The channel is the
+ * per-channel mutex the plan names: the day and week counts are read while it
+ * is held, so two workers cannot each count four of a five-a-week cap and both
+ * take the fifth. The post lock comes second and skips what is already held,
+ * so workers on different posts of the same account still serialise on the
+ * channel -- which is correct, because the thing they are competing for is the
+ * account's allowance, not the row.
+ */
+export async function claimDueMarketingPost(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly channelId: string;
+    readonly claimToken: string;
+    /** Resolved inside this transaction, as the autonomous insert's is. */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+    ) => Promise<{ readonly publish: boolean }>;
+    readonly leaseMs?: number;
+  },
+): Promise<
+  | { readonly claimed: true; readonly id: string; readonly leaseUntil: Date }
+  | { readonly claimed: false; readonly reason: MarketingClaimRefusal }
+> {
+  const channelId = String(rawInput.channelId);
+  const claimToken = String(rawInput.claimToken);
+  const resolveAdmission = rawInput.resolveAdmission;
+  const leaseMs =
+    rawInput.leaseMs === undefined
+      ? MARKETING_CLAIM_LEASE_MS
+      : Number(rawInput.leaseMs);
+  if (!Number.isFinite(leaseMs) || leaseMs <= 0) {
+    throw new MarketingStoreRefusedError(
+      "claim_lease_not_positive",
+      "A lease that has already expired is not a lease",
+    );
+  }
+  if (claimToken.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "claim_token_empty",
+      "A claim is held by a token, and an empty one identifies nobody",
+    );
+  }
+
+  // The audit chain lock before any row lock, for the reason the autonomous
+  // insert takes it: this function's audit entry names the row it claims, so
+  // it is written last, and taking the two locks in the other order from the
+  // admin paths is how two of them deadlock.
+  await takeAuditChainLock(database);
+
+  const channel = await lockMarketingChannel(database, channelId);
+  if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
+    return { claimed: false, reason: "channel_not_publishing" };
+  }
+
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  const admission = await resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
+  if (!admission.publish) {
+    return { claimed: false, reason: "not_admitted" };
+  }
+
+  const due = await lockDueMarketingPost(database, channelId, now);
+  if (!due) return { claimed: false, reason: "nothing_due" };
+
+  const caps = marketingChannelCaps({
+    channel: channel.channel,
+    dailyCapOverride: channel.dailyCapOverride,
+    weeklyCapOverride: channel.weeklyCapOverride,
+  });
+  if (caps === null) {
+    // A channel the policy gives no cap is one that is posted by hand. There
+    // is no number to count against, so there is no slot to take.
+    return { claimed: false, reason: "channel_posts_by_hand" };
+  }
+
+  // Counted while the channel is held, which is what makes the count worth
+  // anything. The day is the database's, not the process's: a worker in
+  // another time zone must not get a second Tuesday.
+  const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
+    Prisma.sql`
+      SELECT
+        count(*) FILTER (WHERE "slotDate" = (${now})::date) AS "today",
+        count(*) FILTER (WHERE "slotDate" > (${now})::date - 7) AS "week"
+      FROM "MarketingPost"
+      WHERE "channelId" = ${channelId}
+        AND "slotDate" IS NOT NULL
+        AND "status" IN (${Prisma.join([...MARKETING_SLOT_HOLDING_STATUSES])})
+        AND "deletedAt" IS NULL
+    `,
+  );
+  const today = Number(used[0]?.today ?? 0);
+  const week = Number(used[0]?.week ?? 0);
+  if (today >= caps.daily) return { claimed: false, reason: "daily_cap_reached" };
+  if (week >= caps.weekly) return { claimed: false, reason: "weekly_cap_reached" };
+
+  const leaseUntil = new Date(now.getTime() + leaseMs);
+
+  // Conditional on everything the decision to claim was made against. The row
+  // is held by `FOR UPDATE` so none of it can have moved, and the predicate is
+  // here for the case where it somehow did: a claim written over another
+  // worker's is two workers publishing one post.
+  const claimed = await database.marketingPost.updateMany({
+    where: {
+      id: due.id,
+      status: "scheduled",
+      claimToken: null,
+      slotDate: null,
+      deletedAt: null,
+      contentPurgedAt: null,
+    },
+    data: {
+      slotDate: now,
+      claimToken,
+      leaseUntil,
+    },
+  });
+  if (claimed.count !== 1) {
+    // Either the row moved, or it was an expired claim rather than an unclaimed
+    // one. The second is a real case and is taken separately, so the
+    // difference between "nobody had it" and "somebody's lease ran out" is
+    // visible in the predicate rather than folded into one.
+    const reclaimed = await database.marketingPost.updateMany({
+      where: {
+        id: due.id,
+        status: "scheduled",
+        leaseUntil: { lte: now },
+        deletedAt: null,
+        contentPurgedAt: null,
+      },
+      data: {
+        slotDate: now,
+        claimToken,
+        leaseUntil,
+      },
+    });
+    if (reclaimed.count !== 1) {
+      return { claimed: false, reason: "claim_conflict" };
+    }
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2C_ACTIONS.postClaimed,
+    targetType: "MarketingPost",
+    targetId: due.id,
+    summary: "Took a publishing slot for a scheduled post.",
+    metadata: {
+      channelId,
+      // The token is the claim's identity and the release has to present it,
+      // so it is recorded. It identifies a worker's attempt, not a person.
+      claimToken,
+      leaseUntil: leaseUntil.toISOString(),
+      slotDate: now.toISOString().slice(0, 10),
+      dailyUsedBefore: today,
+      weeklyUsedBefore: week,
+      dailyCap: caps.daily,
+      weeklyCap: caps.weekly,
+    },
+  });
+
+  return { claimed: true, id: due.id, leaseUntil };
+}
+
+/**
+ * Give a claimed slot back, before anything has left for the platform.
+ *
+ * The caller has to say which claim it is giving back. A release that matched
+ * only on the post id would let a worker whose lease had already expired --
+ * and whose slot another worker had since taken -- clear the new holder's
+ * claim, which is worse than the stall it was trying to fix.
+ *
+ * `status`, `history` and `historyVersion` do not move here either. A
+ * release is the exact undo of a claim and nothing else happened in between:
+ * if something had, this is not the function to call.
+ */
+export async function releaseMarketingPostClaim(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly claimToken: string;
+    readonly expectedHistoryVersion: number;
+    readonly reason: MarketingClaimReleaseReason;
+  },
+): Promise<{ readonly released: boolean }> {
+  const id = String(rawInput.id);
+  const claimToken = String(rawInput.claimToken);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const reason = rawInput.reason;
+  if (!(MARKETING_CLAIM_RELEASE_REASONS as readonly string[]).includes(reason)) {
+    throw new MarketingStoreRefusedError(
+      "claim_release_reason_unknown",
+      "A release says why, from a closed list",
+    );
+  }
+
+  await takeAuditChainLock(database);
+
+  const released = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "scheduled",
+      claimToken,
+      historyVersion: expectedHistoryVersion,
+      // Nothing has left. A row holding a request key is one that has been
+      // dispatched, and a dispatched post is not released -- its outcome is
+      // recorded.
+      providerRequestKey: null,
+    },
+    data: {
+      slotDate: null,
+      claimToken: null,
+      leaseUntil: null,
+    },
+  });
+  if (released.count !== 1) return { released: false };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2C_ACTIONS.postClaimReleased,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "Gave back a publishing slot without publishing.",
+    metadata: { claimToken, reason, historyVersion: expectedHistoryVersion },
+  });
+
+  return { released: true };
 }
 
 export async function appendMarketingPostHistory(

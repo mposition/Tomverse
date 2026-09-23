@@ -17,6 +17,8 @@ import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   approveMarketingPost,
+  claimDueMarketingPost,
+  releaseMarketingPostClaim,
   marketingSerializationFailure,
   createMarketingChannel,
   createMarketingPost,
@@ -2213,4 +2215,185 @@ test("a serialization failure is one the retry loop recognises", async () => {
       assert.equal(result, "done");
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// S2c: one slot, one winner
+// ---------------------------------------------------------------------------
+
+/** A channel in approval mode with one post due to go out. */
+async function accountWithDuePost() {
+  const account = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "approval_mode", approvalStartedAt: new Date(Date.now() - DAY) },
+  });
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-claim",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  // Due: a moment that has already passed at the database's clock.
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+  return { account, postId: draft.id };
+}
+
+const admits = async () => ({ publish: true });
+
+test("a claim writes only the slot, and the row stays scheduled", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const before = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  const result = await runMarketingTransaction(prisma, (tx) =>
+    claimDueMarketingPost(tx, {
+      channelId: account.id,
+      claimToken: "worker-a",
+      resolveAdmission: admits,
+    }),
+  );
+  assert.ok(result.claimed);
+  assert.equal(result.id, postId);
+
+  const after = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(after.status, "scheduled");
+  assert.equal(after.claimToken, "worker-a");
+  assert.ok(after.slotDate);
+  assert.ok(after.leaseUntil);
+  // The three that would say something left for the platform, and the two that
+  // would say the post moved on.
+  assert.equal(after.publishAttempt, before.publishAttempt);
+  assert.equal(after.providerRequestKey, null);
+  assert.equal(after.historyVersion, before.historyVersion);
+  assert.deepEqual(after.history, before.history);
+
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "marketing_post.claimed", targetId: postId },
+  });
+  assert.ok(audit, "the claim wrote no audit entry");
+});
+
+test("two workers race for one slot and exactly one wins", async () => {
+  // The reason the channel is locked before the counts are read. Both
+  // transactions want the same post and the same day; the channel row is the
+  // mutex, so the second waits and then finds the slot gone.
+  const { account } = await accountWithDuePost();
+
+  const claim = (token: string) =>
+    runMarketingTransaction(prisma, (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: token,
+        resolveAdmission: admits,
+      }),
+    ).catch((error: unknown) => error);
+
+  const results = await Promise.all([claim("worker-a"), claim("worker-b")]);
+
+  const claimed = results.filter(
+    (result): result is { claimed: true; id: string; leaseUntil: Date } =>
+      !(result instanceof Error) && result !== null && (result as { claimed?: unknown }).claimed === true,
+  );
+  assert.equal(claimed.length, 1, "exactly one worker may hold a slot");
+  for (const result of results) {
+    if (result instanceof Error) {
+      assert.fail(`a losing worker must be answered, not thrown at: ${result.message}`);
+    }
+  }
+
+  const rows = await prisma.marketingPost.findMany({
+    where: { channelId: account.id, claimToken: { not: null } },
+  });
+  assert.equal(rows.length, 1);
+});
+
+test("a release gives the slot back and another worker can take it", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(prisma, (tx) =>
+    claimDueMarketingPost(tx, {
+      channelId: account.id,
+      claimToken: "worker-a",
+      resolveAdmission: admits,
+    }),
+  );
+  assert.ok(first.claimed);
+
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  const released = await runMarketingTransaction(prisma, (tx) =>
+    releaseMarketingPostClaim(tx, {
+      id: postId,
+      claimToken: "worker-a",
+      expectedHistoryVersion: held.historyVersion,
+      reason: "worker_shutdown",
+    }),
+  );
+  assert.deepEqual(released, { released: true });
+
+  const free = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(free.claimToken, null);
+  assert.equal(free.slotDate, null);
+  assert.equal(free.leaseUntil, null);
+  assert.equal(free.status, "scheduled");
+
+  const second = await runMarketingTransaction(prisma, (tx) =>
+    claimDueMarketingPost(tx, {
+      channelId: account.id,
+      claimToken: "worker-b",
+      resolveAdmission: admits,
+    }),
+  );
+  assert.ok(second.claimed);
+});
+
+test("a release must present the claim it is giving back", async () => {
+  const { account, postId } = await accountWithDuePost();
+  await runMarketingTransaction(prisma, (tx) =>
+    claimDueMarketingPost(tx, {
+      channelId: account.id,
+      claimToken: "worker-a",
+      resolveAdmission: admits,
+    }),
+  );
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  // A worker whose lease expired, trying to tidy up, must not clear the claim
+  // of whoever took the slot after it.
+  const wrongToken = await runMarketingTransaction(prisma, (tx) =>
+    releaseMarketingPostClaim(tx, {
+      id: postId,
+      claimToken: "worker-b",
+      expectedHistoryVersion: held.historyVersion,
+      reason: "worker_shutdown",
+    }),
+  );
+  assert.deepEqual(wrongToken, { released: false });
+
+  const wrongVersion = await runMarketingTransaction(prisma, (tx) =>
+    releaseMarketingPostClaim(tx, {
+      id: postId,
+      claimToken: "worker-a",
+      expectedHistoryVersion: held.historyVersion + 1,
+      reason: "worker_shutdown",
+    }),
+  );
+  assert.deepEqual(wrongVersion, { released: false });
+
+  const still = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(still.claimToken, "worker-a");
 });
