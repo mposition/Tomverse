@@ -261,7 +261,71 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
-test("every approved string sits in its own language's cell of the approved document", () => {
+// Which subsection of section 3 approved each key. A string is checked only
+// against its own subsection, so deleting the approved cell cannot be hidden by
+// the same sentence surviving in some other table of the document.
+const APPROVED_SUBSECTION = {
+  signupOptIn: "### 3.A",
+  signupNotice: "### 3.B",
+  signupRefuse: "### 3.C",
+  noticeTitle: "### 3.D",
+  noticeBody: "### 3.D",
+  noticeAccept: "### 3.D",
+  noticeRefuse: "### 3.D",
+  noticeDismiss: "### 3.D",
+};
+
+/** The text of one section, from its heading to the next heading of the same or higher level. */
+const sectionOf = (doc, heading) => {
+  const lines = doc.split("\n");
+  const from = lines.findIndex((line) => line.startsWith(heading));
+  assert.ok(from >= 0, `section ${heading} not found in the approved document`);
+  const level = heading.match(/^#+/)[0].length;
+  let to = lines.length;
+  for (let i = from + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^(#+) /);
+    if (m && m[1].length <= level) {
+      to = i;
+      break;
+    }
+  }
+  return lines.slice(from, to).join("\n");
+};
+
+/** Every table cell in a section, grouped by the language column it sits in. */
+const cellsByLanguage = (section) => {
+  const clean = (cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1");
+  const rows = section
+    .split("\n")
+    .filter((line) => line.startsWith("|") && !/^\|[-\s|:]+\|$/.test(line))
+    .map((line) => line.split("|").slice(1, -1).map(clean));
+
+  // Two table shapes. Most tables have a language in the first column and the
+  // text in the second. The button table is transposed: its header names the
+  // languages, and each row starts with the button's role.
+  const byLanguage = new Map();
+  const add = (language, text) => {
+    if (!byLanguage.has(language)) byLanguage.set(language, new Set());
+    byLanguage.get(language).add(text);
+  };
+  for (const row of rows) {
+    if (CONSENT_COPY_LANGUAGES.includes(row[0]) && row.length === 2) add(row[0], row[1]);
+  }
+  const header = rows.find(
+    (row) => row.length > 7 && CONSENT_COPY_LANGUAGES.every((l) => row.includes(l))
+  );
+  if (header) {
+    for (const row of rows) {
+      if (row.length !== header.length || row === header) continue;
+      header.forEach((column, index) => {
+        if (CONSENT_COPY_LANGUAGES.includes(column)) add(column, row[index]);
+      });
+    }
+  }
+  return byLanguage;
+};
+
+test("every approved string sits in its own language's cell of its own subsection", () => {
   // The document is what the owner signed. If this file drifts from it, the
   // hash names words nobody approved.
   //
@@ -269,62 +333,61 @@ test("every approved string sits in its own language's cell of the approved docu
   // let a Korean label be swapped for an English sentence that already
   // appeared elsewhere in the document -- the string was "in the document",
   // just not in the Korean column. A whole cell rather than a substring, too:
-  // `받지 않겠습니다` is inside `광고성 이메일을 받지 않겠습니다`.
+  // `받지 않겠습니다` is inside `광고성 이메일을 받지 않겠습니다`. And per
+  // subsection: pooling the whole document let the approved cell be deleted
+  // while a copy of the sentence elsewhere kept this test green.
   const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
-  const clean = (cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1");
-  const rows = doc
-    .split("\n")
-    .filter((line) => line.startsWith("|") && !/^\|[-\s|]+\|$/.test(line))
-    .map((line) => line.split("|").slice(1, -1).map(clean));
-
-  // Two table shapes. Most tables have a language in the first column and the
-  // text in the second. The button table is transposed: its header names the
-  // languages, and each row starts with the button's role.
-  const byLanguage = new Map();
-  for (const row of rows) {
-    if (CONSENT_COPY_LANGUAGES.includes(row[0]) && row.length === 2) {
-      if (!byLanguage.has(row[0])) byLanguage.set(row[0], new Set());
-      byLanguage.get(row[0]).add(row[1]);
-    }
-  }
-  const header = rows.find(
-    (row) => row.length > 7 && CONSENT_COPY_LANGUAGES.every((l) => row.includes(l))
-  );
-  assert.ok(header, "the transposed button table's header was not found");
-  for (const row of rows) {
-    if (row.length !== header.length || row === header) continue;
-    header.forEach((column, index) => {
-      if (!CONSENT_COPY_LANGUAGES.includes(column)) return;
-      if (!byLanguage.has(column)) byLanguage.set(column, new Set());
-      byLanguage.get(column).add(row[index]);
-    });
-  }
-
+  const cache = new Map();
   for (const key of CONSENT_COPY_KEYS) {
+    const heading = APPROVED_SUBSECTION[key];
+    assert.ok(heading, `${key} has no approved subsection`);
+    if (!cache.has(heading)) cache.set(heading, cellsByLanguage(sectionOf(doc, heading)));
+    const byLanguage = cache.get(heading);
     for (const language of CONSENT_COPY_LANGUAGES) {
       const text = consentCopy(key, language);
       assert.ok(
         byLanguage.get(language)?.has(text),
-        `${key}.${language} is not in the approved document's ${language} cells: ${text.slice(0, 40)}`
+        `${key}.${language} is not in ${heading}'s ${language} cells: ${text.slice(0, 40)}`
       );
     }
   }
 });
 
-test("the approved document records the digest of the version it approved", () => {
+test("the approval section records the digest of each version, on that version's line", () => {
   // Per-string pins stop an approved byte moving on its own, but a commit that
   // changes a string *and* its pin passes them. The whole-version digest is
   // also written into the owner's signed record, so changing an approved byte
   // means editing that record -- which section 10 forbids and which a reviewer
   // sees for what it is.
-  const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
+  //
+  // Only section 8 counts, and only as the digest's own line directly under
+  // the line naming its version. `doc.includes()` was satisfied by the digest
+  // anywhere in the document, or by the prefix of a longer token, so a new
+  // digest written outside the approval left section 8 naming the old one.
+  const approval = sectionOf(
+    readFileSync("docs/policy/email-consent-copy-draft.md", "utf8"),
+    "## 8."
+  );
+  const lines = approval.split("\n");
+  const TICK = String.fromCharCode(96); // a backtick
   for (const { version } of CONSENT_COPY_VERSIONS) {
     const digest = consentCopyVersionDigest(version);
+    const at = lines.indexOf(TICK + digest + TICK);
+    assert.ok(at >= 0, `version ${version} digest ${digest} is not its own line in section 8`);
+    const label = lines.slice(0, at).reverse().find((line) => line.trim() !== "");
     assert.ok(
-      doc.includes(digest),
-      `version ${version} digest ${digest} is not recorded in the approved document`
+      label?.includes("버전 " + TICK + version + TICK),
+      `the digest line for ${version} is not under the line naming that version`
     );
   }
+});
+
+test("two versions never share a digest", () => {
+  // The version digest covers the words, not the version's name. Two versions
+  // with identical wording would share one, and section 8 could not tell which
+  // approval it records. A version that changes nothing has no reason to exist.
+  const digests = CONSENT_COPY_VERSIONS.map(({ version }) => consentCopyVersionDigest(version));
+  assert.equal(new Set(digests).size, digests.length);
 });
 
 test("no approved byte has moved since it was approved", () => {
