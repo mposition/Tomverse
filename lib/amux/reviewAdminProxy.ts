@@ -1,6 +1,7 @@
 import "server-only";
 
 import { isAmuxAgentApprovalEnabled } from "@/lib/amux/reviewApprovalCore";
+import { amuxReviewPrivateProxyOrigin } from "@/lib/originProtection";
 
 const unavailable = () =>
   Response.json(
@@ -42,22 +43,37 @@ export async function forwardAmuxAdminReviewCommand(
   }
 
   const secret = process.env.TOMVERSE_AMUX_SYNC_SECRET ?? "";
-  const configuredOrigin = process.env.NEXTAUTH_URL;
-  if (secret.length < 32 || !configuredOrigin)
+  const configuredPublicOrigin = process.env.NEXTAUTH_URL;
+  if (secret.length < 32 || !configuredPublicOrigin)
     return proxyConfigurationError("AMUX_REVIEW_PROXY_CONFIG_INVALID");
 
   let internalUrl: URL;
   try {
-    internalUrl = new URL("/api/internal/amux/review", configuredOrigin);
-    if (new URL(request.url).origin !== internalUrl.origin)
+    const publicOrigin = new URL(configuredPublicOrigin);
+    if (new URL(request.url).origin !== publicOrigin.origin)
       return proxyConfigurationError("AMUX_REVIEW_PROXY_ORIGIN_MISMATCH");
     if (
-      internalUrl.protocol !== "https:" &&
-      !(internalUrl.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(internalUrl.hostname))
+      publicOrigin.protocol !== "https:" &&
+      !(publicOrigin.protocol === "http:" &&
+        ["localhost", "127.0.0.1"].includes(publicOrigin.hostname))
     ) {
       return proxyConfigurationError("AMUX_REVIEW_PROXY_CONFIG_INVALID");
     }
+
+    const configuredPrivateOrigin =
+      process.env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?.trim();
+    const privateOrigin = amuxReviewPrivateProxyOrigin(process.env);
+    if (configuredPrivateOrigin && !privateOrigin)
+      return proxyConfigurationError("AMUX_REVIEW_PROXY_CONFIG_INVALID");
+
+    // Identity-aware proxies may protect the public origin from the app
+    // itself. The optional private target is still the exact same Railway
+    // service; originProtection rejects sibling services and external
+    // hosts before the session cookie or sync secret is attached.
+    internalUrl = new URL(
+      "/api/internal/amux/review",
+      privateOrigin ?? publicOrigin.origin,
+    );
   } catch {
     return proxyConfigurationError("AMUX_REVIEW_PROXY_CONFIG_INVALID");
   }

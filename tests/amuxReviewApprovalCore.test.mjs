@@ -45,6 +45,14 @@ test("approval flag is enabled by one exact value only", () => {
 
 test("approval readiness is conditional and names missing settings without values", () => {
   assert.deepEqual(amuxReviewApprovalReadiness({}), { ready: true, enabled: false, missing: [] });
+  assert.deepEqual(amuxReviewApprovalReadiness({
+    RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://sibling.railway.internal:8080",
+  }), {
+    ready: false,
+    enabled: false,
+    missing: ["TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN"],
+  });
   assert.deepEqual(amuxReviewApprovalReadiness({ TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED: "true" }), {
     ready: false,
     enabled: true,
@@ -56,6 +64,28 @@ test("approval readiness is conditional and names missing settings without value
     AMUX_REVIEW_GITHUB_READ_TOKEN: "token",
     NEXTAUTH_URL: "https://example.test",
   }), { ready: true, enabled: true, missing: [] });
+
+  assert.deepEqual(amuxReviewApprovalReadiness({
+    TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED: "true",
+    TOMVERSE_AMUX_SYNC_SECRET: "s".repeat(32),
+    AMUX_REVIEW_GITHUB_READ_TOKEN: "token",
+    NEXTAUTH_URL: "https://example.test",
+    RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://tomverse.railway.internal:8080",
+  }), { ready: true, enabled: true, missing: [] });
+
+  assert.deepEqual(amuxReviewApprovalReadiness({
+    TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED: "true",
+    TOMVERSE_AMUX_SYNC_SECRET: "s".repeat(32),
+    AMUX_REVIEW_GITHUB_READ_TOKEN: "token",
+    NEXTAUTH_URL: "https://example.test",
+    RAILWAY_PRIVATE_DOMAIN: "tomverse.railway.internal",
+    TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN: "http://sibling.railway.internal:8080",
+  }), {
+    ready: false,
+    enabled: true,
+    missing: ["TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN"],
+  });
 });
 
 test("multibyte ingress text is not mistaken for a 50k-byte display limit", () => {

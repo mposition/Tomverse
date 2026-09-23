@@ -13,6 +13,8 @@ import {
 import {
   getPublicReportOrigin,
   hasRequiredOriginSecret,
+  hasValidOriginSecret,
+  isAllowedAmuxReviewPrivateHost,
   isAllowedRequestHost,
 } from "@/lib/originProtection";
 import {
@@ -98,10 +100,18 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (
-    !isAllowedRequestHost(request.headers.get("host")) ||
-    !hasRequiredOriginSecret(request.headers)
-  ) {
+  const isPrivateAmuxReviewRequest =
+    request.method === "POST" &&
+    request.nextUrl.pathname === "/api/internal/amux/review" &&
+    isAllowedAmuxReviewPrivateHost(request.headers.get("host"));
+  const requestHostAllowed =
+    isAllowedRequestHost(request.headers.get("host")) ||
+    isPrivateAmuxReviewRequest;
+  const originSecretAllowed = isPrivateAmuxReviewRequest
+    ? hasValidOriginSecret(request.headers)
+    : hasRequiredOriginSecret(request.headers);
+
+  if (!requestHostAllowed || !originSecretAllowed) {
     return blockedOriginResponse();
   }
 

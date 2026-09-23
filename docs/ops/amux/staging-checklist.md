@@ -23,6 +23,10 @@ canonical checklist다.
 - Agent 작업 검토는 별도 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED` flag가 off다.
   flag를 켜는 회차에만 전용 GitHub read-only token, AMUX sync secret,
   `NEXTAUTH_URL`을 먼저 주입한다. 비밀값은 기록에 남기지 않는다.
+- 공개 origin이 identity-aware proxy 뒤에 있으면 같은 app service의 Railway
+  private origin을 `TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`에 설정한다. readiness는
+  그 hostname이 Railway가 주입한 `RAILWAY_PRIVATE_DOMAIN`과 정확히 같지 않으면
+  fail-closed다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
 - secret/token 값은 기록에 복사하지 않는다.
 
@@ -118,6 +122,12 @@ turn의 비용·판별 목적을 실행 기록에 먼저 적는다. 캡처 자�
       Contents 읽기 전용이며, 값 자체는 화면·로그·기록에 나오지 않는다.
 - [ ] flag on에서 token·sync secret·`NEXTAUTH_URL` 중 하나가 빠지면 `/api/ready`의
       `amuxReviewApproval`이 false이고, 모두 준비된 뒤에만 true다.
+- [ ] private review origin을 쓰는 경우 현재 app service의
+      `RAILWAY_PRIVATE_DOMAIN`과 정확히 결속되고, 다른 internal/public host는
+      readiness와 proxy 양쪽에서 거절된다.
+- [ ] 결정 mutation 전에 protected review detail을 한 번 열어 private origin의
+      실제 도달성을 확인한다. readiness는 형식 결속만 증명하며 네트워크 도달성을
+      대신하지 않는다.
 - [ ] settle된 `review` 작업은 owner/claim이 해제되고, 이후 snapshot sync로
       `review_pr_number`를 부여해도 해당 terminal attempt가 승인 대상이다.
 - [ ] `approve` 화면은 PR base SHA·head SHA·전체 diff와 그 SHA-256을 보이며,

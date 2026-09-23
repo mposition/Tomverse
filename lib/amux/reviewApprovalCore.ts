@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { amuxReviewPrivateProxyOrigin } from "@/lib/originProtection";
 
 export const AMUX_REVIEW_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1_000;
 export const AMUX_REVIEW_DISPLAY_MAX_BYTES = 200_000;
@@ -15,9 +16,21 @@ export const amuxReviewApprovalReadiness = (env: {
   TOMVERSE_AMUX_SYNC_SECRET?: string;
   AMUX_REVIEW_GITHUB_READ_TOKEN?: string;
   NEXTAUTH_URL?: string;
+  TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?: string;
+  RAILWAY_PRIVATE_DOMAIN?: string;
 }) => {
   const enabled = isAmuxAgentApprovalEnabled(env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED);
-  if (!enabled) return { ready: true, enabled: false, missing: [] as string[] };
+  const invalidPrivateOrigin = Boolean(
+    env.TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN?.trim() &&
+    !amuxReviewPrivateProxyOrigin(env),
+  );
+  if (!enabled) return {
+    ready: !invalidPrivateOrigin,
+    enabled: false,
+    missing: invalidPrivateOrigin
+      ? ["TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN"]
+      : [] as string[],
+  };
   const missing: string[] = [];
   if ((env.TOMVERSE_AMUX_SYNC_SECRET ?? "").length < 32)
     missing.push("TOMVERSE_AMUX_SYNC_SECRET");
@@ -32,6 +45,7 @@ export const amuxReviewApprovalReadiness = (env: {
   } catch {
     missing.push("NEXTAUTH_URL");
   }
+  if (invalidPrivateOrigin) missing.push("TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN");
   return { ready: missing.length === 0, enabled, missing };
 };
 
