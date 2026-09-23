@@ -18,8 +18,9 @@ import {
  *
  * The Privacy page and the routing residency gate read this one list, so what
  * these tests hold is that it cannot claim more than it can show: a row is
- * `proven` only with an entity, a region and a reference to whatever says so,
- * and anything else fails closed in both directions at once.
+ * disclosable only when it answers everything a notice prints, each answer
+ * with a reference, and anything else fails closed in both directions at
+ * once.
  */
 
 // A row that says everything a notice needs, with a reference for each
@@ -181,6 +182,59 @@ test("a location mode must list locations, and an unknown one must not", () => {
     );
 });
 
+test("the two location modes carry locations, and a grouping may be one of them", () => {
+    // The allowing branches, held as well as the refusing ones: a list of
+    // places a provider may use, and "the EU" named as a grouping.
+    const possible = provenRow({
+        processing: {
+            mode: "DISCLOSED_POSSIBLE_LOCATIONS",
+            countryCodes: ["US", "GB"],
+            macroRegions: [],
+            evidenceRef: evidence,
+        },
+    });
+    assert.deepEqual(destinationShapeProblems(possible), []);
+    assert.equal(destinationIsDisclosable(possible), true);
+
+    const grouping = provenRow({
+        customerContentStorage: {
+            mode: "COMMITTED_LOCATIONS",
+            countryCodes: [],
+            macroRegions: ["EU"],
+            evidenceRef: evidence,
+        },
+        destinationRegions: ["EU"],
+    });
+    assert.deepEqual(destinationShapeProblems(grouping), []);
+    assert.equal(destinationIsDisclosable(grouping), true);
+});
+
+test("no place is not a place: NOT_PINNED and NOT_SPECIFIED list nothing", () => {
+    // A set of places the provider may use is DISCLOSED_POSSIBLE_LOCATIONS.
+    for (const mode of ["NOT_PINNED", "NOT_SPECIFIED"]) {
+        const row = provenRow({
+            processing: { mode, countryCodes: ["US"], macroRegions: [], evidenceRef: evidence },
+        });
+        assert.ok(
+            destinationShapeProblems(row).includes(`processing is ${mode} but lists locations`),
+            mode
+        );
+        assert.equal(destinationIsDisclosable(row), false, mode);
+    }
+});
+
+test("the recipient rests on the row's evidence, even while unproven", () => {
+    const named = {
+        ...PROVIDER_DATA_DESTINATIONS[0],
+        recipientEntity: "Example Recipient, LLC",
+        recipientCountryCodes: ["US"],
+    };
+    assert.equal(named.status, "unproven");
+    assert.ok(
+        destinationShapeProblems(named).includes("the recipient is named without an evidenceRef")
+    );
+});
+
 test("a reviewed geography names what it was reviewed against", () => {
     const row = provenRow({
         processing: { mode: "NOT_PINNED", countryCodes: [], macroRegions: [], evidenceRef: null },
@@ -206,12 +260,29 @@ test("country codes are countries and groupings are not padded into them", () =>
     for (const code of ["UK", "EU", "AU/SG_GROUP_DEFINED"]) {
         assert.ok(
             problems.includes(
-                `storage country code ${JSON.stringify(code)} is not ISO 3166-1 alpha-2`
+                `storage country code ${JSON.stringify(code)} is not a two-letter country code`
             ),
             code
         );
     }
     assert.ok(problems.includes('storage macro region "SG" is a country code'));
+
+    // A miswritten country is not a grouping either: moving it to the macro
+    // field must not let it back into the storage alias.
+    const moved = destinationShapeProblems(
+        provenRow({
+            customerContentStorage: {
+                mode: "COMMITTED_LOCATIONS",
+                countryCodes: [],
+                macroRegions: ["UK", "EL", " "],
+                evidenceRef: evidence,
+            },
+            destinationRegions: ["UK", "EL", " "],
+        })
+    );
+    assert.ok(moved.includes('storage macro region "UK" is a miswritten country code'));
+    assert.ok(moved.includes('storage macro region "EL" is a miswritten country code'));
+    assert.ok(moved.includes("storage macro region is blank"));
     assert.deepEqual(
         destinationShapeProblems(
             provenRow({

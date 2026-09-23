@@ -94,7 +94,10 @@ export type ContentGeographyMode =
  */
 export type ContentGeography = {
     mode: ContentGeographyMode;
-    /** ISO 3166-1 alpha-2, upper case. `GB`, not the legacy `UK`. */
+    /**
+     * Meant as ISO 3166-1 alpha-2, upper case -- `GB`, not the legacy `UK`.
+     * Only the shape is checked (`COUNTRY_CODE`), not the ISO list.
+     */
     countryCodes: readonly string[];
     /**
      * Groupings a contract names instead of countries -- `EEA`, `EU`,
@@ -164,7 +167,8 @@ export type ProviderDataDestination = {
     /**
      * The legal entity that receives the data.
      *
-     * Null while unproven. Not the product name: a person asking where their
+     * Null until somebody has established it, and never named without the
+     * row's `evidenceRef`, whatever the status. Not the product name: a person asking where their
      * message went is asking who holds it, and a brand is not an answer to
      * that.
      */
@@ -194,7 +198,14 @@ export type ProviderDataDestination = {
      * Zero data retention as the applicable terms provide it.
      *
      * What a provider offers is not what Tomverse's own account has, so this
-     * alone never makes a route strict. The same holds for another service's
+     * alone never makes a route strict.
+     *
+     * A different fact from `customerContentStorage`, and allowed beside any
+     * storage mode: that field says where content sits when it is stored,
+     * this one says the terms offer a mode in which it is not. The handoff's
+     * own reference record for one provider carries both a storage country
+     * and a ZDR target. Whether a given route runs under ZDR is the route's
+     * configuration, not this row. The same holds for another service's
      * published policy: an aggregator's ZDR list describes that aggregator's
      * agreement with the provider, and calling the same endpoint does not
      * inherit it.
@@ -215,7 +226,9 @@ export type ProviderDataDestination = {
      *
      * A contract, a DPA, a provider's own published sub-processor page --
      * named so that a later reader can check it rather than trust this file.
-     * Null while unproven, and a non-null value is what `proven` means.
+     * Null until there is one. `proven` requires it, and requires more besides:
+     * see `provenDestinationProblems()`. It is also what the recipient
+     * entity and country rest on, so naming either without it is refused.
      * Another service's description of its own arrangement with the provider
      * is not one.
      */
@@ -297,8 +310,9 @@ export const providerDataDestination = (
  * here?" from different sources is how a notice and a gate come to disagree,
  * and the disagreement is only discovered after somebody has been told.
  *
- * What this answers is the prior question: is there a recorded fact about
- * where this provider takes data. An approval is an act performed *on* such a
+ * What this answers is the prior question: could a notice print this
+ * provider's row -- proven, complete, and saying nothing it cannot mean
+ * (`destinationIsDisclosable()`). An approval is an act performed *on* such a
  * fact, so a provider that has none cannot be approved -- but a provider that
  * has one is not thereby approved either.
  *
@@ -321,16 +335,38 @@ export const providerDestinationIsEstablished = (
 export const disclosableDataDestinations = (): readonly ProviderDataDestination[] =>
     PROVIDER_DATA_DESTINATIONS.filter(destinationIsDisclosable);
 
+/**
+ * The shape of a country code: two upper-case letters.
+ *
+ * Shape only. This is not checked against the ISO 3166-1 list, so an
+ * unassigned pair such as `XX` passes; the problem messages say "two-letter
+ * country code" rather than claim an ISO check that does not happen.
+ */
 const COUNTRY_CODE = /^[A-Z]{2}$/;
 
 /**
- * Codes that look like ISO 3166-1 alpha-2 and are not.
+ * Pairs that have the shape and are wrong in every field.
  *
- * `UK` is the one the provider documents use; the code is `GB`. `EU` is
- * an exceptionally reserved code for a grouping, so it belongs in
- * `macroRegions`.
+ * `UK` is how provider documents write the United Kingdom; the code is
+ * `GB`. `EL` is the EU's own code for Greece; the code is `GR`. Neither is
+ * a grouping either, so neither is accepted as a macro region.
  */
-const NOT_COUNTRY_CODES: ReadonlySet<string> = new Set(["UK", "EU", "EL"]);
+const MISWRITTEN_COUNTRY_CODES: ReadonlySet<string> = new Set(["UK", "EL"]);
+
+/**
+ * Pairs that have the shape and name a grouping, not a country.
+ *
+ * Refused as a country code and accepted as a macro region, which is where a
+ * contract that says "the EU" belongs.
+ */
+const GROUPING_CODES: ReadonlySet<string> = new Set(["EU"]);
+
+const countryCodeProblem = (label: string, code: string): string | null =>
+    COUNTRY_CODE.test(code) &&
+    !MISWRITTEN_COUNTRY_CODES.has(code) &&
+    !GROUPING_CODES.has(code)
+        ? null
+        : `${label} country code ${JSON.stringify(code)} is not a two-letter country code`;
 
 const geographyProblems = (
     label: string,
@@ -338,12 +374,15 @@ const geographyProblems = (
 ): string[] => {
     const problems: string[] = [];
     for (const code of geography.countryCodes) {
-        if (!COUNTRY_CODE.test(code) || NOT_COUNTRY_CODES.has(code)) {
-            problems.push(`${label} country code ${JSON.stringify(code)} is not ISO 3166-1 alpha-2`);
-        }
+        const problem = countryCodeProblem(label, code);
+        if (problem) problems.push(problem);
     }
     for (const region of geography.macroRegions) {
-        if (COUNTRY_CODE.test(region) && !NOT_COUNTRY_CODES.has(region)) {
+        if (region.trim() === "") {
+            problems.push(`${label} macro region is blank`);
+        } else if (MISWRITTEN_COUNTRY_CODES.has(region)) {
+            problems.push(`${label} macro region ${JSON.stringify(region)} is a miswritten country code`);
+        } else if (COUNTRY_CODE.test(region) && !GROUPING_CODES.has(region)) {
             problems.push(`${label} macro region ${JSON.stringify(region)} is a country code`);
         }
     }
@@ -356,9 +395,13 @@ const geographyProblems = (
     ) {
         problems.push(`${label} names locations but lists none`);
     }
+    // Only the two location modes carry locations. NOT_PINNED and
+    // NOT_SPECIFIED say the terms hold the provider to no place; a list of the
+    // places it may use is DISCLOSED_POSSIBLE_LOCATIONS, and writing that list
+    // under NOT_PINNED would print a set of countries as though it were none.
     if (
-        (geography.mode === "UNKNOWN" ||
-            geography.mode === "NO_PERSISTENT_CONTENT_STORAGE") &&
+        geography.mode !== "COMMITTED_LOCATIONS" &&
+        geography.mode !== "DISCLOSED_POSSIBLE_LOCATIONS" &&
         located
     ) {
         problems.push(`${label} is ${geography.mode} but lists locations`);
@@ -387,9 +430,17 @@ export const destinationShapeProblems = (
         ...geographyProblems("processing", entry.processing),
     ];
     for (const code of entry.recipientCountryCodes) {
-        if (!COUNTRY_CODE.test(code) || NOT_COUNTRY_CODES.has(code)) {
-            problems.push(`recipient country code ${JSON.stringify(code)} is not ISO 3166-1 alpha-2`);
-        }
+        const problem = countryCodeProblem("recipient", code);
+        if (problem) problems.push(problem);
+    }
+    // Every other answer carries its own reference. Who receives the data,
+    // and where they are, rest on the row's own: naming either without it is
+    // the "somebody was fairly sure" this file exists to refuse.
+    if (
+        (entry.recipientEntity !== null || entry.recipientCountryCodes.length > 0) &&
+        !entry.evidenceRef
+    ) {
+        problems.push("the recipient is named without an evidenceRef");
     }
     if (entry.processing.mode === "NO_PERSISTENT_CONTENT_STORAGE") {
         problems.push("processing cannot be NO_PERSISTENT_CONTENT_STORAGE; that is a storage answer");
