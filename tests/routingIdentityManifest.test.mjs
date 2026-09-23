@@ -408,7 +408,11 @@ test("every digest field is a column of the entry table", () => {
         ),
         "utf8"
     );
-    const sql = `${statements(migration())}\n${statements(added)}`;
+    // The deployment table's alter names the same pin columns. This test is
+    // about the entry table, so the deployment alter is not evidence.
+    const entryAdded = added.slice(added.indexOf('ALTER TABLE "RoutingIdentityManifestEntry"'));
+    assert.ok(entryAdded.length > 0);
+    const sql = `${statements(migration())}\n${entryAdded}`;
     assert.match(sql, /CREATE TABLE "RoutingIdentityManifestEntry"/);
     for (const field of MANIFEST_DIGEST_FIELDS) {
         assert.match(sql, new RegExp(`"${field}"`), field);

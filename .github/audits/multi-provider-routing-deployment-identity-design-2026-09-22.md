@@ -1159,6 +1159,12 @@ enabled인 행의 pin과 benchmark 이름을 identity trigger가 고정합니다
 등록 보고는 23, 약 46%였습니다. 검증·독립 검토·병합·배포는 별도입니다.
 production 배포는 0%입니다.
 
+2026-09-23 검토는 Windows Claude Code CLI가 `c76629064`를 approve로
+돌려줬습니다. blocker는 없습니다. major 가운데 발행 행이 pin을 빠뜨리면
+`strong`으로 굳는 것은 이후 migration이 default를 내리는 것으로 닫습니다.
+배치 행의 default는 그대로입니다. 게이트 함수를 옛 migration에서만 읽던
+테스트는 교체된 함수를 읽습니다. 완료 수는 바꾸지 않습니다.
+
 ## 14.8 Pin hard gate의 판정 (2026-09-23)
 
 ADR §3.5의 판정이 `lib/routingPinGate.ts`에 있습니다. 요청 경로는

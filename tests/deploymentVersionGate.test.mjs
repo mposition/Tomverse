@@ -53,6 +53,23 @@ test("an unknown strength does not drift", () => {
     );
 });
 
+test("a published entry does not receive a pin by default", () => {
+    const dropped = readFileSync(
+        new URL(
+            "../prisma/migrations/20260923420000_manifest_entry_pin_no_default/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
+    assert.match(dropped, /"RoutingIdentityManifestEntry" ALTER COLUMN "versionPinStrength" DROP DEFAULT/);
+    assert.match(dropped, /"RoutingIdentityManifestEntry" ALTER COLUMN "allowVersionDrift" DROP DEFAULT/);
+    const alters = dropped.split("\n").filter((line) => line.startsWith("ALTER TABLE"));
+    assert.deepEqual(
+        alters.map((line) => line.includes('"RoutingIdentityManifestEntry"')),
+        [true, true]
+    );
+});
+
 test("the pin vocabulary is the three strengths, strong first", () => {
     assert.deepEqual(VERSION_PIN_STRENGTHS, ["strong", "weak", "alias_only"]);
     const sql = migration();
