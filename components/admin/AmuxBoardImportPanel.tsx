@@ -71,6 +71,7 @@ export function AmuxBoardImportPanel() {
   };
 
   const refusedForStepUp = result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  const applyReady = result?.applyPermitted === true && approvalId.trim().length > 0;
   const classification = result?.classification;
 
   const missingSentence = result ? sourceMissingSentence(messages, result) : null;
@@ -164,15 +165,16 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-500"
-          disabled
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          disabled={pending || !applyReady}
           aria-describedby="amux-board-import-apply-reason"
+          onClick={() => send("apply", JSON.stringify({ approvalId }))}
         >
           {messages.apply}
         </button>
       </div>
       <p id="amux-board-import-apply-reason" className="text-sm text-zinc-700">
-        {messages.applyDisabled}
+        {applyReady ? messages.applyPermitted("true") : messages.applyDisabled}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline" href={STEP_UP_HREF}>
