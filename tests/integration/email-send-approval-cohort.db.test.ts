@@ -413,6 +413,12 @@ test("the country on the row is the one the caller says it showed", async () => 
         copyHash: "sha256:sg-device",
       },
     ],
+    resolved: {
+      countryCode: "SG",
+      profileKey: "SG",
+      confidence: "high",
+      source: "self_declared",
+    },
   });
 
   const row = await prisma.emailPermissionEvent.findFirstOrThrow({
@@ -440,6 +446,10 @@ test("two candidates leave the country undetermined rather than picking one", as
   // holds one value, so it holds the true one -- `ZZ` -- and the candidates
   // persist in the evidence. Picking one would have been permanent: this
   // writer returns the existing row rather than adding a second.
+  //
+  // The column follows the *resolution*, not the number of candidates. Two
+  // guesses are not the resolver's `conflict`, which means a billing country
+  // and a self-declaration disagreeing -- so this row is `unresolved`.
   const user = await createUser();
   await recordNoticeShown({
     ...noticeInput(user),
@@ -457,17 +467,114 @@ test("two candidates leave the country undetermined rather than picking one", as
         copyHash: "sha256:us-device",
       },
     ],
+    resolved: {
+      countryCode: "ZZ",
+      profileKey: "ZZ",
+      confidence: "unknown",
+      source: "unresolved",
+    },
   });
 
   const row = await prisma.emailPermissionEvent.findFirstOrThrow({
     where: { userId: user.id, kind: "notice_shown" },
   });
   assert.equal(row.jurisdiction, "ZZ");
-  assert.equal(row.jurisdictionSource, "conflict");
+  assert.equal(row.jurisdictionSource, "unresolved");
   const evidence = row.evidence as { candidates: { country: string }[] };
   assert.deepEqual(
     evidence.candidates.map((candidate) => candidate.country),
     ["KR", "US"]
+  );
+});
+
+test("a resolution describing a country the screen never showed is refused", async () => {
+  // The two halves of this row come from different places -- the columns from
+  // the resolution, the evidence from the candidates -- and nothing used to
+  // stop them describing different countries. A send following one would
+  // attach the wrong country's display duties, and neither half can be
+  // corrected afterwards.
+  const user = await createUser();
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      candidates: [
+        {
+          country: "SG",
+          signal: "self_declared",
+          ruleVersion: 1,
+          copyHash: "sha256:sg-device",
+        },
+      ],
+    }),
+    /is not among the rules this notice rendered/
+  );
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id } }),
+    0
+  );
+});
+
+test("a resolution's profile is derived, never taken from the caller", async () => {
+  // A caller could pass `{ countryCode: "JP", profileKey: "AU" }`. The profile
+  // is computed from the code, so the claim buys nothing.
+  const user = await createUser();
+  await recordNoticeShown({
+    ...noticeInput(user),
+    candidates: [
+      {
+        country: "JP",
+        signal: "self_declared",
+        ruleVersion: 1,
+        copyHash: "sha256:jp-device",
+      },
+    ],
+    resolved: {
+      countryCode: "JP",
+      profileKey: "AU",
+      confidence: "high",
+      source: "self_declared",
+    },
+  });
+
+  const row = await prisma.emailPermissionEvent.findFirstOrThrow({
+    where: { userId: user.id, kind: "notice_shown" },
+  });
+  // The country is kept -- section 6.4 gives this column the resolution as it
+  // stood, and a profile added later cannot restore a JP that was erased. The
+  // refusal for a country with no display duties is the override's job.
+  assert.equal(row.jurisdiction, "JP");
+  assert.equal(row.jurisdictionSource, "self_declared");
+});
+
+test("a retry that changes only the resolution is refused", async () => {
+  // Comparing the candidates alone let this through: the first write's
+  // jurisdiction stood and the second caller read success, which erased the
+  // difference between `conflict` and `unresolved` the moment anything
+  // retried.
+  const user = await createUser();
+  await recordNoticeShown(noticeInput(user));
+
+  await assert.rejects(
+    recordNoticeShown({
+      ...noticeInput(user),
+      resolved: {
+        countryCode: "ZZ",
+        profileKey: "ZZ",
+        confidence: "unknown",
+        source: "unresolved",
+      },
+    }),
+    /describes something else/
+  );
+});
+
+test("a retry that changes only the words on the screen is refused", async () => {
+  const user = await createUser();
+  await recordNoticeShown(noticeInput(user));
+
+  await assert.rejects(
+    recordNoticeShown({ ...noticeInput(user), copyHash: "sha256:different" }),
+    /describes something else/
   );
 });
 
@@ -588,6 +695,12 @@ test("two inferences that agree still leave the country undetermined", async () 
         copyHash: "sha256:au-device",
       },
     ],
+    resolved: {
+      countryCode: "AU",
+      profileKey: "AU",
+      confidence: "low",
+      source: "inferred",
+    },
   });
 
   const row = await prisma.emailPermissionEvent.findFirstOrThrow({
@@ -653,7 +766,7 @@ test("a retry carrying different candidates is refused, not silently dropped", a
         },
       ],
     }),
-    /different candidates/
+    /describes something else/
   );
 
   const rows = await prisma.emailPermissionEvent.findMany({

@@ -4,7 +4,10 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { emailAddressDigest } from "@/lib/emailAddressDigest";
-import { normalizeCountry } from "@/lib/emailJurisdictionCore";
+import {
+  normalizeCountry,
+  profileForCountry,
+} from "@/lib/emailJurisdictionCore";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import {
@@ -12,7 +15,7 @@ import {
   normalizeEmailAddress,
 } from "@/lib/emailSuppressionCore";
 import {
-  canonicalCandidates,
+  canonicalJson,
   inProductNoticeOffer,
   noticeJurisdictionColumns,
   noticeObjectionSourceEventKey,
@@ -269,8 +272,52 @@ const recordNoticeEvent = async (
     };
   });
 
-  // How the resolver's answer fits two columns. Not a second resolution.
-  const jurisdiction = noticeJurisdictionColumns(input.resolved);
+  // The resolved answer is checked against itself and against the screen.
+  //
+  // Not a second resolution -- every check here refuses rather than decides.
+  // They exist because the two halves of this row come from different places:
+  // the columns from `resolved` and the evidence from `candidates`, and
+  // nothing stopped them describing different countries. A screen that
+  // rendered Singapore's device with an Australian resolution would have left
+  // a row where the column says AU and the evidence says SG, and a send
+  // following one would attach the wrong country's display duties. Neither
+  // half can be corrected afterwards.
+  const resolvedCountry = normalizeCountry(input.resolved.countryCode);
+  if (input.resolved.countryCode !== "ZZ" && resolvedCountry === null) {
+    throw new Error(
+      `"${input.resolved.countryCode}" is not a country code; an in-product notice event cannot record it.`
+    );
+  }
+  // The caller's own `profileKey` is not evidence of anything: a caller could
+  // pass `{ countryCode: "JP", profileKey: "AU" }`. Derived from the code.
+  const resolved = {
+    countryCode: resolvedCountry ?? "ZZ",
+    profileKey: profileForCountry(resolvedCountry),
+    confidence: input.resolved.confidence,
+    source: input.resolved.source,
+  };
+  if (resolved.source === "conflict" && resolved.confidence !== "conflict") {
+    throw new Error(
+      "An in-product notice event cannot record a conflict without a conflicting resolution."
+    );
+  }
+
+  const jurisdiction = noticeJurisdictionColumns(resolved);
+
+  // A settled country has to be one of the rules that was on the screen.
+  //
+  // Two candidates are allowed (draft section 5.3), and a `ZZ` column is
+  // allowed to match none of them -- undetermined, conflicting and inferred
+  // are all answers that differ from every candidate. What cannot happen is a
+  // settled country the person was never shown the rule for.
+  if (
+    jurisdiction.country !== "ZZ" &&
+    !candidates.some((candidate) => candidate.country === jurisdiction.country)
+  ) {
+    throw new Error(
+      `The resolved country ${jurisdiction.country} is not among the rules this notice rendered.`
+    );
+  }
 
   // The two keys are scoped differently, and deliberately: a render is about
   // the person, a refusal is about the mailbox. See the two builders.
@@ -297,27 +344,50 @@ const recordNoticeEvent = async (
   // fail too and take the caller's work with it. The catch below still exists
   // for the genuine race, which on the root client is recoverable and inside
   // a transaction is a real conflict the caller has to resolve.
-  const wanted = canonicalCandidates(candidates);
-  const sameFactOrThrow = <T extends { evidence: unknown }>(row: T): T => {
-    // The same key has to mean the same fact.
+  const evidence = {
+    surface: input.surface,
+    copyHash: input.copyHash,
+    candidates,
+  };
+  const wanted = canonicalJson({
+    evidence,
+    jurisdiction: jurisdiction.country,
+    jurisdictionSource: jurisdiction.source,
+  });
+
+  const sameFactOrThrow = <
+    T extends { evidence: unknown; jurisdiction: string | null; jurisdictionSource: string | null },
+  >(
+    row: T
+  ): T => {
+    // The same key has to mean the same fact -- all of it.
     //
     // This row is append-only and one per account, so the first write is
-    // permanent -- and returning it for a call that carried different
-    // candidates discards them silently while the caller reads success. A
-    // first call naming Australia and a retry adding Korea would leave Korea
-    // nowhere in the ledger, which is precisely the candidate list section 5.3
-    // says must follow the person from the attempt through to the send
-    // snapshot.
+    // permanent, and returning it for a call that described something else
+    // discards that call silently while its caller reads success. A first call
+    // naming Australia and a retry adding Korea would leave Korea nowhere in
+    // the ledger, which is precisely the candidate list section 5.3 says must
+    // follow the person to the send snapshot.
+    //
+    // Comparing the candidates alone was not enough, and the gap was the
+    // interesting half: a retry with the same candidates but a different
+    // resolution, or different words on the screen, also came back as success
+    // with the first write's jurisdiction and copy hash standing. That erased
+    // the distinction between `conflict` and `unresolved` the moment anything
+    // retried. So the comparison is over everything this call would have
+    // written.
     //
     // Refused rather than merged: the recorded row says what was on the screen
-    // when we asked, and a second set of candidates means a different screen,
-    // not more detail about the same one.
-    const recorded = canonicalCandidates(
-      (row.evidence as { candidates?: unknown } | null)?.candidates ?? null
-    );
+    // when we asked, and a different description means a different screen, not
+    // more detail about the same one.
+    const recorded = canonicalJson({
+      evidence: row.evidence ?? null,
+      jurisdiction: row.jurisdiction,
+      jurisdictionSource: row.jurisdictionSource,
+    });
     if (recorded !== wanted) {
       throw new Error(
-        `An in-product ${record.kind} is already recorded for this account with different candidates; it cannot be rewritten.`
+        `An in-product ${record.kind} is already recorded for this account and describes something else; it cannot be rewritten.`
       );
     }
     return row;
@@ -357,11 +427,7 @@ const recordNoticeEvent = async (
         jurisdiction: jurisdiction.country,
         jurisdictionSource: jurisdiction.source,
         policyVersionId,
-        evidence: {
-          surface: input.surface,
-          copyHash: input.copyHash,
-          candidates,
-        },
+        evidence,
       },
     });
   } catch (error) {

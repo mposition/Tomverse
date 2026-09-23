@@ -45,6 +45,27 @@ test("each row of section 5.6's right column blocks on its own", () => {
   }
 });
 
+test("a country with no reviewed profile is undetermined", () => {
+  // The test was the literal string `ZZ`, and `JP` and `XX` are two-letter
+  // codes with no reviewed profile that sailed through it -- so an override
+  // ran on an account whose display duties had never been worked out, which is
+  // the one thing this entry exists to stop. Korea's (광고) prefix and
+  // Singapore's <ADV> are decided by the rule; a message that cannot be told
+  // what to put in its own subject line is not one we can build.
+  for (const country of ["JP", "XX", "ZZ"]) {
+    assert.deepEqual(overrideBlockers({ ...clear, country }), [
+      "country_undetermined",
+    ]);
+  }
+});
+
+test("a reviewed profile is not blocked, directly or through the EU", () => {
+  assert.deepEqual(overrideBlockers({ ...clear, country: "AU" }), []);
+  assert.deepEqual(overrideBlockers({ ...clear, country: "KR" }), []);
+  // Germany resolves to the EU profile rather than to itself, and that counts.
+  assert.deepEqual(overrideBlockers({ ...clear, country: "DE" }), []);
+});
+
 test("an empty country is undetermined, not permissive", () => {
   // A blank string is what an unset column reads as, and answering "no
   // blockers" there would send to an account whose display duties nobody

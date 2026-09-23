@@ -190,37 +190,37 @@ export const noticeObjectionSourceEventKey = (
  *
  * This function does **not** decide the jurisdiction. It takes the answer
  * `resolveEmailJurisdiction()` already produced and says how to write it into
- * two columns that have no room for a confidence or a profile.
+ * two columns that have no room for a confidence.
  *
  * It used to decide, and it was wrong twice. The first version counted
  * candidates, so two signals agreeing on `AU` came out undetermined. The
  * second counted countries against a hand-written list of "determinative"
- * signals, and that list disagreed with the approved contract in four places
- * at once: it made the consent-time jurisdiction settle a send it is not for,
- * it ranked self-declaration above the billing country when the contract ranks
- * billing higher, it took whichever determinative signal came first in the
- * array, and it called two disagreeing guesses a `conflict` when that word is
- * reserved for billing and self-declaration disagreeing.
+ * signals, and that list disagreed with the approved contract in four places.
+ * There is one jurisdiction rule in this codebase and it is not here.
  *
- * All four came from the same mistake: writing a second jurisdiction rule
- * beside the one that already exists, is already reviewed, and is what the
- * send path itself uses. There is one rule now and this is not it.
+ * ## One guard, and it is about confidence rather than about the country
  *
- * Two guards remain here, because they are about what the *column* can honestly
- * hold rather than about which country applies:
+ * A resolution below `high` is written as `ZZ`. An inference does not settle
+ * a jurisdiction (approved contract sections 6.2 and 6.3), this row has no
+ * confidence column to record that it was only a guess, and it is append-only.
+ * The same condition gates `marketingJurisdictionVerdict()`, so the ledger and
+ * the send agree about what counts as settled.
  *
- * - A country with no reviewed profile is `ZZ`. `normalizeCountry()` accepts
- *   any two letters, so `JP` and `XX` pass it, and
- *   `profileForCountry()` answers `ZZ` for both. Section 6.3 holds marketing
- *   without a reviewed profile, but section 5.6's override only refuses the
- *   literal string `ZZ` -- so writing `JP` would let the override run on an
- *   account whose display duties were never worked out, permanently.
- * - A low-confidence resolution is `ZZ`. An inference does not settle a
- *   jurisdiction (section 6.3), and this row has no confidence column to
- *   record that it was only a guess.
+ * ## The guard this function used to have, and why it was removed
  *
- * The candidates themselves persist in `evidence` either way, which is where
- * section 5.3 says they follow the person to the send snapshot.
+ * It also erased a country whose `profileForCountry()` is `ZZ` -- a
+ * self-declared `JP` was written down as `unresolved`. That was wrong twice
+ * over. Section 6.3's "no reviewed profile" row means *hold marketing for that
+ * country*, not *treat it as a country we never learned*; section 6.4 gives
+ * this column the resolution as it stood, and append-only means a profile
+ * added next year cannot restore the `JP` that was thrown away. The
+ * candidates could not stand in for it either -- they record which rules were
+ * rendered, not what was resolved.
+ *
+ * And it did not close the hole it named. Refusing an override for a country
+ * with no display duties is `overrideBlockers()`'s job, which checked the
+ * literal string `ZZ` and let `JP` through however this column was written.
+ * That check is in that function now, where a send actually passes.
  */
 export type NoticeJurisdiction = {
   country: string;
@@ -232,25 +232,19 @@ export const noticeJurisdictionColumns = (resolved: {
   profileKey: string;
   confidence: string;
   source: string;
-}): NoticeJurisdiction => {
-  const settled =
-    resolved.confidence === "high" &&
-    resolved.countryCode !== "ZZ" &&
-    resolved.profileKey !== "ZZ";
-  if (settled) {
-    return { country: resolved.countryCode, source: resolved.source };
-  }
-  // `conflict` is the resolver's word for two high-confidence signals
-  // disagreeing, and it keeps that meaning here. Everything else that failed
-  // to settle is `unresolved`, which is a different fact and reads as one.
-  return {
-    country: "ZZ",
-    source: resolved.source === "conflict" ? "conflict" : "unresolved",
-  };
-};
+}): NoticeJurisdiction =>
+  resolved.confidence === "high" && resolved.countryCode !== "ZZ"
+    ? { country: resolved.countryCode, source: resolved.source }
+    : {
+        country: "ZZ",
+        // `conflict` is the resolver's word for two high-confidence signals
+        // disagreeing, and it keeps that meaning. Everything else that failed
+        // to settle is `unresolved`, which is a different fact.
+        source: resolved.confidence === "conflict" ? "conflict" : "unresolved",
+      };
 
 /**
- * The bytes two candidate lists are compared by.
+ * The bytes two recorded facts are compared by.
  *
  * Keys sorted, because the stored copy comes back from `jsonb` and PostgreSQL
  * does not keep object key order -- it stores short keys first. Comparing
@@ -262,8 +256,13 @@ export const noticeJurisdictionColumns = (resolved: {
  *
  * Array order is **not** sorted. `jsonb` preserves it, and two lists holding
  * the same candidates in a different order came from different screens.
+ *
+ * It compares whole facts rather than candidate lists, and the rename followed
+ * the widening: comparing the candidates alone let a retry that carried a
+ * different resolution, or different words on the screen, come back as success
+ * with the first write's values standing.
  */
-export const canonicalCandidates = (value: unknown): string => {
+export const canonicalJson = (value: unknown): string => {
   const canonical = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(canonical);
     if (node && typeof node === "object") {

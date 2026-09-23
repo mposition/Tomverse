@@ -8,7 +8,7 @@ import test from "node:test";
 
 import {
   NOTICE_EVENT_KINDS,
-  canonicalCandidates,
+  canonicalJson,
   noticeJurisdictionColumns,
   inProductNoticeOffer,
   noticePurposes,
@@ -186,18 +186,21 @@ test("a high-confidence country with a reviewed profile is written down", () => 
   );
 });
 
-test("a country with no reviewed profile is ZZ, however it was declared", () => {
-  // `normalizeCountry()` accepts any two letters, so `JP` and `XX` reach here
-  // and `profileForCountry()` answers `ZZ` for both. Section 5.6's override
-  // only refuses the literal string `ZZ`, so writing `JP` would let it run on
-  // an account whose display duties were never worked out -- permanently,
-  // because the row is append-only.
-  for (const countryCode of ["JP", "XX"]) {
-    assert.deepEqual(
-      noticeJurisdictionColumns(resolved({ countryCode, profileKey: "ZZ" })),
-      { country: "ZZ", source: "unresolved" }
-    );
-  }
+test("a settled country is kept even when it has no reviewed profile", () => {
+  // This used to be erased to `ZZ`, and that was wrong twice over. Section
+  // 6.3's "no reviewed profile" row means hold marketing for that country, not
+  // treat it as a country we never learned -- and section 6.4 gives this
+  // column the resolution as it stood, which append-only makes permanent. A
+  // profile added next year cannot restore a `JP` that was thrown away.
+  //
+  // The refusal that guard was reaching for lives in `overrideBlockers()`,
+  // where a send actually passes.
+  assert.deepEqual(
+    noticeJurisdictionColumns(
+      resolved({ countryCode: "JP", profileKey: "ZZ" })
+    ),
+    { country: "JP", source: "self_declared" }
+  );
 });
 
 test("a low-confidence resolution is ZZ even with a real profile", () => {
@@ -259,7 +262,7 @@ test("key order does not make two identical lists different", () => {
     { signal: "self_declared", country: "AU", copyHash: "h", ruleVersion: 1 },
   ];
   assert.notEqual(JSON.stringify(written), JSON.stringify(readBack));
-  assert.equal(canonicalCandidates(written), canonicalCandidates(readBack));
+  assert.equal(canonicalJson(written), canonicalJson(readBack));
 });
 
 test("array order still matters", () => {
@@ -267,13 +270,13 @@ test("array order still matters", () => {
   // different order came from different screens.
   const a = [{ country: "AU", signal: "inferred" }, { country: "KR", signal: "inferred" }];
   const b = [{ country: "KR", signal: "inferred" }, { country: "AU", signal: "inferred" }];
-  assert.notEqual(canonicalCandidates(a), canonicalCandidates(b));
+  assert.notEqual(canonicalJson(a), canonicalJson(b));
 });
 
 test("a stored value that is not a list is never equal to one", () => {
-  assert.notEqual(canonicalCandidates(null), canonicalCandidates([]));
+  assert.notEqual(canonicalJson(null), canonicalJson([]));
   assert.notEqual(
-    canonicalCandidates({ country: "AU" }),
-    canonicalCandidates([{ country: "AU" }])
+    canonicalJson({ country: "AU" }),
+    canonicalJson([{ country: "AU" }])
   );
 });

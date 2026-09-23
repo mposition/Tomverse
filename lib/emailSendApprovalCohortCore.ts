@@ -39,6 +39,7 @@
  * owns `node:crypto`.
  */
 
+import { profileForCountry } from "./emailJurisdictionCore";
 import type { CohortQuery } from "./emailPermissionLedgerCore";
 
 /** A member row as the seal check sees it. */
@@ -66,11 +67,18 @@ export type ApprovalCohortMember = NonNullable<CohortQuery["member"]>;
  * "no blockers", so the address of somebody who had asked to be deleted would
  * have been mailed under the override.
  *
- * An undetermined country (`ZZ`) is refused for a reason that is easy to get
+ * An undetermined country is refused for a reason that is easy to get
  * backwards: it is not that the country might forbid the send, but that we
  * cannot work out which display duties attach to it. Korea's `(광고)` prefix
  * and Singapore's `<ADV>` are decided by the rule, and a message that cannot
  * be told what to put in its own subject line is not a message we can build.
+ *
+ * Which is why the test is the *profile*, not the string `ZZ`. It was `ZZ`,
+ * and `JP` and `XX` are two-letter codes with no reviewed profile that sailed
+ * through it -- so an override ran on an account whose display duties had
+ * never been worked out, which is the one thing this entry exists to stop.
+ * `profileForCountry()` answers `ZZ` for an unknown country, an unreviewed
+ * one, and a blank, so it covers all three at once.
  *
  * A rule with an obligation whose status nobody has decided (section 7.8) is
  * the same shape of gap, one level down.
@@ -117,7 +125,7 @@ export const overrideBlockers = (input: OverrideInput): OverrideBlocker[] => {
     blockers.push("suppressed_classification");
   }
   if (input.suppressedGlobally) blockers.push("suppressed_globally");
-  if (input.country === "ZZ" || input.country.trim().length === 0) {
+  if (profileForCountry(input.country) === "ZZ") {
     blockers.push("country_undetermined");
   }
   if (!input.obligationsDecided) blockers.push("obligation_undecided");
