@@ -2093,7 +2093,14 @@ test("a scheduled autonomous row carries a sealed autonomous decision", async ()
     guardDecision: "approval_required",
   });
   await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
-  await refusesAutonomousRow(account.id, slot, { factsDigest: null });
+  // No `factsDigest: null` case here any more. Since S2b3 the column is NOT
+  // NULL, so the generated client refuses the null before a statement is sent
+  // -- a PrismaClientValidationError, which says something about Prisma's
+  // types and nothing about the database. The guarantee this case stood for
+  // is now stronger than the trigger clause it exercised: every row, not just
+  // an autonomous one, must carry a digest, and "a marketing post cannot be
+  // written without its facts digest" proves that with raw SQL against the
+  // column itself.
 });
 
 test("autonomy is only ever inside a named template", async () => {
