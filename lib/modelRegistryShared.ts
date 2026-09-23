@@ -614,36 +614,70 @@ export const staticModelRegistryReconciliationRows = () =>
     });
 
 /**
+ * Hosts that exist so a ModelDeployment can name them. A catalogue row must
+ * not. `AiProvider` still lists them, because the connection table (base URL,
+ * key name) is one list, and a second list is how DeepInfra was labelled and
+ * then left out of a menu. The catalogue write path and the chat adapter
+ * refuse these three; the connection check only says what URL a row would
+ * have to use if one existed.
+ */
+export const DEPLOYMENT_ONLY_PROVIDERS = [
+  "deepinfra",
+  "together",
+  "openrouter",
+] as const satisfies readonly AiProvider[];
+
+export class DeploymentHostRefusal extends Error {
+  readonly code = "DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER" as const;
+
+  constructor() {
+    super("DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER");
+    this.name = "DeploymentHostRefusal";
+  }
+}
+
+/**
  * OpenRouter is an aggregator. Left unset, a chat completion is load-balanced
  * across whoever hosts the model, and `allow_fallbacks` defaults to true, so
- * a failure hops to another host. That is how a Kimi or DeepSeek request
- * reaches the model developer or some other host the destination row does
- * not name.
+ * an `order` list hops to the next host. `only` is a whitelist, not an order:
+ * it does not itself hop off the list. A base slug inside that whitelist still
+ * matches every endpoint of that provider, including every region and variant
+ * (`deepinfra` matches `deepinfra` and `deepinfra/turbo`). Service-tier
+ * endpoints (`openai/fast`, `google-vertex/flex`) are the exception OpenRouter
+ * documents: a base slug does not match them, and the full suffix is required.
+ * Pinning a region means the allowlist carries that full slug, for example
+ * `google-vertex/us-east5`.
  *
- * The pin is the wire object OpenRouter documents (`provider.only` plus
- * `allow_fallbacks: false`). `only: ["azure"]` is their example of a request
- * that uses Azure alone. Account-wide privacy settings can narrow that
- * further; this module does not know them and does not invent a default
- * recipient list. An empty allowlist is a refusal, not "anywhere".
+ * The pin replaces any `provider` object. It sets `only` to that one slug and
+ * `allow_fallbacks` to false. The false flag is the documented way to stop an
+ * `order` from hopping; we set it even though this pin sends `only`, because
+ * the default is true and a replaced body must not leave the default in place.
+ * Account-wide privacy settings can narrow the request further. They cannot
+ * widen it. This module does not know those settings and does not invent a
+ * recipient list.
+ *
+ * The allowlist is `OPENROUTER_RECIPIENT_ALLOWLIST`, an operator environment
+ * variable. It is not a field on the request. A caller that passes the
+ * recipient and the list together is checking the list against itself.
  *
  * This lives beside the provider connection table, not in its own module.
  * `lib/activeAiModel.ts` is inside the Prompt Refiner runtime source closure,
  * and a new local import would add a file to that sealed list. The chat
  * adapter therefore calls these functions through the import it already has.
- *
- * No catalogue model calls this yet. The adapter refuses an OpenRouter model
- * that arrives without an admission, so growing `AiProvider` cannot send a
- * body until a caller names one allowlisted recipient and the providers
- * already failed on this logical response.
  */
 
-const OPENROUTER_PROVIDER_SLUG = /^[a-z0-9](?:[a-z0-9_-]{0,63})$/;
+/** Base slug, or one suffix: `deepinfra`, `deepinfra/turbo`, `google-vertex/us-east5`. */
+const OPENROUTER_PROVIDER_SLUG =
+  /^[a-z0-9](?:[a-z0-9_-]{0,63})(?:\/[a-z0-9](?:[a-z0-9_-]{0,63}))?$/;
 
-export type OpenRouterAdmission = {
-  /** The single upstream host this request may reach. */
+export const OPENROUTER_RECIPIENT_ALLOWLIST_ENV = "OPENROUTER_RECIPIENT_ALLOWLIST";
+
+export type OpenRouterRequest = {
+  /**
+   * The slug OpenRouter will match. A base slug matches every endpoint of
+   * that provider. A suffix pins one variant or region.
+   */
   recipient: string;
-  /** Operator-approved host slugs. Empty refuses every recipient. */
-  allowlist: readonly string[];
   /** Hosts already used by an earlier attempt of this logical response. */
   failedProviders: readonly string[];
 };
@@ -657,6 +691,7 @@ export type OpenRouterPin = {
 export type OpenRouterRefusalCode =
   | "OPENROUTER_ADMISSION_REQUIRED"
   | "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED"
+  | "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID"
   | "OPENROUTER_RECIPIENT_INVALID"
   | "OPENROUTER_RECIPIENT_NOT_ALLOWED"
   | "OPENROUTER_FAILED_PROVIDER_EXCLUDED"
@@ -675,12 +710,69 @@ export class OpenRouterDispatchError extends Error {
 
 const isOpenRouterSlug = (value: string) => OPENROUTER_PROVIDER_SLUG.test(value);
 
+const CATALOGUE_HOST_REFUSAL_NAMES = new Set([
+  "OpenRouterDispatchError",
+  "DeploymentHostRefusal",
+]);
+
+/**
+ * The public code for a refusal this module threw, or null for anything else.
+ *
+ * The chat route maps this before the generic application error. A name check
+ * rather than `instanceof`, because the route and this module can be loaded
+ * as two copies and the class identity does not survive that.
+ */
+export const catalogueHostRefusalCode = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const name = (error as { name?: unknown }).name;
+  const code = (error as { code?: unknown }).code;
+  if (typeof name !== "string" || !CATALOGUE_HOST_REFUSAL_NAMES.has(name)) return null;
+  if (typeof code !== "string" || !/^[A-Z0-9_]{1,80}$/.test(code)) return null;
+  return code;
+};
+
+/**
+ * The operator's recipient allowlist. Empty is a refusal. One invalid slug
+ * refuses the whole list: dropping it would silently shrink the set the
+ * operator thought they configured.
+ */
+export const readOpenRouterRecipientAllowlist = (
+  environment: Record<string, string | undefined> = process.env
+):
+  | { ok: true; allowlist: readonly string[] }
+  | {
+      ok: false;
+      code:
+        | "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED"
+        | "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID";
+    } => {
+  const raw = environment.OPENROUTER_RECIPIENT_ALLOWLIST;
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  const allowlist = raw
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter((slug) => slug.length > 0);
+  if (allowlist.length === 0) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  if (allowlist.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID" };
+  }
+  return { ok: true, allowlist };
+};
+
 export const decideOpenRouterDispatch = (
-  admission: OpenRouterAdmission | undefined
+  admission: OpenRouterRequest | undefined,
+  allowlist: readonly string[]
 ): { ok: true; pin: OpenRouterPin } | { ok: false; code: OpenRouterRefusalCode } => {
   if (!admission) return { ok: false, code: "OPENROUTER_ADMISSION_REQUIRED" };
-  if (admission.allowlist.length === 0) {
+  if (allowlist.length === 0) {
     return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  if (allowlist.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID" };
   }
   if (admission.failedProviders.some((slug) => !isOpenRouterSlug(slug))) {
     return { ok: false, code: "OPENROUTER_FAILED_PROVIDER_INVALID" };
@@ -688,7 +780,7 @@ export const decideOpenRouterDispatch = (
   if (!isOpenRouterSlug(admission.recipient)) {
     return { ok: false, code: "OPENROUTER_RECIPIENT_INVALID" };
   }
-  if (!admission.allowlist.includes(admission.recipient)) {
+  if (!allowlist.includes(admission.recipient)) {
     return { ok: false, code: "OPENROUTER_RECIPIENT_NOT_ALLOWED" };
   }
   if (admission.failedProviders.includes(admission.recipient)) {

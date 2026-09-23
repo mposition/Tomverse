@@ -1091,15 +1091,30 @@ allowlist와 실패 공급자 제외가 호출 조건입니다. 둘 다
 import하므로, Prompt Refiner runtime closure에 파일을 더하지 않고 admission
 없이 클라이언트를 만들지 않습니다.
 
-허용 목록이 비어 있으면 거절입니다. 저장소는 수신자 목록을 지어 넣지 않습니다.
-통과한 요청의 본문에는 OpenRouter가 문서화한 `provider.only`(수신자 하나)와
-`allow_fallbacks: false`가 실리며, 이미 있던 `provider` 객체는 합치지 않고
-바꿉니다. 문서의 Azure 예는 `only: ["azure"]`이고, fallback을 끄지 않으면
-그 목록 밖의 호스트로 넘어갈 수 있으므로 둘을 같이 겁니다. 앞선 attempt가
-쓴 호스트는 `ignore`에 실리고, 그 호스트를 수신자로 고르면 거절입니다.
-계정 설정의 허용·무시 목록은 요청 목록과 합쳐져 더 좁아질 수 있습니다.
-base slug는 그 공급자의 region variant까지 맞습니다. 지역을 고정하려면
-variant slug 자체가 allowlist에 있어야 합니다.
+허용 목록은 요청 필드가 아닙니다. 운영자 환경변수
+`OPENROUTER_RECIPIENT_ALLOWLIST`이고, 비어 있거나 slug가 하나라도 잘못되면
+거절입니다. 저장소는 수신자 목록을 지어 넣지 않습니다. 호출자가 수신자와
+목록을 같은 인자로 넘기면 목록은 자기 자신과만 맞으므로, 어댑터는 그 필드를
+읽지 않습니다.
+
+통과한 요청의 본문에는 `provider.only`(slug 하나)와 `allow_fallbacks: false`가
+실리며, 이미 있던 `provider` 객체는 합치지 않고 바꿉니다. `only`는 허용
+목록입니다. 목록 밖으로 넘어가는 것은 `order`의 동작이고, `allow_fallbacks`의
+기본값이 true인 것은 그 hop을 위한 것입니다. 둘을 같이 거는 이유는 `only`가
+목록을 탈출해서가 아니라, 교체된 본문에 그 기본값이 남지 않게 하기
+위해서입니다. 앞선 attempt가 쓴 slug는 `ignore`에 실리고, 그 slug를 수신자로
+고르면 거절입니다. 계정 설정의 허용·무시 목록은 요청 목록과 합쳐져 더 좁아질
+수 있고, 넓히지는 못합니다.
+
+base slug는 그 공급자의 모든 endpoint(지역·variant)와 맞습니다. `deepinfra`는
+`deepinfra/turbo`까지 포함합니다. 서비스 티어 endpoint(`openai/fast`,
+`google-vertex/flex`)는 예외로, base slug가 맞추지 않으므로 suffix가
+필요합니다. 지역을 고정하려면 `google-vertex/us-east5` 같은 variant slug
+자체가 allowlist에 있어야 하고, 게이트는 그 형태를 받습니다.
+
+DeepInfra와 Together는 카탈로그 어댑터에서 클라이언트를 만들기 전에 거절합니다.
+관리자 카탈로그 쓰기도 이 세 공급자를 거절합니다. 호스팅된 사본은
+카탈로그 행이 아닙니다.
 
 목적지 행은 `unproven`, 정산은 `unknown`, 카탈로그 모델은 없습니다. base는
 문서의 `https://openrouter.ai/api/v1`, 키는 `OPENROUTER_API_KEY`입니다.

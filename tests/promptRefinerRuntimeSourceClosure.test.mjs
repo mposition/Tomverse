@@ -210,12 +210,18 @@ const compilerOptions = parsedConfig.options;
 // lib/routingIdentityManifest.ts moved existing accesses. No new computed
 // access. Count 228, position-free hash unchanged. A repin of the
 // position-sensitive digest only.
+//
+// 2026-09-23, the review fix: variant slugs, an environment allowlist read
+// as a static property, and catalogue refusals for the deployment hosts.
+// No new element access. Count 228, position-free hash unchanged. A repin
+// of the position-sensitive digest only. Recomputed after merging that fix
+// onto the version-gate note above.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "95c138293c0286aafe38b1b6d2d1848f",
-  "7e0355b84f55e7d9b2df901cdfcb320f",
+  "1df15acd773fa75d193d6e4bac84b77a",
+  "64c839fbcad96d5cd26dba477ae0f3a2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

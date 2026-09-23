@@ -126,6 +126,24 @@ test("the rejection points at usageClass, so the form can show it", () => {
 });
 
 // The rule must not swallow the refinements that were already there.
+test("a catalogue write cannot name a deployment-only host", () => {
+  for (const provider of ["deepinfra", "together", "openrouter"]) {
+    const created = create({ provider, status: "disabled", usageClass: "standard" });
+    const updated = updateModelRegistrySchema.safeParse({
+      ...base,
+      provider,
+      status: "disabled",
+      usageClass: "standard",
+    });
+    assert.equal(created.success, false, provider);
+    assert.equal(updated.success, false, provider);
+    assert.ok(
+      messages(created).some((message) => /deployment hosts/.test(message)),
+      provider
+    );
+  }
+});
+
 test("the existing reservation-token refinement still applies", () => {
   const result = create({
     id: "gpt-5-6-sol",
