@@ -353,6 +353,20 @@ const REGISTRY = {
     reason:
       "proven and unproven, and deliberately no third value for 'probably'. The question this answers is binary -- may a residency-constrained request be served from here -- and a middle value would be read as a yes by whoever needed one. 'unproven' is the honest default rather than a gap: it says nobody has read a contract naming a recipient entity and a processing region, which is where every provider stands until the contract review lands.",
   },
+  RoutingIdentityManifestEntry_versionPinStrength_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "VERSION_PIN_STRENGTHS",
+    reason:
+      "The same three values as ModelDeployment_versionPinStrength_check. A published entry copies the pin, and a copy that allowed a fourth spelling would be a publication the live row could not have.",
+  },
+  ModelDeployment_versionPinStrength_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "VERSION_PIN_STRENGTHS",
+    reason:
+      "strong, weak, alias_only. strong is an immutable revision and versionMayDrift() refuses to widen it even when allowVersionDrift is set. weak and alias_only may move only when that flag is also true. The column default is strong, so a row that predates the column cannot drift by omission. The same list is on RoutingIdentityManifestEntry, because a publication that stored a different vocabulary would be a second answer to what the pin was.",
+  },
   ModelDeployment_qualityGateStatus_check: {
     owner: "list",
     module: "lib/deploymentIdentity.ts",

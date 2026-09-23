@@ -5818,6 +5818,18 @@ model ModelDeployment {
   /// digest computed from it. As a free string the same instant spelled two
   /// ways digested differently and this column kept only one of them.
   qualityGateExpiresAt   DateTime?
+  /// How tightly this placement is pinned to modelVersion / modelRevision.
+  /// `strong` never drifts. `weak` and `alias_only` may move only when
+  /// allowVersionDrift is also true. The default is `strong`, so a row that
+  /// predates the column cannot drift.
+  versionPinStrength      String    @default("strong")
+  allowVersionDrift       Boolean   @default(false)
+  /// The benchmark a pass was measured against. Null until a gate is run.
+  /// Changing it changes what the pass means, so an enabled row cannot.
+  qualityBenchmarkVersion String?
+  /// When that benchmark was last run. A re-check of the same benchmark may
+  /// update this while the deployment stays enabled.
+  qualityLastVerifiedAt   DateTime?
   /// Capability declarations, as the candidate filter would read them.
   capabilities           Json?
   enabled                Boolean   @default(false)
@@ -5943,6 +5955,10 @@ model RoutingIdentityManifestEntry {
   capabilities           String
   qualityGateStatus      String
   qualityGateExpiresAt   DateTime?
+  versionPinStrength      String
+  allowVersionDrift       Boolean
+  qualityBenchmarkVersion String?
+  qualityLastVerifiedAt   DateTime?
   deploymentEnabled      Boolean
 
   /// The endpoint it was served from, as it stood.

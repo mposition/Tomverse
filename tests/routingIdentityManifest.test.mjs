@@ -30,7 +30,10 @@ const migration = () =>
 const identityMigration = () =>
     readFileSync(
         new URL(
-            "../prisma/migrations/20260923120000_deployment_identity_dark/migration.sql",
+            // The migration that last replaced the function, named here rather
+            // than discovered as "the newest file". A later migration must not
+            // become the authority by existing.
+            "../prisma/migrations/20260923390000_deployment_version_gate_dark/migration.sql",
             import.meta.url
         ),
         "utf8"
@@ -54,6 +57,10 @@ const entry = (overrides = {}) => ({
     capabilities: canonicalCapabilities({ vision: true, tools: ["search"] }),
     qualityGateStatus: "pending",
     qualityGateExpiresAt: null,
+    versionPinStrength: "strong",
+    allowVersionDrift: false,
+    qualityBenchmarkVersion: null,
+    qualityLastVerifiedAt: null,
     deploymentEnabled: true,
     providerEndpointId: "end_1",
     gatewayProvider: "openai",
@@ -178,6 +185,10 @@ test("every field in the list changes the digest", () => {
         capabilities: canonicalCapabilities({ vision: false }),
         qualityGateStatus: "passed",
         qualityGateExpiresAt: new Date("2026-12-01T00:00:00.000Z"),
+        versionPinStrength: "weak",
+        allowVersionDrift: true,
+        qualityBenchmarkVersion: "bench-2",
+        qualityLastVerifiedAt: new Date("2026-09-01T00:00:00.000Z"),
         deploymentEnabled: false,
         providerEndpointId: "end_2",
         gatewayProvider: "azure",
@@ -211,6 +222,22 @@ test("the expiry digests as one instant, however it was spelled", () => {
     assert.deepEqual(
         manifestProblems(manifest([entry({ qualityGateExpiresAt: new Date("nonsense") })])),
         ['deployment "dep_1" has an expiry that is not an instant']
+    );
+});
+
+test("the verification instant digests as one instant, however it was spelled", () => {
+    const verified = new Date("2026-09-01T00:00:00.000Z");
+    assert.equal(
+        manifestDigest([entry({ qualityLastVerifiedAt: verified })]),
+        manifestDigest([entry({ qualityLastVerifiedAt: new Date("2026-09-01T00:00:00Z") })])
+    );
+    assert.notEqual(
+        manifestDigest([entry({ qualityLastVerifiedAt: verified })]),
+        manifestDigest([entry({ qualityLastVerifiedAt: null })])
+    );
+    assert.deepEqual(
+        manifestProblems(manifest([entry({ qualityLastVerifiedAt: new Date("nonsense") })])),
+        ['deployment "dep_1" has a verification time that is not an instant']
     );
 });
 
@@ -374,7 +401,14 @@ test("every digest field is a column of the entry table", () => {
     // ProviderEndpoint are mutable rows that will have moved by the time
     // anybody asks. This checks the DDL declares a column per digest field,
     // which is what makes the reconstruction possible; it writes no row.
-    const sql = statements(migration());
+    const added = readFileSync(
+        new URL(
+            "../prisma/migrations/20260923390000_deployment_version_gate_dark/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
+    const sql = `${statements(migration())}\n${statements(added)}`;
     assert.match(sql, /CREATE TABLE "RoutingIdentityManifestEntry"/);
     for (const field of MANIFEST_DIGEST_FIELDS) {
         assert.match(sql, new RegExp(`"${field}"`), field);

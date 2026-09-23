@@ -1012,8 +1012,8 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 |---|---|---|
 | §1·§14 | 호스트 6곳 onboarding | DeepInfra dark 등록부터 착수 (§14.4) |
 | §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 없음 |
-| §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | 필드 없음 |
-| §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 상태·만료 컬럼만 |
+| §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
+| §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | benchmark version·마지막 검증 시각은 §14.7. stale 전환과 drift 재검증은 없음 |
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 없음 |
 | §7.1 | capacity 런타임: Retry-After, token bucket, deprioritize (A-4b) | `QuotaCapacityState` dark schema만 |
 | §7.2·§7.3 | deployment 단위 health와 circuit breaker | provider 단위만 |
@@ -1107,6 +1107,29 @@ variant slug 자체가 allowlist에 있어야 합니다.
 이 등록까지가 호스트 6곳 중 3곳이고, 빠져 있던 OpenRouter 제외·allowlist
 항목이 코드로 있습니다. §14.3의 약 50단위에서 완료는 23, **약 46%(추정)**입니다.
 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.7 Model version gate (2026-09-23)
+
+ADR §3.3의 필드가 `ModelDeployment`에 있습니다. dark입니다. 라우터는
+읽지 않습니다. 발행된 manifest는 그 값을 복사하고, digest가 덮습니다.
+enabled인 행의 pin과 benchmark 이름을 identity trigger가 고정합니다.
+
+- `versionPinStrength`는 `strong`, `weak`, `alias_only`입니다. 기본은 `strong`입니다.
+- `allowVersionDrift`의 기본은 false입니다.
+- 판정은 `versionMayDrift()` 한 곳입니다. `strong`은 플래그가 켜져 있어도
+  다른 revision으로 가지 않습니다. `weak`와 `alias_only`는 플래그가 켜져
+  있을 때만 움직입니다.
+- `qualityBenchmarkVersion`은 그 pass가 어떤 benchmark인지입니다. enabled인
+  동안 바꾸면 trigger가 거절합니다.
+- `qualityLastVerifiedAt`은 같은 benchmark를 다시 잰 시각입니다. enabled인
+  채로 갱신할 수 있습니다. manifest에는 들어가서 발행 시점의 시각이 남습니다.
+
+이 필드가 §14.3의 version gate 항목입니다. pin hard gate와, 만료를 `stale`로
+돌리는 운영 전환은 아직입니다.
+
+§14.3의 약 50단위에서 완료는 24, **약 48%(추정)**입니다. 직전 OpenRouter
+등록 보고는 23, 약 46%였습니다. 검증·독립 검토·병합·배포는 별도입니다.
+production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

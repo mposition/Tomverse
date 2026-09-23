@@ -110,6 +110,20 @@ export type ManifestDeploymentEntry = {
      * string that is not a date at all digested fine and failed to insert.
      */
     qualityGateExpiresAt: Date | null;
+    /**
+     * `strong`, `weak`, or `alias_only`. Copied because a publication that
+     * omitted it would keep meaning "this revision" after the row was
+     * loosened to an alias.
+     */
+    versionPinStrength: string;
+    allowVersionDrift: boolean;
+    /** The benchmark the pass was measured against, or null when none has run. */
+    qualityBenchmarkVersion: string | null;
+    /**
+     * When that benchmark was last run, or null. Canonicalised like the
+     * expiry: two spellings of one instant digest the same.
+     */
+    qualityLastVerifiedAt: Date | null;
     deploymentEnabled: boolean;
 
     // --- the endpoint it is served from ------------------------------------
@@ -145,6 +159,10 @@ const MANIFEST_ENTRY_FIELDS = [
     "capabilities",
     "qualityGateStatus",
     "qualityGateExpiresAt",
+    "versionPinStrength",
+    "allowVersionDrift",
+    "qualityBenchmarkVersion",
+    "qualityLastVerifiedAt",
     "deploymentEnabled",
     "providerEndpointId",
     "gatewayProvider",
@@ -230,25 +248,29 @@ const encodeField = (value: string | boolean | null): string => {
 /**
  * One field's value as the digest sees it.
  *
- * Only the expiry needs normalising, and it needs it badly enough to be
- * worth a function: the column is a `TIMESTAMP(3)` and two spellings of one
- * instant have to digest the same, or a row cannot reproduce the digest
- * computed from it.
+ * An instant needs normalising, and it needs it badly enough to be worth a
+ * function: the column is a `TIMESTAMP(3)` and two spellings of one instant
+ * have to digest the same, or a row cannot reproduce the digest computed
+ * from it. The expiry and the last-verified instant are both that column.
  */
-const fieldValue = (
-    entry: ManifestDeploymentEntry,
-    field: (typeof MANIFEST_ENTRY_FIELDS)[number]
-): string | boolean | null => {
-    if (field !== "qualityGateExpiresAt") return entry[field];
-    const expiry = entry.qualityGateExpiresAt;
-    if (expiry === null) return null;
+const instantValue = (instant: Date | null): string | null => {
+    if (instant === null) return null;
     // `toISOString()` throws on an invalid Date, and this function has to be
     // total: `manifestProblems()` computes the digest in order to compare it,
     // so a throw here would stop the validator reaching its own complaint
     // about the same value. A fixed marker instead -- distinct from null, so
-    // an unreadable expiry does not digest as no expiry, and never present in
-    // a published digest because publication refuses the entry.
-    return Number.isNaN(expiry.getTime()) ? "not-an-instant" : expiry.toISOString();
+    // an unreadable instant does not digest as no instant, and never present
+    // in a published digest because publication refuses the entry.
+    return Number.isNaN(instant.getTime()) ? "not-an-instant" : instant.toISOString();
+};
+
+const fieldValue = (
+    entry: ManifestDeploymentEntry,
+    field: (typeof MANIFEST_ENTRY_FIELDS)[number]
+): string | boolean | null => {
+    if (field === "qualityGateExpiresAt") return instantValue(entry.qualityGateExpiresAt);
+    if (field === "qualityLastVerifiedAt") return instantValue(entry.qualityLastVerifiedAt);
+    return entry[field];
 };
 
 const encodeEntry = (entry: ManifestDeploymentEntry): string =>
@@ -345,6 +367,12 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
         if (expiry !== null && Number.isNaN(expiry.getTime())) {
             problems.push(
                 `deployment ${JSON.stringify(entry.modelDeploymentId)} has an expiry that is not an instant`
+            );
+        }
+        const verified = entry.qualityLastVerifiedAt;
+        if (verified !== null && Number.isNaN(verified.getTime())) {
+            problems.push(
+                `deployment ${JSON.stringify(entry.modelDeploymentId)} has a verification time that is not an instant`
             );
         }
     }
