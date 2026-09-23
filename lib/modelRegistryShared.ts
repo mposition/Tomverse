@@ -22,6 +22,7 @@ export const AI_PROVIDERS = [
   "deepinfra",
   "together",
   "openrouter",
+  "sail",
 ] as const satisfies readonly AiProvider[];
 
 export const PROVIDER_API_CONFIGURATION: Record<
@@ -107,6 +108,14 @@ export const PROVIDER_API_CONFIGURATION: Record<
     apiKeyEnvName: "OPENROUTER_API_KEY",
     protocol: "openai-compatible",
   },
+  sail: {
+    // OpenAI-compatible chat completions. The Anthropic Messages base is the
+    // same origin without /v1 and is documented as beta, so it is not this
+    // connection.
+    baseUrl: "https://api.sailresearch.com/v1",
+    apiKeyEnvName: "SAIL_API_KEY",
+    protocol: "openai-compatible",
+  },
 };
 
 /**
@@ -160,6 +169,7 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
     deepinfra: ["DEEPINFRA_API_KEY"],
     together: ["TOGETHER_API_KEY"],
     openrouter: ["OPENROUTER_API_KEY"],
+    sail: ["SAIL_API_KEY"],
   };
 
 /**
@@ -618,13 +628,14 @@ export const staticModelRegistryReconciliationRows = () =>
  * not. `AiProvider` still lists them, because the connection table (base URL,
  * key name) is one list, and a second list is how DeepInfra was labelled and
  * then left out of a menu. The catalogue write path and the chat adapter
- * refuse these three; the connection check only says what URL a row would
+ * refuse every entry; the connection check only says what URL a row would
  * have to use if one existed.
  */
 export const DEPLOYMENT_ONLY_PROVIDERS = [
   "deepinfra",
   "together",
   "openrouter",
+  "sail",
 ] as const satisfies readonly AiProvider[];
 
 export class DeploymentHostRefusal extends Error {

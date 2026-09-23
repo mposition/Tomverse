@@ -59,6 +59,7 @@ const providerLabel: Record<AiProvider, string> = {
   deepinfra: "DeepInfra",
   together: "Together",
   openrouter: "OpenRouter",
+  sail: "Sail Research",
 };
 
 const dateLabel = (value: string | null) => {

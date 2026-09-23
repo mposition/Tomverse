@@ -255,8 +255,9 @@ test("the chat adapter uses the operator allowlist and not the request", () => {
   assert.equal(typeof model, "object");
 });
 
-test("DeepInfra and Together are not catalogue adapters", () => {
-  for (const provider of ["deepinfra", "together"]) {
+test("deployment hosts other than OpenRouter are not catalogue adapters", () => {
+  for (const provider of DEPLOYMENT_ONLY_PROVIDERS) {
+    if (provider === "openrouter") continue;
     assert.throws(
       () => getActiveAiModel({ provider, apiModel: "deepseek-ai/DeepSeek-V4-Pro" }),
       (error) =>

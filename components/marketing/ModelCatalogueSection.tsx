@@ -53,6 +53,7 @@ const PROVIDER_LABELS: Record<AiProvider, string> = {
   deepinfra: "DeepInfra",
   together: "Together",
   openrouter: "OpenRouter",
+  sail: "Sail Research",
 };
 
 export function ModelCatalogueBlock() {

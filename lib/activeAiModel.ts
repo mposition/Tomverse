@@ -71,6 +71,7 @@ export const getActiveAiModel = (
       return createOpenAI(configuration).chat(model.apiModel);
     case "deepinfra":
     case "together":
+    case "sail":
       // Inference hosts (ADR v2.1 provider pool). A catalogue model must not
       // call them: the price on the catalogue row is the direct connection's
       // price, and the destination row for these hosts is unproven. A hosted

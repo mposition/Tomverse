@@ -216,12 +216,17 @@ const compilerOptions = parsedConfig.options;
 // No new element access. Count 228, position-free hash unchanged. A repin
 // of the position-sensitive digest only. Recomputed after merging that fix
 // onto the version-gate note above.
+//
+// 2026-09-23, Sail Research registered the same way as Together: a literal
+// `case` in `lib/activeAiModel.ts` and a literal registry entry in
+// `lib/modelRegistryShared.ts`. No computed access. Count 228, position-free
+// hash unchanged. A repin of the position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "1df15acd773fa75d193d6e4bac84b77a",
-  "64c839fbcad96d5cd26dba477ae0f3a2",
+  "ea410e0839b6137ebbe89458e69990fe",
+  "2d1081e78be996e036aa4243522156ac",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

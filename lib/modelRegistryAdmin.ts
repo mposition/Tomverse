@@ -119,7 +119,7 @@ const refineModelInput = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
         code: "custom",
         path: ["provider"],
         message:
-          "DeepInfra, Together and OpenRouter are deployment hosts. A catalogue row cannot name them.",
+          "These providers are deployment hosts. A catalogue row cannot name them.",
       });
     }
     const unpricedPremium = unpricedPremiumMessage(candidate);

@@ -56,6 +56,8 @@ const providerConsoleHref: Record<AiProvider, string> = {
   // Documented as Settings → Billing after signing in at api.together.ai.
   together: "https://api.together.ai/settings/billing",
   openrouter: "https://openrouter.ai/settings/credits",
+  // Usage docs name this dashboard as where billing and cost are shown.
+  sail: "https://app.sailresearch.com",
 };
 
 const money = (microUsd: number) =>

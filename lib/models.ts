@@ -15,7 +15,8 @@ export type AiProvider =
     | "perplexity"
     | "deepinfra"
     | "together"
-    | "openrouter";
+    | "openrouter"
+    | "sail";
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";

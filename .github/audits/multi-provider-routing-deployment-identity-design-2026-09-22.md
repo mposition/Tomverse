@@ -1010,8 +1010,8 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 
 | 원문 | 항목 | 현재 |
 |---|---|---|
-| §1·§14 | 호스트 6곳 onboarding | DeepInfra dark 등록부터 착수 (§14.4) |
-| §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 없음 |
+| §1·§14 | 호스트 6곳 onboarding | 4곳 dark: DeepInfra, Together, OpenRouter, Sail (§14.4–§14.6, §14.11). Vertex·Azure는 등록하지 않음 |
+| §14.1·Phase 1 | OpenRouter 실패 공급자 제외 (+ 수신자 allowlist) | 코드 (§14.6). 라우터는 호출하지 않음 |
 | §3.3 | version gate: `version_pin_strength`, `allow_version_drift` | dark columns (§14.7). 라우터는 읽지 않음 |
 | §3.2·§9 | quality gate 운영: benchmark version, 마지막 검증 시각, 만료 시 stale, deployment별 품질 benchmark, drift 감지 후 재검증 | 판정 (§14.9). 행 UPDATE는 없음. drift 숫자 임계값은 없음 |
 | §3.5·§2.1 | pin hard gate (`pin_scope`, `pin_fallback_policy=error`)와 요청 시작 시 고정되는 account 정책 버전 | 판정 함수만 (§14.8). 요청 시작 시 버전 고정은 없음 |
@@ -1200,6 +1200,34 @@ ADR §7.2와 §7.3의 판정이 `lib/deploymentAvailability.ts`에 있습니다.
 이 줄이 §14.3의 deployment health 항목입니다. 직전 quality 보고는 25, 약 50%였습니다.
 §14.3의 약 50단위에서 완료는 26, **약 52%(추정)**입니다. 검증·독립 검토·
 병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.11 Sail Research (2026-09-23)
+
+ADR §14.1의 background·유연한 작업 호스트입니다. DeepInfra와 같은 형태의
+dark 등록만 합니다. 공식 quickstart의 OpenAI 호환 base는
+`https://api.sailresearch.com/v1`이고 키 이름은 `SAIL_API_KEY`입니다.
+같은 origin의 Anthropic Messages base(`/v1` 없음)는 beta로 적혀 있어 이
+연결에 쓰지 않습니다.
+
+목적지 행은 `unproven`입니다. 정산 모델은 `unknown`입니다. 카탈로그 모델은
+없고, 호스팅된 사본은 `ModelDeployment`입니다. 가격 profile은 넣지 않습니다.
+`DEPLOYMENT_ONLY_PROVIDERS`에 들어 있어 카탈로그 쓰기와 카탈로그 어댑터가
+거절합니다. 운영자 콘솔 링크는 usage 문서가 대시보드로 가리키는
+`https://app.sailresearch.com`입니다. 그 문서가 billing path를 따로
+적지 않으므로 `/billing`을 붙이지 않습니다.
+
+Vertex AI와 Azure OpenAI는 이 등록에 없습니다. Vertex는 지역 endpoint이고
+Azure는 리소스마다 base가 다릅니다. T1은 region-pin 공급자가 확인된 곳이
+0개라고 하므로, 하나의 base URL을 지어 넣지 않습니다.
+
+위 표의 호스트 칸과 OpenRouter 제외 칸은 코드와 어긋나 있어 이 절에서
+고쳤습니다. OpenRouter 제외는 §14.6에서 이미 세었으므로 여기서 다시 세지
+않습니다. Sail 한 곳만 더합니다.
+
+이 등록이 코드로 들어가면 호스트 6곳 중 4곳(DeepInfra, Together, OpenRouter,
+Sail)이 dark로 있습니다. §14.3의 약 50단위 분모에서 완료는 27, **약 54%(추정)**
+입니다. 직전 availability 보고는 26, 약 52%였습니다. 검증·독립 검토·병합·
+배포는 이 수에 들어 있지 않습니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

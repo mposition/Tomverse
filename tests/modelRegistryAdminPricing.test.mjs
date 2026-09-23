@@ -5,6 +5,7 @@ import {
   createModelRegistrySchema,
   updateModelRegistrySchema,
 } from "../lib/modelRegistryAdmin.ts";
+import { DEPLOYMENT_ONLY_PROVIDERS } from "../lib/modelRegistryShared.ts";
 
 // Whether the priced-premium rule holds for the catalogue that actually bills.
 //
@@ -127,7 +128,7 @@ test("the rejection points at usageClass, so the form can show it", () => {
 
 // The rule must not swallow the refinements that were already there.
 test("a catalogue write cannot name a deployment-only host", () => {
-  for (const provider of ["deepinfra", "together", "openrouter"]) {
+  for (const provider of DEPLOYMENT_ONLY_PROVIDERS) {
     const created = create({ provider, status: "disabled", usageClass: "standard" });
     const updated = updateModelRegistrySchema.safeParse({
       ...base,

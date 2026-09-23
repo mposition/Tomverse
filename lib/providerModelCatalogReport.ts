@@ -60,6 +60,7 @@ const PROVIDER_REPORT_NAMES: Readonly<Record<AiProvider, string>> = {
   deepinfra: "DeepInfra",
   together: "Together",
   openrouter: "OpenRouter",
+  sail: "Sail Research",
 };
 
 /**

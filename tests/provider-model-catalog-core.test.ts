@@ -382,6 +382,7 @@ test("each provider's catalogue URL is the one that provider actually serves", (
       deepinfra: "https://api.deepinfra.com/v1/openai/models",
       together: "https://api.together.ai/v1/models",
       openrouter: "https://openrouter.ai/api/v1/models",
+      sail: "https://api.sailresearch.com/v1/models",
     }
   );
 });

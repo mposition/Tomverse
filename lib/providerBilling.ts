@@ -26,6 +26,7 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   deepinfra: defaultProfile("usage_based", "unknown"),
   together: defaultProfile("usage_based", "unknown"),
   openrouter: defaultProfile("usage_based", "unknown"),
+  sail: defaultProfile("usage_based", "unknown"),
 };
 
 function defaultProfile(
