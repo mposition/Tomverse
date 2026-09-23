@@ -36,18 +36,29 @@
 // ## Output, and what it can and cannot protect
 //
 // Counts only -- no address, no id, no country. A population below
-// `--min-population` is refused without saying how far below, and any bucket
-// holding fewer than that many accounts prints as "hidden" rather than its
-// count, because a row of one is a person. The floor cannot be set below 5.
+// `--min-population` (N) is refused without saying how far below, and no
+// bucket holding between 1 and N-1 accounts prints its count, because a row of
+// one is a person. The floor cannot be set below 5.
 //
-// Hiding one cell is not enough on its own, and the first version showed why:
-// it printed the exact total beside the visible cells, so a single hidden cell
-// was simply the total minus the rest -- 78 accounts, 77 in one bucket, and the
-// one `jurisdiction_conflict` was recovered by subtraction. So when anything is
-// hidden the total is hidden too, and if only one cell would be hidden, the
-// next smallest non-empty cell is hidden with it. What can then be worked out
-// from outside, even knowing the population, is the sum of the hidden cells
-// and not any one of them.
+// Hiding the small cells is not enough, and two versions showed why. The
+// population is not a secret -- the draft names 78, and anyone with the
+// database can count addresses -- so every exact number printed is an
+// equation. The first version printed the total and the other cells exactly,
+// and a single hidden cell was the total minus the rest. The second hid the
+// total and one complementary cell, and still: 76 visible and two hidden cells
+// out of a known 78 makes both hidden cells 1, bucket names and all.
+//
+// So when any cell is small, the report prints **no exact non-zero count**. A
+// small cell prints as "1 to N-1". A large cell prints as a lower bound, its
+// count rounded down to a multiple of N ("at least 70"). And the bounds are
+// lowered further, a multiple of N at a time, until every small cell could be
+// N-1 *at the same time* without the large cells falling below their printed
+// bounds. That is the test that matters: once it holds, every combination of
+// small counts is consistent with the population, so knowing the population
+// excludes none of them, and the total can be printed as it is. If no set of
+// bounds passes, the table is refused like a population below the floor.
+//
+// Zero stays zero: "nobody is in this state" identifies nobody.
 //
 // That protects a single run. It does not make two runs safe to compare: the
 // people in scope here are the existing accounts, who largely know each other,
@@ -109,7 +120,8 @@ const { marketingJurisdictionVerdict } = await import(
 
 // The three rows of section 6.3's table that share one skip reason are split
 // here, because they are released by different things -- and for one of them
-// neither the country confirmation nor an IP amendment does anything.
+// neither an IP amendment nor confirming the same country does anything; only
+// a different, allowed country does (see its remedy).
 //
 // The low-confidence bucket is split once more, by asking the same verdict a
 // hypothetical: *if* the guessed country were settled, would it be allowed?
@@ -140,41 +152,54 @@ const REMEDY = {
   unconfirmed_low_guess_allowed_if_settled:
     "A language-and-timezone guess naming one of the ten. The S0 IP amendment could release it, provided the IP country -- where it differs from the guess -- is one of the ten as well (draft section 5.3 requires both candidates to pass, not to agree). IP is not recorded, so that cannot be checked here. A confirmed allowed country releases it outright.",
   unconfirmed_low_guess_not_allowed_if_settled:
-    "A guess naming a country outside the ten or without a reviewed profile (JP, CN, ES, PT among them). The S0 amendment does not release it; only a confirmed allowed country does.",
+    "A guess naming a country outside the ten or without a reviewed profile (JP, CN, ES, PT among them). The S0 amendment does not release it. A settled signal naming one of the ten does: the person declaring that country in the preference centre, or a billing country recorded later, which outranks any guess.",
   unconfirmed_no_reviewed_profile:
     "A settled, high-confidence country with no reviewed profile. The S0 amendment does not release it (an IP estimate ranks below billing and declaration), and confirming the same country does not either. Declaring one of the ten allowed countries in the preference centre does, if that is where the person lives -- the later declaration outranks the billing country. Otherwise the country needs a reviewed profile, its country-level record and a place in MARKETING_ALLOWED_COUNTRY_CODES; a profile alone only moves it to marketing_country_not_allowed.",
   jurisdiction_conflict:
-    "Billing country and declaration disagree. The person confirms which is current.",
+    "Billing country and declaration disagree. A confirmation settles which is current, and releases the account only if that country is one of the ten: confirming a country outside the ten moves it to marketing_country_not_allowed, and one without a reviewed profile to unconfirmed_no_reviewed_profile.",
   marketing_country_not_allowed:
-    "Settled, with a profile, but outside MARKETING_ALLOWED_COUNTRY_CODES. Adding a country needs its own country-level record first.",
+    "Settled, with a profile, but outside MARKETING_ALLOWED_COUNTRY_CODES. Adding a country needs its own country-level record first, and the verdict changes only when the code is added to that list; the record alone changes nothing here.",
 };
 
 /**
- * Hide every non-empty cell below the floor, and one more if only one is.
+ * The rows as they may be printed beside the exact total, or `null` if no
+ * printing leaves the small cells ambiguous.
  *
- * Zero stays zero: "nobody is in this state" identifies nobody. A single
- * hidden cell is recoverable from the total and the visible cells, so a second
- * -- the smallest remaining non-empty one -- is hidden with it, and the caller
- * hides the total whenever anything is hidden.
+ * With no small cell, every count is exact. Otherwise no non-zero count is:
+ * small cells say "1 to N-1", large cells say "at least" a multiple of N, and
+ * those bounds are lowered until
+ *
+ *     sum of printed bounds + (small cells) x (N-1) <= total
+ *
+ * -- every small cell could be N-1 at once and the large cells would still
+ * reach their bounds. Any smaller small counts leave more for the large
+ * cells, which have no printed ceiling, so every combination is consistent
+ * with the total and knowing it excludes nothing. That needs at least one
+ * large cell to take up the slack; with none, the small cells sum to the
+ * total exactly, which is the equation this exists to prevent.
  */
-const suppressCells = (rows, floor) => {
-  const hide = new Set(
+const coarsenCells = (rows, floor, total) => {
+  const smallCount = rows.filter((row) => row.accounts > 0 && row.accounts < floor).length;
+  if (smallCount === 0) return rows;
+  const bounds = new Map(
     rows
-      .filter((row) => row.accounts > 0 && row.accounts < floor)
-      .map((row) => row.bucket)
+      .filter((row) => row.accounts >= floor)
+      .map((row) => [row.bucket, Math.floor(row.accounts / floor) * floor])
   );
-  if (hide.size === 1) {
-    const next = rows
-      .filter((row) => row.accounts > 0 && !hide.has(row.bucket))
-      .sort((a, b) => a.accounts - b.accounts)[0];
-    if (next) hide.add(next.bucket);
+  if (bounds.size === 0) return null;
+  const budget = total - smallCount * (floor - 1);
+  let sum = [...bounds.values()].reduce((a, b) => a + b, 0);
+  while (sum > budget) {
+    const [bucket, value] = [...bounds.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (value <= floor) return null;
+    bounds.set(bucket, value - floor);
+    sum -= floor;
   }
-  return rows.map((row) =>
-    // One neutral word for every hidden cell. "<N" would be false for the
-    // complementary cell, which is often the largest one, and a different
-    // label for it would say which hidden cell was the small one.
-    hide.has(row.bucket) ? { ...row, accounts: "hidden", hidden: true } : row
-  );
+  return rows.map((row) => {
+    if (row.accounts === 0) return row;
+    if (bounds.has(row.bucket)) return { ...row, accounts: `at least ${bounds.get(row.bucket)}` };
+    return { ...row, accounts: `1 to ${floor - 1}` };
+  });
 };
 
 let result;
@@ -207,26 +232,26 @@ try {
       counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
     }
     const unexpected = [...counts.keys()].filter((key) => !(key in REMEDY));
-    result = {
-      scope,
-      total: accounts.length,
-      // Replaced below when any cell is hidden.
-      totalShown: true,
-      buckets: suppressCells(
-        Object.keys(REMEDY).map((bucket) => ({
-          bucket,
-          accounts: counts.get(bucket) ?? 0,
-          remedy: REMEDY[bucket],
-        })),
-        minPopulation
-      ),
-      ...(unexpected.length > 0 ? { unexpectedReasons: unexpected } : {}),
-    };
-    if (result.buckets.some((row) => row.hidden)) {
-      result.total = `at least ${minPopulation}`;
-      result.totalShown = false;
-    }
-    for (const row of result.buckets) delete row.hidden;
+    const buckets = coarsenCells(
+      Object.keys(REMEDY).map((bucket) => ({
+        bucket,
+        accounts: counts.get(bucket) ?? 0,
+        remedy: REMEDY[bucket],
+      })),
+      minPopulation,
+      accounts.length
+    );
+    result = buckets
+      ? {
+          scope,
+          total: accounts.length,
+          buckets,
+          ...(unexpected.length > 0 ? { unexpectedReasons: unexpected } : {}),
+        }
+      : {
+          scope,
+          refused: `Some buckets hold fewer than ${minPopulation} accounts, and the rest are too few to leave those counts ambiguous against the total. At this size a row of the table describes a person, so nothing is printed.`,
+        };
   }
 } finally {
   await prisma.$disconnect().catch(() => undefined);
@@ -237,14 +262,10 @@ if (json) {
 } else if (result.refused) {
   console.log(`Existing-account jurisdiction -- ${result.scope}\n\n  ${result.refused}`);
 } else {
-  console.log(
-    `Existing-account jurisdiction -- ${result.scope}: ${result.total}${
-      result.totalShown ? "" : " (hidden, because a cell below is hidden)"
-    }`
-  );
+  console.log(`Existing-account jurisdiction -- ${result.scope}: ${result.total}`);
   console.log("One gate only. This is not a count of who would be mailed.\n");
   for (const row of result.buckets) {
-    console.log(`  ${String(row.accounts).padStart(5)}  ${row.bucket}`);
+    console.log(`  ${String(row.accounts).padStart(12)}  ${row.bucket}`);
     console.log(`         ${row.remedy}`);
   }
   if (result.unexpectedReasons) {
