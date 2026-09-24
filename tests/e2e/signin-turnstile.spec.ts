@@ -7,7 +7,7 @@ import {
   setTurnstileScript,
 } from "./support/app-fixtures";
 
-test("email login reveals and reuses an interactive Turnstile at the form width", { tag: "@smoke" }, async ({
+test("email login reveals and reuses an interactive Turnstile at the form width", async ({
   page,
 }, testInfo) => {
   test.skip(
