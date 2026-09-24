@@ -11,7 +11,10 @@ import {
   boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
 import { AMUX_INTAKE_POLICY_VERSION } from "@/lib/amux/intakeCore";
-import type { AmuxIntakeRegistrationPlan } from "@/lib/amux/intakeRegistrationCore";
+import {
+  classifyAmuxIntakeReadBack,
+  type AmuxIntakeRegistrationPlan,
+} from "@/lib/amux/intakeRegistrationCore";
 import { AMUX_INTAKE_APPLY_ENV, amuxIntakeApplyPermitted } from "@/lib/amux/intakeCore";
 import { prisma } from "@/lib/prisma";
 
@@ -26,6 +29,17 @@ import { prisma } from "@/lib/prisma";
  */
 
 const TARGET_TYPE = "AmuxIntakeApproval";
+
+export class AmuxIntakeOutcomeUnknownError extends BoardImportError {
+  readonly readBack: "absent" | "partial";
+  readonly retry = false as const;
+
+  constructor(approvalId: string, readBack: "absent" | "partial") {
+    super("outcome_unknown", 409, approvalId);
+    this.name = "AmuxIntakeOutcomeUnknownError";
+    this.readBack = readBack;
+  }
+}
 
 const prismaCode = (error: unknown): string | null => {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
@@ -145,6 +159,69 @@ export async function commitAmuxIntakeRegistration(
   return { created: true, cardId: created.id, approvalId: input.approvalId, auditId };
 }
 
+type IntakeReadDb = Pick<Prisma.TransactionClient, "$queryRaw" | "amuxWorkItem">;
+
+/** Read-only comparison after an unclear commit. This function does not write. */
+export async function readAmuxIntakeRegistration(
+  plan: AmuxIntakeRegistrationPlan,
+  db: IntakeReadDb = prisma,
+): Promise<
+  | { kind: "committed"; cardId: string; approvalId: string; auditId: string }
+  | { kind: "absent" }
+  | { kind: "partial" }
+> {
+  const card = plan.card;
+  const stored = await db.amuxWorkItem.findUnique({
+    where: {
+      sourceSystem_sourceKey: { sourceSystem: card.sourceSystem, sourceKey: card.sourceKey },
+    },
+    select: { id: true, sourceDigest: true },
+  });
+  const drafts = await db.$queryRaw<Array<{ draftDigest: string; status: string }>>`
+    SELECT "draftDigest", "status" FROM "AmuxIntakeDraft"
+    WHERE "sourceSystem" = ${card.sourceSystem} AND "sourceKey" = ${card.sourceKey}
+  `;
+  const approvals = stored
+    ? await db.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AmuxIntakeApproval"
+        WHERE "workItemId" = ${stored.id}
+          AND "draftDigest" = ${card.sourceDigest}
+          AND "status" = 'consumed'
+      `
+    : await db.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AmuxIntakeApproval"
+        WHERE "draftDigest" = ${card.sourceDigest} AND "status" = 'consumed'
+      `;
+  const audits = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AdminAuditLog"
+    WHERE "action" = ${plan.auditAction} AND "metadata"->>'draftDigest' = ${card.sourceDigest}
+  `;
+  const matchingDrafts = drafts.filter(
+    (row) => row.draftDigest === card.sourceDigest && row.status === "consumed",
+  );
+  const classified = classifyAmuxIntakeReadBack(
+    {
+      cardDigest: stored?.sourceDigest ?? null,
+      matchingConsumedDrafts: matchingDrafts.length,
+      matchingConsumedApprovals: approvals.length,
+      matchingAudits: audits.length,
+      otherIntakeRows: drafts.length - matchingDrafts.length,
+    },
+    card.sourceDigest,
+  );
+  const approval = approvals[0];
+  const audit = audits[0];
+  if (classified === "committed" && stored && approval && audit) {
+    return {
+      kind: "committed",
+      cardId: stored.id,
+      approvalId: approval.id,
+      auditId: audit.id,
+    };
+  }
+  return { kind: classified === "committed" ? "partial" : classified };
+}
+
 export async function applyAmuxIntakeRegistration(input: {
   session: Session;
   request: Request;
@@ -167,7 +244,22 @@ export async function applyAmuxIntakeRegistration(input: {
     const code = prismaCode(error);
     if (code === "P2002") throw new BoardImportError("conflict", 409, approvalId);
     if (boardImportFailureIsAmbiguous(code) || disconnectMessage(error)) {
-      throw new BoardImportError("outcome_unknown", 409, approvalId);
+      let readBack: "absent" | "partial" = "partial";
+      try {
+        const seen = await readAmuxIntakeRegistration(input.plan);
+        if (seen.kind === "committed") {
+          return {
+            created: false,
+            cardId: seen.cardId,
+            approvalId: seen.approvalId,
+            auditId: seen.auditId,
+          };
+        }
+        readBack = seen.kind;
+      } catch {
+        readBack = "partial";
+      }
+      throw new AmuxIntakeOutcomeUnknownError(approvalId, readBack);
     }
     throw error;
   }

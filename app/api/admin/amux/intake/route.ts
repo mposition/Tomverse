@@ -24,7 +24,10 @@ import {
   planAmuxIntakeRegistration,
   previewAmuxIntake,
 } from "@/lib/amux/intakeRegistrationCore";
-import { applyAmuxIntakeRegistration } from "@/lib/amux/intakeRegistration";
+import {
+  AmuxIntakeOutcomeUnknownError,
+  applyAmuxIntakeRegistration,
+} from "@/lib/amux/intakeRegistration";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 const ACTIONS = new Set(["preview", "register"]);
@@ -106,7 +109,11 @@ export async function POST(request: Request) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return withNoStore(approvalResponse);
     if (error instanceof BoardImportError) {
-      return NextResponse.json({ error: error.code, writes: 0 }, { status: error.httpStatus, headers: noStoreHeaders });
+      const body =
+        error instanceof AmuxIntakeOutcomeUnknownError
+          ? { error: error.code, retry: false as const, readBack: error.readBack }
+          : { error: error.code, writes: 0 as const };
+      return NextResponse.json(body, { status: error.httpStatus, headers: noStoreHeaders });
     }
     const security = apiSecurityResponse(error);
     if (security) return withNoStore(security);

@@ -71,7 +71,7 @@ raw 대화 원문은 앱 DB에 두지 않는다. 승인 전 draft의 기술적 �
 
 감사 metadata에는 approval id, digest, count, policy version, scanner version만 넣는다. 원문, 제목, secret finding은 넣지 않는다.
 
-Preview는 DB에 쓰지 않는다. 응답을 잃으면 즉시 재시도하지 않고 read-back한다. 일부만 있으면 `outcome_unknown`이고 자동 재시도를 멈춘다. card 생성, approval consume, audit는 한 트랜잭션이다.
+Preview는 DB에 쓰지 않는다. 등록 트랜잭션의 결과가 불명확하면 카드, draft, approval, audit를 한 번 읽는다. 넷이 같은 digest로 있으면 그 등록은 성공이다. 하나도 없으면 `outcome_unknown`이고 read-back은 `absent`다. 일부만 있으면 `outcome_unknown`이고 read-back은 `partial`이다. 그 읽기는 쓰지 않고 두 번째 트랜잭션을 열지 않는다. 자동 재시도는 없다. card 생성, approval consume, audit는 한 트랜잭션이다.
 
 ## 표시와 지역
 
@@ -111,6 +111,6 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 ## 등록 트랜잭션
 
-미리보기는 DB에 쓰지 않는다. 공개 route는 코드 래치가 켜져 있고 환경 값이 `enabled`일 때만 트랜잭션을 연다. 그 한 트랜잭션이 backlog 카드, 본문이 비어 있는 draft, consumed approval, human audit를 함께 쓴다. 그 트랜잭션은 todo, owner, claim, attempt, delivery, route decision, provider 비용, 사용자 credit를 늘리지 않는다. 같은 source key의 동시 등록이 유니크 제약에 걸리면 conflict다. 응답이 끊기면 `outcome_unknown`이고 자동 재시도를 멈춘다.
+미리보기는 DB에 쓰지 않는다. 공개 route는 코드 래치가 켜져 있고 환경 값이 `enabled`일 때만 트랜잭션을 연다. 그 한 트랜잭션이 backlog 카드, 본문이 비어 있는 draft, consumed approval, human audit를 함께 쓴다. 그 트랜잭션은 todo, owner, claim, attempt, delivery, route decision, provider 비용, 사용자 credit를 늘리지 않는다. 같은 source key의 동시 등록이 유니크 제약에 걸리면 conflict다. 응답이 끊기면 위 read-back을 한 번 하고, 확정되지 않으면 `outcome_unknown`이며 자동 재시도를 멈춘다.
 
 저장하는 `sourceKey`는 HMAC의 대문자 hex다. 기존 카드의 source key 검사에 맞추기 위한 형태이고, 원문 task id는 저장하지 않는다.
