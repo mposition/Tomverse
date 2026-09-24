@@ -497,6 +497,20 @@ const REGISTRY = {
     reason:
       "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
   },
+  AmuxReconciliationRun_status_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_RECONCILIATION_RUN_STATUSES",
+    reason:
+      "prepared, approved, applying, consumed, rejected, outcome_unknown. A run records one pinned source comparison. Item drift is not inferred from the run manifest digest, and the shipped apply latch stays off.",
+  },
+  AmuxWorkItemSourceRevision_state_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_SOURCE_REVISION_STATES",
+    reason:
+      "observed, accepted, rejected. Rows are append-only. accepted is the only state a card pointer may reference, and the original import is backfilled as accepted without rewriting source columns.",
+  },
   AmuxBoardPromotionApproval_status_check: {
     owner: "list",
     module: "lib/amux/boardPromotionCore.ts",
