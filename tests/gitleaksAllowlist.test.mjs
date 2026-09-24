@@ -74,6 +74,7 @@ const NON_SECRETS = [
   '        "Key sha256:67ad26189fa0, project sha256:35539b590847 (originals in " +',
   '        "Key sha256:1c9f4b0e7a63 (original in the private operations record); " +',
   '    scopeKey: "conversation_1",',
+  '    entry.sourceKey === "AMUX-BOARD-01" || entry.sourceKey === "AMUX-INTAKE-01"',
 ];
 
 // Credential-shaped canaries. None of these is a real secret, but each is
@@ -93,6 +94,7 @@ const CANARIES = [
   credentialLine("ANTHROPIC_API_KEY", "sk", "-", "ant", "-", "api03", "-", "AbCdEf0123456789"),
   credentialLine("NEXTAUTH_SECRET_KEY", "8f14e45fceea167a", "5a36dedd4bea2543"),
   credentialLine("TURNSTILE_SECRET_KEY", "0x4AAAAAAA", "BkMYinukE8nzY", "-UnexpectedSecret"),
+  `entry.sourceKey === "${["sk", "_live_", "51HxYzAbCdEfGhIj"].join("")}"`,
   // The digest rule's anchor is the `sha256:` label, and these prove the value
   // class alone never carries it. Both are lowercase hex of exactly the length
   // the rule admits after that label -- 32 and 64 characters -- so if the rule

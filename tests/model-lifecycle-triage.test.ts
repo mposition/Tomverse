@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assessModelLifecycleItem,
+  modelGenerationFamily,
+  modelPortfolioRelation,
+  modelTier,
   candidateDecisionKey,
   candidateFamilyIdentity,
   candidateRepresentativeRank,
@@ -226,9 +229,13 @@ test("an unclassified served role prevents a false portfolio-gap claim", () => {
       },
     ],
   });
-  assert.equal(assessment.priority, "needs_evidence");
+  // The served role is unclassified, so no portfolio gap may be claimed. The
+  // generation is a different fact and the ids do state it: medium 4 follows
+  // medium 3.5, which is what an operator needs before anything else.
+  assert.equal(assessment.priority, "recommended");
   assert.doesNotMatch(assessment.analysisKo, /현재 라인업에 없는 역할/);
-  assert.match(assessment.analysisKo, /공식 포지셔닝/);
+  assert.match(assessment.verdictKo, /상위 세대/);
+  assert.match(assessment.verdictKo, /Mistral Medium 3\.5/);
 });
 
 test("a new Anthropic tier names the existing lineup and missing decision evidence", () => {
@@ -362,7 +369,7 @@ test("multi-agent research models are not treated as ordinary chat", () => {
   });
   assert.equal(assessment.priority, "no_action");
   assert.match(assessment.analysisKo, /Responses API/);
-  assert.match(assessment.analysisKo, /현재 Tomverse 채팅 모델로 등록해도 동작하지 않습니다/);
+  assert.match(assessment.verdictKo, /등록하면 동작하지 않습니다/);
 });
 
 test("a current unserved image model is recommended for Image Studio review", () => {
@@ -459,7 +466,7 @@ test("a legacy prerelease item is marked no-action under the stable-only policy"
       servedByTomverse: false,
     });
     assert.equal(assessment.priority, "no_action", apiModel);
-    assert.match(assessment.analysisKo, /후보에서 제외/);
+    assert.match(assessment.nextStepKo, /제외합니다/, apiModel);
   }
 });
 
@@ -538,7 +545,8 @@ test("failed provider evidence cannot be mistaken for retirement", () => {
     servedByTomverse: false,
   });
   assert.equal(assessment.priority, "needs_evidence");
-  assert.match(assessment.analysisKo, /확인하기 전/);
+  assert.match(assessment.verdictKo, /제공 여부를 모릅니다/);
+  assert.match(assessment.nextStepKo, /스캔이 한 번 성공한 뒤/);
 });
 
 test("retirement work stays urgent even though the model is stale", () => {
@@ -552,7 +560,8 @@ test("retirement work stays urgent even though the model is stale", () => {
   });
   assert.equal(assessment.priority, "recommended");
   assert.equal(assessment.kind, "retirement");
-  assert.match(assessment.analysisKo, /사용자 영향/);
+  assert.match(assessment.nextStepKo, /대체 모델/);
+  assert.match(assessment.nextStepKo, /저장해 둔 사용자/);
 });
 
 test("the short spellings of a release stage are prerelease too", () => {
@@ -727,4 +736,379 @@ test("only the newest generation of a line survives one scan", () => {
     (value) => value
   );
   assert.deepEqual(kept, ["claude-opus-5", "gpt-4o"]);
+});
+
+// The provider release wave that named this work: Zhipu's 2026-09-21 scan, with
+// GLM 5.2 in the catalogue. Five ids arrived and the queue said the same
+// paragraph about all five -- that it could not tell what any of them
+// complements or replaces -- while the ids themselves said that two are older
+// generations of the served model and one is the next generation of it.
+const ZHIPU_WAVE = [
+  "glm-4.5-air",
+  "glm-5-turbo",
+  "ZHIPU/GLM-5.3",
+  "glm-5.3-flash",
+  "glm-5.3-flashx",
+];
+
+const zhipuCandidate = (apiModel: string) =>
+  assessModelLifecycleItem({
+    action: "add",
+    apiModel,
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.2",
+        name: "GLM 5.2",
+        reasoning: "high",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: ZHIPU_WAVE,
+  });
+
+test("a tier word is read the same way wherever it sits in the id", () => {
+  assert.equal(modelTier("glm-4.5-air").kind, "economy");
+  assert.equal(modelTier("glm-5.3-flashx").kind, "economy");
+  assert.equal(modelTier("glm-5-turbo").kind, "speed");
+  assert.equal(modelTier("claude-opus-5").kind, "flagship");
+  assert.equal(modelTier("gemini-4-pro").kind, "flagship");
+  // Absent is not "standard": the id declined to say.
+  assert.equal(modelTier("glm-5.3").kind, null);
+  assert.equal(modelTier("mistral-medium-4").kind, null);
+  // Two tier words are one seat, not the first word repeated.
+  assert.equal(modelTier("gemini-3.5-flash").word, "flash");
+  assert.equal(modelTier("gemini-3.5-flash-lite").word, "flash-lite");
+  assert.equal(modelTier("gemini-3.5-flash-lite").kind, "economy");
+  // A gap is not a seat. The last consecutive run is the tier.
+  assert.equal(modelTier("whisper-large-v3-turbo").word, "turbo");
+  assert.equal(modelTier("whisper-large-v3-turbo").kind, "speed");
+  assert.equal(modelTier("grok-3-mini-fast").word, "mini-fast");
+  assert.equal(modelTier("grok-3-mini-fast").kind, "economy");
+  assert.equal(modelTier("claude-opus-5-fast").word, "fast");
+  assert.equal(modelTier("claude-opus-5-fast").kind, "speed");
+});
+
+test("a compound tier is not the same seat as its first word", () => {
+  const served = [
+    {
+      provider: "google",
+      apiModel: "gemini-3.5-flash",
+      name: "Gemini 3.5 Flash",
+      product: "chat" as const,
+    },
+  ];
+  const relation = modelPortfolioRelation("gemini-3.5-flash-lite", served);
+  assert.equal(relation.kind, "same_generation");
+  assert.equal(relation.sameTier, false);
+  assert.equal(relation.candidateTier.word, "flash-lite");
+  assert.equal(modelGenerationFamily("gemini-3.5-flash-lite").family, "gemini");
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gemini-3.5-flash-lite",
+    providers: ["google"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: served,
+    siblingApiModels: ["gemini-3.5-flash"],
+  });
+  assert.equal(assessment.priority, "review");
+  assert.doesNotMatch(assessment.verdictKo, /같은 자리를 놓고/);
+  assert.ok(
+    !assessment.pointsKo.some((point) => /한 글자 차이/.test(point)),
+    assessment.pointsKo.join(" | ")
+  );
+});
+
+test("a generation family drops the tier word that modelLine keeps", () => {
+  // modelLine keeps the tier so "we already serve a later one of exactly this"
+  // stays answerable; the family drops it so one release wave is one group.
+  assert.equal(modelLine("glm-4.5-air").line, "glm-air");
+  assert.equal(modelGenerationFamily("glm-4.5-air").family, "glm");
+  assert.equal(modelGenerationFamily("glm-5.3-flashx").family, "glm");
+  assert.equal(modelGenerationFamily("claude-opus-5").family, "claude");
+  assert.deepEqual(modelGenerationFamily("glm-5.3").version, [5, 3]);
+});
+
+test("the relation names the served model it was measured against", () => {
+  const served = [{ provider: "zhipu", apiModel: "glm-5.2", name: "GLM 5.2" }];
+  const older = modelPortfolioRelation("glm-4.5-air", served);
+  assert.equal(older.kind, "older_generation");
+  assert.equal(older.candidateGeneration, "4.5");
+  assert.equal(older.servedGeneration, "5.2");
+  assert.equal(older.against?.apiModel, "glm-5.2");
+  assert.equal(modelPortfolioRelation("ZHIPU/GLM-5.3", served).kind, "newer_generation");
+  assert.equal(modelPortfolioRelation("glm-5.2", served).kind, "same_generation");
+  // Another maker's model is never the thing this is measured against.
+  assert.equal(modelPortfolioRelation("claude-opus-5", served).kind, "no_shared_family");
+});
+
+test("a cheaper served seat does not decide an unnamed base is already served", () => {
+  const flashOnly = [
+    { provider: "zhipu", apiModel: "glm-5.3-flash", name: "GLM 5.3 Flash" },
+  ];
+  const relation = modelPortfolioRelation("glm-5.2", flashOnly);
+  assert.equal(relation.kind, "family_seat_mismatch");
+  assert.equal(relation.candidateGeneration, "5.2");
+  assert.equal(relation.against?.apiModel, "glm-5.3-flash");
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "glm-5.2",
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.3-flash",
+        name: "GLM 5.3 Flash",
+        reasoning: "high",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: [],
+  });
+  assert.equal(assessment.priority, "review");
+  assert.match(assessment.verdictKo, /5\.2 세대/);
+  assert.match(assessment.verdictKo, /더 낮은 자리/);
+  assert.doesNotMatch(assessment.verdictKo, /확정되지 않아/);
+  assert.doesNotMatch(assessment.nextStepKo, /편입 근거가 없습니다/);
+});
+
+test("a same-kind seat with a different word does not close its neighbour", () => {
+  const liteOnly = [
+    { provider: "google", apiModel: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite" },
+  ];
+  const relation = modelPortfolioRelation("gemini-3-flash", liteOnly);
+  assert.equal(relation.kind, "family_seat_mismatch");
+  assert.notEqual(relation.kind, "older_generation");
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gemini-3-flash",
+    providers: ["google"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: [
+      {
+        provider: "google",
+        apiModel: "gemini-3.5-flash-lite",
+        name: "Gemini 3.5 Flash-Lite",
+        reasoning: "high",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: [],
+  });
+  assert.notEqual(assessment.priority, "low");
+  assert.match(assessment.verdictKo, /다른 자리/);
+  assert.doesNotMatch(assessment.nextStepKo, /편입 근거가 없습니다/);
+  assert.doesNotMatch(assessment.verdictKo, /확정되지 않아/);
+});
+
+test("a seat mismatch keeps a missing role on the recommended view", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "glm-5.2",
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: true },
+    servedModels: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.3-flash",
+        name: "GLM 5.3 Flash",
+        reasoning: "none",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: [],
+  });
+  assert.equal(assessment.priority, "recommended");
+  assert.match(assessment.verdictKo, /더 낮은 자리/);
+  assert.doesNotMatch(assessment.nextStepKo, /편입 근거가 없습니다/);
+});
+
+test("a queued base model keeps a seat mismatch off the recommended view", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "glm-5.3-plus",
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: true },
+    servedModels: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.2-air",
+        name: "GLM 5.2 Air",
+        reasoning: "none",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: ["glm-5.3", "glm-5.3-plus"],
+  });
+  assert.equal(assessment.priority, "review");
+  assert.match(assessment.verdictKo, /다른 자리|더 낮은 자리/);
+});
+
+test("a preview queued beside a derivative is not the base model", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "o1-mini",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: true },
+    servedModels: [
+      {
+        provider: "openai",
+        apiModel: "gpt-5",
+        name: "GPT-5",
+        reasoning: "high",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: ["o1-preview", "o1-mini"],
+  });
+  assert.equal(assessment.priority, "recommended");
+  assert.ok(
+    !assessment.pointsKo.some((point) => /기본형 'o1-preview'/.test(point)),
+    assessment.pointsKo.join(" | ")
+  );
+});
+
+test("a preview sibling is not named as a derivative to decide with", () => {
+  const base = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gpt-5.7",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: [],
+    siblingApiModels: ["gpt-5.7", "gpt-5.7-mini-preview"],
+  });
+  assert.ok(
+    !base.pointsKo.some((point) => /gpt-5\.7-mini-preview/.test(point)),
+    base.pointsKo.join(" | ")
+  );
+  const flash = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "glm-5.3-flash",
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: null,
+    servedModels: [],
+    siblingApiModels: ["glm-5.3-flash", "glm-5.3-flashx-preview"],
+  });
+  assert.ok(
+    !flash.pointsKo.some((point) => /한 글자/.test(point)),
+    flash.pointsKo.join(" | ")
+  );
+});
+
+test("an older generation of a served family is a decided row, not an open question", () => {
+  for (const apiModel of ["glm-4.5-air", "glm-5-turbo"]) {
+    const assessment = zhipuCandidate(apiModel);
+    assert.equal(assessment.priority, "low", apiModel);
+    assert.match(assessment.verdictKo, /GLM 5\.2/, apiModel);
+    assert.match(assessment.verdictKo, /세대/, apiModel);
+    assert.match(assessment.nextStepKo, /편입 근거가 없습니다/, apiModel);
+  }
+  assert.match(zhipuCandidate("glm-4.5-air").verdictKo, /4\.5 세대/);
+  assert.match(zhipuCandidate("glm-5-turbo").verdictKo, /속도 지향/);
+});
+
+test("the next generation of the served line is the row an operator came for", () => {
+  const assessment = zhipuCandidate("ZHIPU/GLM-5.3");
+  assert.equal(assessment.priority, "recommended");
+  assert.match(assessment.verdictKo, /상위 세대 5\.3/);
+  assert.match(assessment.verdictKo, /대체할 후보/);
+  // What is missing is named, rather than "check the official positioning".
+  assert.match(assessment.nextStepKo, /컨텍스트 창/);
+  assert.match(assessment.nextStepKo, /입력\/출력 단가/);
+});
+
+test("a derivative of a wave points at the base model queued beside it", () => {
+  const flash = zhipuCandidate("glm-5.3-flash");
+  // Never louder than the base model it depends on, even when its role is
+  // missing from the lineup: deciding the base decides this one's seat.
+  assert.equal(flash.priority, "review");
+  assert.match(flash.verdictKo, /경량·저가 파생형/);
+  assert.ok(
+    flash.pointsKo.some((point) => /기본형 'ZHIPU\/GLM-5\.3'/.test(point)),
+    flash.pointsKo.join(" | ")
+  );
+  // flash and flashx differ by one letter: the queue raises the question and
+  // leaves the answer to the provider's documentation.
+  assert.ok(
+    flash.pointsKo.some((point) => /속도·가격 SKU일 수 있습니다/.test(point)),
+    flash.pointsKo.join(" | ")
+  );
+  assert.ok(
+    zhipuCandidate("glm-5.3-flashx").pointsKo.some((point) =>
+      /glm-5\.3-flash'/.test(point)
+    )
+  );
+});
+
+test("one release wave produces five different answers", () => {
+  const verdicts = ZHIPU_WAVE.map((apiModel) => zhipuCandidate(apiModel).verdictKo);
+  const priorities = ZHIPU_WAVE.map((apiModel) => zhipuCandidate(apiModel).priority);
+  // The defect this replaces: one paragraph, five times, one priority.
+  assert.ok(new Set(verdicts).size >= 3, verdicts.join("\n"));
+  assert.ok(new Set(priorities).size >= 3, priorities.join(","));
+  // And the analysis an exclusion records is still one string, built from the
+  // three parts rather than written twice.
+  for (const apiModel of ZHIPU_WAVE) {
+    const assessment = zhipuCandidate(apiModel);
+    assert.equal(
+      assessment.analysisKo,
+      [assessment.verdictKo, ...assessment.pointsKo, assessment.nextStepKo].join(" ")
+    );
+  }
+});
+
+test("a wave with no base model queued leaves the derivative on its own merits", () => {
+  const flashAlone = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "glm-5.3-flash",
+    providers: ["zhipu"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    servedModels: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.2",
+        name: "GLM 5.2",
+        reasoning: "high",
+        product: "chat" as const,
+      },
+    ],
+    siblingApiModels: ["glm-5.3-flash"],
+  });
+  assert.equal(flashAlone.priority, "recommended");
+  assert.ok(
+    !flashAlone.pointsKo.some((point) => /기본형/.test(point)),
+    flashAlone.pointsKo.join(" | ")
+  );
 });

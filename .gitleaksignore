@@ -267,6 +267,24 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:94
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md:generic-api-key:168
 
+# Provider doc fixture copied a public quick-start, not a credential.
+#
+# Commits 302185ba (develop PR) and ae2fffc5 (main cherry-pick) copied Zhipu's
+# published GLM-5.3 page, whose cURL sample says `Authorization: Bearer
+# your-api-key`. That placeholder never authorised anything. gitleaks reads
+# the curl header as curl-auth-header, which is the correct behaviour for a
+# scanner, so the follow-up commit writes `$ZHIPU_API_KEY` instead — the same
+# shape the Groq fixture already uses — rather than teaching the scanner to
+# ignore every bearer sample.
+#
+# The introducing commits are immutable history and stay pinned here.
+#
+# Scope: exactly these four findings in those two commits — nothing wider.
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+
 # Commit 9662e94b (S2a, 2026-09-21) added two marketing E2E fixture constants
 # that assigned a hyphenated token to a property whose name ends in "Key" --
 # MarketingPost's idempotency identifier, which is a business key a draft is

@@ -20,8 +20,10 @@
  * Every parser fails closed. A page whose structure has moved is a page whose
  * numbers cannot be trusted, and the answer to that is a named problem --
  * never a best guess, because a guessed price is an override written into a
- * column that bills every request. A problem anywhere in a parse withholds its
- * price, and the daily report prints it.
+ * column that bills every request. A problem about the price withholds it.
+ * A problem that only says the model page was missing or about another model
+ * does not: the price was read from the pricing table, and the daily report
+ * still prints the model-page problem.
  *
  * ## Not a price source
  *
@@ -32,7 +34,9 @@
  */
 
 /** Bumped whenever a parser's reading of a document changes. Stored with every row. */
-export const PROVIDER_MODEL_DOC_PARSER_VERSION = "2026-09-13.5";
+import { machineReadableDocProviders } from "@/lib/providerModelDocSources";
+
+export const PROVIDER_MODEL_DOC_PARSER_VERSION = "2026-09-22.44";
 
 /**
  * How old evidence may be and still prefill anything.
@@ -63,11 +67,16 @@ export type ProviderModelDocEvidenceSummary = {
   /** Queued models this run did not reach: over the per-provider cap or past the time budget. */
   notAttempted: Array<{ provider: string; apiModel: string; reason: "cap" | "time_budget" }>;
   /**
-   * Promotion sentences on a pricing page that are not in
-   * ACKNOWLEDGED_PROMOTION_SENTENCES. Each one withholds every price that page
-   * supplies until somebody reads it and records what it applies to.
+   * Promotion sentences that are not in ACKNOWLEDGED_PROMOTION_SENTENCES.
+   * A pricing-page sentence (no source) withholds every price that page
+   * supplies. A model-page sentence withholds only the models it applies to.
    */
-  unacknowledgedNotices: Array<{ provider: string; sentence: string }>;
+  unacknowledgedNotices: Array<{
+    provider: string;
+    sentence: string;
+    source?: "model_page";
+    apiModels?: string[];
+  }>;
 };
 
 /**
@@ -100,10 +109,14 @@ export const docEvidenceReportLines = (
             failure.problems.length ? ` (${failure.problems.slice(0, 3).join(", ")})` : ""
           }`
       ),
-      ...summary.unacknowledgedNotices.map(
-        (notice) =>
-          `• ${notice.provider} pricing page: unreviewed promotion sentence withholds every documented price -- "${notice.sentence.slice(0, 160)}"`
-      ),
+      ...summary.unacknowledgedNotices.map((notice) => {
+        const quoted = `"${notice.sentence.slice(0, 160)}"`;
+        if (notice.source === "model_page") {
+          const models = (notice.apiModels ?? []).map((id) => `\`${id}\``).join(", ");
+          return `• ${notice.provider} model page: unreviewed promotion sentence withholds the documented price for ${models} -- ${quoted}`;
+        }
+        return `• ${notice.provider} pricing page: unreviewed promotion sentence withholds every documented price -- ${quoted}`;
+      }),
       ...(summary.notAttempted.length
         ? [
             `• Provider documentation not read this run (${summary.notAttempted
@@ -132,6 +145,13 @@ export const docEvidenceProviderNote = (
   if (summary === undefined) return "documentation read did not run";
   const failures = summary.failures.filter((failure) => failure.provider === provider);
   const unread = summary.notAttempted.filter((item) => item.provider === provider);
+  const modelPageIds = [
+    ...new Set(
+      summary.unacknowledgedNotices
+        .filter((notice) => notice.provider === provider && notice.source === "model_page")
+        .flatMap((notice) => notice.apiModels ?? [])
+    ),
+  ];
   const parts = [
     failures.length
       ? `documentation: ${failures
@@ -140,16 +160,37 @@ export const docEvidenceProviderNote = (
           .join("; ")}${failures.length > 3 ? ` (+${failures.length - 3} more)` : ""}`
       : null,
     unread.length ? `documentation not read for ${unread.length} queued model(s)` : null,
-    summary.unacknowledgedNotices.some((notice) => notice.provider === provider)
+    summary.unacknowledgedNotices.some(
+      (notice) => notice.provider === provider && notice.source !== "model_page"
+    )
       ? "unreviewed promotion sentence on the pricing page; no documented price used"
+      : null,
+    modelPageIds.length
+      ? `unreviewed promotion sentence on a model page; documented price withheld for ${modelPageIds
+          .map((id) => `\`${id}\``)
+          .join(", ")}`
       : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 };
 
 /** Providers whose documentation this module can read. Everyone else has no evidence. */
-export const PROVIDER_MODEL_DOC_PROVIDERS = ["openai", "anthropic"] as const;
-export type ProviderModelDocProvider = (typeof PROVIDER_MODEL_DOC_PROVIDERS)[number];
+/**
+ * Providers whose own documents the scan reads.
+ *
+ * Derived from the source table rather than written here. This module used to
+ * name OpenAI and Anthropic, and that is why candidates from the other ten
+ * providers reached an operator with no price, no context window and no output
+ * ceiling between them.
+ */
+export const PROVIDER_MODEL_DOC_PROVIDERS: readonly string[] =
+  machineReadableDocProviders();
+
+/**
+ * Any provider id. The evidence table holds one row per (provider, apiModel)
+ * whether or not that provider publishes documents a machine can read.
+ */
+export type ProviderModelDocProvider = string;
 
 export const OPENAI_PRICING_MARKDOWN_URL =
   "https://developers.openai.com/api/docs/pricing.md";
@@ -240,6 +281,16 @@ const emptyFields = (): ProviderModelDocFields => ({
  * listing it would block every page until each of those sentences was
  * acknowledged.
  */
+/**
+ * A table cell that is a value rather than a sentence.
+ *
+ * Kept tight on purpose: anything this does not recognise is treated as prose
+ * and still checked for promotional wording, so a provider announcing a
+ * limited-time price in a notice row is not silently exempted.
+ */
+const TABLE_VALUE_CELL =
+  /^(?:\\?\$?\d[\d,.]*\s*(?:\/\s*[\w%]+)?|free|limited[- ]time free|contact\s?sales|n\/a|yes|no|-|—|✓|✗)$/i;
+
 const PROMOTION_WORDS =
   /promotional|introductory|limited[- ]time|temporar|special (?:launch )?(?:rate|price|pricing)|launch (?:rate|price|pricing)|(?:through|until|ends?|expires?) (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}/i;
 
@@ -256,6 +307,26 @@ const paragraphs = (markdown: string) =>
     .map((block) =>
       block
         .split("\n")
+        // A table row is cells, and only some of them are sentences. The
+        // value cells are dropped -- Zhipu writes "Limited-time Free" in the
+        // cached-storage column of every row, and the table reader already
+        // refuses that cell with its reason -- while a cell carrying an actual
+        // notice stays, because a promotion announced inside a table is still
+        // a promotion announced.
+        .map((line) =>
+          line.trim().startsWith("|")
+            ? line
+                .trim()
+                .replace(/^\|/, "")
+                .replace(/\|$/, "")
+                .split("|")
+                .map((cell) => cell.trim())
+                .filter(
+                  (cell) => cell && !TABLE_VALUE_CELL.test(cell) && !/^[-:\s]+$/.test(cell)
+                )
+                .join(" ")
+            : line
+        )
         // A list bullet or a quote marker is formatting, not part of the
         // sentence: the same acknowledged sentence moved into a bullet is
         // still the sentence somebody read.
@@ -536,6 +607,9 @@ export const parseOpenAiModelPage = (input: {
   const tablePromotion = input.pricingTable?.notices.promoted.get(input.apiModel);
   const promotionNote = ownPromotion ?? tablePromotion;
   if (promotionNote) fields.promotional = { note: promotionNote.replace(/^-\s*/, "").trim() };
+  if (promotionNotices("openai", page).unacknowledged.length) {
+    problems.push("unacknowledged_promotion_notice_on_model_page");
+  }
   if (input.pricingTable?.notices.unacknowledged.length) {
     problems.push("unacknowledged_promotion_notice_on_pricing_page");
   }
@@ -992,6 +1066,17 @@ export type DocPriceRefusal =
   | "long_context_unknown"
   | "promotional";
 
+/**
+ * Whether this problem is about the price.
+ *
+ * `model_page_not_found`, `model_page_names_other_model` and `model_page:*`
+ * say the per-model page could not be used. The pricing table is a different
+ * document. Letting those problems withhold its price made a 404 on the model
+ * page throw away a table that had already parsed.
+ */
+export const docProblemWithholdsPrice = (problem: string) =>
+  !problem.startsWith("model_page");
+
 export const docPricePrefill = (input: {
   parse: ProviderModelDocParse | null;
   hasPricingProfile: boolean;
@@ -1015,9 +1100,9 @@ export const docPricePrefill = (input: {
   // A promotion first: it is the most specific reason, and the one an
   // operator can act on, even when the same parse also recorded a problem.
   if (fields.promotional) return { value: null, refusal: "promotional" };
-  // Any problem at all. A page that parsed with a named problem is a page
-  // whose structure has already surprised this parser once.
-  if (parse.problems.length) return { value: null, refusal: "problems" };
+  // A problem about the price. A model-page miss is reported and does not
+  // erase a number the pricing table already stated.
+  if (parse.problems.some(docProblemWithholdsPrice)) return { value: null, refusal: "problems" };
   if (fields.longContext.kind === "tiered") return { value: null, refusal: "tiered" };
   if (fields.longContext.kind !== "flat") return { value: null, refusal: "long_context_unknown" };
   const inputPrice = fields.inputUsdPerMillionTokens;
@@ -1069,7 +1154,7 @@ export const buildPricingProfileProposal = (input: {
   requestOutputCapTokens: number | null;
 }) => {
   const parse = input.parse;
-  if (!parse || parse.status !== "parsed" || parse.problems.length) return null;
+  if (!parse || parse.status !== "parsed" || parse.problems.some(docProblemWithholdsPrice)) return null;
   if (!docEvidenceIsFresh(input.fetchedAt, input.now) || input.sources.length === 0) return null;
   const f = parse.fields;
   if (f.promotional || f.longContext.kind === "unknown") return null;

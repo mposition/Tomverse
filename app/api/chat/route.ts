@@ -70,6 +70,7 @@ import {
 } from "@/lib/routingDispatchInstrumentation";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
 import type {
+    RoutingAttemptErrorClass,
     RoutingAttemptOutcome,
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
@@ -203,10 +204,17 @@ import {
     type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
 import {
+    routingFailureLayerForSettlement,
+    routingOutcomeForSettlement,
+} from "@/lib/chatSettlementOutcome";
+import {
     decideFallback,
     recoveryAfterFallback,
 } from "@/lib/routingFallbackPolicy";
-import { classifyStreamFailure } from "@/lib/routingStreamFailure";
+import {
+    classifyStreamFailure,
+    type StreamFailureClassification,
+} from "@/lib/routingStreamFailure";
 import {
     FAULT_INJECTION_HEADER,
     decideFaultInjection,
@@ -4283,7 +4291,7 @@ async function handleChatPost(
             instrumentation?: {
                 outcome?: RoutingAttemptOutcome;
                 failureLayer?: RoutingFailureLayer;
-                errorClass?: string | null;
+                errorClass?: RoutingAttemptErrorClass | null;
             }
         ) => {
             // Before the reservation guard: a turn without a reservation still
@@ -4420,16 +4428,10 @@ async function handleChatPost(
                     await completeInstrumentedDispatch(dispatchRecord, {
                         outcome:
                             instrumentation?.outcome ??
-                            (outcome === "completed"
-                                ? "succeeded"
-                                : outcome === "cancelled"
-                                  ? "cancelled"
-                                  : "failed_post_token"),
+                            routingOutcomeForSettlement(outcome),
                         failureLayer:
                             instrumentation?.failureLayer ??
-                            (outcome === "completed" || outcome === "cancelled"
-                                ? "none"
-                                : "stream"),
+                            routingFailureLayerForSettlement(outcome),
                         actualInputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
                         actualOutputTokens:
@@ -4800,6 +4802,36 @@ async function handleChatPost(
          * nothing gets one refusal for every turn and never a second provider
          * call.
          */
+        /**
+         * The last classification this turn produced, for the settlement.
+         *
+         * `attemptFallback` computes one for every stream failure and, until
+         * this was kept, threw it away unless a fallback actually happened --
+         * and fallback is off by default, so on almost every failed turn the
+         * attempt row recorded no class at all. The classifier's verdict is
+         * the only place a rate limit is told apart from an outage, and a row
+         * written without it cannot be reanalysed later.
+         *
+         * What is recorded is `observedOutcome`, the layer and the class --
+         * what happened -- and not `outcome`, which is the fallback verdict.
+         *
+         * The two were one value, and that was the defect. The verdict is
+         * conservative on purpose: a lost connection is called `cancelled` so
+         * that no second model is tried. Recording the verdict as the
+         * observation then told `lib/routerSignalCore.ts` that the person had
+         * changed their mind, which drops the turn from the success rate --
+         * true of an abort, false of a dropped connection. Recording the
+         * generic mapping instead was wrong the other way: it filed a genuine
+         * cancellation as `failed_post_token` and counted it against the
+         * model.
+         *
+         * The layer has to travel too, or the row contradicts itself: a rate
+         * limit would carry `errorClass: "provider_rate_limited"` beside the
+         * generic mapping's `failureLayer: "stream"`, which says the failure
+         * was this process or this connection.
+         */
+        let lastStreamFailure: StreamFailureClassification | null = null;
+
         const attemptFallback = async (
             controller: ReadableStreamDefaultController<string>,
             error: unknown
@@ -4810,6 +4842,7 @@ async function handleChatPost(
                 visibleTokenEmitted: generatedText.length > 0,
                 downstreamOpen: streamState === "open",
             });
+            lastStreamFailure = classified;
             const scope = autoFallbackScope({
                 routed: autoSelection.routed,
                 isGuest: access.kind === "guest",
@@ -4838,6 +4871,7 @@ async function handleChatPost(
                 attempt: {
                     modelId: dispatched.modelId,
                     outcome: classified.outcome,
+                    observedOutcome: classified.observedOutcome,
                     failureLayer: classified.failureLayer,
                     providerRefusal: classified.providerRefusal,
                 },
@@ -5095,7 +5129,13 @@ async function handleChatPost(
                     failureLayer: classified.failureLayer,
                     actualInputTokens: budget.inputTokens,
                     actualOutputTokens: 0,
-                    errorClass: "provider_pre_token_failure",
+                    // The classifier's own category, rather than one word for
+                    // every provider failure there is. It changes nothing
+                    // about this attempt -- the layer and the outcome above
+                    // are what decide -- and it is the only place the
+                    // difference between a rate limit and an outage can be
+                    // kept for later.
+                    errorClass: classified.errorClass,
                     settlementOutcome: "failed",
                     cost: usageReservation
                         ? {
@@ -5975,7 +6015,19 @@ async function handleChatPost(
                     // user-ledger fields are left alone -- only the provider
                     // ledger is told that the count is unknown rather than
                     // zero.
-                    await settleSafely("failed", { searchQueriesObserved: false });
+                    await settleSafely(
+                        "failed",
+                        { searchQueriesObserved: false },
+                        // What was observed, not what was decided. See
+                        // `lastStreamFailure`.
+                        lastStreamFailure
+                            ? {
+                                  outcome: lastStreamFailure.observedOutcome,
+                                  failureLayer: lastStreamFailure.failureLayer,
+                                  errorClass: lastStreamFailure.errorClass,
+                              }
+                            : undefined
+                    );
                     errorSafely(controller, error);
                     await releaseSafely();
                 }

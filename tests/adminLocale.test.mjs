@@ -142,6 +142,12 @@ test("the palette finds a page by either language in either console", () => {
 const COMPONENTS_WITHOUT_COPY = new Set([
   "AdminConsolePreferences.tsx",
   "AdminLocaleProvider.tsx",
+  // Renders only the strings its caller passes in `m`, which the caller read
+  // from `adminMarketingMessages`. Reading a catalogue here would mean this
+  // component choosing wording for screens it knows nothing about, and the
+  // panel that does know already does the choosing. Pinned below so the claim
+  // is checked rather than trusted.
+  "MarketingActions.tsx",
 ]);
 
 test("every admin component reads its copy from a message catalog", () => {
@@ -153,6 +159,24 @@ test("every admin component reads its copy from a message catalog", () => {
         !readFileSync(join(directory, name), "utf8").includes("@/lib/adminMessages/")
     );
   assert.deepEqual(missing, [], "components with no message catalog");
+});
+
+test("a component excused from the catalogue really has no copy of its own", () => {
+  // The exception list is only as good as the claim behind each entry, and a
+  // claim nobody checks is how an English island ships. A component that
+  // renders no copy of its own has no operator-visible sentence in it: every
+  // string it draws arrives through props.
+  const directory = join(process.cwd(), "components", "admin");
+  const offenders = [];
+  for (const name of COMPONENTS_WITHOUT_COPY) {
+    const source = readFileSync(join(directory, name), "utf8");
+    // A run of words inside JSX text, which is what user-visible copy looks
+    // like. Attribute values, class names and identifiers are not matched.
+    for (const match of source.matchAll(/>\s*([A-Za-z][A-Za-z,'’.!? ]{12,})\s*</gu)) {
+      offenders.push(`${name}: ${match[1].trim().slice(0, 40)}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
 });
 
 test("the console root re-resolves its typeface for its own language", () => {

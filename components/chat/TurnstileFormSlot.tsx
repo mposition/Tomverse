@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { RefCallback } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   guestVerificationFailureKey,
@@ -13,10 +13,12 @@ import type { GuestVerificationFailure } from "@/components/chat/guestVerificati
  *
  * The rule this encodes: the container must exist and stay renderable for the
  * whole verification -- Cloudflare cannot run a challenge inside a
- * `display: none` box -- but it may not occupy a single pixel until Cloudflare
- * actually asks for an interaction. So the closed state is out of flow and
- * transparent rather than hidden, exactly as the chat surfaces do it
- * (GuestVerificationDesktopSlot, GuestVerificationSheet).
+ * `display: none` box -- and it must have the form's real width when the
+ * iframe is created. A one-pixel fixed host lets Cloudflare initialise but can
+ * leave the managed iframe at that measured width after React reveals it.
+ * The closed state therefore keeps full inline width while collapsing only
+ * its height and opacity; it occupies no vertical space until Cloudflare asks
+ * for interaction.
  *
  * The failure sentence comes from the shared mapping, so a cancelled check
  * reads the same here as it does in chat.
@@ -29,7 +31,7 @@ export function TurnstileFormSlot({
   onCancel,
   testId = "turnstile-form-slot",
 }: {
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: RefCallback<HTMLDivElement>;
   isChallengeVisible: boolean;
   failure: GuestVerificationFailure | null;
   surface?: GuestVerificationSurface;
@@ -49,7 +51,7 @@ export function TurnstileFormSlot({
       className={
         isChallengeVisible
           ? "mt-3 flex w-full min-w-0 flex-col items-center gap-2"
-          : "pointer-events-none fixed left-0 top-0 h-px w-px overflow-hidden opacity-0"
+          : "pointer-events-none h-0 w-full min-w-0 overflow-hidden opacity-0"
       }
     >
       {isChallengeVisible ? (

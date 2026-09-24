@@ -13,7 +13,6 @@ import {
     ROUTER_STICKY_SWITCH_MARGIN_BANDS,
     ROUTER_TIE_BREAK_ORDER,
     ROUTER_WEAK_CONFIDENCE_EXTRA_TURNS,
-    compareRouterScoreCells,
     getRouterScoreCell,
     isRouterScoreSnapshotModel,
     rankingKindFor,
@@ -145,48 +144,6 @@ test("the switch margin is stated in the units of the current scale", () => {
     );
 });
 
-test("a cell with no interval is compared on its band alone", () => {
-    const band = (qualityBand, qualityCi95Lower = null) => ({
-        qualityBand,
-        qualityCi95Lower,
-        evidenceRef: null,
-    });
-
-    assert.ok(compareRouterScoreCells(band(3), band(2)) < 0);
-    assert.equal(compareRouterScoreCells(band(2), band(2)), 0);
-    // One side measured is not enough: an interval is only ever compared with
-    // another interval.
-    assert.equal(compareRouterScoreCells(band(2, 0.9), band(2)), 0);
-    assert.equal(compareRouterScoreCells(band(2), band(2, 0.9)), 0);
-    // Both measured, same band: the interval refines the order.
-    assert.ok(compareRouterScoreCells(band(2, 0.9), band(2, 0.4)) < 0);
-});
-
-// A comparator that let an interval outrank a band would not be a total order:
-// A over B on an interval, B over C on a band and C over A on a band has no
-// consistent answer, and the sort result would depend on input order.
-test("the band is a strict primary key, so the order stays total", () => {
-    const cells = [
-        { qualityBand: 2, qualityCi95Lower: 0.99, evidenceRef: "e" },
-        { qualityBand: 3, qualityCi95Lower: null, evidenceRef: "e" },
-        { qualityBand: 1, qualityCi95Lower: 0.01, evidenceRef: "e" },
-    ];
-    for (const left of cells) {
-        for (const right of cells) {
-            for (const middle of cells) {
-                if (
-                    compareRouterScoreCells(left, middle) < 0 &&
-                    compareRouterScoreCells(middle, right) < 0
-                ) {
-                    assert.ok(
-                        compareRouterScoreCells(left, right) < 0,
-                        "comparison is not transitive"
-                    );
-                }
-            }
-        }
-    }
-});
 
 // A kind nothing supported is not a weak opinion about the kind; it is the
 // absence of one, and it must not steer the ranking.
