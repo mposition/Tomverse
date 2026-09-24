@@ -5128,6 +5128,12 @@ model AmuxWorkItem {
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals AmuxReviewProposal[]
+  sourceRevisions AmuxWorkItemSourceRevision[]
+  /// Points at an accepted revision of this same card. Null until the R0
+  /// backfill or a later accept sets it. The source columns above stay the
+  /// immutable import snapshot.
+  acceptedSourceRevision   AmuxWorkItemSourceRevision? @relation("AmuxAcceptedSourceRevision", fields: [acceptedSourceRevisionId], references: [id], onDelete: Restrict)
+  acceptedSourceRevisionId String?                     @unique
   intakeDrafts    AmuxIntakeDraft[]
   intakeApprovals AmuxIntakeApproval[]
 
@@ -5419,6 +5425,70 @@ model AmuxBoardPromotionApproval {
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
+}
+
+/// One observed source snapshot. Append-only. The original import is
+/// backfilled as an accepted revision with no run. A later run does not
+/// rewrite AmuxWorkItem source columns.
+model AmuxWorkItemSourceRevision {
+  id                  String    @id
+  workItemId          String
+  parentRevisionId    String?
+  sourceVersion       String
+  detailDigest        String
+  sectionCode         String
+  reconciliationRunId String?
+  state               String
+  observedAt          DateTime
+  decidedAt           DateTime?
+  decisionAuditLogId  String?
+  createdAt           DateTime  @default(now())
+
+  workItem          AmuxWorkItem                 @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+  parentRevision    AmuxWorkItemSourceRevision?  @relation("AmuxSourceRevisionParent", fields: [parentRevisionId], references: [id], onDelete: Restrict)
+  childRevisions    AmuxWorkItemSourceRevision[] @relation("AmuxSourceRevisionParent")
+  reconciliationRun AmuxReconciliationRun?       @relation(fields: [reconciliationRunId], references: [id], onDelete: Restrict)
+  acceptedBy        AmuxWorkItem[]               @relation("AmuxAcceptedSourceRevision")
+
+  @@index([workItemId, createdAt])
+  @@index([reconciliationRunId])
+}
+
+/// One comparison of a pinned source commit with the stored cards.
+/// Item drift is not derived from this row's manifest digest.
+model AmuxReconciliationRun {
+  id                      String    @id
+  status                  String
+  sourceCommit            String
+  boardDigest             String
+  manifestDigest          String
+  canonicalizationVersion String
+  plannerVersion          String
+  validatorVersion        String
+  scannerVersion          String
+  scannerRulesetDigest    String
+  activeItemCount         Int
+  sectionCount            Int
+  itemDriftCount          Int
+  missingCount            Int
+  extraCount              Int
+  globalSnapshotDrift     Int
+  actorUserId             String
+  approvalAuditLogId      String?   @unique
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  applyingAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  revisions AmuxWorkItemSourceRevision[]
+
+  @@index([status, expiresAt])
+  @@index([sourceCommit])
 }
 
 /// Digest-only record of one explicit intake. Proposal text stays null.
