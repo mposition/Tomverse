@@ -210,6 +210,59 @@ export const isCreditFloor = (
 ): value is CreditFloor => "usageClass" in value;
 
 /**
+ * Why an adoption save must not be sent yet, or null when it may.
+ *
+ * The dialog covers the page, and a disabled button there has no click, so
+ * the operator sees nothing when the save is refused. The panel prints this
+ * code beside the buttons. The server repeats the birth-state and floor
+ * checks; this one only decides what to say before the request.
+ */
+export type AdoptionSaveBlock =
+  | "reason_too_short"
+  | "class_unconfirmed"
+  | "profile_lookup_pending"
+  | "reasoning_unconfirmed"
+  | "price_unconfirmed"
+  | "born_enabled"
+  | "born_listed"
+  | "above_every_class"
+  | "output_cap_unknown"
+  | "prices_unknown"
+  | "credits_below_floor";
+
+export const adoptionSaveBlock = (input: {
+  reason: string;
+  classChosen: boolean;
+  profileLookupPending: boolean;
+  profileLookupFailed: boolean;
+  reasoningSuggested: boolean;
+  reasoningConfirmed: boolean;
+  priceSuggested: boolean;
+  priceConfirmed: boolean;
+  status: string;
+  publiclyListed: boolean;
+  creditWeight: number;
+  floor: CreditFloor | CreditFloorRefusal;
+}): AdoptionSaveBlock | null => {
+  if (input.reason.trim().length < 4) return "reason_too_short";
+  if (!input.classChosen) return "class_unconfirmed";
+  if (input.profileLookupPending) return "profile_lookup_pending";
+  if (input.reasoningSuggested && !input.reasoningConfirmed) return "reasoning_unconfirmed";
+  if (input.priceSuggested && !input.priceConfirmed) return "price_unconfirmed";
+  if (input.status === "enabled" || input.status === "limited") return "born_enabled";
+  if (input.publiclyListed) return "born_listed";
+  if (!input.profileLookupFailed) {
+    if (!isCreditFloor(input.floor)) {
+      if (input.floor.reason === "above_every_class") return "above_every_class";
+      if (input.floor.reason === "output_cap_unknown") return "output_cap_unknown";
+      return "prices_unknown";
+    }
+    if (input.creditWeight < input.floor.credits) return "credits_below_floor";
+  }
+  return null;
+};
+
+/**
  * The sale class and credit weight the adoption form shows for confirmation.
  *
  * The same floor the save already refuses to go under. Absent when the price
@@ -869,14 +922,18 @@ export const ADOPTION_PENDING_VALIDATIONS = ["pricing", "access", "staging"] as 
  * does not: that column means "the model that replaces me", and writing the
  * predecessor there would say the adoption is already obsolete. The
  * application default and the guest default stay enabled, and a row that
- * already names a different successor is left on that chain.
+ * already names a different successor is left on that chain. The predecessor
+ * has to belong to the adopted model's provider: a replacement does not
+ * cross providers.
  */
 export const adoptionReplacementRefusal = (input: {
   adoptedModelId: string;
+  adoptedProvider: string;
   replacesModelId: string | null;
   predecessor: {
     catalogDeleted: boolean;
     replacementModelId: string | null;
+    provider: string;
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
   } | null;
@@ -889,6 +946,12 @@ export const adoptionReplacementRefusal = (input: {
     return {
       status: 400,
       message: "The model being replaced is not in the active registry.",
+    };
+  }
+  if (input.predecessor.provider !== input.adoptedProvider) {
+    return {
+      status: 409,
+      message: "A model can only replace another model from the same provider.",
     };
   }
   if (input.predecessor.isApplicationDefault) {

@@ -110,9 +110,16 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
       replaceTitle: "Replace an existing model",
       replaceHelp:
-        "Replace and save disables the chosen model and records this adoption as what replaces it. The new model stays coming soon until validation finishes, so it is not offered in the picker until then.",
+        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The new model stays coming soon until validation finishes, so it is not offered in the picker until then.",
       replaceLabel: "Model to replace",
       replaceNone: "Do not replace a model",
+      replaceRequired: "Choose the model this adoption replaces, or save without replacing one.",
+      saveRefused: "Not saved.",
+      reasonTooShort: "Write an adoption reason of at least 4 characters. That sentence is what the approval record keeps.",
+      bornOff: "An adopted model is saved as coming soon. Enable it from the registry after pricing, access and staging are verified.",
+      bornUnlisted: "An adopted model is saved unlisted. Turn on the public listing after it is verified and enabled.",
+      creditsBelowFloor: (credits: number, usageClass: string) =>
+        `This price needs at least ${credits} credits (${usageClass}). The weight on this form is lower.`,
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -311,9 +318,16 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       replaceTitle: "기존 모델 대체",
       replaceHelp:
-        "대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 검증이 끝나기 전까지 출시 예정이므로 그때까지 선택 목록에 나오지 않습니다.",
+        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 검증이 끝나기 전까지 출시 예정이므로 그때까지 선택 목록에 나오지 않습니다.",
       replaceLabel: "대체할 모델",
       replaceNone: "대체하지 않음",
+      replaceRequired: "대체할 모델을 고르거나, 대체 없이 저장하세요.",
+      saveRefused: "저장하지 않았습니다.",
+      reasonTooShort: "채택 사유를 4자 이상 적어야 저장됩니다. 이 문장이 승인 기록에 남습니다.",
+      bornOff: "채택으로 만드는 모델은 출시 예정으로만 저장됩니다. 가격·접근·staging 검증이 끝난 뒤 레지스트리에서 활성화하세요.",
+      bornUnlisted: "채택으로 만드는 모델은 공개 목록에 올리지 않은 채로 저장됩니다. 검증 후 활성화한 다음에 공개하세요.",
+      creditsBelowFloor: (credits: number, usageClass: string) =>
+        `이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다. 폼의 가중치가 그보다 낮습니다.`,
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",

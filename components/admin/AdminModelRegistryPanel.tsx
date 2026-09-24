@@ -23,7 +23,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
 import {
@@ -225,6 +225,9 @@ export function AdminModelRegistryPanel() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedProvider = searchParams.get("provider");
+  const [apiFailure, setApiFailure] = useState<string | null>(null);
+  const [saveAttempt, setSaveAttempt] = useState(0);
+  const [saveRefusal, setSaveRefusal] = useState<"replace" | "plain" | null>(null);
   const [models, setModels] = useState<AdminModel[]>([]);
   const [securityFindings, setSecurityFindings] = useState<RegistrySecurityFinding[]>([]);
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
@@ -713,16 +716,50 @@ export function AdminModelRegistryPanel() {
     () => (adoptWorkItemId && !adoptClassChosen ? adoptionSaleProposal(creditFloor) : null),
     [adoptWorkItemId, adoptClassChosen, creditFloor]
   );
-  const adoptSaveBlocked =
-    Boolean(adoptWorkItemId) &&
-    (adoptReason.trim().length < 4 ||
-      !adoptClassChosen ||
-      profileLookupPending ||
-      (adoptReasoningSuggested && !adoptReasoningConfirmed) ||
-      (adoptPriceSuggested && !adoptPriceConfirmed) ||
-      (!profileLookupFailed &&
-        (!isCreditFloor(creditFloor) ||
-          (saleProposal?.creditWeight ?? form.creditWeight) < creditFloor.credits)));
+  const adoptBlock = adoptWorkItemId
+    ? adoptionSaveBlock({
+        reason: adoptReason,
+        classChosen: adoptClassChosen,
+        profileLookupPending,
+        profileLookupFailed,
+        reasoningSuggested: adoptReasoningSuggested,
+        reasoningConfirmed: adoptReasoningConfirmed,
+        priceSuggested: adoptPriceSuggested,
+        priceConfirmed: adoptPriceConfirmed,
+        status: form.status,
+        publiclyListed: form.publiclyListed,
+        creditWeight: saleProposal?.creditWeight ?? form.creditWeight,
+        floor: creditFloor,
+      })
+    : null;
+  const adoptSaveBlocked = adoptBlock !== null;
+  const replaceMissing = Boolean(adoptWorkItemId) && !adoptReplacesModelId.trim();
+  const adoptBlockText =
+    adoptBlock === "reason_too_short"
+      ? m.adopt.reasonTooShort
+      : adoptBlock === "class_unconfirmed"
+        ? saleProposal
+          ? m.adopt.classSuggested
+          : m.adopt.classRequired
+        : adoptBlock === "profile_lookup_pending"
+          ? m.adopt.draftReloading
+          : adoptBlock === "reasoning_unconfirmed"
+            ? m.adopt.reasoningSuggested
+            : adoptBlock === "price_unconfirmed"
+              ? m.adopt.priceFromDocs
+              : adoptBlock === "born_enabled"
+                ? m.adopt.bornOff
+                : adoptBlock === "born_listed"
+                  ? m.adopt.bornUnlisted
+                  : adoptBlock === "above_every_class"
+                    ? `${m.floor.noClassBefore} US$${((creditFloor.worstCaseMicroUsd ?? 0) / 1_000_000).toFixed(3)}${m.floor.noClassAfter}`
+                    : adoptBlock === "output_cap_unknown"
+                      ? m.floor.outputCapUnknown
+                      : adoptBlock === "prices_unknown"
+                        ? m.floor.pricesUnknown
+                        : adoptBlock === "credits_below_floor" && isCreditFloor(creditFloor)
+                          ? m.adopt.creditsBelowFloor(creditFloor.credits, creditFloor.usageClass)
+                          : null;
 
   const updateLocation = (
     nextQuery: string,
@@ -752,6 +789,7 @@ export function AdminModelRegistryPanel() {
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
     setValidation(null);
+    setApiFailure(null);
   };
 
   // A different model, at the moment the operator picks it. Everything the
@@ -776,7 +814,10 @@ export function AdminModelRegistryPanel() {
   }
 
   const selectProvider = (nextProvider: AiProvider) => {
-    if (adoptWorkItemId && nextProvider !== form.provider) startNewPair();
+    if (adoptWorkItemId && nextProvider !== form.provider) {
+      startNewPair();
+      setAdoptReplacesModelId("");
+    }
     setForm((current) => ({
       ...current,
       provider: nextProvider,
@@ -804,6 +845,12 @@ export function AdminModelRegistryPanel() {
   };
 
   const save = async (replaces = false) => {
+    if (adoptWorkItemId && ((replaces && replaceMissing) || adoptSaveBlocked)) {
+      setSaveRefusal(replaces ? "replace" : "plain");
+      setSaveAttempt((current) => current + 1);
+      return;
+    }
+    setApiFailure(null);
     setSaving(true);
     try {
       const isNew = editingId === "new";
@@ -870,7 +917,9 @@ export function AdminModelRegistryPanel() {
         "success"
       );
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : m.toast.saveFailed, "error");
+      // The dialog stays open, so the sentence lives in the dialog. A second
+      // copy in the toast makes the same text match twice.
+      setApiFailure(error instanceof Error ? error.message : m.toast.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -927,6 +976,11 @@ export function AdminModelRegistryPanel() {
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
+      {apiFailure && !editingId ? (
+        <div role="alert" data-testid="admin-api-error" className="border-b border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-100">
+          {apiFailure}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>
@@ -1179,7 +1233,7 @@ export function AdminModelRegistryPanel() {
                       >
                         <option value="">{m.adopt.replaceNone}</option>
                         {models
-                          .filter((model) => model.id !== form.id && !model.catalogDeleted)
+                          .filter((model) => model.provider === form.provider && model.id !== form.id && !model.catalogDeleted)
                           .map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.name} ({model.id})
@@ -1295,7 +1349,25 @@ export function AdminModelRegistryPanel() {
               ) : null}
             </div>
 
-            <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
+            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
+              {apiFailure ? (
+                <div role="alert" data-testid="admin-api-error" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm leading-5 text-red-100">
+                  {apiFailure}
+                </div>
+              ) : null}
+              {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (
+                <div
+                  key={saveAttempt}
+                  role={saveRefusal ? "alert" : "status"}
+                  data-testid="adopt-save-block"
+                  className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm leading-5 text-amber-100"
+                >
+                  {saveRefusal ? <p className="font-bold">{m.adopt.saveRefused}</p> : null}
+                  {saveRefusal === "replace" && replaceMissing ? <p>{m.adopt.replaceRequired}</p> : null}
+                  {adoptBlockText ? <p>{adoptBlockText}</p> : null}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 {editingId !== "new" ? (
                   <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
@@ -1303,8 +1375,9 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> {m.actions.validate}</button>
-                {adoptWorkItemId ? <button type="button" onClick={() => void save(true)} disabled={saving || !adoptReplacesModelId || adoptSaveBlocked} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-5 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {m.actions.replaceAndSave}</button> : null}
-                <button type="button" onClick={() => void save(false)} disabled={saving || adoptSaveBlocked || Boolean(adoptWorkItemId && adoptReplacesModelId)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
+                {adoptWorkItemId ? <button type="button" onClick={() => void save(true)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-5 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {m.actions.replaceAndSave}</button> : null}
+                <button type="button" onClick={() => void save(false)} disabled={saving || Boolean(adoptWorkItemId && adoptReplacesModelId)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
+              </div>
               </div>
             </div>
           </div>
