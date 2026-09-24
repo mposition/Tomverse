@@ -90,13 +90,13 @@ export function AmuxBoardImportPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-import-panel">
-      <h1 className="text-lg font-semibold text-zinc-900">{messages.title}</h1>
-      <p className="text-sm text-zinc-700">{messages.description}</p>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800" htmlFor="amux-board-import-manifest">
+      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h1>
+      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-board-import-manifest">
         {messages.manifestLabel}
         <textarea
           id="amux-board-import-manifest"
-          className="min-h-40 w-full rounded-md border border-zinc-300 p-3 text-base text-zinc-900"
+          className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={manifest}
           onChange={(event) => setManifest(event.target.value)}
           spellCheck={false}
@@ -105,7 +105,7 @@ export function AmuxBoardImportPanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50"
+          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           disabled={pending || manifest.trim().length === 0}
           onClick={() => send("preview", manifest)}
         >
@@ -113,18 +113,18 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending || manifest.trim().length === 0}
           onClick={() => send("prepare", manifest)}
         >
           {messages.prepare}
         </button>
       </div>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800" htmlFor="amux-board-import-approval">
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-board-import-approval">
         {messages.approvalLabel}
         <input
           id="amux-board-import-approval"
-          className="min-h-11 w-full rounded-md border border-zinc-300 px-3 text-base text-zinc-900"
+          className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={approvalId}
           onChange={(event) => setApprovalId(event.target.value)}
           spellCheck={false}
@@ -133,7 +133,7 @@ export function AmuxBoardImportPanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("approve", JSON.stringify({ approvalId }))}
         >
@@ -141,7 +141,7 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("reject", JSON.stringify({ approvalId }))}
         >
@@ -149,7 +149,7 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("expire", JSON.stringify({ approvalId }))}
         >
@@ -157,7 +157,7 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending}
           onClick={() => send("expire-due", "{}")}
         >
@@ -165,7 +165,7 @@ export function AmuxBoardImportPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
           disabled={pending || !applyReady}
           aria-describedby="amux-board-import-apply-reason"
           onClick={() => send("apply", JSON.stringify({ approvalId }))}
@@ -173,16 +173,16 @@ export function AmuxBoardImportPanel() {
           {messages.apply}
         </button>
       </div>
-      <p id="amux-board-import-apply-reason" className="text-sm text-zinc-700">
+      <p id="amux-board-import-apply-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
         {applyReady ? messages.applyPermitted("true") : messages.applyDisabled}
       </p>
       {refusedForStepUp ? (
-        <a className="text-sm font-medium text-zinc-900 underline" href={STEP_UP_HREF}>
+        <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}
         </a>
       ) : null}
       {result ? (
-        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800" role="status">
+        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}
