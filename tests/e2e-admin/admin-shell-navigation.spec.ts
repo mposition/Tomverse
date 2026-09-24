@@ -84,7 +84,7 @@ const LEGACY_ROUTES = [
   },
   {
     from: "/admin/approvals",
-    to: "/admin/work-queue?tab=approvals",
+    to: "/admin/work-queue",
     heading: "Work queue",
   },
 ] as const;
