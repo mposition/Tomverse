@@ -586,6 +586,9 @@ export async function POST(req: Request) {
       {
         model: adminModel(model),
         ...(retired ? { retired: adminModel(retired) } : {}),
+        // Equal to the row just written, so the next save from this form is
+        // not refused as a conflict with the create itself.
+        readAt: row.updatedAt.toISOString(),
       },
       { status: 201 }
     );

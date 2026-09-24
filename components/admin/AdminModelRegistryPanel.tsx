@@ -744,8 +744,6 @@ export function AdminModelRegistryPanel() {
         reasoningConfirmed: adoptReasoningConfirmed,
         priceSuggested: adoptPriceSuggested,
         priceConfirmed: adoptPriceConfirmed,
-        status: form.status,
-        publiclyListed: form.publiclyListed,
         creditWeight: saleProposal?.creditWeight ?? form.creditWeight,
         floor: creditFloor,
       })
@@ -763,13 +761,9 @@ export function AdminModelRegistryPanel() {
           ? m.adopt.draftReloading
           : adoptBlock === "reasoning_unconfirmed"
             ? m.adopt.reasoningSuggested
-            : adoptBlock === "price_unconfirmed"
-              ? m.adopt.priceFromDocs
-              : adoptBlock === "born_enabled"
-                ? m.adopt.bornOff
-                : adoptBlock === "born_listed"
-                  ? m.adopt.bornUnlisted
-                  : adoptBlock === "above_every_class"
+              : adoptBlock === "price_unconfirmed"
+                ? m.adopt.priceFromDocs
+                : adoptBlock === "above_every_class"
                     ? `${m.floor.noClassBefore} US$${((creditFloor.worstCaseMicroUsd ?? 0) / 1_000_000).toFixed(3)}${m.floor.noClassAfter}`
                     : adoptBlock === "output_cap_unknown"
                       ? m.floor.outputCapUnknown

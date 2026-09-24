@@ -164,7 +164,7 @@ test("the draft copies what the provider said and nothing else", () => {
   assert.equal(draft.observedCapabilities.providerMaxOutputTokens, 64_000);
 });
 
-test("an adoption save says why it is not ready, starting with the birth state", () => {
+test("an adoption save says why it is not ready", () => {
   const floor = {
     usageClass: "frontier" as const,
     credits: 32,
@@ -183,20 +183,15 @@ test("an adoption save says why it is not ready, starting with the birth state",
     reasoningConfirmed: true,
     priceSuggested: false,
     priceConfirmed: true,
-    status: "coming-soon",
-    publiclyListed: false,
     creditWeight: 32,
     floor,
   };
   assert.equal(adoptionSaveBlock(ready), null);
-  assert.equal(adoptionSaveBlock({ ...ready, status: "enabled" }), "born_enabled");
-  assert.equal(adoptionSaveBlock({ ...ready, status: "limited" }), "born_enabled");
-  assert.equal(adoptionSaveBlock({ ...ready, publiclyListed: true }), "born_listed");
   assert.equal(adoptionSaveBlock({ ...ready, reason: "no" }), "reason_too_short");
   assert.equal(adoptionSaveBlock({ ...ready, creditWeight: 16 }), "credits_below_floor");
 });
 
-test("a new model is born switched off and unlisted", () => {
+test("a new adoption draft opens coming soon and unlisted", () => {
   const draft = buildAdoptionDraft({ provider: "openai", apiModel: "gpt-5.7" });
   assert.equal(draft.fields.status, "coming-soon");
   assert.equal(draft.fields.publiclyListed, false);
@@ -538,21 +533,24 @@ test("a second row for a model the registry already serves is refused", () => {
   assert.match(refusal!.message, /already serves/);
 });
 
-test("an adopted model cannot be born enabled or listed", () => {
-  for (const status of ["enabled", "limited"]) {
-    const refusal = adoptionPreflightRefusal({
-      workItem: adoptable,
-      body: { ...adoptBody, status },
-    });
-    assert.equal(refusal?.status, 409, status);
-    assert.match(refusal!.message, /switched off/);
+test("an adopted model keeps the status and listing the form submitted", () => {
+  for (const status of ["enabled", "limited", "coming-soon", "disabled"]) {
+    assert.equal(
+      adoptionPreflightRefusal({
+        workItem: adoptable,
+        body: { ...adoptBody, status },
+      }),
+      null,
+      status
+    );
   }
-  const listed = adoptionPreflightRefusal({
-    workItem: adoptable,
-    body: { ...adoptBody, publiclyListed: true },
-  });
-  assert.equal(listed?.status, 409);
-  assert.match(listed!.message, /unlisted/);
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: adoptable,
+      body: { ...adoptBody, status: "enabled", publiclyListed: true },
+    }),
+    null
+  );
 });
 
 test("a class below the floor is refused at the save, not just warned about", () => {
