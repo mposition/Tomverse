@@ -203,6 +203,9 @@ run(
     // exactly one owner and one append-only route decision, and a failed
     // decision write must roll the ownership change back.
     "tests/integration/amux-orchestration.db.test.ts",
+    // AMUX one-person review proposals and decisions must be DB-enforced,
+    // append-only, and bound to the task, escalation and audit chain.
+    "tests/integration/amux-agent-review-approval.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or

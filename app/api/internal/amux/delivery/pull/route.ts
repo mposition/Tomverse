@@ -45,50 +45,35 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await readLimitedJson(
-      request,
-      2 * 1_024,
-      requestSchema,
-    );
+    const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
 
-    const outcome =
-      await pullAmuxWorkDelivery({
-        worker: body.worker,
-        instanceId: body.instance_id,
-        generation: body.generation,
-      });
+    const outcome = await pullAmuxWorkDelivery({
+      worker: body.worker,
+      instanceId: body.instance_id,
+      generation: body.generation,
+    });
 
     if (!outcome.available) {
-      return Response.json(
-        outcome,
-        {
-          status:
-            outcome.reason ===
-            "runtime_not_ready"
-              ? 409
-              : 200,
-          headers: {
-            "Cache-Control": "no-store",
-          },
+      return Response.json(outcome, {
+        status:
+          outcome.reason === "runtime_not_ready" ? 409 : 200,
+        headers: {
+          "Cache-Control": "no-store",
         },
-      );
+      });
     }
 
     return Response.json(
       {
         available: true,
         delivery: {
-          attempt_id:
-            outcome.delivery.attemptId,
+          attempt_id: outcome.delivery.attemptId,
           task_id: outcome.delivery.taskId,
           worker: outcome.delivery.worker,
-          task_revision:
-            outcome.delivery.taskRevision,
+          task_revision: outcome.delivery.taskRevision,
           prompt: outcome.delivery.prompt,
-          receipt_id:
-            outcome.delivery.receiptId,
-          lease_expires_at:
-            outcome.delivery.leaseExpiresAt.toISOString(),
+          receipt_id: outcome.delivery.receiptId,
+          lease_expires_at: outcome.delivery.leaseExpiresAt.toISOString(),
         },
       },
       {

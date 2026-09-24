@@ -2,9 +2,24 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { cancelPendingAmuxWorkDelivery } from "@/lib/amux/delivery";
+import {
+  AMUX_DB_BOUNDARIES,
+  AmuxDbBoundaryError,
+  withAmuxDbBoundary,
+} from "@/lib/amux/dbBoundary";
+import {
+  decideAmuxAttemptBudget,
+  settlementDestinationForBudget,
+} from "@/lib/amux/executionBudgetCore";
+import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
+import {
+  evaluateLockedAmuxCostAdmission,
+  lockAmuxResourcePolicies,
+} from "@/lib/amux/resourcePolicy";
+import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -15,19 +30,12 @@ export const AMUX_EXECUTION_LEASE_MS = 90_000;
  */
 export const AMUX_CLAIM_RESERVATION_MS = 180_000;
 
-const AMUX_EXECUTION_SYSTEM_ACTOR =
-  "tomverse-amux-orchestrator";
+const AMUX_EXECUTION_SYSTEM_ACTOR = "tomverse-amux-orchestrator";
+const AMUX_MAX_EXPECTED_REVISION = 2_147_483_646;
 
-export type AmuxExecutionOutcome =
-  | "succeeded"
-  | "failed"
-  | "blocked";
+export type AmuxExecutionOutcome = "succeeded" | "failed" | "blocked";
 
-export type AmuxExecutionToStatus =
-  | "todo"
-  | "review"
-  | "done"
-  | "blocked";
+export type AmuxExecutionToStatus = "todo" | "review" | "done" | "blocked";
 
 type RuntimeLockRow = {
   workerName: string;
@@ -45,6 +53,8 @@ type AttemptLockRow = {
   workerInstanceId: string;
   workerGeneration: number;
   taskRevision: number;
+  attemptNumber: number | null;
+  reservedCostMicrousd: bigint;
   leaseExpiresAt: Date | null;
   endedAt: Date | null;
 };
@@ -56,6 +66,11 @@ type TaskLockRow = {
   revision: number;
   claimedAt: Date | null;
   archivedAt: Date | null;
+  projectKey: string | null;
+  teamKey: string | null;
+  estimatedCostMicrousd: bigint | null;
+  requiresHumanReview: boolean;
+  reviewSpecialty: string | null;
 };
 
 const executionLeaseExpiry = (now: Date) =>
@@ -93,6 +108,8 @@ const lockAttempt = async (
       "workerInstanceId",
       "workerGeneration",
       "taskRevision",
+      "attemptNumber",
+      "reservedCostMicrousd",
       "leaseExpiresAt",
       "endedAt"
     FROM "AmuxExecutionAttempt"
@@ -115,6 +132,11 @@ const lockTask = async (
       "revision",
       "claimedAt",
       "archivedAt"
+      ,"projectKey"
+      ,"teamKey"
+      ,"estimatedCostMicrousd"
+      ,"requiresHumanReview"
+      ,"reviewSpecialty"
     FROM "AmuxWorkItem"
     WHERE "id" = ${taskId}
     FOR UPDATE
@@ -142,8 +164,7 @@ const validSettlement = (
   outcome: AmuxExecutionOutcome,
   toStatus: AmuxExecutionToStatus,
 ) =>
-  (outcome === "succeeded" &&
-    (toStatus === "review" || toStatus === "done")) ||
+  (outcome === "succeeded" && (toStatus === "review" || toStatus === "done")) ||
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
 
@@ -155,11 +176,31 @@ const buildAmuxDeliveryPrompt = (input: {
   priority: string;
   worker: string;
   attemptId: string;
+  attemptNumber: number;
   taskRevision: number;
+  previousAttempt: {
+    outcome: string | null;
+    toStatus: string | null;
+  } | null;
 }) => {
-  const description =
-    input.description?.trim() ||
-    "(no description)";
+  const description = input.description?.trim() || "(no description)";
+  const reportedOutcome = input.previousAttempt?.outcome;
+  const previousOutcome =
+    reportedOutcome === "succeeded" ||
+    reportedOutcome === "failed" ||
+    reportedOutcome === "blocked" ||
+    reportedOutcome === "expired"
+      ? reportedOutcome
+      : "unknown";
+  const reportedStatus = input.previousAttempt?.toStatus;
+  const previousStatus =
+    reportedStatus === "todo" ||
+    reportedStatus === "review" ||
+    reportedStatus === "done" ||
+    reportedStatus === "blocked" ||
+    reportedStatus === "cancelled"
+      ? reportedStatus
+      : "unknown";
 
   return [
     "[Tomverse AMUX work]",
@@ -169,7 +210,14 @@ const buildAmuxDeliveryPrompt = (input: {
     `Priority: ${input.priority}`,
     `Worker: ${input.worker}`,
     `Execution attempt: ${input.attemptId}`,
+    `Attempt number: ${input.attemptNumber}`,
     `Task revision: ${input.taskRevision}`,
+    ...(input.previousAttempt
+      ? [
+          `Previous outcome: ${previousOutcome}`,
+          `Previous status: ${previousStatus}`,
+        ]
+      : []),
     "",
     description,
   ].join("\n");
@@ -179,7 +227,8 @@ const buildAmuxDeliveryPrompt = (input: {
  * Starts execution only for the currently-owned Todo and the currently-live
  * worker runtime generation.
  *
- * Runtime row lock -> task CAS -> attempt creation are one transaction.
+ * Incident lock -> resource locks -> runtime row lock -> task CAS -> attempt
+ * creation are one transaction.
  * Failure at any later write rolls the todo->doing transition back.
  */
 export async function startAmuxExecution(input: {
@@ -198,52 +247,237 @@ export async function startAmuxExecution(input: {
     }
   | {
       started: false;
-      reason: "runtime_not_ready" | "task_not_startable";
+      reason:
+        | "runtime_not_ready"
+        | "task_not_startable"
+        | "attempt_budget_exhausted"
+        | "incident_frozen"
+        | "cost_estimate_missing"
+        | "cost_budget_exhausted"
+        | "cost_budget_window_inactive";
     }
 > {
-  const now = input.now ?? new Date();
+  if (input.expectedRevision > AMUX_MAX_EXPECTED_REVISION) {
+    return { started: false as const, reason: "task_not_startable" as const };
+  }
 
-  return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(tx, input.worker);
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.executionStart,
+    async (tx, context) => {
+      const now = input.now ?? context.dbNow;
+      const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
+      if (incident.blocks_admission) {
+        await writeSystemAuditLog({
+          systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+          action: "amux.execution.start_refused",
+          targetType: "AmuxWorkItem",
+          targetId: input.taskId,
+          summary: `Refused AMUX execution start for ${input.taskId} during incident mode.`,
+          metadata: {
+            reason: "incident_frozen",
+            worker: input.worker,
+            expected_revision: input.expectedRevision,
+            incident_state: incident.state.state,
+            incident_transition_id: incident.state.transition_id,
+            incident_valid: incident.valid,
+            measured: true,
+            verdict: "refused",
+          },
+          tx,
+        });
+        return {
+          started: false as const,
+          reason: "incident_frozen" as const,
+        };
+      }
 
-    if (
-      !runtimeGenerationMatches(runtime, input, now) ||
-      runtime?.status !== "idle" ||
-      !runtime.dispatchReady
-    ) {
-      return {
-        started: false as const,
-        reason: "runtime_not_ready" as const,
-      };
-    }
-
-    const taskRevision = input.expectedRevision + 1;
-
-    const task = await tx.amuxWorkItem.updateMany({
-      where: {
-        id: input.taskId,
-        owner: input.worker,
-        status: "todo",
-        archivedAt: null,
-        revision: input.expectedRevision,
-      },
-      data: {
-        status: "doing",
-        revision: {
-          increment: 1,
+      const planning = await tx.amuxWorkItem.findUnique({
+        where: { id: input.taskId },
+        select: {
+          projectKey: true,
+          teamKey: true,
+          effortPoints: true,
+          estimatedCostMicrousd: true,
         },
-      },
-    });
+      });
+      if (!planning) {
+        return {
+          started: false as const,
+          reason: "task_not_startable" as const,
+        };
+      }
 
-    if (task.count !== 1) {
-      return {
-        started: false as const,
-        reason: "task_not_startable" as const,
-      };
-    }
+      const resourcePolicies = await lockAmuxResourcePolicies(
+        tx,
+        amuxResourceRefs(planning),
+      );
 
-    const runtimeBusy =
-      await tx.amuxWorkerRuntime.updateMany({
+      const runtime = await lockRuntime(tx, input.worker);
+
+      if (
+        !runtimeGenerationMatches(runtime, input, now) ||
+        runtime?.status !== "idle" ||
+        !runtime.dispatchReady
+      ) {
+        return {
+          started: false as const,
+          reason: "runtime_not_ready" as const,
+        };
+      }
+
+      const lockedTask = await lockTask(tx, input.taskId);
+      if (
+        !lockedTask ||
+        lockedTask.owner !== input.worker ||
+        lockedTask.status !== "todo" ||
+        lockedTask.archivedAt !== null ||
+        lockedTask.revision !== input.expectedRevision ||
+        lockedTask.projectKey !== planning.projectKey ||
+        lockedTask.teamKey !== planning.teamKey ||
+        lockedTask.estimatedCostMicrousd !== planning.estimatedCostMicrousd
+      ) {
+        return {
+          started: false as const,
+          reason: "task_not_startable" as const,
+        };
+      }
+
+      const costAdmission = await evaluateLockedAmuxCostAdmission(
+        tx,
+        resourcePolicies,
+        lockedTask.estimatedCostMicrousd,
+        now,
+      );
+      if (!costAdmission.allowed) {
+        const blocked = await tx.amuxWorkItem.updateMany({
+          where: {
+            id: input.taskId,
+            owner: input.worker,
+            status: "todo",
+            archivedAt: null,
+            revision: input.expectedRevision,
+          },
+          data: { status: "blocked", revision: { increment: 1 } },
+        });
+        if (blocked.count !== 1) {
+          return {
+            started: false as const,
+            reason: "task_not_startable" as const,
+          };
+        }
+        await openAmuxHumanEscalation(tx, {
+          taskId: input.taskId,
+          specialty: "cost-operations",
+          reason: "operational_cost_blocked",
+          openedBy: AMUX_EXECUTION_SYSTEM_ACTOR,
+        });
+        await writeSystemAuditLog({
+          systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+          action: "amux.execution.cost_guard_blocked",
+          targetType: "AmuxWorkItem",
+          targetId: input.taskId,
+          summary: `Blocked AMUX task ${input.taskId} before execution because its operational cost guard refused admission.`,
+          metadata: {
+            reason: costAdmission.reason,
+            resource_scope: costAdmission.blocked_resource.scope,
+            resource_key: costAdmission.blocked_resource.key,
+            evidence: costAdmission.evidence.map((item) => ({
+              ...item,
+              budget: item.budget.toString(),
+              used: item.used.toString(),
+              proposed: item.proposed.toString(),
+            })),
+            previous_revision: input.expectedRevision,
+            next_revision: input.expectedRevision + 1,
+          },
+          tx,
+        });
+        return { started: false as const, reason: costAdmission.reason };
+      }
+
+      const attemptAggregate = await tx.amuxExecutionAttempt.aggregate({
+        where: { taskId: input.taskId },
+        _count: { _all: true },
+        _max: { attemptNumber: true },
+      });
+      const budget = decideAmuxAttemptBudget({
+        historical_rows: attemptAggregate._count._all,
+        greatest_attempt_number: attemptAggregate._max.attemptNumber,
+      });
+      if (!budget.allowed) {
+        const blocked = await tx.amuxWorkItem.updateMany({
+          where: {
+            id: input.taskId,
+            owner: input.worker,
+            status: "todo",
+            archivedAt: null,
+            revision: input.expectedRevision,
+          },
+          data: {
+            status: "blocked",
+            revision: { increment: 1 },
+          },
+        });
+        if (blocked.count !== 1) {
+          return {
+            started: false as const,
+            reason: "task_not_startable" as const,
+          };
+        }
+        await openAmuxHumanEscalation(tx, {
+          taskId: input.taskId,
+          specialty: "execution-recovery",
+          reason: "attempt_budget_exhausted",
+          openedBy: AMUX_EXECUTION_SYSTEM_ACTOR,
+        });
+        await writeSystemAuditLog({
+          systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+          action: "amux.execution.budget_exhausted",
+          targetType: "AmuxWorkItem",
+          targetId: input.taskId,
+          summary: `Blocked AMUX task ${input.taskId} after its execution attempt budget was exhausted.`,
+          metadata: {
+            worker: input.worker,
+            exhausted_limit: budget.exhausted_limit,
+            attempts_used: budget.attempts_used,
+            max_attempts: budget.max_attempts,
+            previous_revision: input.expectedRevision,
+            next_revision: input.expectedRevision + 1,
+          },
+          tx,
+        });
+        return {
+          started: false as const,
+          reason: "attempt_budget_exhausted" as const,
+        };
+      }
+
+      const taskRevision = input.expectedRevision + 1;
+
+      const task = await tx.amuxWorkItem.updateMany({
+        where: {
+          id: input.taskId,
+          owner: input.worker,
+          status: "todo",
+          archivedAt: null,
+          revision: input.expectedRevision,
+        },
+        data: {
+          status: "doing",
+          revision: {
+            increment: 1,
+          },
+        },
+      });
+
+      if (task.count !== 1) {
+        return {
+          started: false as const,
+          reason: "task_not_startable" as const,
+        };
+      }
+
+      const runtimeBusy = await tx.amuxWorkerRuntime.updateMany({
         where: {
           workerName: input.worker,
           instanceId: input.instanceId,
@@ -260,118 +494,155 @@ export async function startAmuxExecution(input: {
         },
       });
 
-    if (runtimeBusy.count !== 1) {
-      throw new Error(
-        "AMUX runtime fence changed while starting execution",
-      );
-    }
+      if (runtimeBusy.count !== 1) {
+        throw new Error("AMUX runtime fence changed while starting execution");
+      }
 
-    const attemptId = randomUUID();
-    const leaseExpiresAt = executionLeaseExpiry(now);
+      const attemptId = randomUUID();
+      const leaseExpiresAt = executionLeaseExpiry(now);
 
-    await tx.amuxExecutionAttempt.create({
-      data: {
-        id: attemptId,
-        taskId: input.taskId,
-        worker: input.worker,
-        workerInstanceId: input.instanceId,
-        workerGeneration: input.generation,
-        taskRevision,
-        heartbeatAt: now,
-        leaseExpiresAt,
-        startedAt: now,
-      },
-    });
-
-    const taskSnapshot =
-      await tx.amuxWorkItem.findUniqueOrThrow({
-        where: {
-          id: input.taskId,
-        },
-        select: {
-          title: true,
-          description: true,
-          kind: true,
-          priority: true,
+      await tx.amuxExecutionAttempt.create({
+        data: {
+          id: attemptId,
+          taskId: input.taskId,
+          worker: input.worker,
+          workerInstanceId: input.instanceId,
+          workerGeneration: input.generation,
+          taskRevision,
+          attemptNumber: budget.next_attempt_number,
+          reservedCostMicrousd: lockedTask.estimatedCostMicrousd ?? BigInt(0),
+          heartbeatAt: now,
+          leaseExpiresAt,
+          startedAt: now,
         },
       });
 
-    const deliveryPrompt =
-      buildAmuxDeliveryPrompt({
+      if (costAdmission.reservations.length > 0) {
+        await tx.amuxCostLedgerEntry.createMany({
+          data: costAdmission.reservations.map((reservation) => ({
+            scope: reservation.scope,
+            resourceKey: reservation.resourceKey,
+            budgetWindowStartsAt: reservation.budgetWindowStartsAt,
+            budgetWindowEndsAt: reservation.budgetWindowEndsAt,
+            taskId: input.taskId,
+            attemptId,
+            kind: "reservation",
+            amountMicrousd: reservation.amountMicrousd,
+          })),
+        });
+      }
+
+      const [taskSnapshot, previousAttempt] = await Promise.all([
+        tx.amuxWorkItem.findUniqueOrThrow({
+          where: {
+            id: input.taskId,
+          },
+          select: {
+            title: true,
+            description: true,
+            kind: true,
+            priority: true,
+          },
+        }),
+        tx.amuxExecutionAttempt.findFirst({
+          where: {
+            taskId: input.taskId,
+            id: { not: attemptId },
+            endedAt: { not: null },
+          },
+          orderBy: [
+            { attemptNumber: "desc" },
+            { startedAt: "desc" },
+            { id: "desc" },
+          ],
+          select: { outcome: true, toStatus: true },
+        }),
+      ]);
+
+      const deliveryPrompt = buildAmuxDeliveryPrompt({
         taskId: input.taskId,
         title: taskSnapshot.title,
-        description:
-          taskSnapshot.description,
+        description: taskSnapshot.description,
         kind: taskSnapshot.kind,
         priority: taskSnapshot.priority,
         worker: input.worker,
         attemptId,
+        attemptNumber: budget.next_attempt_number,
         taskRevision,
+        previousAttempt,
       });
 
-    /*
-     * Durable delivery is part of execution start itself.
-     *
-     * If this write, either audit write, or transaction commit fails, the
-     * Todo->Doing mutation, runtime Busy transition and execution attempt all
-     * roll back with it. There is no started-without-delivery state.
-     */
-    await tx.amuxWorkDelivery.create({
-      data: {
+      /*
+       * Durable delivery is part of execution start itself.
+       *
+       * If this write, either audit write, or transaction commit fails, the
+       * Todo->Doing mutation, runtime Busy transition and execution attempt all
+       * roll back with it. There is no started-without-delivery state.
+       */
+      await tx.amuxWorkDelivery.create({
+        data: {
+          attemptId,
+          taskId: input.taskId,
+          worker: input.worker,
+          workerInstanceId: input.instanceId,
+          workerGeneration: input.generation,
+          taskRevision,
+          prompt: deliveryPrompt,
+          status: "queued",
+        },
+      });
+
+      await writeSystemAuditLog({
+        systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+        action: "amux.execution.started",
+        targetType: "AmuxWorkItem",
+        targetId: input.taskId,
+        summary: `Started AMUX execution ${attemptId}.`,
+        metadata: {
+          attempt_id: attemptId,
+          attempt_number: budget.next_attempt_number,
+          max_attempts: budget.max_attempts,
+          reserved_cost_microusd: (
+            lockedTask.estimatedCostMicrousd ?? BigInt(0)
+          ).toString(),
+          guarded_resources: costAdmission.reservations.map((item) => ({
+            scope: item.scope,
+            key: item.resourceKey,
+          })),
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: taskRevision,
+        },
+        tx,
+      });
+
+      await writeSystemAuditLog({
+        systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+        action: "amux.delivery.enqueued",
+        targetType: "AmuxWorkItem",
+        targetId: input.taskId,
+        summary: `Queued durable AMUX delivery ${attemptId} atomically with execution start.`,
+        metadata: {
+          attempt_id: attemptId,
+          attempt_number: budget.next_attempt_number,
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: taskRevision,
+          atomic_with_execution_start: true,
+        },
+        tx,
+      });
+
+      return {
+        started: true as const,
         attemptId,
-        taskId: input.taskId,
-        worker: input.worker,
-        workerInstanceId:
-          input.instanceId,
-        workerGeneration:
-          input.generation,
         taskRevision,
-        prompt: deliveryPrompt,
-        status: "queued",
-      },
-    });
-
-    await writeSystemAuditLog({
-      systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
-      action: "amux.execution.started",
-      targetType: "AmuxWorkItem",
-      targetId: input.taskId,
-      summary: `Started AMUX execution ${attemptId}.`,
-      metadata: {
-        attempt_id: attemptId,
-        worker: input.worker,
-        worker_instance_id: input.instanceId,
-        worker_generation: input.generation,
-        task_revision: taskRevision,
-      },
-      tx,
-    });
-
-    await writeSystemAuditLog({
-      systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
-      action: "amux.delivery.enqueued",
-      targetType: "AmuxWorkItem",
-      targetId: input.taskId,
-      summary:
-        `Queued durable AMUX delivery ${attemptId} atomically with execution start.`,
-      metadata: {
-        attempt_id: attemptId,
-        worker: input.worker,
-        worker_instance_id: input.instanceId,
-        worker_generation: input.generation,
-        task_revision: taskRevision,
-        atomic_with_execution_start: true,
-      },
-      tx,
-    });
-
-    return {
-      started: true as const,
-      attemptId,
-      taskRevision,
-      leaseExpiresAt,
-    };
-  });
+        leaseExpiresAt,
+      };
+    },
+  );
 }
 
 /**
@@ -389,51 +660,48 @@ export async function heartbeatAmuxExecution(input: {
   taskRevision: number;
   now?: Date;
 }): Promise<boolean> {
-  const now = input.now ?? new Date();
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.executionHeartbeat,
+    async (tx, context) => {
+      const now = input.now ?? context.dbNow;
+      const runtime = await lockRuntime(tx, input.worker);
 
-  return prisma.$transaction(async (tx) => {
-    const runtime = await lockRuntime(tx, input.worker);
+      if (
+        !runtimeGenerationMatches(runtime, input, now) ||
+        runtime?.status !== "busy"
+      ) {
+        return false;
+      }
 
-    if (
-      !runtimeGenerationMatches(runtime, input, now) ||
-      runtime?.status !== "busy"
-    ) {
-      return false;
-    }
+      const attempt = await lockAttempt(tx, input.attemptId);
 
-    const attempt = await lockAttempt(
-      tx,
-      input.attemptId,
-    );
+      if (
+        !attempt ||
+        attempt.endedAt !== null ||
+        attempt.worker !== input.worker ||
+        attempt.workerInstanceId !== input.instanceId ||
+        attempt.workerGeneration !== input.generation ||
+        attempt.taskRevision !== input.taskRevision ||
+        !attempt.leaseExpiresAt ||
+        attempt.leaseExpiresAt.getTime() <= now.getTime()
+      ) {
+        return false;
+      }
 
-    if (
-      !attempt ||
-      attempt.endedAt !== null ||
-      attempt.worker !== input.worker ||
-      attempt.workerInstanceId !== input.instanceId ||
-      attempt.workerGeneration !== input.generation ||
-      attempt.taskRevision !== input.taskRevision ||
-      !attempt.leaseExpiresAt ||
-      attempt.leaseExpiresAt.getTime() <= now.getTime()
-    ) {
-      return false;
-    }
+      const task = await lockTask(tx, attempt.taskId);
 
-    const task = await lockTask(tx, attempt.taskId);
+      if (
+        !task ||
+        task.owner !== input.worker ||
+        task.status !== "doing" ||
+        task.revision !== input.taskRevision
+      ) {
+        return false;
+      }
 
-    if (
-      !task ||
-      task.owner !== input.worker ||
-      task.status !== "doing" ||
-      task.revision !== input.taskRevision
-    ) {
-      return false;
-    }
+      const nextLease = executionLeaseExpiry(now);
 
-    const nextLease = executionLeaseExpiry(now);
-
-    const updated =
-      await tx.amuxExecutionAttempt.updateMany({
+      const updated = await tx.amuxExecutionAttempt.updateMany({
         where: {
           id: input.attemptId,
           worker: input.worker,
@@ -451,8 +719,31 @@ export async function heartbeatAmuxExecution(input: {
         },
       });
 
-    return updated.count === 1;
-  });
+      if (updated.count !== 1) return false;
+      if (runtime === null || attempt.leaseExpiresAt === null) {
+        throw new Error("AMUX execution heartbeat lease invariant lost");
+      }
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(attempt.leaseExpiresAt);
+      await writeSystemAuditLog({
+        systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+        action: "amux.execution.lease_renewed",
+        targetType: "AmuxWorkItem",
+        targetId: attempt.taskId,
+        summary: `Renewed AMUX execution lease ${input.attemptId}.`,
+        metadata: {
+          attempt_id: input.attemptId,
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: input.taskRevision,
+          lease_expires_at: nextLease.toISOString(),
+        },
+        tx,
+      });
+      return true;
+    },
+  );
 }
 
 /**
@@ -471,6 +762,7 @@ export async function settleAmuxExecution(input: {
   outcome: AmuxExecutionOutcome;
   toStatus: AmuxExecutionToStatus;
   reason?: string | null;
+  actualCostMicrousd?: bigint | null;
   now?: Date;
 }): Promise<
   | { settled: true; taskRevision: number }
@@ -481,96 +773,125 @@ export async function settleAmuxExecution(input: {
       `Invalid AMUX execution settlement: ${input.outcome} -> ${input.toStatus}`,
     );
   }
+  if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
+    return { settled: false as const, reason: "fenced_out" as const };
+  }
 
-  const now = input.now ?? new Date();
-
-  return prisma.$transaction(async (tx) => {
-    /*
-     * Lock order is deliberately the same as execution heartbeat:
-     * runtime -> attempt -> task.
-     */
-    const runtime = await lockRuntime(tx, input.worker);
-
-    if (
-      !runtimeGenerationMatches(runtime, input, now) ||
-      runtime?.status !== "busy"
-    ) {
-      return {
-        settled: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
-
-    const attempt = await lockAttempt(
-      tx,
-      input.attemptId,
-    );
-
-    if (
-      !attempt ||
-      attempt.endedAt !== null ||
-      attempt.worker !== input.worker ||
-      attempt.workerInstanceId !== input.instanceId ||
-      attempt.workerGeneration !== input.generation ||
-      attempt.taskRevision !== input.taskRevision ||
-      !attempt.leaseExpiresAt ||
-      attempt.leaseExpiresAt.getTime() <= now.getTime()
-    ) {
-      return {
-        settled: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
-
-    const task = await lockTask(tx, attempt.taskId);
-
-    if (
-      !task ||
-      task.owner !== input.worker ||
-      task.status !== "doing" ||
-      task.revision !== input.taskRevision
-    ) {
-      return {
-        settled: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
-
-    const moved = await tx.amuxWorkItem.updateMany({
-      where: {
-        id: attempt.taskId,
-        owner: input.worker,
-        status: "doing",
-        archivedAt: null,
-        revision: input.taskRevision,
-      },
-      data:
-        input.toStatus === "todo"
-          ? {
-              status: "todo",
-              owner: null,
-              claimedAt: null,
-              revision: {
-                increment: 1,
-              },
-            }
-          : {
-              status: input.toStatus,
-              revision: {
-                increment: 1,
-              },
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.executionSettle,
+    async (tx, context) => {
+      const now = input.now ?? context.dbNow;
+      const planning = await tx.amuxExecutionAttempt.findUnique({
+        where: { id: input.attemptId },
+        select: {
+          task: {
+            select: {
+              projectKey: true,
+              teamKey: true,
+              effortPoints: true,
+              estimatedCostMicrousd: true,
             },
-    });
+          },
+        },
+      });
+      if (!planning) {
+        return { settled: false as const, reason: "fenced_out" as const };
+      }
+      /*
+       * Resource locks come before the ordinary execution fence order so a
+       * settlement delta cannot race a new cost admission. Heartbeat takes no
+       * resource lock and still uses runtime -> attempt -> task.
+       */
+      await lockAmuxResourcePolicies(tx, amuxResourceRefs(planning.task));
+      const runtime = await lockRuntime(tx, input.worker);
 
-    if (moved.count !== 1) {
-      return {
-        settled: false as const,
-        reason: "fenced_out" as const,
-      };
-    }
+      if (
+        !runtimeGenerationMatches(runtime, input, now) ||
+        runtime?.status !== "busy"
+      ) {
+        return {
+          settled: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
 
-    const closed =
-      await tx.amuxExecutionAttempt.updateMany({
+      const attempt = await lockAttempt(tx, input.attemptId);
+
+      if (
+        !attempt ||
+        attempt.endedAt !== null ||
+        attempt.worker !== input.worker ||
+        attempt.workerInstanceId !== input.instanceId ||
+        attempt.workerGeneration !== input.generation ||
+        attempt.taskRevision !== input.taskRevision ||
+        !attempt.leaseExpiresAt ||
+        attempt.leaseExpiresAt.getTime() <= now.getTime()
+      ) {
+        return {
+          settled: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
+
+      const task = await lockTask(tx, attempt.taskId);
+
+      if (
+        !task ||
+        task.owner !== input.worker ||
+        task.status !== "doing" ||
+        task.revision !== input.taskRevision ||
+        task.projectKey !== planning.task.projectKey ||
+        task.teamKey !== planning.task.teamKey
+      ) {
+        return {
+          settled: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
+
+      const budgetDestination = settlementDestinationForBudget({
+        requested_status: input.toStatus,
+        attempt_number: attempt.attemptNumber,
+      });
+      const effectiveToStatus =
+        budgetDestination.to_status === "done" && task.requiresHumanReview
+          ? "review"
+          : budgetDestination.to_status;
+
+      const moved = await tx.amuxWorkItem.updateMany({
+        where: {
+          id: attempt.taskId,
+          owner: input.worker,
+          status: "doing",
+          archivedAt: null,
+          revision: input.taskRevision,
+        },
+        data:
+          effectiveToStatus === "todo" || effectiveToStatus === "review"
+            ? {
+                status: effectiveToStatus,
+                owner: null,
+                claimedAt: null,
+                revision: {
+                  increment: 1,
+                },
+              }
+            : {
+                status: effectiveToStatus,
+                revision: {
+                  increment: 1,
+                },
+              },
+      });
+
+      if (moved.count !== 1) {
+        return {
+          settled: false as const,
+          reason: "fenced_out" as const,
+        };
+      }
+
+      const closed = await tx.amuxExecutionAttempt.updateMany({
         where: {
           id: input.attemptId,
           worker: input.worker,
@@ -584,48 +905,117 @@ export async function settleAmuxExecution(input: {
           leaseExpiresAt: null,
           endedAt: now,
           outcome: input.outcome,
-          toStatus: input.toStatus,
+          toStatus: effectiveToStatus,
           endedBy: input.worker,
-          reason: input.reason ?? null,
+          reason: budgetDestination.exhausted_limit
+            ? "attempt_budget_exhausted"
+            : effectiveToStatus === "review"
+              ? "human_review_required"
+              : input.outcome === "succeeded"
+                ? "execution_succeeded"
+                : input.outcome === "failed"
+                  ? "execution_failed"
+                  : "execution_blocked",
+          settledCostMicrousd: input.actualCostMicrousd ?? null,
+          costConfirmed:
+            input.actualCostMicrousd !== null &&
+            input.actualCostMicrousd !== undefined,
         },
       });
 
-    if (closed.count !== 1) {
-      throw new Error(
-        "AMUX execution attempt changed while settling",
-      );
-    }
+      if (closed.count !== 1) {
+        throw new Error("AMUX execution attempt changed while settling");
+      }
 
-    await cancelPendingAmuxWorkDelivery(
-      tx,
-      input.attemptId,
-      now,
-    );
+      if (
+        input.actualCostMicrousd !== null &&
+        input.actualCostMicrousd !== undefined
+      ) {
+        const reservations = await tx.amuxCostLedgerEntry.findMany({
+          where: { attemptId: input.attemptId, kind: "reservation" },
+          select: {
+            scope: true,
+            resourceKey: true,
+            budgetWindowStartsAt: true,
+            budgetWindowEndsAt: true,
+            amountMicrousd: true,
+          },
+        });
+        if (reservations.length > 0) {
+          await tx.amuxCostLedgerEntry.createMany({
+            data: reservations.map((reservation) => ({
+              scope: reservation.scope,
+              resourceKey: reservation.resourceKey,
+              budgetWindowStartsAt: reservation.budgetWindowStartsAt,
+              budgetWindowEndsAt: reservation.budgetWindowEndsAt,
+              taskId: attempt.taskId,
+              attemptId: input.attemptId,
+              kind: "settlement_delta",
+              amountMicrousd:
+                input.actualCostMicrousd! - reservation.amountMicrousd,
+            })),
+          });
+        }
+      }
 
-    await writeSystemAuditLog({
-      systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
-      action: "amux.execution.settled",
-      targetType: "AmuxWorkItem",
-      targetId: attempt.taskId,
-      summary: `Settled AMUX execution ${input.attemptId}.`,
-      metadata: {
-        attempt_id: input.attemptId,
-        worker: input.worker,
-        worker_instance_id: input.instanceId,
-        worker_generation: input.generation,
-        task_revision: input.taskRevision,
-        next_task_revision: input.taskRevision + 1,
-        outcome: input.outcome,
-        to_status: input.toStatus,
-      },
-      tx,
-    });
+      if (effectiveToStatus === "review" && task.requiresHumanReview) {
+        await openAmuxHumanEscalation(tx, {
+          taskId: attempt.taskId,
+          specialty: task.reviewSpecialty,
+          reason: "human_review_required",
+          openedBy: input.worker,
+        });
+      } else if (effectiveToStatus === "blocked") {
+        await openAmuxHumanEscalation(tx, {
+          taskId: attempt.taskId,
+          specialty: "execution-recovery",
+          reason: budgetDestination.exhausted_limit
+            ? "attempt_budget_exhausted"
+            : "execution_blocked",
+          openedBy: input.worker,
+        });
+      }
 
-    return {
-      settled: true as const,
-      taskRevision: input.taskRevision + 1,
-    };
-  });
+      await cancelPendingAmuxWorkDelivery(tx, input.attemptId, now);
+
+      await writeSystemAuditLog({
+        systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+        action: "amux.execution.settled",
+        targetType: "AmuxWorkItem",
+        targetId: attempt.taskId,
+        summary: `Settled AMUX execution ${input.attemptId}.`,
+        metadata: {
+          attempt_id: input.attemptId,
+          worker: input.worker,
+          worker_instance_id: input.instanceId,
+          worker_generation: input.generation,
+          task_revision: input.taskRevision,
+          next_task_revision: input.taskRevision + 1,
+          outcome: input.outcome,
+          requested_to_status: input.toStatus,
+          to_status: effectiveToStatus,
+          human_review_forced:
+            input.toStatus === "done" && effectiveToStatus === "review",
+          reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
+          settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
+          attempt_number: attempt.attemptNumber,
+          exhausted_limit: budgetDestination.exhausted_limit,
+          max_attempts: budgetDestination.max_attempts,
+        },
+        tx,
+      });
+
+      if (runtime === null || attempt.leaseExpiresAt === null) {
+        throw new Error("AMUX execution settlement lease invariant lost");
+      }
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(attempt.leaseExpiresAt);
+      return {
+        settled: true as const,
+        taskRevision: input.taskRevision + 1,
+      };
+    },
+  );
 }
 
 /**
@@ -641,87 +1031,85 @@ export async function reclaimExpiredAmuxExecutions(
   options: {
     now?: Date;
     limit?: number;
+    onMoreWork?: () => void;
   } = {},
 ): Promise<number> {
-  const now = options.now ?? new Date();
-  const limit = Math.max(
-    1,
-    Math.min(options.limit ?? 50, 200),
+  const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+
+  const candidates = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.executionRecoveryRead,
+    (tx, context) => {
+      const now = options.now ?? context.dbNow;
+      return tx.amuxExecutionAttempt.findMany({
+        where: {
+          endedAt: null,
+          leaseExpiresAt: { lte: now },
+        },
+        orderBy: [{ leaseExpiresAt: "asc" }, { id: "asc" }],
+        take: limit,
+        select: {
+          id: true,
+          worker: true,
+        },
+      });
+    },
   );
 
-  const candidates =
-    await prisma.amuxExecutionAttempt.findMany({
-      where: {
-        endedAt: null,
-        leaseExpiresAt: {
-          lte: now,
-        },
-      },
-      orderBy: [
-        {
-          leaseExpiresAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
-      take: limit,
-      select: {
-        id: true,
-        worker: true,
-      },
-    });
+  if (candidates.length >= limit) options.onMoreWork?.();
 
   let reclaimed = 0;
 
   for (const candidate of candidates) {
-    const applied = await prisma.$transaction(
-      async (tx) => {
-        /*
-         * Keep the same lock ordering used by heartbeat and settle:
-         * runtime -> attempt -> task.
-         */
-        const runtime = await lockRuntime(
-          tx,
-          candidate.worker,
-        );
+    let applied: boolean;
+    try {
+      applied = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        async (tx, context) => {
+          const now = options.now ?? context.dbNow;
+          /*
+           * Keep the same lock ordering used by heartbeat and settle:
+           * runtime -> attempt -> task.
+           */
+          const runtime = await lockRuntime(tx, candidate.worker);
 
-        const attempt = await lockAttempt(
-          tx,
-          candidate.id,
-        );
+          const attempt = await lockAttempt(tx, candidate.id);
 
-        if (
-          !attempt ||
-          attempt.endedAt !== null ||
-          !attempt.leaseExpiresAt ||
-          attempt.leaseExpiresAt.getTime() >
-            now.getTime()
-        ) {
-          return false;
-        }
+          if (
+            !attempt ||
+            attempt.endedAt !== null ||
+            !attempt.leaseExpiresAt ||
+            attempt.leaseExpiresAt.getTime() > now.getTime()
+          ) {
+            return false;
+          }
 
-        const task = await lockTask(
-          tx,
-          attempt.taskId,
-        );
+          const task = await lockTask(tx, attempt.taskId);
 
-        /*
-         * Only the execution which still owns the task may recover it.
-         * A mismatch is an abnormal/stale row, not authority to overwrite
-         * whichever lifecycle now owns the task.
-         */
-        if (
-          !task ||
-          task.owner !== attempt.worker ||
-          task.status !== "doing" ||
-          task.revision !== attempt.taskRevision
-        ) {
-          return false;
-        }
+          /*
+           * Only the execution which still owns the task may recover it.
+           * A mismatch is an abnormal/stale row, not authority to overwrite
+           * whichever lifecycle now owns the task.
+           */
+          if (
+            !task ||
+            task.owner !== attempt.worker ||
+            task.status !== "doing" ||
+            task.revision !== attempt.taskRevision ||
+            task.revision > AMUX_MAX_EXPECTED_REVISION
+          ) {
+            return false;
+          }
 
-        const moved =
-          await tx.amuxWorkItem.updateMany({
+          const budgetDestination = settlementDestinationForBudget({
+            requested_status: "todo",
+            attempt_number: attempt.attemptNumber,
+          });
+          const effectiveToStatus = budgetDestination.to_status;
+          const recoveryReason = budgetDestination.exhausted_limit
+            ? "attempt_budget_exhausted"
+            : "lease_expired";
+
+          const moved = await tx.amuxWorkItem.updateMany({
             where: {
               id: attempt.taskId,
               owner: attempt.worker,
@@ -729,22 +1117,29 @@ export async function reclaimExpiredAmuxExecutions(
               archivedAt: null,
               revision: attempt.taskRevision,
             },
-            data: {
-              status: "todo",
-              owner: null,
-              claimedAt: null,
-              revision: {
-                increment: 1,
-              },
-            },
+            data:
+              effectiveToStatus === "todo"
+                ? {
+                    status: "todo",
+                    owner: null,
+                    claimedAt: null,
+                    revision: {
+                      increment: 1,
+                    },
+                  }
+                : {
+                    status: "blocked",
+                    revision: {
+                      increment: 1,
+                    },
+                  },
           });
 
-        if (moved.count !== 1) {
-          return false;
-        }
+          if (moved.count !== 1) {
+            return false;
+          }
 
-        const closed =
-          await tx.amuxExecutionAttempt.updateMany({
+          const closed = await tx.amuxExecutionAttempt.updateMany({
             where: {
               id: attempt.id,
               endedAt: null,
@@ -757,80 +1152,88 @@ export async function reclaimExpiredAmuxExecutions(
               leaseExpiresAt: null,
               endedAt: now,
               outcome: "expired",
-              toStatus: "todo",
-              endedBy:
-                "system:amux-execution-reaper",
-              reason: "lease_expired",
+              toStatus: effectiveToStatus,
+              endedBy: "system:amux-execution-reaper",
+              reason: recoveryReason,
             },
           });
 
-        if (closed.count !== 1) {
-          throw new Error(
-            "AMUX expired execution changed while reclaiming",
-          );
-        }
+          if (closed.count !== 1) {
+            throw new Error("AMUX expired execution changed while reclaiming");
+          }
 
-        await cancelPendingAmuxWorkDelivery(
-          tx,
-          attempt.id,
-          now,
-        );
+          if (effectiveToStatus === "blocked") {
+            await openAmuxHumanEscalation(tx, {
+              taskId: attempt.taskId,
+              specialty: "execution-recovery",
+              reason: budgetDestination.exhausted_limit
+                ? "attempt_budget_exhausted"
+                : "execution_lease_expired",
+              openedBy: "system:amux-execution-reaper",
+            });
+          }
 
-        /*
-         * If the same runtime generation is still marked busy, quarantine it.
-         * A replacement generation must never be touched here.
-         */
-        if (
-          runtime &&
-          runtime.instanceId ===
-            attempt.workerInstanceId &&
-          runtime.generation ===
-            attempt.workerGeneration &&
-          runtime.status === "busy"
-        ) {
-          await tx.amuxWorkerRuntime.updateMany({
-            where: {
-              workerName: attempt.worker,
-              instanceId:
-                attempt.workerInstanceId,
-              generation:
-                attempt.workerGeneration,
-              status: "busy",
+          await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+
+          /*
+           * If the same runtime generation is still marked busy, quarantine it.
+           * A replacement generation must never be touched here.
+           */
+          if (
+            runtime &&
+            runtime.instanceId === attempt.workerInstanceId &&
+            runtime.generation === attempt.workerGeneration &&
+            runtime.status === "busy"
+          ) {
+            await tx.amuxWorkerRuntime.updateMany({
+              where: {
+                workerName: attempt.worker,
+                instanceId: attempt.workerInstanceId,
+                generation: attempt.workerGeneration,
+                status: "busy",
+              },
+              data: {
+                status: "error",
+                dispatchReady: false,
+              },
+            });
+          }
+
+          await writeSystemAuditLog({
+            systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+            action: "amux.execution.expired",
+            targetType: "AmuxWorkItem",
+            targetId: attempt.taskId,
+            summary: `Reclaimed expired AMUX execution ${attempt.id}.`,
+            metadata: {
+              attempt_id: attempt.id,
+              worker: attempt.worker,
+              worker_instance_id: attempt.workerInstanceId,
+              worker_generation: attempt.workerGeneration,
+              task_revision: attempt.taskRevision,
+              next_task_revision: attempt.taskRevision + 1,
+              outcome: "expired",
+              to_status: effectiveToStatus,
+              attempt_number: attempt.attemptNumber,
+              exhausted_limit: budgetDestination.exhausted_limit,
+              max_attempts: budgetDestination.max_attempts,
             },
-            data: {
-              status: "error",
-              dispatchReady: false,
-            },
+            tx,
           });
-        }
 
-        await writeSystemAuditLog({
-          systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
-          action: "amux.execution.expired",
-          targetType: "AmuxWorkItem",
-          targetId: attempt.taskId,
-          summary:
-            `Reclaimed expired AMUX execution ${attempt.id}.`,
-          metadata: {
-            attempt_id: attempt.id,
-            worker: attempt.worker,
-            worker_instance_id:
-              attempt.workerInstanceId,
-            worker_generation:
-              attempt.workerGeneration,
-            task_revision:
-              attempt.taskRevision,
-            next_task_revision:
-              attempt.taskRevision + 1,
-            outcome: "expired",
-            to_status: "todo",
-          },
-          tx,
-        });
-
-        return true;
-      },
-    );
+          return true;
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof AmuxDbBoundaryError &&
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+      ) {
+        options.onMoreWork?.();
+        break;
+      }
+      throw error;
+    }
 
     if (applied) {
       reclaimed += 1;
@@ -851,101 +1254,86 @@ export async function reclaimExpiredAmuxClaims(
   options: {
     now?: Date;
     limit?: number;
+    onMoreWork?: () => void;
   } = {},
 ): Promise<number> {
-  const now = options.now ?? new Date();
-  const limit = Math.max(
-    1,
-    Math.min(options.limit ?? 50, 200),
+  const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+
+  const candidates = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.ownershipRecoveryRead,
+    (tx, context) => {
+      const now = options.now ?? context.dbNow;
+      const cutoff = new Date(now.getTime() - AMUX_CLAIM_RESERVATION_MS);
+      return tx.amuxWorkItem.findMany({
+        where: {
+          status: "todo",
+          owner: { not: null },
+          archivedAt: null,
+          claimedAt: { lte: cutoff },
+        },
+        orderBy: [{ claimedAt: "asc" }, { id: "asc" }],
+        take: limit,
+        select: {
+          id: true,
+          owner: true,
+          revision: true,
+          claimedAt: true,
+        },
+      });
+    },
   );
 
-  const cutoff = new Date(
-    now.getTime() - AMUX_CLAIM_RESERVATION_MS,
-  );
-
-  const candidates =
-    await prisma.amuxWorkItem.findMany({
-      where: {
-        status: "todo",
-        owner: {
-          not: null,
-        },
-        archivedAt: null,
-        claimedAt: {
-          lte: cutoff,
-        },
-      },
-      orderBy: [
-        {
-          claimedAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
-      take: limit,
-      select: {
-        id: true,
-        owner: true,
-        revision: true,
-        claimedAt: true,
-      },
-    });
+  if (candidates.length >= limit) options.onMoreWork?.();
 
   let reclaimed = 0;
 
   for (const candidate of candidates) {
     const candidateOwner = candidate.owner;
-    const candidateClaimedAt =
-      candidate.claimedAt;
+    const candidateClaimedAt = candidate.claimedAt;
 
-    if (
-      !candidateOwner ||
-      !candidateClaimedAt
-    ) {
+    if (!candidateOwner || !candidateClaimedAt) {
       continue;
     }
 
-    const applied =
-      await prisma.$transaction(async (tx) => {
-        const task = await lockTask(
-          tx,
-          candidate.id,
-        );
+    let applied: boolean;
+    try {
+      applied = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.ownershipRecoveryWrite,
+        async (tx, context) => {
+          const now = options.now ?? context.dbNow;
+          const cutoff = new Date(now.getTime() - AMUX_CLAIM_RESERVATION_MS);
+          const task = await lockTask(tx, candidate.id);
 
-        if (
-          !task ||
-          task.status !== "todo" ||
-          task.archivedAt !== null ||
-          task.owner !== candidateOwner ||
-          task.revision !== candidate.revision ||
-          !task.claimedAt ||
-          task.claimedAt.getTime() !==
-            candidateClaimedAt.getTime() ||
-          task.claimedAt.getTime() >
-            cutoff.getTime()
-        ) {
-          return false;
-        }
+          if (
+            !task ||
+            task.status !== "todo" ||
+            task.archivedAt !== null ||
+            task.owner !== candidateOwner ||
+            task.revision !== candidate.revision ||
+            task.revision > AMUX_MAX_EXPECTED_REVISION ||
+            !task.claimedAt ||
+            task.claimedAt.getTime() !== candidateClaimedAt.getTime() ||
+            task.claimedAt.getTime() > cutoff.getTime()
+          ) {
+            return false;
+          }
 
-        /*
-         * Todo should imply no live execution, but fail closed if historical
-         * corruption or a future lifecycle change ever violates that assumption.
-         */
-        const liveAttempts =
-          await tx.amuxExecutionAttempt.count({
+          /*
+           * Todo should imply no live execution, but fail closed if historical
+           * corruption or a future lifecycle change ever violates that assumption.
+           */
+          const liveAttempts = await tx.amuxExecutionAttempt.count({
             where: {
               taskId: task.id,
               endedAt: null,
             },
           });
 
-        if (liveAttempts !== 0) {
-          return false;
-        }
+          if (liveAttempts !== 0) {
+            return false;
+          }
 
-        const released =
-          await tx.amuxWorkItem.updateMany({
+          const released = await tx.amuxWorkItem.updateMany({
             where: {
               id: task.id,
               owner: task.owner,
@@ -963,33 +1351,39 @@ export async function reclaimExpiredAmuxClaims(
             },
           });
 
-        if (released.count !== 1) {
-          return false;
-        }
+          if (released.count !== 1) {
+            return false;
+          }
 
-        await writeSystemAuditLog({
-          systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
-          action: "amux.claim.expired",
-          targetType: "AmuxWorkItem",
-          targetId: task.id,
-          summary:
-            `Released expired AMUX ownership reservation for ${task.id}.`,
-          metadata: {
-            previous_worker: task.owner,
-            previous_revision:
-              task.revision,
-            next_revision:
-              task.revision + 1,
-            claimed_at:
-              task.claimedAt.toISOString(),
-            reservation_ms:
-              AMUX_CLAIM_RESERVATION_MS,
-          },
-          tx,
-        });
+          await writeSystemAuditLog({
+            systemActor: AMUX_EXECUTION_SYSTEM_ACTOR,
+            action: "amux.claim.expired",
+            targetType: "AmuxWorkItem",
+            targetId: task.id,
+            summary: `Released expired AMUX ownership reservation for ${task.id}.`,
+            metadata: {
+              previous_worker: task.owner,
+              previous_revision: task.revision,
+              next_revision: task.revision + 1,
+              claimed_at: task.claimedAt.toISOString(),
+              reservation_ms: AMUX_CLAIM_RESERVATION_MS,
+            },
+            tx,
+          });
 
-        return true;
-      });
+          return true;
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof AmuxDbBoundaryError &&
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+      ) {
+        options.onMoreWork?.();
+        break;
+      }
+      throw error;
+    }
 
     if (applied) {
       reclaimed += 1;

@@ -31,6 +31,26 @@ Tomverse는 shell을 사용하지 않는다. `program`과 `args`를
 
 worker 이름은 server-side worker catalog와 같은 논리적 worker identity여야 한다.
 
+## Agent 검토 app server 설정
+
+Agent 작업 검토 승인은 executor lane이 아니라 app server 기능이다. 별도 승인
+계약과 staging 기록에 서명하기 전에는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED`를
+off로 유지한다. 켜기 전에 app server에 `mposition/Tomverse` 한정 Metadata·Pull
+requests·Contents 읽기 전용 `AMUX_REVIEW_GITHUB_READ_TOKEN`, 기존
+`TOMVERSE_AMUX_SYNC_SECRET`, Admin-to-internal proxy의 `NEXTAUTH_URL`을
+설정한다. 이 GitHub token은 orchestrator나 executor lane에 설치하지 않고,
+값 자체를 증거에도 기록하지 않는다.
+
+공개 origin이 Cloudflare Access 같은 identity-aware proxy 뒤에 있으면 app의
+self-call도 로그인 redirect를 받는다. 이 경우에만
+`TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`을 같은 process의 loopback
+origin(`http://127.0.0.1:<PORT>`)으로 설정한다. Railway private DNS를 써야 한다면
+같은 app service의 `http://<RAILWAY_PRIVATE_DOMAIN>:<PORT>`만 허용한다. 코드는
+Railway가 주입한 `PORT`와 명시적 port가 정확히 같고, hostname도 loopback 또는
+`RAILWAY_PRIVATE_DOMAIN`과 정확히 같은 경우만 허용한다. 다른 private service나
+외부 host에는 Admin cookie·sync secret을 보내지 않는다.
+`NEXTAUTH_URL`은 공개 로그인 origin으로 유지한다.
+
 ## stdin
 
 wrapper는 stdin에서 JSON document 하나를 받는다.

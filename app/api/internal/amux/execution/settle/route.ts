@@ -18,18 +18,16 @@ const requestSchema = z
     instance_id: z.string().uuid(),
     generation: z.number().int().min(1),
     task_revision: z.number().int().min(0),
-    outcome: z.enum([
-      "succeeded",
-      "failed",
-      "blocked",
-    ]),
-    to_status: z.enum([
-      "todo",
-      "review",
-      "done",
-      "blocked",
-    ]),
+    outcome: z.enum(["succeeded", "failed", "blocked"]),
+    to_status: z.enum(["todo", "review", "done", "blocked"]),
     reason: z.string().trim().max(1_000).nullable().optional(),
+    cost_microusd: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -58,11 +56,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await readLimitedJson(
-      request,
-      8 * 1_024,
-      requestSchema,
-    );
+    const body = await readLimitedJson(request, 8 * 1_024, requestSchema);
 
     const outcome = await settleAmuxExecution({
       attemptId: body.attempt_id,
@@ -73,17 +67,18 @@ export async function POST(request: Request) {
       outcome: body.outcome,
       toStatus: body.to_status,
       reason: body.reason ?? null,
+      actualCostMicrousd:
+        body.cost_microusd === null || body.cost_microusd === undefined
+          ? null
+          : BigInt(body.cost_microusd),
     });
 
-    return Response.json(
-      outcome,
-      {
-        status: outcome.settled ? 200 : 409,
-        headers: {
-          "Cache-Control": "no-store",
-        },
+    return Response.json(outcome, {
+      status: outcome.settled ? 200 : 409,
+      headers: {
+        "Cache-Control": "no-store",
       },
-    );
+    });
   } catch {
     return Response.json(
       { error: "Invalid request." },

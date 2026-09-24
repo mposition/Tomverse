@@ -281,6 +281,18 @@ type RouteModule = {
 let prisma: (typeof import("@/lib/prisma"))["prisma"];
 let route: RouteModule;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalAmuxReviewEnv = {
+    TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED: process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED,
+    TOMVERSE_AMUX_SYNC_SECRET: process.env.TOMVERSE_AMUX_SYNC_SECRET,
+    AMUX_REVIEW_GITHUB_READ_TOKEN: process.env.AMUX_REVIEW_GITHUB_READ_TOKEN,
+    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+};
+const restoreAmuxReviewEnv = () => {
+    for (const [name, value] of Object.entries(originalAmuxReviewEnv)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+    }
+};
 /**
  * `NODE_ENV` is typed read-only by Next's environment augmentation, and the
  * route reads it at request time. Writing through the record is the assignment
@@ -321,6 +333,8 @@ before(async () => {
 });
 
 beforeEach(() => {
+    restoreAmuxReviewEnv();
+    delete process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED;
     deferred = [];
     reported = [];
     securityReady = true;
@@ -341,6 +355,7 @@ beforeEach(() => {
 });
 
 after(async () => {
+    restoreAmuxReviewEnv();
     setNodeEnv(originalNodeEnv);
     await prisma.$disconnect();
 });
@@ -361,6 +376,7 @@ type ReadinessBody = {
         emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
         searchProviderBudget: boolean;
+        amuxReviewApproval: boolean;
     };
     traceId: string;
 };
@@ -395,6 +411,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailConsentKeyring: true,
         emailBusinessIdentity: true,
         searchProviderBudget: true,
+        amuxReviewApproval: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -410,6 +427,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         name: keyof ReadinessBody["checks"];
         arrange: () => void;
     }> = [
+        {
+            name: "amuxReviewApproval",
+            arrange: () => {
+                process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED = "true";
+                process.env.TOMVERSE_AMUX_SYNC_SECRET = "s".repeat(32);
+                delete process.env.AMUX_REVIEW_GITHUB_READ_TOKEN;
+                process.env.NEXTAUTH_URL = "https://example.test";
+            },
+        },
         {
             name: "securityEnvironment",
             arrange: () => {
@@ -524,6 +550,8 @@ test("each dependency alone sinks the verdict, and the others still report", asy
     ];
 
     for (const { name, arrange } of cases) {
+        restoreAmuxReviewEnv();
+        delete process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED;
         deferred = [];
         reported = [];
         securityReady = true;
