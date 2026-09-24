@@ -6,6 +6,7 @@ import {
   AMUX_INTAKE_APPLY_CODE_LATCH,
   amuxIntakeApplyPermitted,
   amuxIntakeDraftDigest,
+  amuxIntakeNormalizedDraft,
   amuxIntakeSourceKey,
   guardAmuxIntake,
   parseAmuxIntakeDraft,
@@ -35,10 +36,9 @@ const body = (value) => JSON.stringify(value);
 
 test("the code latch ships false and one latch is not enough", () => {
   assert.equal(AMUX_INTAKE_APPLY_CODE_LATCH, false);
-  assert.equal(amuxIntakeApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
-  assert.equal(amuxIntakeApplyPermitted({ envValue: "enabled", codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH }), false);
-  assert.equal(amuxIntakeApplyPermitted({ envValue: "true", codeLatch: true }), false);
-  assert.equal(amuxIntakeApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
+  assert.equal(amuxIntakeApplyPermitted("enabled"), false);
+  assert.equal(amuxIntakeApplyPermitted("true"), false);
+  assert.equal(amuxIntakeApplyPermitted(undefined), false);
 });
 
 test("a conversation that is not an explicit registration produces no card", () => {
@@ -62,7 +62,7 @@ test("a valid draft waits for confirmation and does not write a card", () => {
   assert.match(guarded.draftDigest, /^[a-f0-9]{64}$/);
   const parsed = parseAmuxIntakeDraft(body(draft()));
   assert.equal(parsed.ok, true);
-  assert.equal(JSON.stringify(amuxIntakeDraftDigest(parsed.draft)).includes(taskId), false);
+  assert.equal(JSON.stringify(amuxIntakeNormalizedDraft(parsed.draft)).includes(taskId), false);
   assert.equal(guarded.draftDigest.includes(taskId), false);
 });
 
@@ -125,6 +125,7 @@ test("the source key is an hmac and a short secret produces none", () => {
 test("the pure module does not open a writer", () => {
   const source = read("lib/amux/intakeCore.ts");
   assert.equal(source.includes("AMUX_INTAKE_APPLY_CODE_LATCH = false"), true);
+  assert.equal(source.includes("codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH"), true);
   assert.equal(source.includes("@prisma/client"), false);
   assert.equal(source.includes("lib/credit"), false);
   assert.equal(source.includes("TOMVERSE_AMUX_EXECUTE"), false);

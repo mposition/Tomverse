@@ -122,7 +122,12 @@ const scannedText = (value: string, maxBytes: number): boolean =>
   bytes(value) <= maxBytes &&
   !amuxCatalogTextRefused(value);
 
-export const amuxIntakeApplyPermitted = boardImportApplyPermitted;
+/** Uses the shipped latch constant. A caller cannot supply the latch. */
+export const amuxIntakeApplyPermitted = (envValue: string | undefined): boolean =>
+  boardImportApplyPermitted({
+    envValue,
+    codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH,
+  });
 
 export const amuxIntakeNormalizedDraft = (draft: AmuxIntakeDraft): AmuxIntakeNormalizedDraft => ({
   policyVersion: draft.policyVersion,
