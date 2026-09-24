@@ -252,9 +252,9 @@ test("a run still inside its silence budget is not reported delayed", async () =
  * rows the sixth condition requires are actually written before and after the
  * operation.
  *
- * This is where the path is proven at all. Staging cannot do it -- its
- * `ADMIN_OWNER_EMAILS` names two addresses, so the exception correctly stays
- * shut there (observed 2026-08-23); production names one.
+ * This is where the path is proven at all. A second eligible administrator
+ * is counted on the audit row and does not close the path. The dry-run
+ * digest binding still has to match.
  */
 
 const withSoleAdmin = async <T>(
@@ -269,7 +269,7 @@ const withSoleAdmin = async <T>(
   };
   process.env.ADMIN_EMAILS = emails.join(",");
   // Id-admitted administrators are counted as approvers, so an inherited
-  // ADMIN_USER_IDS would silently close every sole-path test here.
+  // ADMIN_USER_IDS would change the count these tests assert.
   delete process.env.ADMIN_USER_IDS;
   process.env.ADMIN_OWNER_EMAILS = emails.join(",");
   delete process.env.ADMIN_ACCESS_EXPIRY_JSON;
@@ -384,28 +384,32 @@ test("the sole administrator executes, and the audit says why one was enough", a
   });
 });
 
-test("a second eligible administrator closes the path without being asked", async () => {
+test("a second eligible administrator does not close the retention path", async () => {
   const admin = await createAdminSession("first-admin");
   const other = await createAdminSession("second-admin");
   await withSoleAdmin(
     [admin.session.user?.email as string, other.session.user?.email as string],
     async () => {
-      // Condition 6, read from configuration on this call -- there is no
-      // stored mode to migrate and no flag anyone has to remember to clear.
       assert.equal(
         soleApproverIsAvailable("retention.cleanup.execute", admin.session),
-        false
+        true
       );
       const { run, digest } = await seedDryRun(admin);
       let executions = 0;
-      await assert.rejects(
-        () =>
-          executeAsSoleApprover(admin, run.id, digest, async () => {
-            executions += 1;
-          }),
-        AdminSoleApproverRefusedError
+      const result = await executeAsSoleApprover(admin, run.id, digest, async () => {
+        executions += 1;
+        return { assistantKnowledgeObjectsDeleted: 2 };
+      });
+      assert.equal(executions, 1);
+      assert.deepEqual(result, { assistantKnowledgeObjectsDeleted: 2 });
+      assert.equal(await prisma.adminActionApproval.count(), 0);
+      const started = await prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: "admin_sole_approver.execution_started" },
+      });
+      assert.equal(
+        (started.metadata as Record<string, unknown>).eligibleApproverCount,
+        2
       );
-      assert.equal(executions, 0);
     }
   );
 });

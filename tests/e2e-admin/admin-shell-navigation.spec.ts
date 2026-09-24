@@ -185,15 +185,21 @@ test.describe("admin console shell", () => {
 
       await expect(page).toHaveURL(legacy.to);
       await expect(consoleHeading(page)).toHaveText(legacy.heading);
-      // The tab named in the destination is the one that opened.
+      // A destination that names a tab opens that section. A destination
+      // with no tab, such as the work queue after two-person approval was
+      // retired, has no section strip to mark current.
       const tab = new URL(legacy.to, "https://example.invalid").searchParams.get(
         "tab"
       );
       const tabStrip = page.getByRole("navigation", { name: /sections$/ });
-      await expect(tabStrip.locator('a[aria-current="page"]')).toHaveAttribute(
-        "href",
-        new RegExp(`tab=${tab}$`)
-      );
+      if (tab === null) {
+        await expect(tabStrip).toHaveCount(0);
+      } else {
+        await expect(tabStrip.locator('a[aria-current="page"]')).toHaveAttribute(
+          "href",
+          new RegExp(`tab=${tab}$`)
+        );
+      }
     });
   }
 
