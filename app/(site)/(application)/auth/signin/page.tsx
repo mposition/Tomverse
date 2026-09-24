@@ -27,14 +27,18 @@ export default async function SignInPage({
 }) {
   const requested = (await searchParams).lang;
   const locale = Array.isArray(requested) ? requested[0] : requested;
+  // NEXT_PUBLIC_* is normally inlined into client bundles. Passing the public
+  // site key from this dynamic server page also covers deployments where the
+  // runtime environment is updated independently of the build artifact.
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
   if (!isLanguage(locale)) {
-    return <SignInPageContent />;
+    return <SignInPageContent turnstileSiteKey={turnstileSiteKey} />;
   }
 
   return (
     <LanguageProvider initialLang={locale} forceInitialLang>
-      <SignInPageContent />
+      <SignInPageContent turnstileSiteKey={turnstileSiteKey} />
     </LanguageProvider>
   );
 }

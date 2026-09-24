@@ -66,7 +66,7 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons() {
+function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
@@ -119,7 +119,7 @@ function SignInButtons() {
         getToken: getTurnstileToken,
         failure: turnstileFailure,
         isChallengeVisible,
-    } = useTurnstile(true, "email_login_request");
+    } = useTurnstile(true, "email_login_request", turnstileSiteKey);
 
     // Drives the "N초 후 다시 시도" countdown on a minute-scoped rate limit:
     // retryAfterUntil is the fixed deadline from the server's Retry-After
@@ -498,7 +498,11 @@ function SignInButtons() {
     );
 }
 
-export function SignInPageContent() {
+export function SignInPageContent({
+    turnstileSiteKey,
+}: {
+    turnstileSiteKey?: string;
+}) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
     // spanning the bottom of the screen, which could cross over the login
@@ -537,7 +541,7 @@ export function SignInPageContent() {
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons />
+                        <SignInButtons turnstileSiteKey={turnstileSiteKey} />
                     </Suspense>
                 </div>
             </div>
