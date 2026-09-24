@@ -1,11 +1,12 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 5
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 6
+approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 7
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -15,6 +16,7 @@ approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 6
 | 4 | 2026-09-24 mposition | 카드별 accept 또는 reject만 받는 append-only source reconciliation 적용 경로. 코드 래치는 끈 채로 둔다. source 컬럼 overwrite, revision delete, lifecycle 변경, 현황판 cutover는 열지 않는다. |
 | 5 | 2026-09-24 mposition | #1662 배포 `4265e173422915516eee0e4b9dda3bc519ca47c3` 뒤, J의 운영 read-back을 위해 reconciliation 코드 래치를 켠다. 환경 값이 정확히 `enabled`일 때만 apply가 열린다. 이 버전은 revision을 쓰지 않고 `amux_authority`와 현황판 동결을 열지 않는다. |
 | 6 | 2026-09-24 mposition | 운영자가 2026-09-24에 적은 E pilot 세 카드(`OPS-JOBS-DELAYED-01`, `MOBILE-HEADER-NARROW-01`, `STARTER-LAYOUT-01`)를 위해 promotion 코드 래치를 켠다. 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`일 때만 apply가 열린다. 이 버전은 카드를 승격하지 않고, 환경 변수를 설정하지 않으며, worker 실행과 `amux_authority`를 열지 않는다. |
+| 7 | 2026-09-24 mposition | backlog 추천 풀과 카드별 사람 승인, 보류, 거절. 풀은 새 카드 status가 아니다. 코드 래치는 끈 채로 둔다. 용량 행을 넣지 않고, 자동 승격과 worker 실행을 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -443,7 +445,7 @@ Apply 성공 후 staging 또는 production에서 증명해야 하는 불변식�
 - legal retention period의 확정
 
 각 항목은 해당 단계의 별도 정책·독립 검토·운영자 승인이 필요하다.
-버전 3은 그중 수동 1~3개 promotion pilot만 연다. 나머지 항목은 그대로다.
+버전 3은 그중 수동 1~3개 promotion pilot만 연다. 버전 7은 추천 풀과 카드 하나의 사람 결정만 연다. 자동 승격과 나머지 항목은 그대로다.
 
 ## Manual promotion pilot
 
@@ -474,3 +476,94 @@ Preview는 아무것도 쓰지 않는다. `applyPermitted`는 환경 변수 `TOM
 래치가 열린 뒤의 한 트랜잭션은 consumed run, 사람 감사, revision insert, accept인 카드의 pointer 갱신만 한다. revision은 append-only다. accept는 새 accepted revision을 넣은 뒤에 pointer만 옮긴다. reject는 rejected revision만 추가하고 pointer를 유지한다. 어느 쪽도 `sourceVersion`, `sourceDigest`, `sourceSnapshot`, status, kind, priority, owner, `claimedAt`을 바꾸지 않는다. attempt, delivery, route decision, provider cost, 사용자 크레딧을 만들지 않는다. 감사 metadata에는 제목과 source key를 넣지 않고 digest와 개수만 남긴다.
 
 overwrite와 delete는 여전히 없다. 코드 래치를 켜는 것은 현황판 cutover가 아니다.
+
+## Recommendation pool
+
+버전 7은 backlog 카드의 추천 풀과, 그 풀에 있는 카드 하나에 대한 사람의 승인, 보류, 거절이다. 추천 풀은 `AmuxWorkItem.status`가 아니다. 카드는 승인 소비 전까지 `backlog`다. 보류와 거절도 `backlog`를 유지한다. 이 버전은 자동 승격을 정의하지 않고 실행하지 않는다. `TOMVERSE_AMUX_EXECUTE`, `TOMVERSE_AMUX_EXECUTION_API_ENABLED`, worker catalog, executor command를 읽거나 쓰지 않는다. 사용자 크레딧, Chat, Memory, 결제, 외부 게시를 건드리지 않는다. 버전 3의 수동 pilot 요청 경로는 그대로다.
+
+구현은 이 절의 독립 검토가 끝난 뒤에만 시작한다. 이 파일에 승인을 적은 것은 그 검토 기록이 아니다.
+
+### Capacity
+
+용량의 분모는 코드 상수가 아니다. 테이블 `AmuxRecommendationCapacity`의 단일 행 `queue`가 있고 `active`가 true이며 `wipLimit`이 null이 아닐 때만 그 `wipLimit`이 분모다. 행이 없거나 `active`가 false이거나 `wipLimit`이 null이면 용량은 미설정이고 남은 자리는 0이다. 이 버전은 그 행을 넣지 않는다. `wipLimit`은 1 이상 10000 이하다. 10000은 기존 `AmuxResourcePolicy_wip_limit_check`와 같은 저장 상한이지 용량의 기본값이 아니다. 3은 용량이 아니다.
+
+분자는 `archivedAt`이 null이고 status가 `todo` 또는 `doing`인 카드 수다. owner가 null인 `todo`도 분자에 들어간다. claim 경로의 WIP 분자는 `doing`과 owner가 있는 `todo`만 센다. 이 버전은 그 함수와 `AmuxResourcePolicy`의 `project`·`team` scope를 바꾸지 않는다.
+
+시점은 둘이다. snapshot 트랜잭션이 advisory lock을 잡은 뒤의 분자와, 승인 트랜잭션이 같은 lock을 잡은 뒤 카드 쓰기 전의 분자다. snapshot의 남은 자리는 표시다. 승인을 허용하는 값은 승인 트랜잭션의 재계산뿐이다. 남은 자리는 `max(0, wipLimit - 분자)`다. 승인은 `분자 + 1 <= wipLimit`일 때만 카드를 쓴다.
+
+per-worker 용량은 이 버전에 없다. worker catalog가 없어도 사람의 승인을 막지 않는다. 승인은 실행이 아니다. snapshot은 `worker_capacity: closed`를 기록한다. per-classification 용량도 없다. classification은 승인 요청이 버전 3과 같은 객체로 내는 값이고 남은 자리를 늘리지 않는다. snapshot은 `classification_capacity: closed`를 기록한다.
+
+유계 batch는 결정 1건에 카드 1장이다. 버전 3의 1~3장은 수동 pilot의 요청 모양이고 이 용량이 아니다. 동시에 들어온 추천 결정들은 advisory lock `tomverse-amux-recommendation:queue` 아래에서 분자를 다시 센다. 합이 분모를 넘으면 넘는 요청은 카드를 쓰지 않는다. 이 합산은 그 lock을 잡는 추천 결정 사이에서만 성립한다. 버전 3 수동 pilot은 이 lock을 잡지 않으므로 그 경로의 `todo`는 이 분모를 넘을 수 있다. 버전 7은 그 경로를 바꾸지 않는다.
+
+한 snapshot의 저장 행 수는 그때의 backlog 행 수와 같다. 10000행을 넘으면 snapshot을 쓰지 않고 `snapshot_backstop`으로 거절한다. 잘리지 않는다. 10000은 용량이 아니다.
+
+### Candidate filter
+
+포함은 아래를 모두 통과한 카드뿐이다. 하나라도 실패하면 제외 행이고, 제외는 fail-closed다.
+
+- status가 `backlog`다
+- owner, `claimedAt`, `archivedAt`이 null이다
+- attempt, delivery, route decision이 0이다
+- 의존성이 있으면 그 의존성은 `done`이고 archive되지 않았다
+- `sourceDigest`가 있고, 승인 시점에 snapshot에 묶인 값과 같다
+- `executionBriefDigest`가 snapshot에 기록된 값과 같다. 둘 다 null인 것은 같다. 하나만 바뀌면 `brief_digest_changed`다
+- incident가 admission을 막지 않는다. 입력은 `amux.incidentMode`를 `parseAmuxIncidentSetting`으로 읽은 값이고, claim 경로와 같다. `blocks_admission`이 true이면 포함 행은 0이고 사유는 `incident_blocked`다
+- 용량이 설정돼 있고 남은 자리가 1 이상이다. 아니면 `capacity_unconfigured` 또는 `capacity_full`이다
+- `reviewAfter`가 아직 미래인 보류 또는 거절이 없다. 있으면 `review_waiting`이다
+
+제외 코드는 `not_backlog`, `owner_set`, `claimed`, `archived`, `lifecycle_present`, `dependency_open`, `source_unbound`, `brief_digest_changed`, `incident_blocked`, `capacity_unconfigured`, `capacity_full`, `review_waiting`뿐이다.
+
+score는 `scoreAmuxScheduler`와 `amux-global-priority-v2`다. capacity weight는 0이고 incident bonus는 넘기지 않는다. 포함 행의 순서는 score 내림차순이고, 같으면 card id 오름차순이다. 포함 행 수는 남은 자리 이하다. LLM은 추천, 제외, 승인을 판정하지 않는다. 카드 제목, brief, source key는 모델 입력으로 나가지 않는다.
+
+### Decisions
+
+preview는 아무것도 쓰지 않는다. 계산된 포함, 제외, `applyPermitted`만 반환한다.
+
+prepare와 승인, 보류, 거절은 환경 변수 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`이고 코드 래치가 true일 때만 쓴다. 버전 7이 출고하는 코드 래치는 false다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 그 네 쓰기 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. 이미 쓴 snapshot의 읽기는 남는다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 용량 행의 insert와 update writer도 이 버전에 없다.
+
+preview는 위 조건과 무관하게 아무것도 쓰지 않는다.
+
+승인, 보류, 거절은 준비한 운영자가 최근 step-up 뒤 같은 snapshot 항목을 한 번 결정한다. 15분 창의 시작은 snapshot `preparedAt`이고, 그 시각은 DB 시계다. 창은 catalog import와 같다. 스위치가 꺼져 있으면 트랜잭션을 열지 않으므로 `expired` 행도 쓰지 않는다. 스위치가 열린 요청이 만료된 snapshot을 가리키면, 같은 advisory lock 안에서 status를 다시 읽기 전에 `expired` decision 행을 기록하고 카드를 쓰지 않는다. 카드가 더 이상 `backlog`가 아니어도 그 `expired` 행은 쓴다. 그 actor는 그 요청을 보낸 사람이다. 만료를 돌리는 sweeper job은 없다.
+
+승인 요청은 카드 정확히 하나다. 버전 3의 1~3장 parser를 그대로 받아 여러 장을 허용하지 않는다. 그 카드가 그 snapshot의 포함 행이 아니면 거절한다. 보류와 거절은 그 snapshot의 행이면 기록할 수 있다. 승인, 보류, 거절은 같은 advisory lock을 잡고 카드 status를 다시 읽는다. status가 `backlog`가 아니면 결정 행을 쓰지 않는다.
+
+승인 요청의 항목 필드는 버전 3의 카드 하나와 같다. `kind`는 `unknown`이 아니다. priority, classification, execution brief, expected revision, `sourceDigest`가 있다. brief는 1~8192 UTF-8 byte다. brief만이 아니라 요청 전체가 catalog scanner `amux-board-content-scan-v1`을 통과한다.
+
+성공한 승인은 한 트랜잭션이다. 그 트랜잭션이 lock, 필터 재검사, 용량 재검사, decision `consumed`, 버전 3과 같은 카드 쓰기, 사람 감사 `amux.recommendation.consumed`를 함께 한다. 승인과 소비 사이에 따로 두는 상태는 없다. 카드 쓰기는 status `todo`, 요청의 kind, priority, classification, brief, brief digest, revision + 1이다. owner, attempt, delivery, route decision을 만들지 않는다.
+
+보류와 거절도 각각 한 트랜잭션이고 카드 상태를 쓰지 않는다. reason code는 `capacity`, `dependency`, `cost`, `risk`, `scope`, `not_now` 중 하나다. `reviewAfter`는 `YYYY-MM-DDTHH:mm:ss.sssZ`이고, 그 문자열은 `new Date(value).toISOString()`과 같아야 한다. 그 시각은 트랜잭션 시계보다 미래이고, 그 시계로부터 366일을 넘지 않는다. 366일은 용량이 아니라 시각 상한이다. 감사 metadata의 `reviewAfter`는 그 정규화된 시각만 담는다. 자유 텍스트 사유는 없다.
+
+같은 snapshot 항목의 두 번째 결정은 거절한다. 같은 decision id의 재전송은 기존 행을 반환한다. 결과를 잃으면 `outcome_unknown`으로 멈추고 DB read-back으로만 확정한다. blind retry는 없다. revision 또는 status의 CAS가 실패하면 트랜잭션은 rollback하고 카드 쓰기는 0이다.
+
+kill switch는 환경 값이 정확히 `enabled`가 아니거나 코드 래치가 false인 것이다. 그때 새 snapshot과 새 결정은 열리지 않고, 이미 쓴 snapshot의 읽기는 남는다. 사람의 재개는 환경 값을 다시 `enabled`로 두는 별도 운영 조작이다. 래치를 다시 켜는 것도 별도 버전이다. 이 버전은 그 조작을 하지 않는다.
+
+### Audit, storage, and checklist
+
+감사 action은 `amux.recommendation.prepared`, `amux.recommendation.held`, `amux.recommendation.rejected`, `amux.recommendation.expired`, `amux.recommendation.consumed`, `amux.recommendation.outcome_unknown`이다. actor는 사람이다. metadata에는 brief, 제목, source key를 넣지 않는다. 허용 값은 decision id, snapshot id, digest, 개수, reason code, `reviewAfter`, 용량의 분자와 분모뿐이다.
+
+저장은 본 앱 DB다. Admin 화면은 owner 전용 `/admin/amux-board-recommendation`이고 내비게이션 목록에 넣지 않는다. GitHub issue, label, comment는 상태 저장소가 아니다. 보존 기간은 이 버전이 정하지 않는다. 법적 보존이 미정인 동안 행을 지우는 job을 만들지 않는다.
+
+판정은 본 앱 route에 있다. LLM과 외부 텍스트 실행이 없으므로 별도 Railway 서비스, 서비스와 앱의 hard timeout 쌍, Publisher, GitHub 쓰기는 없다. 추천 경로가 제품 DB credential을 새로 받지 않는다. 중국 본토 전송과 고객에게 보이는 자동 결정 표시는 없다. Admin 문구는 추천을 더 나은 실행이나 최적 선택이라고 말하지 않는다.
+
+설계 체크리스트는 이렇게 닫는다.
+
+1. 조합 대상은 AMUX 카드의 backlog 추천과 사람 결정뿐이다. Chat, Memory, 금융, 사용자 크레딧, attempt, delivery, route decision은 비접촉이다.
+2. 고객 `platformProductKey`는 없다. 시스템 actor는 없다. 권한은 기존 owner와 최근 step-up이다.
+3. 되돌릴 수 없는 외부 게시, 삭제, 결제는 없다. 이 경로에서 `backlog`에서 `todo`로의 전이는 사람의 승인 소비에서만 일어난다. 버전 3 수동 pilot은 별도 경로다. 자율 졸업은 이 버전에 없다.
+4. Guard 입력은 위 필터, snapshot digest, brief digest, 용량 재계산, 운영 스위치, 코드 래치다. 값은 거절, 사람 결정 필요, 승인 소비 뒤의 허용이다. LLM 판정은 없다.
+5. 모델 입력 경로는 없다.
+6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
+7. 테이블은 `AmuxRecommendationCapacity`, snapshot, snapshot 항목, decision이다. 용량 행의 insert와 update writer는 이 버전에 없다. 추천 서비스는 snapshot과 decision만 쓴다. 카드 status enum에 값을 추가하지 않는다. 보존 기간은 미정이고 삭제 job은 없다.
+8. 추천 비용 namespace는 열지 않는다. provider 호출이 없으므로 상한은 0건이다. 사용자 크레딧과 섞지 않는다.
+9. 스위치는 `TOMVERSE_AMUX_BOARD_RECOMMEND`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 자동 정지는 환경 값이 더 이상 `enabled`가 아니거나 래치가 false일 때다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것은 별도 버전이다.
+10. 멱등 키는 decision id다. `outcome_unknown` 뒤에는 read-back만 한다.
+11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
+12. 위 감사 action은 전부 사람이다.
+13. 고객 개인정보를 새로 저장하지 않는다. 국외 이전을 추가하지 않는다. 중국 본토 경로를 만들지 않는다.
+14. 이 버전의 차단 기준은 승인 없는 `todo` 증가, attempt·delivery·route 증가, 실행 스위치 변경, 용량 행의 자동 삽입이다.
+15. 계산은 본 앱 route다. LLM과 외부 텍스트를 다루지 않는다. 별도 서비스와 게시 권한은 없다.
+16. 대기열과 승인 기록은 위 테이블과 `/admin/amux-board-recommendation`이다. 승인은 snapshot digest, card revision, source digest, brief digest에 묶인다. 코드 변경 PR을 승인 증거로 쓰지 않는다.
+
+완료로 세려면 구현이 다음을 테스트로 보여야 한다. 용량 미설정과 가득 참의 거절, 풀 밖 카드와 바뀐 brief digest와 의존성 미충족의 fail-closed, snapshot이 카드 status를 만들지 않음, 승인만 `todo`가 되고 보류와 거절은 `backlog`와 사유와 `reviewAfter`를 남김, 추천 결정의 병렬 요청이 분모를 넘기지 않음, CAS 실패와 rollback, 감사 사슬, `outcome_unknown` read-back, 승인 없는 `todo` 증가 0, attempt·delivery·route 증가 0.
+
+버전 7은 자동 승격의 graduation 기준, 비용 상한, worker 격리, 자동 승격 kill switch를 정하지 않는다. 그 항목이 없는 동안 자동 승격은 닫혀 있다.
