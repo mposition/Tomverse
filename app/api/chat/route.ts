@@ -37,6 +37,8 @@ import {
 } from "@/lib/r2";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
+import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
+import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
 import {
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
@@ -1061,6 +1063,22 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        const pinnedDeployment = await enterPinnedDeploymentChat({
+            authenticatedAccountId: session?.user?.id ?? null,
+            traceId,
+            messages,
+            webSearchMode: webSearchMode ?? null,
+            deepResearchDepth: deepResearchDepth ?? null,
+        });
+        if (pinnedDeployment.route === "refused") {
+            const http = pinnedRefusalHttp(pinnedDeployment.reason);
+            return tracedJsonError(http.message, http.code, http.status, traceId);
+        }
+        if (pinnedDeployment.route === "dispatched") {
+            if (pinnedDeployment.response instanceof Response) return pinnedDeployment.response;
+            const http = pinnedRefusalHttp("provider_error");
+            return tracedJsonError(http.message, http.code, http.status, traceId);
+        }
         /*
           Files this request has been told are gone and may proceed without.
 

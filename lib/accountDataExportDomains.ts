@@ -550,6 +550,38 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason:
       "Each extraction the user ran, which conversations they chose for it, and how far it got. The worker lease, the prompt version and the pricing version are how Tomverse executed it.",
   },
+  {
+    domain: "routingCandidateVerdict",
+    publicName: "routing_candidate_verdicts",
+    prismaModel: "RoutingCandidateVerdict",
+    state: "excluded",
+    exclusionReason:
+      "Which models the Router considered for one turn and why each was ruled out. Operational routing data, from a closed list of reasons. No prompt and no answer. Deleted with the account.",
+  },
+  {
+    domain: "deploymentCacheAffinity",
+    publicName: "deployment_cache_affinity",
+    prismaModel: "DeploymentCacheAffinity",
+    state: "excluded",
+    exclusionReason:
+      "Which placement a conversation's turns last went to, and when. Infrastructure routing state. It carries no digest of the prompt prefix. Deleted with the account.",
+  },
+  {
+    domain: "credentialBinding",
+    publicName: "credential_bindings",
+    prismaModel: "CredentialBinding",
+    state: "excluded",
+    exclusionReason:
+      "Which credential authorises a call and who is billed for it. A binding names where a key is kept, never the key itself. Deleted with the account.",
+  },
+  {
+    domain: "quotaScope",
+    publicName: "quota_scopes",
+    prismaModel: "QuotaScope",
+    state: "excluded",
+    exclusionReason:
+      "What a capacity limit is counted against, and how much room is left. Counters and a scope kind. Deleted with the account.",
+  },
 ];
 
 /** Domains whose data reaches the export at all. */
