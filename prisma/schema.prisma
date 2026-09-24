@@ -5892,6 +5892,7 @@ model ModelDeployment {
   routingAttempts                RoutingAttempt[]
   availabilityObservations       AvailabilityObservation[]
   routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+  priceSnapshots                 DeploymentPriceSnapshot[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
@@ -6421,6 +6422,33 @@ model AvailabilityRollupApplication {
   observation AvailabilityObservation @relation(fields: [eventId], references: [eventId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([eventId, grain, targetId])
+}
+
+/// A deployment-grain price observation.
+///
+/// Dark. This is not `ChatCreditReservation.pricingSnapshot`, and nothing
+/// inserts a row. Unknown knowledge has no amount. A stated estimate or a
+/// verified price names its amount, currency, source and effective time.
+/// The two applied flags cannot be true: using the row for routing or for
+/// a credit charge is a separate approval.
+model DeploymentPriceSnapshot {
+  id                 String    @id @default(cuid())
+  modelDeploymentId  String
+  /// Copied at record time. The deployment row can be renamed later.
+  logicalModelId     String
+  /// unknown | estimate | verified
+  knowledge          String
+  amount             Decimal?  @db.Decimal(20, 8)
+  currency           String?
+  source             String?
+  effectiveAt        DateTime?
+  appliedToRouting   Boolean   @default(false)
+  appliedToBilling   Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  deployment ModelDeployment @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([modelDeploymentId, effectiveAt])
 }
 
 /// One separately approved, content-free Prompt Refiner staging shadow.

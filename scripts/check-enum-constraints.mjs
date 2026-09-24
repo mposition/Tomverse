@@ -283,6 +283,13 @@ const REGISTRY = {
     reason:
       "succeeded or failed. Two values because a rollup divides one by the total; a third would need every consumer to decide which side it counted on, and they would not all decide the same way.",
   },
+  DeploymentPriceSnapshot_knowledge_check: {
+    owner: "list",
+    module: "lib/routingHeldDecisions.ts",
+    list: "DEPLOYMENT_PRICE_KNOWLEDGE",
+    reason:
+      "unknown, estimate, verified. Unknown is a missing amount, not zero. Estimate and verified are stated prices with a source and an effective time. A fourth value would be a price the record-only rule has not decided how to store, and the amount check beside this list would not know which side it was on. Routing and billing do not read the row.",
+  },
   AvailabilityRollupApplication_grain_check: {
     owner: "list",
     module: "lib/availabilityObservation.ts",

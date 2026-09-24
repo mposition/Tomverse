@@ -1021,7 +1021,7 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | §8.5 | load guard | 판정 (§14.12). softmax는 없음. 감쇠 계수는 호출자. 완료로 세지 않음 |
 | §11.2 | 401/403/billing에서 credential scope 비활성화와 알림 | 판정 (§14.13). 행 UPDATE와 알림 발송은 없음 |
 | §12 | secret 참조, credential resolver, billing owner (§14의 7번과 겹침) | 참조·시각·resolver (§14.14). 행은 읽지 않음. BYOK 배선은 없음 |
-| §13 | deployment별 `pricing_snapshots` | 없음. `docs/policy/credit-and-cost-limits.md` 계약에 닿아 별도 승인 (§15.3) |
+| §13 | deployment별 `pricing_snapshots` | 기록만 dark (§14.35). 라우팅·청구 반영은 거절. 크레딧 snapshot은 그대로 |
 | §15.2·§15.3·§15.5 | counterfactual replay, fault injection 확장, draft→shadow→canary→active 승격 절차 | 판정 (§14.16). 가중합은 없음. 행은 쓰지 않음 |
 | Phase 1 | health·capacity·quality 운영 대시보드 | 집계 (`lib/routingOpsSummary.ts`, §14.23). 화면은 없음. 분모 0은 0%가 아님 |
 | 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 판정 (§14.17). 길이와 기한의 숫자는 호출자. 라우터는 열에 쓰지 않음 |
@@ -1574,7 +1574,7 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 | canary lane의 실행 | §14.32가 비운영 리허설의 입장 조건만 고정합니다. 실행은 여기 완료로 세지 않습니다. |
 | BYOK 비용 배선 | §14.32에서 비활성입니다. 관리 키로의 자동 전환은 없습니다. |
 | load guard의 softmax와 감쇠 계수 | §14.32에서 온도는 미설정입니다. 0은 그 미설정이 아닙니다. |
-| deployment별 pricing snapshot | §14.32가 기록과 반영을 나눕니다. 반영은 승인되지 않았습니다. |
+| deployment별 pricing snapshot의 반영 | §14.35가 기록을 dark로 둡니다. 라우팅·청구 반영은 여기 완료로 세지 않습니다. |
 | decision grain 원자 전환 | §14.32가 probe를 deployment 관측으로 복사하지 않습니다. 전환은 보류입니다. |
 | 2-attempt fallback 활성화 | 연결 계약은 §14.32이고 라이브 경로는 그대로입니다. 활성화는 여기 완료로 세지 않습니다. |
 | equivalence class | §14.32에서 미검증입니다. 이름이 같다는 것은 증거가 아닙니다. |
@@ -1677,6 +1677,14 @@ Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었�
 실험 예산은 canary와 control을 합쳐 일 US$5, 전체 US$20입니다. 실패 호출, SDK 내부 재시도, 진행 중 예약 상한을 포함합니다. 사용자 크레딧 정책 변경은 아닙니다.
 
 **실행은 보류입니다.** A-5 판정은 사용자 콘텐츠, 비합성 트래픽, 공유 credential quota, 공유 provider budget, 정상 routing candidate를 거절하고 공급자를 부르지 않습니다. manifest는 발행되지 않고 요청 경로가 읽지 않습니다. 이 계획을 그 코드만으로 돌릴 수 없고, 후보 선택이나 health 읽기를 바꾸지 않습니다. 실험 비용만 막는 상한도 없습니다. 지금 있는 한도는 전체 트래픽의 provider budget과 플랜 guardrail입니다. 그 상한을 이 실험에 쓸 수 없으므로 공급자 호출이 있는 실행은 시작하지 않습니다.
+
+## 14.35 Deployment 가격 기록 (2026-09-24)
+
+표는 `DeploymentPriceSnapshot`이고, 판정은 `deploymentPriceSnapshotColumns`입니다. 요청 경로는 import하지 않습니다. 행을 쓰지 않습니다. `ChatCreditReservation.pricingSnapshot`은 그대로입니다.
+
+모르는 가격은 금액이 없습니다. 0으로 채우면 기록이 거절됩니다. 출처와 시점을 밝힌 추정 또는 확인 가격은 그 금액이 0이어도 기록 대상입니다. deployment id와 logical model id가 없으면 기록하지 않습니다. `appliedToRouting`과 `appliedToBilling`은 데이터베이스에서도 false만 허용합니다. snapshot을 라우팅이나 청구에 쓰는 것은 여전히 거절입니다.
+
+이 줄은 §14.3의 deployment 가격 snapshot 가운데 기록입니다. 반영은 §14.26에 남습니다. 직전 범위 판정 보고는 45, 약 90%였습니다. §14.3의 약 50단위에서 완료는 46, **약 92%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

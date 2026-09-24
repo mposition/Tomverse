@@ -15,7 +15,9 @@ import {
     assessFallbackConnection,
     bindRequestVersion,
     byokFailurePosture,
+    DEPLOYMENT_PRICE_KNOWLEDGE,
     deploymentEvidence,
+    deploymentPriceSnapshotColumns,
     distributionCandidate,
     interpretObservationMode,
     interpretProviderProbe,
@@ -140,6 +142,46 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
         "unrecognized_knowledge"
     );
     assert.deepEqual(applyPriceSnapshot(), { applied: false, reason: "behavior_change_unapproved" });
+    assert.deepEqual(DEPLOYMENT_PRICE_KNOWLEDGE, ["unknown", "estimate", "verified"]);
+    assert.equal(
+        deploymentPriceSnapshotColumns({
+            modelDeploymentId: " ",
+            logicalModelId: "gpt-5-6-luna",
+            knowledge: "unknown",
+            amount: null,
+            currency: null,
+            source: null,
+            effectiveAt: null,
+        }).reason,
+        "missing_placement"
+    );
+    const columns = deploymentPriceSnapshotColumns({
+        modelDeploymentId: "dep_luna",
+        logicalModelId: "gpt-5-6-luna",
+        knowledge: "verified",
+        amount: 3,
+        currency: "USD",
+        source: "provider-card",
+        effectiveAt: "2026-09-24T00:00:00.000Z",
+    });
+    assert.equal(columns.recorded, true);
+    assert.equal(columns.appliedToRouting, false);
+    assert.equal(columns.appliedToBilling, false);
+    const priceSql = readFileSync(
+        join(
+            dirname(fileURLToPath(import.meta.url)),
+            "..",
+            "prisma",
+            "migrations",
+            "20260924190000_deployment_price_snapshot_dark",
+            "migration.sql"
+        ),
+        "utf8"
+    );
+    assert.match(priceSql, /CHECK \("appliedToRouting" = false AND "appliedToBilling" = false\)/);
+    assert.match(priceSql, /"knowledge" = 'unknown'/);
+    assert.match(priceSql, /"amount" IS NULL/);
+    assert.doesNotMatch(priceSql, /ChatCreditReservation/);
 });
 
 test("a missing deployment sample does not borrow probe health", () => {

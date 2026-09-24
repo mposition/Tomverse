@@ -107,9 +107,15 @@ export const distributionCandidate = (input: { passedHardGates: boolean }): { el
     eligible: input.passedHardGates === true,
 });
 
-export type PriceKnowledge = "unknown" | "estimate" | "verified";
+export const DEPLOYMENT_PRICE_KNOWLEDGE = ["unknown", "estimate", "verified"] as const;
 
-export type PriceRecordRefusal = "unknown_has_amount" | "incomplete_known_price" | "unrecognized_knowledge";
+export type PriceKnowledge = (typeof DEPLOYMENT_PRICE_KNOWLEDGE)[number];
+
+export type PriceRecordRefusal =
+    | "unknown_has_amount"
+    | "incomplete_known_price"
+    | "unrecognized_knowledge"
+    | "missing_placement";
 
 /**
  * A record-only snapshot keeps an unknown price unknown. A stated estimate
@@ -131,7 +137,7 @@ export const recordDeploymentPrice = (input: {
         if (input.amount !== null) return { recorded: false, reason: "unknown_has_amount" };
         return { recorded: true, appliedToRouting: false, appliedToBilling: false };
     }
-    if (input.knowledge !== "estimate" && input.knowledge !== "verified") {
+    if (!(DEPLOYMENT_PRICE_KNOWLEDGE as readonly string[]).includes(input.knowledge)) {
         return { recorded: false, reason: "unrecognized_knowledge" };
     }
     const amountKnown =
@@ -140,6 +146,53 @@ export const recordDeploymentPrice = (input: {
         return { recorded: false, reason: "incomplete_known_price" };
     }
     return { recorded: true, appliedToRouting: false, appliedToBilling: false };
+};
+
+/**
+ * The columns a record-only deployment price would store.
+ *
+ * Nothing inserts them. Routing and billing stay closed, including when
+ * the price itself is complete.
+ */
+export const deploymentPriceSnapshotColumns = (input: {
+    modelDeploymentId: string | null;
+    logicalModelId: string | null;
+    knowledge: PriceKnowledge;
+    amount: number | null;
+    currency: string | null;
+    source: string | null;
+    effectiveAt: string | null;
+}):
+    | { recorded: false; reason: PriceRecordRefusal }
+    | {
+          recorded: true;
+          modelDeploymentId: string;
+          logicalModelId: string;
+          knowledge: PriceKnowledge;
+          amount: number | null;
+          currency: string | null;
+          source: string | null;
+          effectiveAt: string | null;
+          appliedToRouting: false;
+          appliedToBilling: false;
+      } => {
+    if (!named(input.modelDeploymentId) || !named(input.logicalModelId)) {
+        return { recorded: false, reason: "missing_placement" };
+    }
+    const price = recordDeploymentPrice(input);
+    if (!price.recorded) return price;
+    return {
+        recorded: true,
+        modelDeploymentId: input.modelDeploymentId,
+        logicalModelId: input.logicalModelId,
+        knowledge: input.knowledge,
+        amount: input.amount,
+        currency: input.currency,
+        source: input.source,
+        effectiveAt: input.effectiveAt,
+        appliedToRouting: false,
+        appliedToBilling: false,
+    };
 };
 
 export const applyPriceSnapshot = (): { applied: false; reason: "behavior_change_unapproved" } => ({

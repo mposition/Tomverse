@@ -41,6 +41,7 @@ const DARK_TABLES = [
     "RoutingIdentityManifestEntry",
     "RoutingSnapshotCeilingApproval",
     "AvailabilityRollupApplication",
+    "DeploymentPriceSnapshot",
 ];
 
 
@@ -133,6 +134,7 @@ const DARK_COLUMNS = [
             "lib/availabilityObservation.ts",
             "lib/deploymentCacheAffinity.ts",
             "lib/deploymentIdentity.ts",
+            "lib/routingHeldDecisions.ts",
             "lib/routingIdentityManifest.ts",
         ],
     },

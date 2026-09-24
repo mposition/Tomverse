@@ -249,12 +249,17 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-24, the rollup application table. Another dated note above the
 // fingerprint, comment only. Count 228, position-free hash unchanged. A
 // repin of the position-sensitive digest only.
+//
+// 2026-09-24, a dark deployment price snapshot. Another dated note above the
+// fingerprint, comment only, plus the schema model that note names. No
+// computed access. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e0d1dc68a776908b1862c2e58882fa42",
-  "696b68c56fd25ac3f70311006bd10c44",
+  "1808f5ab1f1c0e6841dcf16b158064d6",
+  "6420c56028bf91bdb8e64d8b592334ad",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
