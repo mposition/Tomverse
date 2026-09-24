@@ -393,10 +393,12 @@ export type HoldSnapshot = {
 };
 
 /**
- * `not_started` drops the reservation. `usage` keeps the measured cost and
- * drops the rest. `unknown` keeps the whole reservation as spent. A second
- * close finds a terminal status and changes nothing, so it cannot release
- * an occupied hold and it cannot add the same cost twice.
+ * `not_started` drops the reservation. `unknown` keeps the whole reservation
+ * as spent. `usage` records the measured cost on the hold. The experiment
+ * ceiling keeps that measurement when it is at least the reservation, and
+ * keeps the whole reservation when the measurement is smaller. A
+ * second close finds a terminal status and changes nothing, so it cannot
+ * release an occupied hold and it cannot add the same cost twice.
  */
 export const applyExperimentClose = (
     counters: ExperimentCounters,
@@ -428,7 +430,7 @@ export const applyExperimentClose = (
     let added = 0;
     if (request.outcome === "usage") {
         if (!safeNonNegative(request.actualMicroUsd)) return { ok: false, reason: "unpriced" };
-        added = request.actualMicroUsd;
+        added = Math.max(request.actualMicroUsd, hold.reservedMicroUsd);
     } else if (request.outcome === "unknown") {
         added = hold.reservedMicroUsd;
     }
