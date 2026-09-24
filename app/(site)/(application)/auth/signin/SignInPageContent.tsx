@@ -4,6 +4,7 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -113,9 +114,12 @@ function SignInButtons() {
     const [formError, setFormError] = useState<string | null>(null);
     const [emailError, setEmailError] = useState<string | null>(null);
     const isEmailValid = isValidLoginEmail(email);
-    const [needsTurnstile, setNeedsTurnstile] = useState(false);
-    const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
-        useTurnstile(true, "email_login_request");
+    const {
+        containerRef: turnstileContainerRef,
+        getToken: getTurnstileToken,
+        failure: turnstileFailure,
+        isChallengeVisible,
+    } = useTurnstile(true, "email_login_request");
 
     // Drives the "N초 후 다시 시도" countdown on a minute-scoped rate limit:
     // retryAfterUntil is the fixed deadline from the server's Retry-After
@@ -189,7 +193,6 @@ function SignInButtons() {
             if (response.status === 403) {
                 data = await response.json().catch(() => null);
                 if (data?.code === "TURNSTILE_REQUIRED") {
-                    setNeedsTurnstile(true);
                     const token = await getTurnstileToken();
                     response = await requestCode(token);
                     data = null;
@@ -397,9 +400,12 @@ function SignInButtons() {
                             {emailError}
                         </p>
                     ) : null}
-                    <div
-                        ref={turnstileContainerRef}
-                        className={needsTurnstile ? "flex justify-center py-1" : "hidden"}
+                    <TurnstileFormSlot
+                        containerRef={turnstileContainerRef}
+                        isChallengeVisible={isChallengeVisible}
+                        failure={turnstileFailure}
+                        surface="emailLogin"
+                        testId="email-login-verification"
                     />
                     <button
                         type="button"

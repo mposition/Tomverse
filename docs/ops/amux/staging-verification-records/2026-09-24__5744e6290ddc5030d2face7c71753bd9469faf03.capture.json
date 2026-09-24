@@ -1,0 +1,84 @@
+{
+  "schema_version": "amux-staging-evidence-v1",
+  "evidence_scope": "observed_facts_only",
+  "generated_at": "2026-09-24T00:18:37.389Z",
+  "deployment_revision": "5744e6290ddc5030d2face7c71753bd9469faf03",
+  "capture_process_revision_matches_expected": true,
+  "human_judgement": {
+    "result": null,
+    "signature": null,
+    "note": "This capture does not approve, freeze or sign a staging result."
+  },
+  "incident": {
+    "valid": true,
+    "blocks_admission": false,
+    "problem": null,
+    "state": {
+      "version": 1,
+      "state": "normal",
+      "transition_id": null,
+      "changed_at": "2026-09-21T13:28:10.476Z",
+      "reason": "Initial incident-mode rollout state.",
+      "ticket": "migration:20260921123000"
+    },
+    "setting_updated_at": "2026-09-21T13:28:10.476Z"
+  },
+  "tasks": [
+    {
+      "status": "blocked",
+      "due_parse_state": "none",
+      "count": 1
+    },
+    {
+      "status": "blocked",
+      "due_parse_state": "valid",
+      "count": 1
+    },
+    {
+      "status": "done",
+      "due_parse_state": "none",
+      "count": 1
+    },
+    {
+      "status": "todo",
+      "due_parse_state": "valid",
+      "count": 1
+    }
+  ],
+  "route_decisions": [],
+  "execution_attempts": [
+    {
+      "outcome": "blocked",
+      "cost_confirmed": false,
+      "count": 6
+    },
+    {
+      "outcome": "succeeded",
+      "cost_confirmed": false,
+      "count": 2
+    }
+  ],
+  "deliveries": [],
+  "resource_policies": [],
+  "latest_quota_by_worker": [],
+  "human_escalations": [
+    {
+      "status": "open",
+      "specialty": "code-review",
+      "count": 1
+    },
+    {
+      "status": "resolved",
+      "specialty": "code-review",
+      "count": 2
+    },
+    {
+      "status": "resolved",
+      "specialty": "execution-recovery",
+      "count": 3
+    }
+  ],
+  "cost_ledger": [],
+  "stable_state_digest_sha256": "f0ef7e7f81424a4f354184be50b902ffe9344a3096ac0d6a55c3743c44186dbb",
+  "observation_digest_sha256": "906a04490383672f39153561edb16e827c86adcec1fb7ca76c61eb5d5359fa69"
+}

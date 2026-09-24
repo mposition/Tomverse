@@ -315,9 +315,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "routing",
     label: "Routing",
     href: "/admin/routing",
-    description: "Shadow Auto Router decisions against what actually ran",
+    description: "Chat shadow routing and AMUX assignment evidence",
     group: "AI Platform",
-    aliases: ["auto", "router", "shadow", "task profile", "candidates"],
+    aliases: [
+      "auto",
+      "router",
+      "shadow",
+      "amux",
+      "task profile",
+      "candidates",
+    ],
   },
   {
     id: "infrastructure",

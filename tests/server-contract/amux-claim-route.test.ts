@@ -30,8 +30,14 @@ type World = {
   auditError: Error | null;
   snapshot: Record<string, unknown>;
   snapshotError: Error | null;
+  schedulerFacts: Record<string, unknown> | null;
   authoritativeRouting: Record<string, unknown>;
-  claimResult: { revision: number; decisionId: string } | null;
+  claimResult:
+    | { claimed: true; revision: number; decisionId: string }
+    | {
+        claimed: false;
+        reason: "cas_lost" | "incident_admission_blocked" | "wip_limit_reached";
+      };
   claimError: Error | null;
   claimCalls: number;
 };
@@ -85,11 +91,50 @@ const freshWorld = (): World => ({
       risk: 1,
       files_expected: 1,
     },
-    candidates: [],
+    candidates: [
+      {
+        worker: {
+          worker_name: "worker-a",
+          provider: "codex",
+          model: null,
+          routing_roles: ["feature"],
+          running: true,
+          status: "idle",
+          dispatch_ready: true,
+          archived: false,
+          paused: false,
+          isolated: false,
+          blocked: false,
+        },
+        predicted_success: null,
+        quota_remaining: null,
+        expected_speed: null,
+        low_rework: null,
+        low_human_attention: null,
+        cost_efficiency: null,
+        provider_exhausted: false,
+      },
+    ],
+    telemetry: {},
   },
   snapshotError: null,
+  schedulerFacts: {
+    facts: {
+      pinned: false,
+      createdAt: new Date(),
+      kind: "code",
+      priority: "p1",
+      dependentCount: 0,
+      drag: 0,
+    },
+    capacityWeight: 0,
+  },
   authoritativeRouting: routing,
-  claimResult: { revision: 4, decisionId: "decision-1" },
+  claimResult: {
+    claimed: true,
+    revision: 4,
+    decisionId: "decision-1",
+  },
   claimError: null,
   claimCalls: 0,
 });
@@ -115,7 +160,7 @@ async function loadRoute(): Promise<{
     });
     mock.module(mod("lib/amux/claimDeadline.ts"), {
       namedExports: {
-        AMUX_CLAIM_ROUTE_BUDGET_MS: 6_000,
+        AMUX_CLAIM_ROUTE_BUDGET_MS: 12_000,
         anchorAmuxClaimDeadline: async () => {},
       },
     });
@@ -166,6 +211,7 @@ async function loadRoute(): Promise<{
     });
     mock.module(mod("lib/amux/store.ts"), {
       namedExports: {
+        getAuthoritativeSchedulerFacts: async () => world.schedulerFacts,
         recordAmuxClaimRefusal: async (
           reason: string,
           context?: Record<string, unknown>,
@@ -308,6 +354,20 @@ test("closed claim refusals are structured conflicts with one audit", async () =
   const { POST } = await loadRoute();
 
   world = freshWorld();
+  world.schedulerFacts = null;
+  let response = await POST(request(validBody()));
+  assert.equal(response.status, 409);
+  assertNoStore(response);
+  assert.deepEqual(await response.json(), {
+    claimed: false,
+    reason: "not_eligible",
+  });
+  assert.deepEqual(
+    world.auditCalls.map((entry) => entry.reason),
+    ["not_eligible"],
+  );
+
+  world = freshWorld();
   world.snapshot = {
     eligible: false,
     execution_ready: false,
@@ -315,7 +375,7 @@ test("closed claim refusals are structured conflicts with one audit", async () =
     task: null,
     candidates: [],
   };
-  let response = await POST(request(validBody()));
+  response = await POST(request(validBody()));
   assert.equal(response.status, 409);
   assertNoStore(response);
   assert.deepEqual(await response.json(), {
@@ -341,6 +401,48 @@ test("closed claim refusals are structured conflicts with one audit", async () =
     world.auditCalls.map((entry) => entry.reason),
     ["invalid_routing_evidence"],
   );
+
+  world = freshWorld();
+  const selected = (
+    world.snapshot.candidates as Array<{
+      worker: { dispatch_ready: boolean };
+    }>
+  )[0];
+  assert.ok(selected);
+  selected.worker.dispatch_ready = false;
+  response = await POST(request(validBody()));
+  assert.equal(response.status, 409);
+  assertNoStore(response);
+  assert.deepEqual(await response.json(), {
+    claimed: false,
+    reason: "no_authoritative_worker",
+  });
+  assert.deepEqual(
+    world.auditCalls.map((entry) => entry.reason),
+    ["no_authoritative_worker"],
+  );
+
+  for (const reason of [
+    "incident_admission_blocked",
+    "wip_limit_reached",
+  ] as const) {
+    world = freshWorld();
+    world.claimResult = { claimed: false, reason };
+    response = await POST(request(validBody()));
+    assert.equal(response.status, 409);
+    assertNoStore(response);
+    assert.deepEqual(await response.json(), { claimed: false, reason });
+    // These refusals are written atomically inside claimUnownedTodo.
+    assert.deepEqual(world.auditCalls, []);
+  }
+
+  world = freshWorld();
+  world.claimResult = { claimed: false, reason: "cas_lost" };
+  response = await POST(request(validBody()));
+  assert.equal(response.status, 200);
+  assertNoStore(response);
+  assert.deepEqual(await response.json(), { claimed: false });
+  assert.deepEqual(world.auditCalls, []);
 });
 
 test("audit, database, and claim writer failures are generic no-store 500s", async () => {

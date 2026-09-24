@@ -1037,6 +1037,76 @@ domains:
       operator and can name third parties, so it is routed to the manual
       PrivacyRequest path rather than the unified export.
 
+  - domain: amuxReviewDecision
+    prismaModel: AmuxReviewDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Content-free, append-only evidence of a privileged AMUX task-review
+        decision, linked to the tamper-evident AdminAuditLog entry. Keeping the
+        decision attributable protects the integrity of security investigation
+        and access-control evidence under the same basis as AdminAuditLog.
+      retentionStartsFrom: "decidedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      The immutable decision stores the approving operator's actorUserId and
+      refers to a proposal bound to an AMUX task and a GitHub PR digest; it
+      has no typed customer identifier or review prose. The operator approved
+      the existing Admin audit retention policy for this ledger on 2026-09-21;
+      its non-null actorUserId remains attributable after account deletion.
+      The operator approved exclusion from unified export and manual
+      PrivacyRequest review for access requests on 2026-09-21. This prevents
+      automatic disclosure of other operators or tasks while preserving access
+      review; it is distinct from the approved retention period.
+      The linked AdminAuditLog is separately retained under the same schedule.
+
+  - domain: amuxResourcePolicy
+    prismaModel: AmuxResourcePolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The current project or team capacity and cost policy records who last
+      changed it by operator id and address. Registered on 2026-09-24 because
+      the actor-data sweep correctly detected those columns. Deletion,
+      retention, subject linkage and export remain unverified until privacy
+      owners decide whether mutable operator attribution is anonymised or
+      retained; this row deliberately makes no policy decision by inference.
+
+  - domain: amuxHumanEscalation
+    prismaModel: AmuxHumanEscalation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      A task escalation can name acknowledging and resolving operators by id
+      and address and can retain bounded operational reason text. Registered
+      on 2026-09-24 when the actor-data sweep detected those identities. The
+      approved immutable review-decision ledger policy does not automatically
+      decide this separate mutable table, so every privacy axis stays
+      unverified instead of extending that approval beyond its scope.
+
   - domain: promptRefinerReservationStage
     prismaModel: PromptRefinerReservationStage
     userLinkageRole: actor

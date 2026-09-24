@@ -11,6 +11,8 @@ approver:
 result:
 frozen: false
 digest:
+stateDigest:
+capturePath:
 ---
 
 # AMUX staging 검증 실행 — <날짜> / <deploy SHA>
@@ -34,7 +36,7 @@ digest:
 
 ## 항목별 결과
 
-체크리스트의 A–F 구획을 그대로 기록한다.
+체크리스트의 A–H 구획을 그대로 기록한다.
 
 각 항목은 `pass`, `fail`, `n/a`, `미기록` 중 하나를 사용한다.
 
@@ -46,6 +48,9 @@ digest:
 위치 등을 적는다.
 
 secret, token, task prompt, 사용자 데이터 자체는 넣지 않는다.
+
+자동 capture가 채우는 것은 관측과 digest뿐이다. `result`, activation 판정과 아래
+서명은 실행자가 관측을 대조한 뒤 직접 결정한다.
 
 ## 판정
 
