@@ -657,8 +657,8 @@ A-4a가 분류를 보존하도록 고쳤지만, 그 절반만 고쳤던 것입�
 
 DB CHECK가 `succeeded`에 `failureLayer = 'none'`을 강제하고, 공통 writer가 성공 시
 `errorClass`를 지웁니다(`lib/routingAttemptStore.ts`). `errorClass` 컬럼에도 이제
-CHECK가 있습니다 — A-3b가 닫힌 vocabulary를 `NOT VALID`로 배포했으므로 신규·갱신
-행에는 적용되고 과거 행만 미검증입니다. 정확한 서술은 **"writer와 failure-layer
+CHECK가 있습니다 — A-3b의 vocabulary는 production에서 검증됐습니다(§14.30).
+신규·갱신 행과 기존 행 모두 그 목록을 통과합니다. 정확한 서술은 **"writer와 failure-layer
 CHECK가 `succeeded + model_output` 표현을 막는다"** 입니다.
 
 원칙은 라우팅 밖에서 이미 구현돼 있었습니다 — `AI_EMPTY_RESPONSE` →
@@ -676,7 +676,7 @@ CHECK가 `succeeded + model_output` 표현을 막는다"** 입니다.
 | A-1 | comparator 전순서 수정 | **구현·검증 완료. 2차 검토 `approve_with_changes` → 지적 5건 반영 완료** |
 | A-2 | 빈 200 오분류 | 구현·검증 완료 |
 | A-3a | `model_output` failure layer | 구현·검증 완료 |
-| A-3b | `errorClass` 닫힌 vocabulary + CHECK | **writer 구현, `NOT VALID` CHECK 배포. production 조사 후 별도 `VALIDATE` 대기** |
+| A-3b | `errorClass` 닫힌 vocabulary + CHECK | **production에서 검증됨** (§14.30). 목록은 그대로이고 `provider_pre_token_failure`는 이력 호환으로 남습니다 |
 | A-4a | `RATE_LIMIT` 등 분류 보존 | **구현 완료.** fallback 거절 경로까지 도달(개정 4), 연결 손실 오분류 수정(개정 5) |
 | A-4b | capacity state·token bucket | C 이후 |
 | A-5 | 원자적 config manifest | **C 이후로 이동** (§14) |
@@ -704,7 +704,8 @@ dispatched attempt 최대 2회를 유지합니다. 첫 fallback이 신뢰성 이
 
 **이 표는 아직 구현할 수 없습니다** (개정 4에서 추가). `classifyStreamFailure`는
 scope를 반환하지 않고, `classifyProviderFailure().scope`를 읽고 나서 버립니다
-(`lib/routingStreamFailure.ts`).
+(`lib/routingStreamFailure.ts`). 그 표의 dark 판정은 §14.31입니다. 라이브
+분류기는 여전히 scope를 반환하지 않고, 요청 경로는 그 판정을 부르지 않습니다.
 
 **그리고 scope를 살리는 것만으로는 부족합니다**(개정 5에서 정정). 연결 실패는
 `classifyProviderFailure`를 **부르기 전에** 반환되므로 그 함수의 scope를 보존해도
@@ -933,14 +934,14 @@ workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 wo
 | 1 | T1·T2와 workspace/account 소유권 | **소유자.** account로 결정됨(2026-09-23) |
 | 2 | canonical failure classification과 scope identity | **완료** (A-2·A-3a·A-3b·A-4a, §10) |
 | 3 | residency approval과 recipient/destination 계약을 C schema에 | **완료** (`EndpointResidencyApproval`, `lib/providerDataDestinations.ts`) |
-| 4 | A-3b CHECK를 운영값 조사 후 `VALIDATE` | **소유자.** production 조사가 선행 |
+| 4 | A-3b CHECK를 운영값 조사 후 `VALIDATE` | **완료** (§14.30). production `convalidated = true` |
 | 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 12개·dark column 6개, migration이 어느 환경에도 적용되지 않음. A-5는 2라운드 검토를 거쳤습니다 — 1라운드가 reject였고, digest가 덮는 field 목록이 `model_deployment_gate_follows_identity()`보다 좁았던 것과 digest만으로는 재구성이 안 된다는 것 둘입니다. 후자가 `RoutingIdentityManifestEntry`를 만든 이유입니다 |
 | 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
 | 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
 | 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료. ceiling은 이 스택에 merge (`§14.22`). 라우터는 읽지 않음 |
 | 9 | sticky·score snapshot grain 전환, 그 뒤 shadow 검증 | 판정 (`lib/routingStickyGrain.ts`, §14.21). 저장된 id는 그대로. 라우터는 호출하지 않음 |
 | 10 | decision grain을 `deploymentId`로 원자 전환 | §8.1 선행조건 5개가 선행 |
-| 11 | scope·capacity 준비 후 2-attempt fallback 활성화 | 미착수 |
+| 11 | scope·capacity 준비 후 2-attempt fallback 활성화 | 범위가 고르는 두 번째 attempt의 판정은 §14.31. 요청 경로 연결은 미착수 |
 | 12 | provider attestation 입증 시 equivalence class 재검토 | 미착수 |
 
 막고 있는 것은 넷이고 전부 사람의 행위입니다.
@@ -1569,13 +1570,13 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 
 | 항목 | 왜 지금 쓰지 않는가 |
 |---|---|
-| A-3b `VALIDATE` | production 조사가 선행입니다. |
+| A-3b `VALIDATE` | §14.30에서 완료로 셉니다. 이 표를 쓸 때는 조사가 선행이었습니다. |
 | canary lane의 실행 | A-5가 어느 환경에도 배포되지 않았고, probe 선택기는 여전히 provider당 대표 모델 하나입니다. 입장 판정은 §14.28이고, 그 판정은 호출이 아닙니다. |
 | BYOK 비용 배선 | A-5 배포와 수요 확인이 선행입니다. 가격 계약도 따로입니다. |
 | load guard의 softmax와 감쇠 계수 | 온도는 품질과 비용의 교환이고, 그 교환은 정해지지 않았습니다. |
 | deployment별 pricing snapshot | `docs/policy/credit-and-cost-limits.md`의 별도 승인입니다. |
 | decision grain 원자 전환 | §8.1 선행조건 2·4·5가 표본과 시간 위에 있습니다. 필터는 아직 probe health를 읽습니다. |
-| 2-attempt fallback 활성화 | scope와 capacity가 준비된 뒤입니다. 판정을 요청 경로에 연결하지 않습니다. |
+| 2-attempt fallback 활성화 | 범위 판정은 §14.31이고 여기서 완료로 세지 않습니다. 요청 경로 연결은 scope와 capacity가 준비된 뒤입니다. |
 | equivalence class | provider attestation이 없습니다. |
 
 DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenAI·Anthropic ZDR 신청, exploration을 켜는 것, Privacy 고지, ADR 원문을 develop으로 가져오는 것은 소유자 결정입니다. 여기서 정하지 않습니다.
@@ -1609,6 +1610,22 @@ broker에서 gateway와 serving이 다르거나 serving id가 없고, 쪽을 말
 canary 관측 입장은 window 통과를 요구하지 않습니다. window 통과는 그 다음의 routing eligibility입니다. 기권한 score cell을 순위에서 빼서 비교하지 않습니다. 그 cell이 있으면 shadow는 inconclusive입니다.
 
 production 배포는 0%입니다.
+
+## 14.30 A-3b VALIDATE (2026-09-24)
+
+`RoutingAttempt_errorClass_check`는 production에서 검증됐습니다. PR #1647이 `NOT VALID` 제약을 넣었고, PR #1650의 `20260924140000_validate_routing_attempt_error_class`가 `VALIDATE CONSTRAINT`를 실행했습니다. 콘솔에서 바꾸지 않았습니다.
+
+배포 뒤 읽기 전용 전체 조회의 결과는 이렇습니다. `convalidated`는 `true`입니다. 정의는 `errorClass IS NULL OR errorClass = ANY (ARRAY[18개])`이고 `NOT VALID`는 없습니다. `NULL`은 배열 밖입니다. 680행에 어휘 밖 non-NULL은 0입니다. migration 적용 시각은 2026-09-24 04:07:25 UTC이고 rollback은 없습니다. `provider_pre_token_failure`는 목록에 남아 있습니다. 이 브랜치의 `classifyStreamFailure`는 그 값을 새로 내지 않습니다.
+
+이 줄은 권장 순서 4번입니다. 직전 검토 보고는 43, 약 86%였습니다. §14.3의 약 50단위에서 완료는 44, **약 88%(추정)**입니다. 라우팅 스택의 production 배포는 0%입니다. 이 CHECK의 검증만 production에 있습니다.
+
+## 14.31 범위가 고르는 두 번째 attempt (2026-09-24)
+
+판정이 `lib/scopedFallbackAdmission.ts`에 있습니다. 요청 경로는 import하지 않습니다. 라이브 `decideFallback`은 그대로 다음 logical model을 고릅니다. 이 모듈은 그 함수를 바꾸지 않습니다. 행을 읽거나 쓰지 않습니다. capacity와 가격을 읽지 않습니다.
+
+endpoint 실패는 다른 endpoint만 통과합니다. deployment 실패는 같은 endpoint의 다른 deployment를 통과합니다. gateway라고 이름 붙은 실패는 그 gateway의 다른 endpoint를 통과시키지 않습니다. 기권은 후보를 통과시키지 않습니다. 실패한 범위 안에만 후보가 남으면 체인을 멈춥니다. 이미 보낸 attempt가 둘이면 세 번째를 만들지 않습니다. 예산은 라이브 정책의 2와 같습니다. equivalence class가 없는 것은 통과도 거절도 아닙니다.
+
+이 줄은 권장 순서 11번의 범위 판정입니다. 요청 경로에 연결하는 활성화는 아니고, 그 연결은 §14.26에 남습니다. 직전 VALIDATE 보고는 44, 약 88%였습니다. §14.3의 약 50단위에서 완료는 45, **약 90%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

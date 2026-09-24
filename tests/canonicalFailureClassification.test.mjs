@@ -219,6 +219,7 @@ test("the request path does not import the canonical classifier", () => {
             }
             if (!/\.(?:ts|tsx|mjs|js)$/.test(name)) continue;
             if (path === join("lib", "canonicalFailureClassification.ts")) continue;
+            if (path === join("lib", "scopedFallbackAdmission.ts")) continue;
             const source = readFileSync(path, "utf8");
             if (
                 source.includes("canonicalFailureClassification") ||
