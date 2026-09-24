@@ -13,6 +13,10 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
+// The server-side review proxy waits up to 40s. The browser must not abort
+// first; an unknown outcome freezes writes until decision ID/digest lookup.
+const AMUX_REVIEW_CLIENT_TIMEOUT_MS = 45_000;
+
 type Metric = { value: number; observed: boolean };
 type MetricEvidence = {
   value: number | null;
@@ -346,7 +350,10 @@ export function AdminAmuxRoutingPanel() {
     try {
       const response = await fetch(
         `/api/admin/amux/escalations/review?escalation_id=${encodeURIComponent(escalationId)}`,
-        { cache: "no-store" },
+        {
+          cache: "no-store",
+          signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
+        },
       );
       if (requestId !== reviewRequestId.current) return;
       if (!response.ok) {
@@ -389,6 +396,7 @@ export function AdminAmuxRoutingPanel() {
       const response = await fetch("/api/admin/amux/escalations/proposals", {
         method: "POST",
         cache: "no-store",
+        signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           escalation_id: review.escalation.id,
@@ -460,6 +468,7 @@ export function AdminAmuxRoutingPanel() {
       const response = await fetch("/api/admin/amux/escalations", {
         method: "PATCH",
         cache: "no-store",
+        signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "resolve",
@@ -529,7 +538,10 @@ export function AdminAmuxRoutingPanel() {
       });
       const response = await fetch(
         `/api/admin/amux/escalations/review/decision-status?${query}`,
-        { cache: "no-store" },
+        {
+          cache: "no-store",
+          signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
+        },
       );
       if (!response.ok) {
         const code = await responseCode(response);
