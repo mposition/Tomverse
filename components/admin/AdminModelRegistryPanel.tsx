@@ -19,8 +19,6 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
-import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
-import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -227,7 +225,7 @@ export function AdminModelRegistryPanel() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedProvider = searchParams.get("provider");
-  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
+  const [apiFailure, setApiFailure] = useState<string | null>(null);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [saveRefusal, setSaveRefusal] = useState<"replace" | "plain" | null>(null);
   const [models, setModels] = useState<AdminModel[]>([]);
@@ -920,12 +918,7 @@ export function AdminModelRegistryPanel() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : m.toast.saveFailed;
-      setApiFailure({
-        message,
-        tone: "error",
-        requiresReauthentication: false,
-        approvalId: null,
-      });
+      setApiFailure(message);
       dispatchAppToast(message, "error");
     } finally {
       setSaving(false);
@@ -983,7 +976,11 @@ export function AdminModelRegistryPanel() {
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
-      {apiFailure && !editingId ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+      {apiFailure && !editingId ? (
+        <div role="alert" data-testid="admin-api-error" className="border-b border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-100">
+          {apiFailure}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>
@@ -1353,7 +1350,11 @@ export function AdminModelRegistryPanel() {
             </div>
 
             <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
-              {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+              {apiFailure ? (
+                <div role="alert" data-testid="admin-api-error" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm leading-5 text-red-100">
+                  {apiFailure}
+                </div>
+              ) : null}
               {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (
                 <div
                   key={saveAttempt}
