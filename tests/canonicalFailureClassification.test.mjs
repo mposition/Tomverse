@@ -76,6 +76,40 @@ test("a broker path abstains until the caller names the side", () => {
     assert.equal(named.scopeId, "deepinfra");
 });
 
+test("a broker server error abstains until the caller names the side, even with an endpoint", () => {
+    assert.equal(
+        classifyCanonicalFailure({
+            ...base,
+            gatewayProviderId: "openrouter",
+            servingProviderId: "anthropic",
+            providerSide: null,
+            endpointId: "ep_1",
+            category: "SERVER_ERROR",
+        }).reason,
+        "gateway_serving_unresolved"
+    );
+    const namedGateway = classifyCanonicalFailure({
+        ...base,
+        gatewayProviderId: "openrouter",
+        servingProviderId: "anthropic",
+        providerSide: "gateway",
+        endpointId: "ep_1",
+        category: "RATE_LIMIT",
+    });
+    assert.equal(namedGateway.scopeKind, "gateway");
+    assert.equal(namedGateway.scopeId, "openrouter");
+    assert.equal(namedGateway.differentEndpointRequired, false);
+    assert.equal(
+        candidateOutsideFailureScope(namedGateway, {
+            deploymentId: "dep_2",
+            logicalModelId: "deepseek-v4-pro",
+            endpointId: "ep_2",
+            gatewayProviderId: "openrouter",
+        }).reason,
+        "same_scope"
+    );
+});
+
 test("a server error names the endpoint and does not widen to the provider", () => {
     const classified = classifyCanonicalFailure(base);
     assert.equal(classified.scopeKind, "serving_endpoint");

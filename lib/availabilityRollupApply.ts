@@ -36,7 +36,12 @@ export const shouldApplyRollup = (
     input: { eventId: string; grain: string; targetId: string },
     alreadyApplied: ReadonlySet<string>
 ): RollupApplyDecision => {
-    if (input.eventId.length === 0 || input.targetId.length === 0) {
+    if (
+        input.eventId.length === 0 ||
+        input.eventId !== input.eventId.trim() ||
+        input.targetId.length === 0 ||
+        input.targetId !== input.targetId.trim()
+    ) {
         return { apply: false, reason: "blank" };
     }
     if (!isGrain(input.grain)) return { apply: false, reason: "unknown_grain" };

@@ -168,11 +168,10 @@ test("no binding abstains, and the provider id is not turned into a deployment",
 test("shadow match does not select a model, and abstention is not agreement", () => {
     const match = compareGrainShadow({
         logicalOrder: ["deepseek-v4-pro", "kimi-k3"],
-        deploymentOrder: [
-            { logicalModelId: "deepseek-v4-pro", deploymentId: "dep_deepinfra_pro" },
-            { logicalModelId: "kimi-k3", deploymentId: "dep_together_kimi" },
+        cells: [
+            { kind: "deployment", logicalModelId: "deepseek-v4-pro", deploymentId: "dep_deepinfra_pro" },
+            { kind: "deployment", logicalModelId: "kimi-k3", deploymentId: "dep_together_kimi" },
         ],
-        abstained: false,
     });
     assert.deepEqual(match, { kind: "match" });
     assert.equal("selectedModelId" in match, false);
@@ -180,41 +179,42 @@ test("shadow match does not select a model, and abstention is not agreement", ()
     assert.deepEqual(
         compareGrainShadow({
             logicalOrder: ["deepseek-v4-pro", "kimi-k3"],
-            deploymentOrder: [
-                { logicalModelId: "kimi-k3", deploymentId: "dep_together_kimi" },
-                { logicalModelId: "deepseek-v4-pro", deploymentId: "dep_deepinfra_pro" },
+            cells: [
+                { kind: "deployment", logicalModelId: "kimi-k3", deploymentId: "dep_together_kimi" },
+                { kind: "deployment", logicalModelId: "deepseek-v4-pro", deploymentId: "dep_deepinfra_pro" },
             ],
-            abstained: false,
         }),
         { kind: "diverge" }
     );
     assert.deepEqual(
         compareGrainShadow({
-            logicalOrder: ["deepseek-v4-pro", "kimi-k3"],
-            deploymentOrder: [
-                { logicalModelId: "deepseek-v4-pro", deploymentId: "dep_deepinfra_pro" },
-                { logicalModelId: "kimi-k3", deploymentId: "dep_together_kimi" },
+            logicalOrder: ["deepseek-v4-pro"],
+            cells: [
+                { kind: "deployment", logicalModelId: "deepseek-v4-pro", deploymentId: "dep_a" },
+                {
+                    kind: "abstain",
+                    logicalModelId: "deepseek-v4-pro",
+                    deploymentId: "dep_b",
+                    reason: "missing_evidence",
+                },
             ],
-            abstained: true,
         }),
         { kind: "inconclusive", reason: "abstained" }
     );
     assert.equal(
         compareGrainShadow({
             logicalOrder: [],
-            deploymentOrder: [],
-            abstained: false,
+            cells: [],
         }).reason,
         "empty"
     );
     assert.equal(
         compareGrainShadow({
             logicalOrder: ["deepseek-v4-pro"],
-            deploymentOrder: [
-                { logicalModelId: "deepseek-v4-pro", deploymentId: "dep_a" },
-                { logicalModelId: "deepseek-v4-pro", deploymentId: "dep_b" },
+            cells: [
+                { kind: "deployment", logicalModelId: "deepseek-v4-pro", deploymentId: "dep_a" },
+                { kind: "deployment", logicalModelId: "deepseek-v4-pro", deploymentId: "dep_b" },
             ],
-            abstained: false,
         }).reason,
         "unpaired"
     );

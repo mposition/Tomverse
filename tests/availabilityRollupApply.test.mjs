@@ -25,6 +25,7 @@ test("a provider application does not consume the deployment grain", () => {
 });
 
 test("a blank or unknown grain is not treated as already applied", () => {
+    assert.equal(shouldApplyRollup({ eventId: " ", grain: "provider", targetId: "deepinfra" }, new Set()).reason, "blank");
     assert.equal(shouldApplyRollup({ eventId: "", grain: "provider", targetId: "deepinfra" }, new Set()).reason, "blank");
     assert.equal(shouldApplyRollup({ eventId: "evt_1", grain: "provider", targetId: "" }, new Set()).reason, "blank");
     assert.equal(

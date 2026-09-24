@@ -47,8 +47,14 @@ export const hostCopyMaySubstitute = (input: {
     catalogue: CatalogueLimits;
     host: HostCopyLimits;
 }): HostCopyDecision => {
-    if (input.host.deploymentId.length === 0) return { ok: false, reason: "blank_deployment" };
-    if (input.catalogue.logicalModelId.length === 0 || input.catalogue.logicalModelId !== input.host.logicalModelId) {
+    if (input.host.deploymentId.length === 0 || input.host.deploymentId !== input.host.deploymentId.trim()) {
+        return { ok: false, reason: "blank_deployment" };
+    }
+    if (
+        input.catalogue.logicalModelId.length === 0 ||
+        input.catalogue.logicalModelId !== input.catalogue.logicalModelId.trim() ||
+        input.catalogue.logicalModelId !== input.host.logicalModelId
+    ) {
         return { ok: false, reason: "different_model" };
     }
     if (!positiveWhole(input.catalogue.maxOutputTokens) || !positiveWhole(input.catalogue.contextTokens)) {

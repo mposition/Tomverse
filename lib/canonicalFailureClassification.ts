@@ -144,7 +144,7 @@ const gatewayScope = (input: CanonicalFailureInput, category: ProviderFailureCat
         return { status: "abstain", reason: "gateway_serving_unresolved" };
     }
     if (input.providerSide === "serving") {
-        return { status: "abstain", reason: "missing_endpoint" };
+        return { status: "abstain", reason: "gateway_serving_unresolved" };
     }
     if (gateway === null) return { status: "abstain", reason: "missing_gateway" };
     return classified("gateway", gateway, category, "provider_reported", false);
@@ -160,13 +160,15 @@ const endpointScope = (
     if (endpointId === "invalid" || gateway === "invalid" || serving === "invalid") {
         return { status: "abstain", reason: "invalid_id" };
     }
-    if (endpointId === null) {
-        const sidesDiffer = gateway !== null && serving !== null && gateway !== serving;
-        if (sidesDiffer && input.providerSide === null) {
-            return { status: "abstain", reason: "gateway_serving_unresolved" };
-        }
-        return { status: "abstain", reason: "missing_endpoint" };
+    const sidesDiffer = gateway !== null && serving !== null && gateway !== serving;
+    if (sidesDiffer && input.providerSide === null) {
+        return { status: "abstain", reason: "gateway_serving_unresolved" };
     }
+    if (input.providerSide === "gateway") {
+        if (gateway === null) return { status: "abstain", reason: "missing_gateway" };
+        return classified("gateway", gateway, category, "provider_reported", false);
+    }
+    if (endpointId === null) return { status: "abstain", reason: "missing_endpoint" };
     return classified("serving_endpoint", endpointId, category, "provider_reported", true);
 };
 

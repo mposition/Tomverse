@@ -77,6 +77,18 @@ test("a missing or shorter host limit is not the catalogue model", () => {
     );
     assert.equal(
         hostCopyMaySubstitute({
+            catalogue,
+            host: {
+                logicalModelId: "deepseek-v4-pro",
+                deploymentId: " ",
+                maxOutputTokens: 128000,
+                contextTokens: 1000000,
+            },
+        }).reason,
+        "blank_deployment"
+    );
+    assert.equal(
+        hostCopyMaySubstitute({
             catalogue: { ...catalogue, maxOutputTokens: 0 },
             host: {
                 logicalModelId: "deepseek-v4-pro",

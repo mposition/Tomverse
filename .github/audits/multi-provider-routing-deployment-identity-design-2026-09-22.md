@@ -1555,8 +1555,9 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 빈 id와 모르는 grain은 이미 적용된 것이 아닙니다. 재실행은 그 셋이 이미
 있을 때만 거절합니다.
 
-이 줄은 §8.1이 관측 저널과 따로 남겨 둔 적용 기록입니다. 관측 테이블을
-다시 세지 않습니다. 직전 capability 보고는 40, 약 80%였습니다. §14.3의
+이 줄은 §8.1이 관측 저널과 따로 남겨 둔 적용 기록입니다. `shouldApply`는
+관측 event를 한 번 넣었는지만 봅니다. grain 적용이 아닙니다. provider를
+반영해도 deployment 적용은 남아 있습니다. 관측 테이블을 다시 세지 않습니다. 직전 capability 보고는 40, 약 80%였습니다. §14.3의
 약 50단위에서 완료는 41, **약 82%(추정)**입니다. 검증·독립 검토·병합·
 배포는 별도입니다. production 배포는 0%입니다.
 
@@ -1583,7 +1584,7 @@ DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenA
 
 판정이 `lib/canonicalFailureClassification.ts`에 있습니다. 요청 경로는 import하지 않습니다. 라이브 stream 분류기는 그대로이고, 이 모듈은 그 함수를 바꾸지 않습니다. 행을 읽거나 쓰지 않습니다.
 
-범용 provider 범위는 gateway와 serving을 구분하지 못합니다. 둘이 다르고 호출자가 어느 쪽인지 말하지 않으면 기권입니다. provider id는 endpoint id가 아닙니다. 연결 실패와 5xx와 429는 endpoint가 있을 때만 serving endpoint로 이름 붙고, 없으면 gateway로 넓히지 않습니다. 인증과 결제 실패는 gateway id가 있을 때만 gateway입니다. serving 쪽을 골라도 endpoint가 없으면 기권입니다. UNKNOWN은 범위로 만들지 않습니다. 사용자 abort와 upstream timeout은 다른 provenance입니다. abort는 local이고, timeout은 endpoint가 있을 때만 serving endpoint이며 category는 NETWORK입니다.
+범용 provider 범위는 gateway와 serving을 구분하지 못합니다. 둘이 다르고 호출자가 어느 쪽인지 말하지 않으면, endpoint id가 있어도 기권입니다. 호출자가 gateway라고 한 429는 그 endpoint가 아니라 gateway입니다. 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다. provider id는 endpoint id가 아닙니다. 연결 실패와 5xx와 429는 쪽이 갈리지 않았거나 serving이라고 했을 때만, endpoint가 있을 때 serving endpoint로 이름 붙고, 없으면 gateway로 넓히지 않습니다. 인증과 결제 실패는 gateway id가 있을 때만 gateway입니다. serving 쪽을 골라도 endpoint가 없으면 기권입니다. UNKNOWN은 범위로 만들지 않습니다. 사용자 abort와 upstream timeout은 다른 provenance입니다. abort는 local이고, timeout은 endpoint가 있을 때만 serving endpoint이며 category는 NETWORK입니다.
 
 모델 범위의 실패는 deployment id가 있을 때만 그 deployment입니다. deployment를 모르는 채 logical model 전체로 넓히지 않습니다. 기권은 다른 후보를 허용하는 판정이 아닙니다. 같은 endpoint의 다른 모델은 endpoint 실패의 밖이 아닙니다. 다른 endpoint만 그 범위 밖입니다.
 
@@ -1593,9 +1594,21 @@ DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenA
 
 판정이 `lib/deploymentCanaryLane.ts`에 있습니다. 요청 경로는 import하지 않습니다. provider를 호출하지 않습니다. 모델을 고르지 않습니다. 표본 크기를 정하지 않습니다. `getProbeModelFor`는 그대로 provider당 대표 모델 하나입니다.
 
-사용자 콘텐츠가 있으면 거절입니다. synthetic이 아니면 거절입니다. residency가 proven이 아니면 거절입니다. credential quota나 provider budget이 따로가 아니면 거절입니다. 정상 routing candidate이면 거절입니다. 관측 window를 통과했다는 사실이 true가 아니면 거절입니다. null은 통과가 아닙니다. 입장한 관측도 routing candidate가 아닙니다.
+관측을 모으는 판정과 routing eligibility는 다릅니다. 사용자 콘텐츠, synthetic이 아님, residency 미증명, quota 공유, 정상 routing candidate는 관측 입장에서 거절입니다. 그 입장은 window를 요구하지 않습니다. window는 그 관측으로 채우는 것입니다. routing eligibility는 입장이 끝난 뒤 window가 true일 때만 열리고, null은 통과가 아닙니다. 관측 입장 자체는 routing candidate가 아닙니다.
 
 이 줄은 권장 순서 6번의 입장 규칙입니다. lane을 실행하는 것은 아니고, 그 실행은 §14.26에 남습니다. 직전 분류 보고는 42, 약 84%였습니다. §14.3의 약 50단위에서 완료는 43, **약 86%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.29 검토에서 닫은 세 가지 (2026-09-24)
+
+Cursor CLI 검토는 blocker 없이 변경 후 승인이었습니다. 세 major를 닫았고, 완료 수는 올리지 않습니다. 43, 약 86%가 그대로입니다.
+
+broker에서 gateway와 serving이 다르고 쪽을 말하지 않으면 endpoint id가 있어도 기권입니다. 429를 gateway라고 부르면 범위는 gateway이고, 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다.
+
+`shouldApply`는 관측 insert입니다. grain 적용은 `shouldApplyRollup`입니다. 둘은 같은 규칙이 아닙니다.
+
+canary 관측 입장은 window 통과를 요구하지 않습니다. window 통과는 그 다음의 routing eligibility입니다. 기권한 score cell을 순위에서 빼서 비교하지 않습니다. 그 cell이 있으면 shadow는 inconclusive입니다.
+
+production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 

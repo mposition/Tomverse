@@ -32,7 +32,7 @@ const classifyStickyId = (
     logicalModelIds: ReadonlySet<string>,
     deploymentIds: ReadonlySet<string>
 ): "logical" | StickyGrainRefusal => {
-    if (id.length === 0) return "blank";
+    if (id.length === 0 || id.trim().length === 0) return "blank";
     const logical = logicalModelIds.has(id);
     const deployment = deploymentIds.has(id);
     if (logical && deployment) return "ambiguous";
@@ -112,7 +112,9 @@ export const projectDeploymentScores = (input: {
 }): ScoreProjection => {
     const seenModels = new Set<string>();
     for (const entry of input.entries) {
-        if (entry.modelId.length === 0) return { ok: false, reason: "blank_model" };
+        if (entry.modelId.length === 0 || entry.modelId !== entry.modelId.trim()) {
+            return { ok: false, reason: "blank_model" };
+        }
         if (seenModels.has(entry.modelId)) return { ok: false, reason: "duplicate_logical" };
         seenModels.add(entry.modelId);
     }
@@ -120,7 +122,12 @@ export const projectDeploymentScores = (input: {
     const seenDeployments = new Set<string>();
     const bindingsByModel = new Map<string, DeploymentScoreBinding[]>();
     for (const binding of input.bindings) {
-        if (binding.deploymentId.length === 0 || binding.logicalModelId.length === 0) {
+        if (
+            binding.deploymentId.length === 0 ||
+            binding.deploymentId !== binding.deploymentId.trim() ||
+            binding.logicalModelId.length === 0 ||
+            binding.logicalModelId !== binding.logicalModelId.trim()
+        ) {
             return { ok: false, reason: "blank_deployment" };
         }
         if (seenDeployments.has(binding.deploymentId)) {
@@ -171,20 +178,27 @@ export type GrainShadowReport =
     | { kind: "inconclusive"; reason: "abstained" | "empty" | "unpaired" };
 
 /**
- * Compare a logical ranking with a deployment ranking.
+ * Compare a logical ranking with the projected deployment cells.
  *
- * Match, diverge, and inconclusive name the relationship of the two
- * orders. None of them is a selected model. Abstaining, an empty order,
- * or a set that is not one logical model per row is inconclusive: a
- * missing member is not a different ranking of the same set.
+ * Pass every cell the projection returned. Dropping an abstention and
+ * comparing what remains can turn two deployments of one logical model
+ * into a false match. Any abstaining cell makes the comparison
+ * inconclusive. Match, diverge, and inconclusive name the relationship
+ * of the two orders. None of them is a selected model.
  */
 export const compareGrainShadow = (input: {
     logicalOrder: readonly string[];
-    deploymentOrder: readonly { logicalModelId: string; deploymentId: string }[];
-    abstained: boolean;
+    cells: readonly DeploymentScoreCell[];
 }): GrainShadowReport => {
-    if (input.abstained) return { kind: "inconclusive", reason: "abstained" };
-    if (input.logicalOrder.length === 0 || input.deploymentOrder.length === 0) {
+    if (input.cells.some((cell) => cell.kind === "abstain")) {
+        return { kind: "inconclusive", reason: "abstained" };
+    }
+    const deploymentOrder = input.cells.flatMap((cell) =>
+        cell.kind === "deployment"
+            ? [{ logicalModelId: cell.logicalModelId, deploymentId: cell.deploymentId }]
+            : []
+    );
+    if (input.logicalOrder.length === 0 || deploymentOrder.length === 0) {
         return { kind: "inconclusive", reason: "empty" };
     }
 
@@ -198,8 +212,13 @@ export const compareGrainShadow = (input: {
 
     const deploymentSeen = new Set<string>();
     const deploymentModels: string[] = [];
-    for (const row of input.deploymentOrder) {
-        if (row.logicalModelId.length === 0 || row.deploymentId.length === 0) {
+    for (const row of deploymentOrder) {
+        if (
+            row.logicalModelId.length === 0 ||
+            row.logicalModelId !== row.logicalModelId.trim() ||
+            row.deploymentId.length === 0 ||
+            row.deploymentId !== row.deploymentId.trim()
+        ) {
             return { kind: "inconclusive", reason: "unpaired" };
         }
         if (deploymentSeen.has(row.deploymentId) || deploymentModels.includes(row.logicalModelId)) {
