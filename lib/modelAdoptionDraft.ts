@@ -25,10 +25,14 @@
  * or a sale price would be this module deciding what it is not allowed to
  * decide, and the operator would be approving a number nobody chose.
  *
- * One field sits between the last two: reasoning is *proposed* from what the
+ * Two fields sit between the last two. Reasoning is *proposed* from what the
  * provider says about thinking, and listed in `suggestions` so the panel will
- * not save it until somebody confirms it. A proposal the save cannot skip is
- * not a guess; it is the operator not having to find out the model thinks.
+ * not save it until somebody confirms it. The sale class and its credit weight
+ * are proposed the same way, by the panel, from `suggestCreditFloor` once a
+ * price and an output cap exist. They stay out of `fields`: those columns
+ * cannot hold "undecided", so a draft that filled them would be a sale
+ * decision the save could not tell from one a person made. A proposal the
+ * save cannot skip is not a guess.
  */
 
 import {
@@ -51,6 +55,10 @@ import {
   type ProviderModelDocParse,
   type ProviderModelDocProvider,
 } from "@/lib/providerModelDocsCore";
+import {
+  machineReadableDocProviders,
+  providerDocHumanUrl,
+} from "@/lib/providerModelDocSources";
 
 /**
  * The largest prompt a user can send, from `CHAT_USER_MAX_INPUT_TOKENS`.
@@ -75,6 +83,7 @@ const CLASS_CREDITS: ReadonlyArray<{
     usageClass: "premium-reasoning",
     credits: MODEL_USAGE_CREDIT_WEIGHTS.premiumReasoning,
   },
+  { usageClass: "frontier", credits: MODEL_USAGE_CREDIT_WEIGHTS.frontier },
 ];
 
 export type CreditFloor = {
@@ -200,6 +209,98 @@ export const isCreditFloor = (
   value: CreditFloor | CreditFloorRefusal
 ): value is CreditFloor => "usageClass" in value;
 
+/**
+ * Why an adoption save must not be sent yet, or null when it may.
+ *
+ * The dialog covers the page, and a disabled button there has no click, so
+ * the operator sees nothing when the save is refused. The panel prints this
+ * code beside the buttons. The server repeats the birth-state and floor
+ * checks; this one only decides what to say before the request.
+ */
+export type AdoptionSaveBlock =
+  | "reason_too_short"
+  | "class_unconfirmed"
+  | "profile_lookup_pending"
+  | "reasoning_unconfirmed"
+  | "price_unconfirmed"
+  | "born_enabled"
+  | "born_listed"
+  | "above_every_class"
+  | "output_cap_unknown"
+  | "prices_unknown"
+  | "credits_below_floor";
+
+export const adoptionSaveBlock = (input: {
+  reason: string;
+  classChosen: boolean;
+  profileLookupPending: boolean;
+  profileLookupFailed: boolean;
+  reasoningSuggested: boolean;
+  reasoningConfirmed: boolean;
+  priceSuggested: boolean;
+  priceConfirmed: boolean;
+  status: string;
+  publiclyListed: boolean;
+  creditWeight: number;
+  floor: CreditFloor | CreditFloorRefusal;
+}): AdoptionSaveBlock | null => {
+  if (input.reason.trim().length < 4) return "reason_too_short";
+  if (!input.classChosen) return "class_unconfirmed";
+  if (input.profileLookupPending) return "profile_lookup_pending";
+  if (input.reasoningSuggested && !input.reasoningConfirmed) return "reasoning_unconfirmed";
+  if (input.priceSuggested && !input.priceConfirmed) return "price_unconfirmed";
+  if (input.status === "enabled" || input.status === "limited") return "born_enabled";
+  if (input.publiclyListed) return "born_listed";
+  if (!input.profileLookupFailed) {
+    if (!isCreditFloor(input.floor)) {
+      if (input.floor.reason === "above_every_class") return "above_every_class";
+      if (input.floor.reason === "output_cap_unknown") return "output_cap_unknown";
+      return "prices_unknown";
+    }
+    if (input.creditWeight < input.floor.credits) return "credits_below_floor";
+  }
+  return null;
+};
+
+/**
+ * The sale class and credit weight the adoption form shows for confirmation.
+ *
+ * The same floor the save already refuses to go under. Absent when the price
+ * or the output cap is still unknown: the form then keeps its unset default
+ * and will not save until a person chooses. Present, it is still not a
+ * decision — the panel writes it into the controls and keeps save disabled
+ * until the operator confirms it.
+ */
+export const adoptionSaleProposal = (
+  floor: CreditFloor | CreditFloorRefusal
+): { usageClass: ModelUsageClass; creditWeight: number } | null =>
+  isCreditFloor(floor)
+    ? { usageClass: floor.usageClass, creditWeight: floor.credits }
+    : null;
+
+/**
+ * Whether opening the adoption form should read this provider's documents now.
+ *
+ * A fresh parse from the current reader is already the answer, and asking the
+ * host again would only make the form wait. Everything else — no row, an older
+ * parser, a failed read, evidence past its age — is read once, for this model,
+ * through the same reader the daily scan uses. Providers that publish prices
+ * only as HTML are not read: a rendered page parsed as a price is how a wrong
+ * number becomes an override.
+ */
+export const adoptionDocReadIsDue = (input: {
+  provider: string;
+  parse: ProviderModelDocParse | null;
+  fetchedAt: Date | null;
+  now: Date;
+}): boolean => {
+  if (!(machineReadableDocProviders() as readonly string[]).includes(input.provider)) {
+    return false;
+  }
+  if (!input.parse || input.parse.status !== "parsed") return true;
+  return !docEvidenceIsFresh(input.fetchedAt, input.now);
+};
+
 /** What the catalogue scan stored about a model, as far as this cares. */
 export type AdoptionObservation = {
   displayName?: string | null;
@@ -237,6 +338,7 @@ export const ADOPTION_USAGE_CLASSES = [
   "premium-reasoning",
   "research",
   "deep-research",
+  "frontier",
 ] as const satisfies readonly ModelUsageClass[];
 
 /**
@@ -648,7 +750,9 @@ export const buildAdoptionDraft = (input: {
     notes.push(
       "입력·출력 단가 — lib/modelPricing.ts의 profile을 상속합니다. 비워 두세요. 숫자를 넣으면 tier와 예정 가격이 영구 override 됩니다."
     );
-    unknowns.push("판매 등급과 크레딧 — 최소 등급은 상속 가격으로 계산됩니다.");
+    unknowns.push(
+      "판매 등급과 크레딧 — 상속 가격으로 가장 낮은 등급과 크레딧을 제안합니다. 확정해야 저장됩니다."
+    );
   } else if (docPrice.value) {
     sources.inputUsdPerMillionTokens = "provider_docs";
     sources.outputUsdPerMillionTokens = "provider_docs";
@@ -664,10 +768,15 @@ export const buildAdoptionDraft = (input: {
           : ""
       }을 채웠습니다. 단일 요율로 확인된 가격이며, 저장하면 관리자 override가 됩니다. 채택 뒤 pricing 검증은 그대로 남습니다.`
     );
-    unknowns.push("판매 등급과 크레딧 — 채운 가격으로 최소 등급이 계산됩니다.");
-  } else {
     unknowns.push(
-      `입력·출력 단가 — ${DOC_PRICE_REFUSAL_TEXT[docPrice.refusal === "profile_covers" ? "no_evidence" : docPrice.refusal]}`
+      "판매 등급과 크레딧 — 채운 가격으로 가장 낮은 등급과 크레딧을 제안합니다. 확정해야 저장됩니다."
+    );
+  } else {
+    const priceRefusal =
+      DOC_PRICE_REFUSAL_TEXT[docPrice.refusal === "profile_covers" ? "no_evidence" : docPrice.refusal];
+    const pricePage = providerDocHumanUrl(input.provider);
+    unknowns.push(
+      `입력·출력 단가 — ${priceRefusal}${pricePage ? ` ${pricePage}` : ""}`
     );
     if (doc?.promotional) unknowns.push(`프로모션 문구 — ${doc.promotional.note}`);
     if (doc?.longContext.kind === "tiered") {
@@ -675,7 +784,9 @@ export const buildAdoptionDraft = (input: {
         `장문 구간 — 문서 기준 ${numberText(doc.longContext.thresholdTokens)} 입력 토큰 초과 시 입력 ${doc.longContext.inputMultiplier}배, 출력 ${doc.longContext.outputMultiplier}배입니다.`
       );
     }
-    unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
+    unknowns.push(
+      "판매 등급과 크레딧 — 가격이 채워지면 가장 낮은 등급과 크레딧을 제안합니다. 확정해야 저장됩니다."
+    );
   }
   unknowns.push("최소 플랜 — Pro로 두었습니다. 더 열려면 제품 결정이 필요합니다.");
   if (input.profileForOtherPair) {
@@ -757,10 +868,7 @@ export const buildAdoptionDraft = (input: {
     observedCapabilities: { providerMaxOutputTokens },
     suggestions: { reasoning: reasoning.value, price: Boolean(docPrice.value) },
     pricingProfileProposal:
-      input.hasPricingProfile ||
-      !input.docEvidence ||
-      !input.docEvidence.fetchedAt ||
-      (input.provider !== "openai" && input.provider !== "anthropic")
+      input.hasPricingProfile || !input.docEvidence || !input.docEvidence.fetchedAt
         ? null
         : buildPricingProfileProposal({
             modelId:
@@ -807,6 +915,70 @@ export const ADOPTION_PENDING_VALIDATIONS = ["pricing", "access", "staging"] as 
  * registering `claude-fable-5-1-20260901` against an item filed as
  * `claude-fable-5-1` is the same decision, and registering `gpt-other` is not.
  */
+/**
+ * Why this adoption may not also retire an existing model, or null.
+ *
+ * The retired row is the one that gains `replacementModelId`. The new row
+ * does not: that column means "the model that replaces me", and writing the
+ * predecessor there would say the adoption is already obsolete. The
+ * application default and the guest default stay enabled, and a row that
+ * already names a different successor is left on that chain. The predecessor
+ * has to belong to the adopted model's provider: a replacement does not
+ * cross providers.
+ */
+export const adoptionReplacementRefusal = (input: {
+  adoptedModelId: string;
+  adoptedProvider: string;
+  replacesModelId: string | null;
+  predecessor: {
+    catalogDeleted: boolean;
+    replacementModelId: string | null;
+    provider: string;
+    isApplicationDefault: boolean;
+    isGuestDefault: boolean;
+  } | null;
+}): { status: 400 | 409; message: string } | null => {
+  if (!input.replacesModelId) return null;
+  if (input.replacesModelId === input.adoptedModelId) {
+    return { status: 400, message: "A model cannot replace itself." };
+  }
+  if (!input.predecessor || input.predecessor.catalogDeleted) {
+    return {
+      status: 400,
+      message: "The model being replaced is not in the active registry.",
+    };
+  }
+  if (input.predecessor.provider !== input.adoptedProvider) {
+    return {
+      status: 409,
+      message: "A model can only replace another model from the same provider.",
+    };
+  }
+  if (input.predecessor.isApplicationDefault) {
+    return {
+      status: 409,
+      message: "The application fallback model must remain enabled and Guest-accessible.",
+    };
+  }
+  if (input.predecessor.isGuestDefault) {
+    return {
+      status: 409,
+      message:
+        "Change the Guest default model in Platform Settings before disabling or restricting this model.",
+    };
+  }
+  if (
+    input.predecessor.replacementModelId &&
+    input.predecessor.replacementModelId !== input.adoptedModelId
+  ) {
+    return {
+      status: 409,
+      message: `That model already names ${input.predecessor.replacementModelId} as its replacement.`,
+    };
+  }
+  return null;
+};
+
 export const adoptionPreflightRefusal = (input: {
   workItem: {
     id: string;

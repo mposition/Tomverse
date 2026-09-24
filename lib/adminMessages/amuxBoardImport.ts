@@ -36,6 +36,12 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
       `Active execution: ${count}. Nothing was overwritten.`,
     otherConflict: (count: number) =>
       `Other catalog conflict: ${count}. Nothing was overwritten.`,
+    reasonSourceDrift: "source drift",
+    reasonActiveExecution: "active execution",
+    reasonOtherConflict: "other catalog conflict",
+    reasonUnknown: "unrecognized reason",
+    conflictLedgerLine: (key: string, reasons: string) =>
+      `${key}: ${reasons}. Nothing was overwritten.`,
   },
   ko: {
     title: "AMUX 카탈로그 이관",
@@ -72,5 +78,11 @@ export const adminAmuxBoardImportMessages = defineAdminMessages({
       `실행 중 ${count}건입니다. 아무것도 덮어쓰지 않았습니다.`,
     otherConflict: (count: number) =>
       `그 밖의 카탈로그 충돌 ${count}건입니다. 아무것도 덮어쓰지 않았습니다.`,
+    reasonSourceDrift: "원본 차이",
+    reasonActiveExecution: "실행 중",
+    reasonOtherConflict: "그 밖의 카탈로그 충돌",
+    reasonUnknown: "알 수 없는 이유",
+    conflictLedgerLine: (key: string, reasons: string) =>
+      `${key}: ${reasons}. 아무것도 덮어쓰지 않았습니다.`,
   },
 });

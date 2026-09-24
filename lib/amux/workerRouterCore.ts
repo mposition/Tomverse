@@ -2,56 +2,48 @@ import type { AmuxRoutingSnapshot } from "@/lib/amux/routing";
 
 const NEUTRAL_PRIOR = 0.5;
 
-const W_TASK_FIT = 0.30;
-const W_PREDICTED_SUCCESS = 0.20;
-const W_QUOTA_REMAINING = 0.20;
-const W_EXPECTED_SPEED = 0.10;
-const W_LOW_REWORK = 0.10;
+const W_TASK_FIT = 0.3;
+const W_PREDICTED_SUCCESS = 0.2;
+const W_QUOTA_REMAINING = 0.2;
+const W_EXPECTED_SPEED = 0.1;
+const W_LOW_REWORK = 0.1;
 const W_LOW_HUMAN_ATTENTION = 0.05;
 const W_COST_EFFICIENCY = 0.05;
 
-const INTRINSIC_WEIGHT_TOTAL = 0.80;
+const INTRINSIC_WEIGHT_TOTAL = 0.8;
 
-type EligibleSnapshot = Extract<
-  AmuxRoutingSnapshot,
-  { eligible: true }
->;
+type EligibleSnapshot = Extract<AmuxRoutingSnapshot, { eligible: true }>;
 
-export type AmuxRoutingTask =
-  EligibleSnapshot["task"];
+export type AmuxRoutingTask = EligibleSnapshot["task"];
 
-type SnapshotRoutingCandidate =
-  EligibleSnapshot["candidates"][number];
+type SnapshotRoutingCandidate = EligibleSnapshot["candidates"][number];
 
 /**
  * Pure scorer input.
  *
- * The current authoritative routing snapshot deliberately has no historical
- * metrics yet, so those fields are `null` there and provider exhaustion is
- * currently `false`. The scorer contract itself must still model observed
- * evidence because Rust uses the same algorithm when such evidence exists.
- *
- * A current server snapshot remains assignable to this broader type.
+ * The authoritative snapshot supplies confidence-adjusted historical, quota
+ * and cost observations. Missing/stale evidence remains `null`, which this
+ * scorer represents as an explicit neutral prior. Rust uses the same input
+ * and algorithm.
  */
-export type AmuxRoutingCandidate =
-  Omit<
-    SnapshotRoutingCandidate,
-    | "predicted_success"
-    | "quota_remaining"
-    | "expected_speed"
-    | "low_rework"
-    | "low_human_attention"
-    | "cost_efficiency"
-    | "provider_exhausted"
-  > & {
-    predicted_success: number | null;
-    quota_remaining: number | null;
-    expected_speed: number | null;
-    low_rework: number | null;
-    low_human_attention: number | null;
-    cost_efficiency: number | null;
-    provider_exhausted: boolean;
-  };
+export type AmuxRoutingCandidate = Omit<
+  SnapshotRoutingCandidate,
+  | "predicted_success"
+  | "quota_remaining"
+  | "expected_speed"
+  | "low_rework"
+  | "low_human_attention"
+  | "cost_efficiency"
+  | "provider_exhausted"
+> & {
+  predicted_success: number | null;
+  quota_remaining: number | null;
+  expected_speed: number | null;
+  low_rework: number | null;
+  low_human_attention: number | null;
+  cost_efficiency: number | null;
+  provider_exhausted: boolean;
+};
 
 export type AmuxMetricBreakdown = {
   value: number;
@@ -94,16 +86,10 @@ export type AmuxRoutingScoreResult = {
   candidates: AmuxScoredWorker[];
 };
 
-const clamp01 = (value: number) =>
-  Math.max(0, Math.min(1, value));
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-const metric = (
-  value: number | null,
-): AmuxMetricBreakdown => {
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
+const metric = (value: number | null): AmuxMetricBreakdown => {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return {
       value: clamp01(value),
       observed: true,
@@ -121,15 +107,14 @@ const roleFit = (
   roles: readonly string[],
   largeTask: boolean,
 ) => {
-  const has = (role: string) =>
-    roles.includes(role);
+  const has = (role: string) => roles.includes(role);
 
   let fit = has(kind) ? 1 : 0;
 
   switch (kind) {
     case "architecture":
       if (has("reasoning")) fit = Math.max(fit, 0.85);
-      if (has("contract")) fit = Math.max(fit, 0.80);
+      if (has("contract")) fit = Math.max(fit, 0.8);
       if (has("review")) fit = Math.max(fit, 0.55);
       break;
 
@@ -139,30 +124,30 @@ const roleFit = (
       break;
 
     case "feature":
-      if (has("implementation")) fit = Math.max(fit, 0.90);
+      if (has("implementation")) fit = Math.max(fit, 0.9);
       if (largeTask && has("multi_file")) {
-        fit = Math.max(fit, 0.90);
+        fit = Math.max(fit, 0.9);
       }
       if (largeTask && has("long_running")) {
-        fit = Math.max(fit, 0.80);
+        fit = Math.max(fit, 0.8);
       }
       break;
 
     case "bugfix":
       if (has("implementation")) fit = Math.max(fit, 0.85);
-      if (has("reasoning")) fit = Math.max(fit, 0.80);
+      if (has("reasoning")) fit = Math.max(fit, 0.8);
       if (has("tests")) fit = Math.max(fit, 0.65);
       break;
 
     case "iteration":
-      if (has("implementation")) fit = Math.max(fit, 0.70);
-      if (has("bugfix")) fit = Math.max(fit, 0.70);
+      if (has("implementation")) fit = Math.max(fit, 0.7);
+      if (has("bugfix")) fit = Math.max(fit, 0.7);
       break;
 
     case "refactor":
       if (has("implementation")) fit = Math.max(fit, 0.85);
       if (largeTask && has("multi_file")) {
-        fit = Math.max(fit, 0.90);
+        fit = Math.max(fit, 0.9);
       }
       break;
 
@@ -173,21 +158,21 @@ const roleFit = (
       break;
 
     case "dependency_upgrade":
-      if (has("implementation")) fit = Math.max(fit, 0.60);
+      if (has("implementation")) fit = Math.max(fit, 0.6);
       if (has("tests")) fit = Math.max(fit, 0.75);
-      if (has("multi_file")) fit = Math.max(fit, 0.70);
+      if (has("multi_file")) fit = Math.max(fit, 0.7);
       break;
 
     case "tests":
-      if (has("implementation")) fit = Math.max(fit, 0.60);
+      if (has("implementation")) fit = Math.max(fit, 0.6);
       if (has("bugfix")) fit = Math.max(fit, 0.65);
-      if (has("integration")) fit = Math.max(fit, 0.70);
+      if (has("integration")) fit = Math.max(fit, 0.7);
       break;
 
     case "review":
-      if (has("contract")) fit = Math.max(fit, 0.80);
+      if (has("contract")) fit = Math.max(fit, 0.8);
       if (has("security")) fit = Math.max(fit, 0.75);
-      if (has("architecture")) fit = Math.max(fit, 0.70);
+      if (has("architecture")) fit = Math.max(fit, 0.7);
       break;
 
     case "security":
@@ -198,7 +183,7 @@ const roleFit = (
 
     case "integration":
       if (has("tests")) fit = Math.max(fit, 0.75);
-      if (has("bugfix")) fit = Math.max(fit, 0.60);
+      if (has("bugfix")) fit = Math.max(fit, 0.6);
       break;
   }
 
@@ -209,17 +194,10 @@ const roleFit = (
   return clamp01(fit);
 };
 
-const providerFit = (
-  kind: string,
-  providerRaw: string,
-  largeTask: boolean,
-) => {
-  const provider =
-    providerRaw.trim().toLowerCase();
+const providerFit = (kind: string, providerRaw: string, largeTask: boolean) => {
+  const provider = providerRaw.trim().toLowerCase();
 
-  const isClaude =
-    provider === "claude" ||
-    provider === "claude-code";
+  const isClaude = provider === "claude" || provider === "claude-code";
 
   const isCodex = provider === "codex";
   const isDevin = provider === "devin";
@@ -231,72 +209,70 @@ const providerFit = (
       if (isClaude) return 1;
       if (isCodex) return 0.75;
       if (isDevin) return 0.45;
-      return 0.50;
+      return 0.5;
 
     case "feature":
       if (largeTask) {
         if (isDevin) return 1;
         if (isCodex) return 0.95;
         if (isClaude) return 0.85;
-        return 0.50;
+        return 0.5;
       }
 
       if (isCodex) return 1;
       if (isDevin) return 0.95;
       if (isClaude) return 0.85;
-      return 0.50;
+      return 0.5;
 
     case "bugfix":
       if (isClaude) return 1;
       if (isCodex) return 0.95;
       if (isDevin) return 0.75;
-      return 0.50;
+      return 0.5;
 
     case "iteration":
     case "integration":
       if (isCodex) return 1;
       if (isClaude) return 0.75;
       if (isDevin) return 0.65;
-      return 0.50;
+      return 0.5;
 
     case "refactor":
       if (largeTask) {
         if (isDevin) return 1;
         if (isCodex) return 0.95;
         if (isClaude) return 0.85;
-        return 0.50;
+        return 0.5;
       }
 
       if (isCodex) return 1;
-      if (isDevin) return 0.90;
+      if (isDevin) return 0.9;
       if (isClaude) return 0.85;
-      return 0.50;
+      return 0.5;
 
     case "migration":
       if (isDevin) return 1;
       if (isClaude) return 0.85;
-      if (isCodex) return 0.80;
-      return 0.50;
+      if (isCodex) return 0.8;
+      return 0.5;
 
     case "dependency_upgrade":
       if (isDevin) return 1;
-      if (isCodex) return 0.90;
-      if (isClaude) return 0.70;
-      return 0.50;
+      if (isCodex) return 0.9;
+      if (isClaude) return 0.7;
+      return 0.5;
 
     case "tests":
       if (isCodex) return 1;
-      if (isDevin) return 0.90;
+      if (isDevin) return 0.9;
       if (isClaude) return 0.75;
-      return 0.50;
+      return 0.5;
 
     case "review":
-      return isClaude || isCodex
-        ? 1
-        : 0.50;
+      return isClaude || isCodex ? 1 : 0.5;
 
     default:
-      return 0.50;
+      return 0.5;
   }
 };
 
@@ -304,9 +280,7 @@ const taskFit = (
   task: AmuxRoutingTask,
   candidate: AmuxRoutingCandidate,
 ): AmuxTaskFitBreakdown => {
-  const largeTask =
-    task.complexity >= 7 ||
-    (task.files_expected ?? 0) >= 6;
+  const largeTask = task.complexity >= 7 || (task.files_expected ?? 0) >= 6;
 
   const role = roleFit(
     task.task_kind,
@@ -323,10 +297,7 @@ const taskFit = (
   return {
     role_fit: role,
     provider_fit: provider,
-    combined: clamp01(
-      0.75 * role +
-        0.25 * provider,
-    ),
+    combined: clamp01(0.75 * role + 0.25 * provider),
     large_task: largeTask,
   };
 };
@@ -337,58 +308,39 @@ const scoreOne = (
 ): AmuxScoredWorker => {
   const fit = taskFit(task, candidate);
 
-  const predictedSuccess =
-    metric(candidate.predicted_success);
+  const predictedSuccess = metric(candidate.predicted_success);
 
-  const quotaRemaining =
-    candidate.provider_exhausted
-      ? {
-          value: 0,
-          observed: true,
-        }
-      : metric(candidate.quota_remaining);
+  const quotaRemaining = candidate.provider_exhausted
+    ? {
+        value: 0,
+        observed: true,
+      }
+    : metric(candidate.quota_remaining);
 
-  const expectedSpeed =
-    metric(candidate.expected_speed);
+  const expectedSpeed = metric(candidate.expected_speed);
 
-  const lowRework =
-    metric(candidate.low_rework);
+  const lowRework = metric(candidate.low_rework);
 
-  const lowHumanAttention =
-    metric(candidate.low_human_attention);
+  const lowHumanAttention = metric(candidate.low_human_attention);
 
-  const costEfficiency =
-    metric(candidate.cost_efficiency);
+  const costEfficiency = metric(candidate.cost_efficiency);
 
   const selectedScore =
     W_TASK_FIT * fit.combined +
-    W_PREDICTED_SUCCESS *
-      predictedSuccess.value +
-    W_QUOTA_REMAINING *
-      quotaRemaining.value +
-    W_EXPECTED_SPEED *
-      expectedSpeed.value +
-    W_LOW_REWORK *
-      lowRework.value +
-    W_LOW_HUMAN_ATTENTION *
-      lowHumanAttention.value +
-    W_COST_EFFICIENCY *
-      costEfficiency.value;
+    W_PREDICTED_SUCCESS * predictedSuccess.value +
+    W_QUOTA_REMAINING * quotaRemaining.value +
+    W_EXPECTED_SPEED * expectedSpeed.value +
+    W_LOW_REWORK * lowRework.value +
+    W_LOW_HUMAN_ATTENTION * lowHumanAttention.value +
+    W_COST_EFFICIENCY * costEfficiency.value;
 
   const intrinsicScore =
-    (
-      W_TASK_FIT * fit.combined +
-      W_PREDICTED_SUCCESS *
-        predictedSuccess.value +
-      W_EXPECTED_SPEED *
-        expectedSpeed.value +
-      W_LOW_REWORK *
-        lowRework.value +
-      W_LOW_HUMAN_ATTENTION *
-        lowHumanAttention.value +
-      W_COST_EFFICIENCY *
-        costEfficiency.value
-    ) /
+    (W_TASK_FIT * fit.combined +
+      W_PREDICTED_SUCCESS * predictedSuccess.value +
+      W_EXPECTED_SPEED * expectedSpeed.value +
+      W_LOW_REWORK * lowRework.value +
+      W_LOW_HUMAN_ATTENTION * lowHumanAttention.value +
+      W_COST_EFFICIENCY * costEfficiency.value) /
     INTRINSIC_WEIGHT_TOTAL;
 
   const operationallyAllowed =
@@ -397,71 +349,51 @@ const scoreOne = (
     !candidate.worker.isolated &&
     !candidate.worker.blocked;
 
+  // A stopped worker remains selectable because the execution layer owns
+  // worker startup. A running idle worker without a recognized dispatch
+  // boundary is unsafe for new ownership and remains preference-only.
   const idleWithoutBoundary =
     candidate.worker.running &&
-    candidate.worker.status
-      .toLowerCase() === "idle" &&
+    candidate.worker.status.toLowerCase() === "idle" &&
     !candidate.worker.dispatch_ready;
-
   const selectedEligible =
     operationallyAllowed &&
     !candidate.provider_exhausted &&
     !idleWithoutBoundary;
 
   return {
-    worker_name:
-      candidate.worker.worker_name,
-    provider:
-      candidate.worker.provider,
+    worker_name: candidate.worker.worker_name,
+    provider: candidate.worker.provider,
     breakdown: {
       task_fit: fit,
-      predicted_success:
-        predictedSuccess,
-      quota_remaining:
-        quotaRemaining,
-      expected_speed:
-        expectedSpeed,
-      low_rework:
-        lowRework,
-      low_human_attention:
-        lowHumanAttention,
-      cost_efficiency:
-        costEfficiency,
-      selected_score:
-        selectedScore,
-      intrinsic_score:
-        intrinsicScore,
-      operationally_allowed:
-        operationallyAllowed,
-      provider_exhausted:
-        candidate.provider_exhausted,
-      selected_eligible:
-        selectedEligible,
+      predicted_success: predictedSuccess,
+      quota_remaining: quotaRemaining,
+      expected_speed: expectedSpeed,
+      low_rework: lowRework,
+      low_human_attention: lowHumanAttention,
+      cost_efficiency: costEfficiency,
+      selected_score: selectedScore,
+      intrinsic_score: intrinsicScore,
+      operationally_allowed: operationallyAllowed,
+      provider_exhausted: candidate.provider_exhausted,
+      selected_eligible: selectedEligible,
     },
   };
 };
 
-const workerNameCompare = (
-  left: AmuxScoredWorker,
-  right: AmuxScoredWorker,
-) =>
+const workerNameCompare = (left: AmuxScoredWorker, right: AmuxScoredWorker) =>
   left.worker_name < right.worker_name
     ? -1
     : left.worker_name > right.worker_name
       ? 1
       : 0;
 
-const bestBy = (
-  candidates: readonly AmuxScoredWorker[],
-  selected: boolean,
-) =>
+const bestBy = (candidates: readonly AmuxScoredWorker[], selected: boolean) =>
   [...candidates]
     .filter((candidate) =>
       selected
-        ? candidate.breakdown
-            .selected_eligible
-        : candidate.breakdown
-            .operationally_allowed,
+        ? candidate.breakdown.selected_eligible
+        : candidate.breakdown.operationally_allowed,
     )
     .sort((left, right) => {
       const leftScore = selected
@@ -472,10 +404,7 @@ const bestBy = (
         ? right.breakdown.selected_score
         : right.breakdown.intrinsic_score;
 
-      return (
-        rightScore - leftScore ||
-        workerNameCompare(left, right)
-      );
+      return rightScore - leftScore || workerNameCompare(left, right);
     })[0] ?? null;
 
 export const scoreAmuxWorkers = (
@@ -483,28 +412,18 @@ export const scoreAmuxWorkers = (
   candidates: readonly AmuxRoutingCandidate[],
 ): AmuxRoutingScoreResult => {
   const scored = candidates
-    .map((candidate) =>
-      scoreOne(task, candidate),
-    )
+    .map((candidate) => scoreOne(task, candidate))
     .sort(workerNameCompare);
 
-  const preferred =
-    bestBy(scored, false);
+  const preferred = bestBy(scored, false);
 
-  const selected =
-    bestBy(scored, true);
+  const selected = bestBy(scored, true);
 
   return {
-    preferred_worker:
-      preferred?.worker_name ?? null,
-    selected_worker:
-      selected?.worker_name ?? null,
-    preferred_score:
-      preferred?.breakdown
-        .intrinsic_score ?? null,
-    selected_score:
-      selected?.breakdown
-        .selected_score ?? null,
+    preferred_worker: preferred?.worker_name ?? null,
+    selected_worker: selected?.worker_name ?? null,
+    preferred_score: preferred?.breakdown.intrinsic_score ?? null,
+    selected_score: selected?.breakdown.selected_score ?? null,
     candidates: scored,
   };
 };

@@ -48,7 +48,7 @@ const create = (overrides) =>
 const messages = (result) =>
   result.success ? [] : result.error.issues.map((issue) => issue.message);
 
-const PREMIUM_CLASSES = ["premium", "premium-reasoning", "deep-research"];
+const PREMIUM_CLASSES = ["premium", "premium-reasoning", "deep-research", "frontier"];
 const CHEAPER_CLASSES = ["standard", "advanced", "reasoning", "research"];
 
 for (const usageClass of PREMIUM_CLASSES) {

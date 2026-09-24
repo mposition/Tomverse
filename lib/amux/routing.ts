@@ -1,10 +1,12 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { amuxMachineIdSchema } from "@/lib/amux/claimContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { getRoutingSnapshotTask } from "@/lib/amux/store";
 import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
+import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
 
 const classificationSchema = z
   .object({
@@ -60,6 +62,7 @@ export type AmuxRoutingSnapshot =
       reason: "not_eligible" | "unclassified" | "worker_catalog_unavailable";
       task: null;
       candidates: [];
+      telemetry: Record<string, never>;
     }
   | {
       eligible: true;
@@ -85,14 +88,15 @@ export type AmuxRoutingSnapshot =
           isolated: boolean;
           blocked: boolean;
         };
-        predicted_success: null;
-        quota_remaining: null;
-        expected_speed: null;
-        low_rework: null;
-        low_human_attention: null;
-        cost_efficiency: null;
-        provider_exhausted: false;
+        predicted_success: number | null;
+        quota_remaining: number | null;
+        expected_speed: number | null;
+        low_rework: number | null;
+        low_human_attention: number | null;
+        cost_efficiency: number | null;
+        provider_exhausted: boolean;
       }>;
+      telemetry: Prisma.InputJsonObject;
     };
 
 const unavailable = (
@@ -103,6 +107,7 @@ const unavailable = (
   reason,
   task: null,
   candidates: [],
+  telemetry: {},
 });
 
 const parseWorkerCatalog = () => {
@@ -124,7 +129,7 @@ const parseWorkerCatalog = () => {
   const seen = new Set<string>();
 
   const workers = parsed.data.map((entry) => {
-    const workerName = entry.worker_name;
+    const workerName = entry.worker_name.trim();
 
     if (seen.has(workerName)) {
       throw new Error(`Duplicate AMUX worker name: ${workerName}`);
@@ -141,15 +146,8 @@ const parseWorkerCatalog = () => {
         ),
       ].sort(),
 
-      /*
-       * Tomverse does not yet have a live development-agent runtime snapshot.
-       * Do not pretend a terminal boundary exists. These are static catalog
-       * entries and therefore begin as stopped/not-dispatch-ready.
-       *
-       * The scorer deliberately permits a stopped worker because the execution
-       * lifecycle layer will own startup. TOMVERSE_AMUX_EXECUTE stays the outer
-       * mutation gate until that lifecycle is implemented.
-       */
+      // Static catalog rows are overlaid with the live runtime snapshot below.
+      // Start conservatively so a missing or stale runtime cannot be selected.
       running: false,
       status: "stopped",
       dispatch_ready: false,
@@ -201,6 +199,11 @@ export async function buildAmuxRoutingSnapshot(
         workers.map((worker) => worker.worker_name),
         tx,
       );
+      const telemetryByWorker = await getAmuxWorkerTelemetry(
+        workers,
+        dbNow,
+        tx,
+      );
 
       const filesExpected = classification.data.files_expected;
 
@@ -212,7 +215,25 @@ export async function buildAmuxRoutingSnapshot(
 
       return {
         eligible: true,
-        execution_ready: false,
+        execution_ready: workers.some((worker) => {
+          const runtime = runtimeByWorker.get(worker.worker_name);
+          const specialistMismatch =
+            row.requiredRoutingRole !== null &&
+            !worker.routing_roles.includes(
+              row.requiredRoutingRole.toLowerCase(),
+            );
+          return (
+            runtime !== undefined &&
+            runtime.leaseExpiresAt.getTime() > dbNow.getTime() &&
+            runtime.status === "idle" &&
+            runtime.dispatchReady &&
+            !worker.archived &&
+            !worker.paused &&
+            !worker.isolated &&
+            !worker.blocked &&
+            !specialistMismatch
+          );
+        }),
         reason: null,
         task: {
           task_kind: classification.data.task_kind.trim().toLowerCase(),
@@ -220,6 +241,15 @@ export async function buildAmuxRoutingSnapshot(
           risk: classification.data.risk,
           files_expected: filesExpectedCount,
         },
+        telemetry: Object.fromEntries(
+          workers.map((worker) => [
+            worker.worker_name,
+            telemetryByWorker.get(worker.worker_name)?.evidence ?? {
+              history: { sample_size: 0 },
+              quota: { state: "unknown", provider_exhausted: false },
+            },
+          ]),
+        ) as Prisma.InputJsonObject,
         candidates: workers.map((worker) => {
           const runtime = runtimeByWorker.get(worker.worker_name);
 
@@ -229,6 +259,12 @@ export async function buildAmuxRoutingSnapshot(
 
           const running = fresh && runtime.status !== "stopped";
 
+          const specialistMismatch =
+            row.requiredRoutingRole !== null &&
+            !worker.routing_roles.includes(
+              row.requiredRoutingRole.toLowerCase(),
+            );
+
           const dispatchReady =
             running &&
             runtime.status === "idle" &&
@@ -236,22 +272,37 @@ export async function buildAmuxRoutingSnapshot(
             !worker.archived &&
             !worker.paused &&
             !worker.isolated &&
-            !worker.blocked;
+            !worker.blocked &&
+            !specialistMismatch;
+          const telemetry = telemetryByWorker.get(worker.worker_name)?.scoring;
 
           return {
             worker: {
               ...worker,
+              blocked: worker.blocked || specialistMismatch,
               running,
               status: running ? runtime.status : "stopped",
               dispatch_ready: dispatchReady,
             },
-            predicted_success: null,
-            quota_remaining: null,
-            expected_speed: null,
-            low_rework: null,
-            low_human_attention: null,
-            cost_efficiency: null,
-            provider_exhausted: false,
+            predicted_success: telemetry?.predicted_success.observed
+              ? telemetry.predicted_success.value
+              : null,
+            quota_remaining: telemetry?.quota_remaining.observed
+              ? telemetry.quota_remaining.value
+              : null,
+            expected_speed: telemetry?.expected_speed.observed
+              ? telemetry.expected_speed.value
+              : null,
+            low_rework: telemetry?.low_rework.observed
+              ? telemetry.low_rework.value
+              : null,
+            low_human_attention: telemetry?.low_human_attention.observed
+              ? telemetry.low_human_attention.value
+              : null,
+            cost_efficiency: telemetry?.cost_efficiency.observed
+              ? telemetry.cost_efficiency.value
+              : null,
+            provider_exhausted: telemetry?.provider_exhausted ?? false,
           };
         }),
       };

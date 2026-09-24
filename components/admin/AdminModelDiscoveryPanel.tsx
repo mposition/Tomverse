@@ -45,6 +45,13 @@ export type ModelWorkItemRow = {
   reviewPriority: ReviewPriority;
   reviewKind: string;
   product: ModelProduct;
+  /** One line: what this candidate is to the catalogue Tomverse runs. */
+  verdictKo: string;
+  /** Supporting facts, each checkable on its own. */
+  pointsKo: string[];
+  /** What to do next, and what would change the answer. */
+  nextStepKo: string;
+  /** The three above joined; what a decision records as the analysis shown. */
   analysisKo: string;
   /** Present only in the excluded view: what closed the item, and who. */
   exclusion?: {
@@ -826,7 +833,32 @@ export function AdminModelDiscoveryPanel() {
                         ) : null}
                       </td>
                       <td className="py-3 pr-3 leading-relaxed text-zinc-300">
-                        {row.analysisKo}
+                        {/*
+                          A verdict, its evidence, then the action. An older
+                          row rendered before this shape existed has only the
+                          joined paragraph, so it is shown as it is rather than
+                          left blank.
+                        */}
+                        {row.verdictKo ? (
+                          <div className="space-y-1.5">
+                            <p className="font-semibold text-zinc-100">{row.verdictKo}</p>
+                            {row.pointsKo?.length ? (
+                              <ul className="space-y-1 text-[11px] text-zinc-400">
+                                {row.pointsKo.map((point, index) => (
+                                  <li key={`${index}-${point.slice(0, 24)}`}>· {point}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {row.nextStepKo ? (
+                              <p className="text-[11px] text-zinc-300">
+                                <span className="text-zinc-500">{m.table.nextStep} </span>
+                                {row.nextStepKo}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          row.analysisKo
+                        )}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
                         {view === "excluded" && row.exclusion ? (

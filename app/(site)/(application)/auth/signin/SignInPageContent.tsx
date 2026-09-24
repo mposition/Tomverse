@@ -4,7 +4,9 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
 import { useTurnstile } from "@/components/chat/useTurnstile";
+import { isGuestVerificationError } from "@/components/chat/guestVerificationFailure";
 import Link from "next/link";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
@@ -65,7 +67,7 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons() {
+function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
@@ -113,9 +115,12 @@ function SignInButtons() {
     const [formError, setFormError] = useState<string | null>(null);
     const [emailError, setEmailError] = useState<string | null>(null);
     const isEmailValid = isValidLoginEmail(email);
-    const [needsTurnstile, setNeedsTurnstile] = useState(false);
-    const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
-        useTurnstile(true, "email_login_request");
+    const {
+        containerRef: turnstileContainerRef,
+        getToken: getTurnstileToken,
+        failure: turnstileFailure,
+        isChallengeVisible,
+    } = useTurnstile(true, "email_login_request", turnstileSiteKey);
 
     // Drives the "N초 후 다시 시도" countdown on a minute-scoped rate limit:
     // retryAfterUntil is the fixed deadline from the server's Retry-After
@@ -189,7 +194,6 @@ function SignInButtons() {
             if (response.status === 403) {
                 data = await response.json().catch(() => null);
                 if (data?.code === "TURNSTILE_REQUIRED") {
-                    setNeedsTurnstile(true);
                     const token = await getTurnstileToken();
                     response = await requestCode(token);
                     data = null;
@@ -219,7 +223,11 @@ function SignInButtons() {
             await discardResponseBody(response);
             markSignupStarted("email-code");
             setStep("code");
-        } catch {
+        } catch (error) {
+            // The verification slot owns typed Turnstile failures. Replacing
+            // that precise sentence with the generic request failure produced
+            // the two contradictory errors reported in staging.
+            if (isGuestVerificationError(error)) return;
             setFormError(t("auth.emailLoginRequestFailed"));
         } finally {
             setIsSendingCode(false);
@@ -362,6 +370,13 @@ function SignInButtons() {
                 <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </div>
 
+            <TurnstileFormSlot
+                containerRef={turnstileContainerRef}
+                isChallengeVisible={isChallengeVisible}
+                failure={turnstileFailure}
+                surface="emailLogin"
+                testId="email-login-verification"
+            />
             {step === "email" ? (
                 <div className="space-y-2">
                     <label htmlFor="email-login-address" className="sr-only">
@@ -397,10 +412,6 @@ function SignInButtons() {
                             {emailError}
                         </p>
                     ) : null}
-                    <div
-                        ref={turnstileContainerRef}
-                        className={needsTurnstile ? "flex justify-center py-1" : "hidden"}
-                    />
                     <button
                         type="button"
                         disabled={!isEmailValid || isSendingCode || retryCountdown > 0}
@@ -492,7 +503,11 @@ function SignInButtons() {
     );
 }
 
-export function SignInPageContent() {
+export function SignInPageContent({
+    turnstileSiteKey,
+}: {
+    turnstileSiteKey?: string;
+}) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
     // spanning the bottom of the screen, which could cross over the login
@@ -531,7 +546,7 @@ export function SignInPageContent() {
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons />
+                        <SignInButtons turnstileSiteKey={turnstileSiteKey} />
                     </Suspense>
                 </div>
             </div>

@@ -1043,6 +1043,76 @@ domains:
       operator and can name third parties, so it is routed to the manual
       PrivacyRequest path rather than the unified export.
 
+  - domain: amuxReviewDecision
+    prismaModel: AmuxReviewDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Content-free, append-only evidence of a privileged AMUX task-review
+        decision, linked to the tamper-evident AdminAuditLog entry. Keeping the
+        decision attributable protects the integrity of security investigation
+        and access-control evidence under the same basis as AdminAuditLog.
+      retentionStartsFrom: "decidedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      The immutable decision stores the approving operator's actorUserId and
+      refers to a proposal bound to an AMUX task and a GitHub PR digest; it
+      has no typed customer identifier or review prose. The operator approved
+      the existing Admin audit retention policy for this ledger on 2026-09-21;
+      its non-null actorUserId remains attributable after account deletion.
+      The operator approved exclusion from unified export and manual
+      PrivacyRequest review for access requests on 2026-09-21. This prevents
+      automatic disclosure of other operators or tasks while preserving access
+      review; it is distinct from the approved retention period.
+      The linked AdminAuditLog is separately retained under the same schedule.
+
+  - domain: amuxResourcePolicy
+    prismaModel: AmuxResourcePolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The current project or team capacity and cost policy records who last
+      changed it by operator id and address. Registered on 2026-09-24 because
+      the actor-data sweep correctly detected those columns. Deletion,
+      retention, subject linkage and export remain unverified until privacy
+      owners decide whether mutable operator attribution is anonymised or
+      retained; this row deliberately makes no policy decision by inference.
+
+  - domain: amuxHumanEscalation
+    prismaModel: AmuxHumanEscalation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      A task escalation can name acknowledging and resolving operators by id
+      and address and can retain bounded operational reason text. Registered
+      on 2026-09-24 when the actor-data sweep detected those identities. The
+      approved immutable review-decision ledger policy does not automatically
+      decide this separate mutable table, so every privacy axis stays
+      unverified instead of extending that approval beyond its scope.
+
   - domain: promptRefinerReservationStage
     prismaModel: PromptRefinerReservationStage
     userLinkageRole: actor
@@ -1108,6 +1178,124 @@ domains:
       requests are handled through the manual PrivacyRequest path together
       with the linked tamper-evident AdminAuditLog entry. Authority expiry and
       retention are separate decisions.
+
+  - domain: amuxReconciliationRun
+    prismaModel: AmuxReconciliationRun
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one source reconciliation run. The row names the
+        administrator who prepared it and is retained for security
+        investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite reconciliation evidence. The row stores
+      commit and digest identifiers, not a customer's prompt or file.
+
+  - domain: amuxBoardPromotionApproval
+    prismaModel: AmuxBoardPromotionApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one manual card-promotion batch. The
+        row names the administrator who prepared it and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. itemBindings holds the operator's
+      promotion request, not a customer's prompt or file. Operator requests are
+      handled through the manual PrivacyRequest path, together with the linked
+      tamper-evident AdminAuditLog entry.
+
+  - domain: amuxIntakeDraft
+    prismaModel: AmuxIntakeDraft
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence that one explicit intake draft was consumed. The
+        row names the administrator and keeps digests only. Proposal text is
+        absent. The retention period is not a legal determination; it stays
+        TBD until security and legal approval, and a legal hold outranks any
+        later purge. The 24 hour draft cap is a technical limit, not this
+        retention period.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite intake evidence. The row is operator
+      evidence, not customer data. Title, scope and completion stay null.
+
+  - domain: amuxIntakeApproval
+    prismaModel: AmuxIntakeApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one explicit intake registration. The
+        row names the administrator who consumed it and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. It is not an AmuxBoardImportApproval
+      row. Operator requests are handled through the manual PrivacyRequest
+      path, together with the linked tamper-evident AdminAuditLog entry.
 
   - domain: adminNote
     prismaModel: AdminNote

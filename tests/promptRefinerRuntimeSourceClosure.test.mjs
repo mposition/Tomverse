@@ -188,82 +188,30 @@ const compilerOptions = parsedConfig.options;
 // the position-free inventory still hashes to the value above, so this is a
 // repin and not a review.
 //
-// 2026-09-23, DeepInfra registered as a provider: a new `case` with its
-// comment in `lib/activeAiModel.ts` and a new entry in
-// `lib/modelRegistryShared.ts`, both literal. No computed access came with
-// them; the accesses below move down. Count 228, position-free hash
-// unchanged. A repin.
-//
-// 2026-09-23, Together registered the same way: another literal `case` and
-// another literal registry entry. Count 228, position-free hash unchanged.
-// A repin of the position-sensitive digest only.
-//
-// 2026-09-23, OpenRouter registered with a dispatch gate. The new `case`
-// calls decideOpenRouterDispatch before createOpenAI. The functions live in
-// lib/modelRegistryShared.ts, which this file already imports, so the sealed
-// runtime closure does not gain a file. That call is an ordinary call, not a
-// computed element access. Count 228, position-free hash unchanged. A repin
-// of the position-sensitive digest only.
-//
-// 2026-09-23, version-gate columns. The dated note in
-// lib/marketingAutomationAccess.ts and the field list in
-// lib/routingIdentityManifest.ts moved existing accesses. No new computed
-// access. Count 228, position-free hash unchanged. A repin of the
-// position-sensitive digest only.
-//
-// 2026-09-23, the review fix: variant slugs, an environment allowlist read
-// as a static property, and catalogue refusals for the deployment hosts.
-// No new element access. Count 228, position-free hash unchanged. A repin
-// of the position-sensitive digest only. Recomputed after merging that fix
-// onto the version-gate note above.
-//
-// 2026-09-23, Sail Research registered the same way as Together: a literal
-// `case` in `lib/activeAiModel.ts` and a literal registry entry in
-// `lib/modelRegistryShared.ts`. No computed access. Count 228, position-free
-// hash unchanged. A repin of the position-sensitive digest only.
-//
-// 2026-09-23, credential rotation columns. The dated note above the marketing
-// webhook fingerprint moved later accesses in `lib/marketingAutomationAccess.ts`.
-// The note is comment only. Count 228, position-free hash unchanged. A repin
-// of the position-sensitive digest only.
-//
-// 2026-09-23, request-start policy columns. Another dated note in
-// `lib/marketingAutomationAccess.ts`, comment only. Count 228, position-free
-// hash unchanged. A repin of the position-sensitive digest only.
-//
-// 2026-09-23, affinity epoch and a request deadline. Another dated note in
-// `lib/marketingAutomationAccess.ts`, comment only. Count 228, position-free
-// hash unchanged. A repin of the position-sensitive digest only.
-//
-// 2026-09-23, a pre-commit buffer column. Another dated note in
-// `lib/marketingAutomationAccess.ts`, comment only, and a field on
-// RoutingRun in `prisma/schema.prisma`. No computed access. Count 228,
-// position-free hash unchanged. A repin of the position-sensitive digest
-// only.
-//
-// 2026-09-24, the routing snapshot ceiling merged onto that stack. Another
-// review note above the watched-schema fingerprint, comment only, plus the
-// schema and manifest fields that note names. Count 228, position-free hash
-// unchanged. A repin of the position-sensitive digest only.
-//
-// 2026-09-24, the rollup application table. Another dated note above the
-// fingerprint, comment only. Count 228, position-free hash unchanged. A
-// repin of the position-sensitive digest only.
-//
-// 2026-09-24, a dark deployment price snapshot. Another dated note above the
-// fingerprint, comment only, plus the schema model that note names. No
-// computed access. Count 228, position-free hash unchanged. A repin of the
-// position-sensitive digest only.
-//
 // 2026-09-24, the pinned-deployment experiment note above the fingerprint.
 // Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, those notes now stand together after merging develop. Comment
+// only. Count 228, position-free hash unchanged. A repin of the
 // position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "4d415ef44b94f1b1f4110953fde77934",
-  "ae2ae5f11cc3c8a97f3ce5731421edf7",
+  "f5c390cfc7e39828c7aef3595bb2c534",
+  "3c45695252cf899b178d1c2ea58f4661",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

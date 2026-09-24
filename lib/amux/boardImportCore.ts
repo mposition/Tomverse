@@ -410,6 +410,12 @@ const contentRefused = (value: unknown, key: string | null): boolean => {
   return false;
 };
 
+/** Catalog scanner, including nested digest-key exceptions. Promotion briefs use this. */
+export const amuxCatalogTextRefused = (value: unknown): boolean => contentRefused(value, null);
+
+/** `amux-json-v1` object-key sort. Array order and string code points stay as they are. */
+export const amuxCanonicalJson = (value: unknown): string => canonicalJson(value);
+
 const isSectionCode = (value: string): value is BoardImportSectionCode =>
   (BOARD_IMPORT_SECTION_CODES as readonly string[]).includes(value);
 
@@ -629,6 +635,19 @@ export const classifyBoardImport = (
   };
 };
 
+export const BOARD_IMPORT_CONFLICT_REASON_CODES = [
+  "active_execution",
+  "other_conflict",
+  "source_drift",
+] as const;
+
+export type BoardImportConflictReasonCode = (typeof BOARD_IMPORT_CONFLICT_REASON_CODES)[number];
+
+export type BoardImportConflictLedgerEntry = {
+  key: string;
+  reasons: BoardImportConflictReasonCode[];
+};
+
 export type BoardImportConflictReasons = {
   sourceDrift: number;
   activeExecution: number;
@@ -639,20 +658,20 @@ export type BoardImportConflictReasons = {
  * Why an in-catalog card is not a fresh backlog match. Drift is that same
  * match after the shared fresh-lifecycle fields are restored, so a new
  * source field counts as drift and a new lifecycle field does not. A card
- * can be both drift and an active execution. The counts do not delete,
- * overwrite, or change the import refusal.
+ * can be both drift and an active execution. Cards the catalog omits are
+ * not entries. The ledger does not delete, overwrite, or change the import
+ * refusal.
  */
-export const boardImportConflictReasons = (
+export const boardImportConflictLedger = (
   manifest: BoardImportManifest,
   existing: readonly BoardImportExistingCard[],
-): BoardImportConflictReasons => {
+): BoardImportConflictLedgerEntry[] => {
   const existingByKey = new Map(existing.map((card) => [boardImportIdentityKey(card), card]));
-  let sourceDrift = 0;
-  let activeExecution = 0;
-  let otherConflict = 0;
+  const entries: BoardImportConflictLedgerEntry[] = [];
   for (const item of manifest.items) {
     if (item.exclude) continue;
-    const card = existingByKey.get(boardImportIdentityKey(item));
+    const key = boardImportIdentityKey(item);
+    const card = existingByKey.get(key);
     if (!card || freshBacklogMatch(item, card, manifest)) continue;
     const drifted = !freshBacklogMatch(item, { ...card, ...BOARD_IMPORT_FRESH_LIFECYCLE }, manifest);
     const active =
@@ -660,12 +679,39 @@ export const boardImportConflictReasons = (
       card.attemptCount > 0 ||
       card.deliveryCount > 0 ||
       card.routeDecisionCount > 0;
-    if (drifted) sourceDrift += 1;
-    if (active) activeExecution += 1;
-    if (!drifted && !active) otherConflict += 1;
+    const reasons = BOARD_IMPORT_CONFLICT_REASON_CODES.filter((code) => {
+      switch (code) {
+        case "active_execution":
+          return active;
+        case "other_conflict":
+          return !drifted && !active;
+        case "source_drift":
+          return drifted;
+        default: {
+          const unreachable: never = code;
+          return unreachable;
+        }
+      }
+    });
+    entries.push({ key, reasons });
   }
-  return { sourceDrift, activeExecution, otherConflict };
+  return entries.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
 };
+
+/** Counts taken from one ledger, so a key cannot be counted and omitted. */
+export const boardImportConflictReasonCounts = (
+  ledger: readonly BoardImportConflictLedgerEntry[],
+): BoardImportConflictReasons => ({
+  sourceDrift: ledger.filter((entry) => entry.reasons.includes("source_drift")).length,
+  activeExecution: ledger.filter((entry) => entry.reasons.includes("active_execution")).length,
+  otherConflict: ledger.filter((entry) => entry.reasons.includes("other_conflict")).length,
+});
+
+export const boardImportConflictReasons = (
+  manifest: BoardImportManifest,
+  existing: readonly BoardImportExistingCard[],
+): BoardImportConflictReasons =>
+  boardImportConflictReasonCounts(boardImportConflictLedger(manifest, existing));
 
 /**
  * Cards of this catalog's source systems whose keys are absent from the

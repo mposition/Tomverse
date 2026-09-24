@@ -203,6 +203,13 @@ run(
     // exactly one owner and one append-only route decision, and a failed
     // decision write must roll the ownership change back.
     "tests/integration/amux-orchestration.db.test.ts",
+    // AMUX one-person review proposals and decisions must be DB-enforced,
+    // append-only, and bound to the task, escalation and audit chain.
+    "tests/integration/amux-agent-review-approval.db.test.ts",
+    // Explicit intake registration writes one backlog card, one body-free
+    // draft, one consumed approval and one audit row, and leaves execution
+    // and credit counts unchanged.
+    "tests/integration/amux-intake-registration.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

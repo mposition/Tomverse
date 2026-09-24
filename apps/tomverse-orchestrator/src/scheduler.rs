@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::tomverse_api::{ClaimResponse, QueueTask, TomverseApi};
 
-const SCORING_VERSION: &str = "amux-global-priority-v1";
+const SCORING_VERSION: &str = "amux-global-priority-v2";
+const RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_ROUTING_PROBES_PER_TICK: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SchedulerDisposition {
@@ -30,20 +33,13 @@ fn claim_disposition(outcome: &ClaimResponse) -> SchedulerDisposition {
     }
 }
 
-fn claim_result_disposition(outcome: &Result<ClaimResponse>) -> SchedulerDisposition {
-    match outcome {
-        Ok(outcome) => claim_disposition(outcome),
-        Err(_) => SchedulerDisposition::Dormant,
-    }
-}
-
 pub fn execution_enabled() -> bool {
     std::env::var("TOMVERSE_AMUX_EXECUTE")
         .ok()
         .is_some_and(|value| value.trim() == "1")
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ScoreBreakdown {
     pub pin: i64,
     pub age_hours: i64,
@@ -52,21 +48,28 @@ pub struct ScoreBreakdown {
     pub dependents: i64,
     pub dependent_weight: i64,
     pub drag: i64,
+    pub urgency: i64,
+    pub capacity_weight: i64,
+    pub incident_bonus: i64,
 }
 
 impl ScoreBreakdown {
-    fn total(&self) -> i64 {
+    pub(crate) fn total(&self) -> i64 {
         self.pin
             + self.age_hours
             + self.type_weight
             + self.priority_weight
             + self.dependent_weight
             + self.drag
+            + self.urgency
+            + self.capacity_weight
+            + self.incident_bonus
     }
 }
 
 pub struct Scheduler {
     api: TomverseApi,
+    scan_offset: usize,
     execution_enabled: bool,
 }
 
@@ -74,20 +77,46 @@ impl Scheduler {
     pub fn new(api: TomverseApi) -> Self {
         Self {
             api,
+            scan_offset: 0,
             execution_enabled: execution_enabled(),
         }
     }
 
-    #[cfg(test)]
-    fn for_test(api: TomverseApi, execution_enabled: bool) -> Self {
-        Self {
-            api,
-            execution_enabled,
-        }
-    }
-
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
+        let mut next_recovery = Instant::now();
         loop {
+            if Instant::now() >= next_recovery {
+                match self.api.execution_recover().await {
+                    Ok(outcome) if outcome.recovered => info!(
+                        reclaimed_executions = outcome.reclaimed.unwrap_or(0),
+                        reclaimed_claims = outcome.reclaimed_claims.unwrap_or(0),
+                        quota_observations_deleted =
+                            outcome.quota_observations_deleted.unwrap_or(0),
+                        more = outcome.more.unwrap_or(false),
+                        "AMUX recovery sweep completed"
+                    ),
+                    Ok(outcome) => info!(
+                        reason = ?outcome.reason,
+                        quota_observations_deleted =
+                            outcome.quota_observations_deleted.unwrap_or(0),
+                        "AMUX execution recovery is disabled; quota evidence swept"
+                    ),
+                    Err(error) => {
+                        warn!(
+                            %error,
+                            incident_id = %uuid::Uuid::new_v4(),
+                            endpoint = "execution_recover",
+                            error_code = "AMUX_RECOVERY_OUTCOME_UNKNOWN",
+                            measured = false,
+                            verdict = "recovery_outcome_unknown_dormant",
+                            "AMUX recovery sweep outcome is unknown; stopping this process run"
+                        );
+                        return Err(anyhow::anyhow!("AMUX_RECOVERY_OUTCOME_UNKNOWN"));
+                    }
+                }
+                next_recovery = Instant::now() + RECOVERY_INTERVAL;
+            }
+
             match self.tick().await {
                 Ok(SchedulerDisposition::Continue) => {}
                 Ok(SchedulerDisposition::Dormant) => {
@@ -96,11 +125,11 @@ impl Scheduler {
                         verdict = "dormant_until_process_restart",
                         "Tomverse AMUX scheduler stopped at a terminal claim containment boundary"
                     );
-
                     return Ok(());
                 }
-                Err(_) => {
+                Err(error) => {
                     warn!(
+                        %error,
                         incident_id = %uuid::Uuid::new_v4(),
                         endpoint = "internal_api",
                         error_code = "AMUX_INTERNAL_API_UNVERIFIED",
@@ -108,11 +137,6 @@ impl Scheduler {
                         verdict = "internal_api_outcome_unknown_dormant",
                         "scheduler stopped after a bounded internal API failure"
                     );
-
-                    // `main` joins the scheduler and runtime with try_join!.
-                    // An Ok here would leave the board loop running after an
-                    // unverified claim, so propagate a terminal error and
-                    // cancel every sibling loop in this process.
                     return Err(anyhow::anyhow!("AMUX_INTERNAL_API_UNVERIFIED"));
                 }
             }
@@ -121,170 +145,227 @@ impl Scheduler {
         }
     }
 
-    async fn tick(&self) -> Result<SchedulerDisposition> {
+    async fn tick(&mut self) -> Result<SchedulerDisposition> {
         let queue = self.api.queue().await?;
-
-        let Some((task, score)) = select_global_priority(queue) else {
-            return Ok(SchedulerDisposition::Continue);
-        };
-
-        info!(
-            task_id = %task.id,
-            priority = %task.priority,
-            kind = %task.kind,
-            dependent_count = task.dependent_count,
-            scheduler_score = score.total(),
-            scoring_version = SCORING_VERSION,
-            "global priority scheduler selected task"
+        let ranked = rank_global_priority_at(queue, Utc::now());
+        // Selection-only observes the highest priority task without taking
+        // ownership or reading worker-specific routing state.
+        let selection_only = !self.execution_enabled;
+        if selection_only {
+            self.scan_offset = 0;
+        }
+        let (start, end) = routing_scan_window(
+            ranked.len(),
+            if selection_only { 0 } else { self.scan_offset },
         );
-
-        // Selection and execution are deliberately separate.
-        if !self.execution_enabled {
+        let queue_len = ranked.len();
+        for (index, (task, score)) in ranked.into_iter().enumerate().skip(start).take(end - start) {
+            // Advance for each attempted candidate, before a fallible request.
+            // Advancing to the end of the window upfront would permanently skip
+            // the remaining candidates after a deterministic API error.
+            self.scan_offset = next_routing_offset(queue_len, index);
             info!(
                 task_id = %task.id,
-                measured = true,
-                verdict = "selection_only",
-                "Tomverse AMUX execution disabled; task was not claimed"
+                priority = %task.priority,
+                kind = %task.kind,
+                dependent_count = task.dependent_count,
+                scheduler_score = score.total(),
+                server_scheduler_score = task.scheduler_score,
+                scoring_version = %task.scoring_version,
+                "global priority scheduler selected task"
             );
-            return Ok(SchedulerDisposition::Continue);
-        }
 
-        let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
-
-        if !snapshot.eligible {
-            warn!(
-                task_id = %task.id,
-                reason = ?snapshot.reason,
-                measured = false,
-                verdict = "worker_routing_unavailable",
-                "Tomverse AMUX refused claim because worker routing facts were unavailable"
-            );
-            return Ok(SchedulerDisposition::Continue);
-        }
-
-        let Some(profile) = snapshot.task else {
-            warn!(
-                task_id = %task.id,
-                measured = false,
-                verdict = "invalid_routing_snapshot",
-                "Tomverse AMUX routing snapshot was eligible but had no task profile"
-            );
-            return Ok(SchedulerDisposition::Continue);
-        };
-
-        let routing = crate::worker::score_execute_candidates(&profile, &snapshot.candidates);
-
-        let Some(worker) = routing.selected_worker.clone() else {
-            warn!(
-                task_id = %task.id,
-                preferred_worker = ?routing.preferred_worker,
-                candidate_count = routing.candidates.len(),
-                measured = true,
-                verdict = "no_selected_worker",
-                "Tomverse AMUX worker router found no eligible worker"
-            );
-            return Ok(SchedulerDisposition::Continue);
-        };
-
-        info!(
-            task_id = %task.id,
-            preferred_worker = ?routing.preferred_worker,
-            selected_worker = %worker,
-            preferred_score = ?routing.preferred_score,
-            selected_score = ?routing.selected_score,
-            candidate_count = routing.candidates.len(),
-            measured = true,
-            verdict = "selected",
-            "Tomverse AMUX worker router selected worker"
-        );
-
-        // Worker scoring is measurable before execution lifecycle is complete,
-        // but ownership must not be stranded on a worker Tomverse cannot yet
-        // start and deliver to.
-        if !snapshot.execution_ready {
-            warn!(
-                task_id = %task.id,
-                selected_worker = %worker,
-                measured = true,
-                verdict = "execution_lifecycle_unavailable",
-                "Tomverse AMUX refused ownership claim because execution lifecycle is not ready"
-            );
-            return Ok(SchedulerDisposition::Continue);
-        }
-
-        let signals = serde_json::json!({
-            "scheduler": &score,
-            "routing": {
-                "scoring_version": "amux-worker-router-v1",
-                "preferred_worker": &routing.preferred_worker,
-                "selected_worker": &routing.selected_worker,
-                "preferred_score": routing.preferred_score,
-                "selected_score": routing.selected_score,
-                "candidates": &routing.candidates,
+            // Selection and execution are deliberately separate.
+            if selection_only {
+                self.scan_offset = 0;
+                info!(
+                    task_id = %task.id,
+                    measured = true,
+                    verdict = "selection_only",
+                    "Tomverse AMUX execution disabled; task was not claimed"
+                );
+                return Ok(SchedulerDisposition::Continue);
             }
-        });
 
-        let claim_result = self
-            .api
-            .claim(&task.id, &worker, task.revision, score.total(), signals)
-            .await;
-        let claim_result_disposition = claim_result_disposition(&claim_result);
-        let outcome = match claim_result {
-            Ok(outcome) => outcome,
-            Err(_) => {
+            let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
+
+            if !snapshot.eligible {
                 warn!(
                     task_id = %task.id,
-                    task_revision = task.revision,
-                    worker = %worker,
-                    incident_id = %uuid::Uuid::new_v4(),
-                    endpoint = "claim",
-                    error_code = "AMUX_CLAIM_OUTCOME_UNKNOWN",
+                    reason = ?snapshot.reason,
                     measured = false,
-                    verdict = "claim_outcome_unknown_dormant",
-                    "Tomverse AMUX stopped after an unverified claim outcome"
+                    verdict = "worker_routing_unavailable",
+                    "Tomverse AMUX refused claim because worker routing facts were unavailable"
                 );
-
-                return Err(anyhow::anyhow!("AMUX_CLAIM_OUTCOME_UNKNOWN"));
+                continue;
             }
-        };
 
-        let verdict = claim_verdict(&outcome);
+            let Some(profile) = snapshot.task else {
+                warn!(
+                    task_id = %task.id,
+                    measured = false,
+                    verdict = "invalid_routing_snapshot",
+                    "Tomverse AMUX routing snapshot was eligible but had no task profile"
+                );
+                continue;
+            };
 
-        if let ClaimResponse::Refused { reason } = &outcome {
-            warn!(
+            let routing = crate::worker::score_execute_candidates(&profile, &snapshot.candidates);
+
+            let Some(worker) = routing.selected_worker.clone() else {
+                warn!(
+                    task_id = %task.id,
+                    preferred_worker = ?routing.preferred_worker,
+                    candidate_count = routing.candidates.len(),
+                    measured = true,
+                    verdict = "no_selected_worker",
+                    "Tomverse AMUX worker router found no eligible worker"
+                );
+                continue;
+            };
+
+            info!(
+                task_id = %task.id,
+                preferred_worker = ?routing.preferred_worker,
+                selected_worker = %worker,
+                preferred_score = ?routing.preferred_score,
+                selected_score = ?routing.selected_score,
+                candidate_count = routing.candidates.len(),
+                measured = true,
+                verdict = "selected",
+                "Tomverse AMUX worker router selected worker"
+            );
+
+            // Ownership must not be stranded unless a matching live worker can
+            // accept the execution immediately.
+            if !snapshot.execution_ready {
+                warn!(
+                    task_id = %task.id,
+                    selected_worker = %worker,
+                    measured = true,
+                    verdict = "execution_lifecycle_unavailable",
+                    "Tomverse AMUX refused ownership claim because execution lifecycle is not ready"
+                );
+                continue;
+            }
+
+            let server_v2 = task.scoring_version == SCORING_VERSION;
+            let scheduler_signals = if server_v2 {
+                serde_json::json!(&score)
+            } else {
+                serde_json::json!({
+                    "pin": score.pin,
+                    "age_hours": score.age_hours,
+                    "type_weight": score.type_weight,
+                    "priority_weight": score.priority_weight,
+                    "dependents": score.dependents,
+                    "dependent_weight": score.dependent_weight,
+                    "drag": score.drag,
+                })
+            };
+            let worker_router_version = if server_v2 {
+                "amux-worker-router-v2"
+            } else {
+                "amux-worker-router-v1"
+            };
+            let scoring_version = if server_v2 {
+                SCORING_VERSION
+            } else {
+                "amux-global-priority-v1"
+            };
+            let signals = serde_json::json!({
+                "scheduler": scheduler_signals,
+                "routing": {
+                    "scoring_version": worker_router_version,
+                    "preferred_worker": &routing.preferred_worker,
+                    "selected_worker": &routing.selected_worker,
+                    "preferred_score": routing.preferred_score,
+                    "selected_score": routing.selected_score,
+                    "candidates": &routing.candidates,
+                }
+            });
+
+            let claim_result = self
+                .api
+                .claim(
+                    &task.id,
+                    &worker,
+                    task.revision,
+                    score.total(),
+                    scoring_version,
+                    signals,
+                )
+                .await;
+            let outcome = match claim_result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        task_id = %task.id,
+                        task_revision = task.revision,
+                        worker = %worker,
+                        incident_id = %uuid::Uuid::new_v4(),
+                        endpoint = "claim",
+                        error_code = "AMUX_CLAIM_OUTCOME_UNKNOWN",
+                        measured = false,
+                        verdict = "claim_outcome_unknown_dormant",
+                        "Tomverse AMUX stopped after an unverified claim outcome"
+                    );
+                    return Err(anyhow::anyhow!("AMUX_CLAIM_OUTCOME_UNKNOWN"));
+                }
+            };
+            let verdict = claim_verdict(&outcome);
+            let disposition = claim_disposition(&outcome);
+            let (claimed, revision, decision_id, reason) = match &outcome {
+                ClaimResponse::Claimed {
+                    revision,
+                    decision_id,
+                } => (true, Some(*revision), Some(decision_id.as_str()), None),
+                ClaimResponse::CasLost => (false, None, None, None),
+                ClaimResponse::Refused { reason } => (false, None, None, Some(reason.as_str())),
+            };
+
+            info!(
                 task_id = %task.id,
                 worker = %worker,
-                reason = reason.as_str(),
+                claimed,
+                revision = ?revision,
+                decision_id = ?decision_id,
+                reason = ?reason,
                 measured = true,
                 verdict,
-                "Tomverse AMUX scheduler became dormant after a closed claim refusal"
+                "Tomverse task claim result"
             );
-            return Ok(claim_result_disposition);
+            if claimed {
+                self.scan_offset = 0;
+                return Ok(SchedulerDisposition::Continue);
+            }
+            // Claim refusals and ambiguous CAS outcomes are terminal for this
+            // process. A restart performs an authoritative fresh read instead of
+            // duplicating a decision whose outcome may be uncertain.
+            return Ok(disposition);
         }
-
-        let (claimed, revision, decision_id, reason) = match &outcome {
-            ClaimResponse::Claimed {
-                revision,
-                decision_id,
-            } => (true, Some(*revision), Some(decision_id.as_str()), None),
-            ClaimResponse::CasLost => (false, None, None, None),
-            ClaimResponse::Refused { reason } => (false, None, None, Some(reason)),
-        };
-
-        info!(
-            task_id = %task.id,
-            worker = %worker,
-            claimed,
-            revision = ?revision,
-            decision_id = ?decision_id,
-            reason = ?reason,
-            measured = true,
-            verdict,
-            "Tomverse task claim result"
-        );
-
-        Ok(claim_result_disposition)
+        Ok(SchedulerDisposition::Continue)
     }
+}
+
+fn next_routing_offset(queue_len: usize, index: usize) -> usize {
+    if index + 1 == queue_len {
+        0
+    } else {
+        index + 1
+    }
+}
+
+fn routing_scan_window(queue_len: usize, offset: usize) -> (usize, usize) {
+    if queue_len == 0 {
+        return (0, 0);
+    }
+    let start = if offset >= queue_len { 0 } else { offset };
+    let end = start
+        .saturating_add(MAX_ROUTING_PROBES_PER_TICK)
+        .min(queue_len);
+    (start, end)
 }
 
 fn type_weight(kind: &str) -> i64 {
@@ -316,6 +397,14 @@ fn age_hours_at(task: &QueueTask, now: DateTime<Utc>) -> i64 {
 }
 
 fn score_at(task: &QueueTask, now: DateTime<Utc>) -> ScoreBreakdown {
+    // A v2 queue row already carries the server-authoritative breakdown.
+    // Recomputing even its age term here would create a second clock boundary
+    // between queue selection and claim. Legacy rows have no such evidence,
+    // so retain the original local scorer only for rolling compatibility.
+    if task.scoring_version == SCORING_VERSION {
+        return task.scheduler_signals.clone();
+    }
+
     let dependents = task.dependent_count.max(0);
 
     ScoreBreakdown {
@@ -326,17 +415,24 @@ fn score_at(task: &QueueTask, now: DateTime<Utc>) -> ScoreBreakdown {
         dependents,
         dependent_weight: dependents.saturating_mul(5),
         drag: task.drag.clamp(0, 8),
+        urgency: 0,
+        capacity_weight: 0,
+        incident_bonus: 0,
     }
 }
 
-fn select_global_priority(tasks: Vec<QueueTask>) -> Option<(QueueTask, ScoreBreakdown)> {
-    select_global_priority_at(tasks, Utc::now())
-}
-
+#[cfg(test)]
 fn select_global_priority_at(
     tasks: Vec<QueueTask>,
     now: DateTime<Utc>,
 ) -> Option<(QueueTask, ScoreBreakdown)> {
+    rank_global_priority_at(tasks, now).into_iter().next()
+}
+
+fn rank_global_priority_at(
+    tasks: Vec<QueueTask>,
+    now: DateTime<Utc>,
+) -> Vec<(QueueTask, ScoreBreakdown)> {
     let mut ranked: Vec<_> = tasks
         .into_iter()
         .map(|task| {
@@ -353,7 +449,7 @@ fn select_global_priority_at(
             .then(a_task.id.cmp(&b_task.id))
     });
 
-    ranked.into_iter().next()
+    ranked
 }
 
 #[cfg(test)]
@@ -361,222 +457,6 @@ mod tests {
     use super::*;
     use crate::tomverse_api::ClaimRefusalReason;
     use chrono::TimeZone;
-    use std::{
-        io::{ErrorKind, Read, Write},
-        net::TcpListener,
-        sync::{
-            atomic::{AtomicBool, AtomicUsize, Ordering},
-            mpsc, Arc,
-        },
-        thread,
-    };
-
-    const QUEUE_BODY: &str = r#"[{"id":"TASK-1","kind":"code","priority":"p1","pinned":false,"drag":0,"revision":1,"created_at":"2026-09-20T12:00:00Z","dependent_count":0}]"#;
-    const ROUTING_BODY: &str = r#"{"eligible":true,"execution_ready":true,"reason":null,"task":{"task_kind":"feature","complexity":5,"risk":1,"files_expected":1},"candidates":[{"worker":{"worker_name":"codex-test","provider":"codex","model":null,"routing_roles":["feature"],"running":false,"status":"stopped","dispatch_ready":false,"archived":false,"paused":false,"isolated":false,"blocked":false},"predicted_success":1.0,"quota_remaining":1.0,"expected_speed":1.0,"low_rework":1.0,"low_human_attention":1.0,"cost_efficiency":1.0,"provider_exhausted":false}]}"#;
-
-    enum SlowStage {
-        Queue,
-        Routing,
-        Claim,
-    }
-
-    enum ServerMode {
-        ClaimResponse { status: String, body: String },
-        CommitThenDropClaim,
-        QueueResponse { status: String, body: String },
-        Stall(SlowStage),
-        TrickleClaim,
-    }
-
-    struct DoneOnDrop(Option<mpsc::Sender<()>>);
-
-    impl Drop for DoneOnDrop {
-        fn drop(&mut self) {
-            if let Some(done) = self.0.take() {
-                let _ = done.send(());
-            }
-        }
-    }
-
-    struct SchedulerTestServer {
-        api: TomverseApi,
-        claim_requests: Arc<AtomicUsize>,
-        committed_claims: Arc<AtomicUsize>,
-        requests: Arc<AtomicUsize>,
-        stop: Arc<AtomicBool>,
-        done: mpsc::Receiver<()>,
-        handle: Option<thread::JoinHandle<()>>,
-    }
-
-    impl SchedulerTestServer {
-        fn spawn(mode: ServerMode) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.set_nonblocking(true).unwrap();
-            let address = listener.local_addr().unwrap();
-            let claim_requests = Arc::new(AtomicUsize::new(0));
-            let committed_claims = Arc::new(AtomicUsize::new(0));
-            let requests = Arc::new(AtomicUsize::new(0));
-            let stop = Arc::new(AtomicBool::new(false));
-            let (done_tx, done) = mpsc::channel();
-            let server_claim_requests = Arc::clone(&claim_requests);
-            let server_committed_claims = Arc::clone(&committed_claims);
-            let server_requests = Arc::clone(&requests);
-            let server_stop = Arc::clone(&stop);
-
-            let handle = thread::spawn(move || {
-                let _done = DoneOnDrop(Some(done_tx));
-
-                while !server_stop.load(Ordering::SeqCst) {
-                    let (mut stream, _) = match listener.accept() {
-                        Ok(connection) => connection,
-                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(5));
-                            continue;
-                        }
-                        Err(error) => panic!("scheduler test server accept failed: {error}"),
-                    };
-
-                    stream
-                        .set_read_timeout(Some(Duration::from_millis(200)))
-                        .unwrap();
-                    stream
-                        .set_write_timeout(Some(Duration::from_millis(200)))
-                        .unwrap();
-
-                    let mut request = [0_u8; 16 * 1024];
-                    let read = match stream.read(&mut request) {
-                        Ok(read) => read,
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                ErrorKind::WouldBlock | ErrorKind::TimedOut
-                            ) =>
-                        {
-                            continue;
-                        }
-                        Err(error) => panic!("scheduler test request read failed: {error}"),
-                    };
-                    server_requests.fetch_add(1, Ordering::SeqCst);
-                    let request = String::from_utf8_lossy(&request[..read]);
-                    let request_line = request.lines().next().unwrap_or_default();
-
-                    let stage = if request_line.contains("/api/internal/amux/queue") {
-                        SlowStage::Queue
-                    } else if request_line.contains("/api/internal/amux/routing-snapshot") {
-                        SlowStage::Routing
-                    } else if request_line.contains("/api/internal/amux/claim") {
-                        server_claim_requests.fetch_add(1, Ordering::SeqCst);
-                        SlowStage::Claim
-                    } else {
-                        panic!("unexpected scheduler request: {request_line}");
-                    };
-
-                    let should_stall = matches!(
-                        (&mode, &stage),
-                        (ServerMode::Stall(SlowStage::Queue), SlowStage::Queue)
-                            | (ServerMode::Stall(SlowStage::Routing), SlowStage::Routing)
-                            | (ServerMode::Stall(SlowStage::Claim), SlowStage::Claim)
-                    );
-                    if matches!(
-                        (&mode, &stage),
-                        (ServerMode::CommitThenDropClaim, SlowStage::Claim)
-                    ) {
-                        // The mock persisted the claim but lost the HTTP
-                        // response before the scheduler could confirm it.
-                        server_committed_claims.fetch_add(1, Ordering::SeqCst);
-                        continue;
-                    }
-                    if should_stall {
-                        while !server_stop.load(Ordering::SeqCst) {
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                        continue;
-                    }
-
-                    if matches!(
-                        (&mode, &stage),
-                        (ServerMode::TrickleClaim, SlowStage::Claim)
-                    ) {
-                        let body = br#"{"claimed":false,"reason":"execution_api_disabled"}"#;
-                        let _ = write!(
-                            stream,
-                            "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-                        );
-
-                        for byte in body {
-                            if server_stop.load(Ordering::SeqCst) {
-                                break;
-                            }
-                            if write!(stream, "1\r\n{}\r\n", char::from(*byte)).is_err()
-                                || stream.flush().is_err()
-                            {
-                                break;
-                            }
-                            thread::sleep(Duration::from_millis(40));
-                        }
-                        continue;
-                    }
-
-                    let (status, body) = match stage {
-                        SlowStage::Queue => match &mode {
-                            ServerMode::QueueResponse { status, body } => {
-                                (status.as_str(), body.as_str())
-                            }
-                            _ => ("200 OK", QUEUE_BODY),
-                        },
-                        SlowStage::Routing => ("200 OK", ROUTING_BODY),
-                        SlowStage::Claim => match &mode {
-                            ServerMode::ClaimResponse { status, body } => {
-                                (status.as_str(), body.as_str())
-                            }
-                            ServerMode::Stall(_)
-                            | ServerMode::CommitThenDropClaim
-                            | ServerMode::TrickleClaim
-                            | ServerMode::QueueResponse { .. } => {
-                                panic!("claim mode did not handle the claim response")
-                            }
-                        },
-                    };
-
-                    write!(
-                        stream,
-                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len(),
-                    )
-                    .unwrap();
-                    stream.flush().unwrap();
-                }
-            });
-
-            let api = TomverseApi::for_test_with_timeouts(
-                format!("http://{address}"),
-                Duration::from_millis(50),
-                Duration::from_millis(200),
-            );
-
-            Self {
-                api,
-                claim_requests,
-                committed_claims,
-                requests,
-                stop,
-                done,
-                handle: Some(handle),
-            }
-        }
-
-        fn finish(mut self) {
-            self.stop.store(true, Ordering::SeqCst);
-            self.done
-                .recv_timeout(Duration::from_secs(1))
-                .expect("scheduler test server did not stop within one second");
-            self.handle
-                .take()
-                .expect("scheduler test server handle missing")
-                .join()
-                .expect("scheduler test server panicked");
-        }
-    }
 
     fn task(id: &str, kind: &str, priority: &str, created_at: &str) -> QueueTask {
         QueueTask {
@@ -588,6 +468,20 @@ mod tests {
             revision: 0,
             created_at: created_at.into(),
             dependent_count: 0,
+            scheduler_score: 0,
+            scoring_version: String::new(),
+            scheduler_signals: ScoreBreakdown {
+                pin: 0,
+                age_hours: 0,
+                type_weight: 0,
+                priority_weight: 0,
+                dependents: 0,
+                dependent_weight: 0,
+                drag: 0,
+                urgency: 0,
+                capacity_weight: 0,
+                incident_bonus: 0,
+            },
         }
     }
 
@@ -595,41 +489,6 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 9, 20, 12, 0, 0)
             .single()
             .unwrap()
-    }
-
-    async fn assert_scheduler_stops(
-        mode: ServerMode,
-        expected_claims: usize,
-        expected_error: bool,
-    ) {
-        let server = SchedulerTestServer::spawn(mode);
-        let run = tokio::time::timeout(
-            Duration::from_secs(1),
-            Scheduler::for_test(server.api.clone(), true).run(),
-        )
-        .await;
-        let claim_requests = server.claim_requests.load(Ordering::SeqCst);
-        server.finish();
-
-        let outcome = run.expect("scheduler did not stop within the bounded test timeout");
-        assert_eq!(outcome.is_err(), expected_error);
-        assert_eq!(claim_requests, expected_claims);
-    }
-
-    async fn assert_scheduler_stops_after_claim_response(
-        status: &str,
-        body: &str,
-        expected_error: bool,
-    ) {
-        assert_scheduler_stops(
-            ServerMode::ClaimResponse {
-                status: status.to_owned(),
-                body: body.to_owned(),
-            },
-            1,
-            expected_error,
-        )
-        .await;
     }
 
     #[test]
@@ -641,6 +500,62 @@ mod tests {
     }
 
     #[test]
+    fn claim_refusals_and_cas_loss_make_the_scheduler_dormant() {
+        assert_eq!(
+            claim_disposition(&ClaimResponse::CasLost),
+            SchedulerDisposition::Dormant,
+        );
+        for reason in ClaimRefusalReason::CLOSED {
+            let outcome = ClaimResponse::Refused { reason: *reason };
+            assert_eq!(claim_disposition(&outcome), SchedulerDisposition::Dormant);
+            assert_eq!(claim_verdict(&outcome), reason.as_str());
+        }
+    }
+
+    #[test]
+    fn legacy_queue_payload_defaults_advanced_signals_for_rolling_deploys() {
+        let legacy: QueueTask = serde_json::from_value(serde_json::json!({
+            "id": "LEGACY",
+            "kind": "code",
+            "priority": "p1",
+            "pinned": false,
+            "drag": 0,
+            "revision": 0,
+            "created_at": "2026-09-20T12:00:00Z",
+            "dependent_count": 0
+        }))
+        .unwrap();
+
+        assert_eq!(legacy.scoring_version, "");
+        assert_eq!(legacy.scheduler_signals, ScoreBreakdown::default());
+        assert_eq!(score_at(&legacy, now()).urgency, 0);
+    }
+
+    #[test]
+    fn v2_queue_payload_uses_the_server_authoritative_breakdown_verbatim() {
+        let mut authoritative = task("SERVER-SCORED", "chore", "p3", "2026-09-01T00:00:00Z");
+        authoritative.scoring_version = SCORING_VERSION.into();
+        authoritative.scheduler_score = 173;
+        authoritative.scheduler_signals = ScoreBreakdown {
+            pin: 0,
+            age_hours: 7,
+            type_weight: 1,
+            priority_weight: 2,
+            dependents: 3,
+            dependent_weight: 15,
+            drag: 8,
+            urgency: 120,
+            capacity_weight: 20,
+            incident_bonus: 0,
+        };
+
+        let score = score_at(&authoritative, now());
+
+        assert_eq!(score, authoritative.scheduler_signals);
+        assert_eq!(score.total(), authoritative.scheduler_score);
+    }
+
+    #[test]
     fn fresh_p0_outranks_a_modestly_older_p3() {
         let tasks = vec![
             task("OLD-P3", "chore", "p3", "2026-09-19T20:00:00Z"),
@@ -649,6 +564,35 @@ mod tests {
 
         let selected = select_global_priority_at(tasks, now()).unwrap();
         assert_eq!(selected.0.id, "NEW-P0");
+    }
+
+    #[test]
+    fn ranked_queue_keeps_lower_priority_tasks_available_for_fallthrough() {
+        let ranked = rank_global_priority_at(
+            vec![
+                task("LOWER", "chore", "p3", "2026-09-20T11:00:00Z"),
+                task("UNROUTABLE-TOP", "bug", "p0", "2026-09-20T11:00:00Z"),
+            ],
+            now(),
+        );
+
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].0.id, "UNROUTABLE-TOP");
+        assert_eq!(ranked[1].0.id, "LOWER");
+    }
+
+    #[test]
+    fn routing_fallthrough_is_bounded_and_reaches_later_candidates() {
+        assert_eq!(routing_scan_window(37, 0), (0, 16));
+        assert_eq!(routing_scan_window(37, 16), (16, 32));
+        assert_eq!(routing_scan_window(37, 32), (32, 37));
+        assert_eq!(routing_scan_window(37, 100), (0, 16));
+        assert_eq!(routing_scan_window(0, 100), (0, 0));
+        // An error on the first request retries from the *next* candidate,
+        // without losing the other fifteen candidates in the current window.
+        assert_eq!(next_routing_offset(37, 0), 1);
+        assert_eq!(routing_scan_window(37, next_routing_offset(37, 0)), (1, 17));
+        assert_eq!(next_routing_offset(37, 36), 0);
     }
 
     #[test]
@@ -695,154 +639,5 @@ mod tests {
 
         let selected = select_global_priority_at(tasks, now()).unwrap();
         assert_eq!(selected.0.id, "A");
-    }
-
-    #[test]
-    fn claim_kill_switch_refusal_is_not_a_generic_claim_loss() {
-        let outcome = ClaimResponse::Refused {
-            reason: ClaimRefusalReason::ExecutionApiDisabled,
-        };
-
-        assert_eq!(claim_verdict(&outcome), "execution_api_disabled");
-    }
-
-    #[tokio::test]
-    async fn scheduler_run_stops_after_one_claim_for_every_closed_refusal() {
-        for reason in ClaimRefusalReason::CLOSED {
-            assert_scheduler_stops_after_claim_response(
-                "409 Conflict",
-                &format!(r#"{{"claimed":false,"reason":"{}"}}"#, reason.as_str(),),
-                false,
-            )
-            .await;
-        }
-    }
-
-    #[tokio::test]
-    async fn contradictory_claim_responses_are_dormant_with_zero_retries() {
-        let invalid = [
-            (
-                "200 OK",
-                r#"{"claimed":true,"revision":4,"decision_id":"decision-1","reason":"execution_api_disabled"}"#,
-            ),
-            (
-                "409 Conflict",
-                r#"{"claimed":true,"revision":4,"decision_id":"decision-1","reason":"execution_api_disabled"}"#,
-            ),
-            ("409 Conflict", r#"{"claimed":false}"#),
-            (
-                "200 OK",
-                r#"{"claimed":false,"reason":"execution_api_disabled"}"#,
-            ),
-            ("200 OK", r#"{"claimed":true,"revision":4}"#),
-            ("200 OK", r#"{"claimed":true,"decision_id":"decision-1"}"#),
-            ("200 OK", r#"{"claimed":false,"revision":4}"#),
-            ("200 OK", r#"{"claimed":false,"decision_id":"decision-1"}"#),
-            (
-                "201 Created",
-                r#"{"claimed":true,"revision":4,"decision_id":"decision-1"}"#,
-            ),
-            ("204 No Content", ""),
-            ("206 Partial Content", r#"{"claimed":false}"#),
-        ];
-
-        for (status, body) in invalid {
-            assert_scheduler_stops_after_claim_response(status, body, true).await;
-        }
-    }
-
-    #[tokio::test]
-    async fn lost_claim_response_cancels_runtime_before_execution_start() {
-        let server = SchedulerTestServer::spawn(ServerMode::CommitThenDropClaim);
-        let committed_claims = Arc::clone(&server.committed_claims);
-        let execution_start_calls = Arc::new(AtomicUsize::new(0));
-        let runtime_start_calls = Arc::clone(&execution_start_calls);
-
-        let mock_runtime = async move {
-            let mut tasks = tokio::task::JoinSet::new();
-            tasks.spawn(async move {
-                while committed_claims.load(Ordering::SeqCst) == 0 {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-                // This is the same spawned-task ownership pattern used by
-                // RuntimeService. If its JoinSet survives the scheduler's
-                // unknown outcome, BoardDriver would start this execution.
-                tokio::time::sleep(Duration::from_millis(400)).await;
-                runtime_start_calls.fetch_add(1, Ordering::SeqCst);
-            });
-            while let Some(joined) = tasks.join_next().await {
-                joined?;
-            }
-            Ok::<(), anyhow::Error>(())
-        };
-
-        let outcome = tokio::time::timeout(Duration::from_secs(1), async {
-            crate::supervise_amux(
-                Scheduler::for_test(server.api.clone(), true).run(),
-                mock_runtime,
-            )
-            .await
-        })
-        .await
-        .expect("the unverified claim must stop the process loops");
-
-        assert!(outcome.is_err());
-        assert_eq!(server.committed_claims.load(Ordering::SeqCst), 1);
-        tokio::time::sleep(Duration::from_millis(450)).await;
-        assert_eq!(execution_start_calls.load(Ordering::SeqCst), 0);
-        server.finish();
-    }
-
-    #[tokio::test]
-    async fn queue_wire_overflow_or_private_fields_never_reach_routing_or_claim() {
-        let row = &QUEUE_BODY[1..QUEUE_BODY.len() - 1];
-        let overflow = format!("[{}]", vec![row; 513].join(","));
-        let cases = [
-            ("200 OK", r#"[{"id":"TASK-1","title":"private","kind":"code","priority":"p1","pinned":false,"drag":0,"revision":1,"created_at":"2026-09-20T12:00:00Z","dependent_count":0}]"#.to_owned()),
-            ("200 OK", overflow),
-            ("201 Created", QUEUE_BODY.to_owned()),
-        ];
-        for (status, body) in cases {
-            let server = SchedulerTestServer::spawn(ServerMode::QueueResponse {
-                status: status.to_owned(),
-                body: body.to_owned(),
-            });
-            let api = server.api.clone();
-            tokio::time::timeout(Duration::from_secs(1), Scheduler::for_test(api, true).run())
-                .await
-                .expect("scheduler must become dormant")
-                .expect_err("invalid queue must stop the full runtime");
-            assert_eq!(server.requests.load(Ordering::SeqCst), 1);
-            assert_eq!(server.claim_requests.load(Ordering::SeqCst), 0);
-            server.finish();
-        }
-    }
-
-    #[tokio::test]
-    async fn bounded_internal_deadlines_stop_stalls_trickles_and_partial_server_use() {
-        for mode in [
-            ServerMode::Stall(SlowStage::Queue),
-            ServerMode::Stall(SlowStage::Routing),
-            ServerMode::Stall(SlowStage::Claim),
-            ServerMode::TrickleClaim,
-        ] {
-            let expected_claims = usize::from(matches!(
-                &mode,
-                ServerMode::Stall(SlowStage::Claim) | ServerMode::TrickleClaim
-            ));
-            assert_scheduler_stops(mode, expected_claims, true).await;
-        }
-
-        // Regression: the server no longer blocks forever waiting for a fixed
-        // queue/routing/claim request count before its thread can be joined.
-        let server = SchedulerTestServer::spawn(ServerMode::ClaimResponse {
-            status: "409 Conflict".to_owned(),
-            body: r#"{"claimed":false,"reason":"execution_api_disabled"}"#.to_owned(),
-        });
-        let queue = server.api.queue().await.unwrap();
-        assert_eq!(queue.len(), 1);
-        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
-        assert_eq!(server.claim_requests.load(Ordering::SeqCst), 0);
-        server.finish();
     }
 }

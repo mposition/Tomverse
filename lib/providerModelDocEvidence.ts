@@ -18,6 +18,7 @@ import {
   parseAnthropicPricingPage,
   parseOpenAiModelPage,
   parseOpenAiStandardPricingTable,
+  type AnthropicPricingPage,
   promotionNotices,
   type DocEvidenceSource,
   type ProviderModelDocEvidenceStatus,
@@ -25,6 +26,13 @@ import {
   type ProviderModelDocParse,
   type ProviderModelDocProvider,
 } from "@/lib/providerModelDocsCore";
+import {
+  PROVIDER_MODEL_DOC_HOSTS,
+  PROVIDER_MODEL_DOC_SOURCES,
+  machineReadableDocProviders,
+  type ProviderModelDocSource,
+} from "@/lib/providerModelDocSources";
+import { genericModelFromDocs, modelPageNoticeAppliesTo } from "@/lib/providerModelDocTables";
 
 export type { ProviderModelDocEvidenceSummary };
 
@@ -43,8 +51,12 @@ export type { ProviderModelDocEvidenceSummary };
  * else's documentation for rows nobody will look at.
  */
 
-/** Hosts a documentation read may reach. A redirect anywhere else is a failure, not a follow. */
-const DOCUMENT_HOSTS = new Set(["developers.openai.com", "platform.claude.com"]);
+/**
+ * Hosts a documentation read may reach. A redirect anywhere else is a failure,
+ * not a follow. Derived from the source table so a provider cannot be added to
+ * one and forgotten in the other.
+ */
+const DOCUMENT_HOSTS = new Set(PROVIDER_MODEL_DOC_HOSTS);
 const DOCUMENT_TIMEOUT_MS = 10_000;
 const DOCUMENT_MAX_BYTES = 1_500_000;
 /**
@@ -60,6 +72,16 @@ const PAGE_CONCURRENCY = 3;
  * started past this; what was not reached is reported as not read.
  */
 const READ_BUDGET_MS = 45_000;
+
+/** The shared pricing document for one provider, or null when it publishes none. */
+const pricingMarkdownUrl = (provider: string): string | null => {
+  if (provider === "openai") return OPENAI_PRICING_MARKDOWN_URL;
+  if (provider === "anthropic") return ANTHROPIC_PRICING_MARKDOWN_URL;
+  return (
+    (PROVIDER_MODEL_DOC_SOURCES as Record<string, ProviderModelDocSource | undefined>)[provider]
+      ?.pricingUrl ?? null
+  );
+};
 
 type FetchedDocument =
   | { ok: true; url: string; body: string; digest: string }
@@ -146,6 +168,130 @@ type EvidenceWrite = {
   sources: DocEvidenceSource[];
   parse: ProviderModelDocParse | null;
   problems: string[];
+};
+
+type OpenAiPricingTable = ReturnType<typeof parseOpenAiStandardPricingTable>;
+
+/**
+ * One model's documents, read the same way the daily scan reads them.
+ *
+ * The scan shares one pricing page across a provider's queue. An adoption
+ * form asks for one model, so it fetches that provider's page itself and then
+ * calls this. The branches stay here so the two callers cannot grow apart.
+ */
+const readModelEvidence = async (input: {
+  provider: ProviderModelDocProvider;
+  apiModel: string;
+  displayName: string | null;
+  shared: FetchedDocument | undefined;
+  openAiTable: OpenAiPricingTable | null;
+  anthropicPage: AnthropicPricingPage | null;
+  noticesFor: (apiModel: string) => string[];
+  noteModelPageNotices: (apiModel: string, markdown: string) => void;
+}): Promise<EvidenceWrite> => {
+  const { provider, apiModel, shared } = input;
+  const sharedSource: DocEvidenceSource[] = shared
+    ? [{ url: shared.url, digest: shared.ok ? shared.digest : null }]
+    : [];
+
+  if (provider === "anthropic") {
+    if (!shared?.ok || !input.anthropicPage) {
+      return {
+        provider,
+        apiModel,
+        status: shared?.ok
+          ? "parse_failed"
+          : shared?.status === "not_found"
+            ? "fetch_failed"
+            : (shared?.status ?? "fetch_failed"),
+        sources: sharedSource,
+        parse: null,
+        problems: [shared?.ok ? "parse_skipped" : (shared?.problem ?? "no_source")],
+      };
+    }
+    const parse = anthropicModelFromPricing(input.anthropicPage, input.displayName);
+    return {
+      provider,
+      apiModel,
+      status: parse.status,
+      sources: sharedSource,
+      parse,
+      problems: parse.problems,
+    };
+  }
+
+  if (provider === "openai") {
+    const page = await fetchDocument(openAiModelMarkdownUrl(apiModel));
+    const sources = [
+      { url: page.url, digest: page.ok ? page.digest : null },
+      ...sharedSource,
+    ];
+    if (!page.ok) {
+      return { provider, apiModel, status: page.status, sources, parse: null, problems: [page.problem] };
+    }
+    input.noteModelPageNotices(apiModel, page.body);
+    const parse = parseOpenAiModelPage({
+      apiModel,
+      modelPage: page.body,
+      pricingTable: input.openAiTable,
+    });
+    const tableProblems = shared?.ok
+      ? (input.openAiTable?.problems ?? []).map((problem) => `pricing_table:${problem}`)
+      : [`pricing_table:${shared?.problem ?? "no_source"}`];
+    const problems = [...parse.problems, ...tableProblems];
+    return {
+      provider,
+      apiModel,
+      status: parse.status,
+      sources,
+      parse: parse.status === "parsed" ? { ...parse, problems } : parse,
+      problems,
+    };
+  }
+
+  const source = (
+    PROVIDER_MODEL_DOC_SOURCES as Record<string, ProviderModelDocSource | undefined>
+  )[provider];
+  const modelPageUrl = source?.modelPageUrl?.(apiModel) ?? null;
+  const modelPage = modelPageUrl ? await fetchDocument(modelPageUrl) : null;
+  const sources = [
+    ...sharedSource,
+    ...(modelPage
+      ? [{ url: modelPage.url, digest: modelPage.ok ? modelPage.digest : null }]
+      : []),
+  ];
+  if (!shared?.ok && !modelPage?.ok) {
+    return {
+      provider,
+      apiModel,
+      status: shared?.status ?? "fetch_failed",
+      sources,
+      parse: null,
+      problems: [shared?.problem ?? "no_source"],
+    };
+  }
+  if (modelPage?.ok) input.noteModelPageNotices(apiModel, modelPage.body);
+  const parse = genericModelFromDocs({
+    apiModel,
+    pricingMarkdown: shared?.ok ? shared.body : null,
+    modelPageMarkdown: modelPage?.ok ? modelPage.body : null,
+    shape: source?.tableShape ?? "columns",
+    expectedHeaders: source?.expectedPriceHeaders,
+    promotionalNotices: input.noticesFor(apiModel),
+  });
+  const problems = [
+    ...parse.problems,
+    ...(shared?.ok ? [] : [`pricing_document:${shared?.problem ?? "no_source"}`]),
+    ...(modelPage && !modelPage.ok ? [`model_page:${modelPage.problem}`] : []),
+  ];
+  return {
+    provider,
+    apiModel,
+    status: parse.status,
+    sources,
+    parse: parse.status === "parsed" ? { ...parse, problems } : parse,
+    problems,
+  };
 };
 
 const writeEvidence = async (write: EvidenceWrite, fetchedAt: Date) => {
@@ -260,90 +406,206 @@ export async function collectProviderModelDocEvidence(
   const { selected, overCap } = await queueTargets();
   summary.notAttempted.push(...overCap);
 
+  // Kept per provider as well as reported: a sentence saying a price will end
+  // has to reach the parse that stores that price, or the prefill offers a
+  // promotional rate and the only warning is a line in a report.
+  const noticesByProvider = new Map<string, string[]>();
+  // And the acknowledged ones, by the model they were acknowledged for.
+  // Acknowledging a sentence records which model it is about; it does not make
+  // the price permanent.
+  const noticesByModel = new Map<string, string[]>();
   const noteNotices = (provider: ProviderModelDocProvider, markdown: string) => {
-    for (const sentence of promotionNotices(provider, markdown).unacknowledged) {
+    const { unacknowledged, promoted } = promotionNotices(provider, markdown);
+    if (unacknowledged.length) {
+      noticesByProvider.set(provider, [...unacknowledged]);
+    }
+    for (const sentence of unacknowledged) {
       summary.unacknowledgedNotices.push({ provider, sentence });
+    }
+    for (const [apiModel, sentence] of promoted) {
+      const key = `${provider}\u0000${apiModel.toLowerCase()}`;
+      noticesByModel.set(key, [...(noticesByModel.get(key) ?? []), sentence]);
     }
   };
 
+  /**
+   * Promotions on a page fetched for one model.
+   *
+   * A page whose title names one model speaks for that model. A page whose
+   * title names two SKUs lends a sentence only where `modelPageNoticeAppliesTo`
+   * says it applies, so FlashX's introductory rate does not withhold Flash.
+   * The same sentence is recorded once, not once per SKU that shares the page.
+   */
+  const noteModelPageNotices = (
+    provider: ProviderModelDocProvider,
+    apiModel: string,
+    markdown: string
+  ) => {
+    const { unacknowledged, promoted } = promotionNotices(provider, markdown);
+    const applies = (sentence: string) =>
+      modelPageNoticeAppliesTo(apiModel, markdown, sentence);
+    const sentences = [...unacknowledged, ...promoted.values()].filter(applies);
+    if (sentences.length) {
+      const key = `${provider}\u0000${apiModel.toLowerCase()}`;
+      noticesByModel.set(key, [...(noticesByModel.get(key) ?? []), ...sentences]);
+    }
+    for (const sentence of unacknowledged) {
+      if (!applies(sentence)) continue;
+      const existing = summary.unacknowledgedNotices.find(
+        (row) =>
+          row.provider === provider && row.sentence === sentence && row.source === "model_page"
+      );
+      if (existing) {
+        existing.apiModels ??= [];
+        if (!existing.apiModels.includes(apiModel)) existing.apiModels.push(apiModel);
+        continue;
+      }
+      summary.unacknowledgedNotices.push({
+        provider,
+        sentence,
+        source: "model_page",
+        apiModels: [apiModel],
+      });
+    }
+  };
+
+  /** Every promotion that applies to one model: the page's and its own. */
+  const noticesFor = (provider: ProviderModelDocProvider, apiModel: string) => [
+    ...(noticesByModel.get(`${provider}\u0000${apiModel.toLowerCase()}`) ?? []),
+    ...(noticesByProvider.get(provider) ?? []),
+  ];
+
+  const providers = machineReadableDocProviders().filter(
+    (provider) => (selected.get(provider) ?? []).length > 0
+  );
+  if (providers.length === 0) return summary;
+
+  // Phase one: the document every model of a provider shares, all providers at
+  // once. Sequential shared reads were most of the budget and none of them
+  // depends on another.
+  //
+  // The budget is checked before the first one as well as between the rest:
+  // everything before this point reads the database, and a slow queue read can
+  // spend the whole allowance before a single document is asked for.
+  if (outOfTime()) {
+    for (const provider of providers) {
+      for (const apiModel of selected.get(provider) ?? []) skip(provider, apiModel);
+    }
+    return summary;
+  }
+  const sharedDocuments = new Map<string, FetchedDocument>();
+  await Promise.all(
+    providers.map(async (provider) => {
+      const url = pricingMarkdownUrl(provider);
+      if (!url) return;
+      const document = await fetchDocument(url);
+      sharedDocuments.set(provider, document);
+      if (document.ok) noteNotices(provider, document.body);
+    })
+  );
+
+  const openAiTable = (() => {
+    const pricing = sharedDocuments.get("openai");
+    return pricing?.ok ? parseOpenAiStandardPricingTable(pricing.body) : null;
+  })();
+  const anthropicPage = (() => {
+    const pricing = sharedDocuments.get("anthropic");
+    return pricing?.ok ? parseAnthropicPricingPage(pricing.body) : null;
+  })();
+  // Anthropic's page is looked up by the display name the models API returned,
+  // which the scan already stored against the exact pair.
+  const anthropicNames = new Map<string, string | null>();
   const anthropicModels = selected.get("anthropic") ?? [];
   if (anthropicModels.length) {
-    if (outOfTime()) anthropicModels.forEach((apiModel) => skip("anthropic", apiModel));
-    else {
-      const page = await fetchDocument(ANTHROPIC_PRICING_MARKDOWN_URL);
-      // The page is looked up by the display name the models API returns, which
-      // the scan already stored against the exact pair.
-      const entries = await prisma.providerModelCatalogEntry.findMany({
-        where: { provider: "anthropic", apiModel: { in: anthropicModels } },
-        select: { apiModel: true, displayName: true },
-      });
-      const names = new Map(entries.map((entry) => [entry.apiModel, entry.displayName]));
-      const parsedPage = page.ok ? parseAnthropicPricingPage(page.body) : null;
-      if (page.ok) noteNotices("anthropic", page.body);
-      for (const apiModel of anthropicModels) {
-        if (!page.ok || !parsedPage) {
-          await record({
-            provider: "anthropic",
-            apiModel,
-            status: page.ok ? "parse_failed" : page.status === "not_found" ? "fetch_failed" : page.status,
-            sources: [{ url: page.url, digest: null }],
-            parse: null,
-            problems: [page.ok ? "parse_skipped" : page.problem],
-          });
-          continue;
-        }
-        const parse = anthropicModelFromPricing(parsedPage, names.get(apiModel) ?? null);
-        await record({
-          provider: "anthropic",
-          apiModel,
-          status: parse.status,
-          sources: [{ url: page.url, digest: page.digest }],
-          parse,
-          problems: parse.problems,
-        });
-      }
+    const entries = await prisma.providerModelCatalogEntry.findMany({
+      where: { provider: "anthropic", apiModel: { in: anthropicModels } },
+      select: { apiModel: true, displayName: true },
+    });
+    for (const entry of entries) anthropicNames.set(entry.apiModel, entry.displayName);
+  }
+
+  // Phase two: one flat list of models, taken from the providers in turn, so
+  // the budget is shared rather than claimed by whoever is read first.
+  const tasks: { provider: ProviderModelDocProvider; apiModel: string }[] = [];
+  const queues = providers.map((provider) => ({
+    provider,
+    models: [...(selected.get(provider) ?? [])],
+  }));
+  while (queues.some((queue) => queue.models.length > 0)) {
+    for (const queue of queues) {
+      const apiModel = queue.models.shift();
+      if (apiModel) tasks.push({ provider: queue.provider, apiModel });
     }
   }
 
-  const openAiModels = selected.get("openai") ?? [];
-  if (openAiModels.length) {
-    if (outOfTime()) openAiModels.forEach((apiModel) => skip("openai", apiModel));
-    else {
-      const pricing = await fetchDocument(OPENAI_PRICING_MARKDOWN_URL);
-      const table = pricing.ok ? parseOpenAiStandardPricingTable(pricing.body) : null;
-      if (pricing.ok) noteNotices("openai", pricing.body);
-      await inBatches(openAiModels, PAGE_CONCURRENCY, async (apiModel) => {
-        if (outOfTime()) {
-          skip("openai", apiModel);
-          return;
-        }
-        const page = await fetchDocument(openAiModelMarkdownUrl(apiModel));
-        const sources = [
-          { url: page.url, digest: page.ok ? page.digest : null },
-          { url: pricing.url, digest: pricing.ok ? pricing.digest : null },
-        ];
-        if (!page.ok) {
-          await record({ provider: "openai", apiModel, status: page.status, sources, parse: null, problems: [page.problem] });
-          return;
-        }
-        const parse = parseOpenAiModelPage({ apiModel, modelPage: page.body, pricingTable: table });
-        // Why the table could not be used travels with every model that needed
-        // it, beside the parser's own "pricing_table_unavailable".
-        const tableProblems = pricing.ok
-          ? (table?.problems ?? []).map((problem) => `pricing_table:${problem}`)
-          : [`pricing_table:${pricing.problem}`];
-        const problems = [...parse.problems, ...tableProblems];
-        await record({
-          provider: "openai",
-          apiModel,
-          status: parse.status,
-          sources,
-          parse: parse.status === "parsed" ? { ...parse, problems } : parse,
-          problems,
-        });
-      });
+  await inBatches(tasks, PAGE_CONCURRENCY, async ({ provider, apiModel }) => {
+    if (outOfTime()) {
+      skip(provider, apiModel);
+      return;
     }
-  }
+    const write = await readModelEvidence({
+      provider,
+      apiModel,
+      displayName: anthropicNames.get(apiModel) ?? null,
+      shared: sharedDocuments.get(provider),
+      openAiTable: provider === "openai" ? openAiTable : null,
+      anthropicPage: provider === "anthropic" ? anthropicPage : null,
+      noticesFor: (model) => noticesFor(provider, model),
+      noteModelPageNotices: (model, markdown) => noteModelPageNotices(provider, model, markdown),
+    });
+    await record(write);
+  });
 
   return summary;
+}
+
+/**
+ * Read one model's first-party documents and store the evidence row.
+ *
+ * The adoption form calls this when the stored row cannot be used, so the
+ * operator does not wait for the next daily scan. It is the same reader as
+ * the scan: the same hosts, the same refusal of HTML, the same parse. A
+ * provider that publishes prices only for people is skipped, and the form
+ * names the official page instead of guessing a number.
+ */
+export async function refreshProviderModelDocEvidence(input: {
+  provider: string;
+  apiModel: string;
+  displayName: string | null;
+  now?: Date;
+}): Promise<"read" | "skipped"> {
+  const provider = machineReadableDocProviders().find((item) => item === input.provider);
+  if (!provider) return "skipped";
+  const url = pricingMarkdownUrl(provider);
+  if (!url) return "skipped";
+  const shared = await fetchDocument(url);
+  const providerNotices: string[] = [];
+  const modelNotices: string[] = [];
+  if (shared.ok) {
+    const { unacknowledged, promoted } = promotionNotices(provider, shared.body);
+    providerNotices.push(...unacknowledged);
+    for (const [model, sentence] of promoted) {
+      if (model.toLowerCase() === input.apiModel.toLowerCase()) modelNotices.push(sentence);
+    }
+  }
+  const write = await readModelEvidence({
+    provider,
+    apiModel: input.apiModel,
+    displayName: input.displayName,
+    shared,
+    openAiTable:
+      provider === "openai" && shared.ok ? parseOpenAiStandardPricingTable(shared.body) : null,
+    anthropicPage:
+      provider === "anthropic" && shared.ok ? parseAnthropicPricingPage(shared.body) : null,
+    noticesFor: () => [...modelNotices, ...providerNotices],
+    noteModelPageNotices: (apiModel, markdown) => {
+      const { unacknowledged, promoted } = promotionNotices(provider, markdown);
+      const applies = (sentence: string) => modelPageNoticeAppliesTo(apiModel, markdown, sentence);
+      for (const sentence of [...unacknowledged, ...promoted.values()]) {
+        if (applies(sentence)) modelNotices.push(sentence);
+      }
+    },
+  });
+  await writeEvidence(write, input.now ?? new Date());
+  return "read";
 }
