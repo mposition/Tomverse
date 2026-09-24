@@ -97,6 +97,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxResourcePolicy",
+    publicName: "amux_resource_policies",
+    prismaModel: "AmuxResourcePolicy",
+    state: "unverified",
+  },
+  {
+    domain: "amuxHumanEscalation",
+    publicName: "amux_human_escalations",
+    prismaModel: "AmuxHumanEscalation",
+    state: "unverified",
+  },
+  {
     domain: "privacyRequest",
     publicName: "privacy_requests",
     prismaModel: "PrivacyRequest",
@@ -520,6 +532,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
   },
   {
+    domain: "amuxReviewDecision",
+    publicName: "amux_review_decisions",
+    prismaModel: "AmuxReviewDecision",
+    state: "excluded",
+    exclusionReason:
+      "A content-free, immutable administrator decision ledger linked to the tamper-evident administrator audit record. It stores actor and proposal identifiers, digests and outcome but no review prose. Operator access requests are reviewed through the manual PrivacyRequest path under the approved Admin audit retention policy; automatic unified export could expose other operators or tasks.",
+  },
+  {
     domain: "promptRefinerReservationStage",
     publicName: "prompt_refiner_stage_approvals",
     prismaModel: "PromptRefinerReservationStage",
@@ -534,6 +554,38 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "Content-free, immutable staging run approval evidence. It contains deployment/source digests, bounded cost and capacity, lifecycle counters and the approving operator id, but no customer id, prompt, output, credential, provider response or error prose. Operator access requests remain on the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+  },
+  {
+    domain: "amuxReconciliationRun",
+    publicName: "amux_reconciliation_runs",
+    prismaModel: "AmuxReconciliationRun",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one source reconciliation, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxBoardPromotionApproval",
+    publicName: "amux_board_promotion_approvals",
+    prismaModel: "AmuxBoardPromotionApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for a manual card promotion, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxIntakeDraft",
+    publicName: "amux_intake_drafts",
+    prismaModel: "AmuxIntakeDraft",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one explicit intake draft, not customer data. The actor id is the administrator and is intentionally not a User foreign key, so account deletion cannot rewrite it. Proposal text is absent. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxIntakeApproval",
+    publicName: "amux_intake_approvals",
+    prismaModel: "AmuxIntakeApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for one explicit intake registration, not customer data. The actor id is the administrator who consumed the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
   {
     domain: "adminNote",

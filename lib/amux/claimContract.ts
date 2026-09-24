@@ -4,7 +4,7 @@ export const AMUX_MACHINE_ID_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,118}[A-Za-z0-9])?$/;
 export const AMUX_PRISMA_INT_MAX = 2_147_483_647;
 export const AMUX_MAX_EXPECTED_REVISION = AMUX_PRISMA_INT_MAX - 1;
-export const AMUX_MAX_SCHEDULER_SCORE = 6_010_088;
+export const AMUX_MAX_SCHEDULER_SCORE = 6_010_428;
 
 export const amuxMachineIdSchema = z
   .string()
@@ -23,6 +23,13 @@ const schedulerSignalsSchema = z
     drag: z.number().int().min(0).max(8),
   })
   .strict();
+
+const schedulerV2SignalsSchema = schedulerSignalsSchema.extend({
+  urgency: z.number().int().min(0).max(240),
+  capacity_weight: z.number().int().min(0).max(20),
+  incident_bonus: z.number().int().min(0).max(80),
+  total: z.number().int().min(0).max(AMUX_MAX_SCHEDULER_SCORE).optional(),
+});
 
 const unitScore = z.number().min(0).max(1);
 
@@ -67,7 +74,7 @@ const candidateSchema = z
 
 export const amuxRoutingEvidenceSchema = z
   .object({
-    scoring_version: z.literal("amux-worker-router-v1"),
+    scoring_version: z.enum(["amux-worker-router-v1", "amux-worker-router-v2"]),
     preferred_worker: amuxMachineIdSchema.nullable(),
     selected_worker: amuxMachineIdSchema.nullable(),
     preferred_score: unitScore.nullable(),
@@ -78,7 +85,7 @@ export const amuxRoutingEvidenceSchema = z
 
 const signalsSchema = z
   .object({
-    scheduler: schedulerSignalsSchema,
+    scheduler: z.union([schedulerSignalsSchema, schedulerV2SignalsSchema]),
     routing: amuxRoutingEvidenceSchema,
   })
   .strict();
@@ -91,7 +98,10 @@ export const amuxClaimRequestSchema = z
     decision: z
       .object({
         scheduler_score: z.number().int().min(0).max(AMUX_MAX_SCHEDULER_SCORE),
-        scoring_version: z.literal("amux-global-priority-v1"),
+        scoring_version: z.enum([
+          "amux-global-priority-v1",
+          "amux-global-priority-v2",
+        ]),
         signals: signalsSchema,
       })
       .strict(),

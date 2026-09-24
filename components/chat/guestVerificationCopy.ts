@@ -6,7 +6,7 @@ import type { GuestVerificationFailure } from "@/components/chat/guestVerificati
  * still safe -- a chat send keeps a draft and its attachments, a feedback form
  * keeps what was typed into it.
  */
-export type GuestVerificationSurface = "chat" | "feedback";
+export type GuestVerificationSurface = "chat" | "feedback" | "emailLogin";
 
 /**
  * One mapping from a verification outcome to the sentence the user reads, so
@@ -19,6 +19,11 @@ export const guestVerificationFailureKey = (
   failure: GuestVerificationFailure,
   surface: GuestVerificationSurface = "chat"
 ) => {
+  if (surface === "emailLogin") {
+    return failure === "unavailable"
+      ? "auth.emailLoginTurnstileUnavailable"
+      : "auth.emailLoginTurnstileFailed";
+  }
   const namespace =
     surface === "feedback" ? "feedback.verification" : "chat.guestVerification";
   switch (failure) {

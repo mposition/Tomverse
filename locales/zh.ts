@@ -1023,6 +1023,7 @@ export const zh = {
         premium: "高端",
         reasoning: "推理",
         research: "研究",
+        frontier: "前沿",
     },
     onboarding: {
         title: "立即比较免费模型",

@@ -315,9 +315,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "routing",
     label: "Routing",
     href: "/admin/routing",
-    description: "Shadow Auto Router decisions against what actually ran",
+    description: "Chat shadow routing and AMUX assignment evidence",
     group: "AI Platform",
-    aliases: ["auto", "router", "shadow", "task profile", "candidates"],
+    aliases: [
+      "auto",
+      "router",
+      "shadow",
+      "amux",
+      "task profile",
+      "candidates",
+    ],
   },
   {
     id: "infrastructure",
@@ -667,6 +674,15 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    id: "amux-board-promotion",
+    pattern: /^\/admin\/amux-board-promotion$/,
+    label: "AMUX card promotion",
+    description: "Owner-only promotion of one to three backlog cards, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // those tables feed the palette for every admin role, while this one-shot
     // cost-authority surface is owner-only and should not be advertised to
@@ -679,6 +695,15 @@ export const ADMIN_DETAIL_ROUTES = [
     parentLabel: "Models",
     parentHref: "/admin/models",
     group: "AI Platform" as const,
+  },
+  {
+    id: "amux-intake",
+    pattern: /^\/admin\/amux-intake$/,
+    label: "AMUX intake",
+    description: "Owner-only preview of one explicit registration, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
   },
   {
     id: "user-detail",

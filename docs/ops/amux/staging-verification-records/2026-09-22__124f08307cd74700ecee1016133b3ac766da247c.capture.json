@@ -1,0 +1,69 @@
+{
+  "schema_version": "amux-staging-evidence-v1",
+  "evidence_scope": "observed_facts_only",
+  "generated_at": "2026-09-22T13:24:53.594Z",
+  "deployment_revision": "124f08307cd74700ecee1016133b3ac766da247c",
+  "capture_process_revision_matches_expected": true,
+  "human_judgement": {
+    "result": null,
+    "signature": null,
+    "note": "This capture does not approve, freeze or sign a staging result."
+  },
+  "incident": {
+    "valid": true,
+    "blocks_admission": false,
+    "problem": null,
+    "state": {
+      "version": 1,
+      "state": "normal",
+      "transition_id": null,
+      "changed_at": "2026-09-21T13:28:10.476Z",
+      "reason": "Initial incident-mode rollout state.",
+      "ticket": "migration:20260921123000"
+    },
+    "setting_updated_at": "2026-09-21T13:28:10.476Z"
+  },
+  "tasks": [
+    {
+      "status": "blocked",
+      "due_parse_state": "valid",
+      "count": 2
+    },
+    {
+      "status": "review",
+      "due_parse_state": "none",
+      "count": 2
+    }
+  ],
+  "route_decisions": [],
+  "execution_attempts": [
+    {
+      "outcome": "blocked",
+      "cost_confirmed": false,
+      "count": 6
+    },
+    {
+      "outcome": "succeeded",
+      "cost_confirmed": false,
+      "count": 2
+    }
+  ],
+  "deliveries": [],
+  "resource_policies": [],
+  "latest_quota_by_worker": [],
+  "human_escalations": [
+    {
+      "status": "open",
+      "specialty": "code-review",
+      "count": 2
+    },
+    {
+      "status": "open",
+      "specialty": "execution-recovery",
+      "count": 2
+    }
+  ],
+  "cost_ledger": [],
+  "stable_state_digest_sha256": "1fd43ba88719209a68a568e2b6dc1a4386fba369ac67f21ca75b3f120b2e936c",
+  "observation_digest_sha256": "51c5e50059c832029be6cca750323455a04d185e6b2557e5f06280a67a88d058"
+}

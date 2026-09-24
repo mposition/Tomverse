@@ -194,12 +194,27 @@ const compilerOptions = parsedConfig.options;
 // unchanged. A repin. Its second review round lengthened the same note by two
 // lines (the entry slot); again comment only, count and position-free hash
 // unchanged, so again a repin.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, those notes now stand together on the ceiling branch. Comment
+// only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a36caed185dbcb22f9cddff79462b24e",
-  "7e37da7b9d3a277e1666179c9e4ccf8e",
+  "27e27e93ad07c30cf32292c871c76f78",
+  "76fe307400409a10cb0a7f0baa1d36c2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -464,6 +464,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The execution-runner migration fails closed on existing attempts, then replaces the exact v3 binding and insert guard for tokenizer facts. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no attempt.",
   },
   {
+    path: "prisma/migrations/20260921160000_amux_agent_review_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 24,
+    reason:
+      "The AMUX approval migration creates only its proposal/decision ledger and reads AdminAuditLog through a restrictive foreign key and SELECT FOR KEY SHARE. It never writes AdminAuditLog; lib/adminAudit.ts remains its sole writer. Exact counts fail closed if this SQL changes.",
+  },
+  {
     path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 8,
@@ -531,6 +539,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 1,
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
+  },
+  {
+    path: "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER TABLE that follows it, and the count in the error message. Both write verbs are that one statement's own ALTER TABLE and ALTER COLUMN -- this migration issues no UPDATE and no DELETE, because the disposition of a row with no digest is an operator's decision carried out separately.",
   },
 ];
 

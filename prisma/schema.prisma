@@ -2251,6 +2251,7 @@ model AdminAuditLog {
   createdAt    DateTime @default(now())
 
   promptRefinerReservationStage PromptRefinerReservationStage?
+  amuxReviewDecision            AmuxReviewDecision?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -6503,8 +6504,9 @@ model MarketingPost {
   assetRegistryVersion Int
   factSnapshot         Json
   /// Full digest of every resolver answer used by the recorded Guard decision.
-  /// Nullable only for rows that predate the expand migration; every new write sets it.
-  factsDigest          String?
+  /// NOT NULL since 20260923140000: the expand migration left it nullable for rows
+  /// that predate the column, and that migration refuses to run while any remain.
+  factsDigest          String
   guardDecision        String
   guardCodes           String[]
   guardRuleIds         String[]
@@ -6608,42 +6610,125 @@ model AmuxWorkerRuntime {
   @@index([instanceId, generation])
 }
 
+model AmuxIncidentTransition {
+  id                      String   @id @default(cuid())
+  fromState               String
+  toState                 String
+  reason                  String
+  ticket                  String
+  approvalId              String?
+  authorizationAuditLogId String?
+  changeAuditLogId        String   @unique
+  createdAt               DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([toState, createdAt])
+}
+
+model AmuxResourcePolicy {
+  scope                String
+  key                  String
+  displayName          String
+  active               Boolean   @default(true)
+  wipLimit             Int?
+  capacityPoints       Int?
+  costBudgetMicrousd   BigInt?
+  budgetWindowStartsAt DateTime?
+  budgetWindowEndsAt   DateTime?
+  updatedById          String?
+  updatedByEmail       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@id([scope, key])
+  @@index([active, scope])
+  @@index([budgetWindowEndsAt])
+}
+
+model AmuxQuotaObservation {
+  id                    String    @id @default(cuid())
+  worker                String
+  provider              String
+  remainingBasisPoints  Int
+  confidenceBasisPoints Int
+  exhausted             Boolean   @default(false)
+  source                String
+  observedAt            DateTime
+  resetAt               DateTime?
+  createdAt             DateTime  @default(now())
+
+  @@index([worker, observedAt])
+  @@index([provider, observedAt])
+  @@index([createdAt])
+}
+
 model AmuxWorkItem {
-  id             String    @id @default(cuid())
-  title          String
-  description    String?
+  id                    String    @id @default(cuid())
+  title                 String
+  description           String?
   /// New rows default to non-dispatchable backlog. This schema imports no
   /// cards and does not promote backlog rows to runnable Todo.
-  status         String    @default("backlog")
-  kind           String    @default("unknown")
-  priority       String    @default("p3")
-  pinned         Boolean   @default(false)
-  drag           Int       @default(0)
-  owner          String?
-  classification Json?
-  revision       Int       @default(0)
-  claimedAt      DateTime?
-  archivedAt     DateTime?
+  status                String    @default("backlog")
+  kind                  String    @default("unknown")
+  priority              String    @default("p3")
+  pinned                Boolean   @default(false)
+  drag                  Int       @default(0)
+  owner                 String?
+  classification        Json?
+  projectKey            String?
+  teamKey               String?
+  dueAt                 DateTime?
+  duePrecision          String?
+  dueSource             String?
+  dueParseState         String    @default("none")
+  dueRaw                String?
+  effortPoints          Int       @default(1)
+  estimatedCostMicrousd BigInt?
+  requiredRoutingRole   String?
+  requiresHumanReview   Boolean   @default(false)
+  reviewSpecialty       String?
+  reviewPrNumber        Int?
+  revision              Int       @default(0)
+  claimedAt             DateTime?
+  archivedAt            DateTime?
   /// Null together for pre-migration or independently created cards. Imported
   /// cards supply canonical lowercase source system, uppercase source key,
   /// printable non-whitespace version, SHA-256 digest, and a nonempty object snapshot.
-  sourceSystem   String?
-  sourceKey      String?
-  sourceVersion  String?
-  sourceDigest   String?
-  sourceSnapshot Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  sourceSystem          String?
+  sourceKey             String?
+  sourceVersion         String?
+  sourceDigest          String?
+  sourceSnapshot        Json?
+  /// Null until a manual promotion stores the operator brief. Catalog import
+  /// leaves both null. The pair check and the sourced-todo check live in SQL.
+  executionBrief        String?
+  executionBriefDigest  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
   routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
+  humanEscalations  AmuxHumanEscalation[]
+  costLedgerEntries AmuxCostLedgerEntry[]
+  reviewProposals   AmuxReviewProposal[]
+  intakeDrafts      AmuxIntakeDraft[]
+  intakeApprovals   AmuxIntakeApproval[]
+  sourceRevisions  AmuxWorkItemSourceRevision[]
+  /// Points at an accepted revision of this same card. Null until the R0
+  /// backfill or a later accept sets it. The source columns above stay the
+  /// immutable import snapshot.
+  acceptedSourceRevision   AmuxWorkItemSourceRevision? @relation("AmuxAcceptedSourceRevision", fields: [acceptedSourceRevisionId], references: [id], onDelete: Restrict)
+  acceptedSourceRevisionId String?                     @unique
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
+  @@index([projectKey, status, owner])
+  @@index([teamKey, status, owner])
+  @@index([dueAt, status])
 }
 
 model AmuxWorkDependency {
@@ -6660,13 +6745,20 @@ model AmuxWorkDependency {
 
 model AmuxExecutionAttempt {
   /// Server-minted execution fence. A worker never chooses this id.
-  id               String @id
-  taskId           String
-  worker           String
-  workerInstanceId String
-  workerGeneration Int
+  id                   String  @id
+  taskId               String
+  worker               String
+  workerInstanceId     String
+  workerGeneration     Int
   /// Task revision after the atomic todo -> doing transition.
-  taskRevision     Int
+  taskRevision         Int
+  /// Monotonic within one task for attempts created after the bounded-retry
+  /// migration. Historical attempts remain NULL rather than receiving an
+  /// invented order when their real creation race cannot be reconstructed.
+  attemptNumber        Int?
+  reservedCostMicrousd BigInt  @default(0)
+  settledCostMicrousd  BigInt?
+  costConfirmed        Boolean @default(false)
 
   heartbeatAt    DateTime
   leaseExpiresAt DateTime?
@@ -6683,12 +6775,115 @@ model AmuxExecutionAttempt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
-  delivery AmuxWorkDelivery?
+  task              AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  delivery          AmuxWorkDelivery?
+  costLedgerEntries AmuxCostLedgerEntry[]
+  reviewProposals   AmuxReviewProposal[]
 
+  @@unique([id, taskId])
+  @@unique([taskId, attemptNumber])
   @@index([taskId, startedAt])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+}
+
+model AmuxCostLedgerEntry {
+  id                   String   @id @default(cuid())
+  scope                String
+  resourceKey          String
+  budgetWindowStartsAt DateTime
+  budgetWindowEndsAt   DateTime
+  taskId               String
+  attemptId            String
+  kind                 String
+  amountMicrousd       BigInt
+  createdAt            DateTime @default(now())
+
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, scope, resourceKey, kind])
+  @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
+  @@index([taskId, createdAt])
+}
+
+model AmuxHumanEscalation {
+  id                  String    @id @default(cuid())
+  taskId              String
+  specialty           String?
+  reason              String
+  status              String    @default("open")
+  openedBy            String
+  openedTaskRevision  Int?
+  acknowledgedById    String?
+  acknowledgedByEmail String?
+  acknowledgedAt      DateTime?
+  resolvedById        String?
+  resolvedByEmail     String?
+  resolvedAt          DateTime?
+  resolution          String?
+  resolutionOutcome   String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  task            AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  reviewProposals AmuxReviewProposal[]
+
+  @@unique([id, taskId])
+  @@index([status, createdAt])
+  @@index([taskId, createdAt])
+  @@index([specialty, status])
+}
+
+/// A server-issued, immutable proposal for one AMUX task-review decision.
+/// Consumption is recorded by AmuxReviewDecision, never by updating this row.
+model AmuxReviewProposal {
+  id               String   @id @default(cuid())
+  decisionId       String   @unique @db.Uuid
+  escalationId     String
+  taskId           String
+  taskRevision     Int
+  outcome          String
+  sourceStatus     String
+  targetStatus     String
+  subjectDigest    String
+  attemptId        String?
+  reviewPrNumber   Int?
+  reviewBaseSha    String?
+  reviewHeadSha    String?
+  reviewDiffDigest String?
+  issuedAt         DateTime
+  expiresAt        DateTime
+
+  escalation AmuxHumanEscalation   @relation(fields: [escalationId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task       AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempt    AmuxExecutionAttempt? @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  decision   AmuxReviewDecision?
+
+  @@unique([id, escalationId])
+  @@index([escalationId, issuedAt])
+  @@index([taskId, taskRevision, issuedAt])
+  @@index([expiresAt])
+}
+
+/// One immutable human decision per proposal and per escalation. No original
+/// review content or prompt is stored here, only IDs, digests and the outcome.
+model AmuxReviewDecision {
+  id                 String   @id @db.Uuid
+  proposalId         String   @unique
+  escalationId       String   @unique
+  outcome            String
+  requestDigest      String
+  idempotencyKeyHash String
+  actorUserId        String
+  auditLogId         String   @unique
+  decidedAt          DateTime @default(now())
+
+  proposal AmuxReviewProposal @relation(fields: [proposalId, escalationId], references: [id, escalationId], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog      @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([proposalId, escalationId])
+  @@index([actorUserId, decidedAt])
 }
 
 model AmuxWorkDelivery {
@@ -7108,4 +7303,150 @@ model AmuxBoardImportApproval {
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
+}
+
+/// Operator evidence for one manual promotion batch. No User foreign key.
+/// Apply stays off until a separate latch is enabled. This table existing
+/// does not promote a card.
+model AmuxBoardPromotionApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  requestDigest           String
+  rawBodyDigest           String
+  itemBindings            Json
+  itemBindingsDigest      String
+  cardCount               Int
+  scannerVersion          String
+  scannerRulesetDigest    String
+  policyVersion           Int
+  outcomeUnknownAt        DateTime?
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  expiredAt               DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// One observed source snapshot. Append-only. The original import is
+/// backfilled as an accepted revision with no run. A later run does not
+/// rewrite AmuxWorkItem source columns.
+model AmuxWorkItemSourceRevision {
+  id                  String    @id
+  workItemId          String
+  parentRevisionId    String?
+  sourceVersion       String
+  detailDigest        String
+  sectionCode         String
+  reconciliationRunId String?
+  state               String
+  observedAt          DateTime
+  decidedAt           DateTime?
+  decisionAuditLogId  String?
+  createdAt           DateTime  @default(now())
+
+  workItem          AmuxWorkItem                 @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+  parentRevision    AmuxWorkItemSourceRevision?  @relation("AmuxSourceRevisionParent", fields: [parentRevisionId], references: [id], onDelete: Restrict)
+  childRevisions    AmuxWorkItemSourceRevision[] @relation("AmuxSourceRevisionParent")
+  reconciliationRun AmuxReconciliationRun?       @relation(fields: [reconciliationRunId], references: [id], onDelete: Restrict)
+  acceptedBy        AmuxWorkItem[]               @relation("AmuxAcceptedSourceRevision")
+
+  @@index([workItemId, createdAt])
+  @@index([reconciliationRunId])
+}
+
+/// One comparison of a pinned source commit with the stored cards.
+/// Item drift is not derived from this row's manifest digest.
+model AmuxReconciliationRun {
+  id                      String    @id
+  status                  String
+  sourceCommit            String
+  boardDigest             String
+  manifestDigest          String
+  canonicalizationVersion String
+  plannerVersion          String
+  validatorVersion        String
+  scannerVersion          String
+  scannerRulesetDigest    String
+  activeItemCount         Int
+  sectionCount            Int
+  itemDriftCount          Int
+  missingCount            Int
+  extraCount              Int
+  globalSnapshotDrift     Int
+  actorUserId             String
+  approvalAuditLogId      String?   @unique
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  applyingAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  revisions AmuxWorkItemSourceRevision[]
+
+  @@index([status, expiresAt])
+  @@index([sourceCommit])
+}
+
+/// Digest-only record of one explicit intake. Proposal text stays null.
+/// Preview does not insert a row. A second digest for the same source key
+/// conflicts instead of replacing this row.
+model AmuxIntakeDraft {
+  id            String    @id
+  sourceSystem  String
+  sourceKey     String
+  sourceVersion String
+  draftDigest   String
+  policyVersion Int
+  status        String
+  actorUserId   String
+  title         String?
+  scope         String?
+  completion    String?
+  workItemId    String
+  createdAt     DateTime  @default(now())
+  consumedAt    DateTime?
+  expiresAt     DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, sourceKey])
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// Human approval consumed in the same transaction as the backlog card.
+/// This is not an AmuxBoardImportApproval row.
+model AmuxIntakeApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  draftDigest             String
+  sourceDigest            String
+  policyVersion           Int
+  scannerVersion          String
+  cardCount               Int
+  workItemId              String
+  consumedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([workItemId])
 }
