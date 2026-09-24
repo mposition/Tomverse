@@ -80,9 +80,10 @@ test("a missing key and an extra key stay out of the no-op list", () => {
   assert.equal(classified.itemNoOp.length, 64);
 });
 
-test("an accepted revision preserves the backlog card and the latch stays off", () => {
-  assert.equal(AMUX_RECONCILIATION_APPLY_CODE_LATCH, false);
-  assert.equal(amuxReconciliationApplyPermitted("enabled"), false);
+test("an accepted revision preserves the backlog card and the latch still needs the environment", () => {
+  assert.equal(AMUX_RECONCILIATION_APPLY_CODE_LATCH, true);
+  assert.equal(amuxReconciliationApplyPermitted("enabled"), true);
+  assert.equal(amuxReconciliationApplyPermitted("true"), false);
   assert.equal(amuxReconciliationApplyPermitted(undefined), false);
   assert.deepEqual(AMUX_RECONCILIATION_PRESERVED_CARD, {
     status: "backlog",
@@ -154,11 +155,12 @@ test("each drifted key needs its own decision and preview writes nothing", () =>
   const preview = previewAmuxReconciliation(body, "enabled");
   assert.equal(preview.outcome, "preview");
   assert.equal(preview.writes, 0);
-  assert.equal(preview.applyPermitted, false);
-  assert.equal(preview.inactive, true);
+  assert.equal(preview.applyPermitted, true);
+  assert.equal(preview.inactive, false);
   assert.deepEqual(preview.acceptKeys, ["AMUX-BOARD-01"]);
   assert.deepEqual(preview.rejectKeys, ["AMUX-INTAKE-01"]);
   assert.equal(previewAmuxReconciliation(body, undefined).applyPermitted, false);
+  assert.equal(previewAmuxReconciliation(body, undefined).inactive, true);
   assert.equal(previewAmuxReconciliation(body, "true").applyPermitted, false);
 });
 
@@ -215,7 +217,7 @@ test("the public apply path checks the shipped latch before the commit", () => {
   const permit = apply.indexOf("amuxReconciliationApplyPermitted");
   const opened = apply.indexOf("prisma.$transaction");
   assert.equal(permit >= 0 && opened > permit, true);
-  assert.equal(core.includes("AMUX_RECONCILIATION_APPLY_CODE_LATCH = false"), true);
+  assert.equal(core.includes("AMUX_RECONCILIATION_APPLY_CODE_LATCH = true"), true);
   assert.equal(core.includes("codeLatch: true"), false);
   assert.equal(service.includes("codeLatch: true"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
