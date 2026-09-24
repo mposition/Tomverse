@@ -234,6 +234,35 @@ export const planAmuxIntakeRegistration = (
   };
 };
 
+export type AmuxIntakeReadBackFact = {
+  cardDigest: string | null;
+  matchingConsumedDrafts: number;
+  matchingConsumedApprovals: number;
+  matchingAudits: number;
+  otherIntakeRows: number;
+};
+
+/** A lost response is compared once. Anything incomplete stays unknown. */
+export const classifyAmuxIntakeReadBack = (
+  fact: AmuxIntakeReadBackFact,
+  expectedDigest: string,
+): "committed" | "absent" | "partial" => {
+  const absent =
+    fact.cardDigest === null &&
+    fact.matchingConsumedDrafts === 0 &&
+    fact.matchingConsumedApprovals === 0 &&
+    fact.matchingAudits === 0 &&
+    fact.otherIntakeRows === 0;
+  if (absent) return "absent";
+  const committed =
+    fact.cardDigest === expectedDigest &&
+    fact.matchingConsumedDrafts === 1 &&
+    fact.matchingConsumedApprovals === 1 &&
+    fact.matchingAudits === 1 &&
+    fact.otherIntakeRows === 0;
+  return committed ? "committed" : "partial";
+};
+
 /** Keeps both digests. A conflict does not overwrite the stored card. */
 export const reportAmuxIntakeDrift = (
   storedDigest: string,

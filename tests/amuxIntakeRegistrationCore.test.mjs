@@ -7,6 +7,7 @@ import { amuxIntakeDraftDigest, parseAmuxIntakeDraft } from "../lib/amux/intakeC
 import {
   AMUX_INTAKE_DRIFT_OWNERS,
   AMUX_INTAKE_UNTOUCHED_TABLES,
+  classifyAmuxIntakeReadBack,
   planAmuxIntakeRegistration,
   previewAmuxIntake,
   reportAmuxIntakeDrift,
@@ -138,24 +139,72 @@ test("drift keeps both digests and names the four owners", () => {
   ]);
 });
 
+test("an unclear registration is classified without writing", () => {
+  const digest = "c".repeat(64);
+  const empty = {
+    cardDigest: null,
+    matchingConsumedDrafts: 0,
+    matchingConsumedApprovals: 0,
+    matchingAudits: 0,
+    otherIntakeRows: 0,
+  };
+  assert.equal(classifyAmuxIntakeReadBack(empty, digest), "absent");
+  assert.equal(
+    classifyAmuxIntakeReadBack(
+      { ...empty, cardDigest: digest, matchingConsumedDrafts: 1, matchingConsumedApprovals: 1, matchingAudits: 1 },
+      digest,
+    ),
+    "committed",
+  );
+  assert.equal(classifyAmuxIntakeReadBack({ ...empty, cardDigest: digest }, digest), "partial");
+  assert.equal(classifyAmuxIntakeReadBack({ ...empty, matchingAudits: 1 }, digest), "partial");
+  assert.equal(
+    classifyAmuxIntakeReadBack(
+      { cardDigest: digest, matchingConsumedDrafts: 1, matchingConsumedApprovals: 1, matchingAudits: 2, otherIntakeRows: 0 },
+      digest,
+    ),
+    "partial",
+  );
+});
+
 test("the public apply path checks the shipped latch before the commit", () => {
   const service = read("lib/amux/intakeRegistration.ts");
   const route = read("app/api/admin/amux/intake/route.ts");
   const panel = read("components/admin/AmuxIntakePanel.tsx");
+  const readBack = service.slice(
+    service.indexOf("export async function readAmuxIntakeRegistration"),
+    service.indexOf("export async function applyAmuxIntakeRegistration"),
+  );
   const apply = service.slice(service.indexOf("export async function applyAmuxIntakeRegistration"));
   const permit = apply.indexOf("amuxIntakeApplyPermitted");
   const commit = apply.indexOf("commitAmuxIntakeRegistration");
+  const ambiguous = apply.indexOf("boardImportFailureIsAmbiguous");
+  const unclear = apply.slice(ambiguous);
   assert.equal(permit >= 0 && commit > permit, true);
+  assert.equal(ambiguous > commit, true);
+  assert.equal(readBack.includes("$transaction"), false);
+  assert.equal(readBack.includes("INSERT"), false);
+  assert.equal(readBack.includes(".create("), false);
+  assert.equal(readBack.includes(".update("), false);
+  assert.equal(readBack.includes(".delete("), false);
+  assert.equal(unclear.includes("commitAmuxIntakeRegistration"), false);
+  assert.equal(unclear.includes("$transaction"), false);
+  assert.equal(unclear.indexOf("readAmuxIntakeRegistration") < unclear.indexOf("AmuxIntakeOutcomeUnknownError"), true);
   assert.equal(apply.includes('code === "P2002"'), true);
   assert.equal(apply.includes('new BoardImportError("conflict", 409, approvalId)'), true);
-  assert.equal(apply.includes('new BoardImportError("outcome_unknown", 409, approvalId)'), true);
+  assert.equal(service.includes('super("outcome_unknown", 409, approvalId)'), true);
+  assert.equal(unclear.includes("new AmuxIntakeOutcomeUnknownError"), true);
   assert.equal(service.includes("codeLatch: true"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(route.includes("commitAmuxIntakeRegistration"), false);
+  assert.equal(route.includes("retry: false"), true);
   assert.equal(route.includes("codeLatch: true"), false);
   assert.match(panel, /registerReady = result\?\.applyPermitted === true/);
   assert.match(panel, /registerReady \? messages\.registerPermitted : messages\.registerDisabled/);
   assert.match(panel, /disabled=\{pending \|\| !registerReady\}/);
+  assert.match(panel, /result\.error === "outcome_unknown"/);
+  assert.match(panel, /messages\.outcomeUnknown/);
+  assert.equal(panel.slice(panel.indexOf("outcome_unknown")).includes('send("register")'), false);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
   const page = resolveAdminPageMeta("/admin/amux-intake");
