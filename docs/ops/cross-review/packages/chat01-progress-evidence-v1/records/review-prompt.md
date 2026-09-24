@@ -1,4 +1,4 @@
-# Independent review — task chat01-progress-evidence-v1, round 0
+# Independent review — task chat01-progress-evidence-v1, round 1
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -18,7 +18,7 @@ CHAT-01 진행 문서에 #1673 병합·정확한 staging deployment·desktop/mob
 - 권장 순서는 product receipt retention/privacy, content-free product request/execution+disposition store, Cursor/CI, separately approved paid confirmatory, human disposition, product suggestion, Router/Auto shadow다.
 - Cursor verdict는 exact package digest에 결속하고 각 finding에 location, severity, evidence와 reproduction을 제공하며 source edit, provider API call, paid call, push, PR, merge 또는 deploy를 하지 않는다.
 
-## Change under review — digest sha256:5aa995fbb4c444dc0348bc92592333be0bac714389274fad08273d8e019b4778
+## Change under review — digest sha256:2323f916ee23b78b7ef2e0d255211698715b485d558ae79bc97e595ead2ce47c
 
 ```diff
 diff --git a/docs/ops/cross-review/packages/chat01-progress-evidence-v1/authorization.md b/docs/ops/cross-review/packages/chat01-progress-evidence-v1/authorization.md
@@ -75,10 +75,10 @@ index 000000000..de842c251
 +  "generatedPaths": []
 +}
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 1df8f7bc9..3700e9f8e 100644
+index 1df8f7bc9..f6f0a087c 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
-@@ -1452,3 +1452,53 @@ reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-in
+@@ -1452,3 +1452,78 @@ reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-in
     evidence를 수집한다.
  5. 그 증거 뒤 Refiner→Router 결합을 ROUTE-03 지연 계약 아래 실험하고 full-catalog
     모델 선택 개선으로 진행한다.
@@ -106,6 +106,25 @@ index 1df8f7bc9..3700e9f8e 100644
 +
 +### 한눈에 보는 전체 Chat 진척
 +
++이 회차부터 아래 네 축은 **`chat-scope-readiness-v1`** 방법으로 처음 산정한다.
++직전 `planning-estimate-v2`의 전체 웹 Chat 약 72%(주관적 범위 62–82%)와
++C19–C20 제품 연결/검증·운영 기반 약 30%/약 95%는 분모와 증거 분류가 다르다.
++따라서 아래 79/65/40/95는 그 수치의 증분이나 갱신이 아니며 직접 비교하지 않는다.
++향후 변화량은 이 네 축과 아래 정의를 그대로 유지한 기록끼리만 비교한다.
++
++- **전체 기술 구현**은 승인된 CHAT-01 기술 범위에서 source 구현, 회귀 검증,
++  병합과 staging 배포까지 확인된 작업량의 가중 추정이다. 품질·활성화 승인은 세지
++  않으며, 기능별 크기 차이 때문에 불확실성은 약 ±10%p다.
++- **release/activation readiness**는 실제 traffic 전에 필요한 품질·안전 gate,
++  staging 증거, 사람 disposition과 명시적 활성화 승인의 충족도를 추정한다. 코드가
++  존재한다는 사실만으로는 올리지 않으며 불확실성은 약 ±10%p다.
++- **Prompt Refiner 제품 연결**은 제품 execution/disposition receipt, server-owned
++  caller와 offered 결정, 사용자 선택 증거 및 Router/Auto shadow까지를 분모로 한다.
++  fixture-only seam은 인터페이스 증거로만 일부 반영하며 불확실성은 약 ±10%p다.
++- **Prompt Refiner confirmatory infrastructure**는 v4 실행 계약, source 결속,
++  content-free evidence 저장·재구성, 관리자 read-back과 runner를 분모로 한다.
++  별도 승인된 실행과 사람 disposition은 남은 gate로 표시하며 불확실성은 약 ±5%p다.
++
 +| 항목 | 이번 판단 |
 +| --- | --- |
 +| 전체 기술 구현 | **약 79%** — saved-but-undispatched 경계 구현·회귀·병합·staging 배포와 기존 대화 reload 보존을 반영한 작업량 추정 |
@@ -116,7 +135,8 @@ index 1df8f7bc9..3700e9f8e 100644
 +
 +남은 retention/privacy 결정과 writer/store/collection은 confirmatory v4 case receipt를
 +새로 만드는 일이 아니다. suggestion/product caller가 만들 제품 request/execution
-+receipt와 사용자의 disposition receipt에만 적용한다.
++receipt와 사용자의 disposition receipt에만 적용하며, confirmatory pass와 사람의
++release disposition 뒤에만 진행한다.
 +
 +위 백분율은 같은 CHAT-01 범위의 대략적인 작업량·준비도 **추정**이다. 품질 gate
 +통과, 실제 사용자 traffic 활성화 또는 launch 승인이 아니며 네 축은 서로를 대신하지
@@ -124,20 +144,25 @@ index 1df8f7bc9..3700e9f8e 100644
 +
 +### 이 Cycle 다음 권장 순서
 +
-+1. 제품 receipt의 retention/privacy 결정을 먼저 동결한다.
-+2. 그 결정에 맞춰 content-free 제품 request/execution receipt와 사용자 disposition
-+   receipt의 store·collection을 구현한다.
-+3. exact diff를 Cursor 읽기 전용 독립 검토와 Linux 통합 CI에 제출한다.
-+4. 별도 비용·stage·run 승인을 받은 뒤에만 bounded paid confirmatory를 실행한다.
-+5. 결과를 사람이 disposition하고, 불명 결과는 확인 전 재실행하지 않는다.
-+6. 통과한 증거에 한해 제품 suggestion 흐름을 default-off로 연결한다.
-+7. 사용자 선택 증거 뒤 Router/Auto shadow 결합을 별도 실험으로 진행한다.
++1. 별도 비용·stage·run 승인을 받은 뒤에만 bounded v4 confirmatory를 정확히 한 번
++   실행하고, content-free 결과를 동결된 deterministic gate로 판정한다. 불명 결과는
++   확인 전 재실행하지 않는다.
++2. 그 품질·비용·지연 결과를 사람이 release disposition한다.
++3. gate pass와 사람 승인 뒤에만 제품 request/execution receipt와 사용자 disposition
++   receipt의 retention, privacy, 사용자 권리와 audit 결정을 동결한다.
++4. 그 결정에 맞춰 제품 adapter와 server-owned content-free receipt writer/store를
++   구현하되 caller는 default-off로 유지하고 사용자에게 노출하지 않는다.
++5. exact diff를 Cursor 읽기 전용 독립 검토와 Linux 통합 CI에 제출한다.
++6. 통과한 구현에 한해 default-off pre-send suggestion UI와 disposition collection을
++   연결한다.
++7. accept/keep/stale 증거 뒤에만 Router/Auto shadow 결합을 ROUTE-03 아래 별도
++   실험으로 진행한다.
 
 ```
 
 ## Test results (run by the control program)
 
-- PASS `npm run check:doc-references` (1840ms)
+- PASS `npm run check:doc-references` (1489ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
@@ -145,21 +170,25 @@ index 1df8f7bc9..3700e9f8e 100644
 
 ## Guard results (run by the control program)
 
-- PASS `npm run check:policy-section-references` (1152ms)
+- PASS `npm run check:policy-section-references` (1302ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4666 citation(s) against 43 policy document(s). 3098 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 234 predate this change).
-- PASS `npm run check:encoding` (1640ms)
+- PASS `npm run check:encoding` (1429ms)
   > ai-chat-hub@0.1.0 check:encoding
   > node scripts/check-text-encoding.mjs
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check 90380a7bd5b1589531741dd02fb2c88c041cc1df` (62ms)
+- PASS `git diff --check 90380a7bd5b1589531741dd02fb2c88c041cc1df -- docs/ops/tomverse-chat-progress.md` (50ms)
+
+## Findings from the previous round (check each was addressed)
+
+- [warning/evidence] docs/ops/tomverse-chat-progress.md:1491: 새 회차 표가 planning-estimate-v2의 전체 웹 Chat·C19–C20 분모를 다른 네 축으로 바꾸면서 기준 변경을 밝히지 않아, 약 79%·40%·95%가 직전 약 72%·30%·95%의 갱신으로 읽힌다.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Record bounded CHAT-01 implementation, staging and receipt evidence without converting estimates or missing interactive seams into launch approval.
+Summary: Version the 79/65/40/95 readiness estimates as non-comparable to planning-estimate-v2 and align product receipt retention, policy, review, paid confirmatory, human disposition, suggestion and Router shadow order.
 
 ## Answer format
 
@@ -168,8 +197,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "chat01-progress-evidence-v1",
-  "round": 0,
-  "reviewedDigest": "sha256:5aa995fbb4c444dc0348bc92592333be0bac714389274fad08273d8e019b4778",
+  "round": 1,
+  "reviewedDigest": "sha256:2323f916ee23b78b7ef2e0d255211698715b485d558ae79bc97e595ead2ce47c",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
