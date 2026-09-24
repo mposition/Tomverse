@@ -702,9 +702,11 @@ jobs:
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
+          # Linux-next-admin-e2e- from another workflow. That cache was built
+          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
           restore-keys: |
             ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'
@@ -904,9 +906,11 @@ jobs:
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
+          # Linux-next-admin-e2e- from another workflow. That cache was built
+          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
           restore-keys: |
             ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'

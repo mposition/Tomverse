@@ -1008,7 +1008,7 @@ export const de = {
         premium: "Premium",
         reasoning: "Schlussfolgern",
         research: "Recherche",
-        frontier: "Frontier",
+        frontier: "Spitzenklasse",
     },
     onboarding: {
         title: "Kostenlose Modelle sofort vergleichen",
