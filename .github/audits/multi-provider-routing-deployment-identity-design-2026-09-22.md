@@ -1647,7 +1647,36 @@ Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었�
 
 **1. 비운영 A-5.** 대상 환경은 staging입니다. 읽기 전용 조사에서 migration 세 건이 끝났고 rollback은 없습니다. `20260923120000_deployment_identity_dark`, `20260923300000_routing_identity_manifest_dark`, `20260923320000_routing_manifest_entries_dark`. `ModelDeployment`, `RoutingIdentityManifest`, `RoutingIdentityManifestEntry`는 있고 각 0행입니다. 실행 중인 staging은 develop `25dbbb9f`이며 배포 상태는 SUCCESS입니다. 공급자 호출은 없었습니다. 이 브랜치의 canary 실행 판정은 develop에 없어서 staging 프로세스 안에서 돌지 않습니다. 기록·중단·복구를 staging에서 실행한 것은 아닙니다.
 
-**2. 운영 canary.** 별도 승인으로 받았고, 실행하지 않았습니다. production에는 위 세 migration과 세 테이블이 없습니다. 대상 deployment, 집단, 비교 기준, 관측 기간, 중단 조건이 비어 있습니다. 그 다섯이 적히기 전에는 운영 비중을 올리지 않습니다.
+**2. 운영 canary.** 별도 승인으로 받았고, 실행하지 않았습니다. production에는 위 세 migration과 세 테이블이 없습니다. 실행 조건은 §14.34입니다. 그 조건이 비어 있는 동안 운영 비중은 올리지 않습니다.
+
+## 14.34 운영 canary 실행계획 (2026-09-24, 보류)
+
+소유자가 대상·집단·비교·관측·중단을 정했습니다. 읽기 전용 운영 집계로 채울 수 있는 식별자만 채웠습니다. 실행은 시작하지 않았습니다. 완료 수는 **45 / 약 50, 약 90%(추정)** 그대로입니다. 이 숫자는 §8.1의 표본·기간을 대신하지 않습니다.
+
+현재 사용 중인 텍스트 채팅 경로는 최근 정산으로 골랐습니다. `ChatCreditReservation`의 `source = chat`, `status = settled`에서 최근 7일 75건, 최근 30일 209건으로 `gpt-5-6-luna` / `openai`가 앞섭니다. 전체 기간 591건인 `gpt-5-4-mini`는 최근 7일 13건이라 현재 경로로 보지 않았습니다. 비밀값은 읽지 않았습니다.
+
+| 식별자 | 고정한 값 |
+|---|---|
+| logical model | `gpt-5-6-luna`. 라이브 경로는 카탈로그 id가 그 역할입니다 |
+| deployment id | 없음. production에 `ModelDeployment`가 없습니다 |
+| provider | `openai` |
+| endpoint | 라이브 코드의 `https://api.openai.com/v1`. `ProviderEndpoint` 행은 없습니다 |
+| upstream | 배포 `ac146905e6b4df57e0bddacc256669c0aca76e62`의 `apiModel` `gpt-5.6-luna`. 별도 버전 행은 없습니다 |
+| credential | 환경변수 이름 `OPENAI_API_KEY`. 값은 기록하지 않습니다. `CredentialBinding` 행은 없습니다. billing owner는 `tomverse` |
+| 배포 SHA | 위 SUCCESS가 조사 시점의 라이브입니다. 더 새 배포 `a4c51af3dcd37f3ad8ab8b20970316bfcee4d6c1`가 WAITING이라 SHA는 고정되지 않았습니다 |
+| A-5 manifest | 없음. production에 테이블이 없고, staging 행은 0입니다 |
+
+집단은 내부 workspace 하나의 신규 세션만 canary 50% / control 50%이고, 일반 고객은 0%입니다. 같은 세션은 같은 군을 유지하고, 진행 중 세션은 넣지 않습니다. 요청은 한 경로만 처리합니다. 이 제품에는 workspace가 없고, 계정 정책이 그 자리입니다. 내부 테스트 workspace UUID는 없어서 지정하지 않았습니다.
+
+비교는 같은 시간대의 control입니다. control은 지금 승인된 production 경로, canary는 같은 upstream의 A-5 경로입니다. 항목은 선택·정책 정합성, streaming 계약, dispatch와 attempt의 대응, TTFT p50/p95와 내부 처리시간, 요청당 upstream 호출·토큰·확인 또는 추정 비용입니다. 클라이언트 취소, 정책 거절, 429, 서버·네트워크 오류는 나눕니다. 비용은 지금 승인된 집계로 보고, 새 snapshot을 청구나 비용 라우팅에 연결하지 않습니다. 모르는 비용은 0이 아닙니다.
+
+관측은 최소 24시간, 각 군 종료된 적격 요청 200건, 각 군 신규 세션 20개, 최대 7일입니다. 성공과 실패를 같이 세고 취소는 따로 표시합니다. 24시간만으로 통과하지 않고, 건수를 빨리 채워도 24시간을 줄이지 않습니다. 7일 또는 비용 한도에 먼저 닿으면 증거 부족으로 끝냅니다. 시작점은 migration 시각이 아니라 승인된 canary 경로의 첫 요청입니다. 끝난 뒤 자동으로 넓히지 않습니다.
+
+중단은 정합성 한 건에 신규 진입을 멈춥니다. 허용하지 않은 workspace·endpoint·모델, billing owner 변경, manifest와 실행의 불일치, 설명되지 않는 dispatch/attempt, 자격증명 노출, 의도하지 않은 중복 호출, commit 이후 자동 재실행이 그 경우입니다. 비교나 비용 추적이 멈추면 일시 중단입니다. 기술적 실패 3건 연속, 각 군 100건 이상에서 canary 기술 실패율이 control보다 2%p 이상 높음, 같은 점검에서 TTFT p95가 20% 이상이면서 200ms 이상 느림은 일시 중단 후 원인 확인입니다. 더 엄격한 기존 SLO가 있으면 그것을 따릅니다. 이 차이는 통계적 확정도 안전 보증도 아닙니다.
+
+실험 예산은 canary와 control을 합쳐 일 US$5, 전체 US$20입니다. 실패 호출, SDK 내부 재시도, 진행 중 예약 상한을 포함합니다. 사용자 크레딧 정책 변경은 아닙니다.
+
+**실행은 보류입니다.** A-5 판정은 사용자 콘텐츠, 비합성 트래픽, 공유 credential quota, 공유 provider budget, 정상 routing candidate를 거절하고 공급자를 부르지 않습니다. manifest는 발행되지 않고 요청 경로가 읽지 않습니다. 이 계획을 그 코드만으로 돌릴 수 없고, 후보 선택이나 health 읽기를 바꾸지 않습니다. 실험 비용만 막는 상한도 없습니다. 지금 있는 한도는 전체 트래픽의 provider budget과 플랜 guardrail입니다. 그 상한을 이 실험에 쓸 수 없으므로 공급자 호출이 있는 실행은 시작하지 않습니다.
 
 ## 15. 되돌릴 수 없는 것
 
