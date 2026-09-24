@@ -39,11 +39,14 @@ import { prisma } from "@/lib/prisma";
 /**
  * Manual promotion writer.
  *
- * docs/policy/development-agent-orchestration.md (policy version 3).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 5).
+ * The request schema stays at policy version 3.
  *
  * Prepare, approve, reject, expire and apply commit with their canonical
  * audit row. applyBoardPromotion does not accept a caller override. The
- * shipped code latch is false, so apply throws before a card write.
+ * shipped code latch is true. Apply still throws before a card write unless
+ * the environment value is exactly enabled. This file does not promote a card
+ * by itself.
  */
 
 const TARGET_TYPE = "AmuxBoardPromotionApproval";
