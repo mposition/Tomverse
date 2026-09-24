@@ -17,6 +17,8 @@ import {
     byokFailurePosture,
     DEPLOYMENT_PRICE_KNOWLEDGE,
     deploymentEvidence,
+    DEPLOYMENT_PRICE_RATE_KINDS,
+    DEPLOYMENT_PRICE_UNIT,
     deploymentPriceSnapshotColumns,
     distributionCandidate,
     interpretObservationMode,
@@ -92,9 +94,14 @@ test("softmax stays unset and zero is not a configured temperature", () => {
 });
 
 test("an unknown price is not stored as zero and a snapshot is not applied", () => {
+    const rate = {
+        rateKind: "input",
+        unit: "per_million_tokens",
+    };
     assert.equal(
         recordDeploymentPrice({
             knowledge: "unknown",
+            ...rate,
             amount: 0,
             currency: null,
             source: null,
@@ -104,6 +111,7 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     );
     const recorded = recordDeploymentPrice({
         knowledge: "unknown",
+        ...rate,
         amount: null,
         currency: null,
         source: null,
@@ -114,6 +122,7 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     assert.equal(recorded.appliedToBilling, false);
     const statedZero = recordDeploymentPrice({
         knowledge: "estimate",
+        ...rate,
         amount: 0,
         currency: "USD",
         source: "provider-card",
@@ -124,6 +133,7 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     assert.equal(
         recordDeploymentPrice({
             knowledge: "verified",
+            ...rate,
             amount: 12,
             currency: " ",
             source: "invoice",
@@ -133,7 +143,87 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     );
     assert.equal(
         recordDeploymentPrice({
+            knowledge: "verified",
+            ...rate,
+            amount: 2e-9,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "amount_not_representable"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            ...rate,
+            amount: 1e12,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "amount_not_representable"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            ...rate,
+            amount: Number.NaN,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "incomplete_known_price"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            rateKind: "prompt",
+            unit: "per_million_tokens",
+            amount: 3,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "unrecognized_rate"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            rateKind: "input",
+            unit: "per_token",
+            amount: 3,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "unrecognized_unit"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            ...rate,
+            amount: 3,
+            currency: "usd",
+            source: "provider-card",
+            effectiveAt: "2026-09-24T00:00:00.000Z",
+        }).reason,
+        "invalid_currency"
+    );
+    assert.equal(
+        recordDeploymentPrice({
+            knowledge: "verified",
+            ...rate,
+            amount: 3,
+            currency: "USD",
+            source: "provider-card",
+            effectiveAt: "yesterday",
+        }).reason,
+        "invalid_effective_at"
+    );
+    assert.equal(
+        recordDeploymentPrice({
             knowledge: "list_price",
+            ...rate,
             amount: 12,
             currency: "USD",
             source: "public-page",
@@ -143,11 +233,14 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     );
     assert.deepEqual(applyPriceSnapshot(), { applied: false, reason: "behavior_change_unapproved" });
     assert.deepEqual(DEPLOYMENT_PRICE_KNOWLEDGE, ["unknown", "estimate", "verified"]);
+    assert.deepEqual(DEPLOYMENT_PRICE_RATE_KINDS, ["input", "output", "cache_read", "cache_write"]);
+    assert.equal(DEPLOYMENT_PRICE_UNIT, "per_million_tokens");
     assert.equal(
         deploymentPriceSnapshotColumns({
             modelDeploymentId: " ",
             logicalModelId: "gpt-5-6-luna",
             knowledge: "unknown",
+            ...rate,
             amount: null,
             currency: null,
             source: null,
@@ -159,12 +252,15 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
         modelDeploymentId: "dep_luna",
         logicalModelId: "gpt-5-6-luna",
         knowledge: "verified",
+        ...rate,
         amount: 3,
         currency: "USD",
         source: "provider-card",
         effectiveAt: "2026-09-24T00:00:00.000Z",
     });
     assert.equal(columns.recorded, true);
+    assert.equal(columns.rateKind, "input");
+    assert.equal(columns.unit, "per_million_tokens");
     assert.equal(columns.appliedToRouting, false);
     assert.equal(columns.appliedToBilling, false);
     const priceSql = readFileSync(
@@ -181,6 +277,12 @@ test("an unknown price is not stored as zero and a snapshot is not applied", () 
     assert.match(priceSql, /CHECK \("appliedToRouting" = false AND "appliedToBilling" = false\)/);
     assert.match(priceSql, /"knowledge" = 'unknown'/);
     assert.match(priceSql, /"amount" IS NULL/);
+    assert.match(priceSql, /"rateKind" IN \('input', 'output', 'cache_read', 'cache_write'\)/);
+    assert.match(priceSql, /"unit" = 'per_million_tokens'/);
+    assert.match(priceSql, /"amount" >= 0/);
+    assert.match(priceSql, /"currency" IS NOT NULL/);
+    assert.match(priceSql, /"source" IS NOT NULL/);
+    assert.match(priceSql, /"effectiveAt" IS NOT NULL/);
     assert.doesNotMatch(priceSql, /ChatCreditReservation/);
 });
 

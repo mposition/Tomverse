@@ -6427,10 +6427,12 @@ model AvailabilityRollupApplication {
 /// A deployment-grain price observation.
 ///
 /// Dark. This is not `ChatCreditReservation.pricingSnapshot`, and nothing
-/// inserts a row. Unknown knowledge has no amount. A stated estimate or a
-/// verified price names its amount, currency, source and effective time.
-/// The two applied flags cannot be true: using the row for routing or for
-/// a credit charge is a separate approval.
+/// inserts a row. `amount` is one named rate of `currency` per million
+/// tokens. Unknown knowledge has no amount. A stated estimate or a
+/// verified price names its amount, currency, source and effective time,
+/// and the amount must fit DECIMAL(20,8) without rounding. The two applied
+/// flags cannot be true: using the row for routing or for a credit charge
+/// is a separate approval.
 model DeploymentPriceSnapshot {
   id                 String    @id @default(cuid())
   modelDeploymentId  String
@@ -6438,6 +6440,10 @@ model DeploymentPriceSnapshot {
   logicalModelId     String
   /// unknown | estimate | verified
   knowledge          String
+  /// input | output | cache_read | cache_write
+  rateKind           String
+  /// per_million_tokens
+  unit               String
   amount             Decimal?  @db.Decimal(20, 8)
   currency           String?
   source             String?

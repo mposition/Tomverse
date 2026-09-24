@@ -111,21 +111,57 @@ export const DEPLOYMENT_PRICE_KNOWLEDGE = ["unknown", "estimate", "verified"] as
 
 export type PriceKnowledge = (typeof DEPLOYMENT_PRICE_KNOWLEDGE)[number];
 
+/** One rate of the named currency per million tokens. The same split `lib/modelPricing.ts` already bills. */
+export const DEPLOYMENT_PRICE_RATE_KINDS = ["input", "output", "cache_read", "cache_write"] as const;
+
+export type DeploymentPriceRateKind = (typeof DEPLOYMENT_PRICE_RATE_KINDS)[number];
+
+export const DEPLOYMENT_PRICE_UNIT = "per_million_tokens" as const;
+
+const PRICE_INTEGER_DIGITS = 12;
+const PRICE_SCALE = 8;
+
+const currencyCode = (value: string | null): value is string => named(value) && /^[A-Z]{3}$/.test(value);
+
+const canonicalEffectiveAt = (value: string | null): value is string => {
+    if (!named(value) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+    return new Date(value).toISOString() === value;
+};
+
+/**
+ * DECIMAL(20,8) rounds a smaller positive amount to zero and rejects an
+ * amount with more than twelve digits left of the point. Either result
+ * would store a different price from the one the caller named, so both
+ * are refused before a row exists.
+ */
+const amountFitsDecimal = (amount: number): boolean => {
+    if (!Number.isFinite(amount) || amount < 0 || amount >= 10 ** PRICE_INTEGER_DIGITS) return false;
+    return Number(amount.toFixed(PRICE_SCALE)) === amount;
+};
+
 export type PriceRecordRefusal =
     | "unknown_has_amount"
     | "incomplete_known_price"
     | "unrecognized_knowledge"
+    | "unrecognized_rate"
+    | "unrecognized_unit"
+    | "amount_not_representable"
+    | "invalid_currency"
+    | "invalid_effective_at"
     | "missing_placement";
 
 /**
  * A record-only snapshot keeps an unknown price unknown. A stated estimate
  * or verified price may be zero when its source and effective time are
- * named; that zero is not an unknown amount filled in. Applying any
+ * named; that zero is not an unknown amount filled in. The amount is one
+ * named rate, in the named currency, per million tokens. Applying any
  * snapshot to routing or to a credit charge is a separate approval this
  * module refuses.
  */
 export const recordDeploymentPrice = (input: {
     knowledge: PriceKnowledge;
+    rateKind: string | null;
+    unit: string | null;
     amount: number | null;
     currency: string | null;
     source: string | null;
@@ -133,18 +169,30 @@ export const recordDeploymentPrice = (input: {
 }):
     | { recorded: false; reason: PriceRecordRefusal }
     | { recorded: true; appliedToRouting: false; appliedToBilling: false } => {
+    if (!(DEPLOYMENT_PRICE_KNOWLEDGE as readonly string[]).includes(input.knowledge)) {
+        return { recorded: false, reason: "unrecognized_knowledge" };
+    }
+    if (!(DEPLOYMENT_PRICE_RATE_KINDS as readonly string[]).includes(input.rateKind ?? "")) {
+        return { recorded: false, reason: "unrecognized_rate" };
+    }
+    if (input.unit !== DEPLOYMENT_PRICE_UNIT) {
+        return { recorded: false, reason: "unrecognized_unit" };
+    }
     if (input.knowledge === "unknown") {
         if (input.amount !== null) return { recorded: false, reason: "unknown_has_amount" };
         return { recorded: true, appliedToRouting: false, appliedToBilling: false };
     }
-    if (!(DEPLOYMENT_PRICE_KNOWLEDGE as readonly string[]).includes(input.knowledge)) {
-        return { recorded: false, reason: "unrecognized_knowledge" };
-    }
-    const amountKnown =
-        typeof input.amount === "number" && Number.isFinite(input.amount) && input.amount >= 0;
-    if (!amountKnown || !named(input.currency) || !named(input.source) || !named(input.effectiveAt)) {
+    if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount < 0) {
         return { recorded: false, reason: "incomplete_known_price" };
     }
+    if (!amountFitsDecimal(input.amount)) {
+        return { recorded: false, reason: "amount_not_representable" };
+    }
+    if (!named(input.currency) || !named(input.source) || !named(input.effectiveAt)) {
+        return { recorded: false, reason: "incomplete_known_price" };
+    }
+    if (!currencyCode(input.currency)) return { recorded: false, reason: "invalid_currency" };
+    if (!canonicalEffectiveAt(input.effectiveAt)) return { recorded: false, reason: "invalid_effective_at" };
     return { recorded: true, appliedToRouting: false, appliedToBilling: false };
 };
 
@@ -158,6 +206,8 @@ export const deploymentPriceSnapshotColumns = (input: {
     modelDeploymentId: string | null;
     logicalModelId: string | null;
     knowledge: PriceKnowledge;
+    rateKind: string | null;
+    unit: string | null;
     amount: number | null;
     currency: string | null;
     source: string | null;
@@ -169,6 +219,8 @@ export const deploymentPriceSnapshotColumns = (input: {
           modelDeploymentId: string;
           logicalModelId: string;
           knowledge: PriceKnowledge;
+          rateKind: DeploymentPriceRateKind;
+          unit: typeof DEPLOYMENT_PRICE_UNIT;
           amount: number | null;
           currency: string | null;
           source: string | null;
@@ -186,6 +238,8 @@ export const deploymentPriceSnapshotColumns = (input: {
         modelDeploymentId: input.modelDeploymentId,
         logicalModelId: input.logicalModelId,
         knowledge: input.knowledge,
+        rateKind: input.rateKind as DeploymentPriceRateKind,
+        unit: DEPLOYMENT_PRICE_UNIT,
         amount: input.amount,
         currency: input.currency,
         source: input.source,

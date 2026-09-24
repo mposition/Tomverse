@@ -1682,7 +1682,7 @@ Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었�
 
 표는 `DeploymentPriceSnapshot`이고, 판정은 `deploymentPriceSnapshotColumns`입니다. 요청 경로는 import하지 않습니다. 행을 쓰지 않습니다. `ChatCreditReservation.pricingSnapshot`은 그대로입니다.
 
-모르는 가격은 금액이 없습니다. 0으로 채우면 기록이 거절됩니다. 출처와 시점을 밝힌 추정 또는 확인 가격은 그 금액이 0이어도 기록 대상입니다. deployment id와 logical model id가 없으면 기록하지 않습니다. `appliedToRouting`과 `appliedToBilling`은 데이터베이스에서도 false만 허용합니다. snapshot을 라우팅이나 청구에 쓰는 것은 여전히 거절입니다.
+금액은 이름 있는 요율 하나입니다. `input`, `output`, `cache_read`, `cache_write` 중 하나이고, 단위는 그 통화의 100만 토큰당입니다. 요율이나 단위가 없으면 기록하지 않습니다. 모르는 가격은 그 요율의 금액이 없습니다. 0으로 채우면 기록이 거절됩니다. 출처·통화·시점을 밝힌 추정 또는 확인 가격은 그 금액이 0이어도 기록 대상입니다. 통화는 대문자 3글자이고, 시점은 UTC instant입니다. `DECIMAL(20,8)`에 그대로 들어가지 않는 금액(더 잘면 0으로 반올림되거나, 정수 12자리를 넘는 값)은 기록 전에 거절합니다. deployment id와 logical model id가 없으면 기록하지 않습니다. `appliedToRouting`과 `appliedToBilling`은 데이터베이스에서도 false만 허용합니다. snapshot을 라우팅이나 청구에 쓰는 것은 여전히 거절입니다.
 
 이 줄은 §14.3의 deployment 가격 snapshot 가운데 기록입니다. 반영은 §14.26에 남습니다. 직전 범위 판정 보고는 45, 약 90%였습니다. §14.3의 약 50단위에서 완료는 46, **약 92%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
 

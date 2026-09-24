@@ -290,6 +290,13 @@ const REGISTRY = {
     reason:
       "unknown, estimate, verified. Unknown is a missing amount, not zero. Estimate and verified are stated prices with a source and an effective time. A fourth value would be a price the record-only rule has not decided how to store, and the amount check beside this list would not know which side it was on. Routing and billing do not read the row.",
   },
+  DeploymentPriceSnapshot_rate_kind_check: {
+    owner: "list",
+    module: "lib/routingHeldDecisions.ts",
+    list: "DEPLOYMENT_PRICE_RATE_KINDS",
+    reason:
+      "input, output, cache_read, cache_write. The same four rates lib/modelPricing.ts already prices per million tokens. One amount without a kind cannot say which of those rates it is, and a fifth kind would be a rate the record has no column for. The unit check beside this list fixes the scale at per million tokens.",
+  },
   AvailabilityRollupApplication_grain_check: {
     owner: "list",
     module: "lib/availabilityObservation.ts",
