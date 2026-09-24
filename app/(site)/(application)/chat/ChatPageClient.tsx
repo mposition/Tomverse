@@ -3907,7 +3907,7 @@ export function ChatPageClient({
               settleInitialConversationHandoff();
               return false;
             }
-            if (id !== currentChatIdRef.current) {
+            if (forceRouteTransition || id !== currentChatIdRef.current) {
               promoteCurrentUndispatchedTurns(selectionIdentityKey);
             }
             conversationSelectionTicketRef.current =
@@ -4103,9 +4103,15 @@ export function ChatPageClient({
 	  const res = await fetch(`/api/conversations/${accountId}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        if (currentChatIdRef.current === id &&
+        if (navigationAttempt === conversationNavigationAttemptRef.current &&
+            currentChatIdRef.current === id &&
             ["chat", "workspace", "continuation"].includes(data.surface) &&
             data.surface !== mountedSurface) {
+          // The in-place selection above already made `id` current, but this
+          // late server-owned surface answer still leaves the mounted tree.
+          // Re-run the departure barrier so durable-but-undispatched turns are
+          // promoted and late receipts cannot disappear with the unmount.
+          commitConversationSelection(true);
           router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));
           return;
         }

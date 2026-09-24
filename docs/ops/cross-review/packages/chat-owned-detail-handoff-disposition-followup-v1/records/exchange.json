@@ -1,0 +1,119 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat-owned-detail-handoff-disposition-followup-v1",
+  "requirement": "PR #1673의 CI 후속 Cursor 읽기 전용 검토가 확인한 두 경계만 보완한다. post-boundary owned-detail surface handoff도 provider 전 departure barrier를 거쳐 pending durable-undispatched turn을 promote하고 committed selection ticket을 갱신한다. continuation routing contract는 outstanding URL handoff가 explicit selection을 중단하지 않으며 promotion이 lookup 및 lock acceptance 뒤 router push 전에 정확한 identity로 한 번 실행됨을 동작과 mutation으로 검증한다. 기존 passed chat-saved-undispatched-disposition-followup-v2 exchange는 변경하지 않는다. provider 호출, 배포, flag 변경, commit 및 push는 범위 밖이다.",
+  "completionCriteria": [
+    "post-boundary owned-detail response가 current id의 다른 surface를 반환하면 captured navigation attempt가 여전히 최신인 경우에만 router.push 전에 동일한 forced departure barrier를 실행해 current pending durable-undispatched turn을 promote하고 committed selection ticket을 갱신한다. newer locked/refused selection 및 A-to-B-to-A 뒤의 stale response는 commit, promotion 및 push를 모두 수행하지 않는다.",
+    "forced same-id surface departure도 exact current identity로 한 번 promote하며 missing, refused, stale, invalid 또는 locked target은 acceptance 전에 promote하지 않는다.",
+    "routing contract가 outstanding initial URL handoff requested id와 explicit clicked id가 다른 시나리오를 실행하고 handoff settle 뒤 selection이 계속됨을 증명하며 inserted return mutation을 거부한다.",
+    "routing contract가 promotion identity, count 및 order, post-boundary navigation freshness와 commit-before-push를 실행 검증하고 missing, early 및 late barrier와 freshness-guard 제거 mutation을 거부한다.",
+    "external continuation contract, 관련 desktop/mobile Chromium E2E, identity/disposition unit, typecheck, scoped lint, production build 및 diff guard가 통과하고 기존 passed successor exchange는 바이트 불변으로 남는다."
+  ],
+  "baseCommit": "5d2c109ab75784d73206c2f904088d84ff3aed13",
+  "roles": {
+    "author": "codex",
+    "reviewer": "cursor"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:79c2eeb2fb274d931cd45c8d32f185fa2a7b78ce6a463cc0aec607c4c4ec4d63",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "docs/ops/cross-review/packages/chat-owned-detail-handoff-disposition-followup-v1/authorization.md",
+        "docs/ops/cross-review/packages/chat-owned-detail-handoff-disposition-followup-v1/task.json",
+        "tests/externalContinuationContracts.test.mjs",
+        "tests/support/continuationRouting.mjs"
+      ],
+      "changeSummary": "Fence post-boundary owned-detail handoffs with an AST-verified fresh navigation-attempt check and durable-undispatched departure barrier.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/externalContinuationContracts.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 44523.9309",
+          "durationMs": 44627
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check 5d2c109ab75784d73206c2f904088d84ff3aed13",
+          "passed": true,
+          "detail": "",
+          "durationMs": 74
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 63823
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' tests/externalContinuationContracts.test.mjs tests/support/continuationRouting.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 45711
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Record this approval against the reviewed digest; post-boundary owned-detail handoff now runs the forced departure barrier only while the captured navigation attempt is still current."
+    }
+  ],
+  "changeDigest": "sha256:79c2eeb2fb274d931cd45c8d32f185fa2a7b78ce6a463cc0aec607c4c4ec4d63",
+  "commit": null,
+  "changeSummary": "Fence post-boundary owned-detail handoffs with an AST-verified fresh navigation-attempt check and durable-undispatched departure barrier.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test tests/externalContinuationContracts.test.mjs",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 44523.9309",
+      "durationMs": 44627
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "git diff --check 5d2c109ab75784d73206c2f904088d84ff3aed13",
+      "passed": true,
+      "detail": "",
+      "durationMs": 74
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 63823
+    },
+    {
+      "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' tests/externalContinuationContracts.test.mjs tests/support/continuationRouting.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 45711
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Record this approval against the reviewed digest; post-boundary owned-detail handoff now runs the forced departure barrier only while the captured navigation attempt is still current.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-24T12:39:36.850Z",
+  "packagedRounds": 1,
+  "concludedAtRound": 0,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "5d2c109ab75784d73206c2f904088d84ff3aed13",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "docs/ops/cross-review/packages/chat-owned-detail-handoff-disposition-followup-v1/authorization.md",
+    "docs/ops/cross-review/packages/chat-owned-detail-handoff-disposition-followup-v1/task.json",
+    "tests/externalContinuationContracts.test.mjs",
+    "tests/support/continuationRouting.mjs"
+  ]
+}
