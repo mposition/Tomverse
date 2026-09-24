@@ -68,6 +68,8 @@ import {
     recordDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
+import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
+import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
 import type {
     RoutingAttemptErrorClass,
@@ -76,6 +78,7 @@ import type {
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
@@ -1108,6 +1111,26 @@ async function handleChatPost(
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
         persistenceSourceUserMessageId = sourceUserMessageId;
+        // A pinned internal account either finishes on this path or, when the
+        // flag is off or the account is not the configured one, falls through
+        // to the ordinary handler. A refusal is not that fall-through: the
+        // experiment budget would not cover a second call.
+        const pinnedDeployment = await enterPinnedDeploymentChat({
+            authenticatedAccountId: session?.user?.id ?? null,
+            traceId,
+            messages,
+            webSearchMode: webSearchMode ?? null,
+            deepResearchDepth: deepResearchDepth ?? null,
+        });
+        if (pinnedDeployment.route === "refused") {
+            const http = pinnedRefusalHttp(pinnedDeployment.reason);
+            return tracedJsonError(http.message, http.code, http.status, traceId);
+        }
+        if (pinnedDeployment.route === "dispatched") {
+            if (pinnedDeployment.response instanceof Response) return pinnedDeployment.response;
+            const http = pinnedRefusalHttp("provider_error");
+            return tracedJsonError(http.message, http.code, http.status, traceId);
+        }
         // Durable idempotency has to claim before credit reservation, but it
         // must not be a way around request admission. This cheap account+IP
         // bucket runs before source lookup, advisory locks and attempt row
@@ -1877,7 +1900,19 @@ async function handleChatPost(
                   )
                 : null;
 
-        const activeModel = getActiveAiModel(modelConfig);
+        let activeModel;
+        try {
+            activeModel = getActiveAiModel(modelConfig);
+        } catch (error) {
+            const code = catalogueHostRefusalCode(error);
+            if (!code) throw error;
+            return tracedJsonError(
+                "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
+                code,
+                409,
+                traceId
+            );
+        }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;

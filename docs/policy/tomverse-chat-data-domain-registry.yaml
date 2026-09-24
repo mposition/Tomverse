@@ -562,7 +562,13 @@ domains:
     note: >-
       Shadow routing telemetry (docs/policy/tomverse-chat-routing.md §5): the
       model the Router would have chosen, beside the one that actually ran, as
-      versions, labels and counts. Cascade rather than SetNull, deliberately.
+      versions, labels and counts. The request-start control-plane version and
+      account policy version may both be absent; absence is not the policy
+      that is active now, and one without the other is not a freeze. A
+      request deadline in milliseconds may be absent; absence is not a
+      deadline of zero. A pre-commit buffer duration in milliseconds may
+      be absent; absence is not a buffer of zero. Cascade
+      rather than SetNull, deliberately.
       subjectKey and traceId would still name the person after a null userId,
       so a surviving row would be a half-anonymisation this registry would have
       to carry as a gap -- and a new telemetry table has no claim on outliving
@@ -1569,7 +1575,8 @@ domains:
       a Tomverse-managed key and with a customer's own, and a credential must
       never redefine the endpoint, region, residency, model version or
       capability semantics it is used against. Holds a reference to where the
-      secret lives, never the secret. Cascade rather than SetNull: a binding
+      secret lives, never the secret. Rotation and expiry instants may be
+      absent; absence is not a lifetime. Cascade rather than SetNull: a binding
       whose account is gone still names that account's provider identity in
       its reference, so a surviving row would be a half-anonymisation.
 
@@ -1639,7 +1646,9 @@ domains:
     inUnifiedExport: excluded
     note: >-
       Which placement a conversation's turns last went to, and when. One row
-      per conversation and logical model. Deliberately holds no digest of the
+      per conversation and logical model. An affinity epoch and a hold-down
+      instant may both be absent. Absence is not epoch zero and it is not a
+      hold-down this schema chose. Deliberately holds no digest of the
       prompt prefix: that would sharpen the cache answer and is derived from
       what the person wrote, and it would confirm a guess about their text.
       Cascades from Conversation, which cascades from User.

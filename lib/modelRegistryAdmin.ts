@@ -6,6 +6,7 @@ import { findUnpricedModels } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 import {
   AI_PROVIDERS,
+  DEPLOYMENT_ONLY_PROVIDERS,
   PROVIDER_API_CONFIGURATION,
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
@@ -111,6 +112,17 @@ const unpricedPremiumMessage = (candidate: Record<string, unknown>) => {
 const refineModelInput = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
   schema.superRefine((value, context) => {
     const candidate = value as Record<string, unknown>;
+    if (
+      typeof candidate.provider === "string" &&
+      (DEPLOYMENT_ONLY_PROVIDERS as readonly string[]).includes(candidate.provider)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["provider"],
+        message:
+          "These providers are deployment hosts. A catalogue row cannot name them.",
+      });
+    }
     const unpricedPremium = unpricedPremiumMessage(candidate);
     if (unpricedPremium) {
       context.addIssue({
