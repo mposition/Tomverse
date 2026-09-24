@@ -42,6 +42,7 @@ export const interpretObservationMode = (
 export type CanaryExecutionRefusal =
     | "production_traffic"
     | "user_traffic"
+    | "production_environment"
     | "unnamed_environment"
     | "unnamed_scope"
     | "unnamed_stop"
@@ -64,8 +65,9 @@ export const admitCanaryExecution = (input: {
 }): { admitted: false; reason: CanaryExecutionRefusal } | { admitted: true; productionWeightChange: false } => {
     if (input.productionTraffic) return { admitted: false, reason: "production_traffic" };
     if (input.userTraffic) return { admitted: false, reason: "user_traffic" };
-    if (!named(input.environmentName) || input.environmentName.toLowerCase() === "production") {
-        return { admitted: false, reason: "unnamed_environment" };
+    if (!named(input.environmentName)) return { admitted: false, reason: "unnamed_environment" };
+    if (input.environmentName.toLowerCase() === "production") {
+        return { admitted: false, reason: "production_environment" };
     }
     if (!named(input.experimentScope)) return { admitted: false, reason: "unnamed_scope" };
     if (!named(input.stopCondition)) return { admitted: false, reason: "unnamed_stop" };
@@ -102,16 +104,19 @@ export const softmaxConfigured = (temperature: number | null): boolean =>
     typeof temperature === "number" && Number.isFinite(temperature) && temperature > 0;
 
 export const distributionCandidate = (input: { passedHardGates: boolean }): { eligible: boolean } => ({
-    eligible: input.passedHardGates,
+    eligible: input.passedHardGates === true,
 });
 
 export type PriceKnowledge = "unknown" | "estimate" | "verified";
 
-export type PriceRecordRefusal = "unknown_has_amount" | "incomplete_known_price";
+export type PriceRecordRefusal = "unknown_has_amount" | "incomplete_known_price" | "unrecognized_knowledge";
 
 /**
- * A record-only snapshot keeps an unknown price unknown. Applying it to
- * routing or to a credit charge is a separate approval this module refuses.
+ * A record-only snapshot keeps an unknown price unknown. A stated estimate
+ * or verified price may be zero when its source and effective time are
+ * named; that zero is not an unknown amount filled in. Applying any
+ * snapshot to routing or to a credit charge is a separate approval this
+ * module refuses.
  */
 export const recordDeploymentPrice = (input: {
     knowledge: PriceKnowledge;
@@ -126,6 +131,9 @@ export const recordDeploymentPrice = (input: {
         if (input.amount !== null) return { recorded: false, reason: "unknown_has_amount" };
         return { recorded: true, appliedToRouting: false, appliedToBilling: false };
     }
+    if (input.knowledge !== "estimate" && input.knowledge !== "verified") {
+        return { recorded: false, reason: "unrecognized_knowledge" };
+    }
     const amountKnown =
         typeof input.amount === "number" && Number.isFinite(input.amount) && input.amount >= 0;
     if (!amountKnown || !named(input.currency) || !named(input.source) || !named(input.effectiveAt)) {
@@ -139,14 +147,16 @@ export const applyPriceSnapshot = (): { applied: false; reason: "behavior_change
     reason: "behavior_change_unapproved",
 });
 
-/** A missing deployment sample stays insufficient. A probe success is not copied in. */
+/**
+ * A missing deployment sample stays insufficient. The probe field is
+ * accepted so a caller must name it, and it is never copied in as the
+ * observation.
+ */
 export const deploymentEvidence = (input: {
     observationCount: number;
     probeSucceeded: boolean;
 }): { status: "insufficient" | "observed"; usedProbe: false } => {
-    if (typeof input.probeSucceeded !== "boolean") {
-        return { status: "insufficient", usedProbe: false };
-    }
+    void input.probeSucceeded;
     if (!Number.isInteger(input.observationCount) || input.observationCount <= 0) {
         return { status: "insufficient", usedProbe: false };
     }
@@ -201,7 +211,9 @@ export const assessFallbackConnection = (input: {
         liveActivation: false as const,
     });
     if (!wholeAtLeastOne(input.tomverseDispatches)) return refused("invalid_attempt_count");
-    if (input.attemptsInsideEachDispatch === null) return refused("unknown_sdk_retries");
+    if (input.attemptsInsideEachDispatch === null || input.attemptsInsideEachDispatch === undefined) {
+        return refused("unknown_sdk_retries");
+    }
     if (!wholeAtLeastOne(input.attemptsInsideEachDispatch)) return refused("invalid_attempt_count");
     const providerAttempts = input.tomverseDispatches * input.attemptsInsideEachDispatch;
     if (providerAttempts > 2) return refused("provider_budget_exceeded");
@@ -227,9 +239,9 @@ export const assessDeploymentEquivalence = (input: {
     providerAttestationId: string | null;
     tomverseEvaluationId: string | null;
 }): { status: EquivalenceStatus; automaticRouting: false; reason: "scope" | "missing_evidence" | "both_evidences" } => {
-    const ids = input.deploymentIds.filter(named);
+    const ids = input.deploymentIds.length === 2 ? input.deploymentIds.filter(named) : [];
     const distinct = new Set(ids);
-    if (!named(input.logicalModelId) || distinct.size !== 2 || ids.length !== 2) {
+    if (!named(input.logicalModelId) || input.deploymentIds.length !== 2 || distinct.size !== 2 || ids.length !== 2) {
         return { status: "unverified", automaticRouting: false, reason: "scope" };
     }
     const provider = named(input.providerAttestationId);
