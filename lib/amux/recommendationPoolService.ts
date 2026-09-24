@@ -27,6 +27,7 @@ import {
   RECOMMENDATION_POLICY_VERSION,
   RECOMMENDATION_SCORING_VERSION,
   RECOMMENDATION_SNAPSHOT_BACKSTOP,
+  type RecommendationApproveRequest,
   type RecommendationCardFact,
   type RecommendationDecisionRequest,
   type RecommendationRow,
@@ -494,6 +495,10 @@ export async function decideRecommendation(input: { session: Session; request: R
   });
 }
 
+const isRecommendationApproval = (
+  decision: RecommendationDecisionRequest,
+): decision is RecommendationApproveRequest => decision.decision === "approve";
+
 export async function commitRecommendationDecision(
   tx: Prisma.TransactionClient,
   input: {
@@ -578,36 +583,37 @@ export async function commitRecommendationDecision(
     select: { id: true, status: true, revision: true },
   });
   if (!live || live.status !== "backlog") throw new BoardImportError("not_backlog", 409, snapshot.id);
-  if (input.decision.decision === "hold" || input.decision.decision === "reject") {
-    if (!recommendationReviewAfterAccepted(input.decision.reviewAfter, input.now)) {
+  const decision = input.decision;
+  if (!isRecommendationApproval(decision)) {
+    if (!recommendationReviewAfterAccepted(decision.reviewAfter, input.now)) {
       throw new BoardImportError("schema_rejected", 400, snapshot.id);
     }
-    const action = input.decision.decision === "hold" ? "amux.recommendation.held" : "amux.recommendation.rejected";
+    const action = decision.decision === "hold" ? "amux.recommendation.held" : "amux.recommendation.rejected";
     const auditId = await writeHumanAudit(tx, input.session, input.request, action, snapshot.id, recommendationAuditMetadata({
       snapshotId: snapshot.id,
-      decisionId: input.decision.decisionId,
+      decisionId: decision.decisionId,
       digest: input.requestDigest,
-      reasonCode: input.decision.reasonCode,
-      reviewAfter: new Date(input.decision.reviewAfter).toISOString(),
+      reasonCode: decision.reasonCode,
+      reviewAfter: new Date(decision.reviewAfter).toISOString(),
     }));
     await tx.amuxRecommendationDecision.create({
       data: {
-        id: input.decision.decisionId,
+        id: decision.decisionId,
         snapshotId: snapshot.id,
         workItemId: cardId,
-        decision: input.decision.decision,
-        status: input.decision.decision === "hold" ? "held" : "rejected",
-        reasonCode: input.decision.reasonCode,
-        reviewAfter: new Date(input.decision.reviewAfter),
+        decision: decision.decision,
+        status: decision.decision === "hold" ? "held" : "rejected",
+        reasonCode: decision.reasonCode,
+        reviewAfter: new Date(decision.reviewAfter),
         actorUserId: actorId(input.session),
         authorizationAuditLogId: auditId,
         requestDigest: input.requestDigest,
       },
     });
     return {
-      decisionId: input.decision.decisionId,
+      decisionId: decision.decisionId,
       snapshotId: snapshot.id,
-      status: input.decision.decision === "hold" ? ("held" as const) : ("rejected" as const),
+      status: decision.decision === "hold" ? ("held" as const) : ("rejected" as const),
       replayed: false as const,
     };
   }
@@ -619,14 +625,14 @@ export async function commitRecommendationDecision(
   const still = recommendationApproveStillIncluded({
     row: rowFromItem(item),
     live: fact,
-    item: input.decision.item,
+    item: decision.item,
     blocksAdmission: await loadBlocksAdmission(tx),
     configured: selection.configured,
     remaining: selection.remaining,
     now: input.now,
   });
   if (!still.ok) throw new BoardImportError(still.code, 409, snapshot.id);
-  const write = boardPromotionCardWrite(input.decision.item);
+  const write = boardPromotionCardWrite(decision.item);
   const updated = await tx.amuxWorkItem.updateMany({ where: write.where, data: write.data });
   if (updated.count !== 1) throw new BoardImportError("conflict", 409, snapshot.id);
   const auditId = await writeHumanAudit(
