@@ -223,8 +223,6 @@ export type AdoptionSaveBlock =
   | "profile_lookup_pending"
   | "reasoning_unconfirmed"
   | "price_unconfirmed"
-  | "born_enabled"
-  | "born_listed"
   | "above_every_class"
   | "output_cap_unknown"
   | "prices_unknown"
@@ -239,8 +237,6 @@ export const adoptionSaveBlock = (input: {
   reasoningConfirmed: boolean;
   priceSuggested: boolean;
   priceConfirmed: boolean;
-  status: string;
-  publiclyListed: boolean;
   creditWeight: number;
   floor: CreditFloor | CreditFloorRefusal;
 }): AdoptionSaveBlock | null => {
@@ -249,8 +245,6 @@ export const adoptionSaveBlock = (input: {
   if (input.profileLookupPending) return "profile_lookup_pending";
   if (input.reasoningSuggested && !input.reasoningConfirmed) return "reasoning_unconfirmed";
   if (input.priceSuggested && !input.priceConfirmed) return "price_unconfirmed";
-  if (input.status === "enabled" || input.status === "limited") return "born_enabled";
-  if (input.publiclyListed) return "born_listed";
   if (!input.profileLookupFailed) {
     if (!isCreditFloor(input.floor)) {
       if (input.floor.reason === "above_every_class") return "above_every_class";
@@ -859,9 +853,8 @@ export const buildAdoptionDraft = (input: {
       supportsNativePdf,
       reasoning: reasoning.value ?? "none",
       minimumPlan: "Pro",
-      // Born switched off. The operator turns it on once the price is in and
-      // the validations are clear, through the same guard every other enable
-      // goes through.
+      // Opens switched off. The same form can set enabled or limited, and
+      // can list the model, before the first save.
       status: "coming-soon",
       publiclyListed: false,
     },
@@ -1145,24 +1138,9 @@ export const adoptionPreflightRefusal = (input: {
       message: `This work item is already at ${workItem.status} with no model against it. Adoption files the validations a model still owes, and this item is past the state that holds them.`,
     };
   }
-  // Born switched off, enforced rather than suggested. The draft proposes
-  // `coming-soon` and unlisted, and the same form can flip both before saving:
-  // a model enabled here is live to users while its work item still lists
-  // pricing, access and staging as owed.
-  if (input.body.status === "enabled" || input.body.status === "limited") {
-    return {
-      status: 409,
-      message:
-        "An adopted model is created switched off. Enable it from the registry once pricing, access and staging are verified.",
-    };
-  }
-  if (input.body.publiclyListed) {
-    return {
-      status: 409,
-      message:
-        "An adopted model is created unlisted. List it once it is verified and enabled.",
-    };
-  }
+  // The draft opens as coming-soon and unlisted. Status and public listing
+  // are whatever this form submits: the price, class and credit floor below
+  // are what still refuse an unpriced model.
   // And if a price is known, the class has to cover it. The panel shows this
   // floor as the operator types; refusing it here is what makes the figure
   // more than decoration.
