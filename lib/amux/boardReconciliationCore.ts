@@ -1,3 +1,5 @@
+import { boardImportApplyPermitted } from "./boardImportCore.ts";
+
 /**
  * Source reconciliation after the first catalog import.
  *
@@ -16,11 +18,14 @@ export const AMUX_RECONCILIATION_RUN_STATUSES = [
 
 export const AMUX_SOURCE_REVISION_STATES = ["observed", "accepted", "rejected"] as const;
 
-/** Shipped off. A caller cannot supply the latch. Typed as boolean so the comparison is not a literal false === true. */
-export const AMUX_RECONCILIATION_APPLY_CODE_LATCH: boolean = false;
+/** Shipped off. A caller cannot supply the latch. */
+export const AMUX_RECONCILIATION_APPLY_CODE_LATCH = false;
 
 export const amuxReconciliationApplyPermitted = (envValue: string | undefined): boolean =>
-  AMUX_RECONCILIATION_APPLY_CODE_LATCH === true && envValue === "enabled";
+  boardImportApplyPermitted({
+    envValue,
+    codeLatch: AMUX_RECONCILIATION_APPLY_CODE_LATCH,
+  });
 
 export type AmuxReconciliationItem = {
   sourceKey: string;
