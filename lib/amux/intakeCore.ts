@@ -151,6 +151,15 @@ export const amuxIntakeSourceKey = (secret: string, sourceTaskId: string): strin
   return createHmac("sha256", secret).update(sourceTaskId, "utf8").digest("hex");
 };
 
+/**
+ * Stored form of the source key. The card check requires an uppercase key.
+ * Uppercase hex is still the HMAC and still does not contain the task id.
+ */
+export const amuxIntakeStoredSourceKey = (secret: string, sourceTaskId: string): string | null => {
+  const key = amuxIntakeSourceKey(secret, sourceTaskId);
+  return key === null ? null : key.toUpperCase();
+};
+
 const workItemRefused = (value: unknown): string | null => {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) return "schema_rejected";
