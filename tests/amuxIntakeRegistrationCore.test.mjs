@@ -53,11 +53,11 @@ test("a conversation that is not an explicit registration writes nothing", () =>
   assert.equal(planned.writes, 0);
 });
 
-test("preview shows one inactive unit and asks again after the payload changes", () => {
+test("preview shows one unit and asks again after the payload changes", () => {
   const waiting = previewAmuxIntake(body(draft()), secret, "enabled");
   assert.equal(waiting.outcome, "approval_required");
   assert.equal(waiting.unitCount, 1);
-  assert.equal(waiting.inactive, true);
+  assert.equal(waiting.inactive, false);
   assert.equal(waiting.applyPermitted, false);
   assert.equal(waiting.writes, 0);
   assert.equal(waiting.reconfirmRequired, true);
@@ -81,6 +81,18 @@ test("preview shows one inactive unit and asks again after the payload changes",
   assert.equal(again.writes, 0);
   assert.equal(again.title, "A different unit");
   assert.notEqual(again.draftDigest, parsed.ok ? amuxIntakeDraftDigest(parsed.draft) : null);
+
+  const ready = previewAmuxIntake(confirmed(draft()), secret, "enabled");
+  assert.equal(ready.outcome, "allow");
+  assert.equal(ready.applyPermitted, true);
+  assert.equal(ready.inactive, false);
+  assert.equal(ready.writes, 0);
+  assert.equal(ready.reconfirmRequired, false);
+  const closed = previewAmuxIntake(confirmed(draft()), secret, undefined);
+  assert.equal(closed.outcome, "allow");
+  assert.equal(closed.applyPermitted, false);
+  assert.equal(closed.inactive, true);
+  assert.equal(closed.writes, 0);
 });
 
 test("the registration plan is one backlog card and does not touch execution or credit", () => {
@@ -134,11 +146,15 @@ test("the public apply path checks the shipped latch before the commit", () => {
   const permit = apply.indexOf("amuxIntakeApplyPermitted");
   const commit = apply.indexOf("commitAmuxIntakeRegistration");
   assert.equal(permit >= 0 && commit > permit, true);
+  assert.equal(apply.includes('code === "P2002"'), true);
+  assert.equal(apply.includes('new BoardImportError("conflict", 409, approvalId)'), true);
+  assert.equal(apply.includes('new BoardImportError("outcome_unknown", 409, approvalId)'), true);
   assert.equal(service.includes("codeLatch: true"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(route.includes("commitAmuxIntakeRegistration"), false);
   assert.equal(route.includes("codeLatch: true"), false);
   assert.match(panel, /registerReady = result\?\.applyPermitted === true/);
+  assert.match(panel, /registerReady \? messages\.registerPermitted : messages\.registerDisabled/);
   assert.match(panel, /disabled=\{pending \|\| !registerReady\}/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);

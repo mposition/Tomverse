@@ -34,9 +34,9 @@ const draft = (overrides = {}) => ({
 
 const body = (value) => JSON.stringify(value);
 
-test("the code latch ships false and one latch is not enough", () => {
-  assert.equal(AMUX_INTAKE_APPLY_CODE_LATCH, false);
-  assert.equal(amuxIntakeApplyPermitted("enabled"), false);
+test("stage 8 arms the code latch and still requires the environment value", () => {
+  assert.equal(AMUX_INTAKE_APPLY_CODE_LATCH, true);
+  assert.equal(amuxIntakeApplyPermitted("enabled"), true);
   assert.equal(amuxIntakeApplyPermitted("true"), false);
   assert.equal(amuxIntakeApplyPermitted(undefined), false);
 });
@@ -124,7 +124,7 @@ test("the source key is an hmac and a short secret produces none", () => {
 
 test("the pure module does not open a writer", () => {
   const source = read("lib/amux/intakeCore.ts");
-  assert.equal(source.includes("AMUX_INTAKE_APPLY_CODE_LATCH = false"), true);
+  assert.equal(source.includes("AMUX_INTAKE_APPLY_CODE_LATCH = true"), true);
   assert.equal(source.includes("codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH"), true);
   assert.equal(source.includes("@prisma/client"), false);
   assert.equal(source.includes("lib/credit"), false);
