@@ -217,3 +217,25 @@ export const closePinnedExperiment = async (
         return { ok: false };
     }
 };
+
+export const listPinnedExperiments = async (
+    db: Pick<ExperimentDb, "$queryRaw">
+): Promise<{ id: string; limitMicroUsd: number }[] | null> => {
+    try {
+        const rows = asRows(await db.$queryRaw`
+            SELECT "id", "limitMicroUsd"
+            FROM "PinnedDeploymentExperiment"
+            ORDER BY "createdAt" ASC
+        `);
+        const experiments = [];
+        for (const row of rows) {
+            if (typeof row.id !== "string" || row.id.length === 0) return null;
+            const limit = micro(row.limitMicroUsd);
+            if (limit === null || limit <= 0) return null;
+            experiments.push({ id: row.id, limitMicroUsd: limit });
+        }
+        return experiments;
+    } catch {
+        return null;
+    }
+};

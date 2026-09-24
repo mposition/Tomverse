@@ -108,6 +108,14 @@ export type PlacementDb = {
                 endpointUrl: true;
             };
         }): Promise<EndpointRow | null>;
+        findMany(args: {
+            where: {
+                gatewayProvider: string;
+                servingProvider: string;
+                endpointUrl: string;
+            };
+            select: { id: true };
+        }): Promise<{ id: string }[]>;
     };
     modelDeployment: {
         create(args: {
@@ -128,6 +136,14 @@ export type PlacementDb = {
                 providerEndpointId: true;
             };
         }): Promise<DeploymentRow | null>;
+        findFirst(args: {
+            where: {
+                providerEndpointId: string;
+                logicalModelId: string;
+                upstreamDeploymentName: string;
+            };
+            select: { id: true };
+        }): Promise<{ id: string } | null>;
     };
 };
 
@@ -172,6 +188,41 @@ export const createLivePlacement = async (
     });
     if (!deployment.id) return { ok: false, reason: "deployment_mismatch" };
     return { ok: true, deploymentId: deployment.id };
+};
+
+/**
+ * The stored row for this live claim, if one already exists. A second insert
+ * would be a second deployment, so the operator reuses this id.
+ */
+export const findLivePlacement = async (
+    db: PlacementDb,
+    claim: LivePlacementClaim
+): Promise<
+    | { ok: true; deploymentId: string | null }
+    | { ok: false; reason: "deployment_mismatch" }
+> => {
+    const matched = matchLivePlacement(claim);
+    if (!matched.ok) return matched;
+    const endpoints = await db.providerEndpoint.findMany({
+        where: {
+            gatewayProvider: matched.provider,
+            servingProvider: matched.provider,
+            endpointUrl: matched.endpointUrl,
+        },
+        select: { id: true },
+    });
+    for (const endpoint of endpoints) {
+        const deployment = await db.modelDeployment.findFirst({
+            where: {
+                providerEndpointId: endpoint.id,
+                logicalModelId: matched.logicalModelId,
+                upstreamDeploymentName: matched.upstreamDeploymentName,
+            },
+            select: { id: true },
+        });
+        if (deployment?.id) return { ok: true, deploymentId: deployment.id };
+    }
+    return { ok: true, deploymentId: null };
 };
 
 export const readStoredPlacement = async (
