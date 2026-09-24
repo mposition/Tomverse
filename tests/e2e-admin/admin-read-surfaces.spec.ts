@@ -124,15 +124,14 @@ test.describe("admin read surfaces", () => {
     ).toBeVisible();
   });
 
-  test("the work queue's approvals tab shows the approval queue", async ({
-    page,
-  }) => {
-    await page.goto("/admin/work-queue?tab=approvals");
+  test("the old approvals address opens the work queue", async ({ page }) => {
+    await page.goto("/admin/approvals");
 
+    await expect(page).toHaveURL("/admin/work-queue");
+    await expect(consoleHeading(page)).toHaveText("Work queue");
     await expect(
       page.getByRole("heading", { name: "High-risk admin approvals" })
-    ).toBeVisible();
-    await expect(page.getByText(/No .*approval/i).first()).toBeVisible();
+    ).toHaveCount(0);
   });
 
   test("providers' incidents tab lists open and resolved incidents", async ({
