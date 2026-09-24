@@ -6,6 +6,7 @@ import {
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
   adoptionSaleProposal,
+  adoptionSaveBlock,
   blankTokenFieldValues,
   buildAdoptionDraft,
   requestOutputCapFromProvider,
@@ -161,6 +162,38 @@ test("the draft copies what the provider said and nothing else", () => {
   assert.equal(draft.fields.maxOutputTokens, 64_000);
   assert.equal(draft.sources.maxOutputTokens, "provider_catalogue");
   assert.equal(draft.observedCapabilities.providerMaxOutputTokens, 64_000);
+});
+
+test("an adoption save says why it is not ready, starting with the birth state", () => {
+  const floor = {
+    usageClass: "frontier" as const,
+    credits: 32,
+    worstCaseMicroUsd: 3_200_000,
+    coverMicroUsd: 3_840_000,
+    inputTokens: 128_000,
+    outputTokens: 128_000,
+    inputMultiplier: 3,
+  };
+  const ready = {
+    reason: "Opus 5 replaces Opus 5",
+    classChosen: true,
+    profileLookupPending: false,
+    profileLookupFailed: false,
+    reasoningSuggested: false,
+    reasoningConfirmed: true,
+    priceSuggested: false,
+    priceConfirmed: true,
+    status: "coming-soon",
+    publiclyListed: false,
+    creditWeight: 32,
+    floor,
+  };
+  assert.equal(adoptionSaveBlock(ready), null);
+  assert.equal(adoptionSaveBlock({ ...ready, status: "enabled" }), "born_enabled");
+  assert.equal(adoptionSaveBlock({ ...ready, status: "limited" }), "born_enabled");
+  assert.equal(adoptionSaveBlock({ ...ready, publiclyListed: true }), "born_listed");
+  assert.equal(adoptionSaveBlock({ ...ready, reason: "no" }), "reason_too_short");
+  assert.equal(adoptionSaveBlock({ ...ready, creditWeight: 16 }), "credits_below_floor");
 });
 
 test("a new model is born switched off and unlisted", () => {
@@ -1369,12 +1402,14 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   const live = {
     catalogDeleted: false,
     replacementModelId: null,
+    provider: "anthropic",
     isApplicationDefault: false,
     isGuestDefault: false,
   };
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: null,
       predecessor: live,
     }),
@@ -1383,14 +1418,25 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "claude-opus-5",
       predecessor: live,
     }),
     null
   );
+  assert.match(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
+      replacesModelId: "gpt-5-6-luna",
+      predecessor: { ...live, provider: "openai" },
+    })?.message ?? "",
+    /same provider/
+  );
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "claude-opus-5-5",
       predecessor: live,
     })?.status,
@@ -1399,6 +1445,7 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "missing",
       predecessor: null,
     })?.status,
@@ -1407,6 +1454,7 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "gpt-5-6-luna",
       predecessor: { ...live, isApplicationDefault: true },
     })?.status,
@@ -1415,6 +1463,7 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "gpt-5-6-luna",
       predecessor: { ...live, isGuestDefault: true },
     })?.status,
@@ -1423,6 +1472,7 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.match(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "claude-opus-5",
       predecessor: { ...live, replacementModelId: "claude-sonnet-5" },
     })?.message ?? "",
@@ -1431,6 +1481,7 @@ test("replacing a model refuses the fallback, the guest default, and an existing
   assert.equal(
     adoptionReplacementRefusal({
       adoptedModelId: "claude-opus-5-5",
+      adoptedProvider: "anthropic",
       replacesModelId: "claude-opus-5",
       predecessor: { ...live, replacementModelId: "claude-opus-5-5" },
     }),
