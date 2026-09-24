@@ -632,6 +632,15 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    id: "amux-board-recommendation",
+    pattern: /^\/admin\/amux-board-recommendation$/,
+    label: "AMUX recommendation pool",
+    description: "Owner-only backlog recommendation snapshot, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     id: "amux-intake",
     pattern: /^\/admin\/amux-intake$/,
     label: "AMUX intake",
