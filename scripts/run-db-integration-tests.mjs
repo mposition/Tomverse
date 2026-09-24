@@ -216,6 +216,7 @@ run(
     // latch is false, so this test calls the commit function directly.
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
+    "tests/integration/amux-auto-promotion.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
