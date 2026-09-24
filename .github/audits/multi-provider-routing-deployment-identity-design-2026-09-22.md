@@ -1732,6 +1732,22 @@ workspace 테이블은 없다. `lib/routingPinGate.ts`가 적는다. ADR의 work
 
 이 절은 그 환경에 배포했거나 행을 넣었다는 뜻이 아니다. 이 브랜치는 develop에 없고 push하지 않았다. `npm run maintenance:pinned-deployment-execution`은 기본이 조회다. 쓰기는 `--apply --approved-pinned-execution --limit-micro-usd=1000000 --target=production`이 모두 있고, 계정 id가 환경변수에 있을 때만 한다. 다른 금액과 다른 대상은 거절한다. migration 적용, 서비스 변수 변경, 공급자 호출은 이 명령이 하지 않는다. 완료 수는 46, 약 92%(추정) 그대로다.
 
+## 14.40 한 번의 production 호출과 그 기록 (2026-09-25)
+
+플래그가 켜진 계정에서 메시지 하나가 이 경로로 들어갔다. HTTP는 200이었다. 실험 hold는 `settled`이고, 예약은 153,623 micro-USD, 측정 정산은 19 micro-USD였다. 실험 지출은 19가 되었고 예약 잔량은 0이 되었다. 같은 시각의 `RoutingAttempt`는 `pending`으로 남았고, dispatch 시각과 토큰 수는 비어 있었다.
+
+§14.38은 측정액이 예약보다 작으면 예약 전액을 실험 한도에 남긴다. `applyExperimentClose`의 `usage`가 그 규칙을 쓴다. hold의 `settledMicroUsd`는 측정액이다. 측정액이 예약 이상이면 실험 지출은 측정액이고, 미만이면 실험 지출은 예약 전액이다. 모르는 비용은 0이 아니다.
+
+성공으로 끝난 스트림은 `recordDispatched` 뒤에 `completeInstrumentedDispatch`로 attempt를 `succeeded`로 닫고, 보고된 입력·출력 토큰만 적는다. 없는 토큰 수는 null이다. 스트림 오류는 `failed_pre_token`과 `provider`다. 모델을 못 구해 호출 전에 돌아온 경우만 `not_dispatched`다. 사용자 크레딧 원장은 쓰지 않는다.
+
+플래그가 `on`이 아니면 `existing`으로 떨어지는 것은 기존 테스트가 고정한다. 운영에서 플래그를 끄고 그 경로를 관측한 것은 아니다.
+
+이미 정산된 production 행은 고치지 않는다. 그 행의 지출은 19 micro-USD로 남고, 예약 153,623과의 차이는 소급하지 않는다. 이 코드는 그 다음 호출의 정산만 바꾼다. 그 차이를 맞추는 원장 조정은 별도 승인이며, 여기서 쓰지 않는다.
+
+`streamPinnedInference`가 스트림 객체를 돌려주기 전에 throw하면 attempt는 dispatch 시각 없이 `pending`으로 남는다. hold는 기존과 같이 `unknown`으로 예약을 유지한다. 그 경로는 이번 수정이 닫지 않는다. 스트림 오류는 토큰이 보였는지와 상관없이 `failed_pre_token`이다. 이 기록은 fallback이나 provider health 판정에 쓰이지 않는다.
+
+이 절은 그 코드를 고친 기록이다. 고친 코드가 운영에서 한 번 더 호출돼 attempt가 닫힌 증거는 아직 없다. 완료 수는 **46 / 약 50, 약 92%(추정)** 그대로다. 검증·독립 검토·병합·배포는 별도다. §14.26과 §14.32의 보류는 그대로다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

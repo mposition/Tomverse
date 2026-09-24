@@ -363,7 +363,7 @@ test("unknown cost after dispatch is kept and a later flag change does not relea
     assert.equal(ledger.snapshot().spentMicroUsd, reservedMicroUsd);
 });
 
-test("a confirmed non-start releases and measured usage keeps only that cost", async () => {
+test("a confirmed non-start releases and a short measurement keeps the reservation", async () => {
     const released = createSerialExperimentLedger(1_000_000);
     const notStarted = await runPinnedDeployment({
         env: enteredEnv,
@@ -392,7 +392,7 @@ test("a confirmed non-start releases and measured usage keeps only that cost", a
         transport: async () => ({ started: true, usage }),
     });
     assert.equal(done.hold, "settled");
-    assert.equal(settled.snapshot().spentMicroUsd, actual);
+    assert.equal(settled.snapshot().spentMicroUsd, reservedMicroUsd);
     assert.equal(settled.snapshot().reservedMicroUsd, 0);
     assert.ok(actual < reservedMicroUsd);
     assert.equal(
@@ -400,13 +400,26 @@ test("a confirmed non-start releases and measured usage keeps only that cost", a
         null
     );
 
+    const shortfall = applyExperimentClose(
+        { spentMicroUsd: 0, reservedMicroUsd: 10, limitMicroUsd: 100 },
+        { status: "held", reservedMicroUsd: 10, experimentId },
+        { experimentId, outcome: "usage", actualMicroUsd: 4 }
+    );
+    assert.equal(shortfall.ok, true);
+    if (!shortfall.ok) return;
+    assert.equal(shortfall.spentMicroUsd, 10);
+    assert.equal(shortfall.settledMicroUsd, 4);
+    assert.equal(shortfall.status, "settled");
+
     const overrun = applyExperimentClose(
         { spentMicroUsd: 0, reservedMicroUsd: 10, limitMicroUsd: 10 },
         { status: "held", reservedMicroUsd: 10, experimentId },
         { experimentId, outcome: "usage", actualMicroUsd: 25 }
     );
     assert.equal(overrun.ok, true);
+    if (!overrun.ok) return;
     assert.equal(overrun.spentMicroUsd, 25);
+    assert.equal(overrun.settledMicroUsd, 25);
     assert.equal(overrun.status, "settled");
 });
 
@@ -597,6 +610,21 @@ test("the ordinary chat retry line is unchanged and this path does not borrow th
     assert.match(pinned, /streamPinnedInference/);
     assert.match(pinned, /estimatedPromptTokens: promptTokens/);
     assert.match(pinned, /settlePinnedUsageCost/);
+    const entranceBody = pinned.slice(pinned.indexOf("export const enterPinnedDeploymentChat"));
+    assert.match(entranceBody, /dispatched \?\?= recordDispatched\(instrumentation\)/);
+    assert.match(entranceBody, /await recordNotDispatched\(instrumentation, reason, "application"\)/);
+    const finishAt = entranceBody.indexOf("onFinish:");
+    const errorAt = entranceBody.indexOf("onError:");
+    assert.ok(finishAt > 0 && errorAt > finishAt);
+    const finishBlock = entranceBody.slice(finishAt, errorAt);
+    const errorBlock = entranceBody.slice(errorAt);
+    assert.match(finishBlock, /await ensureDispatched\(\)/);
+    assert.match(finishBlock, /finally \{[\s\S]*completeInstrumentedDispatch/);
+    assert.match(finishBlock, /outcome: "succeeded"/);
+    assert.match(errorBlock, /await ensureDispatched\(\)/);
+    assert.match(errorBlock, /finally \{[\s\S]*completeInstrumentedDispatch/);
+    assert.match(errorBlock, /outcome: "failed_pre_token"/);
+    assert.match(execution, /Math\.max\(request\.actualMicroUsd, hold\.reservedMicroUsd\)/);
     assert.match(pinned, /outcome: "unknown"/);
     assert.doesNotMatch(pinned, /stepCountIs/);
     assert.match(dispatch, /maxRetries: PINNED_INFERENCE_MAX_RETRIES/);
