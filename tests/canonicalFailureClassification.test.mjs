@@ -121,7 +121,31 @@ test("a server error names the endpoint and does not widen to the provider", () 
     );
 });
 
-test("an unknown category abstains", () => {
+test("a missing serving id does not turn a server error into that endpoint", () => {
+    assert.equal(
+        classifyCanonicalFailure({
+            ...base,
+            servingProviderId: null,
+            providerSide: null,
+            endpointId: "ep_1",
+            category: "SERVER_ERROR",
+        }).reason,
+        "gateway_serving_unresolved"
+    );
+    assert.equal(
+        classifyCanonicalFailure({
+            ...base,
+            gatewayProviderId: null,
+            servingProviderId: null,
+            providerSide: null,
+            endpointId: "ep_1",
+            category: "RATE_LIMIT",
+        }).reason,
+        "gateway_serving_unresolved"
+    );
+});
+
+test("UNKNOWN abstains instead of taking a scope", () => {
     assert.equal(classifyCanonicalFailure({ ...base, category: "UNKNOWN" }).reason, "insufficient");
 });
 

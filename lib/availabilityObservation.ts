@@ -209,4 +209,5 @@ export const rollupGrainsFor = (
 export const shouldApply = (
     eventId: string,
     alreadyApplied: ReadonlySet<string>
-): boolean => Boolean(eventId.trim()) && !alreadyApplied.has(eventId);
+): boolean =>
+    eventId.length > 0 && eventId === eventId.trim() && !alreadyApplied.has(eventId);

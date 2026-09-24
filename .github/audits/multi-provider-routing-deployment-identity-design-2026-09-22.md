@@ -1584,7 +1584,7 @@ DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenA
 
 판정이 `lib/canonicalFailureClassification.ts`에 있습니다. 요청 경로는 import하지 않습니다. 라이브 stream 분류기는 그대로이고, 이 모듈은 그 함수를 바꾸지 않습니다. 행을 읽거나 쓰지 않습니다.
 
-범용 provider 범위는 gateway와 serving을 구분하지 못합니다. 둘이 다르고 호출자가 어느 쪽인지 말하지 않으면, endpoint id가 있어도 기권입니다. 호출자가 gateway라고 한 429는 그 endpoint가 아니라 gateway입니다. 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다. provider id는 endpoint id가 아닙니다. 연결 실패와 5xx와 429는 쪽이 갈리지 않았거나 serving이라고 했을 때만, endpoint가 있을 때 serving endpoint로 이름 붙고, 없으면 gateway로 넓히지 않습니다. 인증과 결제 실패는 gateway id가 있을 때만 gateway입니다. serving 쪽을 골라도 endpoint가 없으면 기권입니다. UNKNOWN은 범위로 만들지 않습니다. 사용자 abort와 upstream timeout은 다른 provenance입니다. abort는 local이고, timeout은 endpoint가 있을 때만 serving endpoint이며 category는 NETWORK입니다.
+범용 provider 범위는 gateway와 serving을 구분하지 못합니다. serving id가 없거나 둘이 다르고, 호출자가 어느 쪽인지 말하지 않으면, endpoint id가 있어도 기권입니다. 양쪽 id가 같고 같을 때만 endpoint로 닫습니다. 호출자가 gateway라고 한 429는 그 endpoint가 아니라 gateway입니다. 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다. provider id는 endpoint id가 아닙니다. 연결 실패와 5xx와 429는 쪽이 갈리지 않았거나 serving이라고 했을 때만, endpoint가 있을 때 serving endpoint로 이름 붙고, 없으면 gateway로 넓히지 않습니다. 인증과 결제 실패는 gateway id가 있을 때만 gateway입니다. serving 쪽을 골라도 endpoint가 없으면 기권입니다. UNKNOWN은 범위로 만들지 않습니다. 사용자 abort와 upstream timeout은 다른 provenance입니다. abort는 local이고, timeout은 endpoint가 있을 때만 serving endpoint이며 category는 NETWORK입니다.
 
 모델 범위의 실패는 deployment id가 있을 때만 그 deployment입니다. deployment를 모르는 채 logical model 전체로 넓히지 않습니다. 기권은 다른 후보를 허용하는 판정이 아닙니다. 같은 endpoint의 다른 모델은 endpoint 실패의 밖이 아닙니다. 다른 endpoint만 그 범위 밖입니다.
 
@@ -1602,7 +1602,7 @@ DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenA
 
 Cursor CLI 검토는 blocker 없이 변경 후 승인이었습니다. 세 major를 닫았고, 완료 수는 올리지 않습니다. 43, 약 86%가 그대로입니다.
 
-broker에서 gateway와 serving이 다르고 쪽을 말하지 않으면 endpoint id가 있어도 기권입니다. 429를 gateway라고 부르면 범위는 gateway이고, 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다.
+broker에서 gateway와 serving이 다르거나 serving id가 없고, 쪽을 말하지 않으면 endpoint id가 있어도 기권입니다. 양쪽 id가 같은 경우만 endpoint로 닫습니다. 429를 gateway라고 부르면 범위는 gateway이고, 같은 gateway의 다른 endpoint는 그 실패의 밖이 아닙니다.
 
 `shouldApply`는 관측 insert입니다. grain 적용은 `shouldApplyRollup`입니다. 둘은 같은 규칙이 아닙니다.
 

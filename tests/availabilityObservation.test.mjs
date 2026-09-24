@@ -117,6 +117,7 @@ test("the observation insert check is not grain application", () => {
     assert.equal(shouldApply("evt_2", seen), true);
     assert.equal(shouldApply("evt_1", seen), false);
     assert.equal(shouldApply("", seen), false);
+    assert.equal(shouldApply("evt_1 ", seen), false);
 });
 
 test("a deployment observation names the endpoint it ran on", () => {

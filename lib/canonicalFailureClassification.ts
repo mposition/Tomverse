@@ -160,8 +160,8 @@ const endpointScope = (
     if (endpointId === "invalid" || gateway === "invalid" || serving === "invalid") {
         return { status: "abstain", reason: "invalid_id" };
     }
-    const sidesDiffer = gateway !== null && serving !== null && gateway !== serving;
-    if (sidesDiffer && input.providerSide === null) {
+    const sameProvider = gateway !== null && serving !== null && gateway === serving;
+    if (input.providerSide === null && !sameProvider) {
         return { status: "abstain", reason: "gateway_serving_unresolved" };
     }
     if (input.providerSide === "gateway") {
@@ -182,7 +182,18 @@ export const classifyCanonicalFailure = (input: CanonicalFailureInput): Canonica
             return { status: "abstain", reason: "provenance_category_conflict" };
         }
         const endpointId = usableId(input.endpointId);
-        if (endpointId === "invalid") return { status: "abstain", reason: "invalid_id" };
+        const gateway = usableId(input.gatewayProviderId);
+        const serving = usableId(input.servingProviderId);
+        if (endpointId === "invalid" || gateway === "invalid" || serving === "invalid") {
+            return { status: "abstain", reason: "invalid_id" };
+        }
+        const sameProvider = gateway !== null && serving !== null && gateway === serving;
+        if (input.providerSide === null && !sameProvider) {
+            return { status: "abstain", reason: "gateway_serving_unresolved" };
+        }
+        if (input.providerSide === "gateway") {
+            return { status: "abstain", reason: "gateway_serving_unresolved" };
+        }
         if (endpointId === null) return { status: "abstain", reason: "missing_endpoint" };
         return classified("serving_endpoint", endpointId, "NETWORK", "upstream_timeout", true);
     }
@@ -258,10 +269,7 @@ export const candidateOutsideFailureScope = (
                 ? { outside: false, reason: "same_scope" }
                 : { outside: true };
         case "model":
-            if (logicalModelId === null) return { outside: false, reason: "missing_candidate" };
-            return logicalModelId === failure.scopeId
-                ? { outside: false, reason: "same_scope" }
-                : { outside: true };
+            return { outside: false, reason: "unclassified" };
         case "serving_endpoint":
             if (endpointId === null) return { outside: false, reason: "missing_candidate" };
             return endpointId === failure.scopeId
