@@ -12,13 +12,13 @@ import {
 /**
  * Manual promotion of one to three catalog backlog cards.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 5).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 6).
  * The request schema stays at policy version 3.
  *
  * Parsing and classification are pure. This module does not open a
  * transaction, write an audit row, or change a card. The service is the only
  * writer. Production apply needs both the environment latch and
- * `BOARD_PROMOTION_APPLY_CODE_LATCH`. Version 5 turns that constant on.
+ * `BOARD_PROMOTION_APPLY_CODE_LATCH`. Version 6 turns that constant on.
  * Nothing here selects a card, starts a worker, or spends credits.
  */
 
@@ -35,7 +35,7 @@ export const BOARD_PROMOTION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_PROMOTE";
 /**
  * Second apply latch. One environment variable must not be enough to move a
  * card. The HTTP route passes this constant and never a literal `true`.
- * Version 5 arms it for the named E pilot. A caller cannot supply the latch.
+ * Version 6 arms it for the named E pilot. A caller cannot supply the latch.
  * This constant does not promote a card and does not read the environment.
  */
 export const BOARD_PROMOTION_APPLY_CODE_LATCH = true;

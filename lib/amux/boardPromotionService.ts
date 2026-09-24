@@ -39,7 +39,7 @@ import { prisma } from "@/lib/prisma";
 /**
  * Manual promotion writer.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 5).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 6).
  * The request schema stays at policy version 3.
  *
  * Prepare, approve, reject, expire and apply commit with their canonical
