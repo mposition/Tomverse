@@ -988,6 +988,7 @@ export const fr = {
         reasoning: "Raisonnement",
         research: "Recherche",
         frontier: "Frontière",
+        apex: "Apex",
     },
     onboarding: {
         title: "Comparez immédiatement des modèles gratuits",
