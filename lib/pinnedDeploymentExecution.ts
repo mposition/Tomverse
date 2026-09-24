@@ -173,15 +173,64 @@ const ceilMicroUsd = (tokens: number, usdPerMillionTokens: number): number | nul
 };
 
 /**
+ * Extra tokens a provider may add around each message. A BPE token is at
+ * least one byte of the text itself, so the byte length plus this ceiling
+ * is the input count the reservation prices. The point estimate is not
+ * that count: dense text can be several tokens per few bytes, and a count
+ * that sits just below a price-tier boundary would otherwise reserve the
+ * cheaper rate for a prompt the provider can bill on the higher one.
+ */
+export const PINNED_MESSAGE_FRAMING_TOKEN_CEILING = 64;
+
+export const pinnedBillablePromptCeiling = (
+    messages: readonly object[]
+): number | null => {
+    let bytes = 0;
+    let count = 0;
+    for (const message of messages) {
+        if (!message || typeof message !== "object") return null;
+        const pinned = readPinnedMessage(message);
+        if (!pinned) return null;
+        const encoded = new TextEncoder().encode(pinned.text).length;
+        if (!safeNonNegative(encoded)) return null;
+        bytes += encoded;
+        count += 1;
+    }
+    const ceiling = bytes + count * PINNED_MESSAGE_FRAMING_TOKEN_CEILING;
+    return safeNonNegative(bytes) && safeNonNegative(ceiling) ? ceiling : null;
+};
+
+/** The input count the reservation prices: the byte ceiling, or the estimate when that is higher. */
+export const pinnedReservedInputTokens = (
+    messages: readonly object[]
+): number | null => {
+    const ceiling = pinnedBillablePromptCeiling(messages);
+    if (ceiling === null) return null;
+    const accumulator = createTokenEstimateAccumulator();
+    for (const message of messages) {
+        if (!message || typeof message !== "object") return null;
+        const pinned = readPinnedMessage(message);
+        if (!pinned) return null;
+        accumulator.addText(pinned.text);
+    }
+    const estimated = toReservedInputTokens(accumulator.breakdown());
+    const reserved = Math.max(estimated, ceiling);
+    return safeNonNegative(estimated) && safeNonNegative(reserved) ? reserved : null;
+};
+
+/**
  * The most the provider can bill for this text at the approved rates.
+ * The input count is the billable ceiling, not the point estimate.
  * Cache-write tokens are not known yet, so the reservation adds the write
- * premium on every input token when a write rate exists. A missing write
- * rate is not zero: the cap is then not a cap, and the quote fails.
+ * premium on every one of those input tokens when a write rate exists. A
+ * missing write rate is not zero: the cap is then not a cap, and the quote
+ * fails. The rates must already be the tier that ceiling can reach.
  */
 export const quotePinnedTextCost = (input: {
     messages: readonly object[];
     pricing: PinnedPriceRates | null;
     contextWindowTokens: number | null;
+    billableInputTokens?: number;
 }): { ok: true; quote: PinnedQuote } | { ok: false; reason: "unpriced" } => {
     const pricing = input.pricing;
     if (!pricing) return { ok: false, reason: "unpriced" };
@@ -213,10 +262,20 @@ export const quotePinnedTextCost = (input: {
     const accumulator = createTokenEstimateAccumulator();
     for (const message of messages) accumulator.addText(message.text);
     const breakdown = accumulator.breakdown();
-    const reservedInputTokens = toReservedInputTokens(breakdown);
+    const estimatedInputTokens = toReservedInputTokens(breakdown);
+    const ceiling = pinnedBillablePromptCeiling(input.messages);
+    const reservedInputTokens = ceiling === null
+        ? null
+        : Math.max(estimatedInputTokens, ceiling);
     if (
+        reservedInputTokens === null ||
         !safeNonNegative(breakdown.rawTotal) ||
+        !safeNonNegative(estimatedInputTokens) ||
         !safeNonNegative(reservedInputTokens) ||
+        (
+            input.billableInputTokens !== undefined &&
+            input.billableInputTokens !== reservedInputTokens
+        ) ||
         reservedInputTokens + pricing.maxOutputTokens > input.contextWindowTokens
     ) {
         return { ok: false, reason: "unpriced" };
@@ -505,7 +564,10 @@ export type PinnedTransportResult = {
 
 export type PinnedRunPorts = {
     loadDeployment: (deploymentId: string) => Promise<PinnedLoadedDeployment>;
-    resolvePricing: (logicalModelId: string) => Promise<PinnedPriceRates | null>;
+    resolvePricing: (
+        logicalModelId: string,
+        promptTokens: number
+    ) => Promise<PinnedPriceRates | null>;
     ledger: ExperimentLedger;
     record: (plan: PinnedQuote & {
         deploymentId: string;
@@ -631,9 +693,12 @@ export const runPinnedDeployment = async (
     }
     if (!loaded.ok || loaded.deploymentId !== deploymentId) return refused("deployment_mismatch");
 
+    const billableInputTokens = pinnedReservedInputTokens(input.messages);
+    if (billableInputTokens === null) return refused("unpriced");
+
     let pricing: PinnedPriceRates | null;
     try {
-        pricing = await ports.resolvePricing(loaded.logicalModelId);
+        pricing = await ports.resolvePricing(loaded.logicalModelId, billableInputTokens);
     } catch {
         return refused("unpriced");
     }
@@ -641,6 +706,7 @@ export const runPinnedDeployment = async (
         messages: input.messages,
         pricing,
         contextWindowTokens: loaded.contextWindowTokens,
+        billableInputTokens,
     });
     if (!quoted.ok) return refused("unpriced");
     const plan = {
@@ -684,7 +750,20 @@ export const runPinnedDeployment = async (
             return refused("not_started");
         }
         if (outcome.usage) {
-            const actual = settlePinnedUsageCost(plan, outcome.usage);
+            let settledRates: PinnedPriceRates | null = null;
+            if (typeof outcome.usage.inputTokens === "number") {
+                try {
+                    settledRates = await ports.resolvePricing(
+                        plan.logicalModelId,
+                        outcome.usage.inputTokens
+                    );
+                } catch {
+                    settledRates = null;
+                }
+            }
+            const actual = settledRates === null
+                ? null
+                : settlePinnedUsageCost(settledRates, outcome.usage);
             const closed = await ports.ledger.close(actual === null
                 ? { holdId: reservedHoldId, experimentId, outcome: "unknown" }
                 : { holdId: reservedHoldId, experimentId, outcome: "usage", actualMicroUsd: actual });

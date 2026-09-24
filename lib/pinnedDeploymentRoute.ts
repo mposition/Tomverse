@@ -3,13 +3,11 @@
  *
  * A result other than `existing` is the whole response. The ordinary handler
  * does not run afterwards, and this file does not call it. Streaming reuses
- * `streamText` with retries forced off. The text stream is the SDK stream;
+ * `streamText` through `streamPinnedInference`, which forces retries off. The text stream is the SDK stream;
  * it is not the chat event stream, and this path does not reserve user credits.
  */
 
 import "server-only";
-
-import { streamText } from "ai";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
@@ -20,11 +18,13 @@ import {
     reservePinnedExperiment,
     type ExperimentDb,
 } from "@/lib/pinnedDeploymentBudget";
+import { streamPinnedInference } from "@/lib/pinnedDeploymentDispatch";
 import {
     pinnedInferenceArguments,
     runPinnedDeployment,
     settlePinnedUsageCost,
     type ExperimentLedger,
+    type PinnedPriceRates,
     type PinnedRunResult,
 } from "@/lib/pinnedDeploymentExecution";
 import {
@@ -49,6 +49,23 @@ const ledger = (): ExperimentLedger => ({
 
 const catalogueModel = (logicalModelId: string) =>
     AVAILABLE_MODELS.find((model) => model.id === logicalModelId && model.enabled) ?? null;
+
+const ratesFor = async (
+    logicalModelId: string,
+    promptTokens: number
+): Promise<PinnedPriceRates | null> => {
+    const model = catalogueModel(logicalModelId);
+    if (!model) return null;
+    const pricing = resolveModelPricing(model, { estimatedPromptTokens: promptTokens });
+    return {
+        costSource: pricing.costSource,
+        reasoningTokenBilling: pricing.reasoningTokenBilling,
+        inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
+        maxOutputTokens: pricing.maxOutputTokens,
+    };
+};
 
 export const enterPinnedDeploymentChat = async (input: {
     authenticatedAccountId: string | null;
@@ -86,19 +103,7 @@ export const enterPinnedDeploymentChat = async (input: {
                 contextWindowTokens: matched.contextWindowTokens,
             };
         },
-        resolvePricing: async (logicalModelId) => {
-            const model = catalogueModel(logicalModelId);
-            if (!model) return null;
-            const pricing = resolveModelPricing(model);
-            return {
-                costSource: pricing.costSource,
-                reasoningTokenBilling: pricing.reasoningTokenBilling,
-                inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
-                outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
-                cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
-                maxOutputTokens: pricing.maxOutputTokens,
-            };
-        },
+        resolvePricing: (logicalModelId, promptTokens) => ratesFor(logicalModelId, promptTokens),
         ledger: experiment,
         record: async (plan) => {
             if (!input.authenticatedAccountId) return { ok: false };
@@ -157,21 +162,31 @@ export const enterPinnedDeploymentChat = async (input: {
                 return { started: false };
             }
             const inference = pinnedInferenceArguments(args);
-            const result = streamText({
+            const result = streamPinnedInference({
                 model: active,
                 messages: args.messages.map((message) => ({
                     role: message.role,
                     content: message.text,
                 })),
                 maxOutputTokens: inference.maxOutputTokens,
-                maxRetries: inference.maxRetries,
                 onFinish: async (event) => {
                     const usage = event.usage;
-                    const actual = settlePinnedUsageCost(args, {
-                        inputTokens: usage?.inputTokens,
-                        outputTokens: usage?.outputTokens,
-                        cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
-                    });
+                    const promptTokens = usage?.inputTokens;
+                    let rates: PinnedPriceRates | null = null;
+                    if (typeof promptTokens === "number") {
+                        try {
+                            rates = await ratesFor(args.logicalModelId, promptTokens);
+                        } catch {
+                            rates = null;
+                        }
+                    }
+                    const actual = rates === null
+                        ? null
+                        : settlePinnedUsageCost(rates, {
+                            inputTokens: usage?.inputTokens,
+                            outputTokens: usage?.outputTokens,
+                            cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+                        });
                     await experiment.close(actual === null
                         ? { holdId: args.holdId, experimentId: args.experimentId, outcome: "unknown" }
                         : {

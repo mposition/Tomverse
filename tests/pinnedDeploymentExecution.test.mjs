@@ -1,3 +1,5 @@
+import { streamText } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -15,7 +17,8 @@ import {
     classifyPinnedDeployment,
     createSerialExperimentLedger,
     decideExperimentReserve,
-    pinnedInferenceArguments,
+    pinnedBillablePromptCeiling,
+    pinnedReservedInputTokens,
     PINNED_INFERENCE_MAX_RETRIES,
     quotePinnedTextCost,
     readPinnedDeploymentConfig,
@@ -28,6 +31,7 @@ import {
     placementWriteData,
     readStoredPlacement,
 } from "../lib/pinnedDeploymentPlacement.ts";
+import { streamPinnedInference } from "../lib/pinnedDeploymentDispatch.ts";
 
 const account = "account_internal";
 const deploymentId = "dep_from_db";
@@ -257,57 +261,70 @@ test("concurrent reservations share one ceiling", async () => {
     assert.ok(snapshot.reservedMicroUsd + snapshot.spentMicroUsd <= reservedMicroUsd * 10);
 });
 
-const sdkAttempts = async (args, send) => {
-    const maxRetries = args.maxRetries === undefined ? 2 : args.maxRetries;
-    let lastError;
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        try {
-            return await send();
-        } catch (error) {
-            lastError = error;
-        }
-    }
-    throw lastError;
+test("a thrown transport occupies the reservation and does not fall through", async () => {
+    let transportCalls = 0;
+    const ledger = createSerialExperimentLedger(1_000_000);
+    const result = await runPinnedDeployment({
+        env: enteredEnv,
+        authenticatedAccountId: account,
+        messages,
+    }, {
+        ...ports({ ledger }),
+        transport: async () => {
+            transportCalls += 1;
+            throw new Error("429");
+        },
+    });
+    assert.equal(transportCalls, 1);
+    assert.equal(result.route, "refused");
+    assert.equal(result.reason, "provider_error");
+    assert.equal(result.providerCalls, 1);
+    assert.notEqual(result.route, "existing");
+    assert.equal(ledger.snapshot().spentMicroUsd, reservedMicroUsd);
+    assert.equal(ledger.snapshot().reservedMicroUsd, 0);
+    assert.equal(ledger.snapshot().holds[0].status, "occupied");
+    assert.equal(PINNED_INFERENCE_MAX_RETRIES, 0);
+});
+
+const countInferenceRequests = async (maxRetries, fail) => {
+    let http = 0;
+    const model = createOpenAI({
+        apiKey: "test",
+        baseURL: "https://api.openai.com/v1",
+        fetch: async () => {
+            http += 1;
+            return fail();
+        },
+    })("gpt-5.6-luna");
+    const messagesForModel = [{ role: "user", content: "hello" }];
+    const result = maxRetries === 0
+        ? streamPinnedInference({
+            model,
+            messages: messagesForModel,
+            maxOutputTokens: 16,
+        })
+        : streamText({
+            model,
+            messages: messagesForModel,
+            maxOutputTokens: 16,
+        });
+    await result.text.catch(() => undefined);
+    return http;
 };
 
-test("the SDK stand-in retries unless this path passes maxRetries 0", async () => {
-    let untouched = 0;
-    await assert.rejects(() => sdkAttempts({}, async () => {
-        untouched += 1;
-        throw new Error("429");
-    }));
-    assert.equal(untouched, 3);
-
-    for (const failure of [429, 500, "connection"]) {
-        let http = 0;
-        let transportCalls = 0;
-        const ledger = createSerialExperimentLedger(1_000_000);
-        const result = await runPinnedDeployment({
-            env: enteredEnv,
-            authenticatedAccountId: account,
-            messages,
-        }, {
-            ...ports({ ledger }),
-            transport: async (args) => {
-                transportCalls += 1;
-                await sdkAttempts(pinnedInferenceArguments(args), async () => {
-                    http += 1;
-                    const error = new Error(String(failure));
-                    throw error;
-                });
-            },
-        });
-        assert.equal(http, 1, String(failure));
-        assert.equal(transportCalls, 1, String(failure));
-        assert.equal(result.route, "refused");
-        assert.equal(result.reason, "provider_error");
-        assert.equal(result.providerCalls, 1);
-        assert.notEqual(result.route, "existing");
-        assert.equal(ledger.snapshot().spentMicroUsd, reservedMicroUsd);
-        assert.equal(ledger.snapshot().reservedMicroUsd, 0);
-        assert.equal(ledger.snapshot().holds[0].status, "occupied");
+test("streamText sends one inference request for 429, 500, and a dropped connection", { timeout: 20_000 }, async () => {
+    const failures = [
+        () => new Response("no", { status: 429 }),
+        () => new Response("no", { status: 500 }),
+        () => { throw new TypeError("connection"); },
+    ];
+    for (const fail of failures) {
+        assert.equal(await countInferenceRequests(0, fail), 1);
     }
-    assert.equal(PINNED_INFERENCE_MAX_RETRIES, 0);
+    assert.equal(
+        await countInferenceRequests(undefined, () => new Response("no", { status: 429 })),
+        3
+    );
 });
 
 test("unknown cost after dispatch is kept and a later flag change does not release it", async () => {
@@ -564,7 +581,8 @@ test("the ordinary chat retry line is unchanged and this path does not borrow th
     assert.match(block, /route === "refused"/);
     assert.match(block, /route === "dispatched"/);
     assert.doesNotMatch(block, /streamText/);
-    for (const source of [pinned, execution, budget, placement]) {
+    const dispatch = readFileSync(new URL("../lib/pinnedDeploymentDispatch.ts", import.meta.url), "utf8");
+    for (const source of [pinned, execution, budget, placement, dispatch]) {
         assert.equal(source.includes("admitCanaryObservation"), false);
         assert.equal(source.includes("routingHeldDecisions"), false);
         assert.equal(source.includes("decideFallback"), false);
@@ -572,11 +590,14 @@ test("the ordinary chat retry line is unchanged and this path does not borrow th
         assert.equal(source.includes("5000000"), false);
         assert.equal(source.includes("US$5"), false);
     }
-    assert.match(pinned, /pinnedInferenceArguments/);
-    assert.match(pinned, /maxRetries: inference\.maxRetries/);
+    assert.match(pinned, /streamPinnedInference/);
+    assert.match(pinned, /estimatedPromptTokens: promptTokens/);
     assert.match(pinned, /settlePinnedUsageCost/);
     assert.match(pinned, /outcome: "unknown"/);
     assert.doesNotMatch(pinned, /stepCountIs/);
+    assert.match(dispatch, /maxRetries: PINNED_INFERENCE_MAX_RETRIES/);
+    assert.doesNotMatch(dispatch, /stepCountIs/);
+    assert.equal(dispatch.includes("maxRetries: inference"), false);
     assert.match(chat, /attemptDispatchOptions\(plan\)/);
 });
 
@@ -601,4 +622,67 @@ test("the default catalogue model has a confirmed cap this path can reserve", ()
     assert.equal(priced.ok, true);
     assert.equal(priced.quote.maxOutputTokens, resolved.maxOutputTokens);
     assert.notEqual(priced.quote.maxOutputTokens, resolved.reservationOutputTokens);
+    assert.equal(priced.quote.reservedInputTokens, pinnedReservedInputTokens(messages));
+    assert.ok(priced.quote.reservedInputTokens > priced.quote.estimatedInputTokens);
+});
+
+const ratesFrom = (resolved) => ({
+    costSource: resolved.costSource,
+    reasoningTokenBilling: resolved.reasoningTokenBilling,
+    inputUsdPerMillionTokens: resolved.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: resolved.outputUsdPerMillionTokens,
+    cacheWriteUsdPerMillionTokens: resolved.cacheWriteUsdPerMillionTokens,
+    maxOutputTokens: 128,
+});
+
+test("a prompt that can cross a price tier reserves and settles the higher rate", async () => {
+    const luna = AVAILABLE_MODELS.find((model) => model.id === "gpt-5-6-luna");
+    const longText = "x".repeat(300_000);
+    const longMessages = [{ role: "user", content: longText }];
+    const ceiling = pinnedBillablePromptCeiling(longMessages);
+    const reservedInput = pinnedReservedInputTokens(longMessages);
+    assert.ok(ceiling > 272_000);
+    assert.equal(reservedInput, ceiling);
+    const short = resolveModelPricing(luna, { estimatedPromptTokens: 1 });
+    const long = resolveModelPricing(luna, { estimatedPromptTokens: reservedInput });
+    assert.equal(long.costSource, "registry_long_context");
+    assert.equal(long.inputUsdPerMillionTokens, short.inputUsdPerMillionTokens * 2);
+    assert.equal(long.outputUsdPerMillionTokens, short.outputUsdPerMillionTokens * 1.5);
+    assert.equal(long.cacheWriteUsdPerMillionTokens, short.cacheWriteUsdPerMillionTokens * 2);
+
+    const atLongRate = quotePinnedTextCost({
+        messages: longMessages,
+        pricing: ratesFrom(long),
+        contextWindowTokens: luna.contextWindowTokens,
+        billableInputTokens: reservedInput,
+    });
+    const atShortRate = quotePinnedTextCost({
+        messages: longMessages,
+        pricing: ratesFrom(short),
+        contextWindowTokens: luna.contextWindowTokens,
+        billableInputTokens: reservedInput,
+    });
+    assert.equal(atLongRate.ok, true);
+    assert.equal(atShortRate.ok, true);
+    assert.ok(atLongRate.quote.reservedMicroUsd > atShortRate.quote.reservedMicroUsd);
+
+    const usage = { inputTokens: 300_000, outputTokens: 10, cacheWriteTokens: 0 };
+    const shortActual = settlePinnedUsageCost(ratesFrom(short), usage);
+    const longActual = settlePinnedUsageCost(ratesFrom(long), usage);
+    assert.ok(longActual > shortActual);
+    const ledger = createSerialExperimentLedger(1_000_000);
+    const done = await runPinnedDeployment({
+        env: enteredEnv,
+        authenticatedAccountId: account,
+        messages,
+    }, {
+        ...ports({ ledger }),
+        resolvePricing: async (_modelId, promptTokens) => (
+            promptTokens > 272_000 ? ratesFrom(long) : ratesFrom(short)
+        ),
+        transport: async () => ({ started: true, usage }),
+    });
+    assert.equal(done.hold, "settled");
+    assert.equal(ledger.snapshot().spentMicroUsd, longActual);
+    assert.ok(longActual > reservedMicroUsd);
 });
