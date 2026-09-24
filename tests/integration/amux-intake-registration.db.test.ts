@@ -4,14 +4,15 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
-import { commitAmuxIntakeRegistration } from "@/lib/amux/intakeRegistration";
+import { commitAmuxIntakeRegistration, readAmuxIntakeRegistration } from "@/lib/amux/intakeRegistration";
 import { amuxIntakeDraftDigest, parseAmuxIntakeDraft } from "@/lib/amux/intakeCore";
 import { planAmuxIntakeRegistration } from "@/lib/amux/intakeRegistrationCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for one explicit intake registration.
-// The public route cannot call this commit while the code latch is false.
-// No local DATABASE_URL means this file was not executed, not that it passed.
+// The public route calls apply, which checks the latch and then this commit.
+// This file calls the transaction body directly. A missing TEST_DATABASE_URL
+// means this file was not executed, not that it passed.
 
 const secret = `intake-hmac-secret-${randomUUID()}-extra`;
 const actorUserId = `amux-intake-${randomUUID()}`;
@@ -89,6 +90,7 @@ test("registration writes one backlog card and leaves execution and credit uncha
   const planned = planAmuxIntakeRegistration(confirmed(taskId, title), secret);
   assert.equal(planned.ok, true);
   if (!planned.ok) return;
+  assert.equal((await readAmuxIntakeRegistration(planned.plan)).kind, "absent");
   const before = await untouchedCounts();
   const result = await prisma.$transaction((tx) =>
     commitAmuxIntakeRegistration(tx, {
@@ -100,6 +102,13 @@ test("registration writes one backlog card and leaves execution and credit uncha
   );
   assert.equal(result.created, true);
   cardIds.push(result.cardId);
+  const seen = await readAmuxIntakeRegistration(planned.plan);
+  assert.equal(seen.kind, "committed");
+  if (seen.kind === "committed") {
+    assert.equal(seen.cardId, result.cardId);
+    assert.equal(seen.approvalId, result.approvalId);
+    assert.equal(seen.auditId, result.auditId);
+  }
   const card = await prisma.amuxWorkItem.findUnique({ where: { id: result.cardId } });
   assert.equal(card?.status, "backlog");
   assert.equal(card?.kind, "unknown");
@@ -142,6 +151,7 @@ test("registration writes one backlog card and leaves execution and credit uncha
       ),
     (error: unknown) => error instanceof Error && error.message === "conflict",
   );
+  assert.equal((await readAmuxIntakeRegistration(changed.plan)).kind, "partial");
   const still = await prisma.amuxWorkItem.findUnique({ where: { id: result.cardId } });
   assert.equal(still?.title, title);
   assert.equal(still?.sourceDigest, card?.sourceDigest);
