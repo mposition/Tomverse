@@ -26,6 +26,8 @@ export const AMUX_MANIFEST_CANONICALIZATION_VERSION = "amux-json-v1";
 export const BOARD_IMPORT_POLICY_VERSION = 2;
 export const BOARD_IMPORT_SCANNER_VERSION = "amux-board-content-scan-v1";
 export const BOARD_IMPORT_SOURCE_VERIFICATION_MODE = "operator_attested";
+/** Fixed source identity assigned by the canonical private-workboard manifest contract. */
+export const BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM = "tomverse_private_workboard";
 export const BOARD_IMPORT_CARD_STATUS = "backlog";
 export const BOARD_IMPORT_CARD_KIND = "unknown";
 /** Schema default for every imported card. Not a mapping from an investment rank. */
