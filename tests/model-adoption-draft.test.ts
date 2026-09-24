@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ADOPTION_PENDING_VALIDATIONS,
+  adoptionDocReadIsDue,
   adoptionPreflightRefusal,
+  adoptionReplacementRefusal,
+  adoptionSaleProposal,
   blankTokenFieldValues,
   buildAdoptionDraft,
   requestOutputCapFromProvider,
@@ -734,15 +737,15 @@ test("an inherited price is a settled note, not an open question", () => {
   assert.doesNotMatch(inherited.unknowns.join("\n"), /상속합니다/);
   // ...and the class line stops telling them to enter a price they are not
   // going to enter.
-  assert.match(inherited.unknowns.join("\n"), /상속 가격으로 계산/);
-  assert.doesNotMatch(inherited.unknowns.join("\n"), /가격을 넣으면/);
+  assert.match(inherited.unknowns.join("\n"), /상속 가격으로 가장 낮은 등급과 크레딧을 제안합니다/);
+  assert.doesNotMatch(inherited.unknowns.join("\n"), /가격이 채워지면/);
 
   const unpriced = buildAdoptionDraft({
     provider: "anthropic",
     apiModel: "claude-fable-5-1",
   });
   assert.doesNotMatch(unpriced.notes.join("\n"), /단가/);
-  assert.match(unpriced.unknowns.join("\n"), /가격을 넣으면/);
+  assert.match(unpriced.unknowns.join("\n"), /가격이 채워지면 가장 낮은 등급과 크레딧을 제안합니다/);
 });
 
 test("the pair being saved is the one judged servable", () => {
@@ -1268,4 +1271,160 @@ test("a profile under this id for a different model is refused, not inherited", 
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /Save it under a different id/);
+});
+
+const groqEvidence = {
+  parse: {
+    status: "parsed" as const,
+    problems: [] as string[],
+    fields: {
+      displayName: "Llama 3.3 70B",
+      contextWindowTokens: 1_000_000,
+      maxInputTokens: null,
+      maxOutputTokens: 8_192,
+      imageInput: null,
+      inputUsdPerMillionTokens: 0.05,
+      cachedInputUsdPerMillionTokens: null,
+      cacheWriteUsdPerMillionTokens: null,
+      outputUsdPerMillionTokens: 0.08,
+      longContext: { kind: "flat" as const },
+      promotional: null,
+    },
+  },
+  sources: [{ url: "https://console.groq.com/docs/models.md", digest: "e".repeat(64) }],
+  fetchedAt: readAt,
+};
+
+test("a documented price proposes a profile for every provider, and the sale class stays out of the fields", () => {
+  const draft = buildAdoptionDraft({
+    provider: "groq",
+    apiModel: "llama-3.3-70b-versatile",
+    observation: {
+      metadata: { contextLength: 1_000_000, outputTokenLimit: 8_192 },
+    },
+    docEvidence: groqEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.suggestions.price, true);
+  assert.match(draft.pricingProfileProposal ?? "", /provider: "groq"/);
+  assert.equal(draft.fields.inputUsdPerMillionTokens, 0.05);
+  assert.equal(draft.fields.outputUsdPerMillionTokens, 0.08);
+  assert.equal("usageClass" in draft.fields, false);
+  assert.equal("creditWeight" in draft.fields, false);
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: draft.fields.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: draft.fields.outputUsdPerMillionTokens,
+    maxOutputTokens: draft.fields.maxOutputTokens,
+  });
+  assert.ok(isCreditFloor(floor));
+  assert.deepEqual(adoptionSaleProposal(floor), {
+    usageClass: floor.usageClass,
+    creditWeight: floor.credits,
+  });
+  assert.equal(adoptionSaleProposal({ reason: "price_unknown", worstCaseMicroUsd: null }), null);
+});
+
+test("the adoption form reads documents only when the stored parse cannot be used", () => {
+  const fresh = { provider: "openai", parse: groqEvidence.parse, fetchedAt: draftNow, now: draftNow };
+  assert.equal(adoptionDocReadIsDue(fresh), false);
+  assert.equal(
+    adoptionDocReadIsDue({ ...fresh, fetchedAt: new Date("2026-01-01T00:00:00Z") }),
+    true
+  );
+  assert.equal(
+    adoptionDocReadIsDue({ provider: "anthropic", parse: null, fetchedAt: null, now: draftNow }),
+    true
+  );
+  assert.equal(
+    adoptionDocReadIsDue({ provider: "google", parse: null, fetchedAt: null, now: draftNow }),
+    false
+  );
+  assert.equal(
+    adoptionDocReadIsDue({ provider: "qwen", parse: null, fetchedAt: null, now: draftNow }),
+    false
+  );
+});
+
+test("replacing a model refuses the fallback, the guest default, and an existing successor", () => {
+  const live = {
+    catalogDeleted: false,
+    replacementModelId: null,
+    isApplicationDefault: false,
+    isGuestDefault: false,
+  };
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: null,
+      predecessor: live,
+    }),
+    null
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "claude-opus-5",
+      predecessor: live,
+    }),
+    null
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "claude-opus-5-5",
+      predecessor: live,
+    })?.status,
+    400
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "missing",
+      predecessor: null,
+    })?.status,
+    400
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "gpt-5-6-luna",
+      predecessor: { ...live, isApplicationDefault: true },
+    })?.status,
+    409
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "gpt-5-6-luna",
+      predecessor: { ...live, isGuestDefault: true },
+    })?.status,
+    409
+  );
+  assert.match(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "claude-opus-5",
+      predecessor: { ...live, replacementModelId: "claude-sonnet-5" },
+    })?.message ?? "",
+    /claude-sonnet-5/
+  );
+  assert.equal(
+    adoptionReplacementRefusal({
+      adoptedModelId: "claude-opus-5-5",
+      replacesModelId: "claude-opus-5",
+      predecessor: { ...live, replacementModelId: "claude-opus-5-5" },
+    }),
+    null
+  );
+});
+
+test("a provider without a machine-readable price page names its official page", () => {
+  const draft = buildAdoptionDraft({
+    provider: "google",
+    apiModel: "gemini-3.1-pro",
+    observation: { metadata: {} },
+  });
+  assert.match(draft.unknowns.join("\n"), /ai\.google\.dev\/gemini-api\/docs\/pricing/);
+  assert.equal(draft.pricingProfileProposal, null);
+  assert.equal(draft.fields.inputUsdPerMillionTokens, null);
 });
