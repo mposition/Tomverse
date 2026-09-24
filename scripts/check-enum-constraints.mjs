@@ -518,6 +518,69 @@ const REGISTRY = {
     reason:
       "The manual promotion approval lifecycle: prepared, approved, rejected, expired, consumed. A card leaves backlog only on the approved-to-consumed transition, and that transition stays behind the shipped-off code latch. The service compares this same list before every state change.",
   },
+  AmuxRecommendationCapacity_id_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_CAPACITY_IDS",
+    reason:
+      "The recommendation ceiling is one row, id queue. Version 7 inserts no row. A missing row means capacity is unconfigured.",
+  },
+  AmuxRecommendationSnapshot_status_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_SNAPSHOT_STATUSES",
+    reason:
+      "A recommendation snapshot is prepared, or outcome_unknown after a lost response. It is not a card status.",
+  },
+  AmuxRecommendationSnapshot_worker_capacity_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_CLOSED_CAPACITIES",
+    reason:
+      "Version 7 records per-worker capacity as closed. The value does not grant a runnable slot.",
+  },
+  AmuxRecommendationSnapshot_classification_capacity_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_CLOSED_CAPACITIES",
+    reason:
+      "Version 7 records per-classification capacity as closed. The value does not grant a runnable slot.",
+  },
+  AmuxRecommendationSnapshotItem_disposition_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_DISPOSITIONS",
+    reason:
+      "A snapshot row is included or excluded. Neither value is an AmuxWorkItem status.",
+  },
+  AmuxRecommendationSnapshotItem_exclusion_code_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_EXCLUSION_CODES",
+    reason:
+      "Excluded recommendation rows use the closed reason list from orchestration policy version 7. Included rows store null.",
+  },
+  AmuxRecommendationDecision_decision_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_DECISIONS",
+    reason:
+      "A human recommendation decision is approve, hold, reject, or the expired record written by that same request.",
+  },
+  AmuxRecommendationDecision_status_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_DECISION_STATUSES",
+    reason:
+      "The stored result of one recommendation decision. consumed is the only status that accompanies a backlog to todo write.",
+  },
+  AmuxRecommendationDecision_reason_code_check: {
+    owner: "list",
+    module: "lib/amux/recommendationPoolCore.ts",
+    list: "RECOMMENDATION_REASON_CODES",
+    reason:
+      "Hold and reject store one of these codes. There is no free-text reason. Approve and expiry leave the column null.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",
