@@ -1,9 +1,8 @@
 /**
  * Source reconciliation after the first catalog import.
  *
- * docs/product/governance.md v1.1 in the private workboard. Item identity is
- * source key, section code and detail digest. A new manifest digest is a
- * property of the run, not of each card. This module does not write.
+ * Item identity is source key, section code and detail digest. A new manifest
+ * digest is a property of the run, not of each card. This module does not write.
  */
 
 export const AMUX_RECONCILIATION_RUN_STATUSES = [
@@ -17,8 +16,8 @@ export const AMUX_RECONCILIATION_RUN_STATUSES = [
 
 export const AMUX_SOURCE_REVISION_STATES = ["observed", "accepted", "rejected"] as const;
 
-/** Shipped off. A caller cannot supply the latch. */
-export const AMUX_RECONCILIATION_APPLY_CODE_LATCH = false;
+/** Shipped off. A caller cannot supply the latch. Typed as boolean so the comparison is not a literal false === true. */
+export const AMUX_RECONCILIATION_APPLY_CODE_LATCH: boolean = false;
 
 export const amuxReconciliationApplyPermitted = (envValue: string | undefined): boolean =>
   AMUX_RECONCILIATION_APPLY_CODE_LATCH === true && envValue === "enabled";
