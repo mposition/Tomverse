@@ -935,7 +935,7 @@ workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 wo
 | 2 | canonical failure classification과 scope identity | **완료** (A-2·A-3a·A-3b·A-4a, §10) |
 | 3 | residency approval과 recipient/destination 계약을 C schema에 | **완료** (`EndpointResidencyApproval`, `lib/providerDataDestinations.ts`) |
 | 4 | A-3b CHECK를 운영값 조사 후 `VALIDATE` | **완료** (§14.30). production `convalidated = true` |
-| 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료, 배포 0%.** dark table 12개·dark column 6개, migration이 어느 환경에도 적용되지 않음. A-5는 2라운드 검토를 거쳤습니다 — 1라운드가 reject였고, digest가 덮는 field 목록이 `model_deployment_gate_follows_identity()`보다 좁았던 것과 digest만으로는 재구성이 안 된다는 것 둘입니다. 후자가 `RoutingIdentityManifestEntry`를 만든 이유입니다 |
+| 5 | C를 dark로 배포하고 즉시 A-5 manifest | **코드 완료. staging에 dark로 적용됨 (§14.33).** production 라우팅 스키마는 이 표의 대상이 아닙니다. A-5는 2라운드 검토를 거쳤습니다 — 1라운드가 reject였고, digest가 덮는 field 목록이 `model_deployment_gate_follows_identity()`보다 좁았던 것과 digest만으로는 재구성이 안 된다는 것 둘입니다. 후자가 `RoutingIdentityManifestEntry`를 만든 이유입니다 |
 | 6 | residency-safe canary lane과 observation journal | observation은 완료(`AvailabilityObservation`), canary lane은 §8.1 선행조건 2 |
 | 7 | BYOK 비용·funded allowance·bucket key를 versioned dual-read/write | 미착수. A-5 배포가 선행 |
 | 8 | candidate verdict와 routing-snapshot ceiling | verdict 완료. ceiling은 이 스택에 merge (`§14.22`). 라우터는 읽지 않음 |
@@ -1640,6 +1640,14 @@ Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었�
 - deployment 관측이 없으면 증거 부족입니다. probe 성공을 그 관측으로 복사하지 않습니다. 진행 중인 요청은 시작한 버전이 있을 때만 그 버전으로 끝나고, 시작 버전이 없으면 승인 버전으로 대체하지 않습니다. 새 요청은 승인된 버전을 받습니다. grain 전환 자체는 `held`입니다.
 - fallback 연결 계약은 공급자 시도가 Tomverse dispatch와 그 안의 재시도를 곱한 값이고, 2를 넘기면 거절입니다. dispatch나 내부 시도가 1 미만이거나 정수가 아니면 거절입니다. 내부 재시도 횟수를 모르면 거절입니다. 사용자에게 보인 뒤, 확인되지 않은 부작용, 검증되지 않은 대상, pin이나 청구 주체의 변경도 거절입니다. `liveActivation`은 false입니다.
 - equivalence는 공급자 증빙과 Tomverse 평가가 둘 다 있어야 `evidenced`입니다. 그 경우에도 사용자 요청의 자동 이동은 false입니다. 같은 이름만으로는 미검증입니다.
+
+## 14.33 비운영 A-5와 운영 canary (2026-09-24)
+
+소유자가 두 승인을 나눴습니다. 완료 수는 그대로 **45 / 약 50, 약 90%(추정)** 입니다. 분모도 그대로입니다. 라우팅 스택의 production 배포는 0%입니다.
+
+**1. 비운영 A-5.** 대상 환경은 staging입니다. 읽기 전용 조사에서 migration 세 건이 끝났고 rollback은 없습니다. `20260923120000_deployment_identity_dark`, `20260923300000_routing_identity_manifest_dark`, `20260923320000_routing_manifest_entries_dark`. `ModelDeployment`, `RoutingIdentityManifest`, `RoutingIdentityManifestEntry`는 있고 각 0행입니다. 실행 중인 staging은 develop `25dbbb9f`이며 배포 상태는 SUCCESS입니다. 공급자 호출은 없었습니다. 이 브랜치의 canary 실행 판정은 develop에 없어서 staging 프로세스 안에서 돌지 않습니다. 기록·중단·복구를 staging에서 실행한 것은 아닙니다.
+
+**2. 운영 canary.** 별도 승인으로 받았고, 실행하지 않았습니다. production에는 위 세 migration과 세 테이블이 없습니다. 대상 deployment, 집단, 비교 기준, 관측 기간, 중단 조건이 비어 있습니다. 그 다섯이 적히기 전에는 운영 비중을 올리지 않습니다.
 
 ## 15. 되돌릴 수 없는 것
 
