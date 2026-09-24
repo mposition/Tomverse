@@ -504,6 +504,20 @@ const REGISTRY = {
     reason:
       "The manual promotion approval lifecycle: prepared, approved, rejected, expired, consumed. A card leaves backlog only on the approved-to-consumed transition, and that transition stays behind the shipped-off code latch. The service compares this same list before every state change.",
   },
+  AmuxIntakeDraft_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_DRAFT_STATUSES",
+    reason:
+      "consumed, rejected, expired. A draft row stores digests only. Proposal text stays null, and the shipped apply latch keeps the public route from inserting one.",
+  },
+  AmuxIntakeApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_APPROVAL_STATUSES",
+    reason:
+      "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
   AmuxWorkDelivery_status_check: {
     owner: "database",
     reason:
