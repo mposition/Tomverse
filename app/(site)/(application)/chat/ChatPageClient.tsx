@@ -247,6 +247,21 @@ import {
   NO_WEB_SEARCH_BACKENDS,
   type WebSearchBackendReadiness,
 } from "@/lib/webSearchBackends";
+import {
+  SAVED_QUESTION_NOT_SENT_CHANGE_EVENT,
+  addSavedQuestionNotSentKey,
+  addSavedQuestionNotSentKeys,
+  bindSavedQuestionNotSentOwner,
+  clearSavedQuestionNotSentKeys,
+  consumeSavedQuestionNotSentPrefix,
+  removeSavedQuestionNotSentKey,
+  setBoundedMapEntry,
+} from "@/lib/chatSavedQuestionDisposition";
+import {
+  activeChatIdentityIs,
+  adoptActiveChatIdentity,
+  chatIdentityCallbackIsCurrent,
+} from "@/lib/chatIdentityEpoch";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -256,7 +271,16 @@ import {
 // Defined in lib/guestChatInitialModels so the first-render guest model
 // decision reads the same key this file writes.
 const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
-
+let conversationSelectionTicketSequence = 0;
+const allocateConversationSelectionTicket = (): number => {
+  conversationSelectionTicketSequence += 1;
+  return conversationSelectionTicketSequence;
+};
+let conversationNavigationAttemptSequence = 0;
+const allocateConversationNavigationAttempt = (): number => {
+  conversationNavigationAttemptSequence += 1;
+  return conversationNavigationAttemptSequence;
+};
 /**
  * Where the draft and message-receipt recovery notices float: under the
  * header, never at the bottom of the screen.
@@ -783,8 +807,47 @@ export function ChatPageClient({
    * re-open the URL's conversation on top of whatever the user had since
    * chosen.
    */
-  const initialConversationAppliedRef = useRef(false);
+  // App Router can preserve this client tree while changing between routed
+  // surfaces. Track the particular URL-named conversation that was applied,
+  // rather than a once-per-component boolean: A -> B -> A must honour the
+  // second A handoff even when the same component instance survives.
+  const initialConversationAppliedRef = useRef<string | null>(null);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  // A server-provided conversation id is a handoff, not a permanent allow
+  // list for which conversation may consume a saved-undispatched notice.
+  // App Router can retain this client tree after the handoff query is removed,
+  // leaving the prop frozen at A while the user later works in B. Suppress a
+  // notice only until this tree has actually reached the requested id; after
+  // that, every committed selection owns its own conversation-scoped notice.
+  const initialConversationHandoffRef = useRef<{
+    requestedId: string | null;
+    settled: boolean;
+  }>({
+    requestedId: initialConversationId ?? null,
+    settled: !initialConversationId,
+  });
+  const [initialConversationHandoffRevision, setInitialConversationHandoffRevision] =
+    useState(0);
+  const settleInitialConversationHandoff = useCallback((requestedId?: string | null) => {
+    const handoff = initialConversationHandoffRef.current;
+    if (handoff.settled ||
+        (requestedId !== undefined && handoff.requestedId !== requestedId)) return false;
+    handoff.settled = true;
+    setInitialConversationHandoffRevision((value) => value + 1);
+    return true;
+  }, []);
+  useLayoutEffect(() => {
+    const requestedId = initialConversationId ?? null;
+    if (initialConversationHandoffRef.current.requestedId !== requestedId) {
+      initialConversationHandoffRef.current = {
+        requestedId,
+        settled: requestedId === null,
+      };
+    }
+    if (requestedId === null || currentChatId === requestedId) {
+      settleInitialConversationHandoff(requestedId);
+    }
+  }, [currentChatId, initialConversationId, settleInitialConversationHandoff]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // True while a "new image" draft is open: the workspace renders with no
   // server row, which is only created by the first successful generation
@@ -1147,14 +1210,27 @@ export function ChatPageClient({
   const [pendingSubmissionOwners, setPendingSubmissionOwners] = useState(
     () => new Map<string, PendingSubmissionOwner>()
   );
-  const submitIdentityFenceRef = useRef({ identityKey, epoch: 0 });
+  // Browser-realm monotonic allocation also fences a preserved async closure
+  // when App Router replaces the page tree during A→B→A. A component-local
+  // counter would restart at zero and make the returning A indistinguishable
+  // from the old A epoch that owns the late Message response.
+  // The browser-realm fence is adopted in the layout effect below. Rendering
+  // (including SSR) never reads or mutates module-global identity state.
+  const [identityEpoch, setIdentityEpoch] = useState(0);
+  const submitIdentityFenceRef = useRef({ identityKey, epoch: identityEpoch });
   useLayoutEffect(() => {
-    const current = submitIdentityFenceRef.current;
-    if (current.identityKey === identityKey) return;
-    submitIdentityFenceRef.current = {
+    const adopted = adoptActiveChatIdentity(identityKey);
+    const nextFence = {
       identityKey,
-      epoch: current.epoch + 1,
+      epoch: adopted.epoch,
     };
+    const current = submitIdentityFenceRef.current;
+    if (current.identityKey === nextFence.identityKey &&
+        current.epoch === nextFence.epoch) return;
+    submitIdentityFenceRef.current = nextFence;
+    // Publish the ref-owned fence to panels. The ref is the async authority;
+    // state only ensures the committed child tree captures the new epoch.
+    setIdentityEpoch(nextFence.epoch);
   }, [identityKey]);
   const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
   const pendingSubmission =
@@ -1164,6 +1240,12 @@ export function ChatPageClient({
     text: string;
     chatId: string;
     userMessageId: string;
+    /** True only after an account Message receipt/mapping was accepted. */
+    messageWasDurablySaved: boolean;
+    /** Conversation-selection epoch at acceptance; independent of identity. */
+    conversationSelectionTicket: number;
+    /** Identity/session epoch that originally owned this accepted send. */
+    identityEpoch: number;
     /**
      * The models this send was actually made for -- the set the preflight
      * priced, reserved admission slots for, and the send barrier confirmed
@@ -1189,6 +1271,14 @@ export function ChatPageClient({
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
   } | null>(null);
+  const providerDispatchedPromptIdsRef = useRef<Set<string>>(new Set());
+  const pendingDurableUndispatchedTurnsRef = useRef(new Map<string, {
+    identityKey: string;
+    identityEpoch: number;
+    conversationId: string;
+    turnId: string;
+    selectionTicket: number;
+  }>());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
@@ -1828,6 +1918,7 @@ export function ChatPageClient({
   // Only the newest selection intent may apply an asynchronous surface read.
   // A new blank/image intent also invalidates reads when the id stays null.
   const conversationSelectionTicketRef = useRef(0);
+  const conversationNavigationAttemptRef = useRef(0);
   const pendingCreatedChatRef = useRef<{
     id: string;
     title: string;
@@ -1847,10 +1938,10 @@ export function ChatPageClient({
   );
 
   useLayoutEffect(() => {
-    conversationSelectionTicketRef.current += 1;
+    conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
     pendingCreatedChatRef.current = null;
     return () => {
-      conversationSelectionTicketRef.current += 1;
+      conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
       pendingCreatedChatRef.current = null;
     };
   }, [identityKey]);
@@ -1880,6 +1971,13 @@ export function ChatPageClient({
   const showToastRef = useRef<
     ((message: string, tone: AppToast["tone"]) => void) | null
   >(null);
+  // A durable Message can lose dispatch authority after it is saved. Keep
+  // only the opaque (identity, conversation, turn id) disposition here -- never the
+  // prompt, admission token or context bundle -- so returning to that exact
+  // conversation can explain what happened without replaying a provider
+  // request. This state is tab-local and cleared at every identity boundary.
+  const savedQuestionNotSentKeysRef = useRef<Set<string>>(new Set());
+  const [savedQuestionNotSentRevision, setSavedQuestionNotSentRevision] = useState(0);
 
   const belongsToCurrentIdentity = useCallback(
     (id: string | null | undefined) =>
@@ -1929,6 +2027,11 @@ export function ChatPageClient({
     );
     identityNamespaceRef.current = identityNamespace;
     appliedIdentityKeyRef.current = nextKey;
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      nextKey
+    );
     // First resolution of a freshly mounted tab: there is no previous identity
     // to have carried anything over from, and the restore effect below still
     // validates the saved id against this account's own conversation list.
@@ -1943,6 +2046,11 @@ export function ChatPageClient({
     modelSettingsSyncQueueRef.current =
       createConversationModelSettingsSyncQueue();
     staleConversationIdsRef.current.clear();
+    clearSavedQuestionNotSentKeys(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage
+    );
+    pendingDurableUndispatchedTurnsRef.current.clear();
     // Panel transcripts and their in-flight runs are held per (identity,
     // conversation, model) so they survive a conversation switch
     // (lib/chatStreamRuntime.ts). Surviving an *identity* change is a
@@ -1966,6 +2074,7 @@ export function ChatPageClient({
 
     const retainedId = selectionAfterIdentityTransition(carriedId, transition);
     if (retainedId !== carriedId) {
+      conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
       currentChatIdRef.current = retainedId;
       setCurrentChatId(retainedId);
       setPromptPayload(null);
@@ -2015,6 +2124,7 @@ export function ChatPageClient({
         previous.filter((conversation) => conversation.id !== conversationId)
       );
       if (currentChatIdRef.current === conversationId) {
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         // A new chat starts with no assistant. Carrying the last one over
@@ -2245,6 +2355,252 @@ export function ChatPageClient({
   useEffect(() => {
     showToastRef.current = showToast;
   }, [showToast]);
+
+  const signalSavedQuestionNotSentChange = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT));
+  }, []);
+
+  const persistSavedQuestionNotSent = useCallback((dispositionKey: string) => {
+    const ownerIdentityKey = dispositionKey.split("\0", 1)[0] ?? "";
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      ownerIdentityKey
+    );
+    addSavedQuestionNotSentKey(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      dispositionKey
+    );
+    // `storage` is not emitted to the same window. This prompt-free event lets
+    // a newer App Router tree consume a receipt written by an older closure.
+    signalSavedQuestionNotSentChange();
+  }, [signalSavedQuestionNotSentChange]);
+
+  const promoteCurrentUndispatchedTurns = useCallback((
+    selectionIdentityKey: string
+  ) => {
+    const originConversationId = currentChatIdRef.current;
+    if (!originConversationId) return;
+    const dispositions: string[] = [];
+    for (const [promptId, pending] of pendingDurableUndispatchedTurnsRef.current) {
+      if (pending.identityKey !== selectionIdentityKey ||
+          pending.identityEpoch !== submitIdentityFenceRef.current.epoch ||
+          pending.conversationId !== originConversationId ||
+          providerDispatchedPromptIdsRef.current.has(promptId)) continue;
+      dispositions.push(
+        `${pending.identityKey}\0${pending.conversationId}\0${pending.turnId}`
+      );
+      pendingDurableUndispatchedTurnsRef.current.delete(promptId);
+    }
+    if (dispositions.length === 0) return;
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      selectionIdentityKey
+    );
+    addSavedQuestionNotSentKeys(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      dispositions
+    );
+    signalSavedQuestionNotSentChange();
+  }, [signalSavedQuestionNotSentChange]);
+
+  const handleSavedQuestionNotSent = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    originSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => {
+    const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: currentIdentityKey,
+      submitFence: submitIdentityFenceRef.current,
+    })) return;
+
+    const dispositionKey = `${originIdentityKey}\0${conversationId}\0${turnId}`;
+    pendingDurableUndispatchedTurnsRef.current.delete(turnId);
+    if (providerDispatchedPromptIdsRef.current.has(turnId)) {
+      // Provider-start is monotonic across sibling panels. One panel can cross
+      // the provider boundary while another is still waiting on preparation;
+      // that sibling's later cleanup must not recreate an "undispatched"
+      // receipt for the exact turn the provider has already received.
+      removeSavedQuestionNotSentKey(
+        savedQuestionNotSentKeysRef.current,
+        typeof window === "undefined" ? null : window.sessionStorage,
+        dispositionKey
+      );
+      return;
+    }
+    if (currentChatIdRef.current === conversationId) {
+      if (reason === "conversation-left") {
+        // Conversation cleanup can be a responsive shell remount, a full page
+        // unmount, or an explicit re-click/new-chat departure. Persist first;
+        // the consumer below protects the exact still-mounted payload during
+        // a responsive remount and consumes it once that payload is gone.
+        persistSavedQuestionNotSent(dispositionKey);
+        return;
+      }
+      removeSavedQuestionNotSentKey(
+        savedQuestionNotSentKeysRef.current,
+        typeof window === "undefined" ? null : window.sessionStorage,
+        dispositionKey
+      );
+      // A responsive-shell remount also cleans up an incomplete panel. It is
+      // not abandonment while the originating conversation and selection
+      // epoch are still current. Identity handoff is fenced separately by the
+      // monotonic identity epoch above; this ticket only describes a committed
+      // conversation transition within that identity epoch.
+      if (reason === "terminal" ||
+          conversationSelectionTicketRef.current !== originSelectionTicket) {
+        showToast(t("chat.savedQuestionNotSent"), "info");
+      }
+      return;
+    }
+
+    persistSavedQuestionNotSent(dispositionKey);
+  }, [persistSavedQuestionNotSent, showToast, t]);
+
+  const handleDurableUndispatchedAccepted = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    originSelectionTicket: number
+  ): boolean => {
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: identityNamespaceKey(identityNamespaceRef.current),
+      submitFence: submitIdentityFenceRef.current,
+    })) return false;
+    // Cross-surface navigation unmounts this workspace before a held Message
+    // save can settle.  In that case there will be no later selection cleanup
+    // in this component tree to promote the accepted receipt into a
+    // conversation-scoped disposition.  The accepted receipt is already the
+    // exact durable boundary, and leaving the origin invalidates this panel's
+    // dispatch authority, so persist the opaque key immediately.  The prompt,
+    // admission token and context never cross the surface boundary.
+    if (currentChatIdRef.current !== conversationId ||
+        conversationSelectionTicketRef.current !== originSelectionTicket) {
+      const dispositionKey = `${originIdentityKey}\0${conversationId}\0${turnId}`;
+      persistSavedQuestionNotSent(dispositionKey);
+      return false;
+    }
+    setBoundedMapEntry(pendingDurableUndispatchedTurnsRef.current, turnId, {
+      identityKey: originIdentityKey,
+      identityEpoch: originIdentityEpoch,
+      conversationId,
+      turnId,
+      selectionTicket: originSelectionTicket,
+    });
+    return true;
+  }, [persistSavedQuestionNotSent]);
+
+  const handleProviderDispatchStarted = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => {
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: identityNamespaceKey(identityNamespaceRef.current),
+      submitFence: submitIdentityFenceRef.current,
+    })) return;
+    providerDispatchedPromptIdsRef.current.add(promptId);
+    pendingDurableUndispatchedTurnsRef.current.delete(promptId);
+    // A held model-only receipt can settle after a surface switch and record
+    // its opaque disposition before the continuation reaches the exact
+    // provider-fetch boundary. If that boundary is reached, it is not an
+    // undispatched turn: retract both the in-memory and tab-persistent key.
+    // Turn ids are server-issued/UUID opaque ids, so no prompt or execution
+    // authority is needed to cancel the notice.
+    removeSavedQuestionNotSentKey(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      `${originIdentityKey}\0${conversationId}\0${promptId}`
+    );
+    if (providerDispatchedPromptIdsRef.current.size > 64) {
+      const oldest = providerDispatchedPromptIdsRef.current.values().next().value;
+      if (typeof oldest === "string") {
+        providerDispatchedPromptIdsRef.current.delete(oldest);
+      }
+    }
+  }, []);
+
+  const consumeSavedQuestionNotSent = useCallback((
+    targetIdentityKey: string,
+    conversationId: string,
+    preserveKey: string | null = null
+  ) => {
+    const found = consumeSavedQuestionNotSentPrefix(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      targetIdentityKey,
+      conversationId,
+      preserveKey
+    );
+    if (!found) return false;
+    // Consumption runs during surface arrival. Dispatch through the shared
+    // event after the queued effect boundary so the newly mounted workspace's
+    // toast listener owns the notice; setting this mount's local state directly
+    // can be discarded by the App Router handoff that is still settling.
+    dispatchAppToast(t("chat.savedQuestionNotSent"), "info");
+    return true;
+  }, [t]);
+
+  useEffect(() => {
+    const handleChange = () => {
+      setSavedQuestionNotSentRevision((value) => value + 1);
+    };
+    window.addEventListener(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT, handleChange);
+    return () => {
+      window.removeEventListener(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT, handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialConversationResolved || !identityKey || !currentChatId) return;
+    // A committed navigation updates the ref synchronously before React can
+    // commit the next conversation state. A same-window disposition event in
+    // that gap belongs to the destination tree, not the stale origin render.
+    if (currentChatIdRef.current !== currentChatId) return;
+    // A routed surface can mount with the tab's previously active id before
+    // it applies the conversation named by the URL. Do not consume an origin
+    // notice against that transient id: it would render on the wrong surface
+    // and disappear when the route selection finishes.
+    const handoff = initialConversationHandoffRef.current;
+    if (handoff.requestedId === initialConversationId && !handoff.settled) return;
+    const protectedDispositionKey = promptPayload?.messageWasDurablySaved &&
+      promptPayload.chatId === currentChatId &&
+      promptPayload.identityEpoch === submitIdentityFenceRef.current.epoch &&
+      !providerDispatchedPromptIdsRef.current.has(promptPayload.id)
+        ? `${identityKey}\0${currentChatId}\0${promptPayload.id}`
+        : null;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        consumeSavedQuestionNotSent(
+          identityKey,
+          currentChatId,
+          protectedDispositionKey
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [consumeSavedQuestionNotSent, currentChatId, identityKey, initialConversationId,
+    initialConversationHandoffRevision, isInitialConversationResolved,
+    promptPayload, savedQuestionNotSentRevision]);
 
   const restoreChatPrompt = useCallback((prompt: {
     text: string;
@@ -3212,7 +3568,13 @@ export function ChatPageClient({
 
     const handleNewChat = () => {
         resetPromptRefinerFixture();
-        conversationSelectionTicketRef.current += 1;
+        if (mountedSurface === "continuation" && identityKey) {
+            // This route transition unmounts the continuation tree. Promote
+            // accepted turns before changing the selection ticket so their
+            // prompt-free receipt survives into the next mount.
+            promoteCurrentUndispatchedTurns(identityKey);
+        }
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         pendingCreatedChatRef.current = null;
         /*
           A new chat on a continuation's URL has to leave that URL.
@@ -3316,7 +3678,7 @@ export function ChatPageClient({
             return;
         }
         resetPromptRefinerFixture();
-        conversationSelectionTicketRef.current += 1;
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
             /*
@@ -3373,7 +3735,7 @@ export function ChatPageClient({
     // Leaving the image draft without generating: the chat draft comes back
     // exactly as it was, in the conversation it belonged to.
     const handleCancelImageDraft = () => {
-        conversationSelectionTicketRef.current += 1;
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         const restore = chatDraftBeforeImage;
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
@@ -3389,7 +3751,7 @@ export function ChatPageClient({
 
     const handleNewImage = () => {
         resetPromptRefinerFixture();
-        conversationSelectionTicketRef.current += 1;
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
@@ -3457,7 +3819,17 @@ export function ChatPageClient({
         skipLockCheck = false,
         surfaceHint?: ConversationSurface
     ) => {
-        const selectionTicket = ++conversationSelectionTicketRef.current;
+        const outstandingHandoff = initialConversationHandoffRef.current;
+        if (!outstandingHandoff.settled &&
+            outstandingHandoff.requestedId !== id) {
+            // An explicit selection of another conversation replaces the URL
+            // handoff. From this point the frozen server prop is historical,
+            // not a reason to suppress this selection's future notices.
+            settleInitialConversationHandoff();
+        }
+        const navigationAttempt = allocateConversationNavigationAttempt();
+        conversationNavigationAttemptRef.current = navigationAttempt;
+        const selectionIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
         /*
           A continuation opens at its own URL
           (docs/policy/external-conversation-continuation.md §8.2).
@@ -3478,10 +3850,13 @@ export function ChatPageClient({
             // A URL/list miss is not product authority. Resolve the owned row
             // before mounting a Chat transcript for an unclassified id.
             const accountId = accountConversationId(id);
-            if (!accountId) return;
+            if (!accountId) {
+                settleInitialConversationHandoff(id);
+                return;
+            }
             const originConversationId = currentChatIdRef.current;
             const lookupIsCurrent = () => Boolean(identityKey) &&
-                selectionTicket === conversationSelectionTicketRef.current &&
+                navigationAttempt === conversationNavigationAttemptRef.current &&
                 identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
                 originConversationId === currentChatIdRef.current;
             if (!lookupIsCurrent()) return;
@@ -3493,18 +3868,54 @@ export function ChatPageClient({
                 }
                 if (!response.ok) {
                     await discardResponseBody(response);
-                    if (lookupIsCurrent()) showToast(t("chat.conversationOpenFailed"), "info");
+                    if (lookupIsCurrent()) {
+                        settleInitialConversationHandoff(id);
+                        showToast(t("chat.conversationOpenFailed"), "info");
+                    }
                     return;
                 }
                 const detail = await response.json();
                 if (!lookupIsCurrent()) return;
-                if (!["chat", "workspace", "continuation"].includes(detail.surface)) return;
+                if (!["chat", "workspace", "continuation"].includes(detail.surface)) {
+                    settleInitialConversationHandoff(id);
+                    return;
+                }
                 targetSurface = detail.surface;
             } catch {
-                if (lookupIsCurrent()) showToast(t("chat.conversationOpenFailed"), "info");
+                if (lookupIsCurrent()) {
+                    settleInitialConversationHandoff(id);
+                    showToast(t("chat.conversationOpenFailed"), "info");
+                }
                 return;
             }
         }
+
+        // A refused click is not a departure. In particular, opening the lock
+        // prompt must not turn the current conversation's pending receipt into
+        // a saved-but-undispatched disposition. Promote only after all lookup
+        // and lock checks have accepted the target, immediately before the
+        // actual route or selection transition below.
+        if (!isGuestMode && !skipLockCheck) {
+            const targetConv = conversations.find((c) => c.id === id);
+            if (targetConv?.isLocked) {
+                setLockedSelectDialog({ id, password: "", error: "" });
+                return;
+            }
+        }
+        const commitConversationSelection = (forceRouteTransition = false) => {
+            if (!forceRouteTransition && id === currentChatIdRef.current) {
+              settleInitialConversationHandoff();
+              return false;
+            }
+            if (id !== currentChatIdRef.current) {
+              promoteCurrentUndispatchedTurns(selectionIdentityKey);
+            }
+            conversationSelectionTicketRef.current =
+              allocateConversationSelectionTicket();
+            currentChatIdRef.current = id;
+            settleInitialConversationHandoff();
+            return true;
+        };
         /*
           Navigate whenever the target's surface is not the one this mount is.
 
@@ -3549,6 +3960,11 @@ export function ChatPageClient({
                 // open row): pushing the current path again is a history entry
                 // that goes nowhere.
                 if (pathname !== ownPath) {
+                    // Record the departure before navigation unmounts this
+                    // workspace. A late durable model-only save otherwise sees
+                    // the conversation being left as "current" and emits its
+                    // notice into a component tree that no longer exists.
+                    commitConversationSelection(true);
                     router.push(ownPath);
                     return;
                 }
@@ -3558,6 +3974,7 @@ export function ChatPageClient({
                 // `LEGACY_REVIEW_PATH`, not `PRODUCT_SURFACE_PATH.review`:
                 // this is where the workspace lives *today*, and the two stop
                 // being equal on the day of the cutover.
+                commitConversationSelection(true);
                 router.push(
                     conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)
                 );
@@ -3573,16 +3990,6 @@ export function ChatPageClient({
         pendingCreatedChatRef.current = null;
         latestLocalComparisonPromptRef.current = null;
 
-        if (!isGuestMode && !skipLockCheck) {
-            const targetConv = conversations.find((c) => c.id === id);
-
-            if (targetConv && targetConv.isLocked) {
-                setLockedSelectDialog({ id, password: "", error: "" });
-                return;
-
-            }
-        }
-
         // An image conversation swaps the whole surface for the image
         // workspace: no chat drafts, model settings or panels to restore,
         // and the workspace loads its own generation history.
@@ -3592,7 +3999,7 @@ export function ChatPageClient({
             // A real switch, so a new workspace instance: the timeline and the
             // poll loop of the conversation being left must not follow.
             setImageWorkspaceKey(id);
-            currentChatIdRef.current = id;
+            commitConversationSelection();
             setCurrentChatId(id);
             setPromptPayload(null);
             setIsDeepResearchPending(false);
@@ -3618,7 +4025,7 @@ export function ChatPageClient({
           }
         }
 
-	  currentChatIdRef.current = id;
+      commitConversationSelection();
       setCurrentChatId(id);
 	  setPromptPayload(null);
       setIsDeepResearchPending(false);
@@ -3813,51 +4220,30 @@ export function ChatPageClient({
         // here instead, because that effect never runs twice.
         if (hasUrlSelectionPreset && !comparisonPresetAppliedRef.current) return;
 
-        if (
-            currentChatId ||
-            isInitialSelectedRef.current ||
-            comparisonPresetRequestedRef.current ||
-            hasUrlSelectionPreset
-        ) {
-            // A conversation is already open, an initial selection already
-            // ran, or the URL already decided the models. No restore will
-            // happen, so the selection is final and readiness must resolve.
-            queueMicrotask(() => setIsInitialConversationResolved(true));
-            return;
-        }
-
-        isInitialSelectedRef.current = true;
-
-        // A same-tab reload (F5, crash recovery) should return to whatever
-        // conversation was open, not send the user back through the welcome
-        // screen the way an actual new tab/session does. Only restore if the
-        // saved id still belongs to this user's just-loaded conversation
-        // list -- covers a deleted conversation, another user's leftover id
-        // after a sign-out/sign-in in the same tab, etc. -- and
-        // handleSelectConversation itself still re-prompts for a locked
-        // conversation's password rather than silently opening it.
         /*
-          A URL that names a conversation wins over the tab's last one.
+          A URL that names a conversation wins over both the open client state
+          and the tab's last conversation.
 
-          `/continuations/[conversationId]` is the caller: the path already
-          says which row this mount is for, so restoring whatever was open
-          before would show a different conversation at that URL -- with the
-          imported prelude beside it describing neither.
+          This must run before the `currentChatId` early return below. App
+          Router may retain this client tree when crossing Chat and Review, so
+          the state can still name B while the new URL explicitly hands Review
+          conversation A back to this workspace. Treating B as "already open"
+          would leave the URL handoff unspent and would also prevent A-bound
+          durable dispositions from being consumed.
 
-          Routed through `handleSelectConversation` like any other selection,
-          so the lock prompt and the surface check still run. An id that is not
-          in this account's just-loaded list is ignored: that list is what the
-          restore below already matches against, and "not yours" and "deleted"
-          are the same answer here as everywhere else.
+          The applied value is the id, not a component-lifetime boolean. A ->
+          B -> A is therefore two distinct handoffs even when React preserves
+          the component. Routed through `handleSelectConversation` like any
+          other selection, so ownership, lock and surface checks remain intact.
         */
         if (
             initialConversationId &&
-            !initialConversationAppliedRef.current &&
+            initialConversationAppliedRef.current !== initialConversationId &&
             conversations.some(
                 (conversation) => conversation.id === initialConversationId
             )
         ) {
-            initialConversationAppliedRef.current = true;
+            initialConversationAppliedRef.current = initialConversationId;
             /*
               The handoff parameter is spent the moment it is honoured.
 
@@ -3889,6 +4275,51 @@ export function ChatPageClient({
             return;
         }
 
+        if (
+            initialConversationId &&
+            initialConversationAppliedRef.current !== initialConversationId &&
+            !conversations.some(
+                (conversation) => conversation.id === initialConversationId
+            )
+        ) {
+            // The owned first-page list is authoritative for this bootstrap.
+            // A missing/unowned URL id cannot remain an eternal in-flight
+            // handoff: remember that it was handled and allow the user's
+            // fallback selection to consume its own future disposition.
+            initialConversationAppliedRef.current = initialConversationId;
+            settleInitialConversationHandoff(initialConversationId);
+        }
+
+        // A route without a named conversation re-arms a future handoff of the
+        // same id. This matters when the URL sequence is A -> unnamed -> A and
+        // the App Router retains the client component throughout.
+        if (!initialConversationId) {
+            initialConversationAppliedRef.current = null;
+        }
+
+        if (
+            currentChatId ||
+            isInitialSelectedRef.current ||
+            comparisonPresetRequestedRef.current ||
+            hasUrlSelectionPreset
+        ) {
+            // A conversation is already open, an initial selection already
+            // ran, or the URL already decided the models. No restore will
+            // happen, so the selection is final and readiness must resolve.
+            queueMicrotask(() => setIsInitialConversationResolved(true));
+            return;
+        }
+
+        isInitialSelectedRef.current = true;
+
+        // A same-tab reload (F5, crash recovery) should return to whatever
+        // conversation was open, not send the user back through the welcome
+        // screen the way an actual new tab/session does. Only restore if the
+        // saved id still belongs to this user's just-loaded conversation
+        // list -- covers a deleted conversation, another user's leftover id
+        // after a sign-out/sign-in in the same tab, etc. -- and
+        // handleSelectConversation itself still re-prompts for a locked
+        // conversation's password rather than silently opening it.
         const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
         /*
           A restore reopens what was on screen; it never navigates.
@@ -3935,6 +4366,7 @@ export function ChatPageClient({
         isGuestMode,
         isUserSettingsLoaded,
         mountedSurface,
+        settleInitialConversationHandoff,
     ]);
 
     const handleLock = async (id: string, password: string) => {
@@ -4243,10 +4675,27 @@ export function ChatPageClient({
   // ChatApp retries, follow-ups and payload sends bypass handleGlobalSubmit,
   // but each crosses onBeforeModelSend. A fixture must refuse that barrier
   // before any Message write or provider-facing request can start.
-  const ensureModelSettingsReadyForChatApp = async (targetChatId: string) =>
-    promptRefinerMode === "e2e_fixture"
+  const ensureModelSettingsReadyForChatApp = async (targetChatId: string) => {
+    const loopbackGate = window as typeof window & {
+      __tomverseChatBeforeModelSendGate?: Promise<void>;
+      __tomverseChatBeforeModelSendStarted?: boolean;
+      __tomverseChatBeforeModelSendCallCount?: number;
+      __tomverseChatBeforeModelSendHoldOnCall?: number;
+    };
+    if (window.location.hostname === "127.0.0.1" &&
+        loopbackGate.__tomverseChatBeforeModelSendGate) {
+      const callCount = (loopbackGate.__tomverseChatBeforeModelSendCallCount ?? 0) + 1;
+      loopbackGate.__tomverseChatBeforeModelSendCallCount = callCount;
+      if (loopbackGate.__tomverseChatBeforeModelSendHoldOnCall === undefined ||
+          loopbackGate.__tomverseChatBeforeModelSendHoldOnCall === callCount) {
+        loopbackGate.__tomverseChatBeforeModelSendStarted = true;
+        await loopbackGate.__tomverseChatBeforeModelSendGate;
+      }
+    }
+    return promptRefinerMode === "e2e_fixture"
       ? false
       : ensureModelSettingsReady(targetChatId);
+  };
 
   useEffect(() => {
     if (
@@ -4428,7 +4877,9 @@ export function ChatPageClient({
     const submitOwnerIsCurrent = () => {
       const current = submitIdentityFenceRef.current;
       const ownerKey = submitOwner.identityKey ?? "unresolved";
-      return current.identityKey === submitOwner.identityKey &&
+      return Boolean(submitOwner.identityKey) &&
+        activeChatIdentityIs(submitOwner.identityKey!, submitOwner.identityEpoch) &&
+        current.identityKey === submitOwner.identityKey &&
         current.epoch === submitOwner.identityEpoch &&
         pendingSubmissionOwnersRef.current.get(ownerKey)?.token ===
           submitOwner.token;
@@ -4736,13 +5187,30 @@ export function ChatPageClient({
       // all: the preflight would price an empty set and the turn would sit
       // unanswered. Abandon instead, leaving the answers already on screen.
       if (!activeModelIds.length) return;
-      const chatSendIsCurrent = (requireLoaded = true) => {
+      const chatSendIsCurrent = (requireLoaded = true, notifyChanged = true) => {
         if (!submitOwnerIsCurrent()) return false;
-        if (mountedSurface !== "chat") return true;
         const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
+        const preparedConversationId = pendingCreatedConversationAdoption
+          ? originScopeId
+          : activeChatId!;
+        const preparedSelectionIsCurrent = Boolean(identityKey) &&
+          identityKey === currentIdentityKey &&
+          preparedSelectionTicket === conversationSelectionTicketRef.current &&
+          preparedConversationId === currentChatIdRef.current;
+        if (!preparedSelectionIsCurrent) {
+          if (notifyChanged && identityKey === currentIdentityKey) {
+            showToast(t("chat.sendPreparationChanged"), "info");
+          }
+          return false;
+        }
+        // Review and every other surface still share the global composer.
+        // They must honour the captured conversation and committed selection
+        // ticket, but their multi-model selection is not Chat's single-model
+        // contract and must not be rejected by the helper below.
+        if (mountedSurface !== "chat") return true;
         const current = chatPreparedSendIsCurrent({
           identityKey, currentIdentityKey,
-          conversationId: pendingCreatedConversationAdoption ? originScopeId : activeChatId!,
+          conversationId: preparedConversationId,
           currentConversationId: currentChatIdRef.current,
           selectionTicket: preparedSelectionTicket,
           currentSelectionTicket: conversationSelectionTicketRef.current,
@@ -5035,6 +5503,38 @@ export function ChatPageClient({
 
         if (saved) {
           messageWasSaved = true;
+          // A durable Message may settle after an A→B→A identity cycle.
+          // It remains a server fact, but the detached epoch has no authority
+          // to create a notice or a later provider-dispatch disposition in the
+          // returning A tree.
+          if (submitOwnerIsCurrent()) {
+            // The commit response can arrive after a same-identity navigation.
+            // There is then no pending entry for the departing selection to
+            // promote: record the opaque disposition immediately and wake the
+            // active tree. A newly-created Chat deliberately compares against
+            // its still-current `new` origin until the accepted Message adopts
+            // the server conversation; `chatSendIsCurrent(false)` preserves
+            // that pending-adoption contract.
+            // Bind the durable receipt to exactly one side-effect-free
+            // selection decision. A stale Review/global send must record its
+            // opaque origin disposition and stop without briefly replacing
+            // the saved notice with a preparation-changed toast on the final
+            // provider guard.
+            sendCurrentAfterMessageSave = chatSendIsCurrent(false, false);
+            if (sendCurrentAfterMessageSave) {
+              setBoundedMapEntry(pendingDurableUndispatchedTurnsRef.current, comparisonId, {
+                identityKey: submitOwner.identityKey ?? "unresolved",
+                identityEpoch: submitOwner.identityEpoch,
+                conversationId: activeChatId,
+                turnId: comparisonId,
+                selectionTicket: preparedSelectionTicket,
+              });
+            } else {
+              persistSavedQuestionNotSent(
+                `${submitOwner.identityKey}\0${activeChatId}\0${comparisonId}`
+              );
+            }
+          }
           /*
             Swap the composer's upload ids for the durable attachment ids the
             save just wrote, in place, so the cards already on screen are the
@@ -5076,7 +5576,7 @@ export function ChatPageClient({
             // The Message is durable. A viewport remount may now refresh its
             // history, but must not erase the accepted turn merely because
             // that GET is pending. The panel will wait for a complete view.
-            sendCurrentAfterMessageSave = chatSendIsCurrent(false);
+            sendCurrentAfterMessageSave = chatSendIsCurrent(false, false);
             const submittedDraftStillCurrent = commitDraftSend(
               preparedDraft,
               originScopeId,
@@ -5228,6 +5728,9 @@ export function ChatPageClient({
         text: trimmed,
         chatId: activeChatId,
         userMessageId: userMsgId,
+        messageWasDurablySaved: messageWasSaved,
+        conversationSelectionTicket: preparedSelectionTicket,
+        identityEpoch: submitOwner.identityEpoch,
         // Exactly the set this run was prepared for above: priced by the
         // preflight, given admission slots by it, and confirmed by the send
         // barrier. A panel whose model is not in here was not part of this
@@ -6298,7 +6801,7 @@ export function ChatPageClient({
         showToast(t("chat.singleModelRequired"), "info");
         return;
       }
-      conversationSelectionTicketRef.current += 1;
+      conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
       const nextModels = clampSelectedModels(
         modelIds.filter(isEnabledModelId)
       ).slice(0, maxSelectableModels);
@@ -7641,6 +8144,12 @@ export function ChatPageClient({
           }
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
+          conversationSelectionTicket={conversationSelectionTicketRef.current}
+          identityEpoch={identityEpoch}
+          onSavedQuestionNotSent={handleSavedQuestionNotSent}
+          onDurableUndispatchedAccepted={handleDurableUndispatchedAccepted}
+          onProviderDispatchStarted={handleProviderDispatchStarted}
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
@@ -7773,6 +8282,12 @@ export function ChatPageClient({
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
+          conversationSelectionTicket={conversationSelectionTicketRef.current}
+          identityEpoch={identityEpoch}
+          onSavedQuestionNotSent={handleSavedQuestionNotSent}
+          onDurableUndispatchedAccepted={handleDurableUndispatchedAccepted}
+          onProviderDispatchStarted={handleProviderDispatchStarted}
           onChangePanelModel={changePanelModel}
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
@@ -8621,7 +9136,10 @@ export function ChatPageClient({
           <div className="mt-5 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setLockedSelectDialog(null)}
+              onClick={() => {
+                settleInitialConversationHandoff(lockedSelectDialog.id);
+                setLockedSelectDialog(null);
+              }}
               className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               {t("auth.cancel")}

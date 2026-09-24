@@ -1,0 +1,52 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-saved-undispatched-disposition-followup-v2",
+  "round": 0,
+  "reviewer": "cursor",
+  "toolVersion": "Cursor CLI (version not recorded)",
+  "command": null,
+  "sandboxSignature": "cursor-cli plan read-only @ H:\\Project\\tomverse-chat-history-pagination-recovery-20260922 model:grok-4.7-xhigh",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: operator-approved for this successor review"
+  ],
+  "model": "grok-4.7-xhigh",
+  "mode": "plan",
+  "sessionId": "47a594ee-061f-4f9f-9437-9794a3865c8c",
+  "requestId": "6023e9a6-9e26-4bec-a63d-07c21bc4ce2f",
+  "durationMs": 887173,
+  "usage": {
+    "tool": "cursor-cli",
+    "inputTokens": 438235,
+    "outputTokens": 50783,
+    "cacheReadTokens": 3832704
+  },
+  "receivedAt": "2026-09-24T07:39:00.416Z",
+  "verdict": {
+    "taskId": "chat-saved-undispatched-disposition-followup-v2",
+    "round": 0,
+    "reviewedDigest": "sha256:c145f16e08688042c97a12fdbd3b7743018101df031aef67bc32359a7ee8422b",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "severity": "error",
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:2523",
+        "basis": "evidence",
+        "claim": "A saved-but-undispatched notice stored for any conversation other than the server handoff id is never consumed, so returning to that originating conversation shows no toast.",
+        "evidence": "The consume effect returns early at ChatPageClient.tsx:2523 whenever the initialConversationId prop is set and currentChatId differs. That prop is the route handoff frozen on the server (app/(site)/(application)/chat/page.tsx:27-30, app/(site)/(application)/chat/workspace/page.tsx via ChatWorkspaceShell.tsx:18-27, components/chat/ReviewWorkspaceShell.tsx:307). Client selection only rewrites the query with history.replaceState (ChatPageClient.tsx:2552-2558) and does not update the prop. persistSavedQuestionNotSent (ChatPageClient.tsx:2329-2343) and promoteCurrentUndispatchedTurns (ChatPageClient.tsx:2346-2373) correctly write the opaque origin key, but consumeSavedQuestionNotSent (ChatPageClient.tsx:2484-2499) never runs for the origin. The focused E2E always abandons and returns to the same ?conversation= id the page opened with, so it never observes this.",
+        "reproduction": "Open /chat/workspace?conversation=<A> (or legacy /chat?conversation=<A>). Select B, submit a Chat message whose durable POST is held until after history load fails, then select C and return to B. Expected: one chat.savedQuestionNotSent toast on B, zero on C, and zero /api/chat posts for that prompt. Actual: sessionStorage key tomverse_saved_question_not_sent_dispositions_v1 still contains A-or-B's origin key after B is selected, and app-toast count for that copy stays 0.",
+        "minimalFix": "Suppress consume only while the URL handoff is still outstanding. Set a settled flag once currentChatId has equalled initialConversationId, or when initialConversationId is null, and do not return early after that flag is set."
+      },
+      {
+        "severity": "error",
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:5058",
+        "basis": "evidence",
+        "claim": "On a non-chat surface a late global Message commit still treats a changed conversation as current, so a same-identity A→B→A cycle publishes the prompt and posts /api/chat instead of recording one origin notice.",
+        "evidence": "chatSendIsCurrent returns true for every mountedSurface other than chat as soon as the submit fence matches (ChatPageClient.tsx:5056-5058), before chatPreparedSendIsCurrent can compare conversation id or selection ticket (ChatPageClient.tsx:5060-5066). Legacy Review mounts ReviewWorkspaceShell with the default mountedSurface workspace (components/chat/ReviewWorkspaceShell.tsx:67-69; app/(site)/(application)/chat/page.tsx does not pass chat). The new branch at ChatPageClient.tsx:5367-5374 therefore stores a pending entry instead of persistSavedQuestionNotSent, and ChatPageClient.tsx:5460 does not return, so setPromptPayload at ChatPageClient.tsx:5569 still runs. Panels whose initialConversationId is again A then call handleSendPrompt. onProviderDispatchStarted (ChatPageClient.tsx:2451-2474) deletes the pending key, so the notice is also dropped. The new rapid A→B→A spec only drives the model-only input, which uses handleDurableUndispatchedAccepted and does not hit this predicate.",
+        "reproduction": "On /chat?conversation=<A> with Review's global composer, hold the Message response after commit (holdMessageSaveResponseAfterCommit). Select B, select A again, then release the response. Expected: zero /api/chat posts whose messages contain that prompt, and one saved-question toast on A. Actual: the held prompt is posted to /api/chat and the saved-question toast count is 0.",
+        "minimalFix": "Decide the undispatched branch by comparing the captured selection ticket and activeChatId with currentChatIdRef and conversationSelectionTicketRef on every surface. When they differ, persist only the opaque key and return before setPromptPayload. Keep chatPreparedSendIsCurrent's pending-adoption comparison for a new Chat whose current id is still the new origin."
+      }
+    ],
+    "nextAction": "Fix the handoff consume guard and the non-chat global current check, then re-review the same scenarios against this digest's successor."
+  }
+}

@@ -85,7 +85,6 @@ import {
   ownsChatRuntimeTranscript,
   releaseChatRuntimeLoad,
   restoreChatRuntimeCompleteViewForSend,
-  isChatRuntimeCompleteViewRecordCurrent,
   setChatRuntimeLastPrompt,
   settleChatRuntimeLoad,
   subscribeChatRuntime,
@@ -127,6 +126,12 @@ type ChatAppProps = {
     text: string;
     chatId: string;
     userMessageId: string;
+    /** True only after the account Message receipt/mapping was accepted. */
+    messageWasDurablySaved: boolean;
+    /** Conversation-selection epoch at acceptance; independent of identity. */
+    conversationSelectionTicket: number;
+    /** Identity/session epoch that owned the accepted send. */
+    identityEpoch: number;
     /**
      * The models this send was actually made for. A panel only auto-sends a
      * payload that names its own model: the payload outlives the send that
@@ -276,6 +281,36 @@ type ChatAppProps = {
   ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
+  /**
+   * Reports a durable user Message for which this panel did not start a
+   * provider request. The shell owns conversation selection, so it is the
+   * only layer that can show the notice on the conversation the Message
+   * belongs to instead of leaking it onto whichever conversation is open
+   * when an awaited save settles.
+   */
+  onSavedQuestionNotSent?: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => void;
+  onDurableUndispatchedAccepted?: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number
+  ) => boolean;
+  onProviderDispatchStarted?: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => void;
   onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentPlan?: string | null;
@@ -315,6 +350,11 @@ function ChatAppComponent({
   onTurnError,
   onFollowupSent,
   onBeforeSend,
+  conversationSelectionTicket,
+  identityEpoch,
+  onSavedQuestionNotSent,
+  onDurableUndispatchedAccepted,
+  onProviderDispatchStarted,
   onRequestCloseModel,
   hasMultipleActiveModels = false,
   currentPlan,
@@ -322,6 +362,11 @@ function ChatAppComponent({
 }: ChatAppProps) {
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
+  const panelIdentityKey = chatRuntimeIdentityKey(
+    isGuestMode
+      ? { kind: "guest" }
+      : { kind: "account", userId: sessionUserId }
+  );
     const { t } = useLanguage();
     // UX-021. Only used to name this panel's follow-up field. Three panels
     // render three of these, so a name that does not say *which* model is the
@@ -341,11 +386,9 @@ function ChatAppComponent({
    * component, because both shells unmount every panel when the conversation
    * changes. Remounting on the same key adopts the run that is already going
    * instead of starting over with nothing.
-   */
+  */
   const runtimeKey = chatRuntimeKey({
-    identityKey: chatRuntimeIdentityKey(
-      isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
-    ),
+    identityKey: panelIdentityKey,
     conversationId: initialConversationId,
     modelId,
     transcriptScope,
@@ -1265,7 +1308,9 @@ function ChatAppComponent({
     */
     acknowledgedUnavailableAttachmentIds: string[] = [],
     /** Persisted identity used by authenticated durable Chat verification. */
-    sourceUserMessageId: string = userMsgId
+    sourceUserMessageId: string = userMsgId,
+    /** Fires at the exact boundary where a provider-facing fetch is attempted. */
+    onDispatchStarted?: () => void
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1511,6 +1556,7 @@ function ChatAppComponent({
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
+        onDispatchStarted?.();
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -2412,7 +2458,28 @@ function ChatAppComponent({
     // models the send was made for may answer it -- a model swapped in
     // afterwards was not part of this run and has no answer to give here.
     if (!promptPayload.modelIds.includes(modelId)) return;
-    if (transcriptScope === "conversation" && !runtime.isLoaded) return;
+    if (transcriptScope === "conversation" && !runtime.isLoaded) {
+      // Only the explicit receipt provenance makes this a durable Message.
+      // Guest and legacy non-durable payloads must never receive "saved" copy.
+      if (!promptPayload.messageWasDurablySaved) return;
+      // If this
+      // incomplete panel is merely remounted (responsive shell change or a
+      // successful retry), the parent still points at the same conversation
+      // and ignores this cleanup. If the user actually leaves, the parent
+      // records one conversation-scoped disposition and shows it only when
+      // that originating conversation is selected again. Never retain the
+      // payload for an automatic provider call after navigation.
+      return () => {
+        onSavedQuestionNotSent?.(
+          panelIdentityKey,
+          promptPayload.identityEpoch,
+          promptPayload.chatId,
+          promptPayload.id,
+          promptPayload.conversationSelectionTicket,
+          "conversation-left"
+        );
+      };
+    }
 
     const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
     if (processedPromptKeys.has(promptKey)) return;
@@ -2420,6 +2487,21 @@ function ChatAppComponent({
     let cancelled = false;
     let claimed = false;
     let retainClaim = false;
+    let providerStarted = false;
+    let dispositionReported = false;
+    const reportDisposition = (reason: "terminal" | "conversation-left") => {
+      if (dispositionReported || transcriptScope !== "conversation" ||
+          !promptPayload.messageWasDurablySaved) return;
+      dispositionReported = true;
+      onSavedQuestionNotSent?.(
+        panelIdentityKey,
+        promptPayload.identityEpoch,
+        promptPayload.chatId,
+        promptPayload.id,
+        promptPayload.conversationSelectionTicket,
+        reason
+      );
+    };
     queueMicrotask(() => {
       if (cancelled || isPanelDisabled) return;
       if (processedPromptKeys.has(promptKey)) return;
@@ -2447,6 +2529,7 @@ function ChatAppComponent({
         // under a model the panel is no longer showing.
         if (!settingsReady || panelModelIdRef.current !== modelId) {
           retainClaim = true;
+          reportDisposition("terminal");
           return;
         }
         if (transcriptScope === "conversation" &&
@@ -2470,13 +2553,27 @@ function ChatAppComponent({
           promptPayload.admissionToken,
           promptPayload.contextBundle,
           promptPayload.contextLayout,
-          promptPayload.webSearchMode
-        );
+          promptPayload.webSearchMode,
+          [],
+          promptPayload.userMessageId,
+          () => {
+            providerStarted = true;
+            onProviderDispatchStarted?.(
+              panelIdentityKey,
+              promptPayload.identityEpoch,
+              promptPayload.chatId,
+              promptPayload.id
+            );
+          }
+        ).then(() => {
+          if (!providerStarted) reportDisposition("terminal");
+        });
       })();
     });
     return () => {
       cancelled = true;
       if (claimed && !retainClaim) processedPromptKeys.delete(promptKey);
+      if (!providerStarted) reportDisposition("conversation-left");
     };
   }, [
     handleSendPrompt,
@@ -2484,6 +2581,9 @@ function ChatAppComponent({
     isGuestMode,
     isPanelDisabled,
     modelId,
+    onSavedQuestionNotSent,
+    onProviderDispatchStarted,
+    panelIdentityKey,
     promptPayload,
     runtime.isLoaded,
     runtimeKey,
@@ -2498,6 +2598,8 @@ function ChatAppComponent({
             !getChatRuntimeSnapshot(runtimeKey).isLoaded) return;
         const preparationToken = beginSendPreparation(runtimeKey);
         if (!preparationToken) return;
+        const originSelectionTicket = conversationSelectionTicket;
+        const originIdentityEpoch = identityEpoch;
 
         try {
           const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
@@ -2531,6 +2633,14 @@ function ChatAppComponent({
                   throw new Error("Model-only user message save returned no valid id mapping.");
                 }
                 userMsgId = mapping.messageId;
+                const retainsDispatchAuthority = onDurableUndispatchedAccepted?.(
+                  panelIdentityKey,
+                  originIdentityEpoch,
+                  initialConversationId,
+                  userMsgId,
+                  originSelectionTicket
+                ) === true;
+                if (!retainsDispatchAuthority) return;
             } catch (error) {
                 console.error("model-only user message save failed:", error);
                 dispatchAppToast(t("chat.retryQuestionSaveFailed"), "error");
@@ -2543,14 +2653,38 @@ function ChatAppComponent({
             // but this stale continuation has no authority to dispatch it.
             // Do not ask for a blind resend: that could duplicate the saved
             // question. The provider was never contacted for this turn.
-            if (isChatRuntimeCompleteViewRecordCurrent(completeView)) {
-              dispatchAppToast(t("chat.savedQuestionNotSent"), "info");
-            }
+            onSavedQuestionNotSent?.(
+              panelIdentityKey,
+              originIdentityEpoch,
+              initialConversationId,
+              userMsgId,
+              originSelectionTicket,
+              "terminal"
+            );
             return;
           }
           setModelInput("");
           onFollowupSent?.(modelId);
-          await handleSendPrompt(trimmed, initialConversationId, userMsgId);
+          await handleSendPrompt(
+            trimmed,
+            initialConversationId,
+            userMsgId,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [],
+            userMsgId,
+            () => onProviderDispatchStarted?.(
+              panelIdentityKey,
+              originIdentityEpoch,
+              initialConversationId,
+              userMsgId
+            )
+          );
         } finally {
           endSendPreparation(runtimeKey, preparationToken);
         }
