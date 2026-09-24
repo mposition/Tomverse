@@ -36,6 +36,10 @@ import { prisma } from "@/lib/prisma";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
+    completeInstrumentedDispatch,
+    recordDispatched,
+    recordNotDispatched,
+    type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
 
 const experimentDb = prisma as unknown as ExperimentDb;
@@ -81,6 +85,17 @@ export const enterPinnedDeploymentChat = async (input: {
     };
 }): Promise<PinnedRunResult> => {
     const experiment = ledger();
+    let instrumentation: DispatchInstrumentation = null;
+    let dispatched: Promise<void> | null = null;
+    const ensureDispatched = () => {
+        if (!instrumentation) return Promise.resolve();
+        dispatched ??= recordDispatched(instrumentation);
+        return dispatched;
+    };
+    const abandonBeforeDispatch = async (reason: string) => {
+        if (!instrumentation || dispatched) return;
+        await recordNotDispatched(instrumentation, reason, "application");
+    };
     return runPinnedDeployment({
         env: input.env ?? {
             PINNED_DEPLOYMENT_EXECUTION: process.env.PINNED_DEPLOYMENT_EXECUTION,
@@ -152,6 +167,7 @@ export const enterPinnedDeploymentChat = async (input: {
                     adapterVersion: "vercel-ai-sdk-streamText-v1",
                 });
                 if (!authorised) return { ok: false };
+                instrumentation = authorised;
                 return { ok: true, attemptId: authorised.attemptId };
             } catch {
                 return { ok: false };
@@ -159,11 +175,15 @@ export const enterPinnedDeploymentChat = async (input: {
         },
         transport: async (args) => {
             const model = catalogueModel(args.logicalModelId);
-            if (!model) return { started: false };
+            if (!model) {
+                await abandonBeforeDispatch("pinned_model_unavailable");
+                return { started: false };
+            }
             let active;
             try {
                 active = getActiveAiModel(model);
             } catch {
+                await abandonBeforeDispatch("pinned_model_inactive");
                 return { started: false };
             }
             const inference = pinnedInferenceArguments(args);
@@ -175,6 +195,7 @@ export const enterPinnedDeploymentChat = async (input: {
                 })),
                 maxOutputTokens: inference.maxOutputTokens,
                 onFinish: async (event) => {
+                    await ensureDispatched();
                     const usage = event.usage;
                     const promptTokens = usage?.inputTokens;
                     let rates: PinnedPriceRates | null = null;
@@ -192,23 +213,44 @@ export const enterPinnedDeploymentChat = async (input: {
                             outputTokens: usage?.outputTokens,
                             cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
                         });
-                    await experiment.close(actual === null
-                        ? { holdId: args.holdId, experimentId: args.experimentId, outcome: "unknown" }
-                        : {
-                            holdId: args.holdId,
-                            experimentId: args.experimentId,
-                            outcome: "usage",
-                            actualMicroUsd: actual,
-                        });
+                    try {
+                        await experiment.close(actual === null
+                            ? { holdId: args.holdId, experimentId: args.experimentId, outcome: "unknown" }
+                            : {
+                                holdId: args.holdId,
+                                experimentId: args.experimentId,
+                                outcome: "usage",
+                                actualMicroUsd: actual,
+                            });
+                    } finally {
+                        if (instrumentation) {
+                            await completeInstrumentedDispatch(instrumentation, {
+                                outcome: "succeeded",
+                                actualInputTokens: typeof usage?.inputTokens === "number" ? usage.inputTokens : null,
+                                actualOutputTokens: typeof usage?.outputTokens === "number" ? usage.outputTokens : null,
+                            });
+                        }
+                    }
                 },
                 onError: async () => {
-                    await experiment.close({
-                        holdId: args.holdId,
-                        experimentId: args.experimentId,
-                        outcome: "unknown",
-                    });
+                    await ensureDispatched();
+                    try {
+                        await experiment.close({
+                            holdId: args.holdId,
+                            experimentId: args.experimentId,
+                            outcome: "unknown",
+                        });
+                    } finally {
+                        if (instrumentation) {
+                            await completeInstrumentedDispatch(instrumentation, {
+                                outcome: "failed_pre_token",
+                                failureLayer: "provider",
+                            });
+                        }
+                    }
                 },
             });
+            await ensureDispatched();
             return {
                 started: true,
                 pending: true,
