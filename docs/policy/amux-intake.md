@@ -97,3 +97,18 @@ draft를 등록 완료로, backlog를 실행 중으로, 제안을 검증 완료�
 6. staging backlog write.
 7. production에서 preview만.
 8. 별도 승인 뒤 production backlog write.
+
+## 책임
+
+상세 문서 갱신, 카드 수정, reconciliation, governance cutover의 책임자는 운영자 `mposition`이다. 역할은 넷이고, 한 사람이 넷을 겸하는 것은 이 조직의 현재 사실이다. intake 등록은 이 넷을 대신하지 않는다.
+
+- 상세 문서: 현황판이 정본인 동안 카드가 상세를 덮어쓰지 않는다.
+- 카드 수정: owner의 human audit가 있는 별도 변경이다. 등록은 backlog 한 건만 만든다.
+- reconciliation: 별도 run이다. 같은 source key의 다른 digest는 conflict이고, 저장된 digest와 관측된 digest를 둘 다 남긴다.
+- governance cutover: 별도 승인이다. 이 문서가 cutover를 수행하지 않는다.
+
+## 등록 트랜잭션
+
+미리보기는 DB에 쓰지 않는다. 공개 route는 `AMUX_INTAKE_APPLY_CODE_LATCH`가 꺼져 있는 동안 트랜잭션을 열지 않는다. 래치가 켜진 뒤의 한 트랜잭션이 backlog 카드, 본문이 비어 있는 draft, consumed approval, human audit를 함께 쓴다. 그 트랜잭션은 todo, owner, claim, attempt, delivery, route decision, provider 비용, 사용자 credit를 늘리지 않는다.
+
+저장하는 `sourceKey`는 HMAC의 대문자 hex다. 기존 카드의 source key 검사에 맞추기 위한 형태이고, 원문 task id는 저장하지 않는다.

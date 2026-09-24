@@ -5128,6 +5128,8 @@ model AmuxWorkItem {
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals AmuxReviewProposal[]
+  intakeDrafts    AmuxIntakeDraft[]
+  intakeApprovals AmuxIntakeApproval[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -5417,4 +5419,56 @@ model AmuxBoardPromotionApproval {
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
+}
+
+/// Digest-only record of one explicit intake. Proposal text stays null.
+/// Preview does not insert a row. A second digest for the same source key
+/// conflicts instead of replacing this row.
+model AmuxIntakeDraft {
+  id            String    @id
+  sourceSystem  String
+  sourceKey     String
+  sourceVersion String
+  draftDigest   String
+  policyVersion Int
+  status        String
+  actorUserId   String
+  title         String?
+  scope         String?
+  completion    String?
+  workItemId    String
+  createdAt     DateTime  @default(now())
+  consumedAt    DateTime?
+  expiresAt     DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, sourceKey])
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// Human approval consumed in the same transaction as the backlog card.
+/// This is not an AmuxBoardImportApproval row.
+model AmuxIntakeApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  draftDigest             String
+  sourceDigest            String
+  policyVersion           Int
+  scannerVersion          String
+  cardCount               Int
+  workItemId              String
+  consumedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([workItemId])
 }
