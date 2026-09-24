@@ -259,6 +259,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "AMUX 등록",
     description: "owner 전용 명시적 등록 미리보기, 꺼진 운영 적용",
   },
+  "amux-reconciliation": {
+    label: "AMUX 소스 재조정",
+    description: "owner 전용 카드별 소스 개정 미리보기, 꺼진 운영 적용",
+  },
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",

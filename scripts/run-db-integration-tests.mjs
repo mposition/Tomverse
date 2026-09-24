@@ -210,6 +210,11 @@ run(
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
     "tests/integration/amux-intake-registration.db.test.ts",
+    // Source reconciliation appends one consumed run and per-card revisions.
+    // Accept moves only the revision pointer. Reject leaves the pointer. The
+    // public apply function returns before the transaction while the code
+    // latch is false, so this test calls the commit function directly.
+    "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
