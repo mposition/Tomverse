@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
@@ -35,7 +34,7 @@ export function AmuxIntakePanel() {
   const send = async (action: string) => {
     setPending(true);
     try {
-      const response = await adminFetch(`/api/admin/amux/intake?action=${action}`, {
+      const response = await fetch(`/api/admin/amux/intake?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: requestText,
