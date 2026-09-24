@@ -1452,3 +1452,53 @@ reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-in
    evidence를 수집한다.
 5. 그 증거 뒤 Refiner→Router 결합을 ROUTE-03 지연 계약 아래 실험하고 full-catalog
    모델 선택 개선으로 진행한다.
+
+## 2026-09-25 saved-but-undispatched 경계 배포·staging 확인 회차
+
+PR #1673은 merge commit `79fc743e163101935d7f68695b61628b62e76fb4`로
+병합됐고, 이 변경을 포함한 staging deployment
+`5e3d9861-f1c1-46a3-a6a4-7972bd358c14`는 `SUCCESS`로 종료됐다. 완료 시각은
+`2026-09-24T13:34:34.181Z`다. desktop/mobile의 deterministic focused E2E는
+**38/38** 통과했다. 이 증거는 saved-but-undispatched departure boundary의 구현과
+회귀 검증, 병합 및 staging 배포를 각각 확인한다.
+
+로그인된 staging Chat에서는 기존 전용 test conversation을 열어 확인했다. 화면은
+기존 사용자 질문 1개와 답변 1개를 불러왔고 reload 뒤에도 같은 한 쌍만 유지했다.
+중복 메시지나 recovery 오류는 없었다. 이 확인에서는 새 메시지를 전송하지 않았고
+provider 호출과 credit 사용도 발생시키지 않았다.
+
+saved-but-undispatched 경계를 staging에서 대화형으로 재현하는 시도는 의도적으로
+하지 않았다. 현재 내장된 deterministic gate는 loopback 전용이고, 실제 화면에서
+click race를 만들면 검증하려던 미전송 turn이 provider로 dispatch될 수 있다. 따라서
+이 항목은 통과나 실패가 아니라 **안전한 interactive staging seam 부재**로 분류한다.
+이는 이미 통과한 구현·회귀 증거를 무효화하지 않지만, 실제 staging 상호작용 증거로
+대체해서도 안 된다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 기술 구현 | **약 79%** — saved-but-undispatched 경계 구현·회귀·병합·staging 배포와 기존 대화 reload 보존을 반영한 작업량 추정 |
+| release/activation readiness | **약 65%** — staging 기본 읽기 흐름은 확인했지만 안전한 interactive seam, confirmatory 판정과 후속 활성화 승인이 남음 |
+| Prompt Refiner 제품 연결 | **약 40%** — 제안형 제품 흐름과 사용자 선택 증거, Router/Auto shadow 결합은 아직 후속 |
+| Prompt Refiner confirmatory infrastructure | **약 95%** — v4가 strict case evidence와 token·cost·latency receipt를 이미 저장하고 content-free aggregate를 재구성함. 별도 승인된 실행과 사람 disposition은 후속 |
+| 이번 직접 관측 | signed-in staging의 기존 전용 test conversation에서 질문 1개·답변 1개가 reload 뒤에도 중복·recovery 오류 없이 유지됨. 새 메시지·provider 호출·credit 사용 0 |
+
+남은 retention/privacy 결정과 writer/store/collection은 confirmatory v4 case receipt를
+새로 만드는 일이 아니다. suggestion/product caller가 만들 제품 request/execution
+receipt와 사용자의 disposition receipt에만 적용한다.
+
+위 백분율은 같은 CHAT-01 범위의 대략적인 작업량·준비도 **추정**이다. 품질 gate
+통과, 실제 사용자 traffic 활성화 또는 launch 승인이 아니며 네 축은 서로를 대신하지
+않는다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 제품 receipt의 retention/privacy 결정을 먼저 동결한다.
+2. 그 결정에 맞춰 content-free 제품 request/execution receipt와 사용자 disposition
+   receipt의 store·collection을 구현한다.
+3. exact diff를 Cursor 읽기 전용 독립 검토와 Linux 통합 CI에 제출한다.
+4. 별도 비용·stage·run 승인을 받은 뒤에만 bounded paid confirmatory를 실행한다.
+5. 결과를 사람이 disposition하고, 불명 결과는 확인 전 재실행하지 않는다.
+6. 통과한 증거에 한해 제품 suggestion 흐름을 default-off로 연결한다.
+7. 사용자 선택 증거 뒤 Router/Auto shadow 결합을 별도 실험으로 진행한다.
