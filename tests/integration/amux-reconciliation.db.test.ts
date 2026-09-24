@@ -14,8 +14,9 @@ import { planAmuxReconciliation } from "@/lib/amux/boardReconciliationCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for one accept and one reject.
-// The public route cannot call this commit while the code latch is false.
-// No local DATABASE_URL means this file was not executed, not that it passed.
+// apply stays closed unless TOMVERSE_AMUX_RECONCILIATION_APPLY is exactly
+// enabled. This file calls the transaction body directly. A missing
+// TEST_DATABASE_URL means this file was not executed, not that it passed.
 
 const actorUserId = `amux-reconciliation-${randomUUID()}`;
 const session = {
@@ -173,10 +174,18 @@ test("accept moves only the pointer and reject keeps the stored revision", async
   const runsBefore = await prisma.$queryRaw<Array<{ count: number }>>`
     SELECT count(*)::int AS count FROM "AmuxReconciliationRun"
   `;
-  await assert.rejects(
-    () => applyAmuxReconciliation({ session, request, plan: planned }),
-    (error: unknown) => error instanceof BoardImportError && error.code === "apply_disabled",
-  );
+  const applyEnv = "TOMVERSE_AMUX_RECONCILIATION_APPLY";
+  const previousApply = process.env[applyEnv];
+  delete process.env[applyEnv];
+  try {
+    await assert.rejects(
+      () => applyAmuxReconciliation({ session, request, plan: planned }),
+      (error: unknown) => error instanceof BoardImportError && error.code === "apply_disabled",
+    );
+  } finally {
+    if (previousApply === undefined) delete process.env[applyEnv];
+    else process.env[applyEnv] = previousApply;
+  }
   const runsAfterRefusal = await prisma.$queryRaw<Array<{ count: number }>>`
     SELECT count(*)::int AS count FROM "AmuxReconciliationRun"
   `;
