@@ -5169,6 +5169,8 @@ model AmuxWorkItem {
   intakeApprovals AmuxIntakeApproval[]
   recommendationItems AmuxRecommendationSnapshotItem[]
   recommendationDecisions AmuxRecommendationDecision[]
+  autoGrants AmuxRecommendationAutoGrant[]
+  autoConsumptions AmuxRecommendationAutoConsumption[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -5493,6 +5495,7 @@ model AmuxRecommendationSnapshot {
   updatedAt               DateTime  @updatedAt
   items                   AmuxRecommendationSnapshotItem[]
   decisions               AmuxRecommendationDecision[]
+  autoConsumptions        AmuxRecommendationAutoConsumption[]
 
   @@index([status, expiresAt])
 }
@@ -5535,6 +5538,72 @@ model AmuxRecommendationDecision {
   workItem AmuxWorkItem               @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([snapshotId, workItemId])
+}
+
+/// One human pre-approval for a later auto-promotion. Version 8 inserts no
+/// row from the public route. A grant does not change the card.
+model AmuxRecommendationAutoGrant {
+  id                      String   @id
+  workItemId              String
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String   @unique
+  requestDigest           String
+  grantedAt               DateTime
+  expiresAt               DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  workItem     AmuxWorkItem                        @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  consumptions AmuxRecommendationAutoConsumption[]
+
+  @@index([workItemId, status])
+}
+
+/// One consumed auto-promotion. Version 8's public route does not insert a row.
+model AmuxRecommendationAutoConsumption {
+  id                      String    @id
+  grantId                 String    @unique
+  workItemId              String
+  snapshotId              String
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  requestDigest           String
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  grant      AmuxRecommendationAutoGrant       @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workItem   AmuxWorkItem                      @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  snapshot   AmuxRecommendationSnapshot        @relation(fields: [snapshotId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  costEntry  AmuxRecommendationAutoCostEntry?
+
+  @@index([workItemId, status])
+}
+
+/// Operational USD cents for the auto-promotion path. Version 8 writes none.
+model AmuxRecommendationAutoCostEntry {
+  id            String   @id
+  consumptionId String   @unique
+  amountCents   Int
+  recordedAt    DateTime
+  createdAt     DateTime @default(now())
+
+  consumption AmuxRecommendationAutoConsumption @relation(fields: [consumptionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+}
+
+/// An open halt has clearedAt null. Version 8 has no resume writer.
+model AmuxRecommendationAutoHalt {
+  id                      String    @id
+  reason                  String
+  violationCode           String?
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  openedAt                DateTime
+  clearedAt               DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 }
 
 /// One observed source snapshot. Append-only. The original import is

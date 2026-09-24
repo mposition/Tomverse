@@ -581,6 +581,34 @@ const REGISTRY = {
     reason:
       "Hold and reject store one of these codes. There is no free-text reason. Approve and expiry leave the column null.",
   },
+  AmuxRecommendationAutoGrant_status_check: {
+    owner: "list",
+    module: "lib/amux/autoPromotionCore.ts",
+    list: "AUTO_GRANT_STATUSES",
+    reason:
+      "active, consumed, expired. A grant is a human pre-approval and is not a card status. Version 8's public route does not insert one.",
+  },
+  AmuxRecommendationAutoConsumption_status_check: {
+    owner: "list",
+    module: "lib/amux/autoPromotionCore.ts",
+    list: "AUTO_CONSUMPTION_STATUSES",
+    reason:
+      "consumed or outcome_unknown. consumed is the only status that accompanies one backlog to todo write, and that write stays behind the shipped-off auto latch.",
+  },
+  AmuxRecommendationAutoHalt_reason_check: {
+    owner: "list",
+    module: "lib/amux/autoPromotionCore.ts",
+    list: "AUTO_HALT_REASONS",
+    reason:
+      "critical_violation or outcome_unknown_burst. An open halt has no resume writer in version 8.",
+  },
+  AmuxRecommendationAutoHalt_violation_code_check: {
+    owner: "list",
+    module: "lib/amux/autoPromotionCore.ts",
+    list: "AUTO_CRITICAL_CODES",
+    reason:
+      "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",
