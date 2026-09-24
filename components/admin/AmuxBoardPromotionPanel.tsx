@@ -3,11 +3,11 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardPromotionMessages } from "@/lib/adminMessages/amuxBoardPromotion";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-promotion");
+const AMUX_BOARD_PROMOTION_CLIENT_TIMEOUT_MS = 15_000;
 
 type PromotionBody = {
   approvalId?: string;
@@ -29,10 +29,11 @@ export function AmuxBoardPromotionPanel() {
   const send = async (action: string, body: string) => {
     setPending(true);
     try {
-      const response = await adminFetch(`/api/admin/amux/board-promotion?action=${action}`, {
+      const response = await fetch(`/api/admin/amux/board-promotion?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body,
+        signal: AbortSignal.timeout(AMUX_BOARD_PROMOTION_CLIENT_TIMEOUT_MS),
       });
       const payload = (await response.json()) as PromotionBody;
       setResult(payload);
