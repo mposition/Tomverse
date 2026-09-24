@@ -53,6 +53,23 @@ test("the floor is the cheapest class that covers the worst accepted turn", () =
   assert.ok(floor.coverMicroUsd >= floor.worstCaseMicroUsd);
 });
 
+test("a 128k answer at US$4/US$20 is sold as frontier", () => {
+  // 128,000 x 4 x 1.25 + 128,000 x 20 = 3,200,000 micro-USD. premium-reasoning
+  // covers 1,920,000 at the 3x input multiplier. frontier's 32 credits cover
+  // 3,840,000.
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: 4,
+    outputUsdPerMillionTokens: 20,
+    maxOutputTokens: 128_000,
+    inputPriceMultiplier: 1.25,
+    worstCaseInputTokens: 128_000,
+  });
+  assert.ok(isCreditFloor(floor));
+  assert.equal(floor.usageClass, "frontier");
+  assert.equal(floor.credits, 32);
+  assert.equal(adoptionSaleProposal(floor)?.creditWeight, 32);
+});
+
 test("a cheap model does not have to be sold as premium", () => {
   const floor = suggestCreditFloor({
     inputUsdPerMillionTokens: 0.1,
@@ -610,7 +627,10 @@ test("an adoption no class can cover is refused, not saved at one credit", () =>
       creditWeight: 1,
       inputUsdPerMillionTokens: 5,
       outputUsdPerMillionTokens: 25,
-      maxOutputTokens: 8_192,
+      // 400,000 input tokens at the cache-write premium plus a 128,000-token
+      // answer is US$5.700. Frontier's 32 credits cover US$3.840 at the 3x
+      // input multiplier, so this turn is still outside every class.
+      maxOutputTokens: 128_000,
     },
     worstCaseInputTokens: 400_000,
     inputPriceMultiplier: 1.25,

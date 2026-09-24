@@ -1008,6 +1008,7 @@ export const fr = {
         premium: "Premium",
         reasoning: "Raisonnement",
         research: "Recherche",
+        frontier: "Frontier",
     },
     onboarding: {
         title: "Comparez immédiatement des modèles gratuits",
