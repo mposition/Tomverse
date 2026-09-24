@@ -139,6 +139,7 @@ export const fr = {
         messageReceiptRecoveryBody: "La réponse d’enregistrement a été interrompue. La modification est suspendue pour éviter une question perdue ou en double. Rechargez la conversation pour vérifier son état en toute sécurité.",
         messageReceiptRecoveryReload: "Recharger la conversation",
         sendPreparationChanged: "La conversation ou le modèle a changé pendant la préparation. Vérifiez votre question et envoyez-la à nouveau.",
+        savedQuestionNotSent: "Votre question a été enregistrée, mais aucune demande de réponse n’a été envoyée. Rechargez cette conversation pour vérifier son état avant de réessayer.",
         conversationOpenFailed: "Cette conversation n’a pas pu être ouverte. Votre conversation actuelle reste inchangée.",
         questionSaveFailed: "La question n’a pas pu être enregistrée avec ses fichiers. Votre brouillon a été conservé.",
         retryQuestionSaveFailed: "La question n’a pas pu être enregistrée pour cette nouvelle tentative. Aucune demande de réponse n’a été envoyée.",

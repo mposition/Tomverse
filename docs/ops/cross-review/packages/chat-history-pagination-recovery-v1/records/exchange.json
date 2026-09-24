@@ -1,0 +1,363 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat-history-pagination-recovery-v1",
+  "requirement": "Tomverse Chat의 기존 대화 기록을 페이지별로 복원할 때 첫 페이지와 모든 후속 페이지가 완전하고 유효할 때만 해당 runtime transcript를 loaded로 인정한다. 후속 페이지 503, malformed 첫 200 응답, 누락·반복 cursor, 캐시된 대화 재방문 및 진행 중 조회를 상속한 panel remount에서 부분 기록을 성공처럼 표시하거나 전송하지 않는다. 실패 상태와 수동 retry는 동일 identity·conversation runtime key에 결속하고 작성 중인 draft를 보존하며, 조회 재시도가 provider POST를 만들지 않는다. Review의 다중 모델 model-only 경로도 재조회 중 숨겨진 전송을 만들지 않고 기존 정상 동작을 유지한다. E2E conversation detail GET fixture는 실제 API와 같은 필수 messagePage를 반환해야 하며 chat-send-history-race의 독립 fixture도 이 계약을 따른다. 저장된 Message에 대한 답변 dispatch가 시작되지 않은 경우에는 중복 Message를 만들 수 있는 재전송 대신 reload로 사실을 확인하도록 7개 locale의 정확한 안내를 제공한다. 변경은 지정된 열여섯 제품·테스트 파일과 이 검토 패키지에 한정한다. 실제 provider 호출, 유료 실행, Railway staging/production, flag 변경, 병합·배포는 범위 밖이다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
+  "completionCriteria": [
+    "첫 페이지와 후속 페이지의 messages 및 messagePage 형식을 검사하고, 후속 페이지 503·malformed JSON·누락 또는 반복 cursor를 complete history로 오인하지 않는다. 실패한 페이지까지의 임시 messages는 화면이나 전송 context에 적용하지 않는다.",
+    "이전에 loaded였던 대화를 재방문해 후속 페이지 갱신에 실패해도 cached loaded=true가 남지 않는다. 같은 runtime key의 in-flight load를 새 panel이 상속한 뒤 이전 panel의 요청이 실패하면 공유 실패 상태를 관측하고 수동 retry에 도달한다. 낡은 ticket의 release/settle은 최신 ticket을 바꾸지 않는다.",
+    "local send 또는 stream이 조회 중 동일 key의 transcript revision을 진전시킨 경우 늦은 조회 응답은 그 transcript를 덮지 않는다. identity·conversation 전환 뒤 이전 응답과 실패는 현재 화면, 다른 key의 draft·toast 또는 전송 권한으로 이전되지 않는다. 특히 다른 계정으로 전환한 뒤 이전 계정의 보류 중 Message save가 끝나도 saved-but-unanswered 안내를 새 계정 화면에 표시하지 않는다.",
+    "기록 로드 전·실패 중에는 Chat 전역 composer와 Review 다중 모델 model-only form의 모든 전송 진입점이 Message 저장과 provider POST 전에 멈춘다. 비활성 버튼 외에 Enter/form submit 및 settings-preparation 대기 뒤의 재검사도 포함한다. 다만 Message POST가 이미 in flight인 동안 viewport remount가 기록 GET claim을 시작하고 그 Message save가 성공한 경우, 이미 커밋된 Message를 답변 없이 버리지 않고 완전한 cached transcript를 보존하며 한 번만 이어서 전송해야 한다. Message 저장 이후 onBeforeSend 대기 중 발생하는 remount·기록 claim도 같은 계약으로 검증한다. Review 다중 모델 model-only Message POST 진행 중 viewport remount와 page2 GET hold/503이 겹친 뒤 POST가 commit되면 provider stream이 spinner 뒤에 숨지 않거나 완전 로드까지 보류되며, 실패한 GET을 성공으로 위장하지 않는지 검증한다. 정상 로드 뒤에는 해당 경로가 한 번만 전송된다.",
+    "오류 UI는 현재 runtime key의 실제 실패에만 나타나고 pending load와 failed load를 서로 다른 메시지·상태로 정직하게 표시한다. 재시도는 기록 GET만 다시 수행하고 중복 provider 실행·무한 자동 재시도·숨겨진 답변을 만들지 않으며, 사용자가 입력한 draft는 실패·재시도·대화 전환 중 보존된다. durable Message 저장은 성공했으나 동시 최신 run이 이겨 답변 dispatch가 시작되지 않은 경우, 완료나 미저장으로 위장하지 않고 중복 Message 위험이 있는 '다시 보내라' 대신 reload로 확인하라는 정확한 복구 disposition을 7개 locale에 제공하고 검증한다.",
+    "집중 runtime unit과 desktop/mobile 브라우저 회귀는 후속 페이지 503, malformed 첫 200, cached revisit, in-flight remount 실패, Review model-only 경합, draft/retry, 완전한 message 순서 및 Chat POST 0건의 실패 경계를 검증한다. 정상 복구 뒤 전송은 완전한 기록을 사용한다. 공용 및 세 독립 E2E fixture는 실제 conversation detail GET의 필수 messagePage 형식을 유지해야 하며 chat-markdown-theme, conversation-draft-isolation, chat-send-history-race, model-change-send-barrier 회귀를 실행한다. cached revisit와 model-change를 desktop/mobile에서 재실행하고 Loading-state golden은 Windows에서 파일 부재로 난 실패를 픽셀 통과로 오인하지 않고 정본 Linux runner에서 snapshot 갱신 없이 실제 비교한다. 관련 regression, typecheck, lint 및 diff guard의 실제 결과를 기록하며 실패·skip을 통과로 표현하지 않는다.",
+    "검토 package는 base ad2b51622992c29056706c443d80bdba928336e1 이후 지정된 열여섯 변경 파일과 이 task/authorization을 모두 포함한다. 생성된 records/만 동일한 exact --out 및 --diff-exclude 경로로 제외하고 source/test나 다른 파일을 제외하지 않는다. generatedPaths는 빈 배열이다.",
+    "Claude는 요구사항과 전체 diff를 먼저 읽고 작성자 테스트 기록을 그 뒤에 검토한다. verdict는 package digest를 명시하고 finding마다 위치·심각도·근거·재현을 제공한다. 사용자 승인 --skip-preflight 예외와 저장된 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다. Anthropic API·API key fallback, --review-despite-check-failures, 실제 provider/staging 호출, 과금, flag 변경, push·merge·deploy는 이 task가 승인하지 않는다."
+  ],
+  "baseCommit": "ad2b51622992c29056706c443d80bdba928336e1",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:1e14dec2c39e884200795fa6007346ed4224b983e3b35552710fde68163eefc9",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json",
+        "lib/chatStreamRuntime.ts",
+        "tests/chatStreamRuntime.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/e2e/support/app-fixtures.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --test tests/chatStreamRuntime.test.mjs && npm run build && npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/chat-unified-workspace.spec.ts --grep 'history|remount|model-only'",
+          "passed": true,
+          "output": "  ok 16 [mobile-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:2812:9 › Chat unified workspace › MODEL_RETIRED recovery opens the model picker and changes selection without deleting history or resending @ui-risk (1.8s)\n  ok 17 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:2812:9 › Chat unified workspace › CREDIT_BALANCE_INSUFFICIENT recovery opens the model picker and changes selection without deleting history or resending @ui-risk (1.8s)\n  ok 18 [mobile-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:2812:9 › Chat unified workspace › CREDIT_BALANCE_INSUFFICIENT recovery opens the model picker and changes selection without deleting history or resending @ui-risk (2.3s)\n\n  18 passed (22.0s)",
+          "durationMs": 54953
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check ad2b51622992c29056706c443d80bdba928336e1",
+          "passed": true,
+          "detail": "",
+          "durationMs": 67
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 40954
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx lib/chatStreamRuntime.ts tests/chatStreamRuntime.test.mjs tests/e2e/chat-unified-workspace.spec.ts tests/e2e/support/app-fixtures.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 8298
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "components/chat/ChatApp.tsx:822-825 (first-page messagePage validation); affected fixtures tests/e2e/chat-markdown-theme.spec.ts:22-41 and tests/e2e/conversation-draft-isolation.spec.ts:108-114",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "Making `messagePage` mandatory on the first 200 breaks existing specs that register their own conversation-detail GET mock after mockAuthenticatedApi (Playwright LIFO, so theirs wins) and return no `messagePage`: those conversations now never load, the panel renders chat-history-load-error, and every send from them is refused by the new ChatPageClient barrier — and neither file is inside the task's writableScope, so the change as scoped leaves the suite red.",
+          "reproduction": "npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-markdown-theme.spec.ts tests/e2e/conversation-draft-isolation.spec.ts — expected: pass as at base ad2b516; actual after this diff: chat-markdown-theme's 'assistant code blocks keep readable contrast' never renders `[data-message-role=\"assistant\"] pre code` (the mocked body at chat-markdown-theme.spec.ts:22-41 has messages but no messagePage, so the loader throws and releases the claim), and conversation-draft-isolation's 'a send clears only the conversation it was sent from' plus 'Korean IME text survives a conversation switch and a return' fail because detailRoute (line 108-114) also omits messagePage, so handleGlobalSubmit toasts chat.workspaceError.body and returns instead of sending. Either extend the authorized scope to those fixtures or state the breakage explicitly as out-of-scope fallout.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "recorded verification command for tests/e2e/chat-unified-workspace.spec.ts (--grep 'history|remount|model-only')",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The recorded run does not cover the cached-revisit criterion or the model-change-send-barrier regression that criterion 6 names: the new test 'a cached transcript cannot bypass a failed later-page refresh' contains none of history/remount/model-only, and the reported 18 passes are exactly 9 per project (7 matching new tests plus the two pre-existing '…without deleting history or resending' tests), so the eighth new test never ran, nor did model-change-send-barrier.spec.ts or the loading-placeholder goldens in chat-state-visual-regression.spec.ts that this diff's placeholder class change touches.",
+          "reproduction": "npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/chat-unified-workspace.spec.ts --grep 'cached transcript' (expect 2 tests, not 0 as in the recorded run's title set), then npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/model-change-send-barrier.spec.ts tests/e2e/chat-state-visual-regression.spec.ts --grep 'Loading state|barrier' and record the real results.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "app/(site)/(application)/chat/ChatPageClient.tsx:4375-4378 and 4759-4767",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "Both new send barriers report a merely-not-yet-loaded transcript as a failure: they fire the `chat.workspaceError.body` error toast on `!isLoaded` without consulting `runtime.loadFailed`, so an ordinary in-flight refresh (every revisit/remount now re-fetches every page sequentially, because claimChatRuntimeLoad clears isLoaded) tells the user the workspace could not be loaded while nothing has failed — contrary to the criterion that error UI appear only on a real failure of the current key and that loading be shown honestly.",
+          "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts: openChat(page, { historyPageFailureOnCursorRead: 1, holdHistoryPageFailure: true }) then submitComposer(...) before calling state.releaseHistoryPageFailure(); observed: the error toast with chat.workspaceError.body while page 2 is still open and the panel still shows data-testid=\"chat-panel-loading\"; expected: no error copy until runtime.loadFailed is true (a loading-specific message, or a send control disabled while loading).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/ChatApp.tsx:2540-2545 with lib/chatStreamRuntime.ts:340-356",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "In the Review model-only path a durable user Message that was already committed is abandoned with only an info toast whenever restoreChatRuntimeCompleteViewForSend returns false because the key's revision advanced meanwhile (e.g. a global Review send reached this same panel key while the model-only POST was on the wire), leaving a saved question that no provider will ever answer.",
+          "reproduction": "Review with two models: hold POST /api/conversations/qa-conversation/messages (holdMessageSaveBeforeTransaction), click model-only-send on panel 1, then submit the global composer so the auto-send effect calls handleSendPrompt on panel 1's runtime key (advanceChatRuntimeRevision), then release the held save; observed: 'chat.sendPreparationChanged' info toast and no /api/chat request for the saved model-only Message; expected: either the turn is dispatched once after the newer run settles, or the user is told the saved question needs a retry.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Resolve the out-of-scope fixture breakage in finding 1 (scope extension or explicit fallout statement), then re-run and record the cached-revisit, model-change-send-barrier and loading-golden regressions before a round 1 review."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:02df40ce87bcb10b54ae6a8ec488b3b180a4edc3de9ab9e409a82826d6686243",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json",
+        "lib/chatStreamRuntime.ts",
+        "locales/de.ts",
+        "locales/en.ts",
+        "locales/es.ts",
+        "locales/fr.ts",
+        "locales/ko.ts",
+        "locales/pt.ts",
+        "locales/zh.ts",
+        "tests/chatStreamRuntime.test.mjs",
+        "tests/e2e/chat-markdown-theme.spec.ts",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/e2e/conversation-draft-isolation.spec.ts",
+        "tests/e2e/support/app-fixtures.ts"
+      ],
+      "changeSummary": "Claude round 0 findings 1-4 fixed with fixture parity, honest pending status, and saved-but-undispatched notice",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/chatStreamRuntime.test.mjs && npm run build && npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-unified-workspace.spec.ts tests/e2e/chat-markdown-theme.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/model-change-send-barrier.spec.ts",
+          "passed": true,
+          "output": "  ok 119 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3385:9 › Chat single-transcript mobile composer › 320px and 200% text preserve the textarea row and Korean composition @ui-risk (792ms)\n  ok 120 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3385:9 › Chat single-transcript mobile composer › 390px and 200% text preserve the textarea row and Korean composition @ui-risk (862ms)\n\n  1 skipped\n  119 passed (2.8m)",
+          "durationMs": 200969
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check ad2b51622992c29056706c443d80bdba928336e1",
+          "passed": true,
+          "detail": "",
+          "durationMs": 96
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 43601
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx lib/chatStreamRuntime.ts locales/de.ts locales/en.ts locales/es.ts locales/fr.ts locales/ko.ts locales/pt.ts locales/zh.ts tests/chatStreamRuntime.test.mjs tests/e2e/chat-markdown-theme.spec.ts tests/e2e/chat-unified-workspace.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/support/app-fixtures.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 33807
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "tests/e2e/chat-send-history-race.spec.ts:38-61 against components/chat/ChatApp.tsx:822-825 and components/chat/ChatApp.tsx:2414",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "Round 0's fixture-parity finding was fixed only for the two specs it named: chat-send-history-race.spec.ts registers its own conversation-detail GET mock (after mockAuthenticatedApi, so Playwright LIFO makes it win) that returns `{id, title, selectedModels, disabledPanels, messages: [], nextCursor: null}` with no `messagePage`, so the new first-page validation throws, releaseChatRuntimeLoad marks the key failed, and — because the panel's auto-send effect now returns while `!runtime.isLoaded` — the first send of the newly created qa-conversation is never dispatched at all; the file is outside `writableScope`, so the change as scoped leaves the suite red.",
+          "reproduction": "npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-send-history-race.spec.ts  — expected 2 passed. Actual (per the code paths above): both tests fail at `expect(userMessages(page, \"survives the late history load\")).toHaveCount(1)`; the panel shows `[data-testid=\"chat-history-load-error\"]` instead of the transcript and no POST /api/chat is made, because the fixture create returns id `qa-conversation` (tests/e2e/support/app-fixtures.ts:710,1022), the panel claims a load for that key (components/chat/ChatApp.tsx:806, lib/chatStreamRuntime.ts:392-399 now clears isLoaded), the spec's mock answers after 1500ms without `messagePage`, and the promptPayload effect is gated on `runtime.isLoaded`. Same class of check for any other spec that overrides the detail GET: only chat-markdown-theme, conversation-draft-isolation and app-fixtures were updated.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/ChatApp.tsx:2540-2546 (restoreChatRuntimeCompleteViewForSend false branch) with lib/chatStreamRuntime.ts:335-345",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The new `chat.savedQuestionNotSent` toast is not gated on the identity still being current, so when the model-only Message POST is outstanding across an account switch the record is deleted by releaseChatRuntimeForOtherIdentities (ChatPageClient.tsx:1953), the generation lookup fails, and the previous identity's failure is announced on the new identity's screen — contrary to criterion 3, and inconsistent with the adjacent `sendPreparationChanged` toast, which is shown only when `identityKey === currentIdentityKey` (ChatPageClient.tsx:4752-4754).",
+          "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts, openChat({legacyReview: true, selectedModels: [MODEL_A, MODEL_B], holdMessageSaveBeforeTransaction: true}); fill and submit model-only; after `state.messageSaveStarted()`, switch identity (the account-B path already in this fixture, `hidePreviousAccount`/accountBConversations); then `state.releaseMessageSave()`. Expected: no toast for the released identity's key. Actual: the app toast \"Your question was saved, but no answer request was sent.\" appears on the new identity's workspace.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "verification record: docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md \"Round 0 수정본의 로컬 검증\" vs criterion 6",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "Criterion 6's loading-golden and desktop+mobile browser regression evidence is still absent for this revision: the control program ran only --project=desktop-chromium over four spec files, and the author's own record states the chat-state-visual-regression Loading-state run produced 4 failures from missing `-win32.png` goldens (never a pixel comparison) plus a grep-narrowed mobile subset, so no golden comparison for the placeholder this diff edits has actually been made.",
+          "reproduction": "On the canonical (Linux) runner: npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/chat-state-visual-regression.spec.ts --grep \"Loading state\" and npm run test:e2e:run -- --project=mobile-chromium tests/e2e/chat-unified-workspace.spec.ts tests/e2e/model-change-send-barrier.spec.ts. Expected: goldens compared and passing with `updateSnapshots: \"none\"`. Note the pending placeholder markup is byte-identical (same testid, same className, aria-busy still \"true\"), so this is an evidence gap rather than an expected diff.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Bring tests/e2e/chat-send-history-race.spec.ts's conversation-detail mock to the real API's required messagePage shape (extending writableScope for that file) and re-run it plus the mobile/golden regressions; round 0's findings 3 and 4 are addressed (toasts now fire only on loadFailed, and the saved-but-undispatched disposition exists in all seven locales)."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:63f99fbb5f577bb684e79b719a635b09f2594ce5d6f70bbef51efaf0874c2018",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md",
+        "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json",
+        "lib/chatStreamRuntime.ts",
+        "locales/de.ts",
+        "locales/en.ts",
+        "locales/es.ts",
+        "locales/fr.ts",
+        "locales/ko.ts",
+        "locales/pt.ts",
+        "locales/zh.ts",
+        "tests/chatStreamRuntime.test.mjs",
+        "tests/e2e/chat-markdown-theme.spec.ts",
+        "tests/e2e/chat-send-history-race.spec.ts",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/e2e/conversation-draft-isolation.spec.ts",
+        "tests/e2e/support/app-fixtures.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/chatStreamRuntime.test.mjs && npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-unified-workspace.spec.ts tests/e2e/chat-markdown-theme.spec.ts tests/e2e/chat-send-history-race.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/model-change-send-barrier.spec.ts",
+          "passed": true,
+          "output": "  ok 123 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3424:9 › Chat single-transcript mobile composer › 320px and 200% text preserve the textarea row and Korean composition @ui-risk (905ms)\n  ok 124 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3424:9 › Chat single-transcript mobile composer › 390px and 200% text preserve the textarea row and Korean composition @ui-risk (938ms)\n\n  1 skipped\n  123 passed (2.9m)",
+          "durationMs": 176225
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check ad2b51622992c29056706c443d80bdba928336e1",
+          "passed": true,
+          "detail": "",
+          "durationMs": 80
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 82853
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx lib/chatStreamRuntime.ts locales/de.ts locales/en.ts locales/es.ts locales/fr.ts locales/ko.ts locales/pt.ts locales/zh.ts tests/chatStreamRuntime.test.mjs tests/e2e/chat-markdown-theme.spec.ts tests/e2e/chat-send-history-race.spec.ts tests/e2e/chat-unified-workspace.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/support/app-fixtures.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 39716
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "components/chat/ChatApp.tsx:2440 and :2477-2480, with app/(site)/(application)/chat/ChatPageClient.tsx:3623 and :5117",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "On the global Chat path a durably saved Message whose dispatch is deferred by the new `!runtime.isLoaded` barrier is abandoned without any notice if the user leaves the conversation instead of pressing retry, because the panel's claim is released on cleanup (`claimed && !retainClaim`), the resumed microtask returns on `cancelled`, and a conversation switch clears `promptPayload` — the Chat path has no equivalent of the model-only path's `chat.savedQuestionNotSent` disposition.",
+          "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts, take the new test \"a committed Chat Message survives a history refresh started during its POST\" and, after `state.releaseHistoryPageFailure()` and `await expect(page.getByTestId(\"chat-history-load-error\")).toBeVisible()`, replace the `chat-history-load-retry` click with: click the sidebar item for SECOND_CONVERSATION, then click back to CONVERSATION. Observed: the saved user row \"Finish the accepted request after the remount.\" is returned by the history GET with no assistant answer, `await persistentChatPostCount(page)` stays 0, and no toast is dispatched; expected (per criterion 5's honesty contract for a saved-but-undispatched Message) either the continued dispatch or a reload-to-check notice.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "components/chat/ChatApp.tsx:2546 (isChatRuntimeCompleteViewRecordCurrent gate) with lib/chatStreamRuntime.ts:335-337",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The round-1 identity leak is fixed (the record is deleted on identity release, so the generation lookup fails and the toast is suppressed), but the gate is record-lifetime only, so a model-only turn that loses to a newer local run can still raise `savedQuestionNotSent` while the user is looking at a different conversation of the same account.",
+          "reproduction": "Extend the new test \"a Review question saved behind a newer turn is not mislabeled as unsaved\": after `await expect.poll(state.messageSaveStarted).toBe(true)` and the newer global submit, click the sidebar item for SECOND_CONVERSATION before `state.releaseMessageSave()`; the toast \"Your question was saved, but no answer request was sent…\" appears on SECOND_CONVERSATION's screen, which names no conversation. Note this matches the project's existing convention — the adjacent `sendPreparationChanged` toast at ChatPageClient.tsx:4752 is likewise gated on identity, not conversation — so it is recorded rather than pressed.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md, \"Round 2 정본 Linux visual 증거\"",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The Loading-state golden requirement of criterion 6 is now recorded as an actual Linux comparison (9/9, no snapshot update) and the workflow's overall `failure` is disclosed rather than dressed up as green, but the accompanying claim that the other 54 chat-state-visual-regression failures pre-date this change is supported only by reasoning about intervening main commits, not by a run of the same workflow at the base commit; I could not verify run 35700992823 at all with the read-only tool set this review is limited to.",
+          "reproduction": "Run the same manually dispatchable `Nightly Visual Regression` workflow at base `ad2b51622992c29056706c443d80bdba928336e1` with `--retries=0` and no snapshot update, and compare its failing test set against run 35700992823's 54 failures; the diff under review does not touch chat-state-visual-regression.spec.ts, its snapshots, or the non-failed loading placeholder markup (ChatApp.tsx:2564-2570 keeps `data-testid=\"chat-panel-loading\"` and the original class string), so the two sets are expected to match.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: components/chat/ChatApp.tsx:2440 and :2477-2480, with app/(site)/(application)/chat/ChatPageClient.tsx:3623 and :5117; open finding: components/chat/ChatApp.tsx:2546 (isChatRuntimeCompleteViewRecordCurrent gate) with lib/chatStreamRuntime.ts:335-337; open finding: docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md, \"Round 2 정본 Linux visual 증거\") and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:63f99fbb5f577bb684e79b719a635b09f2594ce5d6f70bbef51efaf0874c2018",
+  "commit": null,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/chatStreamRuntime.test.mjs && npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-unified-workspace.spec.ts tests/e2e/chat-markdown-theme.spec.ts tests/e2e/chat-send-history-race.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/model-change-send-barrier.spec.ts",
+      "passed": true,
+      "output": "  ok 123 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3424:9 › Chat single-transcript mobile composer › 320px and 200% text preserve the textarea row and Korean composition @ui-risk (905ms)\n  ok 124 [desktop-chromium] › tests\\e2e\\chat-unified-workspace.spec.ts:3424:9 › Chat single-transcript mobile composer › 390px and 200% text preserve the textarea row and Korean composition @ui-risk (938ms)\n\n  1 skipped\n  123 passed (2.9m)",
+      "durationMs": 176225
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "git diff --check ad2b51622992c29056706c443d80bdba928336e1",
+      "passed": true,
+      "detail": "",
+      "durationMs": 80
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 82853
+    },
+    {
+      "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx lib/chatStreamRuntime.ts locales/de.ts locales/en.ts locales/es.ts locales/fr.ts locales/ko.ts locales/pt.ts locales/zh.ts tests/chatStreamRuntime.test.mjs tests/e2e/chat-markdown-theme.spec.ts tests/e2e/chat-send-history-race.spec.ts tests/e2e/chat-unified-workspace.spec.ts tests/e2e/conversation-draft-isolation.spec.ts tests/e2e/support/app-fixtures.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 39716
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "components/chat/ChatApp.tsx:2440 and :2477-2480, with app/(site)/(application)/chat/ChatPageClient.tsx:3623 and :5117",
+      "severity": "warning",
+      "basis": "judgement",
+      "claim": "On the global Chat path a durably saved Message whose dispatch is deferred by the new `!runtime.isLoaded` barrier is abandoned without any notice if the user leaves the conversation instead of pressing retry, because the panel's claim is released on cleanup (`claimed && !retainClaim`), the resumed microtask returns on `cancelled`, and a conversation switch clears `promptPayload` — the Chat path has no equivalent of the model-only path's `chat.savedQuestionNotSent` disposition.",
+      "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts, take the new test \"a committed Chat Message survives a history refresh started during its POST\" and, after `state.releaseHistoryPageFailure()` and `await expect(page.getByTestId(\"chat-history-load-error\")).toBeVisible()`, replace the `chat-history-load-retry` click with: click the sidebar item for SECOND_CONVERSATION, then click back to CONVERSATION. Observed: the saved user row \"Finish the accepted request after the remount.\" is returned by the history GET with no assistant answer, `await persistentChatPostCount(page)` stays 0, and no toast is dispatched; expected (per criterion 5's honesty contract for a saved-but-undispatched Message) either the continued dispatch or a reload-to-check notice.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "components/chat/ChatApp.tsx:2546 (isChatRuntimeCompleteViewRecordCurrent gate) with lib/chatStreamRuntime.ts:335-337",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The round-1 identity leak is fixed (the record is deleted on identity release, so the generation lookup fails and the toast is suppressed), but the gate is record-lifetime only, so a model-only turn that loses to a newer local run can still raise `savedQuestionNotSent` while the user is looking at a different conversation of the same account.",
+      "reproduction": "Extend the new test \"a Review question saved behind a newer turn is not mislabeled as unsaved\": after `await expect.poll(state.messageSaveStarted).toBe(true)` and the newer global submit, click the sidebar item for SECOND_CONVERSATION before `state.releaseMessageSave()`; the toast \"Your question was saved, but no answer request was sent…\" appears on SECOND_CONVERSATION's screen, which names no conversation. Note this matches the project's existing convention — the adjacent `sendPreparationChanged` toast at ChatPageClient.tsx:4752 is likewise gated on identity, not conversation — so it is recorded rather than pressed.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md, \"Round 2 정본 Linux visual 증거\"",
+      "severity": "warning",
+      "basis": "evidence",
+      "claim": "The Loading-state golden requirement of criterion 6 is now recorded as an actual Linux comparison (9/9, no snapshot update) and the workflow's overall `failure` is disclosed rather than dressed up as green, but the accompanying claim that the other 54 chat-state-visual-regression failures pre-date this change is supported only by reasoning about intervening main commits, not by a run of the same workflow at the base commit; I could not verify run 35700992823 at all with the read-only tool set this review is limited to.",
+      "reproduction": "Run the same manually dispatchable `Nightly Visual Regression` workflow at base `ad2b51622992c29056706c443d80bdba928336e1` with `--retries=0` and no snapshot update, and compare its failing test set against run 35700992823's 54 failures; the diff under review does not touch chat-state-visual-regression.spec.ts, its snapshots, or the non-failed loading placeholder markup (ChatApp.tsx:2564-2570 keeps `data-testid=\"chat-panel-loading\"` and the original class string), so the two sets are expected to match.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 3 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-22T08:06:57.832Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "93b18c8f37be46cbfce47658cc638e77aa008d63",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "components/chat/ChatApp.tsx",
+    "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md",
+    "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json",
+    "lib/chatStreamRuntime.ts",
+    "locales/de.ts",
+    "locales/en.ts",
+    "locales/es.ts",
+    "locales/fr.ts",
+    "locales/ko.ts",
+    "locales/pt.ts",
+    "locales/zh.ts",
+    "tests/chatStreamRuntime.test.mjs",
+    "tests/e2e/chat-markdown-theme.spec.ts",
+    "tests/e2e/chat-send-history-race.spec.ts",
+    "tests/e2e/chat-unified-workspace.spec.ts",
+    "tests/e2e/conversation-draft-isolation.spec.ts",
+    "tests/e2e/support/app-fixtures.ts"
+  ]
+}

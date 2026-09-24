@@ -1,0 +1,35 @@
+{
+  "taskId": "chat-history-pagination-recovery-v1",
+  "requirement": "Tomverse Chat의 기존 대화 기록을 페이지별로 복원할 때 첫 페이지와 모든 후속 페이지가 완전하고 유효할 때만 해당 runtime transcript를 loaded로 인정한다. 후속 페이지 503, malformed 첫 200 응답, 누락·반복 cursor, 캐시된 대화 재방문 및 진행 중 조회를 상속한 panel remount에서 부분 기록을 성공처럼 표시하거나 전송하지 않는다. 실패 상태와 수동 retry는 동일 identity·conversation runtime key에 결속하고 작성 중인 draft를 보존하며, 조회 재시도가 provider POST를 만들지 않는다. Review의 다중 모델 model-only 경로도 재조회 중 숨겨진 전송을 만들지 않고 기존 정상 동작을 유지한다. E2E conversation detail GET fixture는 실제 API와 같은 필수 messagePage를 반환해야 하며 chat-send-history-race의 독립 fixture도 이 계약을 따른다. 저장된 Message에 대한 답변 dispatch가 시작되지 않은 경우에는 중복 Message를 만들 수 있는 재전송 대신 reload로 사실을 확인하도록 7개 locale의 정확한 안내를 제공한다. 변경은 지정된 열여섯 제품·테스트 파일과 이 검토 패키지에 한정한다. 실제 provider 호출, 유료 실행, Railway staging/production, flag 변경, 병합·배포는 범위 밖이다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
+  "completionCriteria": [
+    "첫 페이지와 후속 페이지의 messages 및 messagePage 형식을 검사하고, 후속 페이지 503·malformed JSON·누락 또는 반복 cursor를 complete history로 오인하지 않는다. 실패한 페이지까지의 임시 messages는 화면이나 전송 context에 적용하지 않는다.",
+    "이전에 loaded였던 대화를 재방문해 후속 페이지 갱신에 실패해도 cached loaded=true가 남지 않는다. 같은 runtime key의 in-flight load를 새 panel이 상속한 뒤 이전 panel의 요청이 실패하면 공유 실패 상태를 관측하고 수동 retry에 도달한다. 낡은 ticket의 release/settle은 최신 ticket을 바꾸지 않는다.",
+    "local send 또는 stream이 조회 중 동일 key의 transcript revision을 진전시킨 경우 늦은 조회 응답은 그 transcript를 덮지 않는다. identity·conversation 전환 뒤 이전 응답과 실패는 현재 화면, 다른 key의 draft·toast 또는 전송 권한으로 이전되지 않는다. 특히 다른 계정으로 전환한 뒤 이전 계정의 보류 중 Message save가 끝나도 saved-but-unanswered 안내를 새 계정 화면에 표시하지 않는다.",
+    "기록 로드 전·실패 중에는 Chat 전역 composer와 Review 다중 모델 model-only form의 모든 전송 진입점이 Message 저장과 provider POST 전에 멈춘다. 비활성 버튼 외에 Enter/form submit 및 settings-preparation 대기 뒤의 재검사도 포함한다. 다만 Message POST가 이미 in flight인 동안 viewport remount가 기록 GET claim을 시작하고 그 Message save가 성공한 경우, 이미 커밋된 Message를 답변 없이 버리지 않고 완전한 cached transcript를 보존하며 한 번만 이어서 전송해야 한다. Message 저장 이후 onBeforeSend 대기 중 발생하는 remount·기록 claim도 같은 계약으로 검증한다. Review 다중 모델 model-only Message POST 진행 중 viewport remount와 page2 GET hold/503이 겹친 뒤 POST가 commit되면 provider stream이 spinner 뒤에 숨지 않거나 완전 로드까지 보류되며, 실패한 GET을 성공으로 위장하지 않는지 검증한다. 정상 로드 뒤에는 해당 경로가 한 번만 전송된다.",
+    "오류 UI는 현재 runtime key의 실제 실패에만 나타나고 pending load와 failed load를 서로 다른 메시지·상태로 정직하게 표시한다. 재시도는 기록 GET만 다시 수행하고 중복 provider 실행·무한 자동 재시도·숨겨진 답변을 만들지 않으며, 사용자가 입력한 draft는 실패·재시도·대화 전환 중 보존된다. durable Message 저장은 성공했으나 동시 최신 run이 이겨 답변 dispatch가 시작되지 않은 경우, 완료나 미저장으로 위장하지 않고 중복 Message 위험이 있는 '다시 보내라' 대신 reload로 확인하라는 정확한 복구 disposition을 7개 locale에 제공하고 검증한다.",
+    "집중 runtime unit과 desktop/mobile 브라우저 회귀는 후속 페이지 503, malformed 첫 200, cached revisit, in-flight remount 실패, Review model-only 경합, draft/retry, 완전한 message 순서 및 Chat POST 0건의 실패 경계를 검증한다. 정상 복구 뒤 전송은 완전한 기록을 사용한다. 공용 및 세 독립 E2E fixture는 실제 conversation detail GET의 필수 messagePage 형식을 유지해야 하며 chat-markdown-theme, conversation-draft-isolation, chat-send-history-race, model-change-send-barrier 회귀를 실행한다. cached revisit와 model-change를 desktop/mobile에서 재실행하고 Loading-state golden은 Windows에서 파일 부재로 난 실패를 픽셀 통과로 오인하지 않고 정본 Linux runner에서 snapshot 갱신 없이 실제 비교한다. 관련 regression, typecheck, lint 및 diff guard의 실제 결과를 기록하며 실패·skip을 통과로 표현하지 않는다.",
+    "검토 package는 base ad2b51622992c29056706c443d80bdba928336e1 이후 지정된 열여섯 변경 파일과 이 task/authorization을 모두 포함한다. 생성된 records/만 동일한 exact --out 및 --diff-exclude 경로로 제외하고 source/test나 다른 파일을 제외하지 않는다. generatedPaths는 빈 배열이다.",
+    "Claude는 요구사항과 전체 diff를 먼저 읽고 작성자 테스트 기록을 그 뒤에 검토한다. verdict는 package digest를 명시하고 finding마다 위치·심각도·근거·재현을 제공한다. 사용자 승인 --skip-preflight 예외와 저장된 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다. Anthropic API·API key fallback, --review-despite-check-failures, 실제 provider/staging 호출, 과금, flag 변경, push·merge·deploy는 이 task가 승인하지 않는다."
+  ],
+  "baseCommit": "ad2b51622992c29056706c443d80bdba928336e1",
+  "writableScope": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "components/chat/ChatApp.tsx",
+    "lib/chatStreamRuntime.ts",
+    "locales/de.ts",
+    "locales/en.ts",
+    "locales/es.ts",
+    "locales/fr.ts",
+    "locales/ko.ts",
+    "locales/pt.ts",
+    "locales/zh.ts",
+    "tests/chatStreamRuntime.test.mjs",
+    "tests/e2e/chat-markdown-theme.spec.ts",
+    "tests/e2e/chat-send-history-race.spec.ts",
+    "tests/e2e/chat-unified-workspace.spec.ts",
+    "tests/e2e/conversation-draft-isolation.spec.ts",
+    "tests/e2e/support/app-fixtures.ts",
+    "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1"
+  ],
+  "generatedPaths": []
+}

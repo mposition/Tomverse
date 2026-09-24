@@ -139,6 +139,7 @@ export const pt = {
         messageReceiptRecoveryBody: "A resposta de gravação foi interrompida. A edição está pausada para evitar uma pergunta duplicada ou perdida. Recarregue a conversa para verificar o estado guardado com segurança.",
         messageReceiptRecoveryReload: "Recarregar conversa",
         sendPreparationChanged: "A conversa ou o modelo mudou durante a preparação da resposta. Confira a pergunta e envie novamente.",
+        savedQuestionNotSent: "A sua pergunta foi guardada, mas não foi enviado nenhum pedido de resposta. Recarregue esta conversa para verificar o estado antes de tentar novamente.",
         conversationOpenFailed: "Não foi possível abrir esta conversa. A sua conversa atual permanece inalterada.",
         questionSaveFailed: "Não foi possível salvar a pergunta com seus arquivos. Seu rascunho foi mantido.",
         retryQuestionSaveFailed: "Não foi possível salvar a pergunta para esta nova tentativa. Nenhuma solicitação de resposta foi enviada.",

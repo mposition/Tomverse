@@ -156,6 +156,7 @@ export const zh = {
         messageReceiptRecoveryBody: "保存响应已中断。为避免问题重复发送或丢失，编辑已暂停。请重新加载对话以安全确认保存状态。",
         messageReceiptRecoveryReload: "重新加载对话",
         sendPreparationChanged: "准备回答时，对话或模型发生了变化。请检查问题后重新发送。",
+        savedQuestionNotSent: "您的问题已保存，但尚未发送回答请求。再次尝试前，请重新加载此对话以确认状态。",
         conversationOpenFailed: "无法打开此对话。您当前的对话保持不变。",
         questionSaveFailed: "无法连同文件一起保存问题。你的草稿已保留。",
         retryQuestionSaveFailed: "无法保存本次重试的问题，因此未发送回答请求。",

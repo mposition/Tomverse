@@ -1,0 +1,1134 @@
+diff --git a/app/(site)/(application)/chat/ChatPageClient.tsx b/app/(site)/(application)/chat/ChatPageClient.tsx
+index 27c7785ff..01349775b 100644
+--- a/app/(site)/(application)/chat/ChatPageClient.tsx
++++ b/app/(site)/(application)/chat/ChatPageClient.tsx
+@@ -107,7 +107,7 @@ import {
+ } from "@/lib/continuationFocusHandoff";
+ import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
+ import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
+-import { chatRuntimeKey, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
++import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
+ import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
+ import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
+ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
+@@ -4365,12 +4365,18 @@ export function ChatPageClient({
+     const submitFence = submitIdentityFenceRef.current;
+     const ownerKey = identityKey ?? "unresolved";
+     if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
+-    if (mountedSurface === "chat" && currentChatIdRef.current && isChatRuntimeStreaming(chatRuntimeKey({
++    const existingChatRuntimeKey = mountedSurface === "chat" && currentChatIdRef.current
++      ? chatRuntimeKey({
+       identityKey: identityKey ?? "account",
+       conversationId: currentChatIdRef.current,
+       modelId: latestModelSettingsRef.current.models[0] ?? "",
+       transcriptScope: "conversation",
+-    }))) return;
++    }) : null;
++    if (existingChatRuntimeKey && !getChatRuntimeSnapshot(existingChatRuntimeKey).isLoaded) {
++      showToast(t("chat.workspaceError.body"), "error");
++      return;
++    }
++    if (existingChatRuntimeKey && isChatRuntimeStreaming(existingChatRuntimeKey)) return;
+     const owner: PendingSubmissionOwner = {
+       token: crypto.randomUUID(),
+       identityKey,
+@@ -4728,7 +4734,7 @@ export function ChatPageClient({
+       // all: the preflight would price an empty set and the turn would sit
+       // unanswered. Abandon instead, leaving the answers already on screen.
+       if (!activeModelIds.length) return;
+-      const chatSendIsCurrent = () => {
++      const chatSendIsCurrent = (requireLoaded = true) => {
+         if (!submitOwnerIsCurrent()) return false;
+         if (mountedSurface !== "chat") return true;
+         const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
+@@ -4744,7 +4750,22 @@ export function ChatPageClient({
+         if (!current && identityKey === currentIdentityKey) {
+           showToast(t("chat.sendPreparationChanged"), "info");
+         }
+-        return current;
++        if (!current) return false;
++        // A viewport remount can begin a fresh history load without changing
++        // the conversation or selection ticket. The initial submit check is
++        // no longer evidence after an awaited preflight/context/draft step.
++        // Fresh Chat has no origin transcript to reload and keeps its first
++        // send path unchanged.
++        if (requireLoaded && submitOwner.originConversationId && !getChatRuntimeSnapshot(chatRuntimeKey({
++          identityKey: identityKey ?? "account",
++          conversationId: submitOwner.originConversationId,
++          modelId: activeModelIds[0] ?? "",
++          transcriptScope: "conversation",
++        })).isLoaded) {
++          showToast(t("chat.workspaceError.body"), "error");
++          return false;
++        }
++        return true;
+       };
+       if (!chatSendIsCurrent()) return;
+       const preflight = await runComparisonPreflight({
+@@ -4820,6 +4841,7 @@ export function ChatPageClient({
+       }
+       let savedAttachments: ChatAttachment[] = promptAttachments;
+       let sendCurrentAfterMessageSave = true;
++      let messageWasSaved = false;
+       if (!isGuestMode) {
+         const messageToSave: {
+           clientRequestId: string;
+@@ -4853,6 +4875,10 @@ export function ChatPageClient({
+           | "transport"
+           | null = null;
+         let indeterminateFailureCode: string | undefined;
++        if (!chatSendIsCurrent()) {
++          if (preparedDraft) abortDraftSend(preparedDraft);
++          return;
++        }
+         try {
+           const { response: saveResponse, body: saveBody, bodyValid } =
+             await fetchJsonWithTimeout(
+@@ -5004,6 +5030,7 @@ export function ChatPageClient({
+         }
+ 
+         if (saved) {
++          messageWasSaved = true;
+           /*
+             Swap the composer's upload ids for the durable attachment ids the
+             save just wrote, in place, so the cards already on screen are the
+@@ -5042,7 +5069,10 @@ export function ChatPageClient({
+             // exact revision. Only now may the local snapshot disappear; any
+             // text typed while the request was frozen is retained as a fresh
+             // revision-0 draft by the hook.
+-            sendCurrentAfterMessageSave = chatSendIsCurrent();
++            // The Message is durable. A viewport remount may now refresh its
++            // history, but must not erase the accepted turn merely because
++            // that GET is pending. The panel will wait for a complete view.
++            sendCurrentAfterMessageSave = chatSendIsCurrent(false);
+             const submittedDraftStillCurrent = commitDraftSend(
+               preparedDraft,
+               originScopeId,
+@@ -5080,7 +5110,7 @@ export function ChatPageClient({
+ 
+       // Last await boundary: an intervening model/account/conversation change
+       // must not publish a payload to another panel or discard the draft.
+-      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent()) return;
++      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
+       const conversation = conversations.find((item) => item.id === activeChatId);
+       const previousCount = promptCountsRef.current.get(activeChatId) ??
+         (conversation?.messageCount ? 1 : 0);
+diff --git a/components/chat/ChatApp.tsx b/components/chat/ChatApp.tsx
+index ea76d4b1f..8b11f82f5 100644
+--- a/components/chat/ChatApp.tsx
++++ b/components/chat/ChatApp.tsx
+@@ -69,6 +69,7 @@ import {
+   beginChatRuntimeRun,
+   chatRuntimeIdentityKey,
+   chatRuntimeKey,
++  captureChatRuntimeCompleteView,
+   claimChatRuntimeLoad,
+   endChatRuntimeRun,
+   getChatRuntimeLastPrompt,
+@@ -83,6 +84,7 @@ import {
+   markChatRuntimeJobResumed,
+   ownsChatRuntimeTranscript,
+   releaseChatRuntimeLoad,
++  restoreChatRuntimeCompleteViewForSend,
+   setChatRuntimeLastPrompt,
+   settleChatRuntimeLoad,
+   subscribeChatRuntime,
+@@ -431,6 +433,7 @@ function ChatAppComponent({
+    * first will settle the record either way.
+    */
+   const settledViewKeyRef = useRef<string | null>(null);
++  const [historyLoadRetry, setHistoryLoadRetry] = useState(0);
+   /**
+    * The send barrier and this panel's current model, read through refs by the
+    * auto-send effect below.
+@@ -816,8 +819,17 @@ function ChatAppComponent({
+           });
+           if (response.ok) {
+             const data = await response.json();
++            if (!Array.isArray(data.messages) || !data.messagePage ||
++                typeof data.messagePage.hasMore !== "boolean") {
++              throw new Error("Conversation history first page is incomplete.");
++            }
+             let nextCursor = data.messagePage?.nextCursor;
+-            while (data.messagePage?.hasMore && nextCursor && isCurrentLoad()) {
++            const visitedCursors = new Set<string>();
++            while (data.messagePage?.hasMore && isCurrentLoad()) {
++              if (typeof nextCursor !== "string" || !nextCursor || visitedCursors.has(nextCursor)) {
++                throw new Error("Conversation history cursor is missing or repeated.");
++              }
++              visitedCursors.add(nextCursor);
+               const pageResponse = await fetch(
+                 `/api/conversations/${initialConversationId}?${modelQuery}&cursor=${encodeURIComponent(nextCursor)}`,
+                 {
+@@ -827,12 +839,14 @@ function ChatAppComponent({
+               );
+               if (!pageResponse.ok) {
+                 await discardResponseBody(pageResponse);
+-                break;
++                throw new Error(`Conversation history page failed: ${pageResponse.status}`);
+               }
+               const pageData = await pageResponse.json();
+-              if (Array.isArray(pageData.messages)) {
+-                data.messages.push(...pageData.messages);
++              if (!Array.isArray(pageData.messages) || !pageData.messagePage ||
++                  typeof pageData.messagePage.hasMore !== "boolean") {
++                throw new Error("Conversation history page is incomplete.");
+               }
++              data.messages.push(...pageData.messages);
+               data.messagePage = pageData.messagePage;
+               nextCursor = pageData.messagePage?.nextCursor;
+             }
+@@ -915,7 +929,9 @@ function ChatAppComponent({
+         // because a send advanced this key while the request was in flight:
+         // the transcript on screen is then the send's, and it is loaded.
+         if (isCurrentLoad()) {
+-          if (loadFailed) {
++          if (getChatRuntimeRevision(loadKey) !== revisionAtStart || isChatRuntimeStreaming(loadKey)) {
++            settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
++          } else if (loadFailed) {
+             // Let a later re-run retry instead of pinning the view to a failed
+             // load, which would leave the loading placeholder up for good.
+             settledViewKeyRef.current = null;
+@@ -954,6 +970,7 @@ function ChatAppComponent({
+     t,
+     runtimeKey,
+     transcriptScope,
++    historyLoadRetry,
+   ]);
+ 
+   // A reload never resubmits /api/chat. The history read above discovers
+@@ -1353,7 +1370,9 @@ function ChatAppComponent({
+ 	};
+ 	
+     writeChatRuntimeMessages(runKey, (prev) => [
+-      ...prev,
++      // A refresh that completed after the durable Message POST may already
++      // include this user row. The accepted turn must appear once, in order.
++      ...prev.filter((message) => message.id !== userMsgId),
+       userMessage,
+       assistantMessage,
+     ]);
+@@ -2392,17 +2411,21 @@ function ChatAppComponent({
+     // models the send was made for may answer it -- a model swapped in
+     // afterwards was not part of this run and has no answer to give here.
+     if (!promptPayload.modelIds.includes(modelId)) return;
++    if (transcriptScope === "conversation" && !runtime.isLoaded) return;
+ 
+     const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
+     if (processedPromptKeys.has(promptKey)) return;
+ 
+     let cancelled = false;
++    let claimed = false;
++    let retainClaim = false;
+     queueMicrotask(() => {
+       if (cancelled || isPanelDisabled) return;
+       if (processedPromptKeys.has(promptKey)) return;
+       // Claimed before the barrier is awaited, not after: a re-render during
+       // the await must not let a second pass start the same send.
+       processedPromptKeys.add(promptKey);
++      claimed = true;
+       void (async () => {
+         // Every other send path (global submit, per-panel follow-up, both
+         // retries) flushes the model-settings sync before it sends. This one
+@@ -2413,6 +2436,7 @@ function ChatAppComponent({
+         // server rather than racing it.
+         const settingsReady =
+           (await onBeforeSendRef.current?.(promptPayload.chatId)) ?? true;
++        if (cancelled) return;
+         // Abandoned stays abandoned, exactly like the other send paths: a
+         // refused flush has already told the user and put the screen back on
+         // the selection the server confirmed, so re-sending behind that would
+@@ -2420,7 +2444,19 @@ function ChatAppComponent({
+         // payload up again. The model check catches the panel having moved on
+         // while the flush was running -- sending then would file this answer
+         // under a model the panel is no longer showing.
+-        if (!settingsReady || panelModelIdRef.current !== modelId) return;
++        if (!settingsReady || panelModelIdRef.current !== modelId) {
++          retainClaim = true;
++          return;
++        }
++        if (transcriptScope === "conversation" &&
++            !getChatRuntimeSnapshot(runtimeKey).isLoaded) {
++          // A remount claimed a fresh history load while settings were being
++          // confirmed. Keep the durable user Message but wait for the full
++          // transcript (or its manual retry) before contacting a provider.
++          processedPromptKeys.delete(promptKey);
++          return;
++        }
++        retainClaim = true;
+         void handleSendPrompt(
+           promptPayload.text,
+           promptPayload.chatId,
+@@ -2439,6 +2475,7 @@ function ChatAppComponent({
+     });
+     return () => {
+       cancelled = true;
++      if (claimed && !retainClaim) processedPromptKeys.delete(promptKey);
+     };
+   }, [
+     handleSendPrompt,
+@@ -2447,19 +2484,30 @@ function ChatAppComponent({
+     isPanelDisabled,
+     modelId,
+     promptPayload,
++    runtime.isLoaded,
++    runtimeKey,
+     session?.user,
+     status,
++    transcriptScope,
+   ]);
+ 
+     const handleModelOnlySubmit = async () => {
+         const trimmed = modelInput.trim();
+-        if (!trimmed || isSending || isPanelDisabled || !initialConversationId) return;
++        if (!trimmed || isSending || isPanelDisabled || !initialConversationId ||
++            !getChatRuntimeSnapshot(runtimeKey).isLoaded) return;
+         const preparationToken = beginSendPreparation(runtimeKey);
+         if (!preparationToken) return;
+ 
+         try {
+           const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
+           if (!settingsReady) return;
++          // Settings preparation can outlive this view's history load claim.
++          // Do not persist or dispatch a follow-up against an incomplete page.
++          if (!getChatRuntimeSnapshot(runtimeKey).isLoaded) return;
++          const completeView = !isGuestMode
++            ? captureChatRuntimeCompleteView(runtimeKey)
++            : null;
++          if (!isGuestMode && !completeView) return;
+ 
+           const userRequestId = crypto.randomUUID();
+           let userMsgId = userRequestId;
+@@ -2489,6 +2537,12 @@ function ChatAppComponent({
+             }
+           }
+ 
++          if (completeView && !restoreChatRuntimeCompleteViewForSend(completeView)) {
++            // A newer local turn owns this panel now. The Message is durable,
++            // but this stale continuation has no authority to dispatch it.
++            dispatchAppToast(t("chat.sendPreparationChanged"), "info");
++            return;
++          }
+           setModelInput("");
+           onFollowupSent?.(modelId);
+           await handleSendPrompt(trimmed, initialConversationId, userMsgId);
+@@ -2504,11 +2558,28 @@ function ChatAppComponent({
+                   <div className="min-h-0 flex-1 overflow-hidden">
+       {!isCurrentMessageViewLoaded ? (
+         <div
+-          data-testid="chat-panel-loading"
+-          aria-busy="true"
+-          className="flex h-full items-center justify-center text-xs text-zinc-500"
++          data-testid={runtime.loadFailed
++            ? "chat-history-load-error" : "chat-panel-loading"}
++          role={runtime.loadFailed ? "alert" : undefined}
++          aria-busy={!runtime.loadFailed}
++          className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-xs text-zinc-500"
+         >
+-          {t("auth.loading")}
++          {runtime.loadFailed ? (
++            <>
++              <p>{t("chat.workspaceError.title")}</p>
++              <p>{t("chat.workspaceError.body")}</p>
++              <button
++                type="button"
++                data-testid="chat-history-load-retry"
++                onClick={() => {
++                  setHistoryLoadRetry((current) => current + 1);
++                }}
++                className="min-h-11 rounded-lg border border-zinc-300 px-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
++              >
++                {t("chat.workspaceError.retry")}
++              </button>
++            </>
++          ) : t("auth.loading")}
+         </div>
+       ) : useCenteredWelcome &&
+         isConversationEmpty &&
+@@ -2600,7 +2671,8 @@ function ChatAppComponent({
+                           type="submit"
+                           data-testid="model-only-send"
+                           data-model-id={modelId}
+-                          disabled={!modelInput.trim() || isSending || isSendPreparing || !initialConversationId}
++                          disabled={!modelInput.trim() || isSending || isSendPreparing ||
++                            !initialConversationId || !isCurrentMessageViewLoaded}
+                           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
+                           title={t("chat.modelOnlySendTitle")}
+                           aria-label={t("chat.modelOnlySendTitle")}
+diff --git a/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md b/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md
+new file mode 100644
+index 000000000..8855fd1e7
+--- /dev/null
++++ b/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md
+@@ -0,0 +1,47 @@
++# Chat 기록 페이지네이션 복구 독립 검토 제한 승인 기록
++
++- approvedBy: `mposition` (현재 작업 지시에서 Claude 독립 검토와 `--skip-preflight` 예외 승인)
++- approvedAt: `2026-09-22` (Australia/Brisbane, 현재 작업 지시 기준)
++- author: `codex`
++- independentReviewer: `claude-code-max` (저장된 Claude Code Max 구독 CLI)
++- task: [task.json](./task.json)
++
++이 기록은 지정된 변경의 읽기 전용 교차 검토 준비 범위만 명시한다. 사용자 메시지의
++전자서명, 검토 통과, 테스트 통과, 제품 출시, commit·push·PR 병합·배포 또는
++실제 공급자 실행 승인이 아니다. 이 기록을 작성한 시점에는 package와 review를
++아직 실행하지 않았으며, 검증 후 별도 단계에서만 실행한다.
++
++검토 기준은 base commit `ad2b51622992c29056706c443d80bdba928336e1`이다.
++검토 diff에는 [task](./task.json)의 `writableScope`에 열거된 여섯 source/test
++파일과 이 패키지의 `task.json`·`authorization.md`를 포함한다. 생성될
++`docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/records/`만
++package 명령의 동일한 exact `--out` 및 `--diff-exclude` 경로로 제외한다.
++`records/`를 `generatedPaths`에 다시 선언하지 않으며, source/test 파일이나
++상위 패키지 디렉터리를 제외하지 않는다. 범위 밖 변경이 있거나 검사에 실패하면
++검토를 진행하지 않는다.
++
++여섯 번째 파일 `tests/e2e/support/app-fixtures.ts`는 공용 conversation GET
++fixture가 실제 API의 필수 `messagePage`를 빠뜨려 기존
++`model-change-send-barrier.spec.ts` 7건이 새 첫 페이지 검증에서 실패한 것을
++바로잡는 최소 정합성 수정이다. 제품 API 계약을 완화하거나 첫 페이지 검증을
++우회하는 변경이 아니다.
++
++Claude는 원 요구사항과 변경 diff를 먼저 읽고 작성자 설명·검증 기록을 그 뒤에
++읽는다. 사용자가 승인한 `--skip-preflight`는 읽기 도구만 허용된 Claude child에서
++쓰기 거부 probe를 입증할 수 없는 이번 검토에 한한 예외이며, preflight 통과나
++쓰기 불가능성의 증거가 아니다. `--review-despite-check-failures` 또는 실패한
++검사 우회는 허용하지 않는다. Claude child는 `--print --safe-mode
++--output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob
++--strict-mcp-config`의 읽기 전용 제한을 유지하고 shell·write 도구, 추가 MCP
++접근과 모델 override를 받지 않는다.
++
++Claude Code Max의 저장된 `claude.ai` 로그인만 사용한다. Review child에서
++`ANTHROPIC_*`, `CLAUDE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` 및
++Bedrock/Vertex/Foundry 전환 변수를 제거하고, 로그인 확인에 실패하면 중단한다.
++Anthropic API 또는 API key fallback은 금지한다. 이 제한은 parent 환경이나
++영구 설정을 바꾸라는 지시가 아니다.
++
++검토는 후속 페이지 503·malformed 첫 200 응답·cached revisit·in-flight remount,
++Review model-only 경합, draft 보존·retry와 숨겨진 전송 부재를 독립적으로 확인한다.
++실제 provider 또는 R2 호출, 유료 실행, Railway staging/production 접근,
++feature flag 변경, 자동 또는 수동 push·merge·deploy는 이 승인에 포함되지 않는다.
+diff --git a/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json b/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json
+new file mode 100644
+index 000000000..6d3c1b8c2
+--- /dev/null
++++ b/docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/task.json
+@@ -0,0 +1,25 @@
++{
++  "taskId": "chat-history-pagination-recovery-v1",
++  "requirement": "Tomverse Chat의 기존 대화 기록을 페이지별로 복원할 때 첫 페이지와 모든 후속 페이지가 완전하고 유효할 때만 해당 runtime transcript를 loaded로 인정한다. 후속 페이지 503, malformed 첫 200 응답, 누락·반복 cursor, 캐시된 대화 재방문 및 진행 중 조회를 상속한 panel remount에서 부분 기록을 성공처럼 표시하거나 전송하지 않는다. 실패 상태와 수동 retry는 동일 identity·conversation runtime key에 결속하고 작성 중인 draft를 보존하며, 조회 재시도가 provider POST를 만들지 않는다. Review의 다중 모델 model-only 경로도 재조회 중 숨겨진 전송을 만들지 않고 기존 정상 동작을 유지한다. 공용 E2E fixture의 첫 페이지는 실제 API와 같은 필수 messagePage를 반환해야 한다. 변경은 지정된 여섯 source/test 파일과 이 검토 패키지에 한정한다. 실제 provider 호출, 유료 실행, Railway staging/production, flag 변경, 병합·배포는 범위 밖이다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
++  "completionCriteria": [
++    "첫 페이지와 후속 페이지의 messages 및 messagePage 형식을 검사하고, 후속 페이지 503·malformed JSON·누락 또는 반복 cursor를 complete history로 오인하지 않는다. 실패한 페이지까지의 임시 messages는 화면이나 전송 context에 적용하지 않는다.",
++    "이전에 loaded였던 대화를 재방문해 후속 페이지 갱신에 실패해도 cached loaded=true가 남지 않는다. 같은 runtime key의 in-flight load를 새 panel이 상속한 뒤 이전 panel의 요청이 실패하면 공유 실패 상태를 관측하고 수동 retry에 도달한다. 낡은 ticket의 release/settle은 최신 ticket을 바꾸지 않는다.",
++    "local send 또는 stream이 조회 중 동일 key의 transcript revision을 진전시킨 경우 늦은 조회 응답은 그 transcript를 덮지 않는다. identity·conversation 전환 뒤 이전 응답과 실패는 현재 화면, 다른 key의 draft 또는 전송 권한으로 이전되지 않는다.",
++    "기록 로드 전·실패 중에는 Chat 전역 composer와 Review 다중 모델 model-only form의 모든 전송 진입점이 Message 저장과 provider POST 전에 멈춘다. 비활성 버튼 외에 Enter/form submit 및 settings-preparation 대기 뒤의 재검사도 포함한다. 다만 Message POST가 이미 in flight인 동안 viewport remount가 기록 GET claim을 시작하고 그 Message save가 성공한 경우, 이미 커밋된 Message를 답변 없이 버리지 않고 완전한 cached transcript를 보존하며 한 번만 이어서 전송해야 한다. Message 저장 이후 onBeforeSend 대기 중 발생하는 remount·기록 claim도 같은 계약으로 검증한다. Review 다중 모델 model-only Message POST 진행 중 viewport remount와 page2 GET hold/503이 겹친 뒤 POST가 commit되면 provider stream이 spinner 뒤에 숨지 않거나 완전 로드까지 보류되며, 실패한 GET을 성공으로 위장하지 않는지 검증한다. 정상 로드 뒤에는 해당 경로가 한 번만 전송된다.",
++    "오류 UI는 현재 runtime key의 실제 실패에만 나타나고 loading·retry 상태를 정직하게 표시한다. 재시도는 기록 GET만 다시 수행하고 중복 provider 실행·무한 자동 재시도·숨겨진 답변을 만들지 않으며, 사용자가 입력한 draft는 실패·재시도·대화 전환 중 보존된다. 사용자 문구는 기존 locale을 사용한다.",
++    "집중 runtime unit과 desktop/mobile 브라우저 회귀는 후속 페이지 503, malformed 첫 200, cached revisit, in-flight remount 실패, Review model-only 경합, draft/retry, 완전한 message 순서 및 Chat POST 0건의 실패 경계를 검증한다. 정상 복구 뒤 전송은 완전한 기록을 사용한다. 공용 E2E fixture는 실제 conversation GET의 필수 messagePage 형식을 유지해야 하며 model-change-send-barrier 회귀도 확인한다. 관련 regression, typecheck, lint 및 diff guard의 실제 결과를 기록하며 실패·skip을 통과로 표현하지 않는다.",
++    "검토 package는 base ad2b51622992c29056706c443d80bdba928336e1 이후 지정된 여섯 변경 파일과 이 task/authorization을 모두 포함한다. 생성된 records/만 동일한 exact --out 및 --diff-exclude 경로로 제외하고 source/test나 다른 파일을 제외하지 않는다. generatedPaths는 빈 배열이다.",
++    "Claude는 요구사항과 전체 diff를 먼저 읽고 작성자 테스트 기록을 그 뒤에 검토한다. verdict는 package digest를 명시하고 finding마다 위치·심각도·근거·재현을 제공한다. 사용자 승인 --skip-preflight 예외와 저장된 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다. Anthropic API·API key fallback, --review-despite-check-failures, 실제 provider/staging 호출, 과금, flag 변경, push·merge·deploy는 이 task가 승인하지 않는다."
++  ],
++  "baseCommit": "ad2b51622992c29056706c443d80bdba928336e1",
++  "writableScope": [
++    "app/(site)/(application)/chat/ChatPageClient.tsx",
++    "components/chat/ChatApp.tsx",
++    "lib/chatStreamRuntime.ts",
++    "tests/chatStreamRuntime.test.mjs",
++    "tests/e2e/chat-unified-workspace.spec.ts",
++    "tests/e2e/support/app-fixtures.ts",
++    "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1"
++  ],
++  "generatedPaths": []
++}
+diff --git a/lib/chatStreamRuntime.ts b/lib/chatStreamRuntime.ts
+index cf47802c0..a56938075 100644
+--- a/lib/chatStreamRuntime.ts
++++ b/lib/chatStreamRuntime.ts
+@@ -99,6 +99,8 @@ export type ChatRuntimeSnapshot = {
+   messages: Message[];
+   /** True once `messages` describes this exact key -- not a previous view. */
+   isLoaded: boolean;
++  /** The newest history load failed; any remounted panel may offer a manual retry. */
++  loadFailed: boolean;
+   /** A request, stream or deep-research poll this key owns is in flight. */
+   isStreaming: boolean;
+ };
+@@ -142,10 +144,13 @@ const EMPTY_MESSAGES = Object.freeze([]) as unknown as Message[];
+ export const EMPTY_CHAT_RUNTIME_SNAPSHOT: ChatRuntimeSnapshot = Object.freeze({
+   messages: EMPTY_MESSAGES,
+   isLoaded: false,
++  loadFailed: false,
+   isStreaming: false,
+ });
+ 
+ type ChatRuntimeRecord = {
++  /** Unique for each lifetime of a key, including after identity release. */
++  generation: number;
+   snapshot: ChatRuntimeSnapshot;
+   listeners: Set<() => void>;
+   /** Stops the run this key owns. Null when nothing is in flight. */
+@@ -174,6 +179,10 @@ type ChatRuntimeRecord = {
+ };
+ 
+ const records = new Map<string, ChatRuntimeRecord>();
++let nextRecordGeneration = 1;
++// A key can be deleted on A→B and recreated on B→A. Tickets must remain
++// unique across those record lifetimes, not merely within one record.
++let nextLoadRequestId = 1;
+ 
+ const notify = (record: ChatRuntimeRecord) => {
+   for (const listener of record.listeners) listener();
+@@ -204,6 +213,7 @@ const ensureRecord = (key: string): ChatRuntimeRecord => {
+     return existing;
+   }
+   const created: ChatRuntimeRecord = {
++    generation: nextRecordGeneration++,
+     snapshot: EMPTY_CHAT_RUNTIME_SNAPSHOT,
+     listeners: new Set(),
+     controller: null,
+@@ -226,6 +236,7 @@ const patchSnapshot = (key: string, patch: Partial<ChatRuntimeSnapshot>): void =
+   if (
+     next.messages === record.snapshot.messages &&
+     next.isLoaded === record.snapshot.isLoaded &&
++    next.loadFailed === record.snapshot.loadFailed &&
+     next.isStreaming === record.snapshot.isStreaming
+   ) {
+     return;
+@@ -305,6 +316,45 @@ export function advanceChatRuntimeRevision(key: string): number {
+   return record.revision;
+ }
+ 
++/** A complete server view witnessed before an awaited durable Message save. */
++export type ChatRuntimeCompleteView = {
++  key: string;
++  messages: Message[];
++  revision: number;
++  generation: number;
++};
++
++export function captureChatRuntimeCompleteView(key: string): ChatRuntimeCompleteView | null {
++  const record = records.get(key);
++  if (!record?.snapshot.isLoaded || record.snapshot.isStreaming) return null;
++  return { key, messages: record.snapshot.messages, revision: record.revision,
++    generation: record.generation };
++}
++
++/**
++ * A confirmed send may use its previously complete view even if a remount
++ * started another GET while the Message POST was on the wire. Supersede that
++ * GET before publishing the local turn; its late result cannot hide or replace
++ * the answer. Never restore over a newer local send or stream.
++ */
++export function restoreChatRuntimeCompleteViewForSend(view: ChatRuntimeCompleteView): boolean {
++  const record = records.get(view.key);
++  if (!record || record.generation !== view.generation ||
++      record.revision !== view.revision || record.snapshot.isStreaming) return false;
++  record.loadRequestId = nextLoadRequestId++;
++  record.isLoading = false;
++  patchSnapshot(view.key, {
++    // A refresh may have completed while the Message POST was pending. Its
++    // complete server view can include newer rows from another tab and must
++    // not be replaced by the older capture. Only an incomplete/failed load
++    // needs the captured complete view restored.
++    messages: record.snapshot.isLoaded ? record.snapshot.messages : view.messages,
++    isLoaded: true,
++    loadFailed: false,
++  });
++  return true;
++}
++
+ export function setChatRuntimeLastPrompt(
+   key: string,
+   prompt: ChatRuntimeLastPrompt | null
+@@ -338,11 +388,15 @@ export function isChatRuntimeLoadInFlight(key: string): boolean {
+   return records.get(key)?.isLoading ?? false;
+ }
+ 
+-/** Claims the newest load ticket for this key. */
++/** Claims the newest load ticket and closes the send barrier until it settles. */
+ export function claimChatRuntimeLoad(key: string): number {
+   const record = ensureRecord(key);
+-  record.loadRequestId += 1;
++  record.loadRequestId = nextLoadRequestId++;
+   record.isLoading = true;
++  // A cached server view is not proof that this refresh completed. Invalidate
++  // it synchronously so neither this panel nor the parent composer can send
++  // with an incomplete or failed later page.
++  patchSnapshot(key, { isLoaded: false, loadFailed: false });
+   return record.loadRequestId;
+ }
+ 
+@@ -365,7 +419,7 @@ export function settleChatRuntimeLoad(
+   const record = records.get(key);
+   if (!record || record.loadRequestId !== requestId) return;
+   record.isLoading = false;
+-  patchSnapshot(key, { isLoaded: outcome.loaded });
++  patchSnapshot(key, { isLoaded: outcome.loaded, loadFailed: false });
+ }
+ 
+ /**
+@@ -377,6 +431,7 @@ export function releaseChatRuntimeLoad(key: string, requestId: number): void {
+   const record = records.get(key);
+   if (!record || record.loadRequestId !== requestId) return;
+   record.isLoading = false;
++  patchSnapshot(key, { isLoaded: false, loadFailed: true });
+ }
+ 
+ /* -------------------------------------------------------------------------
+diff --git a/tests/chatStreamRuntime.test.mjs b/tests/chatStreamRuntime.test.mjs
+index e1d2280ab..a7b6ef26d 100644
+--- a/tests/chatStreamRuntime.test.mjs
++++ b/tests/chatStreamRuntime.test.mjs
+@@ -7,6 +7,7 @@ import {
+   chatRuntimeIdentityKey,
+   chatRuntimeKey,
+   chatRuntimeKeyIdentity,
++  captureChatRuntimeCompleteView,
+   claimChatRuntimeLoad,
+   endChatRuntimeRun,
+   getChatRuntimeLastPrompt,
+@@ -21,6 +22,7 @@ import {
+   ownsChatRuntimeTranscript,
+   releaseChatRuntimeForOtherIdentities,
+   releaseChatRuntimeLoad,
++  restoreChatRuntimeCompleteViewForSend,
+   resetChatStreamRuntime,
+   setChatRuntimeLastPrompt,
+   settleChatRuntimeLoad,
+@@ -190,6 +192,40 @@ test("a failed load releases its claim so a later attempt can retry", () => {
+   );
+ });
+ 
++test("refreshing a cached transcript invalidates the loaded send barrier until it settles", () => {
++  const first = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, first, { loaded: true });
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
++
++  const refresh = claimChatRuntimeLoad(A);
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
++  releaseChatRuntimeLoad(A, refresh);
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
++
++  const retry = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, retry, { loaded: true });
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
++});
++
++test("a failed load notifies a remounted subscriber and a new ticket clears only its own failure", () => {
++  const snapshots = [];
++  const unsubscribe = subscribeChatRuntime(A, () => {
++    const { isLoaded, loadFailed } = getChatRuntimeSnapshot(A);
++    snapshots.push({ isLoaded, loadFailed });
++  });
++  const first = claimChatRuntimeLoad(A);
++  releaseChatRuntimeLoad(A, first);
++  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: true });
++
++  const retry = claimChatRuntimeLoad(A);
++  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: false });
++  releaseChatRuntimeLoad(A, first);
++  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: false });
++  settleChatRuntimeLoad(A, retry, { loaded: true });
++  assert.deepEqual(snapshots.at(-1), { isLoaded: true, loadFailed: false });
++  unsubscribe();
++});
++
+ test("a transcript this session produced is never re-read from the server", () => {
+   const requestId = claimChatRuntimeLoad(A);
+   settleChatRuntimeLoad(A, requestId, { loaded: true });
+@@ -222,6 +258,74 @@ test("an unloaded key is never treated as owning a transcript", () => {
+   );
+ });
+ 
++test("a confirmed send restores only the complete view it captured before a remount load", () => {
++  writeChatRuntimeMessages(A, [{ id: "saved-51", role: "user", content: "Complete history" }]);
++  const initial = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, initial, { loaded: true });
++  const completeView = captureChatRuntimeCompleteView(A);
++  assert.ok(completeView);
++
++  const refresh = claimChatRuntimeLoad(A);
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
++  assert.equal(restoreChatRuntimeCompleteViewForSend(completeView), true);
++  assert.equal(isCurrentChatRuntimeLoad(A, refresh), false);
++  assert.equal(isChatRuntimeLoadInFlight(A), false);
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
++  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["saved-51"]);
++  releaseChatRuntimeLoad(A, refresh);
++  assert.equal(getChatRuntimeSnapshot(A).loadFailed, false);
++
++  advanceChatRuntimeRevision(A);
++  assert.equal(restoreChatRuntimeCompleteViewForSend(completeView), false);
++  assert.equal(captureChatRuntimeCompleteView(A)?.revision, 1);
++});
++
++test("a confirmed send keeps a newer complete GET instead of its older capture", () => {
++  writeChatRuntimeMessages(A, [{ id: "saved-52", role: "user", content: "Older complete view" }]);
++  const initial = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, initial, { loaded: true });
++  const capture = captureChatRuntimeCompleteView(A);
++  assert.ok(capture);
++
++  const refresh = claimChatRuntimeLoad(A);
++  writeChatRuntimeMessages(A, [
++    { id: "saved-52", role: "user", content: "Older complete view" },
++    { id: "saved-53", role: "user", content: "New durable row from another tab" },
++  ]);
++  settleChatRuntimeLoad(A, refresh, { loaded: true });
++  assert.equal(restoreChatRuntimeCompleteViewForSend(capture), true);
++  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["saved-52", "saved-53"]);
++});
++
++test("a captured view cannot overwrite a new record for the same identity after A-B-A", () => {
++  writeChatRuntimeMessages(A, [{ id: "old-a", role: "user", content: "Old session" }]);
++  const oldLoad = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, oldLoad, { loaded: true });
++  const oldCapture = captureChatRuntimeCompleteView(A);
++  assert.ok(oldCapture);
++
++  releaseChatRuntimeForOtherIdentities("account:other-user");
++  writeChatRuntimeMessages(A, [{ id: "new-a", role: "user", content: "New session" }]);
++  const newLoad = claimChatRuntimeLoad(A);
++  settleChatRuntimeLoad(A, newLoad, { loaded: true });
++  assert.equal(restoreChatRuntimeCompleteViewForSend(oldCapture), false);
++  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["new-a"]);
++});
++
++test("a pre-switch load ticket cannot settle a new A record after A-B-A", () => {
++  const oldTicket = claimChatRuntimeLoad(A);
++  releaseChatRuntimeForOtherIdentities("account:other-user");
++  const newTicket = claimChatRuntimeLoad(A);
++  assert.notEqual(oldTicket, newTicket);
++  assert.equal(isCurrentChatRuntimeLoad(A, oldTicket), false);
++  settleChatRuntimeLoad(A, oldTicket, { loaded: true });
++  releaseChatRuntimeLoad(A, oldTicket);
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
++  assert.equal(isChatRuntimeLoadInFlight(A), true);
++  settleChatRuntimeLoad(A, newTicket, { loaded: true });
++  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
++});
++
+ test("a deep-research job is re-attached to once, not once per remount", () => {
+   assert.equal(hasResumedChatRuntimeJob(A, "job-1"), false);
+   markChatRuntimeJobResumed(A, "job-1");
+diff --git a/tests/e2e/chat-unified-workspace.spec.ts b/tests/e2e/chat-unified-workspace.spec.ts
+index ac18d1137..500804279 100644
+--- a/tests/e2e/chat-unified-workspace.spec.ts
++++ b/tests/e2e/chat-unified-workspace.spec.ts
+@@ -315,6 +315,10 @@ async function openChat(page: Page, options: {
+   holdDraftHydrate?: boolean;
+   holdNextDraftMutation?: boolean;
+   draftSyncFailure?: boolean;
++  historyPageFailureOnCursorRead?: number;
++  holdHistoryPageFailure?: boolean;
++  holdContextBundleOnce?: boolean;
++  malformedFirstHistoryPageOnRead?: number;
+   malformedDraftRead?: boolean;
+   invalidDraftAttachmentRead?: boolean;
+   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
+@@ -369,6 +373,11 @@ async function openChat(page: Page, options: {
+   let attemptReadCount = 0;
+   const attemptPollFailures: Array<{ status: number; retryAfter?: string }> = [];
+   let contextBundleRead = 0;
++  let contextBundleStarted = false;
++  let releaseContextBundle = () => {};
++  const contextBundleGate = new Promise<void>((resolve) => {
++    releaseContextBundle = resolve;
++  });
+   let messageSaveFailureReturned = false;
+   let draftHydrateStarted = false;
+   let draftReadCount = 0;
+@@ -400,6 +409,13 @@ async function openChat(page: Page, options: {
+   const accountBConversations: ConversationFixture[] = [];
+   let exposePreviousAccountDrafts = true;
+   let visibleConversations = conversations;
++  let historyCursorReadCount = 0;
++  let firstHistoryPageReadCount = 0;
++  let historyPageFailureStarted = false;
++  let releaseHistoryPageFailure = () => {};
++  const historyPageFailureGate = new Promise<void>((resolve) => {
++    releaseHistoryPageFailure = resolve;
++  });
+   const payload = (row: ConversationFixture) => ({
+     ...row, disabledPanels: options.disabledPanels ?? [], webSearchMode: "off", memoryMode: "inherit",
+     selectionMode: "manual", autoSelection: { offered: false },
+@@ -712,7 +728,33 @@ async function openChat(page: Page, options: {
+     }
+     if (method === "PATCH" && Array.isArray(body.selectedModels)) row.selectedModels = body.selectedModels as string[];
+     if (method === "GET") historyReads.push(url.pathname + url.search);
+-    return route.fulfill({ json: payload(row) });
++    if (method === "GET" && row.id === CONVERSATION && !url.searchParams.has("cursor") &&
++        ++firstHistoryPageReadCount === options.malformedFirstHistoryPageOnRead) {
++      return route.fulfill({ json: {
++        ...payload(row), messages: null,
++        messagePage: { hasMore: false, nextCursor: null },
++      } });
++    }
++    if (method === "GET" && options.historyPageFailureOnCursorRead && row.id === CONVERSATION) {
++      const cursor = url.searchParams.get("cursor");
++      if (cursor && ++historyCursorReadCount === options.historyPageFailureOnCursorRead) {
++        historyPageFailureStarted = true;
++        if (options.holdHistoryPageFailure) await historyPageFailureGate;
++        return route.fulfill({ status: 503, json: { code: "QA_HISTORY_PAGE_UNAVAILABLE" } });
++      }
++      const cursorIndex = cursor ? row.messages.findIndex((message) => message.id === cursor) : -1;
++      if (cursor && cursorIndex < 0) throw new Error("QA history cursor was not found");
++      const start = cursorIndex + 1;
++      const messages = row.messages.slice(start, start + 50);
++      const hasMore = start + messages.length < row.messages.length;
++      return route.fulfill({ json: {
++        ...payload(row), messages,
++        messagePage: { hasMore, nextCursor: hasMore ? messages.at(-1)?.id ?? null : null },
++      } });
++    }
++    return route.fulfill({ json: method === "GET"
++      ? { ...payload(row), messagePage: { hasMore: false, nextCursor: null } }
++      : payload(row) });
+   });
+   // No title generation, provider operation or real ownership mutation escapes
+   // the fabricated routes, even if a regression calls an unexpected endpoint.
+@@ -720,6 +762,14 @@ async function openChat(page: Page, options: {
+   // Same no-memory contract used by chat-memory-context.spec.ts. Preparation
+   // stays local too; a dummy database refusal is not needed for this journey.
+   await page.route("**/api/chat/context", (route) => {
++    if (options.holdContextBundleOnce && contextBundleRead === 0) {
++      contextBundleStarted = true;
++      return contextBundleGate.then(() => {
++        contextBundleRead += 1;
++        return route.fulfill({ json: { ok: true, contextBundle: options.contextBundle ?? null,
++          memoryUsedCount: 0 } });
++      });
++    }
+     const bundles = options.contextBundles;
+     const contextBundle = bundles
+       ? bundles[Math.min(contextBundleRead, bundles.length - 1)] ?? null
+@@ -758,6 +808,10 @@ async function openChat(page: Page, options: {
+   }
+   return {
+     conversations, writes, historyReads, userSettingsWrites, drafts,
++    contextBundleStarted: () => contextBundleStarted,
++    releaseContextBundle,
++    historyPageFailureStarted: () => historyPageFailureStarted,
++    releaseHistoryPageFailure,
+     detail: (id: string) => payload(conversations.find((row) => row.id === id)!),
+     hidePreviousAccount: () => {
+       visibleConversations = accountBConversations;
+@@ -1694,6 +1748,299 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
+     expect(await persistentProviderStreamCount(page)).toBe(1);
+   });
+ 
++  test("a failed later history page stays unloaded until retry restores the complete send context", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
++      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Saved answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      viewport: MOBILE_VIEWPORT,
++      messages: savedMessages,
++      historyPageFailureOnCursorRead: 1,
++    });
++
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(message(page, "Saved question 1.")).toHaveCount(0);
++    await expect(message(page, "Saved answer 26.")).toHaveCount(0);
++    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
++    await expect(page.getByTestId("chat-textarea")).toHaveValue("Use the whole saved conversation.");
++    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    expect(outgoing.at(-1)?.content).toBe("Use the whole saved conversation.");
++    expect(state.historyReads.some((read) => read.includes("cursor=history-answer-24"))).toBe(true);
++    await drive(page, 0, "push", "Answer with complete history.");
++    await drive(page, 0, "finish");
++  });
++
++  test("a cached transcript cannot bypass a failed later-page refresh", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
++      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Saved answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      viewport: DESKTOP_VIEWPORT,
++      messages: savedMessages,
++      historyPageFailureOnCursorRead: 2,
++    });
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${SECOND_CONVERSATION}"]`).click();
++    await expect(message(page, SECOND_ANSWER)).toBeVisible();
++    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${CONVERSATION}"]`).click();
++
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(message(page, "Saved question 1.")).toHaveCount(0);
++    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await expect(page.getByTestId("chat-textarea")).toHaveValue("Do not send partial cached history.");
++    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    expect(outgoing.at(-1)?.content).toBe("Do not send partial cached history.");
++    await drive(page, 0, "finish");
++  });
++
++  test("a global Chat send rechecks history after async preparation and viewport remount", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
++      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Saved answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      messages: savedMessages,
++      historyPageFailureOnCursorRead: 2,
++      holdHistoryPageFailure: true,
++      holdContextBundleOnce: true,
++    });
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
++    await expect.poll(state.contextBundleStarted).toBe(true);
++    await page.setViewportSize(MOBILE_VIEWPORT);
++    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
++    await page.setViewportSize(DESKTOP_VIEWPORT);
++    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
++    await expect.poll(state.historyPageFailureStarted).toBe(true);
++
++    state.releaseContextBundle();
++    await page.waitForTimeout(200);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++    state.releaseHistoryPageFailure();
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for the refreshed full history.");
++
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    await drive(page, 0, "finish");
++  });
++
++  test("a committed Chat Message survives a history refresh started during its POST", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
++      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Saved answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      messages: savedMessages,
++      holdMessageSaveBeforeTransaction: true,
++      historyPageFailureOnCursorRead: 2,
++      holdHistoryPageFailure: true,
++    });
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await submitComposer(page, "Finish the accepted request after the remount.", DESKTOP_VIEWPORT.width);
++    await expect.poll(state.messageSaveStarted).toBe(true);
++    await page.setViewportSize(MOBILE_VIEWPORT);
++    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
++    await page.setViewportSize(DESKTOP_VIEWPORT);
++    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
++    await expect.poll(state.historyPageFailureStarted).toBe(true);
++
++    state.releaseMessageSave();
++    await page.waitForTimeout(200);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    state.releaseHistoryPageFailure();
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    expect(outgoing.filter((item) => item.id === savedMessages.at(-1)?.id)).toHaveLength(1);
++    expect(outgoing.filter((item) => item.content === "Finish the accepted request after the remount."))
++      .toHaveLength(1);
++    await expect(message(page, "Finish the accepted request after the remount.")).toHaveCount(1);
++    await drive(page, 0, "finish");
++  });
++
++  test("a remounted panel learns that its inherited history request failed", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
++      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Saved answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      messages: savedMessages,
++      historyPageFailureOnCursorRead: 2,
++      holdHistoryPageFailure: true,
++    });
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    const item = (id: string) => page.locator(
++      `[data-testid="sidebar-conversation-item"][data-conversation-id="${id}"]`
++    );
++    await item(SECOND_CONVERSATION).click();
++    await expect(message(page, SECOND_ANSWER)).toBeVisible();
++    await item(CONVERSATION).click();
++    await expect.poll(state.historyPageFailureStarted).toBe(true);
++    await item(SECOND_CONVERSATION).click();
++    await expect(message(page, SECOND_ANSWER)).toBeVisible();
++    await item(CONVERSATION).click();
++    await expect(page.getByTestId("chat-panel-loading")).toBeVisible();
++    state.releaseHistoryPageFailure();
++
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(message(page, "Saved question 1.")).toHaveCount(0);
++    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, "Saved answer 26.")).toBeVisible();
++    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for inherited load recovery.");
++    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    await drive(page, 0, "finish");
++  });
++
++  test("a Review model-only follow-up waits for complete history and retains its draft through retry", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
++      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Review answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      legacyReview: true,
++      selectedModels: [MODEL_A, MODEL_B],
++      messages: savedMessages,
++      historyPageFailureOnCursorRead: 1,
++      holdHistoryPageFailure: true,
++    });
++    await expect.poll(state.historyPageFailureStarted).toBe(true);
++    const form = page.getByTestId("model-only-form").first();
++    const input = page.getByTestId("model-only-input").first();
++    const send = page.getByTestId("model-only-send").first();
++    await input.fill("Review with the full prior history.");
++    await expect(send).toBeDisabled();
++    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++
++    state.releaseHistoryPageFailure();
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(input).toHaveValue("Review with the full prior history.");
++    await expect(send).toBeDisabled();
++    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, "Review answer 26.")).toBeVisible();
++    await expect(input).toHaveValue("Review with the full prior history.");
++    await expect(send).toBeEnabled();
++    await send.click();
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
++    await drive(page, 0, "finish");
++  });
++
++  test("a Review model-only turn stays visible when its saved Message races a remount load", async ({ page }) => {
++    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
++      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
++      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
++        content: `Review answer ${index + 1}.`, status: "normal" },
++    ] as QaConversationMessage[])).flat();
++    const state = await openChat(page, {
++      legacyReview: true,
++      selectedModels: [MODEL_A, MODEL_B],
++      messages: savedMessages,
++      holdMessageSaveBeforeTransaction: true,
++      historyPageFailureOnCursorRead: 3,
++      holdHistoryPageFailure: true,
++    });
++    await expect(message(page, "Review answer 26.")).toBeVisible();
++    await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
++    await page.getByTestId("model-only-send").first().click();
++    await expect.poll(state.messageSaveStarted).toBe(true);
++    await page.setViewportSize(MOBILE_VIEWPORT);
++    await page.setViewportSize(DESKTOP_VIEWPORT);
++    await expect.poll(state.historyPageFailureStarted).toBe(true);
++
++    state.releaseMessageSave();
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
++    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
++    state.releaseHistoryPageFailure();
++    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
++    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
++    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
++      .toEqual(savedMessages.map((item) => item.id));
++    expect(outgoing.filter((item) => item.content === "Show this accepted Review question while answering."))
++      .toHaveLength(1);
++    await drive(page, 0, "finish");
++  });
++
++  test("a malformed first history page remains retryable without a send", async ({ page }) => {
++    const state = await openChat(page, { malformedFirstHistoryPageOnRead: 2 });
++    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
++    await expect(message(page, FIRST_ANSWER)).toHaveCount(0);
++    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
++    await page.waitForTimeout(150);
++    expect(await persistentChatPostCount(page)).toBe(0);
++    expect(state.writes.filter((write) => write.method === "POST" &&
++      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
++
++    await page.getByTestId("chat-history-load-retry").click();
++    await expect(message(page, FIRST_ANSWER)).toBeVisible();
++    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for valid first page.");
++    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
++    await expect.poll(async () => (await requests(page)).length).toBe(1);
++    await drive(page, 0, "finish");
++  });
++
+   test("reload adopts a durable partial and passively polls to terminal without resubmitting", async ({ page }) => {
+     const state = await openChat(page);
+     const active = {
+diff --git a/tests/e2e/support/app-fixtures.ts b/tests/e2e/support/app-fixtures.ts
+index 881bec227..f4aa71f11 100644
+--- a/tests/e2e/support/app-fixtures.ts
++++ b/tests/e2e/support/app-fixtures.ts
+@@ -1245,6 +1245,7 @@ export async function mockAuthenticatedApi(
+         ...conversation(),
+         messages: savedMessages as unknown as JsonValue,
+         nextCursor: null,
++        messagePage: { hasMore: false, nextCursor: null },
+       })
+     );
+   });
+@@ -1313,6 +1314,7 @@ export async function mockAuthenticatedApi(
+             ...extraBody(extra),
+             messages: extra.savedMessages as unknown as JsonValue,
+             nextCursor: null,
++            messagePage: { hasMore: false, nextCursor: null },
+           })
+         );
+       }

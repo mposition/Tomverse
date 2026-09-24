@@ -110,6 +110,7 @@ async function mockConversationPair(
         ...row(id, title),
         messages: world.savedMessages[id] ?? [],
         nextCursor: null,
+        messagePage: { hasMore: false, nextCursor: null },
       })
     );
   };

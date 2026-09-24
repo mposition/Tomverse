@@ -1,0 +1,55 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-owned-detail-handoff-disposition-followup-v1",
+  "round": 0,
+  "reviewer": "cursor",
+  "toolVersion": "Cursor CLI (version not recorded)",
+  "command": null,
+  "sandboxSignature": "cursor-cli subscription plan @ H:\\Project\\tomverse-chat-history-pagination-recovery-20260922 model:grok-4.7-xhigh sandbox:disabled-windows",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: operator-approved for this successor review",
+    "sandbox-disabled: Windows limitation; review remained plan-mode and external provider/API-key environment was removed"
+  ],
+  "model": "grok-4.7-xhigh",
+  "mode": "plan",
+  "sessionId": "66c4c89d-bfcb-4139-9f9d-b66a4a076e0e",
+  "requestId": "97d87e42-a97d-4e28-956f-ac815a274a6f",
+  "durationMs": 671068,
+  "durationApiMs": 671068,
+  "usage": {
+    "tool": "cursor-cli",
+    "inputTokens": 274830,
+    "outputTokens": 40623,
+    "cacheReadTokens": 2976384,
+    "cacheWriteTokens": 0
+  },
+  "receivedAt": "2026-09-24T22:37:11.7244272+10:00",
+  "capture": {
+    "source": "operator-supplied Cursor CLI outer result JSON",
+    "outerResultType": "result",
+    "outerResultSubtype": "success",
+    "outerResultIsError": false,
+    "sourceByteLength": 1150,
+    "sourceSha256": "sha256:deca0df0c0a338ee01d88dcdafbeb2d2df5da382f4514f6a08f358442d12cb0c",
+    "repositoryCapturePath": "docs/ops/cross-review/packages/chat-owned-detail-handoff-disposition-followup-v1/records/review-round0.cursor-result.captured.json",
+    "repositoryCaptureByteLength": 1149,
+    "repositoryCaptureSha256": "sha256:915f341413c5695de4e1fa38c43deb7d65442618f8a53e935b77c2515d0f813a",
+    "repositoryCaptureNormalization": "The source ended in CRLF; the repository capture is the same parsed JSON document with the final line ending normalized to LF.",
+    "resultExtraction": {
+      "resultUtf16Length": 587,
+      "verdictJsonStartUtf16": 188,
+      "method": "Four short Korean narration fragments precede the verdict. The normalized verdict is the exact JSON suffix beginning at the final { in the outer result string and parsed without altering its fields."
+    },
+    "commandLineCaptured": false,
+    "note": "The supplied outer result proves the session, request, timing and token usage. It does not contain the exact Cursor command line, so command remains null rather than being reconstructed."
+  },
+  "verdict": {
+    "taskId": "chat-owned-detail-handoff-disposition-followup-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:79c2eeb2fb274d931cd45c8d32f185fa2a7b78ce6a463cc0aec607c4c4ec4d63",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "Record this approval against the reviewed digest; post-boundary owned-detail handoff now runs the forced departure barrier only while the captured navigation attempt is still current."
+  }
+}
