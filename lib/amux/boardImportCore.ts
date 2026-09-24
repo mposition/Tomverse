@@ -415,6 +415,12 @@ const contentRefused = (value: unknown, key: string | null): boolean => {
   return false;
 };
 
+/** Catalog scanner, including nested digest-key exceptions. Promotion briefs use this. */
+export const amuxCatalogTextRefused = (value: unknown): boolean => contentRefused(value, null);
+
+/** `amux-json-v1` object-key sort. Array order and string code points stay as they are. */
+export const amuxCanonicalJson = (value: unknown): string => canonicalJson(value);
+
 const isSectionCode = (value: string): value is BoardImportSectionCode =>
   (BOARD_IMPORT_SECTION_CODES as readonly string[]).includes(value);
 

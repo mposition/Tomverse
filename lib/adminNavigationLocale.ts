@@ -251,6 +251,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "AMUX 카탈로그 이관",
     description: "owner 전용 카탈로그 미리보기와 승인, 꺼진 운영 적용",
   },
+  "amux-board-promotion": {
+    label: "AMUX 카드 승격",
+    description: "owner 전용 backlog 카드 1~3건 승격, 꺼진 운영 적용",
+  },
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",

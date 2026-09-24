@@ -5114,6 +5114,10 @@ model AmuxWorkItem {
   sourceVersion  String?
   sourceDigest   String?
   sourceSnapshot Json?
+  /// Null until a manual promotion stores the operator brief. Catalog import
+  /// leaves both null. The pair check and the sourced-todo check live in SQL.
+  executionBrief       String?
+  executionBriefDigest String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -5380,6 +5384,36 @@ model AmuxBoardImportApproval {
   expiresAt                    DateTime
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// Operator evidence for one manual promotion batch. No User foreign key.
+/// Apply stays off until a separate latch is enabled. This table existing
+/// does not promote a card.
+model AmuxBoardPromotionApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  requestDigest           String
+  rawBodyDigest           String
+  itemBindings            Json
+  itemBindingsDigest      String
+  cardCount               Int
+  scannerVersion          String
+  scannerRulesetDigest    String
+  policyVersion           Int
+  outcomeUnknownAt        DateTime?
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  expiredAt               DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
