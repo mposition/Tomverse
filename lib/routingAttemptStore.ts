@@ -112,44 +112,6 @@ export type RoutingAttemptOutcome =
    */
   | "unknown_after_dispatch";
 
-export const ROUTING_ATTEMPT_ERROR_CLASSES = [
-  /** The stream ended cleanly and produced nothing. */
-  "empty_response",
-  /** The first token did not arrive inside the turn's deadline. */
-  "first_token_deadline_exceeded",
-  /** The request failed before any classification was reached. */
-  "request_failed",
-  /** The process stopped after dispatching. Written only by the sweep. */
-  "process_stopped_after_dispatch",
-  /** The person's connection was gone, or the turn was aborted. */
-  "client_gone",
-  /** Tomverse's own completion handling failed after the stream finished. */
-  "completion_handling_failed",
-  /**
-   * A provider failure recorded before the category was carried through.
-   *
-   * This release still writes it from the chat route. It stays in the
-   * vocabulary because those rows, and the rows already stored, have to
-   * remain valid. A constraint that refuses its own history cannot be
-   * validated.
-   */
-  "provider_pre_token_failure",
-  "provider_policy_refusal",
-  "provider_payment_required",
-  "provider_rate_limited",
-  "provider_server_error",
-  "provider_network",
-  "provider_authentication",
-  "provider_request_contract",
-  "provider_model_not_found",
-  "provider_model_transient",
-  "provider_local_rejection",
-  "provider_unknown",
-] as const;
-
-export type RoutingAttemptErrorClass =
-  (typeof ROUTING_ATTEMPT_ERROR_CLASSES)[number];
-
 export type RoutingFailureLayer =
   | "planner"
   | "adapter"
