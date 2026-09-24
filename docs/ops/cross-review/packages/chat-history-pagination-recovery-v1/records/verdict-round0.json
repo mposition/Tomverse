@@ -1,0 +1,107 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-history-pagination-recovery-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-history-pagination-recovery-20260922 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-history-pagination-recovery-20260922 shell:default)"
+  ],
+  "startedAt": "2026-09-22T00:52:16.132Z",
+  "durationMs": 727655,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 92,
+    "cachedInputTokens": 4689434,
+    "outputTokens": 48529,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 5.054172,
+    "raw": {
+      "input_tokens": 92,
+      "cache_creation_input_tokens": 149577,
+      "cache_read_input_tokens": 4689434,
+      "output_tokens": 48529,
+      "output_tokens_details": {
+        "thinking_tokens": 38172
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 149577,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4176,
+          "cache_read_input_tokens": 151412,
+          "cache_creation_input_tokens": 1166,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1166
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-22T01:04:23.837Z",
+  "verdict": {
+    "taskId": "chat-history-pagination-recovery-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:1e14dec2c39e884200795fa6007346ed4224b983e3b35552710fde68163eefc9",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "components/chat/ChatApp.tsx:822-825 (first-page messagePage validation); affected fixtures tests/e2e/chat-markdown-theme.spec.ts:22-41 and tests/e2e/conversation-draft-isolation.spec.ts:108-114",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "Making `messagePage` mandatory on the first 200 breaks existing specs that register their own conversation-detail GET mock after mockAuthenticatedApi (Playwright LIFO, so theirs wins) and return no `messagePage`: those conversations now never load, the panel renders chat-history-load-error, and every send from them is refused by the new ChatPageClient barrier — and neither file is inside the task's writableScope, so the change as scoped leaves the suite red.",
+        "reproduction": "npm run test:e2e:run -- --project=desktop-chromium tests/e2e/chat-markdown-theme.spec.ts tests/e2e/conversation-draft-isolation.spec.ts — expected: pass as at base ad2b516; actual after this diff: chat-markdown-theme's 'assistant code blocks keep readable contrast' never renders `[data-message-role=\"assistant\"] pre code` (the mocked body at chat-markdown-theme.spec.ts:22-41 has messages but no messagePage, so the loader throws and releases the claim), and conversation-draft-isolation's 'a send clears only the conversation it was sent from' plus 'Korean IME text survives a conversation switch and a return' fail because detailRoute (line 108-114) also omits messagePage, so handleGlobalSubmit toasts chat.workspaceError.body and returns instead of sending. Either extend the authorized scope to those fixtures or state the breakage explicitly as out-of-scope fallout."
+      },
+      {
+        "location": "recorded verification command for tests/e2e/chat-unified-workspace.spec.ts (--grep 'history|remount|model-only')",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The recorded run does not cover the cached-revisit criterion or the model-change-send-barrier regression that criterion 6 names: the new test 'a cached transcript cannot bypass a failed later-page refresh' contains none of history/remount/model-only, and the reported 18 passes are exactly 9 per project (7 matching new tests plus the two pre-existing '…without deleting history or resending' tests), so the eighth new test never ran, nor did model-change-send-barrier.spec.ts or the loading-placeholder goldens in chat-state-visual-regression.spec.ts that this diff's placeholder class change touches.",
+        "reproduction": "npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/chat-unified-workspace.spec.ts --grep 'cached transcript' (expect 2 tests, not 0 as in the recorded run's title set), then npm run test:e2e:run -- --project=desktop-chromium --project=mobile-chromium tests/e2e/model-change-send-barrier.spec.ts tests/e2e/chat-state-visual-regression.spec.ts --grep 'Loading state|barrier' and record the real results."
+      },
+      {
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:4375-4378 and 4759-4767",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "Both new send barriers report a merely-not-yet-loaded transcript as a failure: they fire the `chat.workspaceError.body` error toast on `!isLoaded` without consulting `runtime.loadFailed`, so an ordinary in-flight refresh (every revisit/remount now re-fetches every page sequentially, because claimChatRuntimeLoad clears isLoaded) tells the user the workspace could not be loaded while nothing has failed — contrary to the criterion that error UI appear only on a real failure of the current key and that loading be shown honestly.",
+        "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts: openChat(page, { historyPageFailureOnCursorRead: 1, holdHistoryPageFailure: true }) then submitComposer(...) before calling state.releaseHistoryPageFailure(); observed: the error toast with chat.workspaceError.body while page 2 is still open and the panel still shows data-testid=\"chat-panel-loading\"; expected: no error copy until runtime.loadFailed is true (a loading-specific message, or a send control disabled while loading)."
+      },
+      {
+        "location": "components/chat/ChatApp.tsx:2540-2545 with lib/chatStreamRuntime.ts:340-356",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "In the Review model-only path a durable user Message that was already committed is abandoned with only an info toast whenever restoreChatRuntimeCompleteViewForSend returns false because the key's revision advanced meanwhile (e.g. a global Review send reached this same panel key while the model-only POST was on the wire), leaving a saved question that no provider will ever answer.",
+        "reproduction": "Review with two models: hold POST /api/conversations/qa-conversation/messages (holdMessageSaveBeforeTransaction), click model-only-send on panel 1, then submit the global composer so the auto-send effect calls handleSendPrompt on panel 1's runtime key (advanceChatRuntimeRevision), then release the held save; observed: 'chat.sendPreparationChanged' info toast and no /api/chat request for the saved model-only Message; expected: either the turn is dispatched once after the newer run settles, or the user is told the saved question needs a retry."
+      }
+    ],
+    "nextAction": "Resolve the out-of-scope fixture breakage in finding 1 (scope extension or explicit fallout statement), then re-run and record the cached-revisit, model-change-send-barrier and loading-golden regressions before a round 1 review."
+  }
+}

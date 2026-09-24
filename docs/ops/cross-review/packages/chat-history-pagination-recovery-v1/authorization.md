@@ -143,3 +143,32 @@ Linux visual 비교, mobile 전체 회귀, 다음 Claude verdict의 결과를 �
 - `ubuntu-24.04` 정본 runner의 Loading-state visual golden 비교는 아직
   **pending**이다. Windows의 golden 파일 부재와 위 기능 회귀 통과는 Linux 픽셀
   비교를 대신하지 않으며 snapshot을 갱신했다는 주장도 하지 않는다.
+
+## Round 2 정본 Linux visual 증거 (2026-09-22)
+
+소스 snapshot commit `93b18c8f37be46cbfce47658cc638e77aa008d63`을 push한 뒤,
+기존 수동 실행 가능한 `Nightly Visual Regression` workflow를 그 exact branch
+head에서 실행했다. run은
+[`35700992823`](https://github.com/mposition/Tomverse/actions/runs/35700992823),
+job은 `106658716490`, attempt는 `1`, runner는 `ubuntu-24.04`이고 Playwright의
+pinned desktop Chromium을 설치한 뒤 snapshot update 없이
+`npm run test:e2e:visual -- --retries=0`을 실행했다.
+
+- 이 변경의 남은 증거였던 `Loading state` 9건은 **9/9 pass**였다. desktop/mobile,
+  light/dark, success와의 models·price 정합성, model-slot count 및 1057/1058px
+  breakpoint를 모두 포함한다. 따라서 Windows에서 Linux golden 부재 때문에
+  비교하지 못했던 loading placeholder는 정본 runner에서 실제 golden 비교를
+  통과했다.
+- workflow 전체 conclusion은 **failure**이며 이를 green으로 표현하지 않는다.
+  전체 81건 중 **27 pass · 54 fail**이었다. 54건은 Loading 다음의 Streaming,
+  Success, Partial/Full error, Retry, credits, Deep Research, attachment 및 AI Review
+  상태에 분포한다. 실패 diff/report artifact는
+  `nightly-visual-regression-35700992823`(artifact id `10682643399`)로 보존됐다.
+- 이 task diff는 `chat-state-visual-regression.spec.ts`와 그 snapshot 파일을
+  수정하지 않는다. 직전 green scheduled run `35663989907`의 main head
+  `9e4fd0c52a5d5b764d4e1b70e819ce7628d67481`과 task base
+  `ad2b51622992c29056706c443d80bdba928336e1` 사이에는 ChatPageClient,
+  ChatApp, ChatInput, ChatMessageList, ChatSidebar, desktop/mobile shells 등 대규모
+  UI 변경과 일부 golden 변경이 존재한다. 이 사실은 범위 밖 54건을 통과로
+  바꾸지 않으며, 이번 review는 exact source head의 Loading 9건 통과와 전체
+  workflow red를 함께 판단해야 한다. golden은 생성하거나 갱신하지 않았다.
