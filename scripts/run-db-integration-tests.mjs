@@ -206,6 +206,10 @@ run(
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
+    // Explicit intake registration writes one backlog card, one body-free
+    // draft, one consumed approval and one audit row, and leaves execution
+    // and credit counts unchanged.
+    "tests/integration/amux-intake-registration.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
