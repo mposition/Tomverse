@@ -556,12 +556,36 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Content-free, immutable staging run approval evidence. It contains deployment/source digests, bounded cost and capacity, lifecycle counters and the approving operator id, but no customer id, prompt, output, credential, provider response or error prose. Operator access requests remain on the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
   },
   {
+    domain: "amuxReconciliationRun",
+    publicName: "amux_reconciliation_runs",
+    prismaModel: "AmuxReconciliationRun",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one source reconciliation, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxBoardPromotionApproval",
     publicName: "amux_board_promotion_approvals",
     prismaModel: "AmuxBoardPromotionApproval",
     state: "excluded",
     exclusionReason:
       "Operator approval evidence for a manual card promotion, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxIntakeDraft",
+    publicName: "amux_intake_drafts",
+    prismaModel: "AmuxIntakeDraft",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one explicit intake draft, not customer data. The actor id is the administrator and is intentionally not a User foreign key, so account deletion cannot rewrite it. Proposal text is absent. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxIntakeApproval",
+    publicName: "amux_intake_approvals",
+    prismaModel: "AmuxIntakeApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for one explicit intake registration, not customer data. The actor id is the administrator who consumed the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
   {
     domain: "adminNote",

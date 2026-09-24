@@ -673,12 +673,40 @@ const REGISTRY = {
     reason:
       "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
   },
+  AmuxReconciliationRun_status_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_RECONCILIATION_RUN_STATUSES",
+    reason:
+      "prepared, approved, applying, consumed, rejected, outcome_unknown. A run records one pinned source comparison. Item drift is not inferred from the run manifest digest, and the shipped apply latch stays off.",
+  },
+  AmuxWorkItemSourceRevision_state_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_SOURCE_REVISION_STATES",
+    reason:
+      "observed, accepted, rejected. Rows are append-only. accepted is the only state a card pointer may reference, and the original import is backfilled as accepted without rewriting source columns.",
+  },
   AmuxBoardPromotionApproval_status_check: {
     owner: "list",
     module: "lib/amux/boardPromotionCore.ts",
     list: "BOARD_PROMOTION_APPROVAL_STATUSES",
     reason:
       "The manual promotion approval lifecycle: prepared, approved, rejected, expired, consumed. A card leaves backlog only on the approved-to-consumed transition, and that transition stays behind the shipped-off code latch. The service compares this same list before every state change.",
+  },
+  AmuxIntakeDraft_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_DRAFT_STATUSES",
+    reason:
+      "consumed, rejected, expired. A draft row stores digests only. Proposal text stays null, and the shipped apply latch keeps the public route from inserting one.",
+  },
+  AmuxIntakeApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_APPROVAL_STATUSES",
+    reason:
+      "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
   AmuxWorkDelivery_status_check: {
     owner: "database",

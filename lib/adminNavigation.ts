@@ -697,6 +697,15 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "AI Platform" as const,
   },
   {
+    id: "amux-intake",
+    pattern: /^\/admin\/amux-intake$/,
+    label: "AMUX intake",
+    description: "Owner-only preview of one explicit registration, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
