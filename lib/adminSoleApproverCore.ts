@@ -48,12 +48,12 @@
  * reviewer provided is replaced by the audit record, which the decision
  * accepts as sufficient while one person is accountable for all of it.
  *
- * Two things did not change. Condition 6 still applies to every action -- a
- * second eligible administrator restores the two-person path on the next
- * request. And the two actions in `SOLE_APPROVER_ACTIONS` keep their bound
- * confirmations (dry-run digest, copy digest): they are stronger than the
- * general path, so the general path refuses to stand in for them
- * (`decideGeneralSoleApproval`).
+ * Two things did not change in 2026-09-15, and one of them changed on
+ * 2026-09-24. The bound confirmations on `SOLE_APPROVER_ACTIONS` (dry-run
+ * digest, copy digest) stay: they are stronger than the general path, so the
+ * general path refuses to stand in for them (`decideGeneralSoleApproval`).
+ * The queue that used to return when a second administrator existed does not.
+ * The audit record is the control at every count.
  */
 
 /**
@@ -80,9 +80,9 @@
  *
  * The distinction is written down because the two arguments justify different
  * things. The retention one would extend to any action a schedule already
- * performs; the campaign one extends only to actions that are otherwise
- * impossible, and stops the moment a second administrator exists — which is
- * condition 6, unchanged.
+ * performs; the campaign one was written for an organisation that could not
+ * satisfy a second reader. Since 2026-09-24 a second administrator does not
+ * close either path. The binding (dry-run digest, copy digest) stays.
  *
  * Neither argument reaches `user.delete` or the refund actions, and when this
  * list was written they stayed two-person. Since 2026-09-15 they reach the
@@ -115,7 +115,6 @@ export type SoleApproverEligibility =
           reason:
               | "action_not_eligible"
               | "no_eligible_approver"
-              | "multiple_eligible_approvers"
               | "requester_is_not_the_sole_approver";
       };
 
@@ -149,7 +148,6 @@ export type GeneralSoleApproval =
           reason:
               | "action_has_bound_path"
               | "no_eligible_approver"
-              | "multiple_eligible_approvers"
               | "requester_is_not_the_sole_approver";
       };
 
@@ -179,7 +177,6 @@ function countSoleApprover(
           allowed: false;
           reason:
               | "no_eligible_approver"
-              | "multiple_eligible_approvers"
               | "requester_is_not_the_sole_approver";
       } {
     const eligible = Array.from(
@@ -192,16 +189,13 @@ function countSoleApprover(
     if (eligible.length === 0) {
         return { allowed: false, reason: "no_eligible_approver" };
     }
-    // Condition 6. Two administrators can review each other, so the reason
-    // this exception exists has gone away and the ordinary path applies again.
-    if (eligible.length > 1) {
-        return { allowed: false, reason: "multiple_eligible_approvers" };
-    }
+    // A second eligible administrator does not restore a queue. The audit
+    // record is the control at every count (docs/policy/admin-sole-approver.md).
     const requester = input.requesterIdentity?.trim().toLowerCase();
-    if (!requester || requester !== eligible[0]) {
+    if (!requester || !eligible.includes(requester)) {
         return { allowed: false, reason: "requester_is_not_the_sole_approver" };
     }
-    return { allowed: true, approverIdentity: eligible[0] };
+    return { allowed: true, approverIdentity: requester };
 }
 
 /**
@@ -226,13 +220,11 @@ export const SOLE_APPROVER_UNAVAILABLE_SENTENCES: Record<
     string
 > = {
     action_not_eligible:
-        "This action always takes a second administrator's approval.",
+        "This action is confirmed against what was just shown.",
     no_eligible_approver:
         "No active administrator holds the permission this action needs.",
-    multiple_eligible_approvers:
-        "Two or more administrators can approve here, so this action takes the usual second approval.",
     requester_is_not_the_sole_approver:
-        "Only the single eligible administrator can execute this one alone.",
+        "This session is not an administrator who can run this action.",
 };
 
 export const soleApproverUnavailableSentence = (

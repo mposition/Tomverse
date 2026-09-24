@@ -85,7 +85,6 @@ export const adminNavigationBadge = (
   switch (key) {
     case "workQueue":
       return sum(
-        counts.pendingApprovals,
         counts.pendingRefunds,
         counts.openFeedback,
         counts.openPrivacyRequests

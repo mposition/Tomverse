@@ -31,8 +31,6 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
     },
     toast: {
       loadFailed: "Could not load this campaign.",
-      approvalRecorded:
-        "Recorded. A second administrator has to approve this in the work queue before the campaign is approved.",
       refused: "The request was refused.",
       recorded: "Recorded.",
       withdrawn: "Withdrawn.",
@@ -109,7 +107,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
     approval: {
       title: "Approval",
       intro:
-        "The only two-person action here, and the only place a person reads the copy. Drafting sends nothing; scheduling a wave sends nothing; running a wave carries out what was approved. Approving is what is reviewed.",
+        "The place a person reads the copy. Drafting sends nothing; scheduling a wave sends nothing; running a wave carries out what was approved. Approving is what is reviewed, and it is bound to the copy that was just read.",
       localesBefore: "The request carries this campaign’s language list —",
       localesNone: "none",
       localesAfter:
@@ -237,8 +235,6 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
     },
     toast: {
       loadFailed: "이 캠페인을 불러오지 못했습니다.",
-      approvalRecorded:
-        "기록되었습니다. 캠페인이 승인되려면 두 번째 관리자가 작업 대기열에서 승인해야 합니다.",
       refused: "요청이 거절되었습니다.",
       recorded: "기록되었습니다.",
       withdrawn: "철회되었습니다.",
@@ -315,7 +311,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
     approval: {
       title: "승인",
       intro:
-        "이 화면에서 유일하게 두 사람이 필요한 작업이며, 사람이 문안을 읽는 유일한 단계입니다. 초안 작성도, wave 예약도 아무것도 발송하지 않습니다. wave 실행은 승인된 내용을 수행할 뿐입니다. 검토 대상은 승인입니다.",
+        "사람이 문안을 읽는 단계입니다. 초안 작성도, wave 예약도 아무것도 발송하지 않습니다. wave 실행은 승인된 내용을 수행할 뿐입니다. 검토 대상은 승인이며, 방금 읽은 문안에 결속됩니다.",
       localesBefore: "요청에는 이 캠페인의 언어 목록이 함께 전달됩니다 —",
       localesNone: "없음",
       localesAfter:

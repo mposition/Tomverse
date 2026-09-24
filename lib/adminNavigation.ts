@@ -102,19 +102,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "Everything waiting on an operator, oldest first",
     group: "Command Center",
     badge: "workQueue",
-    aliases: ["queue", "todo", "pending", "backlog", "approvals", "two-person"],
-    tabs: [
-      {
-        id: "queue",
-        label: "Queue",
-        description: "Open items ranked by priority and age",
-      },
-      {
-        id: "approvals",
-        label: "Approvals",
-        description: "Two-person approval requests",
-      },
-    ],
+    aliases: ["queue", "todo", "pending", "backlog", "approvals"],
   },
   {
     id: "analytics",
@@ -763,7 +751,7 @@ export const ADMIN_LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/admin/usage-cost": "/admin/providers?tab=usage-cost",
   "/admin/jobs": "/admin/automation?tab=jobs",
   "/admin/webhooks": "/admin/automation?tab=webhooks",
-  "/admin/approvals": "/admin/work-queue?tab=approvals",
+  "/admin/approvals": "/admin/work-queue",
 };
 
 /**

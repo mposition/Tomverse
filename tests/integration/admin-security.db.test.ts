@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
-import {
-  AdminApprovalRequiredError,
-  runWithAdminApproval,
-} from "@/lib/adminApproval";
+import { runWithAdminApproval } from "@/lib/adminApproval";
 import { approvalPayloadHash } from "@/lib/adminApprovalCore";
 import {
   AdminSoleApproverRefusedError,
@@ -84,9 +81,8 @@ const createAdminSession = async (
 const staleAuthenticatedAt = () =>
   new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString();
 
-test("an exact approval payload is consumed once", async () => {
+test("an eligible administrator executes without recording an approval", async () => {
   const requester = await createAdminSession("requester");
-  const reviewer = await createAdminSession("reviewer");
   let executions = 0;
   const input = {
     session: requester.session,
@@ -98,52 +94,15 @@ test("an exact approval payload is consumed once", async () => {
     reason: "verified support request",
   };
 
-  await assert.rejects(
-    () => runWithAdminApproval(input, async () => { executions += 1; }),
-    AdminApprovalRequiredError
-  );
-  // A recently re-authenticated admin still gets no execution until a second
-  // administrator approves: the first call only records the request.
-  assert.equal(executions, 0);
-  const pending = await prisma.adminActionApproval.findFirstOrThrow({
-    where: { action: input.action, status: "pending" },
+  await withSoleAdmin([requester.session.user?.email as string], async () => {
+    await runWithAdminApproval(input, async () => { executions += 1; });
+    await runWithAdminApproval(input, async () => { executions += 1; });
   });
-  await prisma.adminActionApproval.update({
-    where: { id: pending.id },
-    data: {
-      status: "approved",
-      reviewedAt: new Date(),
-      reviewedById: reviewer.session.user?.id,
-      reviewedByEmail: reviewer.session.user?.email,
-    },
-  });
-
-  await runWithAdminApproval(input, async () => { executions += 1; });
-  assert.equal(executions, 1);
-  assert.equal(
-    (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
-    "consumed"
-  );
-
-  await assert.rejects(
-    () => runWithAdminApproval(input, async () => { executions += 1; }),
-    AdminApprovalRequiredError
-  );
-  assert.equal(executions, 1);
-  assert.equal(
-    await prisma.adminActionApproval.count({
-      where: { action: input.action, status: "pending" },
-    }),
-    1
-  );
-  assert.ok(
-    await prisma.adminAuditLog.findFirst({
-      where: { action: "admin_approval.consumed", targetId: pending.id },
-    })
-  );
+  assert.equal(executions, 2);
+  assert.equal(await prisma.adminActionApproval.count(), 0);
 });
 
-test("a changed payload cannot reuse a previously approved action", async () => {
+test("a changed payload is its own execution and still creates no approval", async () => {
   const requester = await createAdminSession("requester");
   const base = {
     session: requester.session,
@@ -153,18 +112,19 @@ test("a changed payload cannot reuse a previously approved action", async () => 
     targetId: "model-a",
     reason: "provider deprecated model",
   };
-  await assert.rejects(
-    () => runWithAdminApproval({ ...base, payload: { status: "disabled" } }, async () => undefined),
-    AdminApprovalRequiredError
-  );
-  await assert.rejects(
-    () => runWithAdminApproval({ ...base, payload: { status: "disabled", public: false } }, async () => undefined),
-    AdminApprovalRequiredError
-  );
-  assert.equal(
-    await prisma.adminActionApproval.count({ where: { action: "model.disable" } }),
-    2
-  );
+  let executions = 0;
+  await withSoleAdmin([requester.session.user?.email as string], async () => {
+    await runWithAdminApproval(
+      { ...base, payload: { status: "disabled" } },
+      async () => { executions += 1; }
+    );
+    await runWithAdminApproval(
+      { ...base, payload: { status: "disabled", public: false } },
+      async () => { executions += 1; }
+    );
+  });
+  assert.equal(executions, 2);
+  assert.equal(await prisma.adminActionApproval.count(), 0);
 });
 
 // runWithAdminApproval checks re-authentication before it touches the approval
@@ -292,9 +252,9 @@ test("a run still inside its silence budget is not reported delayed", async () =
  * rows the sixth condition requires are actually written before and after the
  * operation.
  *
- * This is where the path is proven at all. Staging cannot do it -- its
- * `ADMIN_OWNER_EMAILS` names two addresses, so the exception correctly stays
- * shut there (observed 2026-08-23); production names one.
+ * This is where the path is proven at all. A second eligible administrator
+ * is counted on the audit row and does not close the path. The dry-run
+ * digest binding still has to match.
  */
 
 const withSoleAdmin = async <T>(
@@ -309,7 +269,7 @@ const withSoleAdmin = async <T>(
   };
   process.env.ADMIN_EMAILS = emails.join(",");
   // Id-admitted administrators are counted as approvers, so an inherited
-  // ADMIN_USER_IDS would silently close every sole-path test here.
+  // ADMIN_USER_IDS would change the count these tests assert.
   delete process.env.ADMIN_USER_IDS;
   process.env.ADMIN_OWNER_EMAILS = emails.join(",");
   delete process.env.ADMIN_ACCESS_EXPIRY_JSON;
@@ -424,28 +384,32 @@ test("the sole administrator executes, and the audit says why one was enough", a
   });
 });
 
-test("a second eligible administrator closes the path without being asked", async () => {
+test("a second eligible administrator does not close the retention path", async () => {
   const admin = await createAdminSession("first-admin");
   const other = await createAdminSession("second-admin");
   await withSoleAdmin(
     [admin.session.user?.email as string, other.session.user?.email as string],
     async () => {
-      // Condition 6, read from configuration on this call -- there is no
-      // stored mode to migrate and no flag anyone has to remember to clear.
       assert.equal(
         soleApproverIsAvailable("retention.cleanup.execute", admin.session),
-        false
+        true
       );
       const { run, digest } = await seedDryRun(admin);
       let executions = 0;
-      await assert.rejects(
-        () =>
-          executeAsSoleApprover(admin, run.id, digest, async () => {
-            executions += 1;
-          }),
-        AdminSoleApproverRefusedError
+      const result = await executeAsSoleApprover(admin, run.id, digest, async () => {
+        executions += 1;
+        return { assistantKnowledgeObjectsDeleted: 2 };
+      });
+      assert.equal(executions, 1);
+      assert.deepEqual(result, { assistantKnowledgeObjectsDeleted: 2 });
+      assert.equal(await prisma.adminActionApproval.count(), 0);
+      const started = await prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: "admin_sole_approver.execution_started" },
+      });
+      assert.equal(
+        (started.metadata as Record<string, unknown>).eligibleApproverCount,
+        2
       );
-      assert.equal(executions, 0);
     }
   );
 });
@@ -606,33 +570,24 @@ test("a failed sole execution is recorded as failed and leaves nothing claimable
   });
 });
 
-test("a second eligible administrator restores the queue for every action", async () => {
+test("a second eligible administrator does not restore a queue", async () => {
   const admin = await createAdminSession("first-billing");
   const other = await createAdminSession("second-billing");
   await withSoleAdmin(
     [admin.session.user?.email as string, other.session.user?.email as string],
     async () => {
       let executions = 0;
-      await assert.rejects(
-        () =>
-          runWithAdminApproval(planAdjustInput(admin), async () => {
-            executions += 1;
-          }),
-        (error: unknown) => {
-          assert.ok(error instanceof AdminApprovalRequiredError);
-          // Said, not silent: the operator can tell two administrators from a
-          // misconfiguration.
-          assert.equal(
-            error.soleApproverUnavailable,
-            "multiple_eligible_approvers"
-          );
-          return true;
-        }
-      );
-      assert.equal(executions, 0);
+      await runWithAdminApproval(planAdjustInput(admin), async () => {
+        executions += 1;
+      });
+      assert.equal(executions, 1);
+      assert.equal(await prisma.adminActionApproval.count(), 0);
+      const started = await prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: "admin_sole_approver.execution_started" },
+      });
       assert.equal(
-        await prisma.adminActionApproval.count({ where: { status: "pending" } }),
-        1
+        (started.metadata as Record<string, unknown>).eligibleApproverCount,
+        2
       );
     }
   );
@@ -641,8 +596,8 @@ test("a second eligible administrator restores the queue for every action", asyn
 test("the general path never stands in for a bound one", async () => {
   // Retention cleanup and campaign approval keep their digest bindings. A
   // sole administrator reaching them through runWithAdminApproval -- without
-  // the dry run or the copy they read -- gets the ordinary queue, not a
-  // shortcut around the proof.
+  // the dry run or the copy they read -- is refused, not given a shortcut
+  // around the proof and not queued for a second administrator.
   const admin = await createAdminSession("bound-admin");
   await withSoleAdmin([admin.session.user?.email as string], async () => {
     let executions = 0;
@@ -662,13 +617,18 @@ test("the general path never stands in for a bound one", async () => {
             executions += 1;
           }
         ),
-      AdminApprovalRequiredError
+      (error: unknown) => {
+        assert.ok(error instanceof AdminSoleApproverRefusedError);
+        assert.equal(error.reason, "action_has_bound_path");
+        return true;
+      }
     );
     assert.equal(executions, 0);
+    assert.equal(await prisma.adminActionApproval.count(), 0);
   });
 });
 
-test("an administrator admitted by user id is counted, so the sole path fails closed", async () => {
+test("an administrator admitted by user id does not restore a queue", async () => {
   // Codex review, 2026-09-15. An ADMIN_USER_IDS administrator takes their role
   // from a session email the configuration cannot see, so their row reads as
   // readonly. Leaving them out would count one approver where there are two.
@@ -678,74 +638,54 @@ test("an administrator admitted by user id is counted, so the sole path fails cl
       // Set inside: withSoleAdmin clears and restores ADMIN_USER_IDS itself.
       process.env.ADMIN_USER_IDS = other.session.user?.id as string;
       let executions = 0;
-      await assert.rejects(
-        () =>
-          runWithAdminApproval(planAdjustInput(admin), async () => {
-            executions += 1;
-          }),
-        AdminApprovalRequiredError
-      );
-      assert.equal(executions, 0);
+      await runWithAdminApproval(planAdjustInput(admin), async () => {
+        executions += 1;
+      });
+      assert.equal(executions, 1);
 
       // The requester's own id is the requester, not a second person.
       process.env.ADMIN_USER_IDS = admin.session.user?.id as string;
       await runWithAdminApproval(planAdjustInput(admin), async () => {
         executions += 1;
       });
-      assert.equal(executions, 1);
+      assert.equal(executions, 2);
   });
 });
 
-test("a request already approved by a second administrator is closed, not left claimable", async () => {
+test("an already approved request is expired when the action runs, including with a second administrator", async () => {
   const admin = await createAdminSession("returning-owner");
   const reviewer = await createAdminSession("departed-reviewer");
   const input = planAdjustInput(admin);
-  await withSoleAdmin(
-    [admin.session.user?.email as string, reviewer.session.user?.email as string],
-    async () => {
-      await assert.rejects(
-        () => runWithAdminApproval(input, async () => undefined),
-        AdminApprovalRequiredError
-      );
-    }
-  );
-  const pending = await prisma.adminActionApproval.findFirstOrThrow({
-    where: { status: "pending" },
-  });
-  await prisma.adminActionApproval.update({
-    where: { id: pending.id },
+  const pending = await prisma.adminActionApproval.create({
     data: {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
       status: "approved",
-      reviewedAt: new Date(),
+      payload: input.payload,
+      payloadHash: approvalPayloadHash(input.payload),
+      requestedById: admin.session.user?.id,
       reviewedById: reviewer.session.user?.id,
-      reviewedByEmail: reviewer.session.user?.email,
+      expiresAt: new Date(Date.now() + 30 * 60_000),
     },
   });
 
-  // The reviewer has left the configuration; the requester is now alone.
-  await withSoleAdmin([admin.session.user?.email as string], async () => {
-    let executions = 0;
-    await runWithAdminApproval(input, async () => {
-      executions += 1;
-    });
-    assert.equal(executions, 1);
-    assert.equal(
-      (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
-      "expired"
-    );
-  });
-
-  // With the reviewer back, the same request queues again rather than running
-  // on the approval that was already carried out.
   await withSoleAdmin(
     [admin.session.user?.email as string, reviewer.session.user?.email as string],
     async () => {
       let executions = 0;
-      await assert.rejects(
-        () => runWithAdminApproval(input, async () => { executions += 1; }),
-        AdminApprovalRequiredError
+      await runWithAdminApproval(input, async () => {
+        executions += 1;
+      });
+      assert.equal(executions, 1);
+      assert.equal(
+        (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
+        "expired"
       );
-      assert.equal(executions, 0);
+      assert.equal(
+        await prisma.adminActionApproval.count({ where: { status: "pending" } }),
+        0
+      );
     }
   );
 });
@@ -781,25 +721,28 @@ test("the bound retention path closes an approved cleanup request too", async ()
   );
 });
 
-test("a pending request is expired by the sole execution that carries it out", async () => {
+test("a pending request is expired by the execution that carries it out", async () => {
   const admin = await createAdminSession("queued-owner");
   const other = await createAdminSession("queued-other");
   const input = planAdjustInput(admin);
+  const pending = await prisma.adminActionApproval.create({
+    data: {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      status: "pending",
+      payload: input.payload,
+      payloadHash: approvalPayloadHash(input.payload),
+      requestedById: admin.session.user?.id,
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
   await withSoleAdmin(
     [admin.session.user?.email as string, other.session.user?.email as string],
     async () => {
-      await assert.rejects(
-        () => runWithAdminApproval(input, async () => undefined),
-        AdminApprovalRequiredError
-      );
+      await runWithAdminApproval(input, async () => undefined);
     }
   );
-  const pending = await prisma.adminActionApproval.findFirstOrThrow({
-    where: { status: "pending" },
-  });
-  await withSoleAdmin([admin.session.user?.email as string], async () => {
-    await runWithAdminApproval(input, async () => undefined);
-  });
   assert.equal(
     (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
     "expired"
@@ -852,11 +795,11 @@ test("an approval already being carried out refuses a sole execution of the same
   });
 });
 
-test("a claim just before the approval lapses keeps blocking a sole execution while it runs", async () => {
+test("an approved row is expired by the execution and does not keep a lease", async () => {
   const admin = await createAdminSession("near-expiry-owner");
   const reviewer = await createAdminSession("near-expiry-reviewer");
   const input = planAdjustInput(admin);
-  await prisma.adminActionApproval.create({
+  const approval = await prisma.adminActionApproval.create({
     data: {
       action: input.action,
       targetType: input.targetType,
@@ -870,40 +813,25 @@ test("a claim just before the approval lapses keeps blocking a sole execution wh
       expiresAt: new Date(Date.now() + 2_000),
     },
   });
-  let release: () => void = () => undefined;
-  const running = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let ordinaryStarted: () => void = () => undefined;
-  const started = new Promise<void>((resolve) => {
-    ordinaryStarted = resolve;
-  });
-  const ordinary = withSoleAdmin(
+  await withSoleAdmin(
     [admin.session.user?.email as string, reviewer.session.user?.email as string],
-    () =>
-      runWithAdminApproval(input, async () => {
-        ordinaryStarted();
-        await running;
-      })
-  );
-  await started;
-  // Past the approval's original deadline, with the ordinary run still going.
-  await new Promise((resolve) => setTimeout(resolve, 2_500));
-  try {
-    await withSoleAdmin([admin.session.user?.email as string], async () => {
+    async () => {
       let executions = 0;
-      await assert.rejects(
-        () => runWithAdminApproval(input, async () => { executions += 1; }),
-        (error: unknown) => {
-          assert.ok(error instanceof AdminSoleApproverRefusedError);
-          assert.equal(error.reason, "approval_executing");
-          return true;
-        }
-      );
-      assert.equal(executions, 0);
+      await runWithAdminApproval(input, async () => {
+        executions += 1;
+      });
+      assert.equal(executions, 1);
+    }
+  );
+  assert.equal(
+    (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: approval.id } })).status,
+    "expired"
+  );
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    let executions = 0;
+    await runWithAdminApproval(input, async () => {
+      executions += 1;
     });
-  } finally {
-    release();
-    await ordinary.catch(() => undefined);
-  }
+    assert.equal(executions, 1);
+  });
 });

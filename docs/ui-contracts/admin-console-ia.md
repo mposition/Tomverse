@@ -39,7 +39,7 @@ Six groups, seventeen entries. One page, one job.
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
 | Command Center | Overview | `/admin/overview` | `summary`, `health` |
-| Command Center | Work queue | `/admin/work-queue` | `queue`, `approvals` |
+| Command Center | Work queue | `/admin/work-queue` | — |
 | Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports` |
 | Customers | Users | `/admin/users` | — |
 | Customers | Support | `/admin/support` | `feedback`, `privacy` |
@@ -79,7 +79,7 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/usage-cost` | `/admin/providers?tab=usage-cost` | Re-rendered the provider health panel and metrics table |
 | `/admin/jobs` | `/admin/automation?tab=jobs` | Scheduled work supervised, not performed, by an operator |
 | `/admin/webhooks` | `/admin/automation?tab=webhooks` | As above |
-| `/admin/approvals` | `/admin/work-queue?tab=approvals` | An approval is queue work |
+| `/admin/approvals` | `/admin/work-queue` | Two-person approval was retired; the address still opens the queue |
 
 `/admin?tab=<value>` — the console's addressing scheme before every workspace
 got its own route — is mapped by `ADMIN_LEGACY_TAB_ROUTES` and covers both the
