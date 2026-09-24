@@ -24,6 +24,7 @@ Tomverse의 개발 Agent 팀은 `tomverse-orchestrator`를 통해 실행한다.
 **개별 Agent의 권한은 여기 적지 않는다.** 어떤 입력을 작업으로 인정하는지,
 그 결과물이 공개 저장소와 쓰기 가능 자격증명에 어디까지 닿는지는 그 Agent의
 정책 문서가 정한다. engineering Agent는 `docs/policy/engineering-agent.md`다.
+intake Agent의 승인된 v1 설계는 `docs/policy/amux-intake.md`다.
 한 Agent의 규칙을 여기 올리면 다른 팀의 worker가 그 규칙에 묶인다.
 
 두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
