@@ -159,7 +159,7 @@ test("the refund row shows the same Stripe status the toast reports", async ({
   ).toBeVisible();
 });
 
-test("a two-person approval requirement reads as pending, not as a failure", async ({
+test("a leftover two-person approval id reads as a refusal", async ({
   page,
 }) => {
   await openFixture(page);
@@ -175,11 +175,10 @@ test("a two-person approval requirement reads as pending, not as a failure", asy
 
   const toast = page.getByTestId("app-toast");
   await expect(toast).toBeVisible();
-  await expect(toast).toHaveAttribute("data-tone", "info");
-  await expect(toast).toHaveAttribute("role", "status");
-  await expect(toast).toHaveAttribute("aria-live", "polite");
+  await expect(toast).toHaveAttribute("data-tone", "error");
+  await expect(toast).toHaveAttribute("role", "alert");
   await expect(toast).toContainText("apr_qa_1");
-  await expect(toast).toContainText(/nothing has changed yet/i);
+  await expect(toast).toContainText(/was not applied/i);
 });
 
 test("a reauthentication requirement is an assertive error with a next step", async ({

@@ -46,7 +46,7 @@ export const adminEmailCampaignsMessages = defineAdminMessages({
     list: {
       title: "Campaigns",
       intro:
-        "Every campaign this console knows about, newest first. A campaign is a set of waves over one piece of copy; approving it is where a person reads that copy, and it is the only two-person action here.",
+        "Every campaign this console knows about, newest first. A campaign is a set of waves over one piece of copy; approving it is where a person reads that copy.",
       draftingBefore: (limit: number) => `Showing the newest ${limit}.`,
       empty: "No campaigns have been drafted.",
       columns: {
@@ -132,7 +132,7 @@ export const adminEmailCampaignsMessages = defineAdminMessages({
     list: {
       title: "캠페인",
       intro:
-        "이 콘솔이 알고 있는 모든 캠페인을 최신순으로 표시합니다. 캠페인은 하나의 문안에 대한 wave 묶음입니다. 승인은 사람이 그 문안을 읽는 단계이며, 이 화면에서 유일하게 두 사람이 필요한 작업입니다.",
+        "이 콘솔이 알고 있는 모든 캠페인을 최신순으로 표시합니다. 캠페인은 하나의 문안에 대한 wave 묶음입니다. 승인은 사람이 그 문안을 읽는 단계입니다.",
       draftingBefore: (limit: number) => `최신 ${limit}개를 표시합니다.`,
       empty: "작성된 캠페인이 없습니다.",
       columns: {

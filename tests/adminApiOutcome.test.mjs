@@ -35,19 +35,18 @@ test("a body's own error text is what the operator is shown", () => {
   assert.equal(described.requiresReauthentication, false);
 });
 
-// The whole point of the shared helper: an approval-pending 409 is the
-// two-person policy working. Calling it a failure tells the operator to retry,
-// and a retry queues a second request instead of completing the first.
-test("an approval-pending 409 is reported as pending, not as a failure", () => {
+// A 409 that still names an approval row is the retired queue. The action was
+// not applied, so the console says so instead of asking for a second person.
+test("a leftover approval id is a refusal, not a queue", () => {
   const described = failure({
     status: 409,
     error: "A second administrator must approve this action.",
     approvalId: "apr_123",
   });
-  assert.equal(described.tone, "info");
+  assert.equal(described.tone, "error");
   assert.equal(described.approvalId, "apr_123");
   assert.match(described.message, /apr_123/);
-  assert.match(described.message, /Nothing has changed yet/i);
+  assert.match(described.message, /was not applied/i);
   assert.equal(described.message, adminApprovalPendingMessage("apr_123"));
   assert.equal(described.requiresReauthentication, false);
 });

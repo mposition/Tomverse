@@ -56,10 +56,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     label: "작업 대기열",
     description: "운영자 조치를 기다리는 모든 항목, 오래된 순",
     aliases: ["대기열", "할 일", "대기", "승인"],
-    tabs: {
-      queue: { label: "대기열", description: "우선순위와 경과 시간순으로 정렬한 미처리 항목" },
-      approvals: { label: "승인", description: "2인 승인 요청" },
-    },
   },
   analytics: {
     label: "분석",
