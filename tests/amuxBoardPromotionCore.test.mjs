@@ -155,6 +155,10 @@ test("the route cannot turn the latch on and the page stays unlisted", () => {
   const panel = read("components/admin/AmuxBoardPromotionPanel.tsx");
   assert.match(service, /codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH/);
   assert.equal(service.includes('codeLatch: true'), false);
+  const apply = service.slice(service.indexOf("export async function applyBoardPromotion"));
+  const refused = apply.indexOf('throw new BoardImportError("apply_disabled", 409, input.approvalId)');
+  const transaction = apply.indexOf("return withPromotionTransaction");
+  assert.ok(refused > 0 && transaction > refused);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("lib/amux/execution"), false);
   assert.equal(route.includes("codeLatch"), false);
