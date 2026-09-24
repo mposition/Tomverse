@@ -1025,6 +1025,8 @@ Together는 독립 fallback, OpenRouter는 **최종 emergency fallback이며 이
 | Phase 1 | health·capacity·quality 운영 대시보드 | 집계 (`lib/routingOpsSummary.ts`, §14.23). 화면은 없음. 분모 0은 0%가 아님 |
 | 부록 R1·R3·R6 | affinity epoch·hold-down, `request_deadline_ms`, fallback chain의 장애 영역 | 판정 (§14.17). 길이와 기한의 숫자는 호출자. 라우터는 열에 쓰지 않음 |
 | §10.2 | pre-commit buffer | 판정 (§14.19). 길이는 호출자. 라우터는 열에 쓰지 않음 |
+| §11 | canonical failure classification (`scopeKind`, `scopeId`, category, version) | 판정 (`lib/canonicalFailureClassification.ts`, §14.27). 라이브 분류기는 그대로. 행은 쓰지 않음 |
+| §15.1 T3 | synthetic canary lane 입장 | 판정 (`lib/deploymentCanaryLane.ts`, §14.28). probe 선택기는 그대로. 호출은 없음 |
 
 의도적으로 제외한 것은 그대로입니다: §5 가중합 목적함수(어휘순 유지), §7.2의 prior
 shrinkage(관측이 부족하면 판단 보류), malformed 같은 deployment 재시도와
@@ -1560,13 +1562,14 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 
 ## 14.26 여기서 코드가 멈추는 이유 (2026-09-24)
 
-41 다음에 저장소가 스스로 쓸 수 있는 단위는 없습니다. 남은 것은 아래이고,
-어느 것도 이 절에서 완료로 세지 않습니다. 분모 약 50은 그대로입니다.
+이 목록을 쓴 시점에는 41 다음에 저장소가 스스로 쓸 수 있는 단위가 없어 보였습니다.
+분류와 canary 입장은 그 다음 절에서 판정으로 들어갔고, 여기서 완료로 세지 않습니다.
+아래 남은 항목도 이 절에서 완료로 세지 않습니다. 분모 약 50은 그대로입니다.
 
 | 항목 | 왜 지금 쓰지 않는가 |
 |---|---|
 | A-3b `VALIDATE` | production 조사가 선행입니다. |
-| canary lane | A-5가 어느 환경에도 배포되지 않았고, probe는 여전히 provider당 대표 모델 하나입니다. |
+| canary lane의 실행 | A-5가 어느 환경에도 배포되지 않았고, probe 선택기는 여전히 provider당 대표 모델 하나입니다. 입장 판정은 §14.28이고, 그 판정은 호출이 아닙니다. |
 | BYOK 비용 배선 | A-5 배포와 수요 확인이 선행입니다. 가격 계약도 따로입니다. |
 | load guard의 softmax와 감쇠 계수 | 온도는 품질과 비용의 교환이고, 그 교환은 정해지지 않았습니다. |
 | deployment별 pricing snapshot | `docs/policy/credit-and-cost-limits.md`의 별도 승인입니다. |
@@ -1575,6 +1578,24 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 | equivalence class | provider attestation이 없습니다. |
 
 DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenAI·Anthropic ZDR 신청, exploration을 켜는 것, Privacy 고지, ADR 원문을 develop으로 가져오는 것은 소유자 결정입니다. 여기서 정하지 않습니다.
+
+## 14.27 Canonical failure classification (2026-09-24)
+
+판정이 `lib/canonicalFailureClassification.ts`에 있습니다. 요청 경로는 import하지 않습니다. 라이브 stream 분류기는 그대로이고, 이 모듈은 그 함수를 바꾸지 않습니다. 행을 읽거나 쓰지 않습니다.
+
+범용 provider 범위는 gateway와 serving을 구분하지 못합니다. 둘이 다르고 호출자가 어느 쪽인지 말하지 않으면 기권입니다. provider id는 endpoint id가 아닙니다. 연결 실패와 5xx와 429는 endpoint가 있을 때만 serving endpoint로 이름 붙고, 없으면 gateway로 넓히지 않습니다. 인증과 결제 실패는 gateway id가 있을 때만 gateway입니다. serving 쪽을 골라도 endpoint가 없으면 기권입니다. UNKNOWN은 범위로 만들지 않습니다. 사용자 abort와 upstream timeout은 다른 provenance입니다. abort는 local이고, timeout은 endpoint가 있을 때만 serving endpoint이며 category는 NETWORK입니다.
+
+모델 범위의 실패는 deployment id가 있을 때만 그 deployment입니다. deployment를 모르는 채 logical model 전체로 넓히지 않습니다. 기권은 다른 후보를 허용하는 판정이 아닙니다. 같은 endpoint의 다른 모델은 endpoint 실패의 밖이 아닙니다. 다른 endpoint만 그 범위 밖입니다.
+
+이 줄은 권장 순서 2번이고, §11이 선행 조건으로 남겨 둔 분류기입니다. 직전 rollup 보고는 41, 약 82%였습니다. §14.3의 약 50단위에서 완료는 42, **약 84%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
+
+## 14.28 Canary lane 입장 (2026-09-24)
+
+판정이 `lib/deploymentCanaryLane.ts`에 있습니다. 요청 경로는 import하지 않습니다. provider를 호출하지 않습니다. 모델을 고르지 않습니다. 표본 크기를 정하지 않습니다. `getProbeModelFor`는 그대로 provider당 대표 모델 하나입니다.
+
+사용자 콘텐츠가 있으면 거절입니다. synthetic이 아니면 거절입니다. residency가 proven이 아니면 거절입니다. credential quota나 provider budget이 따로가 아니면 거절입니다. 정상 routing candidate이면 거절입니다. 관측 window를 통과했다는 사실이 true가 아니면 거절입니다. null은 통과가 아닙니다. 입장한 관측도 routing candidate가 아닙니다.
+
+이 줄은 권장 순서 6번의 입장 규칙입니다. lane을 실행하는 것은 아니고, 그 실행은 §14.26에 남습니다. 직전 분류 보고는 42, 약 84%였습니다. §14.3의 약 50단위에서 완료는 43, **약 86%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. production 배포는 0%입니다.
 
 ## 15. 되돌릴 수 없는 것
 
