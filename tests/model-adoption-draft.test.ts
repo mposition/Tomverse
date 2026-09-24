@@ -71,6 +71,24 @@ test("a 128k answer at US$4/US$20 is sold as frontier", () => {
   assert.equal(adoptionSaleProposal(floor)?.creditWeight, 32);
 });
 
+test("a 128k answer at US$10/US$50 is sold as apex", () => {
+  // 128,000 x 10 x 1.25 + 128,000 x 50 = 8,000,000 micro-USD. Frontier covers
+  // 3,840,000. 67 credits is the minimum, and apex's 80 cover 9,600,000.
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: 10,
+    outputUsdPerMillionTokens: 50,
+    maxOutputTokens: 128_000,
+    inputPriceMultiplier: 1.25,
+    worstCaseInputTokens: 128_000,
+  });
+  assert.ok(isCreditFloor(floor));
+  assert.equal(floor.usageClass, "apex");
+  assert.equal(floor.credits, 80);
+  assert.equal(floor.worstCaseMicroUsd, 8_000_000);
+  assert.equal(floor.coverMicroUsd, 9_600_000);
+  assert.equal(adoptionSaleProposal(floor)?.creditWeight, 80);
+});
+
 test("a cheap model does not have to be sold as premium", () => {
   const floor = suggestCreditFloor({
     inputUsdPerMillionTokens: 0.1,
@@ -656,10 +674,10 @@ test("an adoption no class can cover is refused, not saved at one credit", () =>
       ...adoptBody,
       usageClass: "standard",
       creditWeight: 1,
-      inputUsdPerMillionTokens: 5,
-      outputUsdPerMillionTokens: 25,
+      inputUsdPerMillionTokens: 10,
+      outputUsdPerMillionTokens: 50,
       // 400,000 input tokens at the cache-write premium plus a 128,000-token
-      // answer is US$5.700. Frontier's 32 credits cover US$3.840 at the 3x
+      // answer is US$11.400. Apex's 80 credits cover US$9.600 at the 3x
       // input multiplier, so this turn is still outside every class.
       maxOutputTokens: 128_000,
     },
