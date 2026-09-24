@@ -396,7 +396,7 @@ export type HoldSnapshot = {
  * `not_started` drops the reservation. `unknown` keeps the whole reservation
  * as spent. `usage` records the measured cost on the hold. The experiment
  * ceiling keeps that measurement when it is at least the reservation, and
- * keeps the whole reservation when the measurement is smaller (§14.38). A
+ * keeps the whole reservation when the measurement is smaller. A
  * second close finds a terminal status and changes nothing, so it cannot
  * release an occupied hold and it cannot add the same cost twice.
  */
