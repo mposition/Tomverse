@@ -1686,6 +1686,28 @@ Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었�
 
 이 줄은 §14.3의 deployment 가격 snapshot 가운데 기록입니다. 반영은 §14.26에 남습니다. 직전 범위 판정 보고는 45, 약 90%였습니다. §14.3의 약 50단위에서 완료는 46, **약 92%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
 
+## 14.36 첫 활성화 범위 (2026-09-24, 미승인)
+
+첫 활성화의 정의는 기존에 동작하던 공급자 호출 하나를 새 라우팅 실행 경로로 통과시키는 것이다. 공급자 자동 교체, 가격 최적화, 청구 변경은 그 범위 밖이다. 이 절은 그 정의를 적는다. 실행 승인, workspace 지정, 실험 예산 승인, staging 배포 승인은 아니다. 완료 수는 46, 약 92%(추정) 그대로다.
+
+② BYOK, ③ softmax와 감쇠, ④ 가격 snapshot의 라우팅·청구 반영, ⑤ decision grain 전환, ⑥ 새 cross-provider fallback, ⑦ 자동 equivalence는 이번 범위에서 켜지 않는다. 요청 경로는 `lib/routingHeldDecisions.ts`를 import하지 않으므로, 이 여섯은 최소 경로를 코드로 묶고 있지 않다. 과거 거절은 이 여섯에 대해 그대로다.
+
+① canary 관찰 입장(`admitCanaryObservation`)은 이 경로의 입장이 아니다. 그 함수는 사용자 콘텐츠와 비합성을 거절한다. 최소 경로는 내부 계정의 실제 요청이므로, canary 조건을 풀어 실트래픽을 넣지 않는다. 별도 입장이다.
+
+최소 경로를 막는 의존성은 셋이다.
+
+1. 실행 함수가 없다. 채팅의 공급자 호출은 `app/api/chat/route.ts`의 기존 경로다. `beginInstrumentedDispatch`는 그 경로에 run과 attempt를 붙이는 기록이고, 모드가 꺼져 있으면 기록도 없다. 기록을 켜도 선택 주체는 카탈로그 모델이다. 새 경로의 dispatch가 아니다.
+2. 고정할 deployment 행이 없다. `decideRoutingPin`은 요청 경로가 호출하지 않고, `ModelDeployment`는 dark다. production에는 그 테이블이 없다. 현재 호출은 코드의 모델 id와 관리 키다. 행이 생기기 전에 그 writer만 dark 목록에서 빠진다. id를 지어 넣지 않는다.
+3. 실험 전용 비용 상한이 없다. 있는 한도는 전체 트래픽의 provider budget과 플랜 guardrail이다. 호출 전 예약은 기존 승인 가격과 출력 상한으로 잡고, 진행 중 요청, 실패, SDK 재시도를 같은 한도에 넣는다. 한도 숫자는 호출자가 준다. 총 US$5는 제안이지 코드에 넣을 승인 값이 아니다. 상한 없이 공급자 호출을 시작하지 않는다.
+
+workspace 테이블은 없다. `lib/routingPinGate.ts`가 적는다. ADR의 workspace 정책은 account 정책이다. 다음 사람의 작업은 본인 소유의 내부 테스트 계정을 조회해 지정하는 것이다. 고객 계정을 고르지 않는다.
+
+채팅 경로는 zhipu가 아니면 `maxRetries`를 넘기지 않는다. 이 저장소는 SDK 기본값이 끄지 않으면 2라고 적는다. 애플리케이션의 한 번이 HTTP 여러 번이 될 수 있다. 최소 경로는 `maxRetries: 0`이거나, 그 재시도를 예산에 넣는다.
+
+`catalogueHostRefusalCode`의 채팅 409는 이 경로와 다른 변경이다. 최소 실행 배포에 넣지 않는다.
+
+완료는 새 경로가 실제 dispatch를 하고, 응답이 도달하고, decision과 attempt로 추적되며, 끄면 기존 경로로 돌아가는 것이다. 표가 있거나, manifest를 저장하거나, shadow가 선택만 계산한 것은 완료가 아니다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.
