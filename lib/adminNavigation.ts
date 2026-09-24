@@ -628,6 +628,15 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    id: "amux-board-promotion",
+    pattern: /^\/admin\/amux-board-promotion$/,
+    label: "AMUX card promotion",
+    description: "Owner-only promotion of one to three backlog cards, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
