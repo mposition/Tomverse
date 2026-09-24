@@ -8,6 +8,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   BOARD_IMPORT_STATEMENT_TIMEOUT,
   BoardImportError,
+  boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
 import { AMUX_INTAKE_POLICY_VERSION } from "@/lib/amux/intakeCore";
 import type { AmuxIntakeRegistrationPlan } from "@/lib/amux/intakeRegistrationCore";
@@ -25,6 +26,19 @@ import { prisma } from "@/lib/prisma";
  */
 
 const TARGET_TYPE = "AmuxIntakeApproval";
+
+const prismaCode = (error: unknown): string | null => {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+};
+
+const disconnectMessage = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : "";
+  return /timeout|ECONNRESET|ECONNREFUSED|Connection terminated|closed the connection|Server has closed/i.test(
+    message,
+  );
+};
 
 const actorId = (session: Session): string => {
   const id = session.user?.id;
@@ -140,11 +154,21 @@ export async function applyAmuxIntakeRegistration(input: {
     throw new BoardImportError("apply_disabled", 409);
   }
   const approvalId = randomUUID();
-  return prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
-      return commitAmuxIntakeRegistration(tx, { ...input, approvalId });
-    },
-    { maxWait: 5_000, timeout: 20_000 },
-  );
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        return commitAmuxIntakeRegistration(tx, { ...input, approvalId });
+      },
+      { maxWait: 5_000, timeout: 20_000 },
+    );
+  } catch (error) {
+    if (error instanceof BoardImportError) throw error;
+    const code = prismaCode(error);
+    if (code === "P2002") throw new BoardImportError("conflict", 409, approvalId);
+    if (boardImportFailureIsAmbiguous(code) || disconnectMessage(error)) {
+      throw new BoardImportError("outcome_unknown", 409, approvalId);
+    }
+    throw error;
+  }
 }
