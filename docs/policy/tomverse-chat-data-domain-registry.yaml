@@ -1173,6 +1173,37 @@ domains:
       with the linked tamper-evident AdminAuditLog entry. Authority expiry and
       retention are separate decisions.
 
+  - domain: amuxBoardPromotionApproval
+    prismaModel: AmuxBoardPromotionApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one manual card-promotion batch. The
+        row names the administrator who prepared it and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. itemBindings holds the operator's
+      promotion request, not a customer's prompt or file. Operator requests are
+      handled through the manual PrivacyRequest path, together with the linked
+      tamper-evident AdminAuditLog entry.
+
   - domain: adminNote
     prismaModel: AdminNote
     userLinkageRole: actor

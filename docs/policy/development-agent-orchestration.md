@@ -1,12 +1,14 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 이 정확한 본문을 승인했다. 공개 저장소에 이 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
+approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-21 mposition | 최초 승인. 병합 당시 본문에 두 가지를 더한 상태를 승인한다 — Agent 승인은 2인 승인(`AdminActionApproval`)이 아니라는 공통 기반 §0 결정(PR #1583)과, 개별 Agent 정책과의 경계(PR #1586) |
 | 2 | 2026-09-22 mposition | Phase A selection-only 경계와 stage-C 비실행 catalog import 계약을 추가한다. 같은 운영자의 prepared row self-approval을 1인 조직 예외로 승인한다. v1의 2인 승인과 sole-approver 경계를 유지한다. |
+| 3 | 2026-09-24 mposition | 사람이 고른 1~3개 backlog 카드의 수동 promotion pilot. 코드 래치는 끈 채로 둔다. 자동 승격, worker 실행, 유료 호출, 사용자 크레딧, 현황판 cutover는 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -434,3 +436,20 @@ Apply 성공 후 staging 또는 production에서 증명해야 하는 불변식�
 - legal retention period의 확정
 
 각 항목은 해당 단계의 별도 정책·독립 검토·운영자 승인이 필요하다.
+버전 3은 그중 수동 1~3개 promotion pilot만 연다. 나머지 항목은 그대로다.
+
+## Manual promotion pilot
+
+버전 3은 catalog import가 만든 `backlog` 카드 가운데 운영자가 한 요청에 적은 1~3개만 `todo`로 바꾸는 별도 Admin 동작이다. 이 절은 그 카드를 고르지 않고, 실행 brief를 쓰지 않으며, apply 래치를 켜지 않는다. 래치가 꺼진 구현이 병합돼도 카드 status는 바뀌지 않는다.
+
+요청은 `amux-json-v1`로 정규화한다. 항목은 1개 이상 3개 이하다. 각 항목은 기존 카드 id, 기대 revision, 저장된 `sourceDigest`, 명시적 `kind`, 명시적 `priority`, routing `classification`, execution brief를 함께 가진다. `kind`는 현재 `AmuxWorkItem_kind_check`의 값 가운데 `unknown`을 뺀 것이다. `priority`는 `p0`~`p3` 중 요청에 적힌 값이다. classification은 `task_kind`, `complexity`, `risk`, `files_expected`만 가진다. `task_kind`는 현재 worker router가 이름을 가진 값만 허용한다. brief는 1~8,192 UTF-8 byte다.
+
+Brief와 요청 전체는 catalog scanner(`amux-board-content-scan-v1`)를 통과해야 한다. 그 scanner는 URL, path separator, 토큰, 비공개 문서 경로를 거절하므로 brief는 저장소 경로를 담지 못한다. 목표, 포함과 제외, 완료 증거는 경로 없이 적는다.
+
+대상 카드는 `backlog`이고 owner와 `claimedAt`과 `archivedAt`이 null이며, attempt, delivery, route decision이 0이고, 의존성이 있으면 그 의존성은 `done`이며 archive되지 않았다. source identity가 없거나 digest가 다르면 거절한다. 하나라도 거절이면 배치 전체를 쓰지 않는다.
+
+Apply는 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`이고 코드 래치가 true일 때만 열린다. 이 버전이 출고하는 코드 래치는 false다. HTTP route는 래치를 인자로 받지 않는다. 승인 계약은 catalog import와 같다. 준비한 운영자가 최근 step-up 후 같은 행을 승인하고, 창은 15분이며, 소비는 한 번이다. 감사 metadata에는 brief 원문, 제목, source key를 넣지 않는다.
+
+성공한 apply는 그 카드의 status를 `todo`로 바꾸고, 요청의 kind, priority, classification, brief, brief digest를 기록하고, revision을 1 올린다. owner를 세팅하지 않고 attempt, delivery, route decision을 만들지 않는다. `TOMVERSE_AMUX_EXECUTE`를 바꾸지 않는다. queue는 계속 literal `todo`와 owner null만 읽는다. 승격된 카드는 그 조건에 들어가 선택 대상이 될 수 있으나, 선택은 실행이 아니다.
+
+이 승인만으로 운영 DB의 카드를 승격하지 않는다. 1~3개를 실제로 바꾸려면 그 카드를 적은 별도 요청과, 래치를 켜는 별도 승인이 또 필요하다.
