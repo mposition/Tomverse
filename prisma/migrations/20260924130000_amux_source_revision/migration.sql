@@ -129,6 +129,9 @@ FOR EACH ROW EXECUTE FUNCTION amux_source_revision_append_only();
 ALTER TABLE "AmuxWorkItem"
     ADD COLUMN "acceptedSourceRevisionId" TEXT;
 
+CREATE UNIQUE INDEX "AmuxWorkItem_acceptedSourceRevisionId_key"
+    ON "AmuxWorkItem"("acceptedSourceRevisionId");
+
 INSERT INTO "AmuxWorkItemSourceRevision" (
     "id",
     "workItemId",
