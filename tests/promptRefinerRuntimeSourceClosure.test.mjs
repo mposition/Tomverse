@@ -192,12 +192,18 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` records the promotion approval model and
 // execution-brief fields. It is comment only. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "3465ec6570b99315a4f77d675683f418",
-  "4c44656e35b639f2e261e7737c71d710",
+  "8760aa5d9aed5d5628c0bb5735a1f0c1",
+  "cb1dad38ac9e231140fe715bb35a9c0b",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
