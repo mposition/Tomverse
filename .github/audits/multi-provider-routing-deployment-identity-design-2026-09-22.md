@@ -1571,13 +1571,13 @@ event, grain, target 셋입니다. grain은 관측 모듈의 목록 그대로입
 | 항목 | 왜 지금 쓰지 않는가 |
 |---|---|
 | A-3b `VALIDATE` | §14.30에서 완료로 셉니다. 이 표를 쓸 때는 조사가 선행이었습니다. |
-| canary lane의 실행 | A-5가 어느 환경에도 배포되지 않았고, probe 선택기는 여전히 provider당 대표 모델 하나입니다. 입장 판정은 §14.28이고, 그 판정은 호출이 아닙니다. |
-| BYOK 비용 배선 | A-5 배포와 수요 확인이 선행입니다. 가격 계약도 따로입니다. |
-| load guard의 softmax와 감쇠 계수 | 온도는 품질과 비용의 교환이고, 그 교환은 정해지지 않았습니다. |
-| deployment별 pricing snapshot | `docs/policy/credit-and-cost-limits.md`의 별도 승인입니다. |
-| decision grain 원자 전환 | §8.1 선행조건 2·4·5가 표본과 시간 위에 있습니다. 필터는 아직 probe health를 읽습니다. |
-| 2-attempt fallback 활성화 | 범위 판정은 §14.31이고 여기서 완료로 세지 않습니다. 요청 경로 연결은 scope와 capacity가 준비된 뒤입니다. |
-| equivalence class | provider attestation이 없습니다. |
+| canary lane의 실행 | §14.32가 비운영 리허설의 입장 조건만 고정합니다. 실행은 여기 완료로 세지 않습니다. |
+| BYOK 비용 배선 | §14.32에서 비활성입니다. 관리 키로의 자동 전환은 없습니다. |
+| load guard의 softmax와 감쇠 계수 | §14.32에서 온도는 미설정입니다. 0은 그 미설정이 아닙니다. |
+| deployment별 pricing snapshot | §14.32가 기록과 반영을 나눕니다. 반영은 승인되지 않았습니다. |
+| decision grain 원자 전환 | §14.32가 probe를 deployment 관측으로 복사하지 않습니다. 전환은 보류입니다. |
+| 2-attempt fallback 활성화 | 연결 계약은 §14.32이고 라이브 경로는 그대로입니다. 활성화는 여기 완료로 세지 않습니다. |
+| equivalence class | §14.32에서 미검증입니다. 이름이 같다는 것은 증거가 아닙니다. |
 
 DeepSeek-V4 Pro의 DeepInfra 원가, 다섯 공급자의 트래픽 유지, OpenAI·Anthropic ZDR 신청, exploration을 켜는 것, Privacy 고지, ADR 원문을 develop으로 가져오는 것은 소유자 결정입니다. 여기서 정하지 않습니다.
 
@@ -1628,6 +1628,18 @@ endpoint 실패는 다른 endpoint만 통과합니다. deployment 실패는 같�
 이 줄은 권장 순서 11번의 범위 판정입니다. 요청 경로에 연결하는 활성화는 아니고, 그 연결은 §14.26에 남습니다. 직전 VALIDATE 보고는 44, 약 88%였습니다. §14.3의 약 50단위에서 완료는 45, **약 90%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
 
 Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었습니다. 통과 목록을 전부 보내는 것으로 읽히지 않게 `remainingAttempts`를 두었고, local 범위의 거절 사유를 나눴습니다. 완료 수는 올리지 않습니다.
+
+## 14.32 보류 결정 일곱 (2026-09-24)
+
+판정이 `lib/routingHeldDecisions.ts`에 있습니다. 요청 경로는 import하지 않습니다. 공급자를 호출하지 않습니다. 행을 쓰지 않습니다. 이 일곱은 기능을 켠 것이 아니므로 완료 수에 넣지 않습니다. 직전 보고 45, 약 90%(추정)가 그대로입니다. 분모 약 50도 그대로입니다. 라우팅 스택의 production 배포는 0%입니다.
+
+- Canary 실행은 비운영 리허설만 이 모듈이 받을 수 있고, 환경·실험 범위·중단 조건이 이름 있어야 합니다. 공급자를 부르면 호출자가 준 양의 비용 한도가 있어야 합니다. 운영 트래픽은 거절입니다. probe 성공은 다른 deployment의 증거가 아닙니다. shadow는 호출이 아니고, 복제 호출은 비용이 들며 공유 캐시를 건드릴 수 있습니다.
+- BYOK 비용 배선은 `inactive`입니다. 실패가 청구 주체를 관리 키로 옮기지 않습니다.
+- softmax 온도는 `null`입니다. 0은 설정된 온도가 아닙니다. hard gate를 통과하지 못한 후보는 배분 대상이 아닙니다. load guard는 온도가 없어도 꺼지지 않습니다.
+- 가격을 모르면 금액은 `null`입니다. 0으로 채우면 기록이 거절됩니다. snapshot을 라우팅이나 청구에 쓰는 반영은 거절입니다.
+- deployment 관측이 없으면 증거 부족입니다. probe 성공을 그 관측으로 복사하지 않습니다. 진행 중인 요청은 시작한 버전으로 끝나고, 새 요청은 승인된 버전을 받습니다. grain 전환 자체는 `held`입니다.
+- fallback 연결 계약은 공급자 시도가 Tomverse dispatch와 그 안의 재시도를 곱한 값이고, 2를 넘기면 거절입니다. 사용자에게 보인 뒤, 확인되지 않은 부작용, 검증되지 않은 대상, pin이나 청구 주체의 조용한 변경도 거절입니다. `liveActivation`은 false입니다.
+- equivalence는 공급자 증빙과 Tomverse 평가가 둘 다 있어야 `evidenced`입니다. 그 경우에도 사용자 요청의 자동 이동은 false입니다. 같은 이름만으로는 미검증입니다.
 
 ## 15. 되돌릴 수 없는 것
 
