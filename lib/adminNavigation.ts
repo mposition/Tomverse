@@ -653,6 +653,15 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    id: "amux-reconciliation",
+    pattern: /^\/admin\/amux-reconciliation$/,
+    label: "AMUX source reconciliation",
+    description: "Owner-only preview of per-card source revisions, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
