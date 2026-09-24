@@ -280,7 +280,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * still moves because the whole Prisma schema is deliberately watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "3d97d558f4bdd768b438f19b39c7dac99e2991cd2b93a33bf469148996d66eb6";
+  "f00a87ddc1f68e4e6c5f002b310f72e964294763dd47d9cfe9bdbd235b1fff02";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
