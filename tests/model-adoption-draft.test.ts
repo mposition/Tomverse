@@ -6,6 +6,7 @@ import {
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
   adoptionSaleProposal,
+  adoptionSaveBlock,
   blankTokenFieldValues,
   buildAdoptionDraft,
   requestOutputCapFromProvider,
@@ -161,6 +162,38 @@ test("the draft copies what the provider said and nothing else", () => {
   assert.equal(draft.fields.maxOutputTokens, 64_000);
   assert.equal(draft.sources.maxOutputTokens, "provider_catalogue");
   assert.equal(draft.observedCapabilities.providerMaxOutputTokens, 64_000);
+});
+
+test("an adoption save says why it is not ready, starting with the birth state", () => {
+  const floor = {
+    usageClass: "frontier" as const,
+    credits: 32,
+    worstCaseMicroUsd: 3_200_000,
+    coverMicroUsd: 3_840_000,
+    inputTokens: 128_000,
+    outputTokens: 128_000,
+    inputMultiplier: 3,
+  };
+  const ready = {
+    reason: "Opus 5 replaces Opus 5",
+    classChosen: true,
+    profileLookupPending: false,
+    profileLookupFailed: false,
+    reasoningSuggested: false,
+    reasoningConfirmed: true,
+    priceSuggested: false,
+    priceConfirmed: true,
+    status: "coming-soon",
+    publiclyListed: false,
+    creditWeight: 32,
+    floor,
+  };
+  assert.equal(adoptionSaveBlock(ready), null);
+  assert.equal(adoptionSaveBlock({ ...ready, status: "enabled" }), "born_enabled");
+  assert.equal(adoptionSaveBlock({ ...ready, status: "limited" }), "born_enabled");
+  assert.equal(adoptionSaveBlock({ ...ready, publiclyListed: true }), "born_listed");
+  assert.equal(adoptionSaveBlock({ ...ready, reason: "no" }), "reason_too_short");
+  assert.equal(adoptionSaveBlock({ ...ready, creditWeight: 16 }), "credits_below_floor");
 });
 
 test("a new model is born switched off and unlisted", () => {
