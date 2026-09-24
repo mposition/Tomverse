@@ -39,6 +39,7 @@ const DARK_TABLES = [
     "DeploymentCacheAffinity",
     "RoutingIdentityManifest",
     "RoutingIdentityManifestEntry",
+    "RoutingSnapshotCeilingApproval",
 ];
 
 

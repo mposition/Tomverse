@@ -274,13 +274,22 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
  *
+ * 2026-09-23, the routing snapshot ceiling: RoutingSnapshotCeilingApproval,
+ * two columns on RoutingIdentityManifest that cite it, a `slot` column on
+ * RoutingIdentityManifestEntry and an index the migration already created.
+ * All dark, none a marketing model, nothing here touches the descriptor, the
+ * config snapshot, a webhook writer or an admission decision.
+ *
  * 2026-09-24: the release reconciliation adds the latched-off
  * `AmuxBoardPromotionApproval` model and nullable execution-brief evidence to
  * `AmuxWorkItem`. Neither is a marketing model or webhook input. The digest
  * still moves because the whole Prisma schema is deliberately watched.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f1431354fbf86700ea76ec7b836826c977e6cfd84eb654a637e38127f5dbeb84";
+  "f973d378e485dd3db58d02ab01d0fa82132adf31d9993dc9c03e363ae55238b9";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -275,6 +275,13 @@ export const manifestDigest = (
     return hash.digest("hex");
 };
 
+/** One approved ceiling, as the manifest cites it. */
+export type CeilingApproval = {
+    id: string;
+    ceiling: number;
+    approvedAt: Date;
+};
+
 export type ManifestInput = {
     version: number;
     digest: string;
@@ -286,6 +293,30 @@ export type ManifestInput = {
      * disagreed.
      */
     entryCount: number;
+    /**
+     * The approved ceiling this manifest is published under.
+     *
+     * Section 8.5: size is controlled when the configuration is approved,
+     * not when a turn runs. An earlier draft capped the candidate verdicts
+     * written per run, and whichever cut you take there throws away either
+     * the lowest-ranked candidates or a particular rejection reason -- the
+     * answer to "why was this deployment not picked".
+     *
+     * **A separate approval, not a number supplied with the entries.** The
+     * first version took `approvedCeiling` from the publisher in the same
+     * call, and an independent review showed why that is not a ceiling: a
+     * hundred deployments with a ceiling of a hundred passes. A limit the
+     * publisher picks to fit is not the limit section 8.5 means.
+     *
+     * So this is the `RoutingSnapshotCeilingApproval` row the manifest
+     * cites -- attributed, dated and immutable -- and the manifest stores
+     * its id and a copy of the value. The database refuses a copy that does
+     * not match the approval, and an approval dated after the publication.
+     *
+     * Null when none has been approved. There is no default, because a
+     * ceiling is an approval and an absent approval is not an unlimited one.
+     */
+    ceilingApproval: CeilingApproval | null;
     entries: readonly ManifestDeploymentEntry[];
     approvedBy?: string | null;
     approvedAt?: Date | null;
@@ -333,6 +364,31 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
         problems.push("the count does not match these deployments");
     }
 
+    // The ceiling comes from an approval the publisher cites, never from a
+    // number supplied alongside the entries. Nothing here reads the
+    // approval table -- this module does no I/O -- so the caller passes the
+    // row, and the database refuses a manifest whose stored copy does not
+    // match the row it cites.
+    const approval = input.ceilingApproval;
+    if (approval === null) {
+        problems.push("a manifest is published under an approved ceiling");
+    } else if (!Number.isInteger(approval.ceiling) || approval.ceiling < 1) {
+        problems.push("an approved ceiling is a whole number from one");
+    } else {
+        if (input.entries.length > approval.ceiling) {
+            // This function reports; it does not refuse a write. A publisher
+            // that heeds it leaves the last approved snapshot standing, which
+            // is section 8.5's behaviour -- but there is no publisher yet.
+            // What the database refuses is an entry in a slot at or beyond
+            // the manifest's `entryCount`, which the ceiling bounds.
+            problems.push(
+                `${input.entries.length} deployments is over the approved ceiling of ${approval.ceiling}`
+            );
+        }
+        if (input.approvedAt && approval.approvedAt > input.approvedAt) {
+            problems.push("the ceiling was approved after this manifest was published");
+        }
+    }
     const ids = new Set<string>();
     for (const entry of input.entries) {
         if (ids.has(entry.modelDeploymentId)) {

@@ -645,6 +645,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Who published one version of the routing identity configuration, and when. Infrastructure — placements, endpoints and the approvals they run under — with nothing an account wrote. The subject is the publisher, not the exporter.",
   },
   {
+    domain: "routingSnapshotCeilingApproval",
+    publicName: "routing_snapshot_ceiling_approvals",
+    prismaModel: "RoutingSnapshotCeilingApproval",
+    state: "excluded",
+    exclusionReason:
+      "Who approved the largest routing snapshot Tomverse may publish, and when. A limit on infrastructure whose subject is the approver, not the exporting account, and which holds nothing an account wrote. Retained under legal hold.",
+  },
+  {
     domain: "credentialBinding",
     publicName: "credential_bindings",
     prismaModel: "CredentialBinding",
