@@ -41,6 +41,7 @@ const modelFields = {
     "premium-reasoning",
     "research",
     "deep-research",
+    "frontier",
   ]),
   creditWeight: z.number().int().min(1).max(1000),
   publiclyListed: z.boolean(),
