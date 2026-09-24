@@ -1010,6 +1010,7 @@ export const es = {
         reasoning: "Razonamiento",
         research: "Investigación",
         frontier: "Frontera",
+        apex: "Ápice",
     },
     onboarding: {
         title: "Compara modelos gratuitos ahora",

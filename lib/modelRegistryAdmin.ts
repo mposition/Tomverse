@@ -43,6 +43,7 @@ const modelFields = {
     "research",
     "deep-research",
     "frontier",
+    "apex",
   ]),
   creditWeight: z.number().int().min(1).max(1000),
   publiclyListed: z.boolean(),

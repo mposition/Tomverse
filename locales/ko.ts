@@ -1012,6 +1012,7 @@ export const ko = {
         reasoning: "추론",
         research: "리서치",
         frontier: "프론티어",
+        apex: "에이펙스",
     },
     onboarding: {
         title: "무료 모델을 지금 바로 비교하세요",

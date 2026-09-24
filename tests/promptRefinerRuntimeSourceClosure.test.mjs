@@ -206,12 +206,18 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-24, those notes now stand together after merging develop. Comment
 // only. Count 228, position-free hash unchanged. A repin of the
 // position-sensitive digest only.
+//
+// 2026-09-24, apex usage class: `lib/models.ts` gains the apex class, its
+// credit weight and the usage-profile case, and `lib/modelPricing.ts` treats
+// that class as premium. Both files are in this closure. Neither addition is
+// a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f5c390cfc7e39828c7aef3595bb2c534",
-  "3c45695252cf899b178d1c2ea58f4661",
+  "45e44993df9550021dc9a7eb888248fe",
+  "cd2e50c5ae92c2e46bfaa16de61cec01",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
