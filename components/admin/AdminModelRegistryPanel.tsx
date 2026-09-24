@@ -956,7 +956,17 @@ export function AdminModelRegistryPanel() {
         "success"
       );
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : m.toast.saveFailed, "error");
+      // The dialog stays open, so the sentence lives in the dialog. A second
+      // copy in the toast makes the same text match twice.
+      const message = error instanceof Error ? error.message : m.toast.saveFailed;
+      setApiFailure((current) =>
+        current ?? {
+          message,
+          tone: "error",
+          requiresReauthentication: false,
+          approvalId: null,
+        }
+      );
     } finally {
       setSaving(false);
     }
