@@ -395,6 +395,10 @@ test("a confirmed non-start releases and measured usage keeps only that cost", a
     assert.equal(settled.snapshot().spentMicroUsd, actual);
     assert.equal(settled.snapshot().reservedMicroUsd, 0);
     assert.ok(actual < reservedMicroUsd);
+    assert.equal(
+        settlePinnedUsageCost({ ...pricing, cacheWriteUsdPerMillionTokens: null }, usage),
+        null
+    );
 
     const overrun = applyExperimentClose(
         { spentMicroUsd: 0, reservedMicroUsd: 10, limitMicroUsd: 10 },

@@ -82,7 +82,12 @@ export const enterPinnedDeploymentChat = async (input: {
 }): Promise<PinnedRunResult> => {
     const experiment = ledger();
     return runPinnedDeployment({
-        env: input.env ?? process.env,
+        env: input.env ?? {
+            PINNED_DEPLOYMENT_EXECUTION: process.env.PINNED_DEPLOYMENT_EXECUTION,
+            PINNED_DEPLOYMENT_ACCOUNT_ID: process.env.PINNED_DEPLOYMENT_ACCOUNT_ID,
+            PINNED_DEPLOYMENT_ID: process.env.PINNED_DEPLOYMENT_ID,
+            PINNED_DEPLOYMENT_EXPERIMENT_ID: process.env.PINNED_DEPLOYMENT_EXPERIMENT_ID,
+        },
         authenticatedAccountId: input.authenticatedAccountId,
         messages: input.messages,
         webSearchMode: input.webSearchMode,

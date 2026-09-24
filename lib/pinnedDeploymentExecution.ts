@@ -241,12 +241,15 @@ export const quotePinnedTextCost = (input: {
     ) {
         return { ok: false, reason: "unpriced" };
     }
+    const contextWindowTokens = input.contextWindowTokens;
+    const cacheWriteUsdPerMillionTokens = pricing.cacheWriteUsdPerMillionTokens;
     if (
+        contextWindowTokens === null ||
+        !Number.isSafeInteger(contextWindowTokens) ||
+        contextWindowTokens <= 0 ||
         !Number.isSafeInteger(pricing.maxOutputTokens) ||
         pricing.maxOutputTokens <= 0 ||
-        !Number.isSafeInteger(input.contextWindowTokens) ||
-        input.contextWindowTokens <= 0 ||
-        pricing.cacheWriteUsdPerMillionTokens === null
+        cacheWriteUsdPerMillionTokens === null
     ) {
         return { ok: false, reason: "unpriced" };
     }
@@ -276,7 +279,7 @@ export const quotePinnedTextCost = (input: {
             input.billableInputTokens !== undefined &&
             input.billableInputTokens !== reservedInputTokens
         ) ||
-        reservedInputTokens + pricing.maxOutputTokens > input.contextWindowTokens
+        reservedInputTokens + pricing.maxOutputTokens > contextWindowTokens
     ) {
         return { ok: false, reason: "unpriced" };
     }
@@ -285,7 +288,7 @@ export const quotePinnedTextCost = (input: {
     const outputCost = ceilMicroUsd(pricing.maxOutputTokens, pricing.outputUsdPerMillionTokens);
     const writePremium = ceilMicroUsd(
         reservedInputTokens,
-        Math.max(0, pricing.cacheWriteUsdPerMillionTokens - pricing.inputUsdPerMillionTokens)
+        Math.max(0, cacheWriteUsdPerMillionTokens - pricing.inputUsdPerMillionTokens)
     );
     if (inputCost === null || outputCost === null || writePremium === null) {
         return { ok: false, reason: "unpriced" };
@@ -301,11 +304,11 @@ export const quotePinnedTextCost = (input: {
             estimatedInputTokens: breakdown.rawTotal,
             reservedInputTokens,
             maxOutputTokens: pricing.maxOutputTokens,
-            contextWindowTokens: input.contextWindowTokens,
+            contextWindowTokens,
             reservedMicroUsd,
             inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
-            cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
+            cacheWriteUsdPerMillionTokens,
         },
     };
 };
@@ -320,7 +323,7 @@ export const settlePinnedUsageCost = (
     rates: {
         inputUsdPerMillionTokens: number;
         outputUsdPerMillionTokens: number;
-        cacheWriteUsdPerMillionTokens: number;
+        cacheWriteUsdPerMillionTokens: number | null;
     },
     usage: {
         inputTokens: number | undefined;
@@ -328,6 +331,8 @@ export const settlePinnedUsageCost = (
         cacheWriteTokens: number | undefined;
     }
 ): number | null => {
+    if (rates.cacheWriteUsdPerMillionTokens === null) return null;
+    const cacheWriteUsdPerMillionTokens = rates.cacheWriteUsdPerMillionTokens;
     if (
         !safeNonNegative(usage.inputTokens ?? -1) ||
         !safeNonNegative(usage.outputTokens ?? -1) ||
@@ -340,7 +345,7 @@ export const settlePinnedUsageCost = (
     const cacheWriteTokens = usage.cacheWriteTokens as number;
     if (cacheWriteTokens > inputTokens) return null;
     const ordinaryInput = ceilMicroUsd(inputTokens - cacheWriteTokens, rates.inputUsdPerMillionTokens);
-    const write = ceilMicroUsd(cacheWriteTokens, rates.cacheWriteUsdPerMillionTokens);
+    const write = ceilMicroUsd(cacheWriteTokens, cacheWriteUsdPerMillionTokens);
     const output = ceilMicroUsd(outputTokens, rates.outputUsdPerMillionTokens);
     if (ordinaryInput === null || write === null || output === null) return null;
     const total = ordinaryInput + write + output;
