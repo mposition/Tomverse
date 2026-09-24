@@ -273,9 +273,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * back-relations only -- `User` gains two and `Conversation` gains one, and
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
+ *
+ * 2026-09-24: the release reconciliation adds the latched-off
+ * `AmuxBoardPromotionApproval` model and nullable execution-brief evidence to
+ * `AmuxWorkItem`. Neither is a marketing model or webhook input. The digest
+ * still moves because the whole Prisma schema is deliberately watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "9db95fb341a63aaeef26a79d59595154ee2c3ed6704eb62ba7bb7a615f219414";
+  "3d97d558f4bdd768b438f19b39c7dac99e2991cd2b93a33bf469148996d66eb6";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

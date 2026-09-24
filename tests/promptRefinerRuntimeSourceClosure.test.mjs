@@ -187,12 +187,17 @@ const compilerOptions = parsedConfig.options;
 // type-level index this inventory does not collect. The count is still 228 and
 // the position-free inventory still hashes to the value above, so this is a
 // repin and not a review.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "1dc36f427a420227efab7b38761ae4256",
-  "ec34f0c9775206d20e32c5e6620e23b",
+  "3465ec6570b99315a4f77d675683f418",
+  "4c44656e35b639f2e261e7737c71d710",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

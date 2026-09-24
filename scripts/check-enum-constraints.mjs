@@ -673,6 +673,13 @@ const REGISTRY = {
     reason:
       "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
   },
+  AmuxBoardPromotionApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/boardPromotionCore.ts",
+    list: "BOARD_PROMOTION_APPROVAL_STATUSES",
+    reason:
+      "The manual promotion approval lifecycle: prepared, approved, rejected, expired, consumed. A card leaves backlog only on the approved-to-consumed transition, and that transition stays behind the shipped-off code latch. The service compares this same list before every state change.",
+  },
   AmuxWorkDelivery_status_check: {
     owner: "database",
     reason:
