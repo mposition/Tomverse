@@ -23,7 +23,7 @@ import { prisma } from "@/lib/prisma";
 /**
  * Append-only source reconciliation writer.
  *
- * docs/policy/development-agent-orchestration.md (policy version 4).
+ * docs/policy/development-agent-orchestration.md (policy version 5).
  *
  * applyAmuxReconciliation checks the shipped latch before it opens a
  * transaction. commitAmuxReconciliation is the transaction body. The admin

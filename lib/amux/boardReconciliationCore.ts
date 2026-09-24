@@ -12,12 +12,12 @@ import {
 /**
  * Source reconciliation after the first catalog import.
  *
- * docs/policy/development-agent-orchestration.md (policy version 4).
+ * docs/policy/development-agent-orchestration.md (policy version 5).
  *
  * Item identity is source key, section code and detail digest. A new manifest
  * digest is a property of the run, not of each card. This module does not write.
- * Preview reports applyPermitted from the shipped latch and always returns
- * writes 0. It does not throw when the latch is closed.
+ * Preview reports applyPermitted from the shipped latch and the environment
+ * value, and always returns writes 0. It does not throw when apply is closed.
  */
 
 export const AMUX_RECONCILIATION_RUN_STATUSES = [
@@ -31,8 +31,8 @@ export const AMUX_RECONCILIATION_RUN_STATUSES = [
 
 export const AMUX_SOURCE_REVISION_STATES = ["observed", "accepted", "rejected"] as const;
 
-/** Shipped off. A caller cannot supply the latch. */
-export const AMUX_RECONCILIATION_APPLY_CODE_LATCH = false;
+/** Armed for J's source read-back. A caller cannot supply the latch. */
+export const AMUX_RECONCILIATION_APPLY_CODE_LATCH = true;
 
 export const amuxReconciliationApplyPermitted = (envValue: string | undefined): boolean =>
   boardImportApplyPermitted({
