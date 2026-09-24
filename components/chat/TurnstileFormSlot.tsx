@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { RefCallback } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   guestVerificationFailureKey,
@@ -31,7 +31,7 @@ export function TurnstileFormSlot({
   onCancel,
   testId = "turnstile-form-slot",
 }: {
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: RefCallback<HTMLDivElement>;
   isChallengeVisible: boolean;
   failure: GuestVerificationFailure | null;
   surface?: GuestVerificationSurface;

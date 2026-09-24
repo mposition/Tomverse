@@ -4,6 +4,7 @@ import {
   installTurnstileScript,
   prepareGuestPage,
   readTurnstileState,
+  setTurnstileScript,
 } from "./support/app-fixtures";
 
 test("email login reveals and reuses an interactive Turnstile at the form width", { tag: "@smoke" }, async ({
@@ -16,6 +17,18 @@ test("email login reveals and reuses an interactive Turnstile at the form width"
 
   await prepareGuestPage(page, "en");
   await installTurnstileScript(page, "interactive");
+  // Reproduce the production ordering where the Turnstile script is already
+  // ready while NextAuth still owns the loading screen and the form host does
+  // not exist yet. Attaching the host must trigger the widget render.
+  await page.unroute("**/api/auth/session**");
+  await page.route("**/api/auth/session**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "null",
+    });
+  });
 
   const requests: Array<string | null> = [];
   await page.route("**/api/auth/email-login/request", async (route) => {
@@ -85,4 +98,25 @@ test("email login reveals and reuses an interactive Turnstile at the form width"
   state = await readTurnstileState(page);
   expect(state?.renders).toBe(1);
   expect(state?.executes).toBe(2);
+
+  await setTurnstileScript(page, "error");
+  await page.getByRole("button", { name: "Send a new code" }).click();
+  await expect(page.getByTestId("email-login-verification-error")).toHaveText(
+    "Security verification wasn't completed. Refresh the page and try again."
+  );
+  await expect(
+    page.getByText(
+      "Check your email address, wait about a minute, then try again. Complete the security check if it appears. If this keeps happening, contact support instead of retrying repeatedly."
+    )
+  ).toHaveCount(0);
+  expect(requests).toEqual([
+    null,
+    "qa-turnstile-token-1",
+    null,
+    "qa-turnstile-token-2",
+    null,
+  ]);
+  state = await readTurnstileState(page);
+  expect(state?.renders).toBe(1);
+  expect(state?.executes).toBe(3);
 });

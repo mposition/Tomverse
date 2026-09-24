@@ -21,6 +21,10 @@ const formSlotSource = readFileSync(
   resolve(ROOT, "components/chat/TurnstileFormSlot.tsx"),
   "utf8"
 );
+const hookSource = readFileSync(
+  resolve(ROOT, "components/chat/useTurnstile.ts"),
+  "utf8"
+);
 
 test("email login keeps the Turnstile container renderable before interaction", () => {
   assert.match(signInSource, /<TurnstileFormSlot/);
@@ -63,7 +67,18 @@ test("email login keeps one Turnstile host mounted across email and code steps",
   assert.ok(stepBranchIndex >= 0);
   assert.ok(slotIndex < stepBranchIndex);
   assert.equal(signInSource.match(/<TurnstileFormSlot/g)?.length, 1);
-  assert.match(signInSource, /isGuestVerificationError\(error\)/);
+  assert.match(
+    signInSource,
+    /if \(isGuestVerificationError\(error\)\) return;\s*setFormError/
+  );
+  assert.match(
+    hookSource,
+    /const \[container, setContainer\] = useState<HTMLDivElement \| null>\(null\)/
+  );
+  assert.match(
+    hookSource,
+    /\[action, clearSilentTimer, container, enabled, settle, siteKey\]/
+  );
 });
 
 test("email login uses its existing localized verification failures", () => {

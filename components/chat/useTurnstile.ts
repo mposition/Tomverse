@@ -57,7 +57,14 @@ export function useTurnstile(
   siteKeyOverride?: string
 ) {
   const siteKey = siteKeyOverride || process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  // A ref object does not notify an effect when React attaches the host after
+  // an initial loading screen. Track the node in state so a script that became
+  // ready before the form rendered still gets a second render attempt as soon
+  // as the host exists.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainer(node);
+  }, []);
   const widgetIdRef = useRef<string | null>(null);
   const pendingRef = useRef<{
     resolve: (token: string) => void;
@@ -104,12 +111,12 @@ export function useTurnstile(
         if (
           cancelled ||
           !window.turnstile ||
-          !containerRef.current ||
+          !container ||
           widgetIdRef.current
         ) {
           return;
         }
-        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        widgetIdRef.current = window.turnstile.render(container, {
           sitekey: siteKey,
           action,
           execution: "execute",
@@ -152,7 +159,7 @@ export function useTurnstile(
       }
       widgetIdRef.current = null;
     };
-  }, [action, clearSilentTimer, enabled, settle, siteKey]);
+  }, [action, clearSilentTimer, container, enabled, settle, siteKey]);
 
   /** Ends the challenge on screen at the user's request. */
   const cancel = useCallback(() => {
