@@ -1476,6 +1476,25 @@ click race를 만들면 검증하려던 미전송 turn이 provider로 dispatch�
 
 ### 한눈에 보는 전체 Chat 진척
 
+이 회차부터 아래 네 축은 **`chat-scope-readiness-v1`** 방법으로 처음 산정한다.
+직전 `planning-estimate-v2`의 전체 웹 Chat 약 72%(주관적 범위 62–82%)와
+C19–C20 제품 연결/검증·운영 기반 약 30%/약 95%는 분모와 증거 분류가 다르다.
+따라서 아래 79/65/40/95는 그 수치의 증분이나 갱신이 아니며 직접 비교하지 않는다.
+향후 변화량은 이 네 축과 아래 정의를 그대로 유지한 기록끼리만 비교한다.
+
+- **전체 기술 구현**은 승인된 CHAT-01 기술 범위에서 source 구현, 회귀 검증,
+  병합과 staging 배포까지 확인된 작업량의 가중 추정이다. 품질·활성화 승인은 세지
+  않으며, 기능별 크기 차이 때문에 불확실성은 약 ±10%p다.
+- **release/activation readiness**는 실제 traffic 전에 필요한 품질·안전 gate,
+  staging 증거, 사람 disposition과 명시적 활성화 승인의 충족도를 추정한다. 코드가
+  존재한다는 사실만으로는 올리지 않으며 불확실성은 약 ±10%p다.
+- **Prompt Refiner 제품 연결**은 제품 execution/disposition receipt, server-owned
+  caller와 offered 결정, 사용자 선택 증거 및 Router/Auto shadow까지를 분모로 한다.
+  fixture-only seam은 인터페이스 증거로만 일부 반영하며 불확실성은 약 ±10%p다.
+- **Prompt Refiner confirmatory infrastructure**는 v4 실행 계약, source 결속,
+  content-free evidence 저장·재구성, 관리자 read-back과 runner를 분모로 한다.
+  별도 승인된 실행과 사람 disposition은 남은 gate로 표시하며 불확실성은 약 ±5%p다.
+
 | 항목 | 이번 판단 |
 | --- | --- |
 | 전체 기술 구현 | **약 79%** — saved-but-undispatched 경계 구현·회귀·병합·staging 배포와 기존 대화 reload 보존을 반영한 작업량 추정 |
