@@ -188,12 +188,9 @@ const compilerOptions = parsedConfig.options;
 // the position-free inventory still hashes to the value above, so this is a
 // repin and not a review.
 //
-// 2026-09-23, the routing snapshot ceiling: another review note above the
-// watched-schema fingerprint in `lib/marketingAutomationAccess.ts`, comment
-// only, and the accesses below it move down. Count 228, position-free hash
-// unchanged. A repin. Its second review round lengthened the same note by two
-// lines (the entry slot); again comment only, count and position-free hash
-// unchanged, so again a repin.
+// 2026-09-24, the pinned-deployment experiment note above the fingerprint.
+// Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
 //
 // 2026-09-24, AMUX release reconciliation: the watched-schema review note in
 // `lib/marketingAutomationAccess.ts` records the promotion approval model and
@@ -206,15 +203,15 @@ const compilerOptions = parsedConfig.options;
 // addition is a computed element access. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so only source positions moved.
 //
-// 2026-09-24, those notes now stand together on the ceiling branch. Comment
+// 2026-09-24, those notes now stand together after merging develop. Comment
 // only. Count 228, position-free hash unchanged. A repin of the
 // position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "27e27e93ad07c30cf32292c871c76f78",
-  "76fe307400409a10cb0a7f0baa1d36c2",
+  "f5c390cfc7e39828c7aef3595bb2c534",
+  "3c45695252cf899b178d1c2ea58f4661",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -274,11 +274,49 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
  *
- * 2026-09-23, the routing snapshot ceiling: RoutingSnapshotCeilingApproval,
- * two columns on RoutingIdentityManifest that cite it, a `slot` column on
- * RoutingIdentityManifestEntry and an index the migration already created.
- * All dark, none a marketing model, nothing here touches the descriptor, the
- * config snapshot, a webhook writer or an admission decision.
+ * 2026-09-23, the version gate columns on ModelDeployment and
+ * RoutingIdentityManifestEntry. Both tables are already dark. The columns
+ * are not marketing models and do not touch a webhook writer. The digest
+ * moves because the schema file is watched whole.
+ *
+ * 2026-09-23, rotation and expiry instants on CredentialBinding. The table
+ * is already dark. Neither column is a marketing model, and neither touches
+ * a webhook writer. The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, two nullable version columns on RoutingRun for the versions a
+ * request holds from the moment it starts. The table is already a marketing
+ * neighbour only by living in the same schema file. The columns are not
+ * marketing models and do not touch a webhook writer. The digest moves
+ * because the schema file is watched whole.
+ *
+ * 2026-09-23, a nullable millisecond deadline on RoutingRun and two nullable
+ * affinity columns on the dark cache-affinity table. None is a marketing
+ * model and none touches a webhook writer. The digest moves because the
+ * schema file is watched whole.
+ *
+ * 2026-09-23, a nullable pre-commit buffer duration on RoutingRun. The
+ * column is not a marketing model and does not touch a webhook writer.
+ * The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, the routing snapshot ceiling, merged onto the stack above:
+ * RoutingSnapshotCeilingApproval, two columns on RoutingIdentityManifest
+ * that cite it, a `slot` column on RoutingIdentityManifestEntry and an
+ * index the migration already created. All dark, none a marketing model,
+ * nothing here touches the descriptor, the config snapshot, a webhook
+ * writer or an admission decision. The digest below is the merged schema,
+ * not either parent's.
+ *
+ * 2026-09-24, AvailabilityRollupApplication. Dark, no marketing model, no
+ * webhook writer. The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-24, DeploymentPriceSnapshot. Dark, no marketing model, no webhook
+ * writer, and not the credit reservation snapshot. Its amount is one rate
+ * per million tokens. The digest moves because the schema is watched whole.
+ *
+ * 2026-09-24, PinnedDeploymentExperiment and its hold. Not a marketing
+ * model, not a webhook writer, and not a credit balance. The limit is
+ * whatever row is stored; the schema has no default amount. The digest
+ * moves because the schema is watched whole.
  *
  * 2026-09-24: the release reconciliation adds the latched-off
  * `AmuxBoardPromotionApproval` model and nullable execution-brief evidence to
@@ -289,7 +327,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f973d378e485dd3db58d02ab01d0fa82132adf31d9993dc9c03e363ae55238b9";
+  "35eb63631aee2e6cb7aeea59d0b76c5cb2c41c6261ef9002f06dbaa75cf38f7a";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

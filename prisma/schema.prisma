@@ -3975,6 +3975,28 @@ model RoutingRun {
   /// policy that had not been decided.
   selectionPolicyVersion String?
 
+  /// The control-plane manifest and the account policy, read once when the
+  /// request started. A promotion during the request is a
+  /// different policy and is not written back here.
+  ///
+  /// Both null, or both set. Null is not the policy that is active now, and
+  /// there is no workspace in this product: the ADR's workspace policy is
+  /// this account's policy. Dark: the request path does not write them yet.
+  controlPlaneVersion  String?
+  accountPolicyVersion String?
+
+  /// How long this request may run, in milliseconds, captured when it
+  /// started. ADR v2.1 appendix R3. Null means nobody supplied one. It is
+  /// not zero and it is not a default this schema chose. Dark: the request
+  /// path does not write it.
+  requestDeadlineMs Int?
+
+  /// How long the first chunk may be withheld, in milliseconds, before it
+  /// is flushed. ADR v2.1 pre-commit buffer. Null means nobody supplied one. It is not
+  /// zero and it is not a duration this schema chose. Dark: the request
+  /// path does not write it.
+  precommitBufferMs Int?
+
   /// The task profile, as labels and booleans.
   profileKind             String
   profileConfidence       String
@@ -5819,6 +5841,18 @@ model ModelDeployment {
   /// digest computed from it. As a free string the same instant spelled two
   /// ways digested differently and this column kept only one of them.
   qualityGateExpiresAt   DateTime?
+  /// How tightly this placement is pinned to modelVersion / modelRevision.
+  /// `strong` never drifts. `weak` and `alias_only` may move only when
+  /// allowVersionDrift is also true. The default is `strong`, so a row that
+  /// predates the column cannot drift.
+  versionPinStrength      String    @default("strong")
+  allowVersionDrift       Boolean   @default(false)
+  /// The benchmark a pass was measured against. Null until a gate is run.
+  /// Changing it changes what the pass means, so an enabled row cannot.
+  qualityBenchmarkVersion String?
+  /// When that benchmark was last run. A re-check of the same benchmark may
+  /// update this while the deployment stays enabled.
+  qualityLastVerifiedAt   DateTime?
   /// Capability declarations, as the candidate filter would read them.
   capabilities           Json?
   enabled                Boolean   @default(false)
@@ -5859,6 +5893,7 @@ model ModelDeployment {
   routingAttempts                RoutingAttempt[]
   availabilityObservations       AvailabilityObservation[]
   routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+  priceSnapshots                 DeploymentPriceSnapshot[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
@@ -5991,6 +6026,10 @@ model RoutingIdentityManifestEntry {
   capabilities           String
   qualityGateStatus      String
   qualityGateExpiresAt   DateTime?
+  versionPinStrength      String
+  allowVersionDrift       Boolean
+  qualityBenchmarkVersion String?
+  qualityLastVerifiedAt   DateTime?
   deploymentEnabled      Boolean
 
   /// The endpoint it was served from, as it stood.
@@ -6050,6 +6089,13 @@ model DeploymentCacheAffinity {
   modelDeploymentId String
   lastServedAt      DateTime
   servedTurns       Int      @default(1)
+  /// How many times capacity displaced this placement. Null means no
+  /// displacement has been recorded, which is not epoch zero. Appendix R1.
+  /// Dark with the rest of this table.
+  affinityEpoch     Int?
+  /// The instant a displacement is allowed again. Null means no window was
+  /// supplied. It is not a duration this schema chose.
+  holdDownUntil     DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -6167,6 +6213,10 @@ model CredentialBinding {
   /// come before that, not after.
   providerBudgetAccountId String?
   status                  String   @default("disabled")
+  /// When the referenced secret was last rotated. Null means not recorded.
+  lastRotatedAt           DateTime?
+  /// When the referenced secret expires. Null is not an invented lifetime.
+  expiresAt               DateTime?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -6299,9 +6349,10 @@ model QuotaCapacityState {
 /// One availability observation, written once and never rewritten.
 ///
 /// Dark. The canonical record the deployment, endpoint and provider rollups
-/// are derived from -- one event in, three summaries out, all of them
-/// idempotent on `eventId` so a projection that failed half way can be run
-/// again without double-counting.
+/// are derived from. `eventId` stops the same observation being inserted
+/// twice. Which grain has already applied it is
+/// `AvailabilityRollupApplication`, not this row. Nothing writes either
+/// table yet.
 ///
 /// Today the same fact is written twice in two shapes: real traffic increments
 /// `ProviderHealthState` and a probe inserts a `ProviderProbeResult`, with no
@@ -6348,6 +6399,106 @@ model AvailabilityObservation {
   @@index([providerEndpointId, observedAt])
   @@index([modelDeploymentId, observedAt])
   @@index([source, observedAt])
+
+  rollupApplications AvailabilityRollupApplication[]
+}
+
+/// One grain of one observation, applied at most once.
+///
+/// Dark. The observation row stops a second insert of the same event. It does
+/// not say whether the deployment rollup, the endpoint rollup, and the
+/// provider rollup have each been updated. This row is that record. Re-running
+/// a projection is safe only when it refuses a triple already stored here.
+/// Nothing writes it yet.
+model AvailabilityRollupApplication {
+  id        String   @id @default(cuid())
+  /// The observation's event id, not its row id.
+  eventId   String
+  /// deployment | endpoint | provider. The same list as the observation grains.
+  grain     String
+  /// The deployment id, endpoint id, or provider name this grain names.
+  targetId  String
+  appliedAt DateTime @default(now())
+
+  observation AvailabilityObservation @relation(fields: [eventId], references: [eventId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([eventId, grain, targetId])
+}
+
+/// A deployment-grain price observation.
+///
+/// Dark. This is not `ChatCreditReservation.pricingSnapshot`, and nothing
+/// inserts a row. `amount` is one named rate of `currency` per million
+/// tokens. Unknown knowledge has no amount. A stated estimate or a
+/// verified price names its amount, currency, source and effective time,
+/// and the amount must fit DECIMAL(20,8) without rounding. The two applied
+/// flags cannot be true: using the row for routing or for a credit charge
+/// is a separate approval.
+model DeploymentPriceSnapshot {
+  id                 String    @id @default(cuid())
+  modelDeploymentId  String
+  /// Copied at record time. The deployment row can be renamed later.
+  logicalModelId     String
+  /// unknown | estimate | verified
+  knowledge          String
+  /// input | output | cache_read | cache_write
+  rateKind           String
+  /// per_million_tokens
+  unit               String
+  amount             Decimal?  @db.Decimal(20, 8)
+  currency           String?
+  source             String?
+  effectiveAt        DateTime?
+  appliedToRouting   Boolean   @default(false)
+  appliedToBilling   Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  deployment ModelDeployment @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([modelDeploymentId, effectiveAt])
+}
+
+/// One internal experiment's cost ceiling, in micro-USD.
+///
+/// Not a credit balance and not a provider-wide budget. There is no default
+/// amount: a missing row is not permission to call a provider. `spentMicroUsd`
+/// is cost already kept. `reservedMicroUsd` is the sum of holds whose cost is
+/// not final. Settlement may record more than the limit, because that cost
+/// has already been incurred; the next reservation then fails.
+model PinnedDeploymentExperiment {
+  id               String   @id
+  limitMicroUsd    BigInt
+  spentMicroUsd    BigInt   @default(0)
+  reservedMicroUsd BigInt   @default(0)
+  createdAt        DateTime @default(now())
+
+  holds PinnedDeploymentExperimentHold[]
+}
+
+/// One call's claim on an experiment ceiling.
+///
+/// `deploymentId` is the identifier returned when the placement row was
+/// stored. It is not a relation. A relation here would make ordinary nested
+/// reads look like reads of the still-dark deployment table.
+///
+/// `released` means the provider call was confirmed not to have started.
+/// `occupied` keeps the reservation after dispatch when the cost is unknown.
+/// `settled` is a measured cost. Unknown is not stored as zero.
+model PinnedDeploymentExperimentHold {
+  id               String    @id
+  experimentId     String
+  deploymentId     String
+  logicalModelId   String
+  reservedMicroUsd BigInt
+  settledMicroUsd  BigInt?
+  /// held | settled | released | occupied
+  status           String
+  createdAt        DateTime  @default(now())
+  closedAt         DateTime?
+
+  experiment PinnedDeploymentExperiment @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([experimentId, status])
 }
 
 /// One separately approved, content-free Prompt Refiner staging shadow.

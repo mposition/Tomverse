@@ -6,8 +6,14 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { AiModel } from "@/lib/models";
 import {
+  decideOpenRouterDispatch,
+  DeploymentHostRefusal,
+  openRouterPinnedFetch,
+  OpenRouterDispatchError,
   PROVIDER_API_CONFIGURATION,
+  readOpenRouterRecipientAllowlist,
   resolveProviderApiKey,
+  type OpenRouterRequest,
 } from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
@@ -27,7 +33,10 @@ const runtimeConfiguration = (model: AiModel) => {
   };
 };
 
-export const getActiveAiModel = (model: AiModel) => {
+export const getActiveAiModel = (
+  model: AiModel,
+  openRouterRequest?: OpenRouterRequest
+) => {
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
     case "openai":
@@ -60,5 +69,28 @@ export const getActiveAiModel = (model: AiModel) => {
       );
     case "zhipu":
       return createOpenAI(configuration).chat(model.apiModel);
+    case "deepinfra":
+    case "together":
+    case "sail":
+      // Inference hosts (ADR v2.1 provider pool). A catalogue model must not
+      // call them: the price on the catalogue row is the direct connection's
+      // price, and the destination row for these hosts is unproven. A hosted
+      // copy is a deployment, and this function is the catalogue adapter.
+      throw new DeploymentHostRefusal();
+    case "openrouter": {
+      // Emergency aggregator. The pin is applied inside the fetch. The
+      // allowlist is the operator environment variable, not the request.
+      // A missing request throws before any client is built. The gate lives
+      // in lib/modelRegistryShared.ts, which this file already imports.
+      if (!openRouterRequest) throw new OpenRouterDispatchError("OPENROUTER_ADMISSION_REQUIRED");
+      const allowlist = readOpenRouterRecipientAllowlist();
+      if (!allowlist.ok) throw new OpenRouterDispatchError(allowlist.code);
+      const decision = decideOpenRouterDispatch(openRouterRequest, allowlist.allowlist);
+      if (!decision.ok) throw new OpenRouterDispatchError(decision.code);
+      return createOpenAI({
+        ...configuration,
+        fetch: openRouterPinnedFetch(decision.pin, fetch),
+      }).chat(model.apiModel);
+    }
   }
 };

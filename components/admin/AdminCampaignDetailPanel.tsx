@@ -25,9 +25,8 @@ import { adminEmailCampaignDetailMessages } from "@/lib/adminMessages/emailCampa
  *    is wrong about somebody who did the work.
  *  - **Approving asks what is being approved.** The language list goes into the
  *    request, so an approval cannot be inherited by a campaign that has since
- *    changed which languages it sends in.
- *  - **`ADMIN_APPROVAL_REQUIRED` is the expected first answer**, not a failure.
- *    The request is recorded and waits for a second administrator.
+ *    changed which languages it sends in. The person who read the copy approves
+ *    it; the audit log is the record.
  *
  * Everything is re-read from the server after every action rather than patched
  * locally: the gates are computed from rows this screen does not hold, and a
@@ -249,12 +248,6 @@ export function AdminCampaignDetailPanel({
       unknown
     > | null;
     if (!response.ok) {
-      // Recorded and waiting for a second administrator: the ordinary first
-      // answer for the one two-person action on this page.
-      if (payload?.code === "ADMIN_APPROVAL_REQUIRED") {
-        dispatchAppToast(m.toast.approvalRecorded, "success");
-        return null;
-      }
       throw new Error(
         typeof payload?.error === "string" ? payload.error : m.toast.refused
       );
