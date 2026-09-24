@@ -1,12 +1,13 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 5
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 6
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 7
+approvedBy: mposition · approvedAt: 2026-09-25 · 정책 버전: 8
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -17,6 +18,7 @@ approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 7
 | 5 | 2026-09-24 mposition | #1662 배포 `4265e173422915516eee0e4b9dda3bc519ca47c3` 뒤, J의 운영 read-back을 위해 reconciliation 코드 래치를 켠다. 환경 값이 정확히 `enabled`일 때만 apply가 열린다. 이 버전은 revision을 쓰지 않고 `amux_authority`와 현황판 동결을 열지 않는다. |
 | 6 | 2026-09-24 mposition | 운영자가 2026-09-24에 적은 E pilot 세 카드(`OPS-JOBS-DELAYED-01`, `MOBILE-HEADER-NARROW-01`, `STARTER-LAYOUT-01`)를 위해 promotion 코드 래치를 켠다. 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`일 때만 apply가 열린다. 이 버전은 카드를 승격하지 않고, 환경 변수를 설정하지 않으며, worker 실행과 `amux_authority`를 열지 않는다. |
 | 7 | 2026-09-24 mposition | backlog 추천 풀과 카드별 사람 승인, 보류, 거절. 풀은 새 카드 status가 아니다. 코드 래치는 끈 채로 둔다. 용량 행을 넣지 않고, 자동 승격과 worker 실행을 열지 않는다. |
+| 8 | 2026-09-25 mposition | 제한 자동 승격의 졸업 조건과 꺼진 게이트. 사람 결정 20건과 14일, 1회 US$5·24시간 US$15·30일 US$100, 자동 경로의 전역 3과 worker당 1, 사전 승인 7일, 카드 하나당 트랜잭션 하나, 중대 위반 1건 또는 15분 안 결과 불명 2건. 코드 래치는 끈 채로 둔다. 용량 행을 넣지 않고 worker 실행을 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -445,7 +447,7 @@ Apply 성공 후 staging 또는 production에서 증명해야 하는 불변식�
 - legal retention period의 확정
 
 각 항목은 해당 단계의 별도 정책·독립 검토·운영자 승인이 필요하다.
-버전 3은 그중 수동 1~3개 promotion pilot만 연다. 버전 7은 추천 풀과 카드 하나의 사람 결정만 연다. 자동 승격과 나머지 항목은 그대로다.
+버전 3은 그중 수동 1~3개 promotion pilot만 연다. 버전 7은 추천 풀과 카드 하나의 사람 결정만 연다. 버전 8은 제한 자동 승격의 졸업 조건과 꺼진 게이트만 정하고 그 게이트를 켜지 않는다. 나머지 항목은 그대로다.
 
 ## Manual promotion pilot
 
@@ -567,3 +569,76 @@ kill switch는 환경 값이 정확히 `enabled`가 아니거나 코드 래치�
 완료로 세려면 구현이 다음을 테스트로 보여야 한다. 용량 미설정과 가득 참의 거절, 풀 밖 카드와 바뀐 brief digest와 의존성 미충족의 fail-closed, snapshot이 카드 status를 만들지 않음, 승인만 `todo`가 되고 보류와 거절은 `backlog`와 사유와 `reviewAfter`를 남김, 추천 결정의 병렬 요청이 분모를 넘기지 않음, CAS 실패와 rollback, 감사 사슬, `outcome_unknown` read-back, 승인 없는 `todo` 증가 0, attempt·delivery·route 증가 0.
 
 버전 7은 자동 승격의 graduation 기준, 비용 상한, worker 격리, 자동 승격 kill switch를 정하지 않는다. 그 항목이 없는 동안 자동 승격은 닫혀 있다.
+
+## Limited automatic promotion
+
+버전 8은 사전 승인된 카드 하나의 제한 자동 승격 게이트다. 자동 승격은 `AmuxWorkItem.status`가 아니다. 카드는 소비 전까지 `backlog`다. 이 버전은 그 소비를 실행하지 않는다. `TOMVERSE_AMUX_EXECUTE`, `TOMVERSE_AMUX_EXECUTION_API_ENABLED`, worker catalog, executor command를 읽거나 쓰지 않는다. 사용자 크레딧, Chat, Memory, 결제, 외부 게시를 건드리지 않는다. 버전 3 수동 pilot과 버전 7 사람 결정 경로는 그대로다. 버전 7의 추천 코드 래치를 이 버전이 켜지 않는다.
+
+구현은 이 절의 독립 검토가 끝난 뒤에만 시작한다. 이 파일에 승인을 적은 것은 그 검토 기록이 아니다.
+
+### Graduation
+
+졸업은 두 조건을 함께 요구한다. 사람 결정이 20건 이상이고, 그 결정들의 `createdAt` 최댓값에서 최솟값을 뺀 간격이 14일 이상이다. 14일은 `14 * 24`시간이고 경계는 포함한다. 20건이어도 간격이 14일보다 짧으면 거절한다. 간격이 14일 이상이어도 20건보다 적으면 거절한다. 거절 코드는 `graduation_unmet`이다.
+
+사람 결정은 `AmuxRecommendationDecision` 가운데 `decision`이 `approve`이고 `status`가 `consumed`인 행만 센다. 보류, 거절, 만료, `outcome_unknown`은 세지 않는다. 버전 3 수동 pilot의 `AmuxBoardPromotionApproval`은 세지 않는다. 자동 승격 소비 행은 세지 않는다. 이 버전은 그 20건을 만들지 않는다.
+
+### Cost caps
+
+비용은 자동 승격 경로의 운영 USD다. 사용자 크레딧이 아니고, 버전 7 추천 경로의 0건 provider 예산이 아니며, `CHAT_COST_GUARDRAIL_*`와 섞지 않는다. 단위는 USD cent 정수다.
+
+- 1회 상한은 500 cent, 곧 US$5.00이다. 한 자동 승격 트랜잭션이 기록할 수 있는 금액은 이 값 이하다.
+- 24시간 상한은 1,500 cent, 곧 US$15.00이다. 창은 DB 시계로부터 뒤로 24시간이고 경계는 포함이다.
+- 30일 상한은 10,000 cent, 곧 US$100.00이다. 30일은 `30 * 24`시간이다. 달력의 월이 아니다.
+
+상한을 넘는 제안은 카드를 쓰기 전에 `cost_exceeded`로 거절한다. 그 사전 거절 자체는 저장된 중대 위반이 아니다. 이미 기록된 합이 상한을 넘는 read-back은 중대 위반 `cost_exceeded`다. 이 버전은 provider를 호출하지 않고 비용 행을 쓰지 않는다. 기록된 합은 0이다.
+
+### Worker isolation
+
+자동 경로의 전역 상한은 3이다. 세는 카드는 `archivedAt`이 null이고 status가 `todo` 또는 `doing`이며 자동 승격 소비 행이 있는 카드다. 이미 3장이면 다음 제안은 카드를 쓰기 전에 `auto_wip_full`로 거절한다. 그 사전 거절은 중대 위반이 아니다. 이 3은 `AmuxRecommendationCapacity.wipLimit`이 아니다. 버전 7의 용량 분모, 분자, 시점은 그대로다. `evaluateLockedAmuxWip`은 바꾸지 않는다. 용량 행이 없거나 비활성이거나 `wipLimit`이 null이면 자동 경로도 `capacity_unconfigured`로 거절한다. `분자 + 1 <= wipLimit`이 아니면 `capacity_full`로 거절한다. 그 두 거절은 중대 위반이 아니다. 이 버전은 용량 행을 넣지 않는다.
+
+worker당 상한은 1이다. 이 버전은 owner를 세팅하지 않고 worker catalog를 읽지 않는다. worker id가 있는 요청은 `worker_not_admitted`로 거절한다. 그 사전 거절은 중대 위반이 아니다. 이 상한은 worker 슬롯을 만들지 않는다. read-back에서 같은 owner의 자동 활성 카드가 2장 이상이면 중대 위반 `worker_cap_exceeded`다. read-back에서 자동 활성 카드가 4장 이상이면 중대 위반 `global_wip_exceeded`다.
+
+### Grant, audit, and one card
+
+사전 승인은 버전 7의 승인 소비가 아니다. grant는 카드 status, owner, attempt, delivery, route decision을 바꾸지 않는다. 한 grant는 카드 하나다. 같은 카드의 active grant가 이미 있으면 두 번째는 거절한다. `expiresAt`은 DB 시계의 `grantedAt`에 7일을 더한 값이다. 7일은 `7 * 24`시간이다. 자동 소비는 `status`가 `active`이고 `expiresAt`이 트랜잭션 시계보다 미래인 grant가 있을 때만 가능하다. 없거나 만료면 `grant_missing`이다. 소비는 그 grant를 같은 트랜잭션에서 `consumed`로 바꾼다.
+
+자동 소비는 카드 하나와 트랜잭션 하나다. 그 트랜잭션이 advisory lock `tomverse-amux-recommendation:queue`, 버전 7 필터 재검사, 용량 재검사, 졸업 재검사, grant 재검사, 비용 재검사, 전역 상한 재검사, halt 재검사, 카드 쓰기, grant 소비, 소비 행, 사람 감사를 함께 한다. 버전 7과 같은 카드 쓰기만 허용한다. owner, attempt, delivery, route decision을 만들지 않는다. 카드 둘을 한 요청에 넣으면 거절한다.
+
+grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7일 수명과 다른 시계다.
+
+감사 action은 `amux.auto_grant.prepared`, `amux.auto_grant.expired`, `amux.auto_promotion.consumed`, `amux.auto_promotion.outcome_unknown`, `amux.auto_promotion.halted`다. actor는 요청을 보낸 사람이다. 시스템 actor는 없다. metadata에는 brief, 제목, source key, 자유 텍스트를 넣지 않는다. 허용 값은 grant id, consumption id, snapshot id, digest, cent 금액, 개수, 위반 코드뿐이다.
+
+### Kill switch
+
+출고 스위치는 둘이다. 환경 변수 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치가 true인 것이다. 버전 8이 출고하는 코드 래치는 false다. 이 버전은 그 환경 변수를 설정하지 않는다. 래치가 꺼져 있거나 환경 값이 `enabled`가 아니면 grant 쓰기와 자동 소비 모두 트랜잭션을 열기 전에 `apply_disabled`로 거절한다. HTTP route는 래치를 인자로 받지 않는다.
+
+추가 정지는 저장된 halt다. `clearedAt`이 null인 halt가 있으면 카드를 쓰기 전에 `auto_halted`로 거절한다. halt를 여는 조건은 둘 중 하나다. 저장된 중대 위반이 1건 이상이거나, 자동 경로의 `outcome_unknown`이 DB 시계로부터 뒤로 15분 안에 2건 이상인 것이다. 15분은 `15 * 60`초이고 경계는 포함한다. 결과 불명 1건은 halt를 열지 않는다. 간격이 15분을 넘는 2건은 halt를 열지 않는다.
+
+중대 위반 코드는 `cost_exceeded`, `worker_cap_exceeded`, `global_wip_exceeded`, `unapproved_todo`, `lifecycle_write`뿐이다. `unapproved_todo`는 grant 소비 없이 `todo`가 된 자동 경로 카드다. `lifecycle_write`는 이 경로가 attempt, delivery, route decision을 만든 것이다. 졸업 미달, 용량 미설정, 용량 가득 참, grant 없음, 사전 비용 거절은 중대 위반이 아니다. 사람의 재개 writer는 이 버전에 없다.
+
+### Storage and checklist
+
+테이블은 `AmuxRecommendationAutoGrant`, `AmuxRecommendationAutoConsumption`, `AmuxRecommendationAutoCostEntry`, `AmuxRecommendationAutoHalt`다. 이 버전의 공개 route는 네 테이블에 쓰지 않는다. 공개 route가 `apply_disabled`로 거절한 뒤의 트랜잭션 본문은 테스트가 직접 부를 수 있다. 그 본문 호출은 공개 route의 래치 판정을 대신하지 않는다. 카드 status enum에 값을 추가하지 않는다. 보존 기간은 미정이고 삭제 job은 없다. 고객 export에 넣지 않는다.
+
+설계 체크리스트는 이렇게 닫는다.
+
+1. 조합 대상은 사전 승인된 backlog 카드 하나의 제한 자동 승격뿐이다. Chat, Memory, 금융, 사용자 크레딧, attempt, delivery, route decision은 비접촉이다.
+2. 고객 `platformProductKey`는 없다. 시스템 actor는 없다. 권한은 기존 owner와 최근 step-up이다.
+3. 되돌릴 수 없는 외부 게시, 삭제, 결제는 없다. `backlog`에서 `todo`로의 전이는 졸업, grant, 용량, 비용, 격리, halt를 같은 트랜잭션에서 통과한 소비에서만 일어난다. 이 버전은 그 소비의 공개 경로를 열지 않는다.
+4. Guard 입력은 졸업 20건과 14일, grant 만료, 버전 7 필터, 용량 재계산, USD cent 상한, 전역 3, worker id 거절, halt, 운영 스위치, 코드 래치다. LLM 판정은 없다.
+5. 모델 입력 경로는 없다.
+6. 새 자격증명은 없다. 로그와 감사에 brief, 제목, source key를 넣지 않는다.
+7. 위 네 테이블만 추가한다. 용량 행의 insert와 update writer는 없다. 추천 분자는 바꾸지 않는다.
+8. 비용 namespace는 자동 경로의 USD cent다. 상한은 500, 1,500, 10,000이다. 사용자 크레딧과 섞지 않는다. 이 버전은 비용 행을 쓰지 않는다.
+9. 스위치는 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`인 것과 코드 래치다. 출고 래치는 false다. 중대 위반 1건 또는 15분 안 결과 불명 2건은 halt다. 환경 값의 해제는 사람의 조작이고, 래치를 다시 켜는 것과 halt를 닫는 것은 별도 버전이다.
+10. 멱등 키는 consumption id다. `outcome_unknown` 뒤에는 read-back만 한다.
+11. 외부 worker와 모델이 없으므로 S0 실측과 DPA 행은 없다.
+12. 위 감사 action의 actor는 사람이다.
+13. 고객 개인정보를 새로 저장하지 않는다. 국외 이전을 추가하지 않는다. 중국 본토 경로를 만들지 않는다.
+14. 이 버전의 차단 기준은 졸업 증거를 만들지 않은 `todo` 증가, attempt·delivery·route 증가, 실행 스위치 변경, 용량 행의 자동 삽입, 비용 상한을 넘는 기록이다.
+15. 계산은 본 앱 route다. LLM과 외부 텍스트를 다루지 않는다. 별도 서비스와 게시 권한은 없다.
+16. 기록은 위 네 테이블이다. 코드 변경 PR을 졸업 증거로 쓰지 않는다. 사람 결정 20건과 14일은 DB의 소비 행으로만 센다.
+
+완료로 세려면 구현이 다음을 테스트로 보여야 한다. 출고 래치가 false여서 공개 경로의 grant, 소비, 비용, halt, 카드 쓰기가 0인 것. 사람 결정 19건의 거절, 20건이어도 14일보다 짧은 간격의 거절, 20건이고 간격이 14일 이상일 때만 졸업 판정이 통과하는 것. 501 cent의 거절, 24시간과 30일 합산 상한의 거절. 자동 활성 3장에서 다음 카드의 거절. worker id가 있는 요청의 거절. grant가 없거나 만료된 카드의 거절과, grant가 카드 status를 바꾸지 않는 것. 한 요청의 카드 둘의 거절. 중대 위반 1건의 halt, 15분 안 결과 불명 2건의 halt, 결과 불명 1건은 halt가 아닌 것. 열린 halt의 카드 쓰기 거절. 버전 7 추천 래치는 false로 남는 것. attempt, delivery, route decision의 증가 0. `TOMVERSE_AMUX_EXECUTE`를 읽거나 쓰지 않는 것.
+
+버전 8은 사람 결정 20건과 14일을 측정된 사실로 만들지 않는다. 그 행이 없는 동안 졸업 판정은 거절이다. 코드 래치를 켜는 것은 별도 버전이다.
