@@ -1,0 +1,49 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat01-progress-evidence-v1",
+  "round": 2,
+  "reviewer": "cursor",
+  "toolVersion": "Cursor CLI 2026.09.23-86fc751",
+  "command": ["cursor-agent", "--print", "--mode", "plan", "--sandbox", "disabled", "--trust", "--output-format", "json", "--model", "grok-4.7-xhigh", "Review the package and governing policy section 8; return blocked if the stale task contract cannot be satisfied without violating policy."],
+  "sandboxSignature": "cursor-cli subscription plan @ H:\\Project\\tomverse-chat01-progress-evidence-20260925 model:grok-4.7-xhigh sandbox:disabled-windows",
+  "preflight": null,
+  "overrides": ["skip-preflight: operator-approved for this review", "sandbox-disabled: Windows limitation; review remained plan-mode and external provider/API-key environment was removed"],
+  "model": "grok-4.7-xhigh",
+  "mode": "plan",
+  "account": "wdclub@hotmail.com",
+  "sessionId": "e7340ee4-713f-4ef4-9c4f-f30a66c14d59",
+  "requestId": "07c7293e-abad-4686-9023-e44bb3b511a3",
+  "durationMs": 492717,
+  "durationApiMs": 492717,
+  "usage": {"tool": "cursor-cli", "inputTokens": 231678, "outputTokens": 35783, "cacheReadTokens": 1207040, "cacheWriteTokens": 0},
+  "receivedAt": "2026-09-25T06:43:21.6185552+10:00",
+  "capture": {
+    "source": "operator-captured Cursor CLI outer result JSON",
+    "outerResultType": "result",
+    "outerResultSubtype": "success",
+    "outerResultIsError": false,
+    "sourceByteLength": 3536,
+    "sourceSha256": "sha256:14f56039099f0e6374df83a179ee3d042c99f9a9e7d3578c22690eb74f3ed8a3",
+    "repositoryCapturePath": "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round2.cursor-result.captured.json",
+    "repositoryCaptureByteLength": 3535,
+    "repositoryCaptureSha256": "sha256:d924290803184677ca4dd97c2f14ce2f8e0ffc4609d6830edc8224e7ca93d564",
+    "repositoryCaptureNormalization": "The source ended in CRLF; the repository capture is the same parsed JSON document with the final line ending normalized to LF.",
+    "resultExtraction": {"resultUtf16Length": 2050, "verdictJsonStartUtf16": 194, "method": "Three Korean narration fragments precede the JSON verdict; the object was parsed without altering its fields."},
+    "commandLineCaptured": true,
+    "environment": "Cursor subscription login; CURSOR_API_KEY and named external provider/API-key environment variables were removed before launch."
+  },
+  "verdict": {
+    "taskId": "chat01-progress-evidence-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:2323f916ee23b78b7ef2e0d255211698715b485d558ae79bc97e595ead2ce47c",
+    "conclusion": "blocked",
+    "findings": [{
+      "location": "docs/ops/cross-review/packages/chat01-progress-evidence-v1/task.json:11",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "v1 수락 순서는 제품 receipt retention/privacy와 content-free product store를 paid confirmatory와 사람 disposition보다 앞에 두어 정책 8절 4항과 충돌하고, 진행 문서는 그 정책을 따르므로 이 기준은 소스를 정책 위반으로 바꾸지 않고는 충족되지 않는다.",
+      "reproduction": "docs/policy/prompt-refiner-observability.md 214행은 품질·비용·지연 증거가 승인된 뒤에만 제품 adapter와 서버 receipt writer를 붙이고, 208-209행은 UI가 없으면 disposition을 만들지 않으며, 215행은 제안형 UI가 실제로 제공될 때만 disposition API를 연결한다. task.json은 product receipt retention/privacy와 store를 paid confirmatory와 사람 disposition보다 앞에 두지만, 진행 문서는 별도 승인 confirmatory와 사람 release disposition 뒤에만 제품 adapter와 receipt writer/store를 두고 그 후 UI disposition과 Router shadow를 둔다. task 순서를 적용하면 정책을 위반하므로 사람이 task 수락 순서를 폐기하거나 개정해야 한다."
+    }],
+    "nextAction": "사람이 v1 수락 순서를 정책 8절 4항에 맞게 폐기하거나 개정하고, 진행 문서의 confirmatory·사람 disposition 뒤 retention과 product receipt store 순서는 유지한다."
+  }
+}

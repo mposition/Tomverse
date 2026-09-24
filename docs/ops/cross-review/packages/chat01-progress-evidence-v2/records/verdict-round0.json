@@ -1,0 +1,43 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat01-progress-evidence-v2",
+  "round": 0,
+  "reviewer": "cursor",
+  "toolVersion": "Cursor CLI 2026.09.23-86fc751",
+  "command": ["cursor-agent", "--print", "--mode", "plan", "--sandbox", "disabled", "--trust", "--output-format", "json", "--model", "grok-4.7-xhigh", "Review the successor package, lineage, inherited finding and governing policy section 8; return one digest-bound verdict."],
+  "sandboxSignature": "cursor-cli subscription plan @ H:\\Project\\tomverse-chat01-progress-evidence-20260925 model:grok-4.7-xhigh sandbox:disabled-windows",
+  "preflight": null,
+  "overrides": ["skip-preflight: operator-approved for this review", "sandbox-disabled: Windows limitation; review remained plan-mode and external provider/API-key environment was removed"],
+  "model": "grok-4.7-xhigh",
+  "mode": "plan",
+  "account": "wdclub@hotmail.com",
+  "sessionId": "7dc3e4f6-fba5-42f7-bf71-039ad182af8a",
+  "requestId": "fc57c561-6374-414d-802b-8f45a7abc899",
+  "durationMs": 533881,
+  "durationApiMs": 533881,
+  "usage": {"tool": "cursor-cli", "inputTokens": 458473, "outputTokens": 30598, "cacheReadTokens": 3683968, "cacheWriteTokens": 0},
+  "receivedAt": "2026-09-25T06:56:00.4452912+10:00",
+  "capture": {
+    "source": "operator-captured Cursor CLI outer result JSON",
+    "outerResultType": "result",
+    "outerResultSubtype": "success",
+    "outerResultIsError": false,
+    "sourceByteLength": 1337,
+    "sourceSha256": "sha256:2ec830db019496a0b3890313eef36e030c805dc0d74e65319803fefe6e59d44a",
+    "repositoryCapturePath": "docs/ops/cross-review/packages/chat01-progress-evidence-v2/records/review-round0.cursor-result.captured.json",
+    "repositoryCaptureByteLength": 1336,
+    "repositoryCaptureSha256": "sha256:e101d5d9b02068a5482fdc89970436797006ab8ee5e200ab53b9c2184cb1e4ea",
+    "repositoryCaptureNormalization": "The source ended in CRLF; the repository capture is the same parsed JSON document with the final line ending normalized to LF.",
+    "resultExtraction": {"resultUtf16Length": 584, "verdictJsonStartUtf16": 236, "method": "Four Korean narration fragments precede the exact JSON suffix; the verdict was parsed without altering its fields."},
+    "commandLineCaptured": true,
+    "environment": "Cursor subscription login; CURSOR_API_KEY and named external provider/API-key environment variables were removed before launch."
+  },
+  "verdict": {
+    "taskId": "chat01-progress-evidence-v2",
+    "round": 0,
+    "reviewedDigest": "sha256:beac50cd0ec18841e0c9da618b63d10c44c14912dfa9a3c17a13443aeeb3a19f",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "v1의 stale 수락 순서는 그대로 보존된 채 successor 계약에서 폐기됐고, 진행 문서는 정책 8절 4-6의 순서와 관측 한계를 지키며 readiness-estimate-v3를 planning-estimate-v2와 직접 비교하지 않으므로 이 digest를 승인한다."
+  }
+}
