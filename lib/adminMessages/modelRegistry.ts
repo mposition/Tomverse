@@ -10,6 +10,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       validationPassed: "Model configuration is structurally valid.",
       saveFailed: "Failed to save model.",
       addedAndAdopted: "Model added, and its discovery item moved to validation.",
+      replacedAndAdopted:
+        "Model added, the chosen model was disabled, and its discovery item moved to validation.",
       added: "Model added to the DB registry.",
       updated: "Model registry updated.",
       archiveConfirm: (name: string) =>
@@ -88,6 +90,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "Why this model is being adopted now — kept in the approval record",
       classRequired:
         "Choose the sale class yourself before saving — the default is a value nobody decided.",
+      classSuggested:
+        "Calculated from the price as the lowest class and credit weight. Confirm before saving.",
       reasoningSuggested:
         "Proposed from the provider's data, not read from it — confirm it before saving.",
       confirmReasoning: "Confirm this value",
@@ -104,6 +108,11 @@ export const adminModelRegistryMessages = defineAdminMessages({
       copyProposal: "Copy",
       proposalCopied: "Copied the profile proposal.",
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
+      replaceTitle: "Replace an existing model",
+      replaceHelp:
+        "Replace and save disables the chosen model and records this adoption as what replaces it. The new model stays coming soon until validation finishes, so it is not offered in the picker until then.",
+      replaceLabel: "Model to replace",
+      replaceNone: "Do not replace a model",
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -193,6 +202,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       validate: "Validate",
       restoreAndSave: "Restore and save",
       saveModel: "Save model",
+      replaceAndSave: "Replace and save",
     },
   },
   ko: {
@@ -203,6 +213,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       validationPassed: "모델 구성이 구조적으로 유효합니다.",
       saveFailed: "모델을 저장하지 못했습니다.",
       addedAndAdopted: "모델을 추가했고, 발견 항목을 검증 단계로 옮겼습니다.",
+      replacedAndAdopted:
+        "모델을 추가하고 선택한 모델을 껐습니다. 발견 항목은 검증 단계로 옮겼습니다.",
       added: "DB 레지스트리에 모델을 추가했습니다.",
       updated: "모델 레지스트리를 업데이트했습니다.",
       archiveConfirm: (name: string) =>
@@ -280,6 +292,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       reasonPlaceholder: "왜 지금 이 모델을 편입하는지 — 승인 기록에 남습니다",
       classRequired:
         "판매 등급을 직접 선택해야 저장됩니다 — 기본값은 아무도 정하지 않은 값입니다.",
+      classSuggested:
+        "가격으로 계산한 가장 낮은 등급과 크레딧입니다. 확정해야 저장됩니다.",
       reasoningSuggested: "공급자 정보로 제안한 값입니다 — 확정해야 저장됩니다.",
       confirmReasoning: "이 값으로 확정",
       blankRequired: "필수 · 비우면 저장되지 않습니다",
@@ -295,6 +309,11 @@ export const adminModelRegistryMessages = defineAdminMessages({
       copyProposal: "복사",
       proposalCopied: "Profile 제안을 복사했습니다.",
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
+      replaceTitle: "기존 모델 대체",
+      replaceHelp:
+        "대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 검증이 끝나기 전까지 출시 예정이므로 그때까지 선택 목록에 나오지 않습니다.",
+      replaceLabel: "대체할 모델",
+      replaceNone: "대체하지 않음",
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",
@@ -383,6 +402,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       validate: "검증",
       restoreAndSave: "복원 후 저장",
       saveModel: "모델 저장",
+      replaceAndSave: "대체하고 저장",
     },
   },
 });

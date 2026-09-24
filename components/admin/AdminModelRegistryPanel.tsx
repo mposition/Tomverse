@@ -23,7 +23,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { adoptionSaleProposal, blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
 import {
@@ -261,6 +261,10 @@ export function AdminModelRegistryPanel() {
   // non-nullable columns -- so an untouched form would save `standard` and 1,
   // a sale decision nobody made, under a banner calling it undecided.
   const [adoptClassChosen, setAdoptClassChosen] = useState(false);
+  // The existing registry row this adoption retires. Empty means the save
+  // only creates the new model. Set, the same save disables that row and
+  // records this adoption as its replacement.
+  const [adoptReplacesModelId, setAdoptReplacesModelId] = useState("");
   const [worstCaseInputTokens, setWorstCaseInputTokens] = useState<number | null>(null);
   // What this model bills at with its price columns left null, when a pricing
   // profile already covers it. Without it the floor reads empty price fields as
@@ -395,6 +399,7 @@ export function AdminModelRegistryPanel() {
         setAdoptWorkItemId(adoptParam);
         setAdoptReason("");
         setAdoptClassChosen(false);
+        setAdoptReplacesModelId("");
         setAdoptReasoningSuggested(Boolean(data.suggestions?.reasoning));
         setAdoptPriceSuggested(Boolean(data.suggestions?.price));
         setAdoptPriceConfirmed(false);
@@ -704,6 +709,20 @@ export function AdminModelRegistryPanel() {
       inheritedPrice,
     ]
   );
+  const saleProposal = useMemo(
+    () => (adoptWorkItemId && !adoptClassChosen ? adoptionSaleProposal(creditFloor) : null),
+    [adoptWorkItemId, adoptClassChosen, creditFloor]
+  );
+  const adoptSaveBlocked =
+    Boolean(adoptWorkItemId) &&
+    (adoptReason.trim().length < 4 ||
+      !adoptClassChosen ||
+      profileLookupPending ||
+      (adoptReasoningSuggested && !adoptReasoningConfirmed) ||
+      (adoptPriceSuggested && !adoptPriceConfirmed) ||
+      (!profileLookupFailed &&
+        (!isCreditFloor(creditFloor) ||
+          (saleProposal?.creditWeight ?? form.creditWeight) < creditFloor.credits)));
 
   const updateLocation = (
     nextQuery: string,
@@ -753,6 +772,7 @@ export function AdminModelRegistryPanel() {
     setAdoptReasoningConfirmed(false);
     setAdoptPriceSuggested(false);
     setAdoptPriceConfirmed(false);
+    setAdoptClassChosen(false);
   }
 
   const selectProvider = (nextProvider: AiProvider) => {
@@ -783,20 +803,26 @@ export function AdminModelRegistryPanel() {
     }
   };
 
-  const save = async () => {
+  const save = async (replaces = false) => {
     setSaving(true);
     try {
       const isNew = editingId === "new";
       const updatePayload: Partial<FormState> = { ...form };
       delete updatePayload.id;
+      const replacesId =
+        replaces && adoptWorkItemId ? adoptReplacesModelId.trim() : "";
       // Adopting: the create and the queue transition are one act on the
       // server, so the work item travels with the request rather than being
-      // moved by a second call that can fail on its own.
+      // moved by a second call that can fail on its own. Retiring an existing
+      // model travels with that same request: a second call is how the new
+      // row can exist while the old one is still being served.
       const createUrl =
         isNew && adoptWorkItemId
-          ? `/api/admin/models?workItemId=${encodeURIComponent(
-              adoptWorkItemId
-            )}&reason=${encodeURIComponent(adoptReason.trim())}`
+          ? `/api/admin/models?${new URLSearchParams({
+              workItemId: adoptWorkItemId,
+              reason: adoptReason.trim(),
+              ...(replacesId ? { replacesModelId: replacesId } : {}),
+            })}`
           : "/api/admin/models";
       const response = await fetch(
         isNew ? createUrl : `/api/admin/models/${encodeURIComponent(form.id)}`,
@@ -806,22 +832,37 @@ export function AdminModelRegistryPanel() {
           body: JSON.stringify(isNew ? form : updatePayload),
         }
       );
-      const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
+      const data = (await response.json().catch(() => null)) as
+        | {
+            model?: AdminModel;
+            retired?: AdminModel;
+            error?: string;
+          }
+        | null;
       if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.saveFailed);
       setModels((current) => {
-        const next = current.filter((model) => model.id !== data.model!.id);
-        return [...next, data.model!].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        const replacedId = data.retired?.id;
+        const next = current.filter(
+          (model) => model.id !== data.model!.id && model.id !== replacedId
+        );
+        return [...next, data.model!, ...(data.retired ? [data.retired] : [])].sort(
+          (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)
+        );
       });
       setEditingId(null);
       setCopySourceId(null);
       setValidation(null);
       const adopted = isNew && Boolean(adoptWorkItemId);
+      const replaced = Boolean(data.retired);
       setAdoptWorkItemId(null);
       setAdoptUnknowns([]);
       setAdoptReason("");
+      setAdoptReplacesModelId("");
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
       dispatchAppToast(
-        adopted
+        replaced
+          ? m.toast.replacedAndAdopted
+          : adopted
           ? m.toast.addedAndAdopted
           : isNew
             ? m.toast.added
@@ -1050,7 +1091,7 @@ export function AdminModelRegistryPanel() {
                   </p>
                 ) : null}
               </div>
-              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); setAdoptReplacesModelId(""); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="grid gap-6 p-5">
@@ -1123,6 +1164,31 @@ export function AdminModelRegistryPanel() {
                       placeholder={m.adopt.reasonPlaceholder}
                     />
                   </label>
+                  <div className="mt-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
+                      {m.adopt.replaceTitle}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-zinc-400">{m.adopt.replaceHelp}</p>
+                    <label className={`${labelClass} mt-3`}>
+                      {m.adopt.replaceLabel}
+                      <select
+                        value={adoptReplacesModelId}
+                        onChange={(event) => setAdoptReplacesModelId(event.target.value)}
+                        className={inputClass}
+                        data-testid="adopt-replaces-model"
+                      >
+                        <option value="">{m.adopt.replaceNone}</option>
+                        {models
+                          .filter((model) => model.id !== form.id && !model.catalogDeleted)
+                          .map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name} ({model.id})
+                              {model.status !== "enabled" ? ` · ${model.status}` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               ) : null}
               {editingId === "new" ? (
@@ -1185,11 +1251,11 @@ export function AdminModelRegistryPanel() {
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.catalogue.legend}</legend>
                 <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
-                <label className={labelClass}>{m.catalogue.usageClass}<select value={form.usageClass} onChange={(e) => { setField("usageClass", e.target.value as ModelUsageClass); setAdoptClassChosen(true); }} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.classRequired}</span> : null}</label>
-                <label className={labelClass}>{m.catalogue.creditWeight}<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
+                <label className={labelClass}>{m.catalogue.usageClass}<select value={saleProposal?.usageClass ?? form.usageClass} onChange={(e) => { const usageClass = e.target.value as ModelUsageClass; if (saleProposal) { setForm((current) => ({ ...current, usageClass, creditWeight: saleProposal.creditWeight })); } else { setField("usageClass", usageClass); } setAdoptClassChosen(true); }} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{saleProposal ? m.adopt.classSuggested : m.adopt.classRequired}{saleProposal ? <button type="button" onClick={(event) => { event.preventDefault(); setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: saleProposal.creditWeight })); setAdoptClassChosen(true); }} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button> : null}</span> : null}</label>
+                <label className={labelClass}>{m.catalogue.creditWeight}<input type="number" min={1} max={1000} value={saleProposal?.creditWeight ?? form.creditWeight} onChange={(e) => { const credits = Number(e.target.value); if (saleProposal) { setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: credits })); } else { setField("creditWeight", credits); } if (adoptWorkItemId) setAdoptClassChosen(true); }} className={inputClass} /></label>
                 <label className={labelClass}>{m.catalogue.runtimeStatus}<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">{m.catalogue.status.enabled}</option><option value="limited">{m.catalogue.status.limited}</option><option value="disabled">{m.catalogue.status.disabled}</option><option value="coming-soon">{m.catalogue.status.comingSoon}</option></select></label>
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> {m.catalogue.publiclyListed}</label>
-                <label className={`${labelClass} md:col-span-2`}>{m.catalogue.replacementModel}<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">{m.catalogue.none}</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>
+                {adoptWorkItemId ? null : <label className={`${labelClass} md:col-span-2`}>{m.catalogue.replacementModel}<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">{m.catalogue.none}</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>}
                 <label className={labelClass}>{m.catalogue.sortOrder}<input type="number" value={form.sortOrder} onChange={(e) => setField("sortOrder", Number(e.target.value))} className={inputClass} /></label>
                 <label className={`${labelClass} md:col-span-2`}>{m.catalogue.operationalReason}<textarea rows={3} value={form.operationalReason} onChange={(e) => setField("operationalReason", e.target.value)} className={inputClass} placeholder={m.catalogue.operationalReasonPlaceholder} /></label>
                 <label className={`${labelClass} md:col-span-2`}>{m.catalogue.userVisibleNote}<textarea rows={3} value={form.userVisibleNote} onChange={(e) => setField("userVisibleNote", e.target.value)} className={inputClass} placeholder={m.catalogue.userVisibleNotePlaceholder} /></label>
@@ -1237,7 +1303,8 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> {m.actions.validate}</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || profileLookupPending || (adoptReasoningSuggested && !adoptReasoningConfirmed) || (adoptPriceSuggested && !adoptPriceConfirmed) || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
+                {adoptWorkItemId ? <button type="button" onClick={() => void save(true)} disabled={saving || !adoptReplacesModelId || adoptSaveBlocked} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-5 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {m.actions.replaceAndSave}</button> : null}
+                <button type="button" onClick={() => void save(false)} disabled={saving || adoptSaveBlocked || Boolean(adoptWorkItemId && adoptReplacesModelId)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
               </div>
             </div>
           </div>
