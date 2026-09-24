@@ -302,7 +302,7 @@ export async function POST(req: Request) {
       const [predecessor, guestDefault] = await Promise.all([
         prisma.modelRegistryEntry.findUnique({
           where: { id: replacesModelId },
-          select: { catalogDeleted: true, replacementModelId: true },
+          select: { catalogDeleted: true, replacementModelId: true, provider: true },
         }),
         prisma.appSetting.findUnique({
           where: { key: "guestDefaultModelId" },
@@ -311,11 +311,13 @@ export async function POST(req: Request) {
       ]);
       const replacementRefusal = adoptionReplacementRefusal({
         adoptedModelId: id,
+        adoptedProvider: body.provider,
         replacesModelId,
         predecessor: predecessor
           ? {
               catalogDeleted: predecessor.catalogDeleted,
               replacementModelId: predecessor.replacementModelId,
+              provider: predecessor.provider,
               isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
               isGuestDefault: guestDefault?.value === replacesModelId,
             }
@@ -435,7 +437,7 @@ export async function POST(req: Request) {
         `;
         const predecessor = await tx.modelRegistryEntry.findUnique({
           where: { id: replacesModelId },
-          select: { catalogDeleted: true, replacementModelId: true },
+          select: { catalogDeleted: true, replacementModelId: true, provider: true },
         });
         const guestDefault = await tx.appSetting.findUnique({
           where: { key: "guestDefaultModelId" },
@@ -443,11 +445,13 @@ export async function POST(req: Request) {
         });
         const replacementRefusal = adoptionReplacementRefusal({
           adoptedModelId: id,
+          adoptedProvider: body.provider,
           replacesModelId,
           predecessor: predecessor
             ? {
                 catalogDeleted: predecessor.catalogDeleted,
                 replacementModelId: predecessor.replacementModelId,
+                provider: predecessor.provider,
                 isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
                 isGuestDefault: guestDefault?.value === replacesModelId,
               }
