@@ -5167,6 +5167,8 @@ model AmuxWorkItem {
   acceptedSourceRevisionId String?                     @unique
   intakeDrafts    AmuxIntakeDraft[]
   intakeApprovals AmuxIntakeApproval[]
+  recommendationItems AmuxRecommendationSnapshotItem[]
+  recommendationDecisions AmuxRecommendationDecision[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -5456,6 +5458,83 @@ model AmuxBoardPromotionApproval {
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
+}
+
+/// One global runnable ceiling for the recommendation pool.
+/// No row is inserted. A missing row means capacity is unconfigured.
+model AmuxRecommendationCapacity {
+  id        String   @id
+  active    Boolean
+  wipLimit  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Immutable recommendation view. Preparing one does not change a card status.
+model AmuxRecommendationSnapshot {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  scoringVersion          String
+  capacityConfigured      Boolean
+  capacityLimit           Int?
+  capacityOccupied        Int
+  workerCapacity          String
+  classificationCapacity  String
+  itemBindingsDigest      String
+  rowCount                Int
+  includedCount           Int
+  policyVersion           Int
+  preparedAt              DateTime
+  expiresAt               DateTime
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  items                   AmuxRecommendationSnapshotItem[]
+  decisions               AmuxRecommendationDecision[]
+
+  @@index([status, expiresAt])
+}
+
+model AmuxRecommendationSnapshotItem {
+  snapshotId           String
+  workItemId           String
+  ordinal              Int
+  expectedRevision     Int
+  sourceDigest         String?
+  executionBriefDigest String?
+  scoreTotal           Int
+  disposition          String
+  exclusionCode        String?
+
+  snapshot AmuxRecommendationSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workItem AmuxWorkItem               @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([snapshotId, workItemId])
+  @@index([workItemId])
+}
+
+/// One human decision for one snapshot row. Approve is the only card-status write.
+model AmuxRecommendationDecision {
+  id                      String    @id
+  snapshotId              String
+  workItemId              String
+  decision                String
+  status                  String
+  reasonCode              String?
+  reviewAfter             DateTime?
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  requestDigest           String
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  snapshot AmuxRecommendationSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workItem AmuxWorkItem               @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([snapshotId, workItemId])
 }
 
 /// One observed source snapshot. Append-only. The original import is

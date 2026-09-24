@@ -251,6 +251,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "AMUX 카드 승격",
     description: "owner 전용 backlog 카드 1~3건 승격, 꺼진 운영 적용",
   },
+  "amux-board-recommendation": {
+    label: "AMUX 추천 풀",
+    description: "owner 전용 backlog 추천 snapshot, 꺼진 운영 적용",
+  },
   "amux-intake": {
     label: "AMUX 등록",
     description: "owner 전용 명시적 등록 미리보기, 꺼진 운영 적용",

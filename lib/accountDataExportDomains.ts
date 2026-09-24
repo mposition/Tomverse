@@ -361,6 +361,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator approval evidence for a manual card promotion, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxRecommendationSnapshot",
+    publicName: "amux_recommendation_snapshots",
+    prismaModel: "AmuxRecommendationSnapshot",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one recommendation snapshot, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores digests and counts, not a customer prompt. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxRecommendationDecision",
+    publicName: "amux_recommendation_decisions",
+    prismaModel: "AmuxRecommendationDecision",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one recommendation decision, not customer data. The actor id is the administrator who recorded the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a reason code and a review time, not free text and not a customer prompt. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIntakeDraft",
     publicName: "amux_intake_drafts",
     prismaModel: "AmuxIntakeDraft",

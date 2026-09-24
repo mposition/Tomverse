@@ -215,6 +215,7 @@ run(
     // public apply function returns before the transaction while the code
     // latch is false, so this test calls the commit function directly.
     "tests/integration/amux-reconciliation.db.test.ts",
+    "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
