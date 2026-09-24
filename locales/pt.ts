@@ -987,6 +987,7 @@ export const pt = {
         premium: "Premium",
         reasoning: "Raciocínio",
         research: "Pesquisa",
+        frontier: "Frontier",
     },
     onboarding: {
         title: "Compare já modelos gratuitos",

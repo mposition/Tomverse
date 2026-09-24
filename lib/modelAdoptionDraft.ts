@@ -83,6 +83,7 @@ const CLASS_CREDITS: ReadonlyArray<{
     usageClass: "premium-reasoning",
     credits: MODEL_USAGE_CREDIT_WEIGHTS.premiumReasoning,
   },
+  { usageClass: "frontier", credits: MODEL_USAGE_CREDIT_WEIGHTS.frontier },
 ];
 
 export type CreditFloor = {
@@ -284,6 +285,7 @@ export const ADOPTION_USAGE_CLASSES = [
   "premium-reasoning",
   "research",
   "deep-research",
+  "frontier",
 ] as const satisfies readonly ModelUsageClass[];
 
 /**

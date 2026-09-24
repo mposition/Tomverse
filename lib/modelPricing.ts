@@ -286,7 +286,8 @@ export const getModelCostClass = (
     if (
         usageClass === "premium" ||
         usageClass === "premium-reasoning" ||
-        usageClass === "deep-research"
+        usageClass === "deep-research" ||
+        usageClass === "frontier"
     ) {
         return "premium";
     }
