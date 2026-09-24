@@ -236,6 +236,13 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  RoutingAttempt_errorClass_check: {
+    owner: "list",
+    module: "lib/routingAttemptStore.ts",
+    list: "ROUTING_ATTEMPT_ERROR_CLASSES",
+    reason:
+      "Why an attempt ended, as a fixed identifier. Bare TEXT until now: five strings written by four call sites, with nothing stopping a sixth, because nothing branches on it. The provider_* half names the categories the routing layer can already tell apart. 'provider_pre_token_failure' stays because this release still writes it and stored rows already carry it. NULL is allowed by the CHECK and is not a member of the list.",
+  },
   RoutingAttempt_failureLayer_check: {
     owner: "type_only",
     reason:
