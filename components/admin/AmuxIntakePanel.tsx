@@ -85,7 +85,7 @@ export function AmuxIntakePanel() {
         </button>
       </div>
       <p id="amux-intake-register-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
-        {registerReady ? messages.inactive : messages.registerDisabled}
+        {registerReady ? messages.registerPermitted : messages.registerDisabled}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
