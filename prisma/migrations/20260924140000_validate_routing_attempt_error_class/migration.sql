@@ -1,0 +1,37 @@
+-- Validate RoutingAttempt_errorClass_check, added NOT VALID by
+-- 20260922130000_routing_attempt_error_class_vocabulary.
+--
+-- That migration enforces the closed list on every new write and checks no
+-- existing row. VALIDATE is the separate step, and only after a full read of
+-- the table.
+--
+-- On 2026-09-24, after main deploy of that migration (PR #1647), a read-only
+-- transaction against production reported:
+--
+--     constraint present, convalidated = false
+--     definition: errorClass IS NULL OR errorClass = ANY (ARRAY[18 values])
+--                 NOT VALID
+--     NULL is outside the array
+--     RoutingAttempt rows: 680
+--     errorClass NULL: 679
+--     errorClass empty_response: 1
+--     out-of-vocabulary non-NULL rows: 0
+--
+-- The scan had no LIMIT. Zero out-of-vocabulary non-NULL rows is what makes
+-- this migration a formality: VALIDATE re-reads every existing row and fails
+-- if any one of them breaks the CHECK.
+--
+-- ## Why this is a migration and not a psql session
+--
+-- Hand-validating production would leave pg_get_constraintdef() -- whose
+-- output carries the NOT VALID suffix -- disagreeing with what the migration
+-- history builds, and scripts/compare-schema-to-migrations.mjs compares that
+-- string between a shadow database built from these files and the real one.
+--
+-- ## Locking
+--
+-- VALIDATE CONSTRAINT takes SHARE UPDATE EXCLUSIVE, not ACCESS EXCLUSIVE: it
+-- scans the table while reads and writes continue. No row is rewritten.
+
+ALTER TABLE "RoutingAttempt"
+    VALIDATE CONSTRAINT "RoutingAttempt_errorClass_check";
