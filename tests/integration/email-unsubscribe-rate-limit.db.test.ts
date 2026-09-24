@@ -38,6 +38,16 @@ after(async () => {
 
 const SHARED_ORIGIN = "203.0.113.10";
 
+// The limiter stores one count per calendar UTC minute. On 2026-09-24 the
+// subject replay started at 09:42:59.377Z and its 31st request landed in the
+// next minute, so that request was still under the limit and returned 200.
+// Wait until the current minute can hold the whole loop.
+const waitForUtcMinuteRoom = async (minimumMs: number) => {
+  const remaining = 60_000 - (Date.now() % 60_000);
+  if (remaining >= minimumMs) return;
+  await new Promise((resolve) => setTimeout(resolve, remaining + 25));
+};
+
 const request = (token: string) =>
   new Request("http://localhost/api/unsubscribe", {
     method: "POST",
@@ -72,6 +82,7 @@ test("many valid unsubscribes from one origin are all processed", async () => {
 });
 
 test("invalid tokens from one origin are still limited", async () => {
+  await waitForUtcMinuteRoom(15_000);
   const statuses: number[] = [];
   for (let index = 0; index < 21; index += 1) {
     const response = await POST(request(`u1.v1.${randomUUID()}.garbage.tag`));
@@ -82,6 +93,7 @@ test("invalid tokens from one origin are still limited", async () => {
 });
 
 test("a valid token still gets through after its origin used up the invalid limit", async () => {
+  await waitForUtcMinuteRoom(15_000);
   for (let index = 0; index < 20; index += 1) {
     await POST(request("not-a-token"));
   }
@@ -92,6 +104,7 @@ test("a valid token still gets through after its origin used up the invalid limi
 });
 
 test("one valid token replayed without end is bounded per subject", async () => {
+  await waitForUtcMinuteRoom(15_000);
   const token = await validTokenFor();
   const statuses: number[] = [];
   for (let index = 0; index < 31; index += 1) {
