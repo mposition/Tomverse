@@ -50,6 +50,14 @@ test("model usage profiles match the launch credit examples", () => {
   });
 });
 
+test("frontier sells at 32 credits and is labelled Frontier", () => {
+  assert.equal(MODEL_USAGE_CREDIT_WEIGHTS.frontier, 32);
+  assert.deepEqual(getModelUsageProfile({ usageClass: "frontier" }), {
+    category: "Frontier",
+    credits: 32,
+  });
+});
+
 test("model usage classes are independent from subscription access", () => {
   const premium = getModel("gpt-5-5");
   const guestStandard = getModel("gpt-5-4-mini");
