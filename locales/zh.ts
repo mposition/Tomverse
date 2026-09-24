@@ -1024,6 +1024,7 @@ export const zh = {
         reasoning: "推理",
         research: "研究",
         frontier: "前沿",
+        apex: "巅峰",
     },
     onboarding: {
         title: "立即比较免费模型",

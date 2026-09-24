@@ -58,6 +58,14 @@ test("frontier sells at 32 credits and is labelled Frontier", () => {
   });
 });
 
+test("apex sells at 80 credits and is labelled Apex", () => {
+  assert.equal(MODEL_USAGE_CREDIT_WEIGHTS.apex, 80);
+  assert.deepEqual(getModelUsageProfile({ usageClass: "apex" }), {
+    category: "Apex",
+    credits: 80,
+  });
+});
+
 test("model usage classes are independent from subscription access", () => {
   const premium = getModel("gpt-5-5");
   const guestStandard = getModel("gpt-5-4-mini");

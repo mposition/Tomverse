@@ -1009,6 +1009,7 @@ export const de = {
         reasoning: "Schlussfolgern",
         research: "Recherche",
         frontier: "Spitzenklasse",
+        apex: "Gipfelklasse",
     },
     onboarding: {
         title: "Kostenlose Modelle sofort vergleichen",
