@@ -1,0 +1,917 @@
+diff --git a/app/api/admin/amux/card/route.ts b/app/api/admin/amux/card/route.ts
+new file mode 100644
+index 000000000..64a8f2f0b
+--- /dev/null
++++ b/app/api/admin/amux/card/route.ts
+@@ -0,0 +1,43 @@
++export const dynamic = "force-dynamic";
++
++import { getServerSession } from "next-auth/next";
++import { NextResponse } from "next/server";
++
++import { isAdminSession } from "@/lib/adminAuth";
++import { readAmuxCardBySourceKey } from "@/lib/amux/cardRead";
++import { parseAmuxCardSourceKey } from "@/lib/amux/cardReadCore";
++import { authOptions } from "@/lib/auth";
++
++const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
++
++const json = (body: object, status = 200) =>
++  NextResponse.json(body, { status, headers: noStoreHeaders });
++
++export async function GET(request: Request) {
++  try {
++    const session = await getServerSession(authOptions);
++    if (!session?.user?.id || !isAdminSession(session)) {
++      return json({ error: "Not found." }, 404);
++    }
++
++    const params = new URL(request.url).searchParams;
++    if ([...params.keys()].some((key) => key !== "sourceKey")) {
++      return json({ error: "Invalid source key." }, 400);
++    }
++    const rawKeys = params.getAll("sourceKey");
++    const sourceKey = rawKeys.length === 1 ? parseAmuxCardSourceKey(rawKeys[0]!) : null;
++    if (!sourceKey) return json({ error: "Invalid source key." }, 400);
++
++    const result = await readAmuxCardBySourceKey(sourceKey);
++    if (result.kind === "missing") return json({ error: "Not found." }, 404);
++    if (result.kind === "ambiguous") {
++      return json({ error: "Source key is ambiguous." }, 409);
++    }
++    if (result.kind === "invalid_provenance") {
++      return json({ error: "Canonical source metadata is unavailable." }, 409);
++    }
++    return json({ card: result.card });
++  } catch {
++    return json({ error: "Failed to load AMUX card." }, 500);
++  }
++}
+diff --git a/docs/ops/amux/README.md b/docs/ops/amux/README.md
+index 6caf2b7c6..91ed1f2d4 100644
+--- a/docs/ops/amux/README.md
++++ b/docs/ops/amux/README.md
+@@ -39,3 +39,21 @@ Production mutation 전에는 다음을 확인한다.
+ 
+ 실제 run record는 staging이 실제로 서빙하는 전체 40자리 SHA를 확인한 뒤에만
+ 생성한다.
++
++## Canonical card read-back
++
++`GET /api/admin/amux/card?sourceKey=<canonical-key>`는 인증된 Admin이 AMUX의
++canonical private-workboard source의 현재 카드 한 건을 읽는 경계다. 조회는 board
++import 계약의 고정 `sourceSystem`과 요청의 `sourceKey`를 함께 사용한다. `sourceKey`는
++대소문자·공백을 정규화하지 않고 정확히 한 번만 받아야 하며, composite identity가
++중복되면 임의로 한 건을 고르지 않고 `409`로 닫힌다. 다른 source system의 동명
++카드는 이 endpoint의 대상이 아니다. 이 경로는 audit, rate bucket, preview,
++transaction 또는 AMUX writer를 호출하지 않으며 모든 응답은 `private, no-store`다.
++
++응답은 현재 status·priority, 불변 import metadata, accepted source revision,
++dependency 상태만 포함한다. Source snapshot과 revision에는 원문 목표가 아니라
++section·version·digest만 저장된다. 따라서 `remainingGoal.availability`은
++`not_stored`, representation은 `detail_digest_only`다. 이는 목표가 비어 있거나
++알 수 없다는 추정이 아니라, 이 스키마에 원문이 저장되지 않았다는 명시적 계약이다.
++Accepted revision은 현재 카드 소유 여부까지 검증하며 dependency는 256개를 넘거나
++source identity의 null 쌍·형식이 일관되지 않으면 응답 전체를 fail-closed 처리한다.
+diff --git a/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/authorization.md b/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/authorization.md
+new file mode 100644
+index 000000000..cb1d4af9a
+--- /dev/null
++++ b/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/authorization.md
+@@ -0,0 +1,50 @@
++# CHAT-01 canonical AMUX card read-back 독립 검토 승인 기록
++
++- approvedBy: `mposition` (현재 대화의 CHAT-01 자동 개발 및 Cursor CLI 독립 검토 지시)
++- approvedAt: `2026-09-25` (Australia/Brisbane)
++- author: `codex`
++- independentReviewer: `cursor-cli`
++- maximumRevisionRounds: `2`
++- task: [task.json](./task.json)
++
++## 목적과 범위
++
++governance v1.1은 현재 작업 상태와 우선순위를 canonical AMUX authority에서 읽도록
++요구하고 역사 기록에서 현재 상태를 추정하지 못하게 한다. 그런데 기존 Admin 표면에는
++특정 canonical 카드의 상태·우선순위·검증된 revision/dependency metadata를 읽는
++bounded GET 계약이 없어 CHAT-01 다음 작업 선택이 fail-closed 상태였다. 이 변경은 그
++read-back blocker만 해소한다.
++
++비교 base는 `e768b1bea649acbdf6f0fb42beb531b6ead55192`, 검토할 source commit은
++`a95c63f63df7a9b5602f6604fc8a7b8abc5bfb9a`다. 제품 범위는 task에 열거한 route,
++read service/core, 기존 board-import canonical source identity, 운영 계약 문서와
++focused tests뿐이다. 비공개 현황판 본문이나 경로는 package에 복사하지 않는다.
++
++## 안전 경계
++
++- GET은 Admin 인증보다 먼저 query나 storage를 읽지 않으며, 모든 분기에서
++  `private, no-store, max-age=0`을 반환한다.
++- 조회는 canonical private-workboard import 계약의 고정 `sourceSystem`과 exact
++  `sourceKey` composite에 결속한다. 다른 source system의 동명 카드는 대상이 아니다.
++- 응답은 원문 목표를 포함하지 않는다. 스키마에 원문이 없으므로 `remainingGoal`은
++  `not_stored/detail_digest_only`로만 표현하고 내용을 만들지 않는다.
++- accepted revision은 work item ownership을 검증하지만 parent relation은 같은 work
++  item 소유를 별도로 증명하지 않으므로 공개 select/response에서 제외한다.
++- dependency는 최대 256개이고 257번째 sentinel, malformed identity 또는 provenance
++  불일치가 있으면 전체를 fail-closed한다.
++- route/service는 audit, rate bucket, transaction, preview, writer, provider 또는
++  외부 mutation 권한을 갖지 않는다.
++
++## 독립 검토 실행 경계
++
++사용자는 이 작업의 `--skip-preflight` 예외를 승인했다. 저장소 cross-review control
++program으로 exact diff와 검사 결과를 package한 뒤 Cursor CLI 구독 로그인을 사용한다.
++Cursor는 `grok-4.7-xhigh`, `--mode=plan`, Windows `--sandbox=disabled`로 실행하고
++외부 API key 환경을 제거한다. Cursor의 Windows plan-mode limitation은 verdict
++provenance에 기록하되 write mode나 `--force`로 대체하지 않는다.
++
++Cursor는 requirement, diff, control-program test/guard 결과와 작성자 설명을 구분해
++읽고 package digest에 JSON verdict를 결속한다. 실제 provider API call, paid execution,
++database write, Railway/staging/production 접근, flag/traffic 변경, source edit, commit,
++push, PR, merge 및 deploy는 승인 범위 밖이다. 공식 exchange의 수정 상한은 기존
++contract대로 2이며, 이를 임의로 높이거나 concluded exchange를 재개하지 않는다.
+diff --git a/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/task.json b/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/task.json
+new file mode 100644
+index 000000000..44e7d0f75
+--- /dev/null
++++ b/docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1/task.json
+@@ -0,0 +1,27 @@
++{
++  "taskId": "chat01-amux-canonical-card-readback-v1",
++  "requirement": "CHAT-01의 현재 상태와 다음 우선순위를 역사 문서에서 추정하지 않고 canonical AMUX 카드에서 읽기 위해, 인증된 Admin 전용 GET read-back을 추가한다. governance v1.1의 canonical AMUX authority 전환으로 생긴 read-back blocker를 최소 disclosure로 해소하되 sourceSystem은 canonical private-workboard import 계약의 고정 identity에 묶고 sourceKey는 exact composite lookup으로만 사용한다. 응답은 status, priority, archived 여부, 검증된 import provenance, 같은 work item에 결속된 accepted revision metadata, 최대 256개의 bounded dependency 상태만 포함한다. 원문 목표는 저장되지 않으므로 remainingGoal은 not_stored/detail_digest_only로 명시하며 내용을 추정하지 않는다. 인증은 조회보다 먼저 fail-closed하고 모든 분기는 private no-store이며 rate bucket, audit, transaction, writer, provider, paid call 또는 외부 mutation을 호출하지 않는다. author는 Codex, reviewer는 Cursor CLI 구독 로그인이고 승인된 skip-preflight 예외 아래 plan-mode 읽기 전용으로 검토한다.",
++  "completionCriteria": [
++    "Admin 인증이 sourceKey parsing 및 storage read보다 먼저 실행되고 unauthenticated/non-admin은 indistinguishable 404이며 모든 성공·오류 응답이 private, no-store, max-age=0이다.",
++    "정확히 하나의 canonical sourceKey만 허용하고 normalization, duplicate parameter, extra parameter 및 malformed key는 storage를 읽지 않고 거부한다.",
++    "storage query는 canonical private-workboard sourceSystem과 sourceKey의 existing composite identity에 묶이고 take 2로 bounded하며 exact select 외 Prisma delegate, writer helper, transaction, audit, rate-limit 또는 preview 경로를 호출하지 않는다.",
++    "work item, metadata snapshot 및 accepted revision의 provenance, source/digest/version/section/state/ownership이 일치하지 않으면 fail-closed하며 parent revision처럼 ownership을 별도로 증명하지 못한 relation은 공개하지 않는다.",
++    "dependency는 257번째 row를 sentinel로 읽어 최대 256개만 허용하고 identity null-pair/format 불일치를 fail-closed하며 deterministic order와 최소 필드만 공개한다.",
++    "remainingGoal은 원문이 저장되지 않았음을 not_stored/detail_digest_only와 revision metadata로만 나타내고 private prose, inferred summary, source snapshot 원문, storage internals 또는 실행 권한을 공개하지 않는다.",
++    "focused core/route/service 계약, 전체 server-contract, TypeScript, scoped ESLint, API cache-control, document/policy references, encoding 및 diff whitespace 검사가 모두 통과한다.",
++    "Cursor verdict는 package digest와 정확히 결속하고 actionable finding마다 location, severity, evidence, reproduction을 제공하며 source 수정, provider API key, paid call, push, PR, merge, deploy 또는 traffic/flag 변경을 하지 않는다."
++  ],
++  "baseCommit": "e768b1bea649acbdf6f0fb42beb531b6ead55192",
++  "writableScope": [
++    "app/api/admin/amux/card/route.ts",
++    "docs/ops/amux/README.md",
++    "docs/ops/cross-review/packages/chat01-amux-canonical-card-readback-v1",
++    "lib/amux/boardImportCore.ts",
++    "lib/amux/cardRead.ts",
++    "lib/amux/cardReadCore.ts",
++    "tests/amuxCardReadCore.test.mjs",
++    "tests/server-contract/admin-amux-card-read-route.test.ts",
++    "tests/server-contract/admin-amux-card-read-service.test.ts"
++  ],
++  "generatedPaths": []
++}
+diff --git a/lib/amux/boardImportCore.ts b/lib/amux/boardImportCore.ts
+index b09ea6e64..113616810 100644
+--- a/lib/amux/boardImportCore.ts
++++ b/lib/amux/boardImportCore.ts
+@@ -26,6 +26,8 @@ export const AMUX_MANIFEST_CANONICALIZATION_VERSION = "amux-json-v1";
+ export const BOARD_IMPORT_POLICY_VERSION = 2;
+ export const BOARD_IMPORT_SCANNER_VERSION = "amux-board-content-scan-v1";
+ export const BOARD_IMPORT_SOURCE_VERIFICATION_MODE = "operator_attested";
++/** Fixed source identity assigned by the canonical private-workboard manifest contract. */
++export const BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM = "tomverse_private_workboard";
+ export const BOARD_IMPORT_CARD_STATUS = "backlog";
+ export const BOARD_IMPORT_CARD_KIND = "unknown";
+ /** Schema default for every imported card. Not a mapping from an investment rank. */
+diff --git a/lib/amux/cardRead.ts b/lib/amux/cardRead.ts
+new file mode 100644
+index 000000000..47290a04f
+--- /dev/null
++++ b/lib/amux/cardRead.ts
+@@ -0,0 +1,63 @@
++import "server-only";
++
++import {
++  AMUX_CARD_READ_MAX_DEPENDENCIES,
++  classifyAmuxCardReadRows,
++  type AmuxCardReadResult,
++} from "@/lib/amux/cardReadCore";
++import { BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM } from "@/lib/amux/boardImportCore";
++import { prisma } from "@/lib/prisma";
++
++/** Exact, bounded, read-only lookup. The query intentionally has no writer or audit dependency. */
++export async function readAmuxCardBySourceKey(
++  sourceKey: string,
++): Promise<AmuxCardReadResult> {
++  const rows = await prisma.amuxWorkItem.findMany({
++    where: {
++      sourceSystem: BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM,
++      sourceKey,
++    },
++    orderBy: [{ sourceSystem: "asc" }, { id: "asc" }],
++    take: 2,
++    select: {
++      id: true,
++      status: true,
++      priority: true,
++      archivedAt: true,
++      sourceSystem: true,
++      sourceKey: true,
++      sourceVersion: true,
++      sourceDigest: true,
++      sourceSnapshot: true,
++      acceptedSourceRevision: {
++        select: {
++          id: true,
++          workItemId: true,
++          sourceVersion: true,
++          detailDigest: true,
++          sectionCode: true,
++          state: true,
++          observedAt: true,
++          decidedAt: true,
++        },
++      },
++      dependencies: {
++        take: AMUX_CARD_READ_MAX_DEPENDENCIES + 1,
++        select: {
++          dependency: {
++            select: {
++              id: true,
++              status: true,
++              priority: true,
++              archivedAt: true,
++              sourceSystem: true,
++              sourceKey: true,
++            },
++          },
++        },
++      },
++    },
++  });
++
++  return classifyAmuxCardReadRows(rows, sourceKey);
++}
+diff --git a/lib/amux/cardReadCore.ts b/lib/amux/cardReadCore.ts
+new file mode 100644
+index 000000000..3d9cfc422
+--- /dev/null
++++ b/lib/amux/cardReadCore.ts
+@@ -0,0 +1,208 @@
++import {
++  BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM,
++  BOARD_IMPORT_SECTION_CODES,
++  boardImportStoredSnapshot,
++} from "./boardImportCore.ts";
++
++const SOURCE_KEY = /^[A-Z0-9][A-Z0-9-]{0,63}$/;
++const SOURCE_SYSTEM = /^[a-z][a-z0-9._-]{0,63}$/;
++const SOURCE_COMMIT = /^[a-f0-9]{40}$/;
++const SHA256 = /^[a-f0-9]{64}$/;
++export const AMUX_CARD_READ_MAX_DEPENDENCIES = 256;
++
++export const parseAmuxCardSourceKey = (value: string | null): string | null =>
++  value !== null && SOURCE_KEY.test(value) ? value : null;
++
++export type AmuxCardReadRow = {
++  id: string;
++  status: string;
++  priority: string;
++  archivedAt: Date | null;
++  sourceSystem: string | null;
++  sourceKey: string | null;
++  sourceVersion: string | null;
++  sourceDigest: string | null;
++  sourceSnapshot: unknown;
++  acceptedSourceRevision: {
++    id: string;
++    workItemId: string;
++    sourceVersion: string;
++    detailDigest: string;
++    sectionCode: string;
++    state: string;
++    observedAt: Date;
++    decidedAt: Date | null;
++  } | null;
++  dependencies: Array<{
++    dependency: {
++      id: string;
++      status: string;
++      priority: string;
++      archivedAt: Date | null;
++      sourceSystem: string | null;
++      sourceKey: string | null;
++    };
++  }>;
++};
++
++export type AmuxCardReadback = {
++  sourceSystem: string;
++  sourceKey: string;
++  status: string;
++  priority: string;
++  archived: boolean;
++  importSource: {
++    sourceVersion: string;
++    sourceDigest: string;
++    snapshot: {
++      representation: "metadata_only";
++      sourceKey: string;
++      sectionCode: string;
++      detailDigest: string;
++      manifestDigest: string;
++      policyVersion: number;
++    };
++  };
++  acceptedSourceRevision: {
++    id: string;
++    sourceVersion: string;
++    detailDigest: string;
++    sectionCode: string;
++    state: "accepted";
++    observedAt: string;
++    decidedAt: string | null;
++  };
++  remainingGoal: {
++    availability: "not_stored";
++    representation: "detail_digest_only";
++    sourceVersion: string;
++    sectionCode: string;
++    detailDigest: string;
++  };
++  dependencies: Array<{
++    id: string;
++    sourceSystem: string | null;
++    sourceKey: string | null;
++    status: string;
++    priority: string;
++    archived: boolean;
++  }>;
++};
++
++export type AmuxCardReadResult =
++  | { kind: "found"; card: AmuxCardReadback }
++  | { kind: "missing" }
++  | { kind: "ambiguous" }
++  | { kind: "invalid_provenance" };
++
++/**
++ * Converts one canonical imported card to the bounded governance read model.
++ * The import snapshot and accepted revision store metadata and a detail
++ * digest, never the private work-item prose. `remainingGoal` therefore says
++ * `not_stored`; an empty string or invented summary would overstate the data.
++ */
++export const amuxCardReadback = (
++  row: AmuxCardReadRow,
++  expectedSourceKey: string,
++): AmuxCardReadback | null => {
++  const snapshot = boardImportStoredSnapshot(row.sourceSnapshot);
++  const accepted = row.acceptedSourceRevision;
++  if (
++    row.sourceKey !== expectedSourceKey ||
++    row.sourceSystem !== BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM ||
++    row.sourceVersion === null ||
++    !SOURCE_COMMIT.test(row.sourceVersion) ||
++    row.sourceDigest === null ||
++    !SHA256.test(row.sourceDigest) ||
++    snapshot === null ||
++    snapshot.sourceKey !== expectedSourceKey ||
++    snapshot.detailDigest !== row.sourceDigest ||
++    !SHA256.test(snapshot.detailDigest) ||
++    !SHA256.test(snapshot.manifestDigest) ||
++    !Number.isSafeInteger(snapshot.policyVersion) ||
++    snapshot.policyVersion < 1 ||
++    accepted === null ||
++    accepted.workItemId !== row.id ||
++    accepted.state !== "accepted" ||
++    !SOURCE_COMMIT.test(accepted.sourceVersion) ||
++    !(BOARD_IMPORT_SECTION_CODES as readonly string[]).includes(accepted.sectionCode) ||
++    !SHA256.test(accepted.detailDigest) ||
++    row.dependencies.length > AMUX_CARD_READ_MAX_DEPENDENCIES
++  ) {
++    return null;
++  }
++
++  const dependencies: AmuxCardReadback["dependencies"] = [];
++  for (const { dependency } of row.dependencies) {
++    const hasNoSourceIdentity =
++      dependency.sourceSystem === null && dependency.sourceKey === null;
++    const hasValidSourceIdentity =
++      dependency.sourceSystem !== null &&
++      SOURCE_SYSTEM.test(dependency.sourceSystem) &&
++      dependency.sourceKey !== null &&
++      SOURCE_KEY.test(dependency.sourceKey);
++    if (!hasNoSourceIdentity && !hasValidSourceIdentity) return null;
++    dependencies.push({
++      id: dependency.id,
++      sourceSystem: dependency.sourceSystem,
++      sourceKey: dependency.sourceKey,
++      status: dependency.status,
++      priority: dependency.priority,
++      archived: dependency.archivedAt !== null,
++    });
++  }
++  dependencies
++    .sort((left, right) => {
++      const leftKey = `${left.sourceSystem ?? ""}\u0000${left.sourceKey ?? ""}\u0000${left.id}`;
++      const rightKey = `${right.sourceSystem ?? ""}\u0000${right.sourceKey ?? ""}\u0000${right.id}`;
++      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
++    });
++
++  return {
++    sourceSystem: row.sourceSystem,
++    sourceKey: row.sourceKey,
++    status: row.status,
++    priority: row.priority,
++    archived: row.archivedAt !== null,
++    importSource: {
++      sourceVersion: row.sourceVersion,
++      sourceDigest: row.sourceDigest,
++      snapshot: {
++        representation: "metadata_only",
++        sourceKey: snapshot.sourceKey,
++        sectionCode: snapshot.sectionCode,
++        detailDigest: snapshot.detailDigest,
++        manifestDigest: snapshot.manifestDigest,
++        policyVersion: snapshot.policyVersion,
++      },
++    },
++    acceptedSourceRevision: {
++      id: accepted.id,
++      sourceVersion: accepted.sourceVersion,
++      detailDigest: accepted.detailDigest,
++      sectionCode: accepted.sectionCode,
++      state: "accepted",
++      observedAt: accepted.observedAt.toISOString(),
++      decidedAt: accepted.decidedAt?.toISOString() ?? null,
++    },
++    remainingGoal: {
++      availability: "not_stored",
++      representation: "detail_digest_only",
++      sourceVersion: accepted.sourceVersion,
++      sectionCode: accepted.sectionCode,
++      detailDigest: accepted.detailDigest,
++    },
++    dependencies,
++  };
++};
++
++/** The storage query is capped at two rows, which is enough to prove ambiguity. */
++export const classifyAmuxCardReadRows = (
++  rows: readonly AmuxCardReadRow[],
++  sourceKey: string,
++): AmuxCardReadResult => {
++  if (rows.length === 0) return { kind: "missing" };
++  if (rows.length !== 1) return { kind: "ambiguous" };
++  const card = amuxCardReadback(rows[0]!, sourceKey);
++  return card ? { kind: "found", card } : { kind: "invalid_provenance" };
++};
+diff --git a/tests/amuxCardReadCore.test.mjs b/tests/amuxCardReadCore.test.mjs
+new file mode 100644
+index 000000000..a8b2766dc
+--- /dev/null
++++ b/tests/amuxCardReadCore.test.mjs
+@@ -0,0 +1,184 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++  AMUX_CARD_READ_MAX_DEPENDENCIES,
++  amuxCardReadback,
++  classifyAmuxCardReadRows,
++  parseAmuxCardSourceKey,
++} from "../lib/amux/cardReadCore.ts";
++
++const digest = (character) => character.repeat(64);
++const date = (day) => new Date(`2026-09-${String(day).padStart(2, "0")}T01:02:03.000Z`);
++
++const row = () => ({
++  id: "work-item-1",
++  status: "doing",
++  priority: "p1",
++  archivedAt: null,
++  sourceSystem: "tomverse_private_workboard",
++  sourceKey: "CHAT-01",
++  sourceVersion: "a".repeat(40),
++  sourceDigest: digest("1"),
++  sourceSnapshot: {
++    sourceKey: "CHAT-01",
++    sectionCode: "investment",
++    detailDigest: digest("1"),
++    manifestDigest: digest("2"),
++    policyVersion: 2,
++  },
++  acceptedSourceRevision: {
++    id: "revision-2",
++    workItemId: "work-item-1",
++    sourceVersion: "b".repeat(40),
++    detailDigest: digest("3"),
++    sectionCode: "investment",
++    state: "accepted",
++    observedAt: date(23),
++    decidedAt: date(24),
++  },
++  dependencies: [
++    {
++      dependency: {
++        id: "dependency-z",
++        status: "todo",
++        priority: "p2",
++        archivedAt: null,
++        sourceSystem: null,
++        sourceKey: null,
++      },
++    },
++    {
++      dependency: {
++        id: "dependency-a",
++        status: "done",
++        priority: "p0",
++        archivedAt: date(20),
++        sourceSystem: "tomverse_private_workboard",
++        sourceKey: "PLAT-01",
++      },
++    },
++  ],
++});
++
++test("source keys are exact canonical board keys", () => {
++  assert.equal(parseAmuxCardSourceKey("CHAT-01"), "CHAT-01");
++  assert.equal(parseAmuxCardSourceKey("A".repeat(64)), "A".repeat(64));
++  for (const invalid of [
++    null,
++    "",
++    "chat-01",
++    " CHAT-01",
++    "CHAT-01 ",
++    "CHAT_01",
++    "CHAT.01",
++    "A".repeat(65),
++  ]) {
++    assert.equal(parseAmuxCardSourceKey(invalid), null, String(invalid));
++  }
++});
++
++test("read-back preserves import and accepted revision semantics without inventing goal text", () => {
++  const result = amuxCardReadback(row(), "CHAT-01");
++  assert.ok(result);
++  assert.equal(result.status, "doing");
++  assert.equal(result.priority, "p1");
++  assert.equal(result.archived, false);
++  assert.deepEqual(result.importSource, {
++    sourceVersion: "a".repeat(40),
++    sourceDigest: digest("1"),
++    snapshot: {
++      representation: "metadata_only",
++      sourceKey: "CHAT-01",
++      sectionCode: "investment",
++      detailDigest: digest("1"),
++      manifestDigest: digest("2"),
++      policyVersion: 2,
++    },
++  });
++  assert.equal(result.acceptedSourceRevision.id, "revision-2");
++  assert.equal(result.acceptedSourceRevision.detailDigest, digest("3"));
++  assert.equal("parentRevisionId" in result.acceptedSourceRevision, false);
++  assert.deepEqual(result.remainingGoal, {
++    availability: "not_stored",
++    representation: "detail_digest_only",
++    sourceVersion: "b".repeat(40),
++    sectionCode: "investment",
++    detailDigest: digest("3"),
++  });
++  assert.equal("content" in result.remainingGoal, false);
++  assert.deepEqual(
++    result.dependencies.map((dependency) => dependency.id),
++    ["dependency-z", "dependency-a"],
++  );
++  assert.equal(result.dependencies[1].archived, true);
++});
++
++test("untrusted or incomplete provenance fails closed instead of exposing a full snapshot", () => {
++  for (const mutate of [
++    (candidate) => (candidate.sourceKey = "CHAT-02"),
++    (candidate) => (candidate.sourceSystem = null),
++    (candidate) => (candidate.sourceSystem = "other_canonical_board"),
++    (candidate) => (candidate.sourceSystem = "Invalid Source"),
++    (candidate) => (candidate.sourceVersion = "not-a-commit"),
++    (candidate) => (candidate.sourceDigest = "not-a-digest"),
++    (candidate) => (candidate.sourceSnapshot = null),
++    (candidate) => (candidate.sourceSnapshot = { ...candidate.sourceSnapshot, prose: "private" }),
++    (candidate) => (candidate.sourceSnapshot.detailDigest = digest("4")),
++    (candidate) => (candidate.sourceSnapshot.manifestDigest = "not-a-digest"),
++    (candidate) => (candidate.acceptedSourceRevision = null),
++    (candidate) => (candidate.acceptedSourceRevision.workItemId = "another-work-item"),
++    (candidate) => (candidate.acceptedSourceRevision.state = "observed"),
++    (candidate) => (candidate.acceptedSourceRevision.sourceVersion = "not-a-commit"),
++    (candidate) => (candidate.acceptedSourceRevision.sectionCode = "unknown"),
++    (candidate) => (candidate.acceptedSourceRevision.detailDigest = "not-a-digest"),
++  ]) {
++    const candidate = structuredClone(row());
++    mutate(candidate);
++    assert.equal(amuxCardReadback(candidate, "CHAT-01"), null);
++  }
++});
++
++test("dependency provenance and the bounded dependency page fail closed", () => {
++  for (const mutate of [
++    (candidate) => (candidate.dependencies[0].dependency.sourceSystem = "Invalid Source"),
++    (candidate) => (candidate.dependencies[0].dependency.sourceSystem = "source-without-key"),
++    (candidate) => {
++      candidate.dependencies[0].dependency.sourceSystem = "tomverse_private_workboard";
++      candidate.dependencies[0].dependency.sourceKey = "bad-key";
++    },
++    (candidate) => {
++      candidate.dependencies = Array.from(
++        { length: AMUX_CARD_READ_MAX_DEPENDENCIES + 1 },
++        (_, index) => ({
++          dependency: {
++            id: `dependency-${index}`,
++            status: "todo",
++            priority: "p3",
++            archivedAt: null,
++            sourceSystem: null,
++            sourceKey: null,
++          },
++        }),
++      );
++    },
++  ]) {
++    const candidate = structuredClone(row());
++    mutate(candidate);
++    assert.equal(amuxCardReadback(candidate, "CHAT-01"), null);
++  }
++});
++
++test("bounded exact matches classify missing and ambiguous rows before serialization", () => {
++  assert.deepEqual(classifyAmuxCardReadRows([], "CHAT-01"), { kind: "missing" });
++  assert.deepEqual(classifyAmuxCardReadRows([row(), row()], "CHAT-01"), {
++    kind: "ambiguous",
++  });
++
++  const invalid = row();
++  invalid.sourceKey = "CHAT-02";
++  assert.deepEqual(classifyAmuxCardReadRows([invalid], "CHAT-01"), {
++    kind: "invalid_provenance",
++  });
++  assert.equal(classifyAmuxCardReadRows([row()], "CHAT-01").kind, "found");
++});
+diff --git a/tests/server-contract/admin-amux-card-read-route.test.ts b/tests/server-contract/admin-amux-card-read-route.test.ts
+new file mode 100644
+index 000000000..7f9d90e93
+--- /dev/null
++++ b/tests/server-contract/admin-amux-card-read-route.test.ts
+@@ -0,0 +1,158 @@
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import { resolve } from "node:path";
++import { pathToFileURL } from "node:url";
++import { mock, test } from "node:test";
++
++const ROOT = resolve(import.meta.dirname, "..", "..");
++const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
++
++type ReadResult =
++  | { kind: "missing" }
++  | { kind: "ambiguous" }
++  | { kind: "invalid_provenance" }
++  | { kind: "found"; card: Record<string, unknown> };
++
++const world: {
++  session: { user: { id: string } } | null;
++  authorized: boolean;
++  result: ReadResult;
++  readCalls: string[];
++} = {
++  session: { user: { id: "admin-1" } },
++  authorized: true,
++  result: { kind: "missing" },
++  readCalls: [],
++};
++
++let installed = false;
++
++async function loadRoute(): Promise<{ GET: (request: Request) => Promise<Response> }> {
++  if (!installed) {
++    installed = true;
++    mock.module("next-auth/next", {
++      namedExports: { getServerSession: async () => world.session },
++    });
++    mock.module(mod("lib/adminAuth.ts"), {
++      namedExports: { isAdminSession: () => world.authorized },
++    });
++    mock.module(mod("lib/auth.ts"), {
++      namedExports: { authOptions: {} },
++    });
++    mock.module(mod("lib/amux/cardRead.ts"), {
++      namedExports: {
++        readAmuxCardBySourceKey: async (sourceKey: string) => {
++          world.readCalls.push(sourceKey);
++          return world.result;
++        },
++      },
++    });
++  }
++  return import(mod("app/api/admin/amux/card/route.ts"));
++}
++
++const request = (query = "") =>
++  new Request(`https://tomverse.app/api/admin/amux/card${query}`);
++
++const assertNoStore = (response: Response) =>
++  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
++
++const reset = () => {
++  world.session = { user: { id: "admin-1" } };
++  world.authorized = true;
++  world.result = { kind: "missing" };
++  world.readCalls = [];
++};
++
++test("authentication fails closed before parsing or reading a card", async () => {
++  const { GET } = await loadRoute();
++  for (const setup of [
++    () => (world.session = null),
++    () => (world.authorized = false),
++  ]) {
++    reset();
++    setup();
++    const response = await GET(request("?sourceKey=CHAT-01"));
++    assert.equal(response.status, 404);
++    assertNoStore(response);
++    assert.deepEqual(await response.json(), { error: "Not found." });
++    assert.deepEqual(world.readCalls, []);
++  }
++});
++
++test("missing, duplicate, normalized, and malformed source keys never reach storage", async () => {
++  const { GET } = await loadRoute();
++  for (const query of [
++    "",
++    "?sourceKey=CHAT-01&sourceKey=CHAT-01",
++    "?sourceKey=CHAT-01&extra=value",
++    "?sourceKey=chat-01",
++    "?sourceKey=%20CHAT-01",
++    "?sourceKey=CHAT_01",
++    `?sourceKey=${"A".repeat(65)}`,
++  ]) {
++    reset();
++    const response = await GET(request(query));
++    assert.equal(response.status, 400, query);
++    assertNoStore(response);
++    assert.deepEqual(world.readCalls, [], query);
++  }
++});
++
++test("the exact key distinguishes missing, ambiguous, invalid, and found cards", async () => {
++  const { GET } = await loadRoute();
++  const scenarios: Array<[ReadResult, number, object]> = [
++    [{ kind: "missing" }, 404, { error: "Not found." }],
++    [{ kind: "ambiguous" }, 409, { error: "Source key is ambiguous." }],
++    [
++      { kind: "invalid_provenance" },
++      409,
++      { error: "Canonical source metadata is unavailable." },
++    ],
++    [
++      { kind: "found", card: { sourceKey: "CHAT-01", status: "doing" } },
++      200,
++      { card: { sourceKey: "CHAT-01", status: "doing" } },
++    ],
++  ];
++
++  for (const [result, status, body] of scenarios) {
++    reset();
++    world.result = result;
++    const response = await GET(request("?sourceKey=CHAT-01"));
++    assert.equal(response.status, status, result.kind);
++    assertNoStore(response);
++    assert.deepEqual(await response.json(), body);
++    assert.deepEqual(world.readCalls, ["CHAT-01"]);
++  }
++});
++
++test("the route and service contain no write, audit, preview, or rate-bucket path", () => {
++  const route = readFileSync(resolve(ROOT, "app/api/admin/amux/card/route.ts"), "utf8");
++  const service = readFileSync(resolve(ROOT, "lib/amux/cardRead.ts"), "utf8");
++  for (const forbidden of [
++    "writeAdminAuditLog",
++    "writeSystemAuditLog",
++    "consumeApiRateLimit",
++    "previewBoard",
++    "readLimitedJson",
++    "POST(",
++    "PUT(",
++    "PATCH(",
++    "DELETE(",
++    ".$transaction(",
++    ".create(",
++    ".update(",
++    ".upsert(",
++    ".delete(",
++    ".$executeRaw",
++  ]) {
++    assert.equal(route.includes(forbidden), false, forbidden);
++    assert.equal(service.includes(forbidden), false, forbidden);
++  }
++  assert.match(service, /sourceSystem:\s*BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM/);
++  assert.match(service, /sourceKey,/);
++  assert.match(service, /take:\s*2/);
++  assert.match(service, /take:\s*AMUX_CARD_READ_MAX_DEPENDENCIES \+ 1/);
++  assert.match(route, /export async function GET/);
++});
+diff --git a/tests/server-contract/admin-amux-card-read-service.test.ts b/tests/server-contract/admin-amux-card-read-service.test.ts
+new file mode 100644
+index 000000000..f67635ba4
+--- /dev/null
++++ b/tests/server-contract/admin-amux-card-read-service.test.ts
+@@ -0,0 +1,97 @@
++import assert from "node:assert/strict";
++import { resolve } from "node:path";
++import { pathToFileURL } from "node:url";
++import test, { mock } from "node:test";
++
++const ROOT = resolve(import.meta.dirname, "..", "..");
++const mod = (relativePath: string) => pathToFileURL(resolve(ROOT, relativePath)).href;
++
++const findManyCalls: unknown[] = [];
++const forbiddenDelegateAccesses: string[] = [];
++
++const amuxWorkItem = new Proxy(
++  {
++    findMany: async (query: unknown) => {
++      findManyCalls.push(query);
++      return [];
++    },
++  },
++  {
++    get(target, property, receiver) {
++      if (property === "findMany") return Reflect.get(target, property, receiver);
++      forbiddenDelegateAccesses.push(`amuxWorkItem.${String(property)}`);
++      throw new Error(`Unexpected AMUX card delegate access: ${String(property)}`);
++    },
++  },
++);
++
++const prisma = new Proxy(
++  { amuxWorkItem },
++  {
++    get(target, property, receiver) {
++      if (property === "amuxWorkItem") return Reflect.get(target, property, receiver);
++      forbiddenDelegateAccesses.push(`prisma.${String(property)}`);
++      throw new Error(`Unexpected Prisma access: ${String(property)}`);
++    },
++  },
++);
++
++mock.module(mod("lib/prisma.ts"), {
++  namedExports: { prisma },
++});
++
++test("the service issues exactly one bounded canonical composite read and has no writer capability", async () => {
++  const { readAmuxCardBySourceKey } = await import(mod("lib/amux/cardRead.ts"));
++
++  const result = await readAmuxCardBySourceKey("CHAT-01");
++
++  assert.deepEqual(result, { kind: "missing" });
++  assert.deepEqual(forbiddenDelegateAccesses, []);
++  assert.equal(findManyCalls.length, 1);
++  assert.deepEqual(findManyCalls[0], {
++    where: {
++      sourceSystem: "tomverse_private_workboard",
++      sourceKey: "CHAT-01",
++    },
++    orderBy: [{ sourceSystem: "asc" }, { id: "asc" }],
++    take: 2,
++    select: {
++      id: true,
++      status: true,
++      priority: true,
++      archivedAt: true,
++      sourceSystem: true,
++      sourceKey: true,
++      sourceVersion: true,
++      sourceDigest: true,
++      sourceSnapshot: true,
++      acceptedSourceRevision: {
++        select: {
++          id: true,
++          workItemId: true,
++          sourceVersion: true,
++          detailDigest: true,
++          sectionCode: true,
++          state: true,
++          observedAt: true,
++          decidedAt: true,
++        },
++      },
++      dependencies: {
++        take: 257,
++        select: {
++          dependency: {
++            select: {
++              id: true,
++              status: true,
++              priority: true,
++              archivedAt: true,
++              sourceSystem: true,
++              sourceKey: true,
++            },
++          },
++        },
++      },
++    },
++  });
++});
