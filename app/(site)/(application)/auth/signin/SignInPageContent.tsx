@@ -6,6 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
 import { useTurnstile } from "@/components/chat/useTurnstile";
+import { isGuestVerificationError } from "@/components/chat/guestVerificationFailure";
 import Link from "next/link";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
@@ -222,7 +223,11 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
             await discardResponseBody(response);
             markSignupStarted("email-code");
             setStep("code");
-        } catch {
+        } catch (error) {
+            // The verification slot owns typed Turnstile failures. Replacing
+            // that precise sentence with the generic request failure produced
+            // the two contradictory errors reported in staging.
+            if (isGuestVerificationError(error)) return;
             setFormError(t("auth.emailLoginRequestFailed"));
         } finally {
             setIsSendingCode(false);
@@ -365,6 +370,13 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </div>
 
+            <TurnstileFormSlot
+                containerRef={turnstileContainerRef}
+                isChallengeVisible={isChallengeVisible}
+                failure={turnstileFailure}
+                surface="emailLogin"
+                testId="email-login-verification"
+            />
             {step === "email" ? (
                 <div className="space-y-2">
                     <label htmlFor="email-login-address" className="sr-only">
@@ -400,13 +412,6 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                             {emailError}
                         </p>
                     ) : null}
-                    <TurnstileFormSlot
-                        containerRef={turnstileContainerRef}
-                        isChallengeVisible={isChallengeVisible}
-                        failure={turnstileFailure}
-                        surface="emailLogin"
-                        testId="email-login-verification"
-                    />
                     <button
                         type="button"
                         disabled={!isEmailValid || isSendingCode || retryCountdown > 0}

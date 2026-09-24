@@ -169,7 +169,9 @@ export function useTurnstile(
     if (isLocalTurnstileBypassHost()) return undefined;
     if (!siteKey) {
       if (process.env.NODE_ENV !== "production") return undefined;
-      throw new GuestVerificationError("unavailable");
+      const error = new GuestVerificationError("unavailable");
+      settle({ failure: "unavailable" });
+      throw error;
     }
 
     setFailure(null);

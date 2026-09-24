@@ -40,7 +40,11 @@ test("email login keeps the Turnstile container renderable before interaction", 
 test("email login receives the runtime Turnstile site key from its dynamic server page", () => {
   assert.match(
     signInPageSource,
-    /turnstileSiteKey\s*=\s*process\.env\.NEXT_PUBLIC_TURNSTILE_SITE_KEY/
+    /runtimeEnvironment\s*=\s*process\.env/
+  );
+  assert.match(
+    signInPageSource,
+    /turnstileSiteKey\s*=\s*runtimeEnvironment\.NEXT_PUBLIC_TURNSTILE_SITE_KEY/
   );
   assert.match(
     signInPageSource,
@@ -50,6 +54,16 @@ test("email login receives the runtime Turnstile site key from its dynamic serve
     signInSource,
     /useTurnstile\(true, "email_login_request", turnstileSiteKey\)/
   );
+});
+
+test("email login keeps one Turnstile host mounted across email and code steps", () => {
+  const slotIndex = signInSource.indexOf("<TurnstileFormSlot");
+  const stepBranchIndex = signInSource.indexOf('{step === "email" ? (');
+  assert.ok(slotIndex >= 0);
+  assert.ok(stepBranchIndex >= 0);
+  assert.ok(slotIndex < stepBranchIndex);
+  assert.equal(signInSource.match(/<TurnstileFormSlot/g)?.length, 1);
+  assert.match(signInSource, /isGuestVerificationError\(error\)/);
 });
 
 test("email login uses its existing localized verification failures", () => {

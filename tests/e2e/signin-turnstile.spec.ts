@@ -6,7 +6,7 @@ import {
   readTurnstileState,
 } from "./support/app-fixtures";
 
-test("email login reveals an interactive Turnstile at the form width and retries with its token", async ({
+test("email login reveals and reuses an interactive Turnstile at the form width", { tag: "@smoke" }, async ({
   page,
 }, testInfo) => {
   test.skip(
@@ -65,7 +65,24 @@ test("email login reveals an interactive Turnstile at the form width and retries
   await expect(page.getByPlaceholder("000000")).toBeVisible();
   expect(requests).toEqual([null, "qa-turnstile-token-1"]);
 
-  const state = await readTurnstileState(page);
+  let state = await readTurnstileState(page);
   expect(state?.renders).toBe(1);
   expect(state?.executes).toBe(1);
+
+  // The OTP screen can request a fresh code. Its Turnstile host must still be
+  // mounted; otherwise the hook keeps a widget id whose iframe was detached
+  // and this second challenge can never be completed.
+  await page.getByRole("button", { name: "Send a new code" }).click();
+  await expect(slot).toHaveAttribute("data-visible", "true");
+  await expect(widget).toBeVisible();
+  expect(await completeTurnstileChallenge(page)).toBe(true);
+  await expect.poll(() => requests).toEqual([
+    null,
+    "qa-turnstile-token-1",
+    null,
+    "qa-turnstile-token-2",
+  ]);
+  state = await readTurnstileState(page);
+  expect(state?.renders).toBe(1);
+  expect(state?.executes).toBe(2);
 });
