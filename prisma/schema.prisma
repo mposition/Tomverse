@@ -6457,6 +6457,49 @@ model DeploymentPriceSnapshot {
   @@index([modelDeploymentId, effectiveAt])
 }
 
+/// One internal experiment's cost ceiling, in micro-USD.
+///
+/// Not a credit balance and not a provider-wide budget. There is no default
+/// amount: a missing row is not permission to call a provider. `spentMicroUsd`
+/// is cost already kept. `reservedMicroUsd` is the sum of holds whose cost is
+/// not final. Settlement may record more than the limit, because that cost
+/// has already been incurred; the next reservation then fails.
+model PinnedDeploymentExperiment {
+  id               String   @id
+  limitMicroUsd    BigInt
+  spentMicroUsd    BigInt   @default(0)
+  reservedMicroUsd BigInt   @default(0)
+  createdAt        DateTime @default(now())
+
+  holds PinnedDeploymentExperimentHold[]
+}
+
+/// One call's claim on an experiment ceiling.
+///
+/// `deploymentId` is the identifier returned when the placement row was
+/// stored. It is not a relation. A relation here would make ordinary nested
+/// reads look like reads of the still-dark deployment table.
+///
+/// `released` means the provider call was confirmed not to have started.
+/// `occupied` keeps the reservation after dispatch when the cost is unknown.
+/// `settled` is a measured cost. Unknown is not stored as zero.
+model PinnedDeploymentExperimentHold {
+  id               String    @id
+  experimentId     String
+  deploymentId     String
+  logicalModelId   String
+  reservedMicroUsd BigInt
+  settledMicroUsd  BigInt?
+  /// held | settled | released | occupied
+  status           String
+  createdAt        DateTime  @default(now())
+  closedAt         DateTime?
+
+  experiment PinnedDeploymentExperiment @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([experimentId, status])
+}
+
 /// One separately approved, content-free Prompt Refiner staging shadow.
 /// The run contract digest is unique so v1 can execute at most once; a retry
 /// after an unknown outcome requires a new reviewed contract rather than a

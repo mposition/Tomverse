@@ -12,8 +12,9 @@
 //
 // This reads every runtime source in the repository instead, and looks for the
 // delegate by any of the spellings that reach it, plus the table name inside
-// raw SQL. Fail-closed: an unrecognised use is a failure, and the way to add
-// one is to take the table off this list deliberately.
+// raw SQL. Fail-closed: an unrecognised use is a failure. Opening a table
+// to every file means taking it out of DARK_TABLES. A file named in
+// LIMITED_DARK_WRITERS may use that one table while every other file fails.
 //
 // Tests are excluded. `tests/deploymentIdentity.test.mjs` names the delegates
 // in order to assert they are unused, and a check that forbade naming them
@@ -43,6 +44,17 @@ const DARK_TABLES = [
     "AvailabilityRollupApplication",
     "DeploymentPriceSnapshot",
 ];
+
+/**
+ * Files that may name one dark table because they are its limited writer.
+ * The table stays dark for every other file. This is not registry activation:
+ * the placement writer stores a row that matches the call the client already
+ * makes, and nothing else may read it.
+ */
+const LIMITED_DARK_WRITERS = {
+    ModelDeployment: ["lib/pinnedDeploymentPlacement.ts"],
+    ProviderEndpoint: ["lib/pinnedDeploymentPlacement.ts"],
+};
 
 
 /**
@@ -125,6 +137,9 @@ const DARK_COLUMNS = [
             "lib/availabilityObservation.ts",
             "lib/deploymentIdentity.ts",
             "lib/routingIdentityManifest.ts",
+            // Writes ModelDeployment.providerEndpointId. The scanner cannot
+            // tell that column from the same name on RoutingAttempt.
+            "lib/pinnedDeploymentPlacement.ts",
         ],
     },
     {
@@ -233,7 +248,10 @@ const problems = [];
 
 for (const file of files) {
     const source = readFileSync(join(root, file), "utf8");
+    const normalised = file.split("\\").join("/");
     for (const table of DARK_TABLES) {
+        const writers = LIMITED_DARK_WRITERS[table] ?? [];
+        if (writers.includes(normalised)) continue;
         const delegate = table.charAt(0).toLowerCase() + table.slice(1);
         // `prisma.modelDeployment`, `tx.modelDeployment`, `client.modelDeployment`
         const dotted = new RegExp(`\\.\\s*${delegate}\\s*\\.`);
@@ -265,7 +283,6 @@ for (const file of files) {
         }
     }
 
-    const normalised = file.split("\\").join("/");
     for (const entry of DARK_COLUMNS) {
         if (entry.exempt.includes(normalised)) continue;
         if (new RegExp(`\\b${entry.column}\\b`).test(source)) {
@@ -290,13 +307,12 @@ if (problems.length > 0) {
     console.error(
         "These tables were added ahead of the work that uses them, on the condition\n" +
             "that nothing reads or writes them until the routing identity change is\n" +
-            "approved on its own. If that approval has happened, take the table out of\n" +
-            "DARK_TABLES in this file -- deliberately, in the same change that starts\n" +
-            "using it."
+            "approved on its own. A limited writer is named in LIMITED_DARK_WRITERS.\n" +
+            "Opening the table to every file means taking it out of DARK_TABLES."
     );
     process.exit(1);
 }
 
 console.log("");
-console.log("None of them is read or written. That is the intended state.");
+console.log("No dark table is read outside its named limited writer.");
 console.log("");

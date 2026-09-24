@@ -297,6 +297,13 @@ const REGISTRY = {
     reason:
       "input, output, cache_read, cache_write. The same four rates lib/modelPricing.ts already prices per million tokens. One amount without a kind cannot say which of those rates it is, and a fifth kind would be a rate the record has no column for. The unit check beside this list fixes the scale at per million tokens.",
   },
+  PinnedDeploymentExperimentHold_status_check: {
+    owner: "list",
+    module: "lib/pinnedDeploymentExecution.ts",
+    list: "PINNED_EXPERIMENT_HOLD_STATUSES",
+    reason:
+      "held, settled, released, occupied. Released is only a call that was confirmed not to have started. Occupied keeps the reservation when the cost is unknown after dispatch. Settled is a measured cost. A fifth value would be a close this ledger has not decided how to apply to the ceiling.",
+  },
   AvailabilityRollupApplication_grain_check: {
     owner: "list",
     module: "lib/availabilityObservation.ts",

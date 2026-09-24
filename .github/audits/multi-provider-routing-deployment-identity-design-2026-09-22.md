@@ -1708,6 +1708,18 @@ workspace 테이블은 없다. `lib/routingPinGate.ts`가 적는다. ADR의 work
 
 완료는 새 경로가 실제 dispatch를 하고, 응답이 도달하고, decision과 attempt로 추적되며, 끄면 기존 경로로 돌아가는 것이다. 표가 있거나, manifest를 저장하거나, shadow가 선택만 계산한 것은 완료가 아니다.
 
+## 14.37 최소 실행 경로의 코드 (2026-09-24, 기본 꺼짐)
+
+세 의존성의 코드와 모의 테스트가 들어갔다. 기본값은 꺼짐이다. 이 절은 활성화 완료가 아니다. 완료 수는 46, 약 92%(추정) 그대로다. 병합, push, migration 실행, 실제 deployment 행 생성, 공급자 호출은 하지 않았다.
+
+1. 입장. `PINNED_DEPLOYMENT_EXECUTION`이 정확히 `on`이고, 서버 세션의 account가 `PINNED_DEPLOYMENT_ACCOUNT_ID`와 같을 때만 새 경로가 요청을 가져간다. 플래그가 꺼져 있거나 계정이 다르면 기존 채팅 경로는 그대로다. 요청 본문의 account는 읽지 않는다. 대상 요청이 deployment, 예산, 기록에서 거절되면 공급자 호출 전에 끝나고, 기존 경로로 넘어가지 않는다. 이미 잡은 예약은 플래그가 나중에 꺼져도 풀리지 않는다.
+2. Deployment 행. `lib/pinnedDeploymentPlacement.ts`만 `ModelDeployment`와 `ProviderEndpoint`를 쓴다. 두 테이블은 그 파일 밖에서 계속 dark다. id는 insert가 돌려준 값이다. 저장은 카탈로그의 provider, endpoint URL, `apiModel`과 문자 그대로 같을 때만 된다. credential은 적지 않는다. `RoutingAttempt.modelDeploymentId`는 쓰지 않는다.
+3. 실험 예산. 한도는 그 실험 행에 저장된 micro-USD다. 코드 기본값은 없다. US$5는 여전히 승인값이 아니다. 행이 없거나 한도가 없으면 공급자 호출은 0회다. 확정 지출과 진행 중 예약과 이번 호출의 보수적 상한을 잠근 행에서 비교한다. 호출이 시작되지 않은 것이 확인되면 예약을 푼다. 사용량을 신뢰할 수 있으면 그 비용만 남긴다. dispatch 이후 비용을 모르면 예약을 지출로 유지하고 0으로 풀지 않는다.
+
+최소 경로의 `streamText`는 `maxRetries: 0`이다. 모의 SDK는 그 값이 빠지면 429를 세 번 보내고, 이 경로에서는 한 번만 보낸다. 기존 채팅의 zhipu 분기와 `decideFallback`은 바꾸지 않았다. `admitCanaryObservation`과 여섯 보류 결정과 `catalogueHostRefusalCode`도 바꾸지 않았다.
+
+이 코드가 아직 활성화가 아닌 이유: 응답은 SDK 텍스트 스트림이고 채팅 이벤트 스트림이 아니다. 이 경로는 사용자 크레딧을 예약하지 않는다. 기록은 `beginInstrumentedDispatch`가 행을 만들 때만 성립하고, instrumentation이 꺼져 있으면 공급자를 호출하지 않는다. 실제 실행 전에는 본인 소유의 내부 테스트 account, 대상 deployment, 실험 예산, 배포 대상을 정해야 한다. 그 증거가 나오기 전에는 활성화 완료로 세지 않는다.
+
 ## 15. 되돌릴 수 없는 것
 
 1. **해외 공개** — 나간 데이터는 회수되지 않습니다.

@@ -309,9 +309,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-24, DeploymentPriceSnapshot. Dark, no marketing model, no webhook
  * writer, and not the credit reservation snapshot. Its amount is one rate
  * per million tokens. The digest moves because the schema is watched whole.
+ *
+ * 2026-09-24, PinnedDeploymentExperiment and its hold. Not a marketing
+ * model, not a webhook writer, and not a credit balance. The limit is
+ * whatever row is stored; the schema has no default amount. The digest
+ * moves because the schema is watched whole.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c5fac4cc9f7ac121c00d76b0df1db50cfcd1786dd204dc1fcf8bd6e01e350195";
+  "8a81b69bf70ed8794e638e2a770f2af0f7792cabbdb222df12d21e175c0886cf";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

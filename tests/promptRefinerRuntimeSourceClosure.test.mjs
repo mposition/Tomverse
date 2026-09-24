@@ -254,12 +254,16 @@ const compilerOptions = parsedConfig.options;
 // fingerprint, comment only, plus the schema model that note names. No
 // computed access. Count 228, position-free hash unchanged. A repin of the
 // position-sensitive digest only.
+//
+// 2026-09-24, the pinned-deployment experiment note above the fingerprint.
+// Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "1808f5ab1f1c0e6841dcf16b158064d6",
-  "6420c56028bf91bdb8e64d8b592334ad",
+  "4d415ef44b94f1b1f4110953fde77934",
+  "ae2ae5f11cc3c8a97f3ce5731421edf7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
