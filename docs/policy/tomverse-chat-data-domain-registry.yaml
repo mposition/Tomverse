@@ -1408,3 +1408,69 @@ domains:
       the same reason -- a plain digest over a body containing a six-digit code
       is reversible in a million tries, which would make the audit column the
       thing worth stealing.
+
+  - domain: credentialBinding
+    prismaModel: CredentialBinding
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.3 (BYOK cost wiring) and section 14 step 7
+    inUnifiedExport: excluded
+    note: >-
+      Which credential authorises a call, and who is billed for it. Holds a
+      reference to where the secret lives, never the secret. A Tomverse-funded
+      binding carries no accountId. Cascade rather than SetNull: a binding
+      whose account is gone still names that account's provider identity.
+
+  - domain: quotaScope
+    prismaModel: QuotaScope
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.2 (QuotaScope registry) and section 14 step 11
+    inUnifiedExport: excluded
+    note: >-
+      What a capacity limit is counted against. Counters and windows only.
+      QuotaCapacityState hangs off this row and cascades with it.
+
+  - domain: routingCandidateVerdict
+    prismaModel: RoutingCandidateVerdict
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.5 (candidate verdict freeze)
+    inUnifiedExport: excluded
+    note: >-
+      One row per candidate the Router considered for one turn. Cascades from
+      RoutingRun, which cascades from User. No prompt and no answer.
+
+  - domain: deploymentCacheAffinity
+    prismaModel: DeploymentCacheAffinity
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 14.1 (cache affinity)
+    inUnifiedExport: excluded
+    note: >-
+      Which placement a conversation's turns last went to. Cascades from
+      Conversation, which cascades from User. No prompt prefix.

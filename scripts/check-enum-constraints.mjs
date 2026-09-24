@@ -717,6 +717,103 @@ const REGISTRY = {
     reason:
       'Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to "why did this person not get it", which is a question support has to be able to answer without reading the send code.',
   },
+  PinnedDeploymentExperimentHold_status_check: {
+    owner: "list",
+    module: "lib/pinnedDeploymentExecution.ts",
+    list: "PINNED_EXPERIMENT_HOLD_STATUSES",
+    reason:
+      "held, settled, released, occupied. Released is only a call that was confirmed not to have started. Occupied keeps the reservation when the cost is unknown after dispatch. Settled is a measured cost.",
+  },
+  AvailabilityObservation_source_check: {
+    owner: "database",
+    reason:
+      "real_traffic, synthetic_probe, operator_verification. An operator proving the API answers is not the same claim as real user traffic being served.",
+  },
+  AvailabilityObservation_outcome_check: {
+    owner: "database",
+    reason:
+      "succeeded or failed. A rollup divides one by the total, so a third value would need every consumer to decide which side it counted on.",
+  },
+  AvailabilityObservation_errorClass_check: {
+    owner: "database",
+    reason:
+      "A subset of the attempt error vocabulary. A success has nothing to classify, so the column is nullable.",
+  },
+  AvailabilityRollupApplication_grain_check: {
+    owner: "database",
+    reason:
+      "deployment, endpoint, provider. Applying the provider grain does not record that the deployment grain was applied.",
+  },
+  DeploymentPriceSnapshot_knowledge_check: {
+    owner: "database",
+    reason:
+      "unknown, estimate, verified. Unknown is a missing amount, not zero.",
+  },
+  DeploymentPriceSnapshot_rate_kind_check: {
+    owner: "database",
+    reason:
+      "input, output, cache_read, cache_write. One amount without a kind cannot say which rate it is.",
+  },
+  RoutingRun_allocationMode_check: {
+    owner: "database",
+    reason:
+      "deterministic or explore_bounded, nullable because a run written before an allocator existed recorded neither.",
+  },
+  RoutingRun_allocationSeedGrain_check: {
+    owner: "database",
+    reason:
+      "request or session. An exploration must name its grain; a deterministic allocation names none.",
+  },
+  ModelDeployment_promptCacheSupport_check: {
+    owner: "database",
+    reason:
+      "unproven, verified_absent, verified_automatic, verified_explicit. Unproven is the default and is neither no-cache nor a cache.",
+  },
+  RoutingCandidateVerdict_verdict_check: {
+    owner: "database",
+    reason:
+      "eligible or rejected. An eligible candidate has no rejection reason.",
+  },
+  RoutingCandidateVerdict_reason_check: {
+    owner: "database",
+    reason:
+      "The reasons a candidate filter can give. Nullable because an eligible candidate has no reason.",
+  },
+  QuotaScope_scopeKind_check: {
+    owner: "database",
+    reason:
+      "credential, endpoint_credential, deployment_credential, account, provider. Each kind names its own columns.",
+  },
+  CredentialBinding_billingOwner_check: {
+    owner: "database",
+    reason:
+      "tomverse or account. It decides which budget a call draws down.",
+  },
+  CredentialBinding_status_check: {
+    owner: "database",
+    reason:
+      "disabled, active, revoked. Revoked is a withdrawn secret, not a pause.",
+  },
+  ProviderEndpoint_residencyClass_check: {
+    owner: "database",
+    reason:
+      "proven and unproven. Unproven is the default until a contract names a recipient and a region.",
+  },
+  RoutingIdentityManifestEntry_versionPinStrength_check: {
+    owner: "database",
+    reason:
+      "strong, weak, alias_only. A published entry copies the pin from the deployment.",
+  },
+  ModelDeployment_versionPinStrength_check: {
+    owner: "database",
+    reason:
+      "strong, weak, alias_only. The default is strong, so a row that predates the column cannot drift by omission.",
+  },
+  ModelDeployment_qualityGateStatus_check: {
+    owner: "database",
+    reason:
+      "pending, passed, failed, stale. Stale is evidence that expired, not evidence the model got worse.",
+  },
 
 };
 
