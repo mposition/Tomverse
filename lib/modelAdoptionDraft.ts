@@ -869,14 +869,18 @@ export const ADOPTION_PENDING_VALIDATIONS = ["pricing", "access", "staging"] as 
  * does not: that column means "the model that replaces me", and writing the
  * predecessor there would say the adoption is already obsolete. The
  * application default and the guest default stay enabled, and a row that
- * already names a different successor is left on that chain.
+ * already names a different successor is left on that chain. The predecessor
+ * has to belong to the adopted model's provider: a replacement does not
+ * cross providers.
  */
 export const adoptionReplacementRefusal = (input: {
   adoptedModelId: string;
+  adoptedProvider: string;
   replacesModelId: string | null;
   predecessor: {
     catalogDeleted: boolean;
     replacementModelId: string | null;
+    provider: string;
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
   } | null;
@@ -889,6 +893,12 @@ export const adoptionReplacementRefusal = (input: {
     return {
       status: 400,
       message: "The model being replaced is not in the active registry.",
+    };
+  }
+  if (input.predecessor.provider !== input.adoptedProvider) {
+    return {
+      status: 409,
+      message: "A model can only replace another model from the same provider.",
     };
   }
   if (input.predecessor.isApplicationDefault) {

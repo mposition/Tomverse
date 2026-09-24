@@ -776,7 +776,10 @@ export function AdminModelRegistryPanel() {
   }
 
   const selectProvider = (nextProvider: AiProvider) => {
-    if (adoptWorkItemId && nextProvider !== form.provider) startNewPair();
+    if (adoptWorkItemId && nextProvider !== form.provider) {
+      startNewPair();
+      setAdoptReplacesModelId("");
+    }
     setForm((current) => ({
       ...current,
       provider: nextProvider,
@@ -1179,7 +1182,7 @@ export function AdminModelRegistryPanel() {
                       >
                         <option value="">{m.adopt.replaceNone}</option>
                         {models
-                          .filter((model) => model.id !== form.id && !model.catalogDeleted)
+                          .filter((model) => model.provider === form.provider && model.id !== form.id && !model.catalogDeleted)
                           .map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.name} ({model.id})

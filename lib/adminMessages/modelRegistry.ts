@@ -110,7 +110,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
       replaceTitle: "Replace an existing model",
       replaceHelp:
-        "Replace and save disables the chosen model and records this adoption as what replaces it. The new model stays coming soon until validation finishes, so it is not offered in the picker until then.",
+        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The new model stays coming soon until validation finishes, so it is not offered in the picker until then.",
       replaceLabel: "Model to replace",
       replaceNone: "Do not replace a model",
     },
@@ -311,7 +311,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       replaceTitle: "기존 모델 대체",
       replaceHelp:
-        "대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 검증이 끝나기 전까지 출시 예정이므로 그때까지 선택 목록에 나오지 않습니다.",
+        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 검증이 끝나기 전까지 출시 예정이므로 그때까지 선택 목록에 나오지 않습니다.",
       replaceLabel: "대체할 모델",
       replaceNone: "대체하지 않음",
     },
