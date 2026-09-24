@@ -1623,9 +1623,11 @@ production 배포는 0%입니다.
 
 판정이 `lib/scopedFallbackAdmission.ts`에 있습니다. 요청 경로는 import하지 않습니다. 라이브 `decideFallback`은 그대로 다음 logical model을 고릅니다. 이 모듈은 그 함수를 바꾸지 않습니다. 행을 읽거나 쓰지 않습니다. capacity와 가격을 읽지 않습니다.
 
-endpoint 실패는 다른 endpoint만 통과합니다. deployment 실패는 같은 endpoint의 다른 deployment를 통과합니다. gateway라고 이름 붙은 실패는 그 gateway의 다른 endpoint를 통과시키지 않습니다. 기권은 후보를 통과시키지 않습니다. 실패한 범위 안에만 후보가 남으면 체인을 멈춥니다. 이미 보낸 attempt가 둘이면 세 번째를 만들지 않습니다. 예산은 라이브 정책의 2와 같습니다. equivalence class가 없는 것은 통과도 거절도 아닙니다.
+endpoint 실패는 다른 endpoint만 통과합니다. deployment 실패는 같은 endpoint의 다른 deployment를 통과합니다. gateway라고 이름 붙은 실패는 그 gateway의 다른 endpoint를 통과시키지 않습니다. 기권은 후보를 통과시키지 않습니다. local 범위는 `local_scope`로 거절합니다. 실패한 범위 안에만 후보가 남으면 체인을 멈춥니다. 이미 보낸 attempt가 둘이면 세 번째를 만들지 않습니다. 통과해도 보내도 되는 수는 `remainingAttempts`이고 목록 전체가 아닙니다. 예산은 라이브 정책의 2와 같습니다. 이 통과는 필요조건입니다. 라이브 정책이 종료라고 하면 종료가 우선합니다. equivalence class가 없는 것은 통과도 거절도 아닙니다.
 
 이 줄은 권장 순서 11번의 범위 판정입니다. 요청 경로에 연결하는 활성화는 아니고, 그 연결은 §14.26에 남습니다. 직전 VALIDATE 보고는 44, 약 88%였습니다. §14.3의 약 50단위에서 완료는 45, **약 90%(추정)**입니다. 검증·독립 검토·병합·배포는 별도입니다. 라우팅 스택의 production 배포는 0%입니다.
+
+Devin CLI 검토(Claude Opus 5.5 High)는 blocker와 major 없이 승인이었습니다. 통과 목록을 전부 보내는 것으로 읽히지 않게 `remainingAttempts`를 두었고, local 범위의 거절 사유를 나눴습니다. 완료 수는 올리지 않습니다.
 
 ## 15. 되돌릴 수 없는 것
 

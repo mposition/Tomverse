@@ -47,6 +47,8 @@ test("an endpoint failure admits only a different endpoint, in caller order", ()
         candidates: [same, later, first],
     });
     assert.equal(decision.admitted, true);
+    assert.equal(decision.remainingAttempts, 1);
+    assert.ok(decision.candidates.length > decision.remainingAttempts);
     assert.deepEqual(
         decision.candidates.map((item) => item.deploymentId),
         ["dep_later", "dep_first"]
@@ -110,7 +112,7 @@ test("an abstention admits nobody", () => {
             attemptsDispatched: 1,
             candidates: [candidate()],
         }),
-        { admitted: false, reason: "abstained" }
+        { admitted: false, reason: "abstained", remainingAttempts: 0 }
     );
 });
 
@@ -122,7 +124,7 @@ test("a second dispatched attempt does not name a third", () => {
             attemptsDispatched: 2,
             candidates: [candidate()],
         }),
-        { admitted: false, reason: "budget_spent" }
+        { admitted: false, reason: "budget_spent", remainingAttempts: 0 }
     );
 });
 
@@ -138,6 +140,32 @@ test("a budget that is not a sent attempt is refused", () => {
             "invalid_budget"
         );
     }
+});
+
+test("a local failure is not described as the same domain", () => {
+    const abort = classifyCanonicalFailure({ ...base, provenance: "user_abort", category: "NETWORK" });
+    assert.equal(abort.scopeKind, "local");
+    assert.deepEqual(
+        admitScopedFallback({
+            failure: abort,
+            attemptsDispatched: 1,
+            candidates: [candidate()],
+        }),
+        { admitted: false, reason: "local_scope", remainingAttempts: 0 }
+    );
+    const local = classifyCanonicalFailure({
+        ...base,
+        category: "LOCAL_REJECTION",
+        genericScope: "none",
+    });
+    assert.equal(
+        admitScopedFallback({
+            failure: local,
+            attemptsDispatched: 1,
+            candidates: [candidate()],
+        }).reason,
+        "local_scope"
+    );
 });
 
 test("no candidate outside the failed scope stops the chain", () => {

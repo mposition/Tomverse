@@ -3,9 +3,14 @@
  *
  * The live fallback policy still chooses the next logical model. This module
  * does not replace it, does not dispatch, and does not read capacity or
- * price. The request path does not import it. Abstention admits nobody.
- * A third dispatched attempt is refused. Absence of an equivalence class
- * neither admits nor refuses a candidate.
+ * price. The request path does not import it.
+ *
+ * An admission is necessary for one more attempt and not sufficient. A live
+ * refusal (funding, safety, cancellation) still refuses. The caller dispatches
+ * at most `remainingAttempts` names from the list, not every name in it.
+ * Abstention admits nobody. A local failure admits nobody. A third dispatched
+ * attempt is refused. Absence of an equivalence class neither admits nor
+ * refuses a candidate.
  */
 
 import {
@@ -21,13 +26,20 @@ export type ScopedFallbackRefusal =
     | "invalid_budget"
     | "budget_spent"
     | "abstained"
+    | "local_scope"
     | "same_failure_domain";
 
 export type ScopedFallbackAdmission =
-    | { admitted: false; reason: ScopedFallbackRefusal }
-    | { admitted: true; candidates: FailureScopedCandidate[] };
+    | { admitted: false; reason: ScopedFallbackRefusal; remainingAttempts: 0 }
+    | { admitted: true; remainingAttempts: number; candidates: FailureScopedCandidate[] };
 
 const wholeAttempt = (value: number) => Number.isInteger(value) && value >= 1;
+
+const refused = (reason: ScopedFallbackRefusal): ScopedFallbackAdmission => ({
+    admitted: false,
+    reason,
+    remainingAttempts: 0,
+});
 
 /**
  * Candidates that sit outside the failed scope, in the caller's order.
@@ -43,15 +55,19 @@ export const admitScopedFallback = (input: {
     candidates: readonly FailureScopedCandidate[];
 }): ScopedFallbackAdmission => {
     if (!wholeAttempt(input.attemptsDispatched)) {
-        return { admitted: false, reason: "invalid_budget" };
+        return refused("invalid_budget");
     }
     if (input.attemptsDispatched >= SCOPED_FALLBACK_ATTEMPT_BUDGET) {
-        return { admitted: false, reason: "budget_spent" };
+        return refused("budget_spent");
     }
     if (input.failure.status !== "classified") {
-        return { admitted: false, reason: "abstained" };
+        return refused("abstained");
+    }
+    if (input.failure.scopeKind === "local") {
+        return refused("local_scope");
     }
 
+    const remainingAttempts = SCOPED_FALLBACK_ATTEMPT_BUDGET - input.attemptsDispatched;
     const admitted: FailureScopedCandidate[] = [];
     for (const candidate of input.candidates) {
         if (candidateOutsideFailureScope(input.failure, candidate).outside) {
@@ -59,7 +75,7 @@ export const admitScopedFallback = (input: {
         }
     }
     if (admitted.length === 0) {
-        return { admitted: false, reason: "same_failure_domain" };
+        return refused("same_failure_domain");
     }
-    return { admitted: true, candidates: admitted };
+    return { admitted: true, remainingAttempts, candidates: admitted };
 };

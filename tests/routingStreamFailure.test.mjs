@@ -366,7 +366,11 @@ test("the classifier does not mint provider_pre_token_failure", () => {
         ),
         "utf8"
     );
-    const inList = migration.slice(migration.indexOf("IN ("), migration.lastIndexOf("NOT VALID"));
+    const inStart = migration.indexOf("IN (");
+    const notValid = migration.lastIndexOf("NOT VALID");
+    assert.ok(inStart >= 0);
+    assert.ok(notValid > inStart);
+    const inList = migration.slice(inStart, notValid);
     assert.equal(inList.includes("'NULL'"), false);
     assert.equal(inList.includes("provider_pre_token_failure"), true);
 
