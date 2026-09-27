@@ -131,11 +131,18 @@ ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_ru
 
 -- ## What the triggers hold
 --
--- 1. **A rule version's content never changes.** It is what a waiver was
---    approved against and what a verdict recorded; a new content is a new
---    version number. Deleting one is refused too while any policy version
---    applies it -- the foreign key does that -- and allowed otherwise, because
---    a draft that was thrown away should not leave a rule nobody uses.
+-- 1. **A rule version is written once and never changes or goes away.** It is
+--    what a waiver was approved against and what a verdict recorded, so a
+--    different content is a different version number.
+--
+--    Allowing an unreferenced one to be deleted was the hole a second review
+--    found, and it defeated the whole point: create a rule version, delete the
+--    draft that referenced it (its country rules cascade away), delete the now
+--    orphaned rule version, and insert the same (ruleKey, ruleVersion) with a
+--    different content. Every CHECK passes, because the row it would have
+--    disagreed with is gone. So a rule version outlives the draft that
+--    introduced it, even one nobody ever used: the pair is a name, and a name
+--    that can be freed is a name that can come to mean something else.
 --
 -- 2. **Only a draft's country rules can be written.** An active or superseded
 --    version is what some verdict was decided under, and editing its rules in
@@ -150,6 +157,16 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION '% version % cannot be deleted; a rule version is a name, and a name that can be freed can come to mean something else.',
+            OLD."ruleKey", OLD."ruleVersion"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Every column, `createdAt` included. It is this row's provenance and
+    -- nothing reads it to decide a send, but a row whose content cannot change
+    -- while its timestamp can is append-only in the part somebody checked and
+    -- not in the part they would cite.
     IF NEW."ruleKey" IS DISTINCT FROM OLD."ruleKey"
        OR NEW."ruleVersion" IS DISTINCT FROM OLD."ruleVersion"
        OR NEW."countryCode" IS DISTINCT FROM OLD."countryCode"
@@ -157,6 +174,7 @@ BEGIN
        OR NEW."status" IS DISTINCT FROM OLD."status"
        OR NEW."releaseConditions" IS DISTINCT FROM OLD."releaseConditions"
        OR NEW."activationGates" IS DISTINCT FROM OLD."activationGates"
+       OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt"
     THEN
         RAISE EXCEPTION '% version % already names a rule; a different content is a new version.',
             OLD."ruleKey", OLD."ruleVersion"
@@ -167,7 +185,7 @@ END;
 $$;
 
 CREATE TRIGGER "release_notes_rule_version_immutable"
-    BEFORE UPDATE ON "ReleaseNotesRuleVersion"
+    BEFORE UPDATE OR DELETE ON "ReleaseNotesRuleVersion"
     FOR EACH ROW EXECUTE FUNCTION "release_notes_rule_version_immutable"();
 
 -- Table names are qualified with the trigger's own schema, as the ledger's

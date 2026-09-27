@@ -4553,8 +4553,8 @@ model JurisdictionProfile {
 /// (`EmailSendApproval.ruleKey`/`ruleVersion`), so that pair has to name one
 /// content or the waiver applies to a rule nobody approved it for. Holding the
 /// content here rather than on each country row makes that structural: there is
-/// one row to say it, its content columns never change, and the version number
-/// is what moves.
+/// one row to say it, that row never changes and is never deleted -- not even
+/// when no policy version references it -- and the version number is what moves.
 ///
 /// `status` is the marketing allowlist (draft section 4.1): open or closed.
 /// `basis` is what the recipient side rests on. `releaseConditions` is section

@@ -214,17 +214,55 @@ test("a rule version's content cannot change, with or without a second row", asy
   ]);
 });
 
-test("a rule version a policy version applies cannot be deleted", async () => {
+test("a rule version cannot be deleted, referenced or not", async () => {
+  // Refusing only a referenced delete left the pair reusable: create a rule
+  // version, delete the draft that referenced it (its country rules cascade
+  // away), delete the orphan, and insert the same pair with a different
+  // content. Every CHECK passes, because the row it would have disagreed with
+  // is gone. So the name is never freed.
+  //
+  // The message is asserted, not just the rejection: a foreign key would refuse
+  // the referenced delete on its own, so a test that accepted either error
+  // passed with no BEFORE DELETE trigger at all -- which is how the first
+  // attempt at this test went green without the fix.
+  const deleteUs = () =>
+    prisma.releaseNotesRuleVersion.delete({
+      where: { ruleKey_ruleVersion: { ruleKey: releaseNotesRuleKey("US"), ruleVersion: 1 } },
+    });
+
   const version = await bareDraft();
   await prisma.releaseNotesRuleVersion.create({ data: ruleVersion() });
   await prisma.releaseNotesCountryRule.create({ data: countryRule(version.id) });
+  await refuses(deleteUs, /cannot be deleted/);
 
+  // Now unreferenced, which used to be enough.
+  await prisma.emailPolicyVersion.delete({ where: { id: version.id } });
+  assert.equal(await prisma.releaseNotesCountryRule.count(), 0);
+  await refuses(deleteUs, /cannot be deleted/);
+
+  // And the pair still says what it said, so no re-insert can redefine it.
+  const stored = await prisma.releaseNotesRuleVersion.findUniqueOrThrow({
+    where: { ruleKey_ruleVersion: { ruleKey: releaseNotesRuleKey("US"), ruleVersion: 1 } },
+  });
+  assert.equal(stored.basis, "opt_out");
+  await refuses(
+    () => prisma.releaseNotesRuleVersion.create({ data: ruleVersion({ basis: "express_consent" }) }),
+    /[Uu]nique|already exists/
+  );
+});
+
+test("a rule version's provenance is as fixed as its content", async () => {
+  // Nothing reads createdAt to decide a send, and a row whose content cannot
+  // change while its timestamp can is append-only in the part somebody checked
+  // and not in the part they would cite.
+  await prisma.releaseNotesRuleVersion.create({ data: ruleVersion() });
   await refuses(
     () =>
-      prisma.releaseNotesRuleVersion.delete({
+      prisma.releaseNotesRuleVersion.update({
         where: { ruleKey_ruleVersion: { ruleKey: releaseNotesRuleKey("US"), ruleVersion: 1 } },
+        data: { createdAt: new Date("2020-01-01T00:00:00.000Z") },
       }),
-    /Foreign key|violates foreign key|constraint/i
+    /a different content is a new version/
   );
 });
 
@@ -298,7 +336,8 @@ test("a draft's rules can be edited, and deleting the draft takes them with it",
   await prisma.emailPolicyVersion.delete({ where: { id: version.id } });
   assert.equal(await prisma.releaseNotesCountryRule.count(), 0);
   // The rule version outlives the draft that referenced it: it is what a
-  // waiver may have named, and nothing else says what that version meant.
+  // waiver may have named, and nothing else says what that version meant. It
+  // cannot be deleted afterwards either -- see the test above.
   assert.equal(await prisma.releaseNotesRuleVersion.count(), 1);
 });
 
