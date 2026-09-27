@@ -21,10 +21,11 @@
 
 export type Transition<S extends string> = readonly [from: S, to: S];
 
-const pairKey = (from: string, to: string) => `${from}\u0000${to}`;
-
-const transitionSet = <S extends string>(table: readonly Transition<S>[]) =>
-  new Set(table.map(([from, to]) => pairKey(from, to)));
+export const isAllowedTransition = <S extends string>(
+  table: readonly Transition<S>[],
+  from: S,
+  to: S,
+) => table.some(([a, b]) => a === from && b === to);
 
 export const ENGINEERING_AGENT_WORK_ITEM_KINDS = [
   "t2_draft",
@@ -37,101 +38,220 @@ export const ENGINEERING_AGENT_WORK_ITEM_KINDS = [
 export type EngineeringAgentWorkItemKind =
   (typeof ENGINEERING_AGENT_WORK_ITEM_KINDS)[number];
 
-export const PUBLISH_STATES = [
-  "queued",
-  "claimed",
-  "needs_lookup",
-  "published",
-  "publish_refused",
-  "publish_failed",
-  "outcome_unknown",
-  "expired",
-] as const;
-export type PublishState = (typeof PUBLISH_STATES)[number];
+/**
+ * The three kinds of work item that write to GitHub: opening the pull request,
+ * closing an expired one, and deleting a branch. Each write is irrevocable, so
+ * all three share one shape -- a claim, a result that must carry the claim's
+ * fencing token, and a lookup before anything is written a second time
+ * (policy §10). They differ only in what their terminal states are called and
+ * in what a write claim has to rest on.
+ */
+export const WRITE_ITEM_KINDS = ["publish", "expire_close", "prune"] as const;
+export type WriteItemKind = (typeof WRITE_ITEM_KINDS)[number];
+
+const WRITE_ITEM_TERMINALS = {
+  publish: { success: "published", refused: "publish_refused", failed: "publish_failed" },
+  expire_close: { success: "closed", refused: "expire_refused", failed: "expire_failed" },
+  prune: { success: "pruned", refused: "prune_refused", failed: "prune_failed" },
+} as const;
+
+export type WriteItemState<K extends WriteItemKind = WriteItemKind> =
+  | "queued"
+  | "claimed"
+  | "needs_lookup"
+  | "outcome_unknown"
+  | "expired"
+  | (typeof WRITE_ITEM_TERMINALS)[K]["success" | "refused" | "failed"];
+
+export const writeItemStates = <K extends WriteItemKind>(kind: K): WriteItemState<K>[] => {
+  const terminals = WRITE_ITEM_TERMINALS[kind];
+  return [
+    "queued",
+    "claimed",
+    "needs_lookup",
+    "outcome_unknown",
+    ...(kind === "publish" ? (["expired"] as const) : []),
+    terminals.success,
+    terminals.refused,
+    terminals.failed,
+  ] as WriteItemState<K>[];
+};
+
+export const writeItemTerminalStates = <K extends WriteItemKind>(kind: K) => {
+  const terminals = WRITE_ITEM_TERMINALS[kind];
+  return [
+    ...(kind === "publish" ? (["expired"] as const) : []),
+    terminals.success,
+    terminals.refused,
+    terminals.failed,
+  ] as WriteItemState<K>[];
+};
 
 /**
- * How a publish item was claimed. A write claim consumed a capability; a
- * lookup claim did not, may not write, and exists only to find out what an
- * earlier claim did (policy §10).
+ * Every allowed transition of a write item of this kind, and the only place
+ * they are written down. The store generates its trigger from this.
+ *
+ * - `queued -> claimed` is a write claim; `needs_lookup -> claimed` and
+ *   `outcome_unknown -> claimed` are lookup-only claims that write nothing and
+ *   consume no capability.
+ * - A lease expiry sends `claimed` to `needs_lookup`, never back to `queued`.
+ * - `claimed -> queued` is a write claim's refusal before any GitHub write, or
+ *   a lookup that proved no earlier write happened.
+ * - Only an unclaimed publish item expires by TTL; the maintenance kinds are
+ *   created when they are due and are not left waiting.
  */
-export const PUBLISH_CLAIM_MODES = ["write", "lookup"] as const;
-export type PublishClaimMode = (typeof PUBLISH_CLAIM_MODES)[number];
+export const writeItemTransitions = <K extends WriteItemKind>(
+  kind: K,
+): readonly Transition<WriteItemState<K>>[] => {
+  const terminals = WRITE_ITEM_TERMINALS[kind];
+  const table: Array<readonly [string, string]> = [
+    ["queued", "claimed"],
+    ["claimed", terminals.success],
+    ["claimed", "queued"],
+    ["claimed", terminals.refused],
+    ["claimed", terminals.failed],
+    ["claimed", "needs_lookup"],
+    ["claimed", "outcome_unknown"],
+    ["needs_lookup", "claimed"],
+    ["outcome_unknown", "claimed"],
+  ];
+  if (kind === "publish") table.push(["queued", "expired"]);
+  return table as unknown as readonly Transition<WriteItemState<K>>[];
+};
+
+/** The publish table, kept by name because the policy and the design cite it. */
+export const PUBLISH_TRANSITIONS = writeItemTransitions("publish");
+export const PUBLISH_STATES = writeItemStates("publish");
+export const PUBLISH_TERMINAL_STATES = writeItemTerminalStates("publish");
+export type PublishState = WriteItemState<"publish">;
 
 /**
- * Every allowed transition of a publish work item, and the only place they are
- * written down. `claimed` is split by claim mode below because the same pair
- * (`claimed -> queued`) means two different things: a write claim that refused
- * before writing, and a lookup claim that proved no earlier write happened.
+ * How a write item was claimed. A write claim may write; a lookup claim exists
+ * only to find out what an earlier claim did, and writes nothing.
  */
-export const PUBLISH_TRANSITIONS: readonly Transition<PublishState>[] = [
-  ["queued", "claimed"],
-  ["queued", "expired"],
-  ["claimed", "published"],
-  ["claimed", "queued"],
-  ["claimed", "publish_refused"],
-  ["claimed", "publish_failed"],
-  ["claimed", "needs_lookup"],
-  ["claimed", "outcome_unknown"],
-  ["needs_lookup", "claimed"],
-  ["outcome_unknown", "claimed"],
-] as const;
+export const WRITE_CLAIM_MODES = ["write", "lookup"] as const;
+export type WriteClaimMode = (typeof WRITE_CLAIM_MODES)[number];
 
-const PUBLISH_TRANSITION_SET = transitionSet(PUBLISH_TRANSITIONS);
+/** What a write claim of each kind has to rest on, all in the claim transaction. */
+export type WriteClaimPrecondition =
+  | { kind: "publish"; capabilityConsumed: boolean }
+  | {
+      kind: "expire_close";
+      /** The binding (number, run id, head) re-read and unchanged. */
+      bindingMatches: boolean;
+      /** Expiry recomputed from owner activity at claim time. */
+      stillExpired: boolean;
+    }
+  | {
+      kind: "prune";
+      /** The branch's ref oid equals the recorded sha. */
+      refMatchesRecorded: boolean;
+      /**
+       * Either the PR is closed or merged, or -- for a branch left by a failed
+       * PR creation -- a lookup read the full PR list and found none.
+       */
+      prClosedOrConfirmedAbsent: boolean;
+    };
 
-export const PUBLISH_TERMINAL_STATES: readonly PublishState[] = [
-  "published",
-  "publish_refused",
-  "publish_failed",
-  "expired",
-];
+/**
+ * The outcome a result reports. The first group ends a write claim; the second
+ * ends a lookup claim; `lookup_impossible` can end either -- a write whose
+ * result is unknown looks first, and when looking fails it stops there.
+ */
+export type WriteResultOutcome =
+  | "confirmed"
+  | "refused_before_write"
+  | "revalidation_refused"
+  | "write_rejected"
+  | "pr_create_rejected"
+  | "lookup_no_prior_write"
+  | "lookup_found_result"
+  | "lookup_impossible";
 
-/** What a publish claim transition is allowed to rest on. */
-export type PublishTransitionContext =
-  | { event: "claim"; mode: PublishClaimMode; capabilityConsumed: boolean }
+export type WriteTransitionContext =
+  | { event: "claim"; mode: "write"; precondition: WriteClaimPrecondition }
+  | { event: "claim"; mode: "lookup"; capabilityConsumed: boolean }
   | { event: "expire_ttl" }
   | { event: "lease_expired" }
   | {
       event: "result";
-      claimMode: PublishClaimMode;
+      claimMode: WriteClaimMode;
       fencingMatches: boolean;
-      outcome:
-        | "pr_confirmed"
-        | "refused_before_write"
-        | "revalidation_refused"
-        | "push_rejected"
-        | "pr_create_rejected"
-        | "lookup_no_prior_write"
-        | "lookup_found_pr"
-        | "lookup_impossible";
+      outcome: WriteResultOutcome;
     };
 
-export type PublishTransitionVerdict =
-  | { allowed: true }
-  | { allowed: false; reason: string };
+export type TransitionVerdict = { allowed: true } | { allowed: false; reason: string };
 
-const refuse = (reason: string): PublishTransitionVerdict => ({
-  allowed: false,
-  reason,
-});
+const refuse = (reason: string): TransitionVerdict => ({ allowed: false, reason });
+
+const resultTarget = (
+  kind: WriteItemKind,
+  mode: WriteClaimMode,
+  outcome: WriteResultOutcome,
+): string | null => {
+  const terminals = WRITE_ITEM_TERMINALS[kind];
+  if (mode === "write") {
+    switch (outcome) {
+      case "confirmed":
+        return terminals.success;
+      case "refused_before_write":
+        return "queued";
+      case "revalidation_refused":
+        return terminals.refused;
+      case "write_rejected":
+        // A rejected push leaves nothing behind, so it is a refusal; a rejected
+        // close or delete leaves the binding in place, so it is a failure.
+        return kind === "publish" ? terminals.refused : terminals.failed;
+      case "pr_create_rejected":
+        // The branch is already there; the prune that follows looks first.
+        return kind === "publish" ? terminals.failed : null;
+      case "lookup_impossible":
+        return "outcome_unknown";
+      default:
+        return null;
+    }
+  }
+  switch (outcome) {
+    case "lookup_no_prior_write":
+      return "queued";
+    case "lookup_found_result":
+      return terminals.success;
+    case "lookup_impossible":
+      return "outcome_unknown";
+    default:
+      return null;
+  }
+};
+
+const writePreconditionHolds = (
+  kind: WriteItemKind,
+  precondition: WriteClaimPrecondition,
+): string | null => {
+  if (precondition.kind !== kind) return "precondition_for_another_kind";
+  switch (precondition.kind) {
+    case "publish":
+      return precondition.capabilityConsumed ? null : "write_claim_requires_capability_consumption";
+    case "expire_close":
+      if (!precondition.bindingMatches) return "binding_changed";
+      return precondition.stillExpired ? null : "no_longer_expired";
+    case "prune":
+      if (!precondition.refMatchesRecorded) return "ref_not_recorded_sha";
+      return precondition.prClosedOrConfirmedAbsent ? null : "pr_not_closed_or_absence_unconfirmed";
+  }
+};
 
 /**
- * The publish table with its conditions. The pair must be in the table, and the
- * event must be one the pair is allowed to rest on:
- *
- * - a write claim consumes a capability in the same transaction; a lookup claim
- *   must not, and is only reachable from `needs_lookup` or `outcome_unknown`;
- * - `claimed -> queued` is a write claim's refusal before any GitHub write, or a
- *   lookup that proved no earlier write -- never a lease expiry, which goes to
- *   `needs_lookup` so nothing is ever written again without looking first;
- * - every result carries the claim's fencing token, and a stale token decides
- *   nothing.
+ * The table with its conditions. The pair must be in the kind's table, and the
+ * event must be one that pair may rest on. Every result must carry the claim's
+ * fencing token; a stale token decides nothing.
  */
-export const decidePublishTransition = (
-  from: PublishState,
-  to: PublishState,
-  context: PublishTransitionContext,
-): PublishTransitionVerdict => {
-  if (!PUBLISH_TRANSITION_SET.has(pairKey(from, to))) {
+export const decideWriteItemTransition = <K extends WriteItemKind>(
+  kind: K,
+  from: WriteItemState<K>,
+  to: WriteItemState<K>,
+  context: WriteTransitionContext,
+): TransitionVerdict => {
+  if (!isAllowedTransition(writeItemTransitions(kind), from, to)) {
     return refuse("transition_not_in_table");
   }
 
@@ -140,18 +260,15 @@ export const decidePublishTransition = (
       if (to !== "claimed") return refuse("claim_must_enter_claimed");
       if (context.mode === "write") {
         if (from !== "queued") return refuse("write_claim_only_from_queued");
-        if (!context.capabilityConsumed) {
-          return refuse("write_claim_requires_capability_consumption");
-        }
-        return { allowed: true };
+        const problem = writePreconditionHolds(kind, context.precondition);
+        return problem === null ? { allowed: true } : refuse(problem);
       }
       if (from !== "needs_lookup" && from !== "outcome_unknown") {
         return refuse("lookup_claim_only_after_unknown_outcome");
       }
-      if (context.capabilityConsumed) {
-        return refuse("lookup_claim_must_not_consume_capability");
-      }
-      return { allowed: true };
+      return context.capabilityConsumed
+        ? refuse("lookup_claim_must_not_consume_capability")
+        : { allowed: true };
     }
     case "expire_ttl":
       return from === "queued" && to === "expired"
@@ -164,56 +281,28 @@ export const decidePublishTransition = (
     case "result": {
       if (from !== "claimed") return refuse("result_only_from_claimed");
       if (!context.fencingMatches) return refuse("stale_fencing_token");
-      const expected = resultTarget(context.claimMode, context.outcome);
+      const expected = resultTarget(kind, context.claimMode, context.outcome);
       if (expected === null) return refuse("outcome_not_valid_for_claim_mode");
-      return expected === to
-        ? { allowed: true }
-        : refuse("outcome_does_not_lead_to_target");
+      return expected === to ? { allowed: true } : refuse("outcome_does_not_lead_to_target");
     }
-  }
-};
-
-const resultTarget = (
-  mode: PublishClaimMode,
-  outcome: Extract<PublishTransitionContext, { event: "result" }>["outcome"],
-): PublishState | null => {
-  if (mode === "write") {
-    switch (outcome) {
-      case "pr_confirmed":
-        return "published";
-      case "refused_before_write":
-        return "queued";
-      case "revalidation_refused":
-      case "push_rejected":
-        return "publish_refused";
-      case "pr_create_rejected":
-        return "publish_failed";
-      case "lookup_impossible":
-        return "outcome_unknown";
-      default:
-        return null;
-    }
-  }
-  switch (outcome) {
-    case "lookup_no_prior_write":
-      return "queued";
-    case "lookup_found_pr":
-      return "published";
-    case "lookup_impossible":
-      return "outcome_unknown";
-    default:
-      return null;
   }
 };
 
 /**
- * Consecutive lookup failures on one `outcome_unknown` item before it becomes a
- * decision item for a person (proposed: 3).
+ * Entering `outcome_unknown` hands the item to a person in the same
+ * transaction (policy §10). Lookups continue once a round, read-only, and a
+ * lookup that settles the result closes the decision with it.
  */
-export const OUTCOME_UNKNOWN_LOOKUP_LIMIT = 3;
+export const opensDecisionOnEntry = (to: string) => to === "outcome_unknown";
 
-export const shouldEscalateOutcomeUnknown = (consecutiveLookupFailures: number) =>
-  consecutiveLookupFailures >= OUTCOME_UNKNOWN_LOOKUP_LIMIT;
+/**
+ * A branch left behind by a PR creation that GitHub rejected is only ever
+ * pruned after a lookup read the whole PR list for its head and found none.
+ */
+export const mayQueuePruneAfterFailedPublish = (lookup: {
+  listReadToEnd: boolean;
+  pullRequestsForHead: number;
+}) => lookup.listReadToEnd && lookup.pullRequestsForHead === 0;
 
 export const RUN_STATUSES = ["active", "finished", "abandoned"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -298,12 +387,6 @@ export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[]
   ["pending", "absent"],
   ["pending", "partial"],
 ] as const;
-
-export const isAllowedTransition = <S extends string>(
-  table: readonly Transition<S>[],
-  from: S,
-  to: S,
-) => table.some(([a, b]) => a === from && b === to);
 
 /* ------------------------------------------------------------------------- */
 /* Mode and switches                                                          */
@@ -479,15 +562,17 @@ export type TerminatedRun = {
  * - An incident starts at a terminated run whose halt is not `none` and whose
  *   previous terminated run was `none` or does not exist, so one long halt is
  *   one incident rather than one per run.
- * - Three incident starts within the trailing thirty days latch it, and so
- *   does the latest terminated run already being `circuit_open`.
+ * - Three incident starts that ever fell within thirty days of each other since
+ *   the acknowledgement latch it, and so does the latest terminated run already
+ *   being `circuit_open`.
  *
- * Only an acknowledgement in the Admin console clears it; nothing here does.
+ * Only an acknowledgement in the Admin console clears it. The passage of time
+ * does not: incidents that latched the circuit keep it latched however old they
+ * become, which is why this takes no clock.
  */
 export const isCircuitLatched = (input: {
   runs: readonly TerminatedRun[];
   acknowledgedAt: Date | null;
-  now: Date;
 }): boolean => {
   const considered = input.runs
     .filter(
@@ -501,15 +586,17 @@ export const isCircuitLatched = (input: {
   if (considered.length === 0) return false;
   if (considered[considered.length - 1].halt === "circuit_open") return true;
 
-  const windowStart = input.now.getTime() - CIRCUIT_WINDOW_DAYS * DAY_MS;
-  let incidents = 0;
+  const starts: number[] = [];
   considered.forEach((run, index) => {
     if (run.halt === "none") return;
     const previous = index === 0 ? null : considered[index - 1];
-    const starts = previous === null || previous.halt === "none";
-    if (starts && run.endedAt.getTime() >= windowStart) incidents += 1;
+    if (previous === null || previous.halt === "none") starts.push(run.endedAt.getTime());
   });
-  return incidents >= CIRCUIT_INCIDENT_LIMIT;
+  const windowMs = CIRCUIT_WINDOW_DAYS * DAY_MS;
+  for (let i = CIRCUIT_INCIDENT_LIMIT - 1; i < starts.length; i += 1) {
+    if (starts[i] - starts[i - (CIRCUIT_INCIDENT_LIMIT - 1)] <= windowMs) return true;
+  }
+  return false;
 };
 
 /**

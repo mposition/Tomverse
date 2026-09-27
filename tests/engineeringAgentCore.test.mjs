@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -13,7 +17,7 @@ import {
   decideArmedGate,
   decideHalt,
   decideOwnerQueues,
-  decidePublishTransition,
+  decideWriteItemTransition,
   engineeringBranchName,
   expectedCommitObject,
   expireCommentMarker,
@@ -24,7 +28,12 @@ import {
   prBodyCarriesMarker,
   prBodyMarker,
   resolveEngineeringAgentSwitches,
-  shouldEscalateOutcomeUnknown,
+  mayQueuePruneAfterFailedPublish,
+  opensDecisionOnEntry,
+  WRITE_ITEM_KINDS,
+  writeItemStates,
+  writeItemTerminalStates,
+  writeItemTransitions,
   shouldSendSuccessHeartbeat,
 } from "../lib/engineeringAgentCore.ts";
 
@@ -32,155 +41,275 @@ const at = (iso) => new Date(iso);
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
-/* Publish transitions -------------------------------------------------- */
+/* Write items ---------------------------------------------------------- */
 
-test("the publish table has no transition out of a terminal state", () => {
-  for (const [from] of PUBLISH_TRANSITIONS) {
-    assert.ok(!PUBLISH_TERMINAL_STATES.includes(from), `${from} is terminal`);
+const writePreconditions = {
+  publish: { kind: "publish", capabilityConsumed: true },
+  expire_close: { kind: "expire_close", bindingMatches: true, stillExpired: true },
+  prune: { kind: "prune", refMatchesRecorded: true, prClosedOrConfirmedAbsent: true },
+};
+
+const terminalsOf = (kind) => {
+  const [success, refused, failed] = writeItemTerminalStates(kind).filter((s) => s !== "expired");
+  return { success, refused, failed };
+};
+
+test("no write item leaves a terminal state, and every pair uses the kind's own states", () => {
+  for (const kind of WRITE_ITEM_KINDS) {
+    const states = writeItemStates(kind);
+    const terminals = writeItemTerminalStates(kind);
+    for (const [from, to] of writeItemTransitions(kind)) {
+      assert.ok(!terminals.includes(from), `${kind}: ${from} is terminal`);
+      assert.ok(states.includes(from) && states.includes(to), `${kind}: ${from}->${to}`);
+    }
   }
-  for (const [from, to] of PUBLISH_TRANSITIONS) {
-    assert.ok(PUBLISH_STATES.includes(from) && PUBLISH_STATES.includes(to));
-  }
+  assert.deepEqual(PUBLISH_STATES, writeItemStates("publish"));
+  assert.deepEqual(PUBLISH_TERMINAL_STATES, writeItemTerminalStates("publish"));
+  assert.deepEqual(PUBLISH_TRANSITIONS, writeItemTransitions("publish"));
 });
 
-test("a pair outside the table is refused whatever the event says", () => {
-  for (const from of PUBLISH_STATES) {
-    for (const to of PUBLISH_STATES) {
-      if (PUBLISH_TRANSITIONS.some(([a, b]) => a === from && b === to)) continue;
-      const verdict = decidePublishTransition(from, to, {
-        event: "claim",
-        mode: "write",
-        capabilityConsumed: true,
-      });
-      assert.deepEqual(verdict, { allowed: false, reason: "transition_not_in_table" });
+test("a pair outside a kind's table is refused whatever the event says", () => {
+  for (const kind of WRITE_ITEM_KINDS) {
+    const states = writeItemStates(kind);
+    for (const from of states) {
+      for (const to of states) {
+        if (writeItemTransitions(kind).some(([a, b]) => a === from && b === to)) continue;
+        const verdict = decideWriteItemTransition(kind, from, to, {
+          event: "claim",
+          mode: "write",
+          precondition: writePreconditions[kind],
+        });
+        assert.deepEqual(verdict, { allowed: false, reason: "transition_not_in_table" });
+      }
     }
   }
 });
 
-test("a write claim consumes a capability and starts only from queued", () => {
-  assert.deepEqual(
-    decidePublishTransition("queued", "claimed", {
-      event: "claim",
-      mode: "write",
-      capabilityConsumed: true,
-    }),
-    { allowed: true },
-  );
-  assert.equal(
-    decidePublishTransition("queued", "claimed", {
-      event: "claim",
-      mode: "write",
-      capabilityConsumed: false,
-    }).allowed,
-    false,
-  );
-  for (const from of ["needs_lookup", "outcome_unknown"]) {
-    assert.equal(
-      decidePublishTransition(from, "claimed", {
+test("every pair in every table is reachable by some legitimate event", () => {
+  const outcomes = [
+    "confirmed",
+    "refused_before_write",
+    "revalidation_refused",
+    "write_rejected",
+    "pr_create_rejected",
+    "lookup_no_prior_write",
+    "lookup_found_result",
+    "lookup_impossible",
+  ];
+  for (const kind of WRITE_ITEM_KINDS) {
+    const contexts = [
+      { event: "claim", mode: "write", precondition: writePreconditions[kind] },
+      { event: "claim", mode: "lookup", capabilityConsumed: false },
+      { event: "expire_ttl" },
+      { event: "lease_expired" },
+      ...["write", "lookup"].flatMap((claimMode) =>
+        outcomes.map((outcome) => ({ event: "result", claimMode, outcome, fencingMatches: true })),
+      ),
+    ];
+    for (const [from, to] of writeItemTransitions(kind)) {
+      assert.ok(
+        contexts.some((context) => decideWriteItemTransition(kind, from, to, context).allowed),
+        `${kind}: ${from}->${to} is in the table but nothing can take it`,
+      );
+    }
+  }
+});
+
+test("a write claim rests on its kind's precondition and starts only from queued", () => {
+  const refusedPreconditions = {
+    publish: [{ kind: "publish", capabilityConsumed: false }],
+    expire_close: [
+      { kind: "expire_close", bindingMatches: false, stillExpired: true },
+      { kind: "expire_close", bindingMatches: true, stillExpired: false },
+    ],
+    prune: [
+      { kind: "prune", refMatchesRecorded: false, prClosedOrConfirmedAbsent: true },
+      { kind: "prune", refMatchesRecorded: true, prClosedOrConfirmedAbsent: false },
+    ],
+  };
+  for (const kind of WRITE_ITEM_KINDS) {
+    assert.deepEqual(
+      decideWriteItemTransition(kind, "queued", "claimed", {
         event: "claim",
         mode: "write",
-        capabilityConsumed: true,
+        precondition: writePreconditions[kind],
+      }),
+      { allowed: true },
+      kind,
+    );
+    for (const precondition of refusedPreconditions[kind]) {
+      assert.equal(
+        decideWriteItemTransition(kind, "queued", "claimed", {
+          event: "claim",
+          mode: "write",
+          precondition,
+        }).allowed,
+        false,
+        `${kind}: ${JSON.stringify(precondition)}`,
+      );
+    }
+    const other = WRITE_ITEM_KINDS.find((candidate) => candidate !== kind);
+    assert.equal(
+      decideWriteItemTransition(kind, "queued", "claimed", {
+        event: "claim",
+        mode: "write",
+        precondition: writePreconditions[other],
       }).allowed,
       false,
-      `${from} must not be write-claimed`,
+      `${kind} must not accept a ${other} precondition`,
     );
+    for (const from of ["needs_lookup", "outcome_unknown"]) {
+      assert.equal(
+        decideWriteItemTransition(kind, from, "claimed", {
+          event: "claim",
+          mode: "write",
+          precondition: writePreconditions[kind],
+        }).allowed,
+        false,
+        `${kind}: ${from} must not be write-claimed`,
+      );
+    }
   }
 });
 
 test("a lookup claim never consumes a capability and only follows an unknown outcome", () => {
-  for (const from of ["needs_lookup", "outcome_unknown"]) {
-    assert.deepEqual(
-      decidePublishTransition(from, "claimed", {
+  for (const kind of WRITE_ITEM_KINDS) {
+    for (const from of ["needs_lookup", "outcome_unknown"]) {
+      assert.deepEqual(
+        decideWriteItemTransition(kind, from, "claimed", {
+          event: "claim",
+          mode: "lookup",
+          capabilityConsumed: false,
+        }),
+        { allowed: true },
+      );
+      assert.equal(
+        decideWriteItemTransition(kind, from, "claimed", {
+          event: "claim",
+          mode: "lookup",
+          capabilityConsumed: true,
+        }).allowed,
+        false,
+      );
+    }
+    assert.equal(
+      decideWriteItemTransition(kind, "queued", "claimed", {
         event: "claim",
         mode: "lookup",
         capabilityConsumed: false,
-      }),
-      { allowed: true },
-    );
-    assert.equal(
-      decidePublishTransition(from, "claimed", {
-        event: "claim",
-        mode: "lookup",
-        capabilityConsumed: true,
       }).allowed,
       false,
     );
   }
-  assert.equal(
-    decidePublishTransition("queued", "claimed", {
-      event: "claim",
-      mode: "lookup",
-      capabilityConsumed: false,
-    }).allowed,
-    false,
-  );
 });
 
-test("a lease expiry never returns an item to queued", () => {
-  assert.equal(
-    decidePublishTransition("claimed", "queued", { event: "lease_expired" }).allowed,
-    false,
-  );
-  assert.deepEqual(
-    decidePublishTransition("claimed", "needs_lookup", { event: "lease_expired" }),
-    { allowed: true },
-  );
+test("a lease expiry never returns a write item to queued", () => {
+  for (const kind of WRITE_ITEM_KINDS) {
+    assert.equal(
+      decideWriteItemTransition(kind, "claimed", "queued", { event: "lease_expired" }).allowed,
+      false,
+    );
+    assert.deepEqual(
+      decideWriteItemTransition(kind, "claimed", "needs_lookup", { event: "lease_expired" }),
+      { allowed: true },
+    );
+  }
 });
 
 test("claimed -> queued rests only on a refusal before writing or a proven absence", () => {
-  const result = (claimMode, outcome, fencingMatches = true) =>
-    decidePublishTransition("claimed", "queued", {
-      event: "result",
-      claimMode,
-      outcome,
-      fencingMatches,
-    }).allowed;
-
-  assert.equal(result("write", "refused_before_write"), true);
-  assert.equal(result("lookup", "lookup_no_prior_write"), true);
-  assert.equal(result("write", "lookup_no_prior_write"), false);
-  assert.equal(result("lookup", "refused_before_write"), false);
-  assert.equal(result("write", "refused_before_write", false), false);
-});
-
-test("every result needs the claim's fencing token", () => {
-  assert.deepEqual(
-    decidePublishTransition("claimed", "published", {
-      event: "result",
-      claimMode: "write",
-      outcome: "pr_confirmed",
-      fencingMatches: false,
-    }),
-    { allowed: false, reason: "stale_fencing_token" },
-  );
-});
-
-test("results map to exactly one target per claim mode", () => {
-  const cases = [
-    ["write", "pr_confirmed", "published"],
-    ["write", "revalidation_refused", "publish_refused"],
-    ["write", "push_rejected", "publish_refused"],
-    ["write", "pr_create_rejected", "publish_failed"],
-    ["write", "lookup_impossible", "outcome_unknown"],
-    ["lookup", "lookup_found_pr", "published"],
-    ["lookup", "lookup_impossible", "outcome_unknown"],
-  ];
-  for (const [claimMode, outcome, target] of cases) {
-    for (const to of PUBLISH_STATES) {
-      const verdict = decidePublishTransition("claimed", to, {
+  for (const kind of WRITE_ITEM_KINDS) {
+    const result = (claimMode, outcome, fencingMatches = true) =>
+      decideWriteItemTransition(kind, "claimed", "queued", {
         event: "result",
         claimMode,
         outcome,
-        fencingMatches: true,
-      });
-      assert.equal(verdict.allowed, to === target, `${claimMode}/${outcome} -> ${to}`);
+        fencingMatches,
+      }).allowed;
+    assert.equal(result("write", "refused_before_write"), true);
+    assert.equal(result("lookup", "lookup_no_prior_write"), true);
+    assert.equal(result("write", "lookup_no_prior_write"), false);
+    assert.equal(result("lookup", "refused_before_write"), false);
+    assert.equal(result("write", "refused_before_write", false), false);
+  }
+});
+
+test("every result needs the claim's fencing token", () => {
+  for (const kind of WRITE_ITEM_KINDS) {
+    assert.deepEqual(
+      decideWriteItemTransition(kind, "claimed", terminalsOf(kind).success, {
+        event: "result",
+        claimMode: "write",
+        outcome: "confirmed",
+        fencingMatches: false,
+      }),
+      { allowed: false, reason: "stale_fencing_token" },
+    );
+  }
+});
+
+test("each write's five paths lead to exactly one state", () => {
+  const expected = {
+    publish: [
+      ["write", "confirmed", "published"],
+      ["write", "revalidation_refused", "publish_refused"],
+      ["write", "write_rejected", "publish_refused"],
+      ["write", "pr_create_rejected", "publish_failed"],
+      ["write", "lookup_impossible", "outcome_unknown"],
+      ["lookup", "lookup_found_result", "published"],
+      ["lookup", "lookup_no_prior_write", "queued"],
+      ["lookup", "lookup_impossible", "outcome_unknown"],
+    ],
+    expire_close: [
+      ["write", "confirmed", "closed"],
+      ["write", "revalidation_refused", "expire_refused"],
+      ["write", "write_rejected", "expire_failed"],
+      ["write", "lookup_impossible", "outcome_unknown"],
+      ["lookup", "lookup_found_result", "closed"],
+      ["lookup", "lookup_no_prior_write", "queued"],
+      ["lookup", "lookup_impossible", "outcome_unknown"],
+    ],
+    prune: [
+      ["write", "confirmed", "pruned"],
+      ["write", "revalidation_refused", "prune_refused"],
+      ["write", "write_rejected", "prune_failed"],
+      ["write", "lookup_impossible", "outcome_unknown"],
+      ["lookup", "lookup_found_result", "pruned"],
+      ["lookup", "lookup_no_prior_write", "queued"],
+      ["lookup", "lookup_impossible", "outcome_unknown"],
+    ],
+  };
+  for (const kind of WRITE_ITEM_KINDS) {
+    for (const [claimMode, outcome, target] of expected[kind]) {
+      for (const to of writeItemStates(kind)) {
+        const verdict = decideWriteItemTransition(kind, "claimed", to, {
+          event: "result",
+          claimMode,
+          outcome,
+          fencingMatches: true,
+        });
+        assert.equal(verdict.allowed, to === target, `${kind} ${claimMode}/${outcome} -> ${to}`);
+      }
+    }
+  }
+  for (const kind of ["expire_close", "prune"]) {
+    for (const to of writeItemStates(kind)) {
+      assert.equal(
+        decideWriteItemTransition(kind, "claimed", to, {
+          event: "result",
+          claimMode: "write",
+          outcome: "pr_create_rejected",
+          fencingMatches: true,
+        }).allowed,
+        false,
+        `${kind} has no PR creation`,
+      );
     }
   }
   assert.equal(
-    decidePublishTransition("claimed", "published", {
+    decideWriteItemTransition("publish", "claimed", "published", {
       event: "result",
       claimMode: "lookup",
-      outcome: "pr_confirmed",
+      outcome: "confirmed",
       fencingMatches: true,
     }).allowed,
     false,
@@ -188,15 +317,24 @@ test("results map to exactly one target per claim mode", () => {
   );
 });
 
-test("TTL expiry applies only to queued items", () => {
-  assert.deepEqual(decidePublishTransition("queued", "expired", { event: "expire_ttl" }), {
-    allowed: true,
-  });
+test("only an unclaimed publish item expires by TTL", () => {
+  assert.deepEqual(
+    decideWriteItemTransition("publish", "queued", "expired", { event: "expire_ttl" }),
+    { allowed: true },
+  );
+  assert.ok(!writeItemStates("prune").includes("expired"));
+  assert.ok(!writeItemStates("expire_close").includes("expired"));
 });
 
-test("an unknown outcome goes to a person after three failed lookups", () => {
-  assert.equal(shouldEscalateOutcomeUnknown(2), false);
-  assert.equal(shouldEscalateOutcomeUnknown(3), true);
+test("an unknown outcome goes to a person the moment it is entered", () => {
+  assert.equal(opensDecisionOnEntry("outcome_unknown"), true);
+  assert.equal(opensDecisionOnEntry("needs_lookup"), false);
+});
+
+test("a branch left by a rejected PR creation is pruned only after a full list found no PR", () => {
+  assert.equal(mayQueuePruneAfterFailedPublish({ listReadToEnd: true, pullRequestsForHead: 0 }), true);
+  assert.equal(mayQueuePruneAfterFailedPublish({ listReadToEnd: false, pullRequestsForHead: 0 }), false);
+  assert.equal(mayQueuePruneAfterFailedPublish({ listReadToEnd: true, pullRequestsForHead: 1 }), false);
 });
 
 test("request idempotency never leaves in_progress on its own", () => {
@@ -329,13 +467,13 @@ test("halt follows the policy priority and a missing App identity is never none"
   assert.equal(decideHalt({ ...clear, openStateMismatches: 1 }), "state_mismatch");
 });
 
-const run = (day, halt, now = at("2026-11-01T00:00:00Z")) => {
-  const end = new Date(now.getTime() - day * DAY);
+const NOW = at("2026-11-01T00:00:00Z");
+const run = (day, halt) => {
+  const end = new Date(NOW.getTime() - day * DAY);
   return { startedAt: new Date(end.getTime() - HOUR), endedAt: end, halt };
 };
 
 test("one long halt is one incident; three separate incidents latch", () => {
-  const now = at("2026-11-01T00:00:00Z");
   const longHalt = [
     run(10, "none"),
     run(9, "unbound_app_pr"),
@@ -343,7 +481,7 @@ test("one long halt is one incident; three separate incidents latch", () => {
     run(7, "unbound_app_pr"),
     run(6, "unbound_app_pr"),
   ];
-  assert.equal(isCircuitLatched({ runs: longHalt, acknowledgedAt: null, now }), false);
+  assert.equal(isCircuitLatched({ runs: longHalt, acknowledgedAt: null }), false);
 
   const three = [
     run(10, "unbound_app_ref"),
@@ -353,21 +491,51 @@ test("one long halt is one incident; three separate incidents latch", () => {
     run(6, "unbound_app_pr"),
     run(5, "none"),
   ];
-  assert.equal(isCircuitLatched({ runs: three, acknowledgedAt: null, now }), true);
+  assert.equal(isCircuitLatched({ runs: three, acknowledgedAt: null }), true);
 });
 
-test("incidents older than thirty days or before the acknowledgement do not count", () => {
-  const now = at("2026-11-01T00:00:00Z");
-  const runs = [
-    run(40, "unbound_app_ref"),
-    run(39, "none"),
-    run(8, "state_mismatch"),
-    run(7, "none"),
-    run(6, "unbound_app_pr"),
-    run(5, "none"),
+test("a latch does not wear off with time -- only an acknowledgement clears it", () => {
+  const latchedLongAgo = [
+    run(400, "unbound_app_ref"),
+    run(399, "none"),
+    run(398, "state_mismatch"),
+    run(397, "none"),
+    run(396, "unbound_app_pr"),
+    ...Array.from({ length: 30 }, (_, i) => run(300 - i * 10, "none")),
   ];
-  assert.equal(isCircuitLatched({ runs, acknowledgedAt: null, now }), false);
+  assert.equal(isCircuitLatched({ runs: latchedLongAgo, acknowledgedAt: null }), true);
+  assert.equal(
+    isCircuitLatched({
+      runs: latchedLongAgo,
+      acknowledgedAt: new Date(NOW.getTime() - 395 * DAY),
+    }),
+    false,
+    "an acknowledgement after the incidents clears them",
+  );
+});
 
+test("three incidents spread wider than thirty days do not latch", () => {
+  const spread = [
+    run(90, "unbound_app_ref"),
+    run(89, "none"),
+    run(50, "state_mismatch"),
+    run(49, "none"),
+    run(10, "unbound_app_pr"),
+    run(9, "none"),
+  ];
+  assert.equal(isCircuitLatched({ runs: spread, acknowledgedAt: null }), false);
+  const closeTogether = [
+    run(40, "unbound_app_ref"),
+    run(39.5, "none"),
+    run(30, "state_mismatch"),
+    run(29, "none"),
+    run(11, "unbound_app_pr"),
+    run(10, "none"),
+  ];
+  assert.equal(isCircuitLatched({ runs: closeTogether, acknowledgedAt: null }), true);
+});
+
+test("incidents that started before the acknowledgement do not count", () => {
   const recent = [
     run(9, "unbound_app_ref"),
     run(8.5, "none"),
@@ -376,21 +544,16 @@ test("incidents older than thirty days or before the acknowledgement do not coun
     run(6, "unbound_app_pr"),
     run(5, "none"),
   ];
-  assert.equal(isCircuitLatched({ runs: recent, acknowledgedAt: null, now }), true);
+  assert.equal(isCircuitLatched({ runs: recent, acknowledgedAt: null }), true);
   assert.equal(
-    isCircuitLatched({
-      runs: recent,
-      acknowledgedAt: new Date(now.getTime() - 8.2 * DAY),
-      now,
-    }),
+    isCircuitLatched({ runs: recent, acknowledgedAt: new Date(NOW.getTime() - 8.2 * DAY) }),
     false,
   );
 });
 
 test("a latest run already circuit_open stays latched", () => {
-  const now = at("2026-11-01T00:00:00Z");
   assert.equal(
-    isCircuitLatched({ runs: [run(1, "none"), run(0.5, "circuit_open")], acknowledgedAt: null, now }),
+    isCircuitLatched({ runs: [run(1, "none"), run(0.5, "circuit_open")], acknowledgedAt: null }),
     true,
   );
 });
@@ -498,6 +661,49 @@ test("a signature, a second parent or any extra header is a mismatch", () => {
   );
   assert.equal(commitObjectMatches(twoParents, expected), false);
   assert.equal(commitObjectMatches(object.replace("Card:", "Card :"), expected), false);
+});
+
+test("encoding, mergetag, CRLF and a trailing newline are all mismatches", () => {
+  const object = expectedCommitObject(expected);
+  const variants = {
+    encoding: object.replace("\n\nengineering", "\nencoding ISO-8859-1\n\nengineering"),
+    mergetag: object.replace("\n\nengineering", "\nmergetag object " + "d".repeat(40) + "\n\nengineering"),
+    crlf: object.replace(/\n/g, "\r\n"),
+    extraNewline: `${object}\n`,
+    missingNewline: object.slice(0, -1),
+    leadingSpace: ` ${object}`,
+  };
+  for (const [name, variant] of Object.entries(variants)) {
+    assert.equal(commitObjectMatches(variant, expected), false, name);
+  }
+});
+
+test("git itself prints the expected object back unchanged", () => {
+  const dir = mkdtempSync(join(tmpdir(), "engineering-agent-commit-"));
+  try {
+    const git = (args, input) =>
+      execFileSync("git", ["-c", "core.autocrlf=false", ...args], {
+        cwd: dir,
+        input,
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: dir },
+      });
+    git(["init", "-q"]);
+    const object = expectedCommitObject(expected);
+    const id = git(["hash-object", "-t", "commit", "-w", "--literally", "--stdin"], object).trim();
+    assert.match(id, /^[0-9a-f]{40}$/);
+    assert.equal(git(["cat-file", "-p", id]), object);
+    assert.equal(commitObjectMatches(git(["cat-file", "-p", id]), expected), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("identity parts carrying CR, NUL or angle brackets are refused", () => {
+  for (const name of ["x\r", "x\u0000", "a<b", "a>b"]) {
+    assert.throws(() => expectedCommitObject({ ...expected, identity: { name, email: "e" } }), JSON.stringify(name));
+    assert.throws(() => expectedCommitObject({ ...expected, identity: { name: "n", email: name } }), JSON.stringify(name));
+  }
 });
 
 test("commit inputs that could smuggle a header are refused", () => {
