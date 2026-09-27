@@ -15,7 +15,6 @@
   "baseCommit": "82caecfd8a3dbb4815fd9c232f2b42b2dafcf646",
   "writableScope": [
     ".gitleaksignore",
-    "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.authorization.md",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.task.json"
   ],
