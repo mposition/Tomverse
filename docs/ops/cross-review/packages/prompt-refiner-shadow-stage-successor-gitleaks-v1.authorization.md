@@ -4,7 +4,7 @@
 - approvedAt: `2026-09-28` (Australia/Brisbane)
 - author: `codex`
 - independentReviewer: `claude-code-max`
-- reviewedHead: `370ae752bdbf2db990b25a965a23cfb2e6959923`
+- reviewedHead: `643a5e2a7eeab20384fd3afe89ec15309dbb35e4`
 - baseCommit: `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 
 사용자는 CHAT-01을 완료할 때까지 권장 순서로 자동 개발하고 독립 검토가 필요할 때
@@ -33,7 +33,7 @@ Claude 검토를 받도록 지시했다. 이 작업의 Claude 검토에 `--skip-
 - `npm run check:encoding`
 - `git diff --check 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 - 로컬에 기존 Gitleaks 8.24.3 binary가 있을 때만 그 binary의 버전을 먼저 확인하고,
-  `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646^..370ae752bdbf2db990b25a965a23cfb2e6959923`
+  `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646^..643a5e2a7eeab20384fd3afe89ec15309dbb35e4`
   first-parent exact range를 현재 `.gitleaksignore`로 scan한다. 이번 작업을 위해 binary를
   내려받거나 다른 버전·container·원격 action으로 대체하지 않는다.
 
