@@ -32,10 +32,20 @@ import { obligationsFor } from "@/lib/releaseNotesObligationCore";
  */
 
 /**
- * The scope trigger's own words, which is the one database error this reports as
- * a refusal rather than rethrowing.
+ * The two sentinels the scope trigger raises, which are the only database errors
+ * this reports as refusals rather than rethrowing.
+ *
+ * Sentinels rather than a phrase, because the first version matched a sentence
+ * fragment and a review found what that cost: a draft rule deleted between the
+ * read below and the write reaches this as the trigger's "does not exist", and
+ * that was reported as a wrong approval. The two are different repairs, so they
+ * are different refusals, and the token is unique enough that no other error can
+ * wear it.
  */
-const SCOPE_REFUSAL = /waives .* version|ReleaseNotesCountryRule .* does not exist/;
+const TRIGGER_REFUSALS = [
+  { sentinel: "RNO_SCOPE_MISMATCH:", refusal: "approval_scope_mismatch" as const },
+  { sentinel: "RNO_RULE_MISSING:", refusal: "rule_not_found" as const },
+];
 
 export type ObligationWaiverRefusal =
   | "rule_not_found"
@@ -138,13 +148,21 @@ export async function recordObligationWaiver(input: {
     // had attached the wrong approval. A wrong cause is worse than no cause --
     // the operator goes and checks the approval, and the approval is fine.
     //
-    // Matched on the message the trigger raises, because a plpgsql RAISE reaches
+    // Matched on the sentinel the trigger raises, because a plpgsql RAISE reaches
     // the client as a message rather than as a distinguishable Prisma code. The
-    // wording is this repository's own, in the migration beside this file, and
+    // sentinels are this repository's own, in the migration beside this file, and
     // `tests/integration/release-notes-rule-obligation.db.test.ts` is what keeps
     // the two in step.
     const message = error instanceof Error ? error.message : String(error);
-    if (SCOPE_REFUSAL.test(message)) {
+    const named = TRIGGER_REFUSALS.find((entry) => message.includes(entry.sentinel));
+    if (named?.refusal === "rule_not_found") {
+      return {
+        ok: false,
+        refusal: "rule_not_found",
+        detail: `Country rule ${input.countryRuleId} is gone; nothing was recorded.`,
+      };
+    }
+    if (named?.refusal === "approval_scope_mismatch") {
       return {
         ok: false,
         refusal: "approval_scope_mismatch",

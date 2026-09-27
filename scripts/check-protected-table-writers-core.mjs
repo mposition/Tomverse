@@ -538,9 +538,9 @@ export const RAW_SQL_ALLOWLIST = [
 export const RUNTIME_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
-    count: 1,
+    count: 3,
     reason:
-      "The waiver-sealed trigger reads the approval it is about to be pointed at, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+      "Three reads, all FOR SHARE, all with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The waiver-scope trigger reads the approval it is about to be pointed at and the country rule whose scope that approval has to name; the country-rule trigger reads the waived duty states hanging off a rule whose scope is being moved. The schema is each trigger own, never input, quoted with %I, and every id is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260923400000_release_notes_country_rule/migration.sql",

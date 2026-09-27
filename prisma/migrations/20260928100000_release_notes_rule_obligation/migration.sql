@@ -181,7 +181,13 @@ BEGIN
     ) INTO rule USING NEW."countryRuleId";
 
     IF rule IS NULL THEN
-        RAISE EXCEPTION 'ReleaseNotesCountryRule % does not exist.', NEW."countryRuleId"
+        -- The sentinel is the first token, because the caller has to tell this
+        -- apart from a scope mismatch: a draft rule deleted between the writer
+        -- reading it and this trigger running is a rule that is gone, not an
+        -- approval that waives something else, and reporting the second sends an
+        -- operator to check an approval that is fine.
+        RAISE EXCEPTION 'RNO_RULE_MISSING: ReleaseNotesCountryRule % does not exist.',
+            NEW."countryRuleId"
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -192,7 +198,7 @@ BEGIN
         OR approval."obligationKey" IS DISTINCT FROM NEW."obligationKey"
     THEN
         RAISE EXCEPTION
-            'EmailSendApproval % waives %/%/% version %, not %/% of rule % version %.',
+            'RNO_SCOPE_MISMATCH: EmailSendApproval % waives %/%/% version %, not %/% of rule % version %.',
             NEW."waiverApprovalId", approval."country", approval."ruleKey",
             approval."obligationKey", approval."ruleVersion",
             rule."countryCode", NEW."obligationKey", rule."ruleKey", rule."ruleVersion"

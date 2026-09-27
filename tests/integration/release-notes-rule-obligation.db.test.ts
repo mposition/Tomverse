@@ -57,13 +57,26 @@ const duty = (
   ...overrides,
 });
 
+/**
+ * An approval, scoped by default to the Korean rule of one policy version.
+ *
+ * `policyVersionId` is a parameter rather than "the newest version", which a
+ * review found mattered: the scope matrix creates a second draft before it runs,
+ * so every case took the newest version and six of the seven negative cases were
+ * already wrong about the policy version before they touched the field they were
+ * about. A case that could fail for two reasons proves neither.
+ */
 const approval = async (
-  overrides: Partial<Prisma.EmailSendApprovalUncheckedCreateInput> = {}
+  overrides: Partial<Prisma.EmailSendApprovalUncheckedCreateInput> = {},
+  policyVersionId?: string
 ) => {
-  const policy = await prisma.emailPolicyVersion.findFirstOrThrow({
-    select: { id: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const policy =
+    policyVersionId === undefined
+      ? await prisma.emailPolicyVersion.findFirstOrThrow({
+          select: { id: true },
+          orderBy: { createdAt: "desc" },
+        })
+      : { id: policyVersionId };
   return prisma.emailSendApproval.create({
     data: {
       approvalType: "obligation_waiver",
@@ -320,6 +333,9 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
   });
 
   const other = await ensureJurisdictionPolicyDraft({ version: `test-${randomUUID()}` });
+  // Each case differs from the rule's own scope in exactly one member. The
+  // default is pinned to that rule's policy version, so the policy case is the
+  // only one that moves it.
   const scopes: Array<[Partial<Prisma.EmailSendApprovalUncheckedCreateInput>, string]> = [
     [{ country: "SG" }, "another country"],
     [{ obligationKey: "body_disclosures" }, "another duty"],
@@ -331,10 +347,17 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
   ];
 
   for (const [overrides, what] of scopes) {
-    const waiver = await approval({
-      sealedAt: new Date("2026-09-20T00:00:00.000Z"),
-      ...overrides,
-    });
+    const waiver = await approval(
+      {
+        sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+        ruleKey: rule.ruleKey,
+        ruleVersion: rule.ruleVersion,
+        country: "KR",
+        obligationKey: "advertising_subject_label",
+        ...overrides,
+      },
+      rule.policyVersionId
+    );
     await refuses(
       () =>
         prisma.releaseNotesRuleObligation.create({
@@ -346,7 +369,7 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
             waiverApprovalType: "obligation_waiver",
           }),
         }),
-      /waives|does not exist/
+      /RNO_SCOPE_MISMATCH|RNO_RULE_MISSING/
     );
     assert.equal(
       await prisma.releaseNotesRuleObligation.count(),
