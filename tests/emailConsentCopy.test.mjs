@@ -261,6 +261,38 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
+/**
+ * The document with everything markdown does not render stripped out.
+ *
+ * Every slice below reads raw lines, and that was a way through: a reviewer
+ * reading the rendered document sees neither a fenced code block nor an HTML
+ * comment, so the approved digest could be moved inside a fence, or the whole
+ * approved table wrapped in `<!-- -->`, and the suite still found its lines.
+ * The record has to be the record somebody reads.
+ *
+ * Fences are dropped whole, including their content, and a comment's lines are
+ * blanked rather than removed so a slice's line numbering is not disturbed.
+ */
+const renderedOnly = (doc) => {
+  const withoutComments = doc.replace(/<!--[\s\S]*?-->/g, (block) =>
+    block.replace(/[^\n]/g, " ")
+  );
+  let fenced = false;
+  return withoutComments
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return "";
+      }
+      return fenced ? "" : line;
+    })
+    .join("\n");
+};
+
+const approvedDocument = () =>
+  renderedOnly(readFileSync("docs/policy/email-consent-copy-draft.md", "utf8"));
+
 // Where each key's approved cell is: the subsection, the bold label the table
 // follows (null when the subsection holds exactly one table), and for the
 // transposed button table the role row. A string is compared with that one
@@ -368,7 +400,7 @@ test("every approved string is exactly its own cell of the approved document", (
   // survived in another table. Pooling per subsection let the title and body
   // cells, or two buttons, trade places. Now each key has one cell -- section,
   // table, role and language -- and must equal it, whole.
-  const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
+  const doc = approvedDocument();
   for (const key of CONSENT_COPY_KEYS) {
     assert.ok(APPROVED_CELL[key], `${key} has no approved cell`);
     for (const language of CONSENT_COPY_LANGUAGES) {
@@ -378,6 +410,96 @@ test("every approved string is exactly its own cell of the approved document", (
         `${key}.${language} differs from its approved cell`
       );
     }
+  }
+});
+
+test("section 3 holds exactly the approved devices, tables and roles", () => {
+  // Reverse completeness. Every test above walks the eight keys the code
+  // declares and finds each one's cell, which says nothing about what else the
+  // document claims was approved: a `### 3.E` device, a fourth button role, or
+  // an extra language column with an approved-looking sentence in it would all
+  // pass while the code knew nothing about them. The owner signed section 3 as
+  // a whole, so the whole of it is compared.
+  const doc = approvedDocument();
+  const section = sectionOf(doc, "## 3.");
+
+  const subsections = section
+    .split("\n")
+    .filter((line) => /^### /.test(line))
+    .map((line) => line.replace(/^(### \S+).*$/, "$1"));
+  assert.deepEqual(subsections, ["### 3.0", "### 3.A", "### 3.B", "### 3.C", "### 3.D"]);
+
+  // 3.0 is the summary of what the four devices are; the four that follow carry
+  // the approved strings, and their tables are exactly the ones the keys name.
+  const expectedTables = {
+    "### 3.0": [null],
+    "### 3.A": [null],
+    "### 3.B": [null],
+    "### 3.C": [null],
+    "### 3.D": ["**제목**", "**본문**", "**세 버튼**"],
+  };
+  for (const [heading, labels] of Object.entries(expectedTables)) {
+    const tables = tablesOf(sectionOf(doc, heading));
+    assert.deepEqual(
+      tables.map((table) => (heading === "### 3.D" ? table.label : null)),
+      labels,
+      `${heading} does not hold exactly the approved tables`
+    );
+  }
+
+  // The language tables: one row per language and no more, so an eighth row
+  // cannot claim an eighth approved language.
+  for (const heading of ["### 3.A", "### 3.B", "### 3.C"]) {
+    const [header, ...rows] = tablesOf(sectionOf(doc, heading))[0].rows;
+    assert.deepEqual(header, ["언어", "문안"]);
+    assert.deepEqual(rows.map((row) => row[0]), [...CONSENT_COPY_LANGUAGES]);
+  }
+  for (const label of ["**제목**", "**본문**"]) {
+    const [header, ...rows] = tablesOf(sectionOf(doc, "### 3.D")).find(
+      (table) => table.label === label
+    ).rows;
+    assert.deepEqual(header, ["언어", "문안"]);
+    assert.deepEqual(rows.map((row) => row[0]), [...CONSENT_COPY_LANGUAGES]);
+  }
+
+  // The button table: the whole header, in order, and exactly three roles. An
+  // extra column was how an approved sentence could be added beside the cell
+  // the code reads.
+  const buttons = tablesOf(sectionOf(doc, "### 3.D")).find(
+    (table) => table.label === "**세 버튼**"
+  );
+  assert.deepEqual(buttons.rows[0], ["역할", ...CONSENT_COPY_LANGUAGES]);
+  assert.deepEqual(buttons.rows.slice(1).map((row) => row[0]), ["동의", "거부", "닫기"]);
+  for (const row of buttons.rows) {
+    assert.equal(row.length, 1 + CONSENT_COPY_LANGUAGES.length);
+  }
+});
+
+test("the approval table binds every approved section to the version's approver and date", () => {
+  // `doc.includes(approver)` was the whole of this check, so the approval cell
+  // for section 3 could be changed to "rejected" and the suite still found the
+  // name somewhere else in the document. The rows are what the owner signed, so
+  // each one is read as a row, and each must carry the approver and date the
+  // code records for the current version.
+  const current = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
+  const tables = tablesOf(sectionOf(approvedDocument(), "## 8."));
+  const approval = tables.find(
+    (table) => table.rows[0]?.[0] === "절" && table.rows[0]?.[2] === "승인"
+  );
+  assert.ok(approval, "section 8 has no approval table");
+
+  const rows = approval.rows.slice(1);
+  assert.deepEqual(
+    rows.map((row) => row[0]),
+    ["§1", "§2", "§3.A–D", "§4.1–4.3", "§5", "§6"],
+    "the approved sections are not the ones section 8 lists"
+  );
+  for (const row of rows) {
+    assert.equal(
+      row[2],
+      `${current.approvedBy}, ${current.approvedAt}`,
+      `${row[0]} is not approved by the version's own approver and date`
+    );
   }
 });
 
@@ -392,10 +514,7 @@ test("the approval section records the digest of each version, once, on that ver
   // line naming its version, and only once. `doc.includes()` was satisfied by
   // the digest anywhere; the first line-based version by the first matching
   // line, so a correct copy placed above the approval hid an edited one.
-  const approval = sectionOf(
-    readFileSync("docs/policy/email-consent-copy-draft.md", "utf8"),
-    "## 8."
-  );
+  const approval = sectionOf(approvedDocument(), "## 8.");
   const lines = approval.split("\n");
   const TICK = String.fromCharCode(96); // a backtick
   const digestLines = lines.filter((line) => /^`sha256:[0-9a-f]*`$/.test(line.trim()));
@@ -467,9 +586,4 @@ test("a missing string is an error rather than an empty label", () => {
   }
 });
 
-test("the approved document records who approved it and when", () => {
-  const doc = readFileSync("docs/policy/email-consent-copy-draft.md", "utf8");
-  const current = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
-  assert.ok(doc.includes(current.approvedBy), "approver missing from the document");
-  assert.ok(doc.includes(current.approvedAt), "approval date missing from the document");
-});
+
