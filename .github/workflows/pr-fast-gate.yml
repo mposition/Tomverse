@@ -178,6 +178,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:policy-section-references
 
+      # The approved consent wording is pinned three ways inside the tree, and a
+      # commit that edits the document and its pins together passes all three.
+      # This one reads the base revision, which is the only place an approved
+      # record can be compared with what it was. It needs the base branch, which
+      # is why the checkout above is at full depth.
+      - name: Approved consent records are unchanged
+        timeout-minutes: 5
+        run: npm run check:consent-copy-immutability
+
       # The staging checklist holds items and never results, and a signed run
       # record is not edited afterwards. The previous shape put an approval
       # table inside the checklist, where it could not say which commit it

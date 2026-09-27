@@ -461,7 +461,7 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * version is added and that move would otherwise cover for an edit to an
  * earlier version's approval table in the same commit.
  */
-const APPROVED_DOCUMENT_DIGEST = "5728d5603e4a8f4f600c2557de4204ed";
+const APPROVED_DOCUMENT_DIGEST = "ffd4c383a7f33b5b8e3b2c92814387ad";
 
 /** The source bytes of a section, from the parser's own offsets. */
 const sourceOf = (source, nodes) => {
@@ -469,6 +469,125 @@ const sourceOf = (source, nodes) => {
   const to = nodes[nodes.length - 1].position.end.offset;
   return source.slice(from, to);
 };
+
+/** Every depth-2 section number, in the order the document holds them. */
+const sectionNumbers = (tree) =>
+  tree.children
+    .filter((node) => node.type === "heading" && node.depth === 2)
+    .map((node) => textOf(node).trim().split(/\s+/)[0]);
+
+/**
+ * The sections one version's approval covers, in document order.
+ *
+ * Derived from the approval table rather than written beside the digest over
+ * them. The first version carried the list in the same file as the digest, and
+ * a review named what that allowed: drop `"4."` from the list, drop section 4's
+ * row from the table, recompute both digests, and section 4's approved wording
+ * is editable behind a repin that adding a version would have justified. The
+ * list is the table's own content now, and the table is inside the record
+ * section whose digest is pinned, so narrowing the scope means moving a value
+ * the owner signed.
+ */
+const approvedSectionNumbersOf = (tree, version) => {
+  const order = sectionNumbers(tree);
+  const seen = new Set();
+  for (const [section] of version.approvedSections) {
+    // A section number, not a prefix: `§3A` and `§3 anything` are not
+    // references to section 3, and a longer number is a different section.
+    const named = /^§([0-9]+)(\.|$)/.exec(section);
+    assert.ok(named, `${version.version}: "${section}" is not a section reference`);
+    const number = named[1] + ".";
+    // Locating it asserts the heading is unique, which is what makes the
+    // digest's input a section rather than the first of several.
+    sectionOf(tree, number, 2);
+    seen.add(number);
+  }
+  assert.ok(seen.size > 0, `${version.version} approves no section`);
+  assert.ok(
+    !seen.has(version.recordSection),
+    `${version.version}'s approval table names its own record section ` +
+      `${version.recordSection}, which the digest already reads separately`
+  );
+  // Document order, so the order the table happens to be written in cannot
+  // change the digest.
+  return order.filter((number) => seen.has(number));
+};
+
+/**
+ * The bytes a digest is taken over, as one unambiguous string.
+ *
+ * Each part carries its own length, rather than being joined by a separator.
+ * The first version joined the sections with a NUL, which is a boundary only
+ * while no part contains one -- nothing checked that, and two different lists
+ * can be the same bytes either way. The part's name is in the input too, so the
+ * same bytes under a different heading is a different digest.
+ */
+const canonicalParts = (parts) =>
+  parts.map(([name, body]) => `${name.length}:${name}${body.length}:${body}`).join("");
+
+const digestOf = (input) =>
+  createHash("sha256").update(input).digest("hex").slice(0, 32);
+
+/**
+ * The sections no version owns, and the digest over them.
+ *
+ * A review walked the gap between the two pins that existed. The document
+ * digest covers every byte but has to move when a version is added; each
+ * version's own two digests cover its approved sections and its record, and
+ * nothing else. So a commit adding a version could edit section 9's decisions,
+ * section 10's procedure or the status block at the top, behind the repin that
+ * the addition justifies.
+ *
+ * This digest does not move when a version is added: a new version's sections
+ * and its record belong to that version, so they are not in this list. Which
+ * also means a new section that no version claims fails here rather than
+ * passing as part of the addition -- the derived list would no longer be the
+ * recorded one.
+ *
+ * Recorded, not computed, for the same reason as the others.
+ */
+const UNVERSIONED_SECTIONS = ["0.", "7.", "9.", "10."];
+const UNVERSIONED_SECTIONS_DIGEST = "516ce2084a42b83dff2707d75d29af30";
+
+test("the sections no version owns have not changed either", () => {
+  const source = approvedSource();
+  const tree = approvedTree();
+  const owned = new Set(
+    CONSENT_COPY_VERSIONS.flatMap((version) => [
+      ...approvedSectionNumbersOf(tree, version),
+      version.recordSection,
+    ])
+  );
+  assert.deepEqual(
+    sectionNumbers(tree).filter((number) => !owned.has(number)),
+    UNVERSIONED_SECTIONS,
+    "a depth-2 section belongs to no version and is not in UNVERSIONED_SECTIONS. " +
+      "Section 10.1 says a new version's sections are the new version's; anything " +
+      "else is an unversioned part of the document, and is pinned here."
+  );
+
+  // The bytes before the first depth-2 heading are the title and the status
+  // block, which is where a review found that 승인됨 could be changed to 반려됨.
+  const firstHeading = tree.children.find(
+    (node) => node.type === "heading" && node.depth === 2
+  );
+  const digest = digestOf(
+    canonicalParts([
+      ["status block", source.slice(0, firstHeading.position.start.offset)],
+      ...UNVERSIONED_SECTIONS.map((number) => [
+        number,
+        sourceOf(source, sectionOf(tree, number, 2)),
+      ]),
+    ])
+  );
+  assert.equal(
+    digest,
+    UNVERSIONED_SECTIONS_DIGEST,
+    "the part of the approved document that no version owns has changed. Adding " +
+      "a version does not do this. If this change is meant, record " +
+      `"${digest}".`
+  );
+});
 
 test("the approved document has not changed since this digest was recorded", () => {
   const digest = createHash("sha256").update(approvedSource()).digest("hex").slice(0, 32);
@@ -507,22 +626,20 @@ test("each version pins its own record and the body it approved", () => {
         `${version.version}. If this change is meant, record "${record}".`
     );
 
-    const body = createHash("sha256")
-      .update(
-        [
-          ...version.approvedSectionNumbers.map((number) =>
-            sourceOf(source, sectionOf(tree, number, 2))
-          ),
-          sourceOf(source, sectionOf(tree, version.recordSection, 2)),
-        ].join("\u0000")
+    const numbers = approvedSectionNumbersOf(tree, version);
+    const body = digestOf(
+      canonicalParts(
+        [...numbers, version.recordSection].map((number) => [
+          number,
+          sourceOf(source, sectionOf(tree, number, 2)),
+        ])
       )
-      .digest("hex")
-      .slice(0, 32);
+    );
     assert.equal(
       body,
       version.approvedBodyDigest,
       `the body approved for ${version.version} (sections ` +
-        `${version.approvedSectionNumbers.join(", ")} and ${version.recordSection}) ` +
+        `${numbers.join(", ")} and ${version.recordSection}) ` +
         `has changed. Section 10 says that is a new version, not an edit. If this ` +
         `change is meant, record "${body}".`
     );
@@ -695,19 +812,14 @@ test("the approval table binds every approved section to the version's approver 
         `${version.version}'s wording is`
     );
 
-    // Every entry names one of the sections this version says it approved, so
-    // the table and the metadata cannot drift into approving different things.
+    // Every entry names a section of this document, and not one this version
+    // uses for something else. The list the body digest covers is that set, so
+    // there is nothing here for the two to drift apart over.
+    //
     // What this does **not** check is the description beside each number: it is
     // compared against the code's copy of it above, not derived from anything,
     // so the guarantee here is the section link.
-    for (const [section] of version.approvedSections) {
-      const named = /^§([0-9]+)(\.|$)/.exec(section);
-      assert.ok(named, `${where}: "${section}" is not a section reference`);
-      assert.ok(
-        version.approvedSectionNumbers.includes(named[1] + "."),
-        `${where}: "${section}" is not one of this version's approved sections`
-      );
-    }
+    assert.ok(approvedSectionNumbersOf(approvedTree(), version).length > 0);
   }
 });
 
@@ -746,23 +858,23 @@ test("the approval section records the digest of each version, once, on that ver
       before?.type === "paragraph",
       `the digest in ${recordSection} does not directly follow a paragraph`
     );
-    // The version named there, compared as a whole token: a substring match
-    // let `2026-09-2` answer for `2026-09-23`. Compared without a regex so the
-    // version id needs no escaping.
-    const line = textOf(before).trim();
-    const marker = "버전 " + version;
-    const start = line.indexOf(marker);
+    // The version is written in inline code there, so this compares that
+    // node's value and needs no notion of where a token ends. Two earlier
+    // attempts argued about the boundary instead: a substring match let
+    // `2026-09-2` answer for `2026-09-23`, and a character class let a
+    // combining mark after the id pass for it. Section 10.1 states the rule the
+    // document has to follow for this to be checkable.
     assert.ok(
-      start >= 0,
-      `the digest in ${recordSection} does not directly follow the line naming ${version}`
+      textOf(before).includes("버전"),
+      `the paragraph above the digest in ${recordSection} does not name a version`
     );
-    // The next character must not continue the token. The first version wrote
-    // this class with the backslash eaten -- `[w.-]` rather than `[\w.-]` --
-    // so it barred a literal "w" and let `2026-09-23x` pass for `2026-09-23`.
-    const after = line[start + marker.length];
-    assert.ok(
-      after === undefined || !/[\p{L}\p{N}_.-]/u.test(after),
-      `the line above the digest in ${recordSection} names a longer version than ${version}`
+    assert.deepEqual(
+      (before.children ?? [])
+        .filter((node) => node.type === "inlineCode")
+        .map((node) => node.value),
+      [version],
+      `the paragraph above the digest in ${recordSection} must hold exactly one ` +
+        `inline code, whose value is ${version}`
     );
   }
 });

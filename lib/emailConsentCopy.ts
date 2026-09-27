@@ -187,17 +187,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    */
   readonly recordDigest: string;
   /**
-   * The depth-2 heading numbers of the document sections this version's
-   * approval covers, as its approval table names them.
-   *
-   * Written as heading numbers rather than derived from `approvedSections`,
-   * whose entries are prose ("§3.A–D", "§4.1–4.3") and would have to be parsed
-   * to be useful. The test compares the two: every entry has to name one of
-   * these sections.
-   */
-  readonly approvedSectionNumbers: readonly string[];
-  /**
-   * The digest of those sections' bytes, plus this version's record section.
+   * The digest of the approved sections' bytes, plus this version's record
+   * section.
    *
    * The document digest has to move whenever a version is added, legitimately,
    * and a review showed what that covers for: the same commit could edit
@@ -205,6 +196,13 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    * only per-version pin was over the approval table. So each version also pins
    * the body it approved. Adding a version does not touch this, and section
    * 10.1 forbids changing an existing one's.
+   *
+   * **Which sections** is not written here. The first version carried the list
+   * beside this digest, and a review named what that allowed: drop `"4."` from
+   * the list, drop §4's row from the approval table, recompute both digests, and
+   * §4's approved wording is editable behind a repin that adding a version would
+   * have justified. The list is derived from `approvedSections` -- the table the
+   * owner signed -- so narrowing the scope means moving that table.
    */
   readonly approvedBodyDigest: string;
   /**
@@ -244,8 +242,7 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     // Recorded, not computed. Moving it means saying that the owner's record
     // for this version has changed.
     recordDigest: "c1cb328e70178109be557037025ef807",
-    approvedSectionNumbers: ["1.", "2.", "3.", "4.", "5.", "6."],
-    approvedBodyDigest: "641a53ca88b3a0fd7d276426c1ee2a29",
+    approvedBodyDigest: "4d4f8824c4a859fbc1f2007eca022af2",
     deviceCells: {
       signupOptIn: { section: "3.A", label: null, role: null },
       signupNotice: { section: "3.B", label: null, role: null },

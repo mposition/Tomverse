@@ -147,6 +147,7 @@
     "check:voice-provider-budget-env": "node --import tsx scripts/check-voice-provider-budget-env.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
     "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
+    "check:consent-copy-immutability": "node scripts/check-consent-copy-immutability.mjs",
     "check:staging-verification-records": "node scripts/check-staging-verification-records.mjs",
     "new:staging-verification-record": "node scripts/new-staging-verification-record.mjs",
     "make:assistant-package-staging-fixtures": "node --import tsx scripts/make-assistant-package-staging-fixtures.mjs",
