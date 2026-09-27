@@ -235,7 +235,7 @@ export const RUN_OUTCOMES = [
 ] as const;
 export type RunOutcome = (typeof RUN_OUTCOMES)[number];
 
-/** How a run's outcome settles the AMUX attempt it is bound to (design §5.10). */
+/** How a run's outcome settles the AMUX attempt it is bound to. */
 export const AMUX_SETTLEMENT_FOR_OUTCOME: Readonly<
   Record<RunOutcome, "review" | "retry" | "blocked" | null>
 > = {
