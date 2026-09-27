@@ -14,8 +14,8 @@ import {
  *
  * Parsing and the guard are pure. This module does not open a transaction,
  * write an audit row, or create a card. Production apply needs both latches.
- * Version 1 ships the code latch false. Nothing here calls a provider or
- * spends credits.
+ * Stage 8 arms the code latch. The environment value must still be exactly
+ * enabled. Nothing here calls a provider or spends credits.
  */
 
 export const AMUX_INTAKE_POLICY_VERSION = 1;
@@ -31,9 +31,10 @@ export const AMUX_INTAKE_TEXT_MAX_BYTES = 2_000;
 
 /**
  * Second apply latch. One environment variable must not be enough to create
- * a card. The shipped constant is false.
+ * a card. Stage 8 sets this constant true. Apply still requires the
+ * environment value to be exactly enabled.
  */
-export const AMUX_INTAKE_APPLY_CODE_LATCH = false;
+export const AMUX_INTAKE_APPLY_CODE_LATCH = true;
 
 export const AMUX_INTAKE_PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 

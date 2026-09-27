@@ -18,25 +18,24 @@ import {
   boardImportContentTypeAccepted,
   pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
-import { AMUX_INTAKE_APPLY_ENV, AMUX_INTAKE_RAW_BODY_MAX_BYTES } from "@/lib/amux/intakeCore";
+import { BOARD_PROMOTION_RAW_BODY_MAX_BYTES } from "@/lib/amux/boardPromotionCore";
+import { RECOMMENDATION_CODE_LATCH } from "@/lib/amux/recommendationPoolCore";
 import {
-  AMUX_INTAKE_SOURCE_KEY_SECRET_ENV,
-  planAmuxIntakeRegistration,
-  previewAmuxIntake,
-} from "@/lib/amux/intakeRegistrationCore";
-import {
-  AmuxIntakeOutcomeUnknownError,
-  applyAmuxIntakeRegistration,
-} from "@/lib/amux/intakeRegistration";
+  decideRecommendation,
+  markRecommendationOutcomeUnknown,
+  prepareRecommendation,
+  previewRecommendation,
+} from "@/lib/amux/recommendationPoolService";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
-const ACTIONS = new Set(["preview", "register"]);
-const previewHits = new Map<string, number[]>();
 
 const withNoStore = (response: Response) => {
   response.headers.set("Cache-Control", noStoreHeaders["Cache-Control"]);
   return response;
 };
+
+const ACTIONS = new Set(["preview", "prepare", "decide"]);
+const previewHits = new Map<string, number[]>();
 
 const requireOwner = async () => {
   const session = await getServerSession(authOptions);
@@ -63,6 +62,7 @@ const requireOwner = async () => {
 };
 
 export async function POST(request: Request) {
+  let snapshotId: string | null = null;
   try {
     const auth = await requireOwner();
     if ("response" in auth) return auth.response;
@@ -73,51 +73,68 @@ export async function POST(request: Request) {
     if (!boardImportContentTypeAccepted(request.headers.get("content-type"))) {
       return NextResponse.json({ error: "content_type_refused" }, { status: 415, headers: noStoreHeaders });
     }
-    const userId = auth.session.user?.id;
-    if (!userId) {
-      return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStoreHeaders });
-    }
     if (action !== "preview") {
-      await consumeApiRateLimit(request, userId, `admin-amux-intake-${action}`, { minute: 10, day: 100 });
+      await consumeApiRateLimit(request, auth.session.user.id, `admin-amux-board-recommendation-${action}`, {
+        minute: 10,
+        day: 100,
+      });
     }
-    const raw = await readLimitedText(request, AMUX_INTAKE_RAW_BODY_MAX_BYTES);
-    const secret = process.env[AMUX_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null;
+    const raw = await readLimitedText(request, BOARD_PROMOTION_RAW_BODY_MAX_BYTES);
     if (action === "preview") {
       const now = Date.now();
       const pruned = pruneBoardImportPreviewHits([...previewHits], now);
       previewHits.clear();
-      for (const [accountId, retained] of pruned) previewHits.set(accountId, retained);
-      const decision = admitBoardImportPreview(previewHits.get(userId) ?? [], now);
-      if (decision.retained.length === 0) previewHits.delete(userId);
-      else previewHits.set(userId, decision.retained);
+      for (const [userId, retained] of pruned) previewHits.set(userId, retained);
+      const decision = admitBoardImportPreview(previewHits.get(auth.session.user.id) ?? [], now);
+      if (decision.retained.length === 0) previewHits.delete(auth.session.user.id);
+      else previewHits.set(auth.session.user.id, decision.retained);
       if (!decision.allowed || decision.retained.length > BOARD_IMPORT_PREVIEW_LIMIT) {
         return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
       }
-      return NextResponse.json(previewAmuxIntake(raw, secret, process.env[AMUX_INTAKE_APPLY_ENV]), {
-        headers: noStoreHeaders,
-      });
+      return NextResponse.json(await previewRecommendation(raw), { headers: noStoreHeaders });
     }
-    const planned = planAmuxIntakeRegistration(raw, secret);
-    if (!planned.ok) {
-      return NextResponse.json({ error: planned.code, writes: 0 }, { status: 409, headers: noStoreHeaders });
+    if (!RECOMMENDATION_CODE_LATCH) {
+      return NextResponse.json({ error: "apply_disabled" }, { status: 409, headers: noStoreHeaders });
     }
-    return NextResponse.json(
-      await applyAmuxIntakeRegistration({ session: auth.session, request, plan: planned.plan }),
-      { headers: noStoreHeaders },
-    );
+    if (action === "prepare") {
+      const prepared = await prepareRecommendation({ session: auth.session, request, raw });
+      return NextResponse.json(prepared, { status: 201, headers: noStoreHeaders });
+    }
+    try {
+      const body = JSON.parse(raw) as { snapshotId?: unknown };
+      if (typeof body.snapshotId === "string") snapshotId = body.snapshotId;
+    } catch {
+      snapshotId = null;
+    }
+    return NextResponse.json(await decideRecommendation({ session: auth.session, request, raw }), {
+      headers: noStoreHeaders,
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return withNoStore(approvalResponse);
+    if (error instanceof BoardImportError && error.code === "outcome_unknown") {
+      const markerId = error.approvalId ?? snapshotId;
+      if (markerId) {
+        try {
+          const session = await getServerSession(authOptions);
+          if (session?.user?.id) {
+            await markRecommendationOutcomeUnknown({ session, request, snapshotId: markerId });
+          }
+        } catch {
+          // The marker is itself uncertain. Do not try the decision again.
+        }
+      }
+      return NextResponse.json({ error: "outcome_unknown", retry: false }, { status: 409, headers: noStoreHeaders });
+    }
     if (error instanceof BoardImportError) {
-      const body =
-        error instanceof AmuxIntakeOutcomeUnknownError
-          ? { error: error.code, retry: false as const, readBack: error.readBack }
-          : { error: error.code, writes: 0 as const };
-      return NextResponse.json(body, { status: error.httpStatus, headers: noStoreHeaders });
+      return NextResponse.json(
+        { error: error.code, ...(error.code === "outcome_unknown" ? { retry: false } : {}) },
+        { status: error.httpStatus, headers: noStoreHeaders },
+      );
     }
     const security = apiSecurityResponse(error);
     if (security) return withNoStore(security);
-    console.error("AMUX intake preview failed");
-    return NextResponse.json({ error: "intake_failed" }, { status: 500, headers: noStoreHeaders });
+    console.error("AMUX board recommendation failed");
+    return NextResponse.json({ error: "board_recommendation_failed" }, { status: 500, headers: noStoreHeaders });
   }
 }

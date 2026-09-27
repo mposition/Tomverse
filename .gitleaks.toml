@@ -72,8 +72,10 @@ regexes = [
   # not a credential. Anchor both the field and the complete value so this
   # cannot suppress an arbitrary token merely because it appears in a test.
   '''scopeKey:\s*"conversation_[0-9]+"''',
-  # Reconciliation tests compare work-item ids with `sourceKey === "AMUX-..."`.
-  # The default generic-api-key rule reads that as a key assignment. The value
-  # is an uppercase work-item id. A credential does not start with `AMUX-`.
-  '''sourceKey === "AMUX(?:-[A-Z0-9]+)+"''',
+  # Reconciliation tests name work-item ids as `sourceKey === "AMUX-..."` or
+  # `sourceKey: "AMUX-..."`. The default generic-api-key rule reads either as a
+  # key assignment. The value is an uppercase work-item id and the closing
+  # quote is required, so a credential after that id is not covered. A
+  # credential does not start with `AMUX-`.
+  '''sourceKey(?: ===|:)\s*"AMUX(?:-[A-Z0-9]+)+"''',
 ]
