@@ -43,9 +43,9 @@ const updateSchema = z
      * Only invalidate the confirmation link already mailed for this purpose.
      *
      * The one control that means that and not "stop sending me this": the
-     * cancel link beside a pending confirmation. Sent as a literal so a
-     * client cannot switch a purpose off *without* recording the refusal by
-     * passing a falsy value of some other shape.
+     * cancel link beside a pending confirmation. A literal, so a client cannot
+     * switch a purpose off *without* recording the refusal by passing a falsy
+     * value of some other shape.
      */
     cancelRequestOnly: z.literal(true).optional(),
     country: z
@@ -55,7 +55,24 @@ const updateSchema = z
       .transform((value) => value.toUpperCase())
       .optional(),
   })
-  .strict();
+  .strict()
+  // The flag belongs to one control, and that control sends one shape: this
+  // purpose, switching off. Accepting it beside `withdrawAllMarketing`, with
+  // `enabled: true`, or with no purpose at all would let a client ask for a
+  // switch-off that records no refusal -- which is the one difference the flag
+  // draws, so a body that does not name that control's action does not get its
+  // exemption. `applyPreferenceChange()` refuses the same cases under the row
+  // lock; this refuses them earlier and says why.
+  .refine(
+    (body) =>
+      !body.cancelRequestOnly ||
+      (body.purpose !== undefined && body.enabled === false && !body.withdrawAllMarketing),
+    {
+      message:
+        "cancelRequestOnly names one purpose being switched off, and cannot be combined with withdrawAllMarketing.",
+      path: ["cancelRequestOnly"],
+    }
+  );
 
 const state = async (userId: string) => {
   const [preferences, jurisdiction] = await Promise.all([

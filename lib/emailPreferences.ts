@@ -396,6 +396,37 @@ export async function applyPreferenceChange(
   });
   if (!existing) throw new Error("The preference row was not created.");
 
+  // Cancelling a mailed confirmation link is its own action, decided before
+  // anything else and never falling through to an ordinary switch-off.
+  //
+  // It used to be read only inside the branch below, which is entered when the
+  // stored value already matches the request. So if `confirmConsent()` in
+  // another tab committed first, the switch was on, this request no longer
+  // matched, and the late "cancel the confirmation email" click took the
+  // ordinary path: it switched the purpose off and wrote a withdrawal, a
+  // transition and an unsubscribe cause. The person cancelled a link and was
+  // recorded as having unsubscribed from a subscription they had just
+  // confirmed.
+  //
+  // So it applies only to what it names -- a purpose that is still off with a
+  // request outstanding -- and in every other state it changes nothing. The
+  // caller reads the state back, which is how the screen learns the
+  // confirmation won the race.
+  if (input.cancelRequestOnly) {
+    if (input.enabled || existing.enabled || existing.confirmationRequestId === null) {
+      return "already_set" as const;
+    }
+    await tx.emailPreference.update({
+      where: { userId_purpose: { userId: input.userId, purpose } },
+      data: {
+        confirmationRequestedAt: null,
+        confirmationRequestId: null,
+        confirmedAt: null,
+      },
+    });
+    return "cancelled" as const;
+  }
+
   if (input.confirmation) {
     if (existing.confirmationRequestId !== input.confirmation.requestId) {
       return "superseded" as const;
@@ -427,11 +458,8 @@ export async function applyPreferenceChange(
     // and let the override keep sending. `all=1` did it for every pending
     // purpose at once.
     //
-    // `cancelRequestOnly` is for the one control that means only the first: the
-    // settings screen's "cancel the confirmation email" link, which sits beside
-    // a switch that is already off and whose own words are about invalidating
-    // the mailed link. Every other caller -- the unsubscribe link, one-click,
-    // withdraw-all, a privacy intake -- means both.
+    // (`cancelRequestOnly` means only the first. It is decided above, before
+    // this branch can be reached, because its condition is not this one.)
     const cancelledRequest = !input.enabled && existing.confirmationRequestId !== null;
     if (cancelledRequest) {
       await tx.emailPreference.update({
@@ -450,12 +478,19 @@ export async function applyPreferenceChange(
     // not do -- once released by the person switching the purpose on, it would
     // stay released through the next unsubscribe.
     //
-    // A live cause counts as the refusal already recorded only when it *is* a
-    // refusal and cannot be lifted as routine maintenance: an unsubscribe, a
-    // complaint, or a privacy request, at any scope that covers this purpose.
-    // A hard or soft bounce is not one -- it says the address did not accept
-    // mail, it can be released when it clears, and writing nothing beside it
-    // would lose the refusal the moment it was.
+    // A live cause counts as the refusal already recorded only when releasing
+    // it could not take the refusal away with it. The release matrix decides
+    // that (`lib/emailSuppressionAuthorityCore.ts`), not how the reason reads:
+    // `unsubscribe` is released only by this person switching the purpose back
+    // on, and `privacy_request` by nothing at all.
+    //
+    // Every other reason is somebody else's to lift. A bounce says the address
+    // did not accept mail and goes when it clears. A `complaint` does read as a
+    // refusal, and two approving administrators may release it -- which would
+    // release a refusal nobody asked them about, because this branch had
+    // declined to record one beside it. So it is not in the list although it is
+    // a refusal; the complaint path writes its own purpose-scoped unsubscribe
+    // for the message complained about, so nothing here is duplicated.
     //
     // The address lock taken above serialises this read with every other cause
     // writer. No history row either way: nothing about the preference changed.
@@ -463,7 +498,7 @@ export async function applyPreferenceChange(
       const refusal = await tx.suppressionCause.findFirst({
         where: {
           emailAddress: normalizeSuppressionAddress(email),
-          reason: { in: ["unsubscribe", "complaint", "privacy_request"] },
+          reason: { in: ["unsubscribe", "privacy_request"] },
           releasedAt: null,
           OR: [
             { scope: "global" },
