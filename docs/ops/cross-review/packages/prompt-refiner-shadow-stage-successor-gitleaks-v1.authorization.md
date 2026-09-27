@@ -4,7 +4,7 @@
 - approvedAt: `2026-09-28` (Australia/Brisbane)
 - author: `codex`
 - independentReviewer: `claude-code-max`
-- reviewedHead: `665f04f0c777189f5ba2d174da67285890eca549`
+- reviewedHead: `cce7072381eda951ca7afe47c5828fb11a0a4aa5`
 - baseCommit: `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 
 `reviewedHead`는 검토 대상 source-fix commit을 뜻한다. 그 뒤에 이 SHA를 적는
@@ -52,7 +52,7 @@ Claude 검토를 받도록 지시했다. 이 작업의 Claude 검토에 `--skip-
   `guardCommands` 및 `guardRuns`에 남아야 한다.
 
 ```sh
-node scripts/check-gitleaks-exact-range.mjs --reviewed-head=665f04f0c777189f5ba2d174da67285890eca549
+node scripts/check-gitleaks-exact-range.mjs --reviewed-head=cce7072381eda951ca7afe47c5828fb11a0a4aa5
 ```
 
 guard는 `GITLEAKS_BIN`을 absolute path로 resolve하고 exe hash를 검사한 다음에만 정확한
