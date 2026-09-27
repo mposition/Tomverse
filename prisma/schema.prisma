@@ -4619,7 +4619,10 @@ model ReleaseNotesCountryRule {
   countryCode String
   ruleKey     String
   ruleVersion Int
-  rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict)
+  /// `map:` because the migration names this constraint, and a Prisma default
+  /// name for the same foreign key is schema drift -- which is what the DB
+  /// integration lane compares and what it failed on.
+  rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict, map: "ReleaseNotesCountryRule_rule_fkey")
 
   notes String
 
