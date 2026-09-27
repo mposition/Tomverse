@@ -66,7 +66,7 @@ type ConversationFixture = {
   selectedModels: string[];
   messages: QaConversationMessage[];
   productKey: "chat" | "review";
-  surface: "chat" | "workspace";
+  surface: "chat" | "workspace" | "continuation";
 };
 
 type DraftFixture = {
@@ -300,6 +300,7 @@ async function openChat(page: Page, options: {
   contextBundles?: Array<string | null>;
   sharedDrafts?: Map<string, DraftFixture>;
   legacyReview?: boolean;
+  continuation?: boolean;
   messageSaveFailure?: boolean;
   messageSaveFailureOnce?: boolean;
   messageSaveFailureStatus?: number;
@@ -307,6 +308,10 @@ async function openChat(page: Page, options: {
   messageSaveResponseLostAfterCommit?: boolean;
   messageSaveBodyStall?: boolean;
   holdMessageSaveBeforeTransaction?: boolean;
+  holdFirstMessageSaveBeforeTransaction?: boolean;
+  holdMessageSaveResponseAfterCommit?: boolean;
+  holdBeforeModelSendAfterPayload?: boolean;
+  holdBeforeModelSendAfterPayloadOnCall?: number;
   messageReceiptUnavailable?: boolean;
   messageReceiptResponseBody?: unknown;
   messageReceiptBodyStall?: boolean;
@@ -315,8 +320,15 @@ async function openChat(page: Page, options: {
   holdDraftHydrate?: boolean;
   holdNextDraftMutation?: boolean;
   draftSyncFailure?: boolean;
+  historyPageFailureOnCursorRead?: number;
+  holdHistoryPageFailure?: boolean;
+  holdContextBundleOnce?: boolean;
+  malformedFirstHistoryPageOnRead?: number;
   malformedDraftRead?: boolean;
   invalidDraftAttachmentRead?: boolean;
+  lockedSecondConversation?: boolean;
+  lockedInitialConversation?: boolean;
+  initialConversationId?: string;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
 } = {}) {
   await prepareGuestPage(page, "en");
@@ -342,8 +354,12 @@ async function openChat(page: Page, options: {
   }]);
   const conversations: ConversationFixture[] = [{
     id: CONVERSATION, title: "QA unified Chat", selectedModels: options.selectedModels ?? [MODEL_A],
-    productKey: options.legacyReview ? "review" : "chat",
-    surface: options.legacyReview ? "workspace" : "chat",
+    productKey: options.legacyReview || options.continuation ? "review" : "chat",
+    surface: options.continuation
+      ? "continuation"
+      : options.legacyReview
+        ? "workspace"
+        : "chat",
     messages: options.messages ?? [
       { id: "seed-u", role: "user", content: "A prior question." },
       { id: "seed-a", role: "assistant", content: FIRST_ANSWER, modelId: MODEL_A, status: "normal" },
@@ -369,6 +385,11 @@ async function openChat(page: Page, options: {
   let attemptReadCount = 0;
   const attemptPollFailures: Array<{ status: number; retryAfter?: string }> = [];
   let contextBundleRead = 0;
+  let contextBundleStarted = false;
+  let releaseContextBundle = () => {};
+  const contextBundleGate = new Promise<void>((resolve) => {
+    releaseContextBundle = resolve;
+  });
   let messageSaveFailureReturned = false;
   let draftHydrateStarted = false;
   let draftReadCount = 0;
@@ -377,10 +398,14 @@ async function openChat(page: Page, options: {
   let draftFailuresReturned = 0;
   let draftMutationStarted = false;
   let messageSaveStarted = false;
+  let messageSaveCommitted = false;
+  let messageSaveResponseSettledCount = 0;
+  let messageSaveCount = 0;
   let messageReceiptStarted = false;
   let releaseDraftHydrate = () => {};
   let releaseDraftMutation = () => {};
   let releaseMessageSave = () => {};
+  let releaseMessageSaveResponse = () => {};
   let releaseMessageReceipt = () => {};
   const draftHydrateGate = new Promise<void>((resolve) => {
     releaseDraftHydrate = resolve;
@@ -391,6 +416,9 @@ async function openChat(page: Page, options: {
   const messageSaveGate = new Promise<void>((resolve) => {
     releaseMessageSave = resolve;
   });
+  const messageSaveResponseGate = new Promise<void>((resolve) => {
+    releaseMessageSaveResponse = resolve;
+  });
   const messageReceiptGate = new Promise<void>((resolve) => {
     releaseMessageReceipt = resolve;
   });
@@ -400,12 +428,30 @@ async function openChat(page: Page, options: {
   const accountBConversations: ConversationFixture[] = [];
   let exposePreviousAccountDrafts = true;
   let visibleConversations = conversations;
+  let historyCursorReadCount = 0;
+  let firstHistoryPageReadCount = 0;
+  let historyPageFailureStarted = false;
+  let contextBundleResponseSettled = false;
+  let releaseHistoryPageFailure = () => {};
+  const historyPageFailureGate = new Promise<void>((resolve) => {
+    releaseHistoryPageFailure = resolve;
+  });
   const payload = (row: ConversationFixture) => ({
     ...row, disabledPanels: options.disabledPanels ?? [], webSearchMode: "off", memoryMode: "inherit",
     selectionMode: "manual", autoSelection: { offered: false },
-    assistantProfile: null, isLocked: false, shareEnabled: false, nextCursor: null,
+    assistantProfile: null,
+    isLocked: (options.lockedSecondConversation && row.id === SECOND_CONVERSATION) ||
+      (options.lockedInitialConversation && row.id === CONVERSATION),
+    shareEnabled: false, nextCursor: null,
     responseAttempts,
   });
+  const settleMessageSaveResponse = async (operation: Promise<void>) => {
+    try {
+      await operation;
+    } finally {
+      messageSaveResponseSettledCount += 1;
+    }
+  };
   await page.route(/\/api\/products\/chat\/attempts\/[^?]+(?:\?.*)?$/, async (route) => {
     attemptReadCount += 1;
     const forcedFailure = attemptPollFailures.shift();
@@ -629,16 +675,20 @@ async function openChat(page: Page, options: {
     if (!row) return route.fulfill({ status: 404, json: { code: "CONVERSATION_NOT_FOUND" } });
     if (path.endsWith("/messages") && method === "POST") {
       messageSaveStarted = true;
-      if (options.holdMessageSaveBeforeTransaction) await messageSaveGate;
+      messageSaveCount += 1;
+      if (options.holdMessageSaveBeforeTransaction ||
+          (options.holdFirstMessageSaveBeforeTransaction && messageSaveCount === 1)) {
+        await messageSaveGate;
+      }
       if (
         options.messageSaveFailure ||
         (options.messageSaveFailureOnce && !messageSaveFailureReturned)
       ) {
         messageSaveFailureReturned = true;
-        return route.fulfill({
+        return settleMessageSaveResponse(route.fulfill({
           status: options.messageSaveFailureStatus ?? 500,
           json: { code: "QA_MESSAGE_SAVE_FAILED" },
-        });
+        }));
       }
       // A mock of the server's ordered restored-reference response, not proof
       // of object copying or DB atomicity. Those require the separate real-DB
@@ -697,10 +747,14 @@ async function openChat(page: Page, options: {
           draftConsumed = true;
         }
       }
-      if (options.messageSaveResponseLostAfterCommit) {
-        return route.abort("failed");
+      messageSaveCommitted = true;
+      if (options.holdMessageSaveResponseAfterCommit) {
+        await messageSaveResponseGate;
       }
-      return route.fulfill({ status: 201, json:
+      if (options.messageSaveResponseLostAfterCommit) {
+        return settleMessageSaveResponse(route.abort("failed"));
+      }
+      return settleMessageSaveResponse(route.fulfill({ status: 201, json:
         options.messageSaveResponseBody ?? {
           success: true,
           created: 1,
@@ -708,18 +762,80 @@ async function openChat(page: Page, options: {
           attachments: bound,
           draftConsumed,
         }
-      });
+      }));
     }
     if (method === "PATCH" && Array.isArray(body.selectedModels)) row.selectedModels = body.selectedModels as string[];
     if (method === "GET") historyReads.push(url.pathname + url.search);
-    return route.fulfill({ json: payload(row) });
+    if (method === "GET" && row.id === CONVERSATION && !url.searchParams.has("cursor") &&
+        ++firstHistoryPageReadCount === options.malformedFirstHistoryPageOnRead) {
+      return route.fulfill({ json: {
+        ...payload(row), messages: null,
+        messagePage: { hasMore: false, nextCursor: null },
+      } });
+    }
+    if (method === "GET" && options.historyPageFailureOnCursorRead && row.id === CONVERSATION) {
+      const cursor = url.searchParams.get("cursor");
+      if (cursor && ++historyCursorReadCount === options.historyPageFailureOnCursorRead) {
+        historyPageFailureStarted = true;
+        if (options.holdHistoryPageFailure) await historyPageFailureGate;
+        return route.fulfill({ status: 503, json: { code: "QA_HISTORY_PAGE_UNAVAILABLE" } });
+      }
+      const cursorIndex = cursor ? row.messages.findIndex((message) => message.id === cursor) : -1;
+      if (cursor && cursorIndex < 0) throw new Error("QA history cursor was not found");
+      const start = cursorIndex + 1;
+      const messages = row.messages.slice(start, start + 50);
+      const hasMore = start + messages.length < row.messages.length;
+      return route.fulfill({ json: {
+        ...payload(row), messages,
+        messagePage: { hasMore, nextCursor: hasMore ? messages.at(-1)?.id ?? null : null },
+      } });
+    }
+    return route.fulfill({ json: method === "GET"
+      ? { ...payload(row), messagePage: { hasMore: false, nextCursor: null } }
+      : payload(row) });
   });
+  if (options.continuation) {
+    await page.route(
+      `**/api/conversations/${CONVERSATION}/continuation*`,
+      (route) => route.fulfill({ json: {
+        conversationId: CONVERSATION,
+        provider: "chatgpt",
+        importedAt: "2026-09-01T00:00:00.000Z",
+        contextSeedVersion: "qa-continuation-seed-v1",
+        seed: {
+          messageCount: 0,
+          truncatedMessageCount: 0,
+          omittedMessageCount: 0,
+          fromOrdinal: 0,
+          toOrdinal: 0,
+        },
+        source: {
+          status: "available",
+          externalConversationId: "qa-external-conversation",
+          title: "QA imported source",
+          messageTotal: 0,
+          offset: 0,
+          limit: 100,
+          messages: [],
+        },
+      } })
+    );
+  }
   // No title generation, provider operation or real ownership mutation escapes
   // the fabricated routes, even if a regression calls an unexpected endpoint.
   await page.route("**/api/conversations/*/generate-title", (route) => route.fulfill({ json: { title: "QA Chat" } }));
   // Same no-memory contract used by chat-memory-context.spec.ts. Preparation
   // stays local too; a dummy database refusal is not needed for this journey.
   await page.route("**/api/chat/context", (route) => {
+    if (options.holdContextBundleOnce && contextBundleRead === 0) {
+      contextBundleStarted = true;
+      return contextBundleGate.then(async () => {
+        contextBundleRead += 1;
+        await route.fulfill({ json: { ok: true, contextBundle: options.contextBundle ?? null,
+          memoryUsedCount: 0 } });
+        contextBundleResponseSettled = true;
+      });
+    }
     const bundles = options.contextBundles;
     const contextBundle = bundles
       ? bundles[Math.min(contextBundleRead, bundles.length - 1)] ?? null
@@ -743,21 +859,50 @@ async function openChat(page: Page, options: {
       window.__tomverseChatMessageDeadlineMs = deadlineMs;
     }, options.messageDeadlineMs);
   }
+  if (options.holdBeforeModelSendAfterPayload ||
+      options.holdBeforeModelSendAfterPayloadOnCall !== undefined) {
+    await page.addInitScript((holdOnCall) => {
+      const target = window as unknown as {
+        __tomverseChatBeforeModelSendGate?: Promise<void>;
+        __tomverseReleaseChatBeforeModelSend?: () => void;
+        __tomverseChatBeforeModelSendStarted?: boolean;
+        __tomverseChatBeforeModelSendCallCount?: number;
+        __tomverseChatBeforeModelSendHoldOnCall?: number;
+      };
+      target.__tomverseChatBeforeModelSendGate = new Promise<void>((resolve) => {
+        target.__tomverseReleaseChatBeforeModelSend = resolve;
+      });
+      target.__tomverseChatBeforeModelSendStarted = false;
+      target.__tomverseChatBeforeModelSendCallCount = 0;
+      target.__tomverseChatBeforeModelSendHoldOnCall = holdOnCall;
+    }, options.holdBeforeModelSendAfterPayloadOnCall);
+  }
   await page.setViewportSize(options.viewport ?? DESKTOP_VIEWPORT);
-  const workspacePath = options.legacyReview ? "/chat" : "/chat/workspace";
-  await page.goto(`${workspacePath}?lang=en${options.fresh ? "" : `&conversation=${CONVERSATION}`}`);
+  const workspacePath = options.continuation
+    ? `/continuations/${CONVERSATION}`
+    : options.legacyReview
+      ? "/chat"
+      : "/chat/workspace";
+  const initialConversationId = options.initialConversationId ?? CONVERSATION;
+  await page.goto(`${workspacePath}?lang=en${options.fresh ? "" : `&conversation=${initialConversationId}`}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
-  if (!options.fresh) {
+  if (!options.fresh && !options.lockedInitialConversation &&
+      conversations.some((conversation) => conversation.id === initialConversationId)) {
     // The server-rendered panel can already show history one commit before
     // ChatPageClient finishes adopting the URL conversation as the composer
     // scope. Tests that start an upload in that gap would correctly bind it
     // to `new`, then accidentally assert behavior for the stored conversation.
     await expect.poll(() => page.evaluate(() =>
       window.sessionStorage.getItem("tomverse_active_chat_id")
-    )).toBe(CONVERSATION);
+    )).toBe(initialConversationId);
   }
   return {
     conversations, writes, historyReads, userSettingsWrites, drafts,
+    contextBundleStarted: () => contextBundleStarted,
+    contextBundleResponseSettled: () => contextBundleResponseSettled,
+    releaseContextBundle,
+    historyPageFailureStarted: () => historyPageFailureStarted,
+    releaseHistoryPageFailure,
     detail: (id: string) => payload(conversations.find((row) => row.id === id)!),
     hidePreviousAccount: () => {
       visibleConversations = accountBConversations;
@@ -783,11 +928,22 @@ async function openChat(page: Page, options: {
     draftHydrateStarted: () => draftHydrateStarted,
     draftMutationStarted: () => draftMutationStarted,
     messageSaveStarted: () => messageSaveStarted,
+    messageSaveCommitted: () => messageSaveCommitted,
+    messageSaveResponseSettledCount: () => messageSaveResponseSettledCount,
     messageReceiptStarted: () => messageReceiptStarted,
     releaseDraftHydrate,
     releaseDraftMutation,
     releaseMessageSave,
+    releaseMessageSaveResponse,
     releaseMessageReceipt,
+    beforeModelSendStarted: () => page.evaluate(() => Boolean(
+      (window as unknown as { __tomverseChatBeforeModelSendStarted?: boolean })
+        .__tomverseChatBeforeModelSendStarted
+    )),
+    releaseBeforeModelSend: () => page.evaluate(() => {
+      (window as unknown as { __tomverseReleaseChatBeforeModelSend?: () => void })
+        .__tomverseReleaseChatBeforeModelSend?.();
+    }),
   };
 }
 
@@ -809,6 +965,15 @@ async function chooseConversation(page: Page, conversationId: string) {
   await page.locator(
     `[data-testid="sidebar-conversation-item"][data-conversation-id="${conversationId}"]`
   ).click();
+}
+
+async function chooseNewChat(page: Page) {
+  const mobileShell = page.getByTestId("mobile-chat-shell");
+  if (await mobileShell.isVisible()) {
+    await page.getByTestId("mobile-sidebar-open").click();
+    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
+  }
+  await page.getByTestId("sidebar-new-chat").click();
 }
 
 async function switchToFixtureAccountB(
@@ -1692,6 +1857,1059 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(sent[0].sourceUserMessageId).toBe(sent[1].sourceUserMessageId);
     expect(sent[1].contextBundle).toBe("qa-fresh-context-bundle");
     expect(await persistentProviderStreamCount(page)).toBe(1);
+  });
+
+  test("a failed later history page stays unloaded until retry restores the complete send context", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      viewport: MOBILE_VIEWPORT,
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+    });
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await expect(message(page, "Saved answer 26.")).toHaveCount(0);
+    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Use the whole saved conversation.");
+    await submitComposer(page, "Use the whole saved conversation.", MOBILE_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.at(-1)?.content).toBe("Use the whole saved conversation.");
+    expect(state.historyReads.some((read) => read.includes("cursor=history-answer-24"))).toBe(true);
+    await drive(page, 0, "push", "Answer with complete history.");
+    await drive(page, 0, "finish");
+  });
+
+  test("an in-flight history page does not announce a load failure before it fails", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+      holdHistoryPageFailure: true,
+    });
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await expect(page.getByTestId("chat-panel-loading")).toBeVisible();
+    await expect(page.getByTestId("chat-send-button")).toBeDisabled();
+    await submitComposer(page, "Wait until loading completes.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await submitComposer(page, "Wait until loading completes.", DESKTOP_VIEWPORT.width);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  test("a cached transcript cannot bypass a failed later-page refresh", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      viewport: DESKTOP_VIEWPORT,
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${SECOND_CONVERSATION}"]`).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${CONVERSATION}"]`).click();
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Do not send partial cached history.");
+    await submitComposer(page, "Do not send partial cached history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.at(-1)?.content).toBe("Do not send partial cached history.");
+    await drive(page, 0, "finish");
+  });
+
+  test("a global Chat send rechecks history after async preparation and viewport remount", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+      holdContextBundleOnce: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(state.contextBundleStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseContextBundle();
+    await expect.poll(state.contextBundleResponseSettled).toBe(true);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "Your conversations are safe." }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for the refreshed full history.");
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Wait for the refreshed full history.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    await drive(page, 0, "finish");
+  });
+
+  test("a committed Chat Message survives a history refresh started during its POST", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await submitComposer(page, "Finish the accepted request after the remount.", DESKTOP_VIEWPORT.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseMessageSave();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.filter((item) => item.id === savedMessages.at(-1)?.id)).toHaveLength(1);
+    expect(outgoing.filter((item) => item.content === "Finish the accepted request after the remount."))
+      .toHaveLength(1);
+    await expect(message(page, "Finish the accepted request after the remount.")).toHaveCount(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("an undispatched saved Chat Message is reported only on its originating conversation", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const remountViewport = testInfo.project.name.includes("mobile")
+      ? DESKTOP_VIEWPORT
+      : MOBILE_VIEWPORT;
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `abandoned-user-${index}`, role: "user", content: `Abandoned question ${index + 1}.` },
+      { id: `abandoned-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Abandoned answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const prompt = "Keep the accepted turn tied to this conversation.";
+    const state = await openChat(page, {
+      viewport,
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Abandoned answer 26.")).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(remountViewport);
+    await page.setViewportSize(viewport);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseMessageSave();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    await chooseConversation(page, CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toBeVisible();
+    await expect(message(page, prompt)).toHaveCount(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
+    await page.reload();
+    await expect(message(page, prompt)).toHaveCount(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toHaveCount(0);
+  });
+
+  test("a full Chat unmount preserves one saved-undispatched notice for the same conversation", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const remountViewport = testInfo.project.name.includes("mobile")
+      ? DESKTOP_VIEWPORT
+      : MOBILE_VIEWPORT;
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `unmount-user-${index}`, role: "user", content: `Unmount question ${index + 1}.` },
+      { id: `unmount-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Unmount answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const prompt = "Keep this durable turn across a full Chat unmount.";
+    const state = await openChat(page, {
+      viewport,
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Unmount answer 26.")).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(remountViewport);
+    await page.setViewportSize(viewport);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    state.releaseMessageSave();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    if (await page.getByTestId("mobile-chat-shell").isVisible()) {
+      await page.getByTestId("mobile-sidebar-open").click();
+      await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
+    }
+    await page.getByTestId("account-menu-trigger").click();
+    await page.getByTestId("account-email-updates").click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/notifications");
+    state.releaseHistoryPageFailure();
+    await page.getByTestId("settings-return-to-chat").click();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await chooseConversation(page, CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    await expect(message(page, prompt)).toHaveCount(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  test("re-clicking the active Chat row preserves and consumes its saved-undispatched notice once", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const remountViewport = testInfo.project.name.includes("mobile")
+      ? DESKTOP_VIEWPORT
+      : MOBILE_VIEWPORT;
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `reclick-user-${index}`, role: "user", content: `Re-click question ${index + 1}.` },
+      { id: `reclick-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Re-click answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const prompt = "Keep this durable turn when the active row is clicked again.";
+    const state = await openChat(page, {
+      viewport,
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Re-click answer 26.")).toBeVisible();
+    await page.evaluate(() => {
+      const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+      tracker.__qaSavedNoticeEvents = [];
+      window.addEventListener("tomverse:toast", (event) => {
+        const text = (event as CustomEvent<{ message?: string }>).detail?.message;
+        if (text) tracker.__qaSavedNoticeEvents.push(text);
+      });
+    });
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(remountViewport);
+    await page.setViewportSize(viewport);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    state.releaseMessageSave();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+
+    await chooseConversation(page, CONVERSATION);
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await chooseConversation(page, CONVERSATION);
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  test("New Chat from a continuation preserves its armed saved-undispatched notice", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `continuation-user-${index}`, role: "user", content: `Continuation question ${index + 1}.` },
+      { id: `continuation-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Continuation answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const prompt = "Keep this continuation turn after New Chat.";
+    const state = await openChat(page, {
+      viewport,
+      continuation: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      messages: savedMessages,
+      holdBeforeModelSendAfterPayload: true,
+    });
+    await expect(message(page, "Continuation answer 26.")).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect.poll(state.beforeModelSendStarted).toBe(true);
+
+    await chooseNewChat(page);
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await state.releaseBeforeModelSend();
+    expect(await persistentChatPostCount(page)).toBe(0);
+    await page.goto(`/continuations/${CONVERSATION}?lang=en`);
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    expect(state.conversations[0]!.messages.filter((item) => item.content === prompt))
+      .toHaveLength(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  for (const surface of ["review", "continuation"] as const) {
+    test(`provider-start stays monotonic when a later ${surface} sibling panel cleans up`, async ({ page }, testInfo) => {
+      const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+      const viewport = testInfo.project.name.includes("mobile")
+        ? MOBILE_VIEWPORT
+        : DESKTOP_VIEWPORT;
+      const prompt = `One ${surface} panel starts this provider request before its sibling leaves.`;
+      const state = await openChat(page, {
+        viewport,
+        legacyReview: surface === "review",
+        continuation: surface === "continuation",
+        selectedModels: [MODEL_A, MODEL_B],
+        // A crosses provider-start; B is stopped at the shared preparation
+        // boundary until navigation has run B's cleanup.
+        holdBeforeModelSendAfterPayloadOnCall: 2,
+      });
+      await page.evaluate(() => {
+        const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+        tracker.__qaSavedNoticeEvents = [];
+        window.addEventListener("tomverse:toast", (event) => {
+          const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+          if (message) tracker.__qaSavedNoticeEvents.push(message);
+        });
+      });
+
+      await submitComposer(page, prompt, viewport.width);
+      await expect.poll(state.beforeModelSendStarted).toBe(true);
+      await expect.poll(() => persistentChatPostCount(page)).toBe(1);
+      const providerRequests = await requests(page);
+      expect(providerRequests).toHaveLength(1);
+      expect(providerRequests[0]).toMatchObject({
+        modelId: MODEL_A,
+        conversationId: CONVERSATION,
+      });
+      expect(providerRequests[0].messages?.at(-1)?.content).toBe(prompt);
+
+      if (surface === "continuation") {
+        await chooseNewChat(page);
+        await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+      } else {
+        await chooseConversation(page, SECOND_CONVERSATION);
+        await expect(message(page, SECOND_ANSWER)).toBeVisible();
+      }
+      await state.releaseBeforeModelSend();
+
+      await expect.poll(() => page.evaluate(() =>
+        sessionStorage.getItem("tomverse_saved_question_not_sent_dispositions_v1")
+      )).toBeNull();
+      await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+        .toHaveCount(0);
+      expect((await page.evaluate(() =>
+        (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+      )).filter((item) => savedNoticeCopy.test(item))).toHaveLength(0);
+      expect(await persistentChatPostCount(page)).toBe(1);
+      await drive(page, 0, "finish");
+    });
+  }
+
+  test("a late global Message commit response reports on the first return to its origin", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const prompt = "Keep this late durable turn with its original Chat.";
+    const state = await openChat(page, {
+      viewport,
+      holdMessageSaveResponseAfterCommit: true,
+    });
+
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+
+    state.releaseMessageSaveResponse();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_saved_question_not_sent_dispositions_v1")
+    )).not.toBeNull();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    await chooseConversation(page, CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toBeVisible();
+    await expect(message(page, prompt)).toHaveCount(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
+  });
+
+  test("a settled URL handoff does not suppress a later conversation's saved notice", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const prompt = "Keep B's accepted turn after leaving for C.";
+    const state = await openChat(page, {
+      viewport,
+      unclassifiedThird: true,
+      holdMessageSaveResponseAfterCommit: true,
+    });
+    await page.evaluate(() => {
+      const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+      tracker.__qaSavedNoticeEvents = [];
+      window.addEventListener("tomverse:toast", (event) => {
+        const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+        if (message) tracker.__qaSavedNoticeEvents.push(message);
+      });
+    });
+
+    // The server-rendered handoff is A. Once it has settled, the retained
+    // client tree must not keep treating that frozen prop as a permanent
+    // restriction on B's later disposition.
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    await chooseConversation(page, UNCLASSIFIED_CONVERSATION);
+    await expect(message(page, UNCLASSIFIED_ANSWER)).toBeVisible();
+
+    state.releaseMessageSaveResponse();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_saved_question_not_sent_dispositions_v1")
+    )).not.toBeNull();
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_saved_question_not_sent_dispositions_v1")
+    )).toBeNull();
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.conversations[1]!.messages.filter((item) => item.content === prompt))
+      .toHaveLength(1);
+  });
+
+  test("cancelling a locked initial URL handoff releases later conversation notices", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const prompt = "B remains eligible after the locked A handoff is cancelled.";
+    const state = await openChat(page, {
+      viewport,
+      lockedInitialConversation: true,
+      unclassifiedThird: true,
+      holdMessageSaveResponseAfterCommit: true,
+    });
+
+    await expect(page.getByRole("heading", { name: "Unlock" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    await chooseConversation(page, UNCLASSIFIED_CONVERSATION);
+    await expect(message(page, UNCLASSIFIED_ANSWER)).toBeVisible();
+
+    state.releaseMessageSaveResponse();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.conversations[1]!.messages.filter((item) => item.content === prompt))
+      .toHaveLength(1);
+  });
+
+  test("a missing initial URL handoff releases later conversation notices", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const prompt = "B remains eligible after the missing URL handoff ends.";
+    const state = await openChat(page, {
+      viewport,
+      initialConversationId: "qa-missing-or-unowned",
+      unclassifiedThird: true,
+      holdMessageSaveResponseAfterCommit: true,
+    });
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    await chooseConversation(page, UNCLASSIFIED_CONVERSATION);
+    await expect(message(page, UNCLASSIFIED_ANSWER)).toBeVisible();
+
+    state.releaseMessageSaveResponse();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.conversations[1]!.messages.filter((item) => item.content === prompt))
+      .toHaveLength(1);
+  });
+
+  test("a late Review global commit after A-to-B-to-A records one notice without dispatch", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const prompt = "Keep this late Review composer turn undispatched.";
+    const state = await openChat(page, {
+      viewport,
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdMessageSaveResponseAfterCommit: true,
+    });
+    await page.evaluate(() => {
+      const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+      tracker.__qaSavedNoticeEvents = [];
+      window.addEventListener("tomverse:toast", (event) => {
+        const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+        if (message) tracker.__qaSavedNoticeEvents.push(message);
+      });
+    });
+
+    await submitComposer(page, prompt, viewport.width);
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await chooseConversation(page, CONVERSATION);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+
+    state.releaseMessageSaveResponse();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+    await expect(page.getByTestId("app-toast").filter({ hasText: savedNoticeCopy }))
+      .toBeVisible();
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) => item.content !== prompt) ?? true
+    )).toBe(true);
+    expect(state.conversations[0]!.messages.filter((item) => item.content === prompt))
+      .toHaveLength(1);
+  });
+
+  test("cancelling a locked conversation selection does not abandon the current saved turn", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const remountViewport = testInfo.project.name.includes("mobile")
+      ? DESKTOP_VIEWPORT
+      : MOBILE_VIEWPORT;
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `locked-user-${index}`, role: "user", content: `Locked question ${index + 1}.` },
+      { id: `locked-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Locked answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      viewport,
+      messages: savedMessages,
+      lockedSecondConversation: true,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await submitComposer(page, "A saved turn remains owned by A.", viewport.width);
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(remountViewport);
+    await page.setViewportSize(viewport);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    state.releaseMessageSave();
+    await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(page.getByRole("heading", { name: "Unlock" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_active_chat_id"))).toBe(CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toHaveCount(0);
+    // A refused lock prompt is a navigation attempt, not a committed
+    // selection. A responsive cleanup/remount must therefore keep A's
+    // selection ticket and must not manufacture an abandonment notice.
+    await page.setViewportSize(remountViewport);
+    await page.setViewportSize(viewport);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    state.releaseHistoryPageFailure();
+  });
+
+  test("a remounted panel learns that its inherited history request failed", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `history-user-${index}`, role: "user", content: `Saved question ${index + 1}.` },
+      { id: `history-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Saved answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 2,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    const item = (id: string) => page.locator(
+      `[data-testid="sidebar-conversation-item"][data-conversation-id="${id}"]`
+    );
+    await item(SECOND_CONVERSATION).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await item(CONVERSATION).click();
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await item(SECOND_CONVERSATION).click();
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await item(CONVERSATION).click();
+    await expect(page.getByTestId("chat-panel-loading")).toBeVisible();
+    state.releaseHistoryPageFailure();
+
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, "Saved question 1.")).toHaveCount(0);
+    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Saved answer 26.")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for inherited load recovery.");
+    await submitComposer(page, "Wait for inherited load recovery.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review model-only follow-up waits for complete history and retains its draft through retry", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
+      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Review answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      messages: savedMessages,
+      historyPageFailureOnCursorRead: 1,
+      holdHistoryPageFailure: true,
+    });
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+    const form = page.getByTestId("model-only-form").first();
+    const input = page.getByTestId("model-only-input").first();
+    const send = page.getByTestId("model-only-send").first();
+    await input.fill("Review with the full prior history.");
+    await expect(send).toBeDisabled();
+    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    state.releaseHistoryPageFailure();
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(input).toHaveValue("Review with the full prior history.");
+    await expect(send).toBeDisabled();
+    await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, "Review answer 26.")).toBeVisible();
+    await expect(input).toHaveValue("Review with the full prior history.");
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review model-only turn stays visible when its saved Message races a remount load", async ({ page }) => {
+    const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
+      { id: `review-user-${index}`, role: "user", content: `Review question ${index + 1}.` },
+      { id: `review-answer-${index}`, role: "assistant", modelId: MODEL_A,
+        content: `Review answer ${index + 1}.`, status: "normal" },
+    ] as QaConversationMessage[])).flat();
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      messages: savedMessages,
+      holdMessageSaveBeforeTransaction: true,
+      historyPageFailureOnCursorRead: 3,
+      holdHistoryPageFailure: true,
+    });
+    await expect(message(page, "Review answer 26.")).toBeVisible();
+    await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect.poll(state.historyPageFailureStarted).toBe(true);
+
+    state.releaseMessageSave();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
+    await expect(page.getByTestId("chat-history-load-error")).toHaveCount(0);
+    state.releaseHistoryPageFailure();
+    await expect(message(page, "Show this accepted Review question while answering.")).toHaveCount(1);
+    const outgoing = (await requests(page))[0].messages as Array<{ id?: string; content?: unknown }>;
+    expect(outgoing.slice(0, savedMessages.length).map((item) => item.id))
+      .toEqual(savedMessages.map((item) => item.id));
+    expect(outgoing.filter((item) => item.content === "Show this accepted Review question while answering."))
+      .toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a Review question saved behind a newer turn is not mislabeled as unsaved", async ({ page }) => {
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdFirstMessageSaveBeforeTransaction: true,
+    });
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await page.getByTestId("model-only-input").first().fill("Earlier Review-only question.");
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+
+    await submitComposer(page, "Newer global Review question.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBeGreaterThan(0);
+    await expect.poll(() => state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`).length).toBe(2);
+    state.releaseMessageSave();
+    await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+      item.content === "Earlier Review-only question.")).toBe(true);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "Your question was saved, but no answer request was sent.",
+    })).toBeVisible();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: "The conversation or model changed while preparing the answer.",
+    })).toHaveCount(0);
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) =>
+        item.content !== "Earlier Review-only question.") ?? true)).toBe(true);
+    await drive(page, 0, "finish");
+    const dispatchedBeforeReload = await persistentChatPostCount(page);
+    await page.reload();
+    await expect(message(page, "Earlier Review-only question.")).toBeVisible();
+    expect(await persistentChatPostCount(page)).toBe(dispatchedBeforeReload);
+  });
+
+  test("a saved Review notice follows its conversation instead of the active workspace", async ({ page }, testInfo) => {
+    const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
+    const noticeViewport = testInfo.project.name.includes("mobile")
+      ? MOBILE_VIEWPORT
+      : DESKTOP_VIEWPORT;
+    const state = await openChat(page, {
+      viewport: DESKTOP_VIEWPORT,
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdFirstMessageSaveBeforeTransaction: true,
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents = [];
+      window.addEventListener("tomverse:toast", (event) => {
+        const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+        if (message) (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents.push(message);
+      });
+    });
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await page.getByTestId("model-only-input").first().fill("Conversation-scoped Review question.");
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+
+    await submitComposer(page, "Newer Review turn owns the panel.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBeGreaterThan(0);
+    await expect.poll(() => state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`).length).toBe(2);
+    await page.setViewportSize(noticeViewport);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+
+    state.releaseMessageSave();
+    await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+      item.content === "Conversation-scoped Review question.")).toBe(true);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: savedNoticeCopy,
+    })).toHaveCount(0);
+    expect((await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item))).toHaveLength(0);
+
+    await chooseConversation(page, CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: savedNoticeCopy,
+    })).toBeVisible();
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_active_chat_id"))).toBe(CONVERSATION);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) =>
+        item.content !== "Conversation-scoped Review question.") ?? true)).toBe(true);
+    expect(state.conversations[0]!.messages.filter((item) =>
+      item.content === "Conversation-scoped Review question.")).toHaveLength(1);
+    await drive(page, 0, "finish");
+    await page.waitForTimeout(3_300);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await chooseConversation(page, CONVERSATION);
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: savedNoticeCopy,
+    })).toHaveCount(0);
+    expect((await page.evaluate(() =>
+      (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
+    )).filter((item) => savedNoticeCopy.test(item))).toHaveLength(1);
+  });
+
+  test("a late Review receipt wakes the active A tree after a rapid A-to-B-to-A switch", async ({ page }) => {
+    const prompt = "A late durable receipt must wake the current A tree.";
+    const state = await openChat(page, {
+      viewport: DESKTOP_VIEWPORT,
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdFirstMessageSaveBeforeTransaction: true,
+    });
+    await page.getByTestId("model-only-input").first().fill(prompt);
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    await chooseConversation(page, CONVERSATION);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+
+    state.releaseMessageSave();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./,
+    })).toBeVisible();
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) => item.content !== prompt) ?? true
+    )).toBe(true);
+    expect(state.conversations[0]!.messages.filter((item) =>
+      item.content === prompt)).toHaveLength(1);
+  });
+
+  for (const returnToA of [false, true]) {
+    test(`a saved Review question from an old identity raises no notice after ${returnToA ? "A-to-B-to-A" : "A-to-B"}`, async ({ page }) => {
+      const state = await openChat(page, {
+        legacyReview: true,
+        selectedModels: [MODEL_A, MODEL_B],
+        holdMessageSaveBeforeTransaction: true,
+      });
+      await page.evaluate(() => {
+        const tracker = window as unknown as { __qaSavedNoticeEvents: string[] };
+        tracker.__qaSavedNoticeEvents = [];
+        window.addEventListener("tomverse:toast", (event) => {
+          const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+          if (message) tracker.__qaSavedNoticeEvents.push(message);
+        });
+      });
+      await page.getByTestId("model-only-input").first().fill("Account A saved question.");
+      await page.getByTestId("model-only-send").first().click();
+      await expect.poll(state.messageSaveStarted).toBe(true);
+
+      await switchToFixtureAccountB(page, state);
+      await expect(message(page, FIRST_ANSWER)).toHaveCount(0);
+      if (returnToA) {
+        await switchToFixtureAccountA(page, state);
+        await chooseConversation(page, CONVERSATION);
+        await expect(message(page, FIRST_ANSWER)).toBeVisible();
+      }
+      state.releaseMessageSave();
+      await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+        item.content === "Account A saved question.")).toBe(true);
+      await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
+      const notices = await page.evaluate(() =>
+        (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents);
+      expect(notices).not.toContain(
+        "Your question was saved, but no answer request was sent. Reload this conversation to check it before trying again."
+      );
+      expect(await persistentChatPostCount(page)).toBe(0);
+    });
+  }
+
+  test("a persisted A disposition is cleared across full-unmount B and A mounts", async ({ page }) => {
+    const prompt = "A full reload must not carry this old account notice.";
+    const state = await openChat(page, {
+      legacyReview: true,
+      selectedModels: [MODEL_A, MODEL_B],
+      holdFirstMessageSaveBeforeTransaction: true,
+    });
+    await page.getByTestId("model-only-input").first().fill(prompt);
+    await page.getByTestId("model-only-send").first().click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    state.releaseMessageSave();
+    await expect.poll(() => state.conversations[0]!.messages.some((item) =>
+      item.content === prompt)).toBe(true);
+    await expect.poll(() => page.evaluate(() => {
+      const raw = sessionStorage.getItem(
+        "tomverse_saved_question_not_sent_dispositions_v1"
+      );
+      return raw ? JSON.parse(raw).length : 0;
+    })).toBe(1);
+
+    // Fully unmount ChatPageClient first. The application session provider
+    // remains alive on the settings route, so B can become current while no
+    // Chat identity effect exists to clear A's persisted disposition.
+    await page.getByTestId("account-menu-trigger").click();
+    await page.getByTestId("account-email-updates").click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/notifications");
+    state.hidePreviousAccount();
+    await page.route("**/api/auth/session**", (route) => route.fulfill({ json: {
+      user: { id: "qa-user-b", name: "QA B", email: "qa-b@example.test" },
+      expires: "2099-01-01T00:00:00.000Z",
+    } }));
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.getByTestId("settings-return-to-chat").click();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await expect.poll(() => page.evaluate(() =>
+      sessionStorage.getItem("tomverse_saved_question_not_sent_dispositions_v1")
+    )).toBeNull();
+
+    // Unmount the B Chat tree as well, restore A in the shared provider, then
+    // mount a fresh A Chat tree. The A disposition was already destroyed by
+    // B's owner binding and must not reappear.
+    await page.getByTestId("account-menu-trigger").click();
+    await page.getByTestId("account-email-updates").click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/notifications");
+    state.showPreviousAccount();
+    await page.route("**/api/auth/session**", (route) => route.fulfill({ json: {
+      user: { id: "qa-user", name: "QA User", email: "qa@example.test" },
+      expires: "2099-01-01T00:00:00.000Z",
+    } }));
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.getByTestId("settings-return-to-chat").click();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await chooseConversation(page, CONVERSATION);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect(page.getByTestId("app-toast").filter({
+      hasText: /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./,
+    })).toHaveCount(0);
+    expect((await requests(page)).every((request) =>
+      request.messages?.every((item) => item.content !== prompt) ?? true
+    )).toBe(true);
+  });
+
+  test("a malformed first history page remains retryable without a send", async ({ page }) => {
+    const state = await openChat(page, { malformedFirstHistoryPageOnRead: 2 });
+    await expect(page.getByTestId("chat-history-load-error")).toBeVisible();
+    await expect(message(page, FIRST_ANSWER)).toHaveCount(0);
+    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
+    await page.waitForTimeout(150);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter((write) => write.method === "POST" &&
+      write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
+
+    await page.getByTestId("chat-history-load-retry").click();
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for valid first page.");
+    await submitComposer(page, "Wait for valid first page.", DESKTOP_VIEWPORT.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await drive(page, 0, "finish");
   });
 
   test("reload adopts a durable partial and passively polls to terminal without resubmitting", async ({ page }) => {

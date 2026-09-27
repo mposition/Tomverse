@@ -18,9 +18,8 @@ import { ROUTING_ATTEMPT_ERROR_CLASSES } from "../lib/routingAttemptStore.ts";
  * inserted twice, an availability failure is only a failure of availability,
  * and nothing is attributed to a grain it was never part of.
  *
- * A re-runnable projection is a further thing and is not here -- no rollup
- * table records what it has applied, so `shouldApply` is the rule stated
- * ahead of the thing that will follow it.
+ * `shouldApply` is the observation insert check. It is not grain
+ * application. That record is `shouldApplyRollup`.
  */
 
 const migration = () =>
@@ -112,14 +111,13 @@ test("an observation carries the id a projection is idempotent on", () => {
     ]);
 });
 
-test("the rule a projection would be idempotent on", () => {
-    // Stated ahead of the projection that will use it. What exists today is
-    // this predicate and a unique index on the observation; neither makes a
-    // rollup safe to re-run, because nothing records what a rollup applied.
+test("the observation insert check is not grain application", () => {
+    // One recorded event id does not mean every grain of that event was applied.
     const seen = new Set(["evt_1"]);
     assert.equal(shouldApply("evt_2", seen), true);
     assert.equal(shouldApply("evt_1", seen), false);
     assert.equal(shouldApply("", seen), false);
+    assert.equal(shouldApply("evt_1 ", seen), false);
 });
 
 test("a deployment observation names the endpoint it ran on", () => {

@@ -194,7 +194,11 @@ const pendingPost = () => ({
   claimRegistryVersion: 1,
   assetRegistryVersion: 1,
   factSnapshot: {},
-  factsDigest: null,
+  // A shape no row can have since 20260923140000. Nothing here writes to a
+  // database, so it never failed -- but a fixture standing for a row the
+  // database would refuse is the same thing that let two rules through this
+  // slice's own review, and it costs nothing to make it a row that can exist.
+  factsDigest: DIGEST,
 });
 
 test("two approvals of one version produce one row update and keep the expiry", async () => {

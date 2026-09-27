@@ -110,6 +110,20 @@ export type ManifestDeploymentEntry = {
      * string that is not a date at all digested fine and failed to insert.
      */
     qualityGateExpiresAt: Date | null;
+    /**
+     * `strong`, `weak`, or `alias_only`. Copied because a publication that
+     * omitted it would keep meaning "this revision" after the row was
+     * loosened to an alias.
+     */
+    versionPinStrength: string;
+    allowVersionDrift: boolean;
+    /** The benchmark the pass was measured against, or null when none has run. */
+    qualityBenchmarkVersion: string | null;
+    /**
+     * When that benchmark was last run, or null. Canonicalised like the
+     * expiry: two spellings of one instant digest the same.
+     */
+    qualityLastVerifiedAt: Date | null;
     deploymentEnabled: boolean;
 
     // --- the endpoint it is served from ------------------------------------
@@ -145,6 +159,10 @@ const MANIFEST_ENTRY_FIELDS = [
     "capabilities",
     "qualityGateStatus",
     "qualityGateExpiresAt",
+    "versionPinStrength",
+    "allowVersionDrift",
+    "qualityBenchmarkVersion",
+    "qualityLastVerifiedAt",
     "deploymentEnabled",
     "providerEndpointId",
     "gatewayProvider",
@@ -230,25 +248,29 @@ const encodeField = (value: string | boolean | null): string => {
 /**
  * One field's value as the digest sees it.
  *
- * Only the expiry needs normalising, and it needs it badly enough to be
- * worth a function: the column is a `TIMESTAMP(3)` and two spellings of one
- * instant have to digest the same, or a row cannot reproduce the digest
- * computed from it.
+ * An instant needs normalising, and it needs it badly enough to be worth a
+ * function: the column is a `TIMESTAMP(3)` and two spellings of one instant
+ * have to digest the same, or a row cannot reproduce the digest computed
+ * from it. The expiry and the last-verified instant are both that column.
  */
-const fieldValue = (
-    entry: ManifestDeploymentEntry,
-    field: (typeof MANIFEST_ENTRY_FIELDS)[number]
-): string | boolean | null => {
-    if (field !== "qualityGateExpiresAt") return entry[field];
-    const expiry = entry.qualityGateExpiresAt;
-    if (expiry === null) return null;
+const instantValue = (instant: Date | null): string | null => {
+    if (instant === null) return null;
     // `toISOString()` throws on an invalid Date, and this function has to be
     // total: `manifestProblems()` computes the digest in order to compare it,
     // so a throw here would stop the validator reaching its own complaint
     // about the same value. A fixed marker instead -- distinct from null, so
-    // an unreadable expiry does not digest as no expiry, and never present in
-    // a published digest because publication refuses the entry.
-    return Number.isNaN(expiry.getTime()) ? "not-an-instant" : expiry.toISOString();
+    // an unreadable instant does not digest as no instant, and never present
+    // in a published digest because publication refuses the entry.
+    return Number.isNaN(instant.getTime()) ? "not-an-instant" : instant.toISOString();
+};
+
+const fieldValue = (
+    entry: ManifestDeploymentEntry,
+    field: (typeof MANIFEST_ENTRY_FIELDS)[number]
+): string | boolean | null => {
+    if (field === "qualityGateExpiresAt") return instantValue(entry.qualityGateExpiresAt);
+    if (field === "qualityLastVerifiedAt") return instantValue(entry.qualityLastVerifiedAt);
+    return entry[field];
 };
 
 const encodeEntry = (entry: ManifestDeploymentEntry): string =>
@@ -275,6 +297,13 @@ export const manifestDigest = (
     return hash.digest("hex");
 };
 
+/** One approved ceiling, as the manifest cites it. */
+export type CeilingApproval = {
+    id: string;
+    ceiling: number;
+    approvedAt: Date;
+};
+
 export type ManifestInput = {
     version: number;
     digest: string;
@@ -286,6 +315,30 @@ export type ManifestInput = {
      * disagreed.
      */
     entryCount: number;
+    /**
+     * The approved ceiling this manifest is published under.
+     *
+     * Section 8.5: size is controlled when the configuration is approved,
+     * not when a turn runs. An earlier draft capped the candidate verdicts
+     * written per run, and whichever cut you take there throws away either
+     * the lowest-ranked candidates or a particular rejection reason -- the
+     * answer to "why was this deployment not picked".
+     *
+     * **A separate approval, not a number supplied with the entries.** The
+     * first version took `approvedCeiling` from the publisher in the same
+     * call, and an independent review showed why that is not a ceiling: a
+     * hundred deployments with a ceiling of a hundred passes. A limit the
+     * publisher picks to fit is not the limit section 8.5 means.
+     *
+     * So this is the `RoutingSnapshotCeilingApproval` row the manifest
+     * cites -- attributed, dated and immutable -- and the manifest stores
+     * its id and a copy of the value. The database refuses a copy that does
+     * not match the approval, and an approval dated after the publication.
+     *
+     * Null when none has been approved. There is no default, because a
+     * ceiling is an approval and an absent approval is not an unlimited one.
+     */
+    ceilingApproval: CeilingApproval | null;
     entries: readonly ManifestDeploymentEntry[];
     approvedBy?: string | null;
     approvedAt?: Date | null;
@@ -333,6 +386,31 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
         problems.push("the count does not match these deployments");
     }
 
+    // The ceiling comes from an approval the publisher cites, never from a
+    // number supplied alongside the entries. Nothing here reads the
+    // approval table -- this module does no I/O -- so the caller passes the
+    // row, and the database refuses a manifest whose stored copy does not
+    // match the row it cites.
+    const approval = input.ceilingApproval;
+    if (approval === null) {
+        problems.push("a manifest is published under an approved ceiling");
+    } else if (!Number.isInteger(approval.ceiling) || approval.ceiling < 1) {
+        problems.push("an approved ceiling is a whole number from one");
+    } else {
+        if (input.entries.length > approval.ceiling) {
+            // This function reports; it does not refuse a write. A publisher
+            // that heeds it leaves the last approved snapshot standing, which
+            // is section 8.5's behaviour -- but there is no publisher yet.
+            // What the database refuses is an entry in a slot at or beyond
+            // the manifest's `entryCount`, which the ceiling bounds.
+            problems.push(
+                `${input.entries.length} deployments is over the approved ceiling of ${approval.ceiling}`
+            );
+        }
+        if (input.approvedAt && approval.approvedAt > input.approvedAt) {
+            problems.push("the ceiling was approved after this manifest was published");
+        }
+    }
     const ids = new Set<string>();
     for (const entry of input.entries) {
         if (ids.has(entry.modelDeploymentId)) {
@@ -345,6 +423,12 @@ export const manifestProblems = (input: ManifestInput): readonly string[] => {
         if (expiry !== null && Number.isNaN(expiry.getTime())) {
             problems.push(
                 `deployment ${JSON.stringify(entry.modelDeploymentId)} has an expiry that is not an instant`
+            );
+        }
+        const verified = entry.qualityLastVerifiedAt;
+        if (verified !== null && Number.isNaN(verified.getTime())) {
+            problems.push(
+                `deployment ${JSON.stringify(entry.modelDeploymentId)} has a verification time that is not an instant`
             );
         }
     }

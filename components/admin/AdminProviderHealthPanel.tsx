@@ -52,6 +52,12 @@ const providerConsoleHref: Record<AiProvider, string> = {
   zhipu: "https://z.ai/manage-apikey/billing",
   perplexity:
     "https://console.perplexity.ai/group/36f95894-ee38-4751-b4a0-4365e41a3c31/billing",
+  deepinfra: "https://deepinfra.com/dash/billing",
+  // Documented as Settings → Billing after signing in at api.together.ai.
+  together: "https://api.together.ai/settings/billing",
+  openrouter: "https://openrouter.ai/settings/credits",
+  // Usage docs name this dashboard as where billing and cost are shown.
+  sail: "https://app.sailresearch.com",
 };
 
 const money = (microUsd: number) =>

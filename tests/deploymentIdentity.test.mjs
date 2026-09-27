@@ -170,8 +170,20 @@ test("a passed gate cannot be carried onto a different thing", () => {
     // A gate passes for a particular model version, quantization and set of
     // capabilities. Editing those while enabled keeps the pass and changes
     // what it was about.
+    //
+    // The trigger is created in the first migration. The function body was
+    // replaced when the version gate added the pin, so the columns are read
+    // from that replacement. Reading the first file would still pass after
+    // the replacement lost a column.
     const sql = migration();
     assert.match(sql, /CREATE TRIGGER "model_deployment_gate_follows_identity_trigger"/);
+    const replaced = readFileSync(
+        new URL(
+            "../prisma/migrations/20260923390000_deployment_version_gate_dark/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
     for (const column of [
         "logicalModelId",
         "providerEndpointId",
@@ -182,10 +194,13 @@ test("a passed gate cannot be carried onto a different thing", () => {
         "tokenizerRevision",
         "qualityTier",
         "capabilities",
+        "versionPinStrength",
+        "allowVersionDrift",
+        "qualityBenchmarkVersion",
     ]) {
         assert.match(
-            sql,
-            new RegExp(`NEW\."${column}" IS DISTINCT FROM OLD\."${column}"`),
+            replaced,
+            new RegExp(`NEW\\."${column}" IS DISTINCT FROM OLD\\."${column}"`),
             column
         );
     }

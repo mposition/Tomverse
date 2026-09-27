@@ -562,7 +562,13 @@ domains:
     note: >-
       Shadow routing telemetry (docs/policy/tomverse-chat-routing.md §5): the
       model the Router would have chosen, beside the one that actually ran, as
-      versions, labels and counts. Cascade rather than SetNull, deliberately.
+      versions, labels and counts. The request-start control-plane version and
+      account policy version may both be absent; absence is not the policy
+      that is active now, and one without the other is not a freeze. A
+      request deadline in milliseconds may be absent; absence is not a
+      deadline of zero. A pre-commit buffer duration in milliseconds may
+      be absent; absence is not a buffer of zero. Cascade
+      rather than SetNull, deliberately.
       subjectKey and traceId would still name the person after a null userId,
       so a surviving row would be a half-anonymisation this registry would have
       to carry as a gap -- and a new telemetry table has no claim on outliving
@@ -1037,6 +1043,76 @@ domains:
       operator and can name third parties, so it is routed to the manual
       PrivacyRequest path rather than the unified export.
 
+  - domain: amuxReviewDecision
+    prismaModel: AmuxReviewDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Content-free, append-only evidence of a privileged AMUX task-review
+        decision, linked to the tamper-evident AdminAuditLog entry. Keeping the
+        decision attributable protects the integrity of security investigation
+        and access-control evidence under the same basis as AdminAuditLog.
+      retentionStartsFrom: "decidedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      The immutable decision stores the approving operator's actorUserId and
+      refers to a proposal bound to an AMUX task and a GitHub PR digest; it
+      has no typed customer identifier or review prose. The operator approved
+      the existing Admin audit retention policy for this ledger on 2026-09-21;
+      its non-null actorUserId remains attributable after account deletion.
+      The operator approved exclusion from unified export and manual
+      PrivacyRequest review for access requests on 2026-09-21. This prevents
+      automatic disclosure of other operators or tasks while preserving access
+      review; it is distinct from the approved retention period.
+      The linked AdminAuditLog is separately retained under the same schedule.
+
+  - domain: amuxResourcePolicy
+    prismaModel: AmuxResourcePolicy
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The current project or team capacity and cost policy records who last
+      changed it by operator id and address. Registered on 2026-09-24 because
+      the actor-data sweep correctly detected those columns. Deletion,
+      retention, subject linkage and export remain unverified until privacy
+      owners decide whether mutable operator attribution is anonymised or
+      retained; this row deliberately makes no policy decision by inference.
+
+  - domain: amuxHumanEscalation
+    prismaModel: AmuxHumanEscalation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      A task escalation can name acknowledging and resolving operators by id
+      and address and can retain bounded operational reason text. Registered
+      on 2026-09-24 when the actor-data sweep detected those identities. The
+      approved immutable review-decision ledger policy does not automatically
+      decide this separate mutable table, so every privacy axis stays
+      unverified instead of extending that approval beyond its scope.
+
   - domain: promptRefinerReservationStage
     prismaModel: PromptRefinerReservationStage
     userLinkageRole: actor
@@ -1102,6 +1178,124 @@ domains:
       requests are handled through the manual PrivacyRequest path together
       with the linked tamper-evident AdminAuditLog entry. Authority expiry and
       retention are separate decisions.
+
+  - domain: amuxReconciliationRun
+    prismaModel: AmuxReconciliationRun
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one source reconciliation run. The row names the
+        administrator who prepared it and is retained for security
+        investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite reconciliation evidence. The row stores
+      commit and digest identifiers, not a customer's prompt or file.
+
+  - domain: amuxBoardPromotionApproval
+    prismaModel: AmuxBoardPromotionApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one manual card-promotion batch. The
+        row names the administrator who prepared it and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "preparedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. itemBindings holds the operator's
+      promotion request, not a customer's prompt or file. Operator requests are
+      handled through the manual PrivacyRequest path, together with the linked
+      tamper-evident AdminAuditLog entry.
+
+  - domain: amuxIntakeDraft
+    prismaModel: AmuxIntakeDraft
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence that one explicit intake draft was consumed. The
+        row names the administrator and keeps digests only. Proposal text is
+        absent. The retention period is not a legal determination; it stays
+        TBD until security and legal approval, and a legal hold outranks any
+        later purge. The 24 hour draft cap is a technical limit, not this
+        retention period.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite intake evidence. The row is operator
+      evidence, not customer data. Title, scope and completion stay null.
+
+  - domain: amuxIntakeApproval
+    prismaModel: AmuxIntakeApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator approval evidence for one explicit intake registration. The
+        row names the administrator who consumed it and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id and intentionally has no User foreign key:
+      account deletion must not rewrite approval evidence. The row is operator
+      approval evidence, not customer data. It is not an AmuxBoardImportApproval
+      row. Operator requests are handled through the manual PrivacyRequest
+      path, together with the linked tamper-evident AdminAuditLog entry.
 
   - domain: adminNote
     prismaModel: AdminNote
@@ -1322,6 +1516,42 @@ domains:
       identity at all and so are not a data domain. Dark, and registered
       anyway for the reason the row above records.
 
+  - domain: routingSnapshotCeilingApproval
+    prismaModel: RoutingSnapshotCeilingApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: planned
+    plannedWorkRef: >-
+      .github/audits/multi-provider-routing-deployment-identity-design-2026-09-22.md
+      section 8.5 (routing-snapshot ceiling) and section 14 step 8
+    subjectReference:
+      kind: none
+    minimisationFields:
+      - approvedBy
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Who approved the largest routing snapshot Tomverse may publish, and
+        when. A manifest cites this row and the database refuses a manifest
+        whose ceiling does not match it, so the approver's name is what makes
+        the ceiling an approval rather than a number somebody chose to fit.
+        Append-only by trigger for the same reason.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-23"
+    inUnifiedExport: excluded
+    exclusionReason: >-
+      The subject is the approver, not any exporting account. The row is a
+      limit on infrastructure and holds nothing an account wrote.
+    note: >-
+      `kind: none`: an approval of a number, with no subject account. Dark,
+      and registered anyway for the reason the two approvals beside it
+      record.
+
   - domain: credentialBinding
     prismaModel: CredentialBinding
     # The row is about the account whose key it is -- the BYOK case -- and
@@ -1345,7 +1575,8 @@ domains:
       a Tomverse-managed key and with a customer's own, and a credential must
       never redefine the endpoint, region, residency, model version or
       capability semantics it is used against. Holds a reference to where the
-      secret lives, never the secret. Cascade rather than SetNull: a binding
+      secret lives, never the secret. Rotation and expiry instants may be
+      absent; absence is not a lifetime. Cascade rather than SetNull: a binding
       whose account is gone still names that account's provider identity in
       its reference, so a surviving row would be a half-anonymisation.
 
@@ -1415,7 +1646,9 @@ domains:
     inUnifiedExport: excluded
     note: >-
       Which placement a conversation's turns last went to, and when. One row
-      per conversation and logical model. Deliberately holds no digest of the
+      per conversation and logical model. An affinity epoch and a hold-down
+      instant may both be absent. Absence is not epoch zero and it is not a
+      hold-down this schema chose. Deliberately holds no digest of the
       prompt prefix: that would sharpen the cache answer and is derived from
       what the person wrote, and it would confirm a guess about their text.
       Cascades from Conversation, which cascades from User.

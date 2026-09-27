@@ -316,6 +316,7 @@ beforeEach(async () => {
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
+      "AmuxReviewDecision",
       "AdminAuditLog"
     RESTART IDENTITY
   `);
@@ -2095,7 +2096,14 @@ test("a scheduled autonomous row carries a sealed autonomous decision", async ()
     guardDecision: "approval_required",
   });
   await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
-  await refusesAutonomousRow(account.id, slot, { factsDigest: null });
+  // No `factsDigest: null` case here any more. Since S2b3 the column is NOT
+  // NULL, so the generated client refuses the null before a statement is sent
+  // -- a PrismaClientValidationError, which says something about Prisma's
+  // types and nothing about the database. The guarantee this case stood for
+  // is now stronger than the trigger clause it exercised: every row, not just
+  // an autonomous one, must carry a digest, and "a marketing post cannot be
+  // written without its facts digest" proves that with raw SQL against the
+  // column itself.
 });
 
 test("autonomy is only ever inside a named template", async () => {
@@ -2217,6 +2225,47 @@ test("a serialization failure is one the retry loop recognises", async () => {
   }
 });
 
+test("a marketing post cannot be written without its facts digest", async () => {
+  // S2b3. The column was nullable while rows predating it might exist; the
+  // migration establishes there are none and the database now says so for
+  // every future row.
+  //
+  // Against a real PostgreSQL rather than against Prisma's types, because the
+  // types are regenerated from the schema and would agree with a schema the
+  // database had not been given. Twice in this slice's review a rule the code
+  // and its types agreed on turned out to be one the database did not have.
+  const account = await channel();
+  await assert.rejects(
+    prisma.$executeRaw`
+      INSERT INTO "MarketingPost" (
+        "id", "channelId", "locale", "kind", "logicalKey",
+        "envelope", "envelopeDigest", "rendererVersion",
+        "claimIds", "assetIds", "claimRegistryVersion", "assetRegistryVersion",
+        "factSnapshot", "factsDigest",
+        "guardDecision", "guardCodes", "guardRuleIds",
+        "status", "mode", "history", "historyVersion", "updatedAt"
+      ) VALUES (
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${account.id}, 'en', 'social',
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${JSON.stringify(envelope())}::jsonb, ${DIGEST}, 'r1',
+        ARRAY[]::text[], ARRAY[]::text[], 1, 1,
+        ${JSON.stringify(factSnapshot)}::jsonb, NULL,
+        'approval_required', ARRAY[]::text[], ARRAY[]::text[],
+        'drafted', 'approval',
+        ${JSON.stringify([historyEntry("draft", { envelopeDigest: DIGEST })])}::jsonb,
+        0, now()
+      )
+    `,
+    /factsDigest|not-null|null value/i,
+  );
+
+  // And the ordinary fixture, which does set it, still goes in -- so the test
+  // above is about the digest and not about the statement being malformed.
+  const written = await post(account.id);
+  assert.equal(written.factsDigest, DIGEST);
+});
+
 // ---------------------------------------------------------------------------
 // S2c: one slot, one winner
 // ---------------------------------------------------------------------------
@@ -2309,10 +2358,29 @@ test("two workers race for one slot and exactly one wins", async () => {
       !(result instanceof Error) && result !== null && (result as { claimed?: unknown }).claimed === true,
   );
   assert.equal(claimed.length, 1, "exactly one worker may hold a slot");
-  for (const result of results) {
-    if (result instanceof Error) {
-      assert.fail(`a losing worker must be answered, not thrown at: ${result.message}`);
-    }
+
+  // The loser is either answered or told to retry. At SERIALIZABLE, a worker
+  // that waited on the channel lock while the winner updated that row receives
+  // a serialization failure -- that is PostgreSQL doing its job, and it arrives
+  // from a raw statement as P2010, not P2034. What matters is that the
+  // classifier recognises it, because a failure it does not recognise is one
+  // nothing retries. The first version of this test demanded an answer and so
+  // asserted something PostgreSQL does not do.
+  const losers = results.filter((result) => result !== claimed[0]);
+  assert.equal(losers.length, 1);
+  const loser = losers[0];
+  if (loser instanceof Error) {
+    assert.ok(
+      marketingSerializationFailure(loser),
+      `a losing worker's failure must be one the retry recognises: ${loser.message}`,
+    );
+    // And retrying it is an answer: the slot is taken, so the retried claim
+    // finds nothing it may take.
+    const retried = await claim("worker-b");
+    assert.ok(!(retried instanceof Error), "the retry must be answered");
+    assert.equal((retried as { claimed: boolean }).claimed, false);
+  } else {
+    assert.equal((loser as { claimed: boolean }).claimed, false);
   }
 
   const rows = await prisma.marketingPost.findMany({

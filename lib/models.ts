@@ -12,7 +12,11 @@ export type AiProvider =
     | "minimax"
     | "qwen"
     | "zhipu"
-    | "perplexity";
+    | "perplexity"
+    | "deepinfra"
+    | "together"
+    | "openrouter"
+    | "sail";
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";
@@ -23,14 +27,18 @@ export type ModelUsageClass =
     | "reasoning"
     | "premium-reasoning"
     | "research"
-    | "deep-research";
+    | "deep-research"
+    | "frontier"
+    | "apex";
 export type ModelMinimumPlan = "Guest" | "Free" | "Pro";
 export type ModelUsageCategory =
     | "Standard"
     | "Advanced"
     | "Premium"
     | "Reasoning"
-    | "Research";
+    | "Research"
+    | "Frontier"
+    | "Apex";
 
 export type ModelInputCapabilities = {
     /** The provider model accepts native image content, not only extracted text. */
@@ -51,6 +59,17 @@ export const MODEL_USAGE_CREDIT_WEIGHTS = {
     premiumReasoning: 16,
     search: 20,
     deepResearch: 30,
+    // A full 128,000-token answer at US$4 in / US$20 out, with Anthropic's
+    // 1.25x five-minute cache-write premium and the 3x input multiplier,
+    // costs US$3.200. 27 credits is the minimum that covers it. 32 leaves
+    // room for the next model in this band: 32 x 3 x US$0.04 = US$3.840.
+    frontier: 32,
+    // A full 128,000-token answer at US$10 in / US$50 out, with Anthropic's
+    // 1.25x five-minute cache-write premium and the 3x input multiplier,
+    // costs US$8.000. 67 credits is the minimum that covers it. 80 leaves
+    // the same room frontier leaves on its own band:
+    // 80 x 3 x US$0.04 = US$9.600.
+    apex: 80,
     // Flat surcharge reserved when webSearchMode === "always" enables a
     // provider-native search tool (OpenAI/Anthropic/Google). Refunded at
     // settlement if the provider didn't actually execute a search that
@@ -428,6 +447,10 @@ export const getModelUsageProfile = (
             return { category: "Research", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.search };
         case "deep-research":
             return { category: "Research", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.deepResearch };
+        case "frontier":
+            return { category: "Frontier", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.frontier };
+        case "apex":
+            return { category: "Apex", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.apex };
     }
 };
 

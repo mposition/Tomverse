@@ -46,7 +46,6 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
-import { databaseErrorMetadata } from "@/lib/databaseError";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -170,26 +169,53 @@ export async function runMarketingTransaction<T>(
  * insert means before any vendor call exists at all (that is S2d2). Retrying
  * after an external effect would repeat the effect.
  *
- * Read through `databaseErrorMetadata()` rather than off `error.code`,
- * because a caller never sees SQLSTATE 40001 here: Prisma turns a serialization
- * conflict in an interactive transaction into `P2034` with a
- * `TransactionWriteConflict` driver cause, and the raw code survives only as
- * the cause's `originalCode`. A predicate that compared `error.code` to
- * "40001" was false for every conflict that actually happens, so the bounded
- * retry the plan requires would never have run once.
+ * Walked structurally, not read off one field. Two different shapes reach a
+ * caller for the same conflict:
+ *
+ * - from a model delegate call, a top-level `P2034` -- the adapter maps
+ *   40001 and 40P01 to `TransactionWriteConflict` and Prisma raises that code;
+ * - from a raw statement, **`P2010` "Raw query failed"**, with the conflict
+ *   only inside `meta.driverAdapterError.cause` (`kind:
+ *   "TransactionWriteConflict"`, `originalCode: "40001"`). There is no top-level
+ *   `P2034` and no `cause` on the error itself.
+ *
+ * An earlier version read `error.code` for `P2034` and `databaseErrorMetadata()`
+ * -- which reads `error.cause` -- for the rest, so it recognised the first shape
+ * and missed the second. Most of the autonomous insert's statements are raw (the
+ * locks, the `FOR SHARE`, the prior-use reads), so a serialization failure
+ * there was not retried: the transaction aborted and nothing wrong was written,
+ * but the bounded retry the plan requires did not happen. It was found by S2c's
+ * integration test racing two workers against a real PostgreSQL, where the loser
+ * received exactly that `P2010`.
+ *
+ * The walk is the one `isStatementTimeout` in lib/conversationSearchResults.ts
+ * already uses: through `cause`, `meta` and `driverAdapterError`.
  *
  * A deadlock (40P01) counts too, and for the same reason: it is the other way
  * two transactions taking the same locks can fail to both be true, nothing
  * was wrong with either, and neither has made an external call.
  */
 export const marketingSerializationFailure = (error: unknown): boolean => {
-  const metadata = databaseErrorMetadata(error);
-  return (
-    metadata.errorCode === "P2034" ||
-    metadata.driverKind === "TransactionWriteConflict" ||
-    metadata.driverCode === "40001" ||
-    metadata.driverCode === "40P01"
-  );
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (
+      record.code === "P2034" ||
+      record.kind === "TransactionWriteConflict" ||
+      record.code === "40001" ||
+      record.code === "40P01" ||
+      record.originalCode === "40001" ||
+      record.originalCode === "40P01"
+    ) {
+      return true;
+    }
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return false;
 };
 
 /** How many times a serialization failure may be retried before it is an answer. */
@@ -3227,7 +3253,7 @@ type LockedMarketingPost = {
   claimRegistryVersion: number;
   assetRegistryVersion: number;
   factSnapshot: Prisma.JsonValue;
-  factsDigest: string | null;
+  factsDigest: string;
 };
 
 async function lockMarketingPost(

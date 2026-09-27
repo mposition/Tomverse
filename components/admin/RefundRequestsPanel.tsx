@@ -173,9 +173,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
         approvalId?: string;
       } | null;
       if (!response.ok || !data?.refundRequest) {
-        // A 409 with an approvalId is the two-person policy working, not a
-        // failure -- reporting it as one makes the operator retry and queue a
-        // second request.
+        // A leftover approval id is a refusal. The action was not applied.
         const failure = describeAdminApiFailure({
           status: response.status,
           error: data?.error,

@@ -1,0 +1,302 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat-saved-undispatched-disposition-followup-v2",
+  "requirement": "종료된 chat-history-pagination-recovery-v1 exchange의 round 2 승인 verdict에 남은 대화 범위 notice 지적 두 건만 보완한다. Chat 전역 전송의 user Message가 durable 저장된 뒤 불완전한 history 때문에 provider dispatch 전 대화를 떠난 경우 prompt/admission/context를 보관하거나 자동 재전송하지 않고, 원래 identity와 conversation으로 돌아왔을 때만 saved-but-undispatched 안내를 표시한다. Review model-only 저장이 최신 run에 밀린 경우에도 같은 identity의 다른 conversation에는 안내를 노출하지 않고 원래 conversation에서만 표시한다. 기존 v1 exchange는 변경하지 않는다. 실제 provider 호출, 유료 실행, staging/production, flag 변경, push·merge·deploy는 범위 밖이다. author는 Codex, 독립 reviewer는 Cursor CLI다.",
+  "completionCriteria": [
+    "Chat 전역 prompt payload가 history failure 뒤 다른 conversation 선택으로 소멸하거나 durable Message commit 응답이 conversation/ticket 변경 뒤 늦게 도착해도, 답변 요청이 시작되지 않았다는 disposition을 identity와 originating conversation에만 결속한다. 다른 conversation에서는 toast를 표시하지 않고 원래 conversation 재선택 때 한 번 표시한다. same-conversation cleanup도 opaque disposition을 저장하되 exact durable payload가 mount된 responsive remount 동안만 소비를 보류하고, full unmount 또는 active-row 재선택으로 payload가 사라지면 한 번 소비한다. 최초 URL conversation handoff가 도달 성공, lock 취소, missing/unowned target 또는 fallback 선택으로 terminal된 뒤에는 frozen initial id가 이후 conversation의 disposition 소비를 막지 않으며 실제 in-flight handoff 동안만 transient conversation의 소비를 막는다. 새 conversation의 commit 응답은 기존 pending-adoption current 판정이 유지된다.",
+    "disposition에는 prompt text, attachment, admission token, context bundle 또는 provider 재실행 권한을 보관하지 않는다. conversation 전환 뒤 blind resend나 자동 provider POST를 만들지 않고 기존 savedQuestionNotSent의 reload 확인 문구를 사용한다.",
+    "Review model-only Message 저장이 최신 local run에 밀린 뒤 사용자가 같은 identity의 다른 conversation에 있어도 toast를 그 화면에 표시하지 않는다. Review 전역 composer의 durable commit도 모든 surface에서 캡처한 conversation과 committed selection ticket을 확인하므로 same-identity A→B→A 뒤 provider payload를 발행하지 않고 origin notice를 한 번 표시한다. 원래 conversation으로 돌아왔을 때만 한 번 표시하고, identity epoch가 바뀐 A→B 및 A→B→A의 늦은 durable callback은 같은 account key로 돌아왔더라도 notice 없이 폐기한다. callback authority는 active identity, namespace, submit-fence identity key 및 epoch를 모두 요구해 unresolved/loading 경계도 old identity를 승인하지 않는다. ChatPage가 완전히 unmount된 동안 identity가 바뀐 경우에도 sessionStorage owner marker가 mismatch disposition을 폐기하며 같은 identity remount만 복구한다. browser identity epoch는 layout commit에서만 채택하고 SSR에서는 module fence를 읽거나 쓰지 않는다.",
+    "desktop/mobile Chromium focused E2E가 유형별 계약을 검증한다. Chat/Review abandonment와 late global commit은 다른 conversation notice 0건, origin notice 1건, saved question provider POST 0건과 테스트가 확인하는 durable Message 1건을 검증한다. 같은 Chat의 full unmount와 active-row 재선택은 origin notice 1건·provider POST 0건을 검증하며, continuation New Chat은 loopback-only onBeforeModelSend barrier로 durable commit 이후 provider 전 경계를 고정해 재진입 notice 1건·provider POST 0건·durable Message 1건을 검증한다. Review와 continuation의 다중 panel은 첫 panel의 실제 provider POST 뒤 둘째 panel cleanup 순서를 고정해 provider POST 1건, savedQuestionNotSent notice 0건, persisted disposition 0건을 검증한다. lock 취소는 notice 0건, current conversation 불변 및 cleanup/remount 뒤 false notice 0건을 검증하고, locked initial URL 취소와 missing/unowned initial URL 뒤에는 다른 origin의 notice가 정상 소비됨을 검증한다. same-identity rapid conversation A→B→A는 origin notice 1건과 provider POST 0건을, identity A→B/A→B→A는 old identity notice 0건과 old prompt provider POST 0건을 검증한다. full-unmount A disposition→B mount→A mount는 old A notice와 provider POST 0건을 검증한다. async fixture는 고정 sleep 대신 response-settled 상태를 기다린다. bounded storage/identity unit, typecheck, 변경 범위 lint, production build 및 diff guard 결과를 정직하게 기록한다.",
+    "기존 chat-history-pagination-recovery-v1 exchange와 records는 on_hold(revisions_exhausted) 상태로 바이트 불변 보존하고 이 successor의 supersedes lineage가 그 exchange를 가리킨다.",
+    "새 package digest는 audit-only base bef622a565468fb9857639bc4ef24171c2c57a5f 이후 지정된 아홉 제품·테스트 파일과 이 task/authorization만 검토 변경으로 포함한다. 제품 source lineage는 그 base의 parent 93b18c8f37be46cbfce47658cc638e77aa008d63이며, audit-only base commit은 v1 authorization과 records만 추가한다. 이 successor의 생성 records 디렉터리만 동일한 exact out/diff-exclude로 제외하고 Cursor CLI verdict는 그 digest에 결속한다."
+  ],
+  "baseCommit": "bef622a565468fb9857639bc4ef24171c2c57a5f",
+  "roles": {
+    "author": "claude",
+    "reviewer": "codex"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:c145f16e08688042c97a12fdbd3b7743018101df031aef67bc32359a7ee8422b",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "components/chat/DesktopChatShell.tsx",
+        "components/chat/MobileChatShell.tsx",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/authorization.md",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/task.json",
+        "lib/chatIdentityEpoch.ts",
+        "lib/chatSavedQuestionDisposition.ts",
+        "tests/chatIdentityEpoch.test.mjs",
+        "tests/chatSavedQuestionDisposition.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 315.4766",
+          "durationMs": 410
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check bef622a565468fb9857639bc4ef24171c2c57a5f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 73
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 45916
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx components/chat/DesktopChatShell.tsx components/chat/MobileChatShell.tsx lib/chatIdentityEpoch.ts lib/chatSavedQuestionDisposition.ts tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs tests/e2e/chat-unified-workspace.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 10064
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "severity": "error",
+          "location": "app/(site)/(application)/chat/ChatPageClient.tsx:2523",
+          "basis": "evidence",
+          "claim": "A saved-but-undispatched notice stored for any conversation other than the server handoff id is never consumed, so returning to that originating conversation shows no toast.",
+          "evidence": "The consume effect returns early at ChatPageClient.tsx:2523 whenever the initialConversationId prop is set and currentChatId differs. That prop is the route handoff frozen on the server (app/(site)/(application)/chat/page.tsx:27-30, app/(site)/(application)/chat/workspace/page.tsx via ChatWorkspaceShell.tsx:18-27, components/chat/ReviewWorkspaceShell.tsx:307). Client selection only rewrites the query with history.replaceState (ChatPageClient.tsx:2552-2558) and does not update the prop. persistSavedQuestionNotSent (ChatPageClient.tsx:2329-2343) and promoteCurrentUndispatchedTurns (ChatPageClient.tsx:2346-2373) correctly write the opaque origin key, but consumeSavedQuestionNotSent (ChatPageClient.tsx:2484-2499) never runs for the origin. The focused E2E always abandons and returns to the same ?conversation= id the page opened with, so it never observes this.",
+          "reproduction": "Open /chat/workspace?conversation=<A> (or legacy /chat?conversation=<A>). Select B, submit a Chat message whose durable POST is held until after history load fails, then select C and return to B. Expected: one chat.savedQuestionNotSent toast on B, zero on C, and zero /api/chat posts for that prompt. Actual: sessionStorage key tomverse_saved_question_not_sent_dispositions_v1 still contains A-or-B's origin key after B is selected, and app-toast count for that copy stays 0.",
+          "minimalFix": "Suppress consume only while the URL handoff is still outstanding. Set a settled flag once currentChatId has equalled initialConversationId, or when initialConversationId is null, and do not return early after that flag is set.",
+          "disposition": "fix_requested"
+        },
+        {
+          "severity": "error",
+          "location": "app/(site)/(application)/chat/ChatPageClient.tsx:5058",
+          "basis": "evidence",
+          "claim": "On a non-chat surface a late global Message commit still treats a changed conversation as current, so a same-identity A→B→A cycle publishes the prompt and posts /api/chat instead of recording one origin notice.",
+          "evidence": "chatSendIsCurrent returns true for every mountedSurface other than chat as soon as the submit fence matches (ChatPageClient.tsx:5056-5058), before chatPreparedSendIsCurrent can compare conversation id or selection ticket (ChatPageClient.tsx:5060-5066). Legacy Review mounts ReviewWorkspaceShell with the default mountedSurface workspace (components/chat/ReviewWorkspaceShell.tsx:67-69; app/(site)/(application)/chat/page.tsx does not pass chat). The new branch at ChatPageClient.tsx:5367-5374 therefore stores a pending entry instead of persistSavedQuestionNotSent, and ChatPageClient.tsx:5460 does not return, so setPromptPayload at ChatPageClient.tsx:5569 still runs. Panels whose initialConversationId is again A then call handleSendPrompt. onProviderDispatchStarted (ChatPageClient.tsx:2451-2474) deletes the pending key, so the notice is also dropped. The new rapid A→B→A spec only drives the model-only input, which uses handleDurableUndispatchedAccepted and does not hit this predicate.",
+          "reproduction": "On /chat?conversation=<A> with Review's global composer, hold the Message response after commit (holdMessageSaveResponseAfterCommit). Select B, select A again, then release the response. Expected: zero /api/chat posts whose messages contain that prompt, and one saved-question toast on A. Actual: the held prompt is posted to /api/chat and the saved-question toast count is 0.",
+          "minimalFix": "Decide the undispatched branch by comparing the captured selection ticket and activeChatId with currentChatIdRef and conversationSelectionTicketRef on every surface. When they differ, persist only the opaque key and return before setPromptPayload. Keep chatPreparedSendIsCurrent's pending-adoption comparison for a new Chat whose current id is still the new origin.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Fix the handoff consume guard and the non-chat global current check, then re-review the same scenarios against this digest's successor."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:adda26cb486b36b41d99353ea95449193a946b4969519921be52efe5e53a33d0",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "components/chat/DesktopChatShell.tsx",
+        "components/chat/MobileChatShell.tsx",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/authorization.md",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/task.json",
+        "lib/chatIdentityEpoch.ts",
+        "lib/chatSavedQuestionDisposition.ts",
+        "tests/chatIdentityEpoch.test.mjs",
+        "tests/chatSavedQuestionDisposition.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 224.6394",
+          "durationMs": 310
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check bef622a565468fb9857639bc4ef24171c2c57a5f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 71
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 49411
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx components/chat/DesktopChatShell.tsx components/chat/MobileChatShell.tsx lib/chatIdentityEpoch.ts lib/chatSavedQuestionDisposition.ts tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs tests/e2e/chat-unified-workspace.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 10915
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "severity": "error",
+          "location": "app/(site)/(application)/chat/ChatPageClient.tsx:2429",
+          "basis": "evidence",
+          "claim": "A durably saved Chat turn that is still waiting on history is dropped when this page unmounts or the open row is clicked again, so returning to that conversation shows no saved-question notice and sends no provider request.",
+          "evidence": "After a durable save, runGlobalSubmit stores the turn in pendingDurableUndispatchedTurnsRef and setPromptPayload (ChatPageClient.tsx:5467-5474 and 5669). While history is unloaded, ChatApp.tsx:2461-2480 registers a conversation-left cleanup and does not call /api/chat. That cleanup reaches handleSavedQuestionNotSent. At ChatPageClient.tsx:2428-2444, when currentChatIdRef still equals the origin and the selection ticket is unchanged, the handler deletes the pending turn, removes any sessionStorage key, and returns without persistSavedQuestionNotSent or a toast. The comment at ChatApp.tsx:2466-2471 assumes that path is only a shell remount, which keeps promptPayload on this ChatPageClient. A full unmount destroys that state, and a re-click takes the same cleanup after setPromptPayload(null): commitConversationSelection returns false at ChatPageClient.tsx:3866-3868 without promoting, then ChatPageClient.tsx:3988-3990 still clears the payload. Sidebar rows call onSelectConversation even when aria-current is already set (ChatSidebar.tsx:2050 and 2075).",
+          "reproduction": "Run the fixture behind an undispatched saved Chat Message is reported only on its originating conversation through the visible history error and persistentChatPostCount 0, then stop before choosing another conversation. Path A: open Settings from the account menu (this unmounts ChatPageClient; the full-unmount spec already uses account-email-updates) and come back to the same conversation. Path B: click that conversation's already-active sidebar row, then retry history or leave and reselect it. Expected: one chat.savedQuestionNotSent toast and zero /api/chat posts for that prompt. Actual: sessionStorage key tomverse_saved_question_not_sent_dispositions_v1 has no origin entry, the toast count stays 0, and the provider post count stays 0 while the saved user Message remains.",
+          "minimalFix": "On conversation-left with the same id and ticket, still write the opaque sessionStorage key. Skip consume while that turn's promptPayload is still mounted and provider dispatch has not started, so a viewport remount keeps the existing zero-toast result. Consume once the payload is gone (full unmount, or the re-click that nulls it).",
+          "disposition": "fix_requested"
+        },
+        {
+          "severity": "error",
+          "location": "app/(site)/(application)/chat/ChatPageClient.tsx:3550",
+          "basis": "evidence",
+          "claim": "New Chat on a continuation, after the global payload is armed, deletes the origin disposition and toasts on the tree that is leaving, so the continuation shows no notice when opened again.",
+          "evidence": "handleNewChat increments the selection ticket at ChatPageClient.tsx:3537 and, when mountedSurface is continuation, calls router.push(LEGACY_REVIEW_PATH) and returns at ChatPageClient.tsx:3550-3554. It does not change currentChatIdRef, clear promptPayload, or call promoteCurrentUndispatchedTurns. Continuation mounts ReviewWorkspaceShell with mountedSurface continuation (app/(site)/(application)/continuations/[conversationId]/page.tsx:41-44), so the global payload is handled by the model-scope effect. Its cleanup at ChatApp.tsx:2573-2576 reports conversation-left before fetch if providerStarted is still false. handleSavedQuestionNotSent then takes the same-id branch at ChatPageClient.tsx:2429-2444: the ticket differs, so it removeSavedQuestionNotSentKey and showToast on this ChatPageClient. /continuations/[id] and /chat are different page trees, so that toast state and the removed key do not reach the later visit. The model-only callback is a different branch: handleDurableUndispatchedAccepted persists on ticket mismatch at ChatPageClient.tsx:2470-2474, and this finding is the armed global payload path.",
+          "reproduction": "On /continuations/<A>, submit with the global composer and hold the model-settings flush that onBeforeSend awaits, after the Message response has been committed and before /api/chat. Click New Chat, then release the flush and open continuation A again. Expected: zero /api/chat posts whose messages contain that prompt, and one saved-question toast on A. Actual: the leaving tree removes the disposition and shows the toast locally; the return to A has toast count 0 and provider post count 0, with the durable Message still stored.",
+          "minimalFix": "When the conversation id matches and the selection ticket does not, persist the opaque key and do not showToast or removeSavedQuestionNotSentKey. Before the continuation router.push, promote pending turns so an armed payload's cleanup cannot be the only record.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Persist same-id conversation-left dispositions across full unmount and continuation New Chat, and re-review those two returns against this digest's successor."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:5ad307d081c9c6746f18e526c2aefb8e61b1012009143df52baef066d7ae8980",
+      "commit": null,
+      "filesChanged": [
+        "app/(site)/(application)/chat/ChatPageClient.tsx",
+        "components/chat/ChatApp.tsx",
+        "components/chat/DesktopChatShell.tsx",
+        "components/chat/MobileChatShell.tsx",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/authorization.md",
+        "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/task.json",
+        "lib/chatIdentityEpoch.ts",
+        "lib/chatSavedQuestionDisposition.ts",
+        "tests/chatIdentityEpoch.test.mjs",
+        "tests/chatSavedQuestionDisposition.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts"
+      ],
+      "changeSummary": "Make provider-start monotonic across later sibling cleanup; add deterministic Review and continuation desktop/mobile regressions.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 338.5376",
+          "durationMs": 439
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git diff --check bef622a565468fb9857639bc4ef24171c2c57a5f",
+          "passed": true,
+          "detail": "",
+          "durationMs": 131
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 60165
+        },
+        {
+          "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx components/chat/DesktopChatShell.tsx components/chat/MobileChatShell.tsx lib/chatIdentityEpoch.ts lib/chatSavedQuestionDisposition.ts tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs tests/e2e/chat-unified-workspace.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 52933
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Record this approval against the reviewed digest; the two round-1 notice losses are now persisted and consumed once on the originating conversation."
+    }
+  ],
+  "changeDigest": "sha256:5ad307d081c9c6746f18e526c2aefb8e61b1012009143df52baef066d7ae8980",
+  "commit": null,
+  "changeSummary": "Make provider-start monotonic across later sibling cleanup; add deterministic Review and continuation desktop/mobile regressions.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 338.5376",
+      "durationMs": 439
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "git diff --check bef622a565468fb9857639bc4ef24171c2c57a5f",
+      "passed": true,
+      "detail": "",
+      "durationMs": 131
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 60165
+    },
+    {
+      "rule": "npm exec eslint -- 'app/(site)/(application)/chat/ChatPageClient.tsx' components/chat/ChatApp.tsx components/chat/DesktopChatShell.tsx components/chat/MobileChatShell.tsx lib/chatIdentityEpoch.ts lib/chatSavedQuestionDisposition.ts tests/chatIdentityEpoch.test.mjs tests/chatSavedQuestionDisposition.test.mjs tests/e2e/chat-unified-workspace.spec.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 52933
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Record this approval against the reviewed digest; the two round-1 notice losses are now persisted and consumed once on the originating conversation.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-24T10:31:43.916Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [
+    "chat-history-pagination-recovery-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "components/chat/ChatApp.tsx:2440 and :2477-2480, with app/(site)/(application)/chat/ChatPageClient.tsx:3623 and :5117",
+      "severity": "warning",
+      "basis": "judgement",
+      "claim": "On the global Chat path a durably saved Message whose dispatch is deferred by the new `!runtime.isLoaded` barrier is abandoned without any notice if the user leaves the conversation instead of pressing retry, because the panel's claim is released on cleanup (`claimed && !retainClaim`), the resumed microtask returns on `cancelled`, and a conversation switch clears `promptPayload` — the Chat path has no equivalent of the model-only path's `chat.savedQuestionNotSent` disposition.",
+      "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts, take the new test \"a committed Chat Message survives a history refresh started during its POST\" and, after `state.releaseHistoryPageFailure()` and `await expect(page.getByTestId(\"chat-history-load-error\")).toBeVisible()`, replace the `chat-history-load-retry` click with: click the sidebar item for SECOND_CONVERSATION, then click back to CONVERSATION. Observed: the saved user row \"Finish the accepted request after the remount.\" is returned by the history GET with no assistant answer, `await persistentChatPostCount(page)` stays 0, and no toast is dispatched; expected (per criterion 5's honesty contract for a saved-but-undispatched Message) either the continued dispatch or a reload-to-check notice."
+    },
+    {
+      "location": "components/chat/ChatApp.tsx:2546 (isChatRuntimeCompleteViewRecordCurrent gate) with lib/chatStreamRuntime.ts:335-337",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The round-1 identity leak is fixed (the record is deleted on identity release, so the generation lookup fails and the toast is suppressed), but the gate is record-lifetime only, so a model-only turn that loses to a newer local run can still raise `savedQuestionNotSent` while the user is looking at a different conversation of the same account.",
+      "reproduction": "Extend the new test \"a Review question saved behind a newer turn is not mislabeled as unsaved\": after `await expect.poll(state.messageSaveStarted).toBe(true)` and the newer global submit, click the sidebar item for SECOND_CONVERSATION before `state.releaseMessageSave()`; the toast \"Your question was saved, but no answer request was sent…\" appears on SECOND_CONVERSATION's screen, which names no conversation. Note this matches the project's existing convention — the adjacent `sendPreparationChanged` toast at ChatPageClient.tsx:4752 is likewise gated on identity, not conversation — so it is recorded rather than pressed."
+    },
+    {
+      "location": "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/authorization.md, \"Round 2 정본 Linux visual 증거\"",
+      "severity": "warning",
+      "basis": "evidence",
+      "claim": "The Loading-state golden requirement of criterion 6 is now recorded as an actual Linux comparison (9/9, no snapshot update) and the workflow's overall `failure` is disclosed rather than dressed up as green, but the accompanying claim that the other 54 chat-state-visual-regression failures pre-date this change is supported only by reasoning about intervening main commits, not by a run of the same workflow at the base commit; I could not verify run 35700992823 at all with the read-only tool set this review is limited to.",
+      "reproduction": "Run the same manually dispatchable `Nightly Visual Regression` workflow at base `ad2b51622992c29056706c443d80bdba928336e1` with `--retries=0` and no snapshot update, and compare its failing test set against run 35700992823's 54 failures; the diff under review does not touch chat-state-visual-regression.spec.ts, its snapshots, or the non-failed loading placeholder markup (ChatApp.tsx:2564-2570 keeps `data-testid=\"chat-panel-loading\"` and the original class string), so the two sets are expected to match."
+    }
+  ],
+  "headCommit": "bef622a565468fb9857639bc4ef24171c2c57a5f",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "components/chat/ChatApp.tsx",
+    "components/chat/DesktopChatShell.tsx",
+    "components/chat/MobileChatShell.tsx",
+    "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/authorization.md",
+    "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2/task.json",
+    "lib/chatIdentityEpoch.ts",
+    "lib/chatSavedQuestionDisposition.ts",
+    "tests/chatIdentityEpoch.test.mjs",
+    "tests/chatSavedQuestionDisposition.test.mjs",
+    "tests/e2e/chat-unified-workspace.spec.ts"
+  ]
+}

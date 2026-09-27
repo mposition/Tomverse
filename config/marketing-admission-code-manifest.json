@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "a7234eb6a20f4c0ccda846ab75c8ce4aa90279486eace50ad2689382ad78fdd0",
-  "totalSizeBytes": 436041,
+  "digest": "13e3151f4d4197e2ecad95b8e4aa16935e382cafc37d343cb3cf0477ea9b8ba8",
+  "totalSizeBytes": 431040,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -30,11 +30,6 @@
       "sha256": "ef33d641ecb0f1f45b668d61e4a5df91be4d3a22b39e28d2cadfd0145e6bc95f"
     },
     {
-      "path": "lib/databaseError.ts",
-      "sizeBytes": 3365,
-      "sha256": "5bb213f91ec92a738426a2add6a996fdb980708c8bd46b114443b4d7788efec0"
-    },
-    {
       "path": "lib/deploymentEnvironment.ts",
       "sizeBytes": 4353,
       "sha256": "322127ee5d1105ad532f4aa76523a99c282621c98249c500198d538e3f893d09"
@@ -46,8 +41,8 @@
     },
     {
       "path": "lib/marketingAutomationAccess.ts",
-      "sizeBytes": 31748,
-      "sha256": "0e27f232740be2ff4255c009f2dcad82c1ebb50a1f7ff0f4d79bf4e348ee1147"
+      "sizeBytes": 34733,
+      "sha256": "99e92e44548165f1f049e907f13d1ae30ccbf5ec1ec4ac6830faff13e2ea966e"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
@@ -106,13 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 158344,
-      "sha256": "dd22820e1bf3c21d1896c13495f7d12cfdc4190e7b1d925cf63e41e025dd802f"
-    },
-    {
-      "path": "lib/operationalMonitoringCore.ts",
-      "sizeBytes": 5758,
-      "sha256": "ce046b0f2cbd6e62657e27e879d327235cf77d427efdc2e473dd127ac1842c9c"
+      "sizeBytes": 159481,
+      "sha256": "6c8ed2c7cdfd0b75dd71286c8eaa42f41b1e4b9b74f83a5d450e592bf19e0012"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",

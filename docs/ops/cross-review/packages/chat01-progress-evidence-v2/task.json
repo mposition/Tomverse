@@ -1,0 +1,25 @@
+{
+  "taskId": "chat01-progress-evidence-v2",
+  "requirement": "chat01-progress-evidence-v1은 제품 receipt store를 confirmatory evidence와 사람 승인보다 앞에 두는 잘못된 수락 계약 때문에 on_hold(reviewer_blocked)로 종결됐다. 그 기록은 보존한다. 이 successor는 같은 source commit의 CHAT-01 진행 증거를 governing prompt-refiner-observability 정책 8절에 따라 검토한다. 이미 독립 검토·통합된 confirmatory v4 실행 계약과 content-free case evidence 기반에서 별도 승인된 bounded confirmatory를 실행하고 품질·비용·지연 결과를 사람이 disposition한 뒤에만 제품 request/execution·disposition receipt의 retention/privacy를 결정하고 product adapter와 server-owned content-free writer/store를 default-off로 구현한다. 그 제품 diff가 Cursor/CI를 통과한 뒤 suggestion UI와 disposition collection을 연결하고, 사용자 증거 뒤 Router/Auto shadow를 별도 실험으로 진행한다. 진행률 네 축은 planning-estimate-v2와 다른 readiness-estimate-v3이며 직접 비교하지 않는다.",
+  "completionCriteria": [
+    "v1의 on_hold(reviewer_blocked), 세 round verdict와 stale task-contract finding을 수정하거나 삭제하지 않고 supersedes lineage와 inherited finding으로 보존한다.",
+    "#1673 merge SHA, staging deployment ID·SUCCESS·완료 시각, desktop/mobile focused E2E 38/38과 signed-in reload 관측을 제공된 범위 이상으로 과장하지 않는다.",
+    "saved-but-undispatched interactive staging 재현을 safe seam 부재로 분류하고 pass/fail이나 provider 검증으로 바꾸지 않는다.",
+    "readiness-estimate-v3의 79%·65%·40%·95%는 planning-estimate-v2의 72%·30%·95%와 분모·방법이 달라 직접 비교하지 않으며 각 축의 불확실성과 launch 승인 아님을 명시한다.",
+    "confirmatory v4가 strict case evidence와 token·cost·latency receipt를 저장하고 content-free aggregate를 재구성한다는 완료 사실과 제품 receipt 공백을 구분한다.",
+    "권장 순서는 별도 승인 bounded v4 confirmatory와 deterministic gate, 사람 release disposition, 그 뒤 제품 receipt retention/privacy 결정, default-off product adapter와 content-free writer/store 구현, 그 제품 diff의 Cursor/CI, suggestion UI와 disposition collection, 마지막 Router/Auto shadow다.",
+    "제품 receipt writer/store와 disposition collection을 confirmatory evidence·사람 승인보다 앞당기지 않고 prompt-refiner-observability 정책 8절 4-6을 따른다.",
+    "Cursor verdict는 exact package digest에 결속하고 각 finding에 location, severity, evidence와 reproduction을 제공하며 source edit, provider API call, paid call, push, PR, merge 또는 deploy를 하지 않는다."
+  ],
+  "baseCommit": "90380a7bd5b1589531741dd02fb2c88c041cc1df",
+  "writableScope": [
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v2"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-progress-evidence-v1",
+    "exchange": "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/exchange.json"
+  }
+}
