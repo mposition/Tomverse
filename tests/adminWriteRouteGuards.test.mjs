@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ADMIN_API_DIR = fileURLToPath(new URL("../app/api/admin/", import.meta.url));
@@ -95,7 +95,19 @@ const routes = routeFiles(ADMIN_API_DIR).map((path) => {
   const source = withoutComments(readFileSync(path, "utf8"));
   const imported = importedSources(source);
   return {
-    name: path.slice(ADMIN_API_DIR.length),
+    /**
+     * Forward slashes on every platform.
+     *
+     * `join` separates with a backslash on Windows, and the exemption below
+     * matches a route by this name -- so a backslash quietly turned a
+     * recognised delegation into an unaudited write. The sweep failed on one
+     * platform and named a defect that was not in the tree, which is the
+     * expensive direction for a guard to be wrong in: the next reader has to
+     * rule out a missing audit row before they can dismiss it. A path is how
+     * the scan reaches a file; a name is what it asserts about, and the two
+     * should not share a shape the operating system chooses.
+     */
+    name: path.slice(ADMIN_API_DIR.length).split(sep).join("/"),
     source,
     /**
      * Whether the route, or a service it calls, performs `name`.
@@ -116,7 +128,24 @@ const writeRoutes = routes.filter((route) =>
   )
 );
 
-/** The proposal route delegates its one audit to the canonical internal transaction. */
+/**
+ * The proposal route delegates its one audit to the canonical internal
+ * transaction, which is why `writeAdminAuditLog` is absent from its own reach.
+ *
+ * The route is a proxy and holds no database handle. The proposal row and the
+ * entry recording it are written together by `createAmuxReviewProposal`, in one
+ * transaction behind `/api/internal/amux/review` -- the stronger shape, because
+ * a proposal that committed without its audit entry is then not reachable.
+ * Calling `writeAdminAuditLog` on this side as well would add a second row for
+ * one action, outside that transaction, and it would survive a proposal that
+ * rolled back. So this exempts the route from the call, never from the record.
+ *
+ * Narrow by construction: rather than trusting the name, it re-derives the
+ * whole path on every run -- the forwarded command's shape, the proxy's target
+ * URL, the internal route's proposal branch and its writer call, the audit
+ * action that writer names, and that the writer performs the call rather than
+ * mentioning it. Break any link and this route stops being exempt.
+ */
 const reachesCanonicalAmuxReviewAudit = (route) =>
   route.name === "amux/escalations/proposals/route.ts" &&
   /forwardAmuxAdminReviewCommand\s*\(\s*request,\s*\{\s*action:\s*"proposal"/.test(route.source) &&
