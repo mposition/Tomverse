@@ -78,6 +78,18 @@ const refuse = (status: number, code: string, message: string): never => {
   throw new PromptRefinerStageAdmissionError(status, code, message);
 };
 
+const promptRefinerShadowActivationFlags = () => {
+  const runApprovalEnabled =
+    process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED === "true";
+  const executionEnabled =
+    process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED === "true";
+  return Object.freeze({
+    runApprovalEnabled,
+    executionEnabled,
+    activationReady: runApprovalEnabled && executionEnabled,
+  });
+};
+
 const serverRuntimeIdentity = (): {
   environment: typeof PROMPT_REFINER_STAGE_ENVIRONMENT;
   commitSha: string;
@@ -464,6 +476,7 @@ const dbClock = async (tx: Prisma.TransactionClient): Promise<Date> => {
 
 export const promptRefinerStagePreview = async () => {
   const facts = await loadPromptRefinerStageAdmissionFacts();
+  const activation = promptRefinerShadowActivationFlags();
   const existing = await prisma.promptRefinerReservationStage.findUnique({
     where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
   });
@@ -485,6 +498,7 @@ export const promptRefinerStagePreview = async () => {
     approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
     previewBindingDigest,
     confirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
+    ...activation,
     executionAdmitted: false as const,
     productAdapterReady: false as const,
   };
@@ -501,6 +515,13 @@ export const createPromptRefinerReservationStage = async (input: {
   };
 }) => {
   if (!input.session.user?.id) refuse(403, "PROMPT_REFINER_STAGE_ACTOR_REQUIRED", "Administrator identity is required.");
+  if (!promptRefinerShadowActivationFlags().activationReady) {
+    refuse(
+      503,
+      "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
+      "Run approval and execution flags must be enabled before creating an immutable stage."
+    );
+  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     refuse(503, "PROMPT_REFINER_STAGE_AUDIT_KEY_REQUIRED", "Audit integrity signing is not configured.");
   }

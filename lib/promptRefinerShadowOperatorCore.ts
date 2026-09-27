@@ -34,8 +34,8 @@ export const PROMPT_REFINER_SHADOW_EXECUTION_PATH =
   "/api/admin/prompt-refiner/shadow-run/execute" as const;
 
 export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
-  stageId: "prompt-refiner-shadow-v2",
-  runId: "prompt-refiner-shadow-run-v4",
+  stageId: "prompt-refiner-shadow-v3",
+  runId: "prompt-refiner-shadow-run-v5",
   environment: "staging",
   provider: "openai",
   modelId: "gpt-5-6-luna",
@@ -53,11 +53,11 @@ export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
   tokenizerEncoding: "o200k_base",
   maxInputTokens: 100_000,
   stageConfirmation:
-    "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES",
+    "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES",
   runConfirmation:
-    "APPROVE PROMPT REFINER SHADOW RUN V4 FOR THE DISPLAYED COST CEILING",
+    "APPROVE PROMPT REFINER SHADOW RUN V5 FOR THE DISPLAYED COST CEILING",
   executionConfirmation:
-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V4 ONCE",
+    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V5 ONCE",
 });
 
 type UnknownRecord = Record<string, unknown>;
@@ -89,6 +89,9 @@ export type PromptRefinerStagePreview = Readonly<{
   approvalTtlMinutes: number;
   previewBindingDigest: string;
   confirmation: string;
+  runApprovalEnabled: boolean;
+  executionEnabled: boolean;
+  activationReady: boolean;
   executionAdmitted: false;
   productAdapterReady: false;
 }>;
@@ -324,6 +327,17 @@ export const promptRefinerStagePreviewProblems = (
     problems.push("approval_ttl");
   if (preview.confirmation !== contract.stageConfirmation)
     problems.push("confirmation");
+  const runApprovalEnabled = boolean(preview.runApprovalEnabled);
+  const executionEnabled = boolean(preview.executionEnabled);
+  const activationReady = boolean(preview.activationReady);
+  if (runApprovalEnabled === null) problems.push("run_approval_enabled");
+  if (executionEnabled === null) problems.push("execution_enabled");
+  if (
+    activationReady === null ||
+    activationReady !== (runApprovalEnabled === true && executionEnabled === true)
+  ) {
+    problems.push("activation_ready");
+  }
   if (preview.executionAdmitted !== false) problems.push("execution_admitted");
   if (preview.productAdapterReady !== false) problems.push("product_adapter");
   return problems;

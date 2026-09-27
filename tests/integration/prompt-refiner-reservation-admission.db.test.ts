@@ -34,6 +34,8 @@ import {
 process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
 process.env.RAILWAY_GIT_COMMIT_SHA = "b".repeat(40);
 process.env.RAILWAY_DEPLOYMENT_ID = "prompt-refiner-admission-db-test";
+process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
+process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
 const AUDIT_FIXTURE_KEY = "prompt-refiner-reservation-strong-fixture-key";
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_FIXTURE_KEY;
 
@@ -121,9 +123,34 @@ before(async () => {
 
 beforeEach(async () => {
   process.env.RAILWAY_DEPLOYMENT_ID = "prompt-refiner-admission-db-test";
+  process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
+  process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_FIXTURE_KEY;
   delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
   await reset();
+});
+
+test("immutable stage creation requires exact true for both downstream flags before any audit write", async () => {
+  for (const [flag, value] of [
+    ["PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED", "false"],
+    ["PROMPT_REFINER_SHADOW_EXECUTION_ENABLED", "false"],
+    ["PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED", "TRUE"],
+    ["PROMPT_REFINER_SHADOW_EXECUTION_ENABLED", "TRUE"],
+  ] as const) {
+    process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
+    process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
+    process.env[flag] = value;
+    await assert.rejects(
+      create(),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
+      `${flag}=${value}`
+    );
+    assert.equal(await prisma.promptRefinerReservationStage.count(), 0, `${flag}=${value}`);
+    assert.equal(await prisma.adminAuditLog.count(), 0, `${flag}=${value}`);
+  }
 });
 
 test("migration has no seed and the writer atomically binds provenance to one audit", async () => {
