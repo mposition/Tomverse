@@ -344,6 +344,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. The last two are written out separately rather than as one statement with the column interpolated, because a runtime column name is what this rule exists to refuse. None interpolates a table name and every write is a delegate call.",
   },
   {
+    path: "lib/amux/intakeRegistration.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The unclear-commit read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxIntakeDraft and AmuxIntakeApproval only. This file never writes AdminAuditLog.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
