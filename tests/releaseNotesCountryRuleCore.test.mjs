@@ -24,7 +24,7 @@ import {
  * moved. Recorded, not computed: see the profile digest in
  * tests/emailJurisdictionSeed.test.mjs for why.
  */
-const SEEDED_RULE_DIGEST = "4e4a0ba5c37344b4";
+const SEEDED_RULE_DIGEST = "471ac4504bfde4e6";
 
 const ruleFor = (countryCode) => {
   const seed = releaseNotesCountryRuleSeed().find((row) => row.countryCode === countryCode);
@@ -89,7 +89,8 @@ test("no seeded rule has moved without a version bump", () => {
           row.ruleVersion,
           row.basis,
           row.status,
-          row.conditions,
+          row.releaseConditions,
+          row.activationGates,
         ])
       )
     )
@@ -101,6 +102,58 @@ test("no seeded rule has moved without a version bump", () => {
     "The seeded country rules changed. Bump the rule's ruleVersion (the table refuses " +
       "one version naming two contents), bump JURISDICTION_POLICY_SEED_VERSION, and " +
       `record the new digest here as "${digest}".`
+  );
+});
+
+test("Australia's conditions are the contract's column and approval C's gates, apart", () => {
+  // The field said it was section 5.1.1's third column and held approval C's
+  // prerequisites instead, which are a different question: one is what would
+  // release the country, the other is what must exist before the approved
+  // basis may be acted on at all.
+  const au = releaseNotesCountryRuleSeed().find((row) => row.countryCode === "AU");
+  assert.deepEqual(au.releaseConditions, [
+    "relationship_start_event",
+    "relationship_kept_alive",
+    "relationship_end_event",
+    "dormant_and_free_accounts",
+    "related_content_scope",
+    "immediate_switch_on_end",
+  ]);
+  assert.deepEqual(au.activationGates, [
+    "relationship_model_built",
+    "policy_amendment_e_in_force",
+  ]);
+
+  // Only the basis a gate holds back carries one.
+  for (const rule of releaseNotesCountryRuleSeed()) {
+    assert.equal(
+      rule.activationGates.length > 0,
+      rule.basis === "inferred_consent",
+      rule.countryCode
+    );
+  }
+});
+
+test("an express consent with no evidence is a caller error, not a refusal", () => {
+  // `legalAllowed: true` with nothing to cite is the shape of a consent nobody
+  // can prove, and the ledger's contract is that a verdict names the rows it
+  // rested on. Loud rather than silent: a caller that has the consent and
+  // forgot its ids would otherwise read an ordinary refusal.
+  const empty = { express: true, evidenceIds: [] };
+  assert.throws(
+    () => recipientAuthority({ country: "KR", rule: ruleFor("KR"), consent: empty }),
+    /must name the ConsentRecord ids/
+  );
+  assert.throws(() => auSenderAuthority({ consent: empty }), /must name the ConsentRecord ids/);
+  assert.throws(
+    () => releaseNotesAuthorityVerdict({ countries: ["KR"], rules: [ruleFor("KR")], consent: empty }),
+    /must name the ConsentRecord ids/
+  );
+
+  // And evidence without a consent is the same kind of mistake.
+  assert.throws(
+    () => auSenderAuthority({ consent: { express: false, evidenceIds: ["cr_1"] } }),
+    /not given/
   );
 });
 
@@ -196,6 +249,31 @@ test("one express consent satisfying both sides is recorded as shared", () => {
   const us = releaseNotesAuthorityVerdict({ countries: ["US"], rules: [ruleFor("US")], consent });
   assert.equal(us.legalAllowed, true);
   assert.equal(us.sharedBasis, null);
+});
+
+test("a basis is shared only when every recipient authority rested on it", () => {
+  // US is opt_out and KR is express_consent, so with a consent both allow and
+  // the send is legal -- but no single basis carried both sides. Reading it as
+  // "some candidate shared it" put that claim in the audit record.
+  const mixed = releaseNotesAuthorityVerdict({
+    countries: ["US", "KR"],
+    rules: [ruleFor("US"), ruleFor("KR")],
+    consent,
+  });
+  assert.equal(mixed.legalAllowed, true);
+  assert.equal(mixed.sharedBasis, null);
+  assert.deepEqual(mixed.ruleVersions, [
+    { ruleKey: "release_notes.KR", ruleVersion: 1 },
+    { ruleKey: "release_notes.US", ruleVersion: 1 },
+  ]);
+
+  // Two express-consent countries: one consent did satisfy every authority.
+  const both = releaseNotesAuthorityVerdict({
+    countries: ["KR", "DE"],
+    rules: [ruleFor("KR"), ruleFor("DE")],
+    consent,
+  });
+  assert.equal(both.sharedBasis, "express_consent");
 });
 
 test("every candidate country must pass, not just one", () => {

@@ -1,20 +1,54 @@
--- The recipient authority for release-notes marketing: one rule per country
--- per policy version.
+-- The recipient authority for release-notes marketing: what a rule version
+-- says, and which countries of which policy version carry it.
 --
 -- Contract: docs/policy/email-notifications.md section 5.1.1 (the canonical
 -- starting values) and the redesign draft's sections 4.1-4.3, 7.6 and 7.8 as
 -- that section pins them.
 --
--- Nothing here sends anything or changes an existing row. One new table; no
+-- Nothing here sends anything or changes an existing row. Two new tables; no
 -- row is written by this migration. Rules reach the database when an operator
 -- creates the next policy draft (lib/emailJurisdictionPolicy.ts) and are read
 -- by nothing that sends until S9's verdict does -- the live gate stays
 -- MARKETING_ALLOWED_COUNTRY_CODES and the consent gate until then.
 --
--- One transaction, for the reason the ledger migration gives: a table with
--- half its triggers looks enforced and is not.
+-- ## Why two tables
+--
+-- An obligation waiver names a rule by key and version
+-- (`EmailSendApproval.ruleKey`/`ruleVersion`, section 7.8), so that pair has to
+-- name one content or a waiver applies to a rule nobody approved it for.
+--
+-- The first version kept the content on each country row and held the rule with
+-- a trigger that looked for a row of the same pair disagreeing with it. A
+-- review found the hole: the check excluded the row being written, so where a
+-- pair had only one row -- the ordinary case -- an UPDATE could change its
+-- basis, status or conditions under the same version number and there was
+-- nothing to disagree with. The rule was only enforced once somebody had
+-- already written a second copy of it.
+--
+-- So the content moved to a row of its own, keyed by the pair, whose content
+-- columns no UPDATE may touch. There is nothing left to compare, and a waiver's
+-- scope has a row to point at.
+--
+-- One transaction, for the reason the ledger migration gives: a table with half
+-- its triggers looks enforced and is not.
 
 BEGIN;
+
+CREATE TABLE "ReleaseNotesRuleVersion" (
+    "ruleKey" TEXT NOT NULL,
+    "ruleVersion" INTEGER NOT NULL,
+    "countryCode" TEXT NOT NULL,
+    "basis" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "releaseConditions" JSONB NOT NULL DEFAULT '[]',
+    "activationGates" JSONB NOT NULL DEFAULT '[]',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ReleaseNotesRuleVersion_pkey" PRIMARY KEY ("ruleKey", "ruleVersion")
+);
+
+CREATE INDEX "ReleaseNotesRuleVersion_countryCode_idx"
+    ON "ReleaseNotesRuleVersion"("countryCode");
 
 CREATE TABLE "ReleaseNotesCountryRule" (
     "id" TEXT NOT NULL,
@@ -22,9 +56,6 @@ CREATE TABLE "ReleaseNotesCountryRule" (
     "countryCode" TEXT NOT NULL,
     "ruleKey" TEXT NOT NULL,
     "ruleVersion" INTEGER NOT NULL,
-    "basis" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
-    "conditions" JSONB NOT NULL DEFAULT '[]',
     "notes" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -42,59 +73,112 @@ ALTER TABLE "ReleaseNotesCountryRule"
     FOREIGN KEY ("policyVersionId") REFERENCES "EmailPolicyVersion"("id")
     ON DELETE CASCADE ON UPDATE CASCADE;
 
--- What the recipient side rests on (lib/releaseNotesCountryRuleCore.ts
--- RELEASE_NOTES_RULE_BASES).
-ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_basis_check"
-    CHECK ("basis" IN ('opt_out', 'express_consent', 'inferred_consent'));
-
--- The allowlist (draft section 4.1): a country is open to marketing or not.
-ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_status_check"
-    CHECK ("status" IN ('open', 'closed'));
+-- Restrict, not cascade: a rule version some policy version applies is not
+-- deletable, because the verdicts decided under it named that pair.
+ALTER TABLE "ReleaseNotesCountryRule"
+    ADD CONSTRAINT "ReleaseNotesCountryRule_rule_fkey"
+    FOREIGN KEY ("ruleKey", "ruleVersion")
+    REFERENCES "ReleaseNotesRuleVersion"("ruleKey", "ruleVersion")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- ZZ is reached by absence. A ZZ row would read as a finding about some
 -- country rather than the lack of one.
-ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_countryCode_check"
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_countryCode_check"
     CHECK ("countryCode" ~ '^[A-Z]{2}$' AND "countryCode" <> 'ZZ');
 
--- The key is derived, so it is checked rather than trusted. An obligation
--- waiver is scoped by (ruleKey, ruleVersion, country); a key that named a
--- different country from its own row would let a waiver for one country
--- apply to another.
+-- The key is derived, so it is checked rather than trusted. A waiver is scoped
+-- by (ruleKey, ruleVersion, country); a key naming a different country from its
+-- own row would let a waiver for one country apply to another.
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_ruleKey_check"
+    CHECK ("ruleKey" = 'release_notes.' || "countryCode");
+
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_ruleVersion_check"
+    CHECK ("ruleVersion" >= 1);
+
+-- What the recipient side rests on (lib/releaseNotesCountryRuleCore.ts
+-- RELEASE_NOTES_RULE_BASES).
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_basis_check"
+    CHECK ("basis" IN ('opt_out', 'express_consent', 'inferred_consent'));
+
+-- The allowlist (draft section 4.1): a country is open to marketing or not.
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_status_check"
+    CHECK ("status" IN ('open', 'closed'));
+
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_shape_check"
+    CHECK (
+        jsonb_typeof("releaseConditions") = 'array'
+        AND jsonb_typeof("activationGates") = 'array'
+    );
+
+-- A gate is why a verdict may refuse a basis the contract approved. Only the
+-- basis that has one may carry one, or a rule would be held back for a reason
+-- no code reads.
+ALTER TABLE "ReleaseNotesRuleVersion" ADD CONSTRAINT "ReleaseNotesRuleVersion_gates_check"
+    CHECK (
+        ("basis" = 'inferred_consent' AND jsonb_array_length("activationGates") > 0)
+        OR ("basis" <> 'inferred_consent' AND jsonb_array_length("activationGates") = 0)
+    );
+
+ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_notes_check"
+    CHECK (length(btrim("notes")) > 0);
+
+-- The country is on both rows, and the foreign key does not compare them: a
+-- rule row could otherwise say Korea while applying the Australian rule, and
+-- the unique index is per country, so both would sit there. The rule's own key
+-- names its country, so comparing against that is enough.
 ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_ruleKey_check"
     CHECK ("ruleKey" = 'release_notes.' || "countryCode");
 
-ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_ruleVersion_check"
-    CHECK ("ruleVersion" >= 1);
-
-ALTER TABLE "ReleaseNotesCountryRule" ADD CONSTRAINT "ReleaseNotesCountryRule_shape_check"
-    CHECK (jsonb_typeof("conditions") = 'array' AND length(btrim("notes")) > 0);
-
--- Two rules the triggers enforce, because neither is a property of one row.
+-- ## What the triggers hold
 --
--- 1. **Only a draft's rules can be written.** An active or superseded version
---    is what some verdict was decided under, and editing its rules in place
---    would rewrite what was true at send time. A delete is allowed when the
---    version row itself is already gone -- the cascade from deleting a draft
---    arrives after its parent -- and refused while the version exists and is
---    not a draft.
+-- 1. **A rule version's content never changes.** It is what a waiver was
+--    approved against and what a verdict recorded; a new content is a new
+--    version number. Deleting one is refused too while any policy version
+--    applies it -- the foreign key does that -- and allowed otherwise, because
+--    a draft that was thrown away should not leave a rule nobody uses.
 --
--- 2. **One (ruleKey, ruleVersion) is one content.** A waiver approval names a
---    rule by that pair (EmailSendApproval_scope_check). If two policy versions
---    carried the same pair with different bases or statuses, the waiver would
---    apply to a rule nobody approved it for. So a row may reuse a pair only
---    with the same basis, status and conditions; anything else is a new
---    version number. `notes` is prose and may differ. The advisory lock keys
---    on the pair so two drafts written at once cannot both be the first.
+-- 2. **Only a draft's country rules can be written.** An active or superseded
+--    version is what some verdict was decided under, and editing its rules in
+--    place would rewrite what was true at send time. A delete is allowed when
+--    the version row itself is already gone -- the cascade from deleting a
+--    draft arrives after its parent -- and refused while the version exists and
+--    is not a draft.
+
+CREATE FUNCTION "release_notes_rule_version_immutable"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF NEW."ruleKey" IS DISTINCT FROM OLD."ruleKey"
+       OR NEW."ruleVersion" IS DISTINCT FROM OLD."ruleVersion"
+       OR NEW."countryCode" IS DISTINCT FROM OLD."countryCode"
+       OR NEW."basis" IS DISTINCT FROM OLD."basis"
+       OR NEW."status" IS DISTINCT FROM OLD."status"
+       OR NEW."releaseConditions" IS DISTINCT FROM OLD."releaseConditions"
+       OR NEW."activationGates" IS DISTINCT FROM OLD."activationGates"
+    THEN
+        RAISE EXCEPTION '% version % already names a rule; a different content is a new version.',
+            OLD."ruleKey", OLD."ruleVersion"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "release_notes_rule_version_immutable"
+    BEFORE UPDATE ON "ReleaseNotesRuleVersion"
+    FOR EACH ROW EXECUTE FUNCTION "release_notes_rule_version_immutable"();
 
 -- Table names are qualified with the trigger's own schema, as the ledger's
--- triggers do, so the function works in whichever schema the table lives in
--- and never resolves a name through a caller's search_path.
+-- triggers do, so the function works in whichever schema the table lives in and
+-- never resolves a name through a caller's search_path.
 --
--- The parent is read FOR SHARE. Activation updates that row, so a rule
--- written while a draft is being activated either waits for the activation
--- and then sees the new status, or holds the activation back until the rule
--- is committed into what was still a draft. Neither order leaves a rule
--- added to an active version.
+-- The parent is read FOR SHARE. Activation updates that row, so a rule written
+-- while a draft is being activated either waits for the activation and then
+-- sees the new status, or holds the activation back until the rule is committed
+-- into what was still a draft. Neither order leaves a rule added to an active
+-- version.
 CREATE FUNCTION "release_notes_country_rule_guard"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -102,16 +186,15 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     version_status TEXT;
-    clash_id TEXT;
 BEGIN
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
         EXECUTE pg_catalog.format(
             'SELECT v."status" FROM %I."EmailPolicyVersion" v WHERE v."id" = $1 FOR SHARE',
             TG_TABLE_SCHEMA
         ) INTO version_status USING OLD."policyVersionId";
-        -- NULL means the version row is gone: this is the cascade from
-        -- deleting it, which arrives after the parent. Whether a version may
-        -- be deleted is the version's question, not this table's.
+        -- NULL means the version row is gone: this is the cascade from deleting
+        -- it, which arrives after the parent. Whether a version may be deleted
+        -- is the version's question, not this table's.
         IF version_status IS NOT NULL AND version_status <> 'draft' THEN
             RAISE EXCEPTION 'ReleaseNotesCountryRule % belongs to a % policy version and cannot be changed (%).',
                 OLD."id", version_status, TG_OP
@@ -131,24 +214,6 @@ BEGIN
     IF version_status IS NOT NULL AND version_status <> 'draft' THEN
         RAISE EXCEPTION 'ReleaseNotesCountryRule rows can only be written to a draft policy version (this one is %).',
             version_status
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    PERFORM pg_catalog.pg_advisory_xact_lock(
-        pg_catalog.hashtextextended(NEW."ruleKey" || ':' || NEW."ruleVersion"::text, 0)
-    );
-
-    EXECUTE pg_catalog.format(
-        'SELECT r."id" FROM %I."ReleaseNotesCountryRule" r
-          WHERE r."ruleKey" = $1 AND r."ruleVersion" = $2 AND r."id" <> $3
-            AND (r."basis" <> $4 OR r."status" <> $5 OR r."conditions" <> $6)
-          LIMIT 1',
-        TG_TABLE_SCHEMA
-    ) INTO clash_id
-      USING NEW."ruleKey", NEW."ruleVersion", NEW."id", NEW."basis", NEW."status", NEW."conditions";
-    IF clash_id IS NOT NULL THEN
-        RAISE EXCEPTION '% version % already names a different rule (row %); use a new rule version.',
-            NEW."ruleKey", NEW."ruleVersion", clash_id
             USING ERRCODE = 'check_violation';
     END IF;
 

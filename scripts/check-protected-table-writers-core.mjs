@@ -538,9 +538,9 @@ export const RAW_SQL_ALLOWLIST = [
 export const RUNTIME_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20260923400000_release_notes_country_rule/migration.sql",
-    count: 3,
+    count: 2,
     reason:
-      "The rule guard trigger reads its policy version (FOR SHARE, twice: old row and new) and its own table for a clashing (ruleKey, ruleVersion) with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. It reads and never writes.",
+      "The country-rule guard trigger reads its policy version FOR SHARE twice -- the old row's and the new row's -- with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. It reads and never writes. A third use read this table for a clashing rule version until the content moved to a row whose columns cannot change, which needs no comparison at all.",
   },
   {
     path: "prisma/migrations/20260921170000_email_permission_ledger/migration.sql",

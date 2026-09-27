@@ -4545,15 +4545,48 @@ model JurisdictionProfile {
   @@index([policyVersionId])
 }
 
-/// The recipient authority for release-notes marketing, one row per country per
-/// policy version. Contract: docs/policy/email-notifications.md section 5.1.1;
-/// draft sections 4.1-4.3.
+/// What one (ruleKey, ruleVersion) says, once, for every policy version that
+/// carries it. Contract: docs/policy/email-notifications.md section 5.1.1;
+/// draft sections 4.1-4.3 and 7.8.
 ///
-/// `status` is the marketing allowlist (section 4.1): open or closed. `basis`
-/// is what the recipient side rests on. Rows are written only while their
-/// policy version is a draft, and one (ruleKey, ruleVersion) names one content
-/// in every version that carries it -- both enforced by trigger in the
-/// migration, because an obligation waiver is scoped to that pair.
+/// An obligation waiver is scoped to a rule key and version
+/// (`EmailSendApproval.ruleKey`/`ruleVersion`), so that pair has to name one
+/// content or the waiver applies to a rule nobody approved it for. Holding the
+/// content here rather than on each country row makes that structural: there is
+/// one row to say it, its content columns never change, and the version number
+/// is what moves.
+///
+/// `status` is the marketing allowlist (draft section 4.1): open or closed.
+/// `basis` is what the recipient side rests on. `releaseConditions` is section
+/// 5.1.1's third column; `activationGates` is what must exist before the basis
+/// may be acted on, which today is only approval C's condition on Australia.
+model ReleaseNotesRuleVersion {
+  ruleKey     String
+  ruleVersion Int
+
+  countryCode String
+
+  basis             String
+  status            String
+  releaseConditions Json   @default("[]")
+  activationGates   Json   @default("[]")
+
+  createdAt DateTime @default(now())
+
+  countryRules ReleaseNotesCountryRule[]
+
+  @@id([ruleKey, ruleVersion])
+  @@index([countryCode])
+}
+
+/// Which rule version a policy version applies to a country. Contract:
+/// docs/policy/email-notifications.md section 5.1.1.
+///
+/// The content is the rule version's (above); this row says which one this
+/// policy version carries, and keeps the prose that belongs to this version's
+/// own review. Rows are written only while their policy version is a draft,
+/// enforced by trigger, because an active version is what some verdict was
+/// decided under.
 model ReleaseNotesCountryRule {
   id String @id @default(cuid())
 
@@ -4563,11 +4596,9 @@ model ReleaseNotesCountryRule {
   countryCode String
   ruleKey     String
   ruleVersion Int
+  rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict)
 
-  basis      String
-  status     String
-  conditions Json   @default("[]")
-  notes      String
+  notes String
 
   createdAt DateTime @default(now())
 
