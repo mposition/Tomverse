@@ -19,6 +19,7 @@ import {
   marketingPublisherDeadlineProblem,
   marketingPublisherRequestSchema,
 } from "@/lib/marketingPublisherRunCore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 
 // The marketing publisher's app route (S2 plan, S2d1).
@@ -129,12 +130,48 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (closed.status !== "succeeded") {
+      // The work finished, and the database would not call the run a success --
+      // its clock says the deadline had passed. A 200 here would leave Railway
+      // marking the execution green while the row says failed, so the one
+      // record contradicts the other and neither is obviously wrong.
+      await reportOperationalIncident({
+        code: "MARKETING_PUBLISHER_RUN_LATE",
+        title: "Marketing publisher run closed after its deadline",
+        severity: "warning",
+        cooldownMs: 30 * 60 * 1_000,
+        context: { component: "marketing-publisher", runId },
+      }).catch(() => undefined);
+      return NextResponse.json(
+        { runId, status: closed.status, code: "run_closed_late" },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ runId, status: closed.status, skipped });
   } catch (error) {
+    // Recorded before anything else, and not conditional on the close
+    // succeeding. If the database is the thing that broke, the close fails too,
+    // and swallowing both left a generic 500 with the cause written down
+    // nowhere -- not in the row, not in the log, not in the worker's output.
+    await reportOperationalIncident({
+      code: "MARKETING_PUBLISHER_RUN_FAILED",
+      title: "Marketing publisher run failed",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-publisher", runId },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing publisher incident could not be reported:", reportError);
+    });
     await finishMarketingPublisherRun(prisma, runId, {
       status: "failed",
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-    }).catch(() => undefined);
+    }).catch((closeError: unknown) => {
+      console.error(
+        `Marketing publisher run ${runId} could not be closed after failing:`,
+        closeError,
+      );
+    });
     return NextResponse.json(
       { runId, status: "failed", code: "run_failed" },
       { status: 500 },

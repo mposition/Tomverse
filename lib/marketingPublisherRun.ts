@@ -245,10 +245,16 @@ export async function finishMarketingPublisherRun(
 
 /** Why a bounded transaction refused to run or to continue. */
 export class MarketingPublisherTransactionRefusedError extends Error {
-  readonly code: "server_too_old" | "statement_budget_exhausted";
+  readonly code:
+    | "server_too_old"
+    | "statement_budget_exhausted"
+    | "transaction_timeout_already_armed";
 
   constructor(
-    code: "server_too_old" | "statement_budget_exhausted",
+    code:
+      | "server_too_old"
+      | "statement_budget_exhausted"
+      | "transaction_timeout_already_armed",
     message: string,
   ) {
     super(message);
@@ -289,6 +295,34 @@ export async function runBoundedMarketingTransaction<T>(
         throw new MarketingPublisherTransactionRefusedError(
           "server_too_old",
           `PostgreSQL ${num} has no transaction_timeout, so the publisher's per-transaction bound cannot be enforced`,
+        );
+      }
+
+      // **A timer that is already running is not one this function set.**
+      //
+      // PostgreSQL 17's `assign_transaction_timeout` starts a timer only when
+      // one is *not already active* -- which is the same sentence foundation
+      // r13 quotes. So if the role, database or session default already gave
+      // this connection a `transaction_timeout`, the timer started at `BEGIN`
+      // with that value, and setting the GUC here changes what
+      // `current_setting` reports without rescheduling anything. The bound in
+      // force would be somebody else's, and the 115 seconds this function
+      // promises would be a number in a variable.
+      //
+      // Whether any such default exists is a fact about the deployment, not
+      // about this repository -- the same kind of fact as the server version --
+      // so it is read rather than assumed, and a non-zero answer is a refusal.
+      // Refusing is right even when the pre-existing bound is *shorter*: this
+      // function's contract is a stated bound, and one it cannot state is not
+      // one it can keep.
+      const existing = await tx.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+        SELECT current_setting('transaction_timeout') AS "value"
+      `);
+      const already = String(existing[0]?.value ?? "").trim();
+      if (already !== "0" && already !== "0ms") {
+        throw new MarketingPublisherTransactionRefusedError(
+          "transaction_timeout_already_armed",
+          `This connection opened with transaction_timeout=${already}, so a timer is already running and cannot be rescheduled to this transaction's bound`,
         );
       }
 
@@ -344,10 +378,18 @@ export async function runBoundedMarketingTransaction<T>(
  *
  * What it counts is what the plan names: statements *in application code*.
  * One Prisma call can send more than one SQL statement -- an `include` is a
- * second query -- and work that reaches for the module-level client instead of
- * the `tx` it was given is outside this transaction entirely. Neither is
- * something a proxy can see, which is exactly why the derived maximum is an
- * application figure and `transaction_timeout` is the bound that holds.
+ * second query -- so twelve is a count of calls rather than of SQL, which is
+ * why the plan calls the derived maximum an application figure and names
+ * `transaction_timeout` as the bound that actually holds.
+ *
+ * Work that reaches for the module-level client instead of the `tx` it was
+ * given is a different matter, and not a caveat to this count: it is on
+ * another connection, where none of the three timeouts apply and whose writes
+ * can commit after this transaction rolls back or after the run's deadline has
+ * passed and the run has been recorded failed. A proxy cannot see it, because
+ * it does not go through the proxy. It is refused in source instead, by
+ * `tests/marketingPublisherBoundedCallers.test.mjs`, before the first caller
+ * is written.
  */
 const countingTransaction = (tx: Prisma.TransactionClient): Prisma.TransactionClient => {
   let issued = 0;

@@ -104,11 +104,18 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
         return null;
       },
     );
+    // `alerts` counts what was actually reported, which now includes the
+    // publisher's own incident. Reporting one and returning zero made the
+    // number disagree with the thing it counts -- and the row and the API
+    // response are where an operator looks to see whether the monitor did
+    // anything.
+    const publisherAlerts = silentPublisherRuns === null || silentPublisherRuns === 0 ? 0 : 1;
+    const alerts = plan.incidents.length + publisherAlerts;
     await completeScheduledJob({
       runId: run?.id,
       processedCount: plan.decisions.length,
       result: {
-        alerts: plan.incidents.length,
+        alerts,
         advisories: plan.advisories.length,
         suppressedAdvisories: plan.advisories,
         statuses: plan.statuses,
@@ -117,7 +124,7 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     });
     return {
       checked: true,
-      alerts: plan.incidents.length,
+      alerts,
       advisories: plan.advisories.length,
     };
   } catch (error) {

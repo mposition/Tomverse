@@ -36,7 +36,7 @@ const statementValues = (query: unknown): readonly unknown[] =>
   (query as { values?: readonly unknown[] }).values ?? [];
 
 /** A client whose transaction records every statement and every option. */
-const fakeClient = (serverVersionNum: number) => {
+const fakeClient = (serverVersionNum: number, existingTransactionTimeout = "0") => {
   const seen = {
     settings: [] as { name: string; value: string }[],
     options: null as Record<string, unknown> | null,
@@ -46,6 +46,9 @@ const fakeClient = (serverVersionNum: number) => {
     async $queryRaw(query: unknown) {
       const sql = statementText(query);
       if (sql.includes("server_version_num")) return [{ num: serverVersionNum }];
+      if (sql.includes("current_setting('transaction_timeout')")) {
+        return [{ value: existingTransactionTimeout }];
+      }
       if (sql.includes("set_config")) {
         const values = statementValues(query);
         const name = /set_config\(\s*'([a-z_]+)'/.exec(sql)?.[1] ?? "?";
@@ -304,4 +307,60 @@ test("a start the database says is already past its deadline is an answer", asyn
     }),
     { started: false, reason: "deadline_passed_at_database" },
   );
+});
+
+test("a transaction timeout already running is refused, not overwritten", async () => {
+  // PostgreSQL 17 starts a transaction timer only when one is not already
+  // active, so `set_config` on a connection that opened with a role- or
+  // database-level `transaction_timeout` changes what `current_setting`
+  // reports and reschedules nothing. The bound in force would be somebody
+  // else's while this function claimed 115 seconds -- a bound it cannot state
+  // is not one it can keep, so it refuses, including when the existing one is
+  // shorter.
+  for (const existing of ["30s", "200000", "5min"]) {
+    const { client, seen } = fakeClient(170002, existing);
+    let ran = false;
+    await assert.rejects(
+      runBoundedMarketingTransaction(client, async () => {
+        ran = true;
+        return "done";
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof MarketingPublisherTransactionRefusedError);
+        assert.equal(error.code, "transaction_timeout_already_armed");
+        assert.match(error.message, new RegExp(existing));
+        return true;
+      },
+    );
+    assert.equal(ran, false);
+    // Refused before any of the three were touched: a partially applied set is
+    // the state this refusal exists to avoid.
+    assert.deepEqual(seen.settings, []);
+  }
+});
+
+test("an unreadable transaction_timeout is refused too", async () => {
+  // A probe that answers nothing is "I do not know whether a timer is
+  // running", which is not "no timer is running".
+  const { client } = fakeClient(170002, "");
+  await assert.rejects(
+    runBoundedMarketingTransaction(client, async () => "done"),
+    (error: unknown) =>
+      error instanceof MarketingPublisherTransactionRefusedError &&
+      error.code === "transaction_timeout_already_armed",
+  );
+});
+
+test("a transaction_timeout of zero is the ordinary case and proceeds", async () => {
+  // Both spellings PostgreSQL uses for "off": `current_setting` returns "0"
+  // for the default, and a session that set it to zero explicitly can read
+  // back "0ms".
+  for (const off of ["0", "0ms"]) {
+    const { client, seen } = fakeClient(170002, off);
+    assert.equal(await runBoundedMarketingTransaction(client, async () => "done"), "done");
+    assert.deepEqual(
+      seen.settings.map((setting) => setting.name),
+      ["transaction_timeout", "statement_timeout", "idle_in_transaction_session_timeout"],
+    );
+  }
 });

@@ -2751,7 +2751,7 @@ test("a deadline cannot be moved, removed, or started already past", async () =>
   for (const deadlineAt of [minutesFromNow(60), null]) {
     await assert.rejects(
       prisma.scheduledJobRun.update({ where: { id: runId }, data: { deadlineAt } }),
-      /deadline cannot change/,
+      /deadline belongs to the insert/,
     );
   }
   await assert.rejects(
@@ -2765,6 +2765,83 @@ test("a deadline cannot be moved, removed, or started already past", async () =>
     }),
     /cannot start after its own deadline/,
   );
+});
+
+test("a deadline cannot be added to a row that does not have one", async () => {
+  // The hole the first version of this trigger left, and the widest one there
+  // is. The immutability check only fired when the row *already* had a
+  // deadline, so a closed row without one could be given a deadline in the
+  // past: its status and `completedAt` did not move, so the closed-row branch
+  // returned happily, and the result was a `succeeded` run that finished after
+  // its deadline -- the single row this trigger exists to make impossible.
+  //
+  // Any other scheduled job's row will do, because every one of them is
+  // written without a deadline. That is the point: rows outside this slice are
+  // not exempt from the rule, they are simply never given a deadline.
+  const runId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: runId,
+      jobKey: "infrastructure_threshold_monitor",
+      status: "succeeded",
+      completedAt: new Date(),
+    },
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60 * 60_000) },
+    }),
+    /deadline belongs to the insert/,
+  );
+  // Still a success with no deadline, which is what it was.
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.equal(row.deadlineAt, null);
+  // A future deadline is refused for the same reason: the rule is about where
+  // a deadline may come from, not about whether this particular one would have
+  // been violated.
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: minutesFromNow(60) },
+    }),
+    /deadline belongs to the insert/,
+  );
+  // And a still-running row without one is refused too, so the rule does not
+  // depend on the row being closed.
+  const openId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: openId, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: openId },
+      data: { deadlineAt: minutesFromNow(4) },
+    }),
+    /deadline belongs to the insert/,
+  );
+});
+
+test("an ordinary scheduled job row is still writable end to end", async () => {
+  // The rule above refuses *adding* a deadline, and must not refuse the
+  // updates every other job already makes. A trigger that broke
+  // `completeScheduledJob` for the whole repository would be a far larger
+  // defect than the one it fixed.
+  const runId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: runId, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await prisma.scheduledJobRun.update({
+    where: { id: runId },
+    data: { status: "succeeded", completedAt: new Date(), processedCount: 3 },
+  });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.equal(row.processedCount, 3);
+  // Its completion time is its own: the trigger returns before touching a row
+  // with no deadline, so the process clock still stamps these.
+  assert.ok(row.completedAt instanceof Date);
 });
 
 test("a closed run stays closed", async () => {

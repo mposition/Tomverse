@@ -45,13 +45,20 @@ DECLARE
 BEGIN
     database_now := (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
 
-    -- A deadline, once set, is not moved or removed. Checked before the early
-    -- return below, because clearing it would otherwise be the way out of every
-    -- rule after it.
+    -- A deadline belongs to the insert that opened the run, and no update may
+    -- add, move or remove one. Checked before the early return below, because
+    -- clearing it would otherwise be the way out of every rule after it.
+    --
+    -- The first version of this only refused a change when the row already had
+    -- a deadline, which left the invariant open by the widest door there is: a
+    -- `succeeded` row with no deadline could be *given* one in the past, and
+    -- because its status and completion time did not move, the closed-row
+    -- branch below waved it through. The result was a succeeded run whose
+    -- `completedAt` is after its `deadlineAt` -- exactly the row this trigger
+    -- exists to make impossible.
     IF TG_OP = 'UPDATE'
-        AND OLD."deadlineAt" IS NOT NULL
         AND NEW."deadlineAt" IS DISTINCT FROM OLD."deadlineAt" THEN
-        RAISE EXCEPTION 'ScheduledJobRun % deadline cannot change once set', OLD."id"
+        RAISE EXCEPTION 'ScheduledJobRun % deadline belongs to the insert that opened it', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
 

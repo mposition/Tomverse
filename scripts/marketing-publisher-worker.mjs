@@ -62,6 +62,12 @@ try {
   } else if (!response.ok) {
     console.error(`Marketing publisher run ${runId} failed:`, response.status, result);
     process.exitCode = 1;
+  } else if (result && result.status && result.status !== "succeeded") {
+    // A 2xx says the request was handled; it does not say the run succeeded.
+    // Exiting zero on a run the database recorded as failed would leave
+    // Railway's green execution contradicting the row.
+    console.error(`Marketing publisher run ${runId} did not succeed:`, result);
+    process.exitCode = 1;
   } else {
     console.log(`Marketing publisher run ${runId}:`, result);
   }
