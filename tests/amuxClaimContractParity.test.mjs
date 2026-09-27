@@ -86,17 +86,25 @@ test("claim scoring versions and supported scheduler-score bounds match both run
   const rustVersion = schedulerSource.match(
     /const SCORING_VERSION: &str = "([^"]+)";/,
   )?.[1];
-  const contractVersions = [
-    ...contractSource.matchAll(/scoring_version: z\.literal\("([^"]+)"\)/g),
-  ].map((match) => match[1]);
-  const wireVersion = rustSource.match(
-    /decision: ClaimDecision\s*\{[^}]*?scoring_version: "([^"]+)"/s,
-  )?.[1];
   assert.ok(rustVersion);
-  assert.deepEqual(contractVersions, ["amux-worker-router-v1", rustVersion]);
-  assert.equal(wireVersion, rustVersion);
+  for (const version of [
+    "amux-worker-router-v1",
+    "amux-worker-router-v2",
+    "amux-global-priority-v1",
+    rustVersion,
+  ]) {
+    assert.match(contractSource, new RegExp(`"${version}"`));
+  }
+  assert.match(schedulerSource, /let worker_router_version = if server_v2 \{/);
+  assert.match(schedulerSource, /"amux-worker-router-v2"/);
+  assert.match(rustSource, /scoring_version: scoring_version\.to_owned\(\)/);
+  assert.match(
+    schedulerSource,
+    /score\.total\(\),\s*scoring_version,\s*signals/s,
+  );
 
-  const schedulerMaximum = 10_000 + 1_000_000 + 40 + 40 + 5_000_000 + 8;
+  const schedulerMaximum =
+    10_000 + 1_000_000 + 40 + 40 + 5_000_000 + 8 + 240 + 20 + 80;
   const declaredMaximum = Number(
     contractSource
       .match(/AMUX_MAX_SCHEDULER_SCORE = ([0-9_]+);/)?.[1]
@@ -141,7 +149,10 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
   const threeTransactions = ["claimRouteClock", "routingSnapshot", "claim"];
   const plannedDbCallBudgetMs = threeTransactions.reduce(
     (sum, profile) =>
-      sum + profileCallCeiling(profile) * perCallPlanningFactor + reserve + maxWait,
+      sum +
+      profileCallCeiling(profile) * perCallPlanningFactor +
+      reserve +
+      maxWait,
     0,
   );
 
@@ -173,40 +184,59 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
         ?.replaceAll("_", ""),
     );
   const routeMs = value("AMUX_LIFECYCLE_ROUTE_BUDGET_MS");
-  const connectMs = Number(
-    rustSource.match(
-      /TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
-    )?.[1],
-  ) * 1_000;
-  const clientMs = Number(
-    rustSource.match(
-      /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
-    )?.[1],
-  ) * 1_000;
+  const connectMs =
+    Number(
+      rustSource.match(
+        /TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
+      )?.[1],
+    ) * 1_000;
+  const clientMs =
+    Number(
+      rustSource.match(
+        /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
+      )?.[1],
+    ) * 1_000;
   assert.ok(clientMs >= routeMs + connectMs + 1_000);
 
   const endpoints = [
-    ["workers/register", "workerRegister", "worker_register"],
-    ["workers/heartbeat", "workerHeartbeat", "worker_heartbeat"],
-    ["delivery/pull", "deliveryPull", "delivery_pull"],
-    ["delivery/ack", "deliveryAck", "delivery_ack"],
-    ["execution/start", "executionStart", "execution_start"],
-    ["execution/heartbeat", "executionHeartbeat", "execution_heartbeat"],
-    ["execution/settle", "executionSettle", "execution_settle"],
+    ["workers/register", ["workerRegister"], "worker_register"],
+    ["workers/heartbeat", ["workerHeartbeat"], "worker_heartbeat"],
+    ["delivery/pull", ["deliveryPull"], "delivery_pull"],
+    ["delivery/ack", ["deliveryAck"], "delivery_ack"],
+    ["execution/start", ["executionStart"], "execution_start"],
+    ["execution/heartbeat", ["executionHeartbeat"], "execution_heartbeat"],
+    ["execution/settle", ["executionSettle"], "execution_settle"],
+    [
+      "execution/recover",
+      [
+        "quotaObservationSweep",
+        "executionRecoveryRead",
+        "executionRecoveryWrite",
+        "ownershipRecoveryRead",
+        "ownershipRecoveryWrite",
+      ],
+      "execution_recover",
+    ],
   ];
-  for (const [route, boundary, method] of endpoints) {
-    const ceiling = Number(
-      dbBoundarySource.match(
-        new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
-      )?.[1],
-    );
-    assert.ok(Number.isInteger(ceiling), boundary);
-    const plannedBudget = ceiling *
-      (value("AMUX_DB_STATEMENT_TIMEOUT_MS") +
-        value("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
-      value("AMUX_DB_COMMIT_RESERVE_MS") +
-      value("AMUX_DB_MAX_WAIT_MS");
-    assert.ok(plannedBudget <= routeMs, `${route} planned DB-call budget exceeds route budget`);
+  for (const [route, boundaries, method] of endpoints) {
+    for (const boundary of boundaries) {
+      const ceiling = Number(
+        dbBoundarySource.match(
+          new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
+        )?.[1],
+      );
+      assert.ok(Number.isInteger(ceiling), boundary);
+      const plannedBudget =
+        ceiling *
+          (value("AMUX_DB_STATEMENT_TIMEOUT_MS") +
+            value("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
+        value("AMUX_DB_COMMIT_RESERVE_MS") +
+        value("AMUX_DB_MAX_WAIT_MS");
+      assert.ok(
+        plannedBudget <= routeMs,
+        `${route}/${boundary} planned DB-call budget exceeds route budget`,
+      );
+    }
     const routeSource = readFileSync(
       join(process.cwd(), "app", "api", "internal", "amux", route, "route.ts"),
       "utf8",
@@ -227,16 +257,18 @@ test("selection reads reserve connect and response time beyond both route budget
         .match(new RegExp(`export const ${name} = ([0-9_]+);`))?.[1]
         ?.replaceAll("_", ""),
     );
-  const connectMs = Number(
-    rustSource.match(
-      /TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
-    )?.[1],
-  ) * 1_000;
-  const clientMs = Number(
-    rustSource.match(
-      /TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
-    )?.[1],
-  ) * 1_000;
+  const connectMs =
+    Number(
+      rustSource.match(
+        /TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
+      )?.[1],
+    ) * 1_000;
+  const clientMs =
+    Number(
+      rustSource.match(
+        /TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/,
+      )?.[1],
+    ) * 1_000;
   assert.match(
     rustSource,
     /api\.selection_read_timeout = TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT;/,
@@ -252,22 +284,30 @@ test("selection reads reserve connect and response time beyond both route budget
     );
     const routeMs = Number(
       [...routeSource.matchAll(/^\s*\}, ([0-9_]+)\);\s*$/gm)]
-        .at(-1)?.[1]?.replaceAll("_", ""),
+        .at(-1)?.[1]
+        ?.replaceAll("_", ""),
     );
     const ceiling = Number(
       dbBoundarySource.match(
         new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
       )?.[1],
     );
-    const plannedBudget = ceiling *
-      (dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
-        dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
+    const plannedBudget =
+      ceiling *
+        (dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
+          dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
       dbNumber("AMUX_DB_COMMIT_RESERVE_MS") +
       dbNumber("AMUX_DB_MAX_WAIT_MS");
     assert.ok(Number.isInteger(ceiling), boundary);
     assert.ok(Number.isInteger(routeMs), route);
-    assert.ok(plannedBudget <= routeMs, `${route} planned DB-call budget exceeds route budget`);
-    assert.ok(clientMs >= routeMs + connectMs + 1_000, `${route} client deadline is too short`);
+    assert.ok(
+      plannedBudget <= routeMs,
+      `${route} planned DB-call budget exceeds route budget`,
+    );
+    assert.ok(
+      clientMs >= routeMs + connectMs + 1_000,
+      `${route} client deadline is too short`,
+    );
     const start = rustSource.indexOf(`pub async fn ${method}(`);
     assert.ok(start >= 0, method);
     const next = rustSource.indexOf("\n    pub async fn ", start + 1);
@@ -305,15 +345,34 @@ test("the Prisma-call limit is not presented as an SQL statement-count guarantee
   );
   assert.doesNotMatch(dbBoundarySource, /statementCeiling/);
   assert.match(dbBoundarySource, /prismaCallCeiling/);
-  assert.match(dbBoundarySource, /A single Prisma call can emit more than one SQL statement/);
+  assert.match(
+    dbBoundarySource,
+    /A single Prisma call can emit more than one SQL statement/,
+  );
   assert.doesNotMatch(dbBoundarySource, /set_config\(\s*'transaction_timeout'/);
-  assert.match(readinessSource, /현재 코드는 `transaction_timeout`을 설정하지 않으므로/);
-  assert.match(readinessSource, /PostgreSQL 17에서는 transaction\s+내부에서 설정한 순간부터/);
+  assert.match(
+    readinessSource,
+    /현재 코드는 `transaction_timeout`을 설정하지 않으므로/,
+  );
+  assert.match(
+    readinessSource,
+    /PostgreSQL 17에서는 transaction\s+내부에서 설정한 순간부터/,
+  );
   assert.match(readinessSource, /PostgreSQL 16에는/);
-  assert.match(readinessSource, /늦은 실행이 성공으로 기록되지 않음을 DB가 강제/);
-  assert.match(readinessSource, /수 상한이나 전체 transaction 시간 상한 자체도 필수 조건이 아니다/);
-  assert.match(dbBoundarySource, /executionHeartbeat: \{[\s\S]*?prismaCallCeiling: 10/);
-  const heartbeat = executionSource.split("export async function heartbeatAmuxExecution")[1]
+  assert.match(
+    readinessSource,
+    /늦은 실행이 성공으로 기록되지 않음을 DB가 강제/,
+  );
+  assert.match(
+    readinessSource,
+    /수 상한이나 전체 transaction 시간 상한 자체도 필수 조건이 아니다/,
+  );
+  assert.match(
+    dbBoundarySource,
+    /executionHeartbeat: \{[\s\S]*?prismaCallCeiling: 10/,
+  );
+  const heartbeat = executionSource
+    .split("export async function heartbeatAmuxExecution")[1]
     ?.split("export async function settleAmuxExecution")[0];
   assert.ok(heartbeat);
   assert.match(heartbeat, /action: "amux\.execution\.lease_renewed"/);
@@ -326,11 +385,21 @@ test("routing response byte ceilings match and overflow refuses complete output"
     "utf8",
   );
   const routeSource = readFileSync(
-    join(process.cwd(), "app", "api", "internal", "amux", "routing-snapshot", "route.ts"),
+    join(
+      process.cwd(),
+      "app",
+      "api",
+      "internal",
+      "amux",
+      "routing-snapshot",
+      "route.ts",
+    ),
     "utf8",
   );
   const serverKiB = Number(
-    serverSource.match(/AMUX_INTERNAL_RESPONSE_MAX_BYTES = (\d+) \* 1_024/)?.[1],
+    serverSource.match(
+      /AMUX_INTERNAL_RESPONSE_MAX_BYTES = (\d+) \* 1_024/,
+    )?.[1],
   );
   const rustKiB = Number(
     rustSource.match(/MAX_ROUTING_RESPONSE_BYTES: usize = (\d+) \* 1024/)?.[1],
@@ -342,11 +411,23 @@ test("routing response byte ceilings match and overflow refuses complete output"
 
 test("unknown future-lifecycle outcomes stop the whole runtime run", () => {
   const runtimeSource = readFileSync(
-    join(process.cwd(), "apps", "tomverse-orchestrator", "src", "runtime_service.rs"),
+    join(
+      process.cwd(),
+      "apps",
+      "tomverse-orchestrator",
+      "src",
+      "runtime_service.rs",
+    ),
     "utf8",
   );
   const boardSource = readFileSync(
-    join(process.cwd(), "apps", "tomverse-orchestrator", "src", "board_driver.rs"),
+    join(
+      process.cwd(),
+      "apps",
+      "tomverse-orchestrator",
+      "src",
+      "board_driver.rs",
+    ),
     "utf8",
   );
   assert.match(

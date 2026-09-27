@@ -84,6 +84,9 @@ type PromptPayload = {
   text: string;
   chatId: string;
   userMessageId: string;
+  messageWasDurablySaved: boolean;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
@@ -329,6 +332,29 @@ type DesktopChatShellProps = {
   }) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
+  onSavedQuestionNotSent: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => void;
+  onDurableUndispatchedAccepted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number
+  ) => boolean;
+  onProviderDispatchStarted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => void;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
@@ -452,6 +478,11 @@ export function DesktopChatShell({
   onWebSearchSuggestionDismiss,
   onSubmit,
   onBeforeModelSend,
+  conversationSelectionTicket,
+  identityEpoch,
+  onSavedQuestionNotSent,
+  onDurableUndispatchedAccepted,
+  onProviderDispatchStarted,
   onChangePanelModel,
   onTogglePanelDisable,
   onRemoveModel,
@@ -1212,6 +1243,11 @@ export function DesktopChatShell({
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
+                  conversationSelectionTicket={conversationSelectionTicket}
+                  identityEpoch={identityEpoch}
+                  onSavedQuestionNotSent={onSavedQuestionNotSent}
+                  onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
+                  onProviderDispatchStarted={onProviderDispatchStarted}
                   onResponseComplete={onResponseComplete}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}

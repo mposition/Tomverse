@@ -2251,6 +2251,7 @@ model AdminAuditLog {
   createdAt    DateTime @default(now())
 
   promptRefinerReservationStage PromptRefinerReservationStage?
+  amuxReviewDecision            AmuxReviewDecision?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -3973,6 +3974,28 @@ model RoutingRun {
   /// genuinely had none; an invented default would claim they ran under a
   /// policy that had not been decided.
   selectionPolicyVersion String?
+
+  /// The control-plane manifest and the account policy, read once when the
+  /// request started. A promotion during the request is a
+  /// different policy and is not written back here.
+  ///
+  /// Both null, or both set. Null is not the policy that is active now, and
+  /// there is no workspace in this product: the ADR's workspace policy is
+  /// this account's policy. Dark: the request path does not write them yet.
+  controlPlaneVersion  String?
+  accountPolicyVersion String?
+
+  /// How long this request may run, in milliseconds, captured when it
+  /// started. ADR v2.1 appendix R3. Null means nobody supplied one. It is
+  /// not zero and it is not a default this schema chose. Dark: the request
+  /// path does not write it.
+  requestDeadlineMs Int?
+
+  /// How long the first chunk may be withheld, in milliseconds, before it
+  /// is flushed. ADR v2.1 pre-commit buffer. Null means nobody supplied one. It is not
+  /// zero and it is not a duration this schema chose. Dark: the request
+  /// path does not write it.
+  precommitBufferMs Int?
 
   /// The task profile, as labels and booleans.
   profileKind             String
@@ -5881,6 +5904,18 @@ model ModelDeployment {
   /// digest computed from it. As a free string the same instant spelled two
   /// ways digested differently and this column kept only one of them.
   qualityGateExpiresAt   DateTime?
+  /// How tightly this placement is pinned to modelVersion / modelRevision.
+  /// `strong` never drifts. `weak` and `alias_only` may move only when
+  /// allowVersionDrift is also true. The default is `strong`, so a row that
+  /// predates the column cannot drift.
+  versionPinStrength      String    @default("strong")
+  allowVersionDrift       Boolean   @default(false)
+  /// The benchmark a pass was measured against. Null until a gate is run.
+  /// Changing it changes what the pass means, so an enabled row cannot.
+  qualityBenchmarkVersion String?
+  /// When that benchmark was last run. A re-check of the same benchmark may
+  /// update this while the deployment stays enabled.
+  qualityLastVerifiedAt   DateTime?
   /// Capability declarations, as the candidate filter would read them.
   capabilities           Json?
   enabled                Boolean   @default(false)
@@ -5921,9 +5956,36 @@ model ModelDeployment {
   routingAttempts                RoutingAttempt[]
   availabilityObservations       AvailabilityObservation[]
   routingIdentityManifestEntries RoutingIdentityManifestEntry[]
+  priceSnapshots                 DeploymentPriceSnapshot[]
 
   @@unique([providerEndpointId, upstreamDeploymentName])
   @@index([logicalModelId, enabled])
+}
+
+/// A ceiling on the published routing snapshot, approved by a named person.
+///
+/// Dark. Section 8.5 controls size when the configuration is approved rather
+/// than by discarding evidence when a turn runs, and T4 scopes it to the
+/// published snapshot only -- the staging registry may grow.
+///
+/// A row of its own, cited by a manifest, so the ceiling exists before and
+/// independently of what is being published. Append-only by trigger: an
+/// approval edited afterwards could not answer what the limit was when a
+/// manifest was published under it.
+///
+/// No User relation. Deleting the approver's account must not rewrite what
+/// they approved -- the reasoning EndpointResidencyApproval records.
+model RoutingSnapshotCeilingApproval {
+  id          String   @id @default(cuid())
+  ceiling     Int
+  approvedBy  String
+  approvedAt  DateTime
+  evidenceRef String?
+  createdAt   DateTime @default(now())
+
+  manifests RoutingIdentityManifest[]
+
+  @@index([approvedAt])
 }
 
 /// One published snapshot of the routing identity configuration.
@@ -5953,21 +6015,37 @@ model ModelDeployment {
 /// lib/routingIdentityManifest.ts, so changing what a manifest commits to is
 /// a change to that file rather than a silent effect of adding a column.
 model RoutingIdentityManifest {
-  id         String   @id @default(cuid())
-  version    Int
+  id                String @id @default(cuid())
+  version           Int
   /// sha256, lowercase hex. The database checks the shape; that it describes
   /// the deployments it was computed over is checked where they are visible.
-  digest     String
-  entryCount Int
-  approvedBy String
-  approvedAt DateTime
-  createdAt  DateTime @default(now())
+  digest            String
+  entryCount        Int
+  /// The approved ceiling this manifest is published under, by id, and a
+  /// copy of its value.
+  ///
+  /// A separate approval rather than a number supplied with the entries: a
+  /// limit the publisher picks to fit is not the ceiling section 8.5 means.
+  /// The copy is kept because a later reader asks what the limit was then,
+  /// and a trigger refuses a copy that does not match the approval, or an
+  /// approval dated after the publication.
+  ///
+  /// No default. A ceiling is an approval, and an absent approval is not an
+  /// unlimited one.
+  ceilingApprovalId String
+  approvedCeiling   Int
+
+  ceilingApproval RoutingSnapshotCeilingApproval @relation(fields: [ceilingApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy      String
+  approvedAt      DateTime
+  createdAt       DateTime                       @default(now())
 
   attempts RoutingAttempt[]
   entries  RoutingIdentityManifestEntry[]
 
   @@unique([version])
   @@index([approvedAt])
+  @@index([ceilingApprovalId])
 }
 
 /// What one published manifest held about one deployment.
@@ -5990,6 +6068,11 @@ model RoutingIdentityManifest {
 model RoutingIdentityManifestEntry {
   id         String @id @default(cuid())
   manifestId String
+  /// This entry's place in its manifest: unique within the manifest and below
+  /// its `entryCount`, so the entries cannot outnumber the count the
+  /// approved ceiling bounds. A trigger in
+  /// 20260923340000_routing_manifest_ceiling_dark enforces the upper bound.
+  slot       Int
 
   /// The placement, as it stood.
   modelDeploymentId      String
@@ -6006,6 +6089,10 @@ model RoutingIdentityManifestEntry {
   capabilities           String
   qualityGateStatus      String
   qualityGateExpiresAt   DateTime?
+  versionPinStrength      String
+  allowVersionDrift       Boolean
+  qualityBenchmarkVersion String?
+  qualityLastVerifiedAt   DateTime?
   deploymentEnabled      Boolean
 
   /// The endpoint it was served from, as it stood.
@@ -6034,6 +6121,7 @@ model RoutingIdentityManifestEntry {
   // Prisma cannot express.
 
   @@unique([manifestId, modelDeploymentId])
+  @@unique([manifestId, slot])
   @@index([modelDeploymentId])
 }
 
@@ -6064,6 +6152,13 @@ model DeploymentCacheAffinity {
   modelDeploymentId String
   lastServedAt      DateTime
   servedTurns       Int      @default(1)
+  /// How many times capacity displaced this placement. Null means no
+  /// displacement has been recorded, which is not epoch zero. Appendix R1.
+  /// Dark with the rest of this table.
+  affinityEpoch     Int?
+  /// The instant a displacement is allowed again. Null means no window was
+  /// supplied. It is not a duration this schema chose.
+  holdDownUntil     DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -6181,6 +6276,10 @@ model CredentialBinding {
   /// come before that, not after.
   providerBudgetAccountId String?
   status                  String   @default("disabled")
+  /// When the referenced secret was last rotated. Null means not recorded.
+  lastRotatedAt           DateTime?
+  /// When the referenced secret expires. Null is not an invented lifetime.
+  expiresAt               DateTime?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -6313,9 +6412,10 @@ model QuotaCapacityState {
 /// One availability observation, written once and never rewritten.
 ///
 /// Dark. The canonical record the deployment, endpoint and provider rollups
-/// are derived from -- one event in, three summaries out, all of them
-/// idempotent on `eventId` so a projection that failed half way can be run
-/// again without double-counting.
+/// are derived from. `eventId` stops the same observation being inserted
+/// twice. Which grain has already applied it is
+/// `AvailabilityRollupApplication`, not this row. Nothing writes either
+/// table yet.
 ///
 /// Today the same fact is written twice in two shapes: real traffic increments
 /// `ProviderHealthState` and a probe inserts a `ProviderProbeResult`, with no
@@ -6362,6 +6462,106 @@ model AvailabilityObservation {
   @@index([providerEndpointId, observedAt])
   @@index([modelDeploymentId, observedAt])
   @@index([source, observedAt])
+
+  rollupApplications AvailabilityRollupApplication[]
+}
+
+/// One grain of one observation, applied at most once.
+///
+/// Dark. The observation row stops a second insert of the same event. It does
+/// not say whether the deployment rollup, the endpoint rollup, and the
+/// provider rollup have each been updated. This row is that record. Re-running
+/// a projection is safe only when it refuses a triple already stored here.
+/// Nothing writes it yet.
+model AvailabilityRollupApplication {
+  id        String   @id @default(cuid())
+  /// The observation's event id, not its row id.
+  eventId   String
+  /// deployment | endpoint | provider. The same list as the observation grains.
+  grain     String
+  /// The deployment id, endpoint id, or provider name this grain names.
+  targetId  String
+  appliedAt DateTime @default(now())
+
+  observation AvailabilityObservation @relation(fields: [eventId], references: [eventId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([eventId, grain, targetId])
+}
+
+/// A deployment-grain price observation.
+///
+/// Dark. This is not `ChatCreditReservation.pricingSnapshot`, and nothing
+/// inserts a row. `amount` is one named rate of `currency` per million
+/// tokens. Unknown knowledge has no amount. A stated estimate or a
+/// verified price names its amount, currency, source and effective time,
+/// and the amount must fit DECIMAL(20,8) without rounding. The two applied
+/// flags cannot be true: using the row for routing or for a credit charge
+/// is a separate approval.
+model DeploymentPriceSnapshot {
+  id                 String    @id @default(cuid())
+  modelDeploymentId  String
+  /// Copied at record time. The deployment row can be renamed later.
+  logicalModelId     String
+  /// unknown | estimate | verified
+  knowledge          String
+  /// input | output | cache_read | cache_write
+  rateKind           String
+  /// per_million_tokens
+  unit               String
+  amount             Decimal?  @db.Decimal(20, 8)
+  currency           String?
+  source             String?
+  effectiveAt        DateTime?
+  appliedToRouting   Boolean   @default(false)
+  appliedToBilling   Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  deployment ModelDeployment @relation(fields: [modelDeploymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([modelDeploymentId, effectiveAt])
+}
+
+/// One internal experiment's cost ceiling, in micro-USD.
+///
+/// Not a credit balance and not a provider-wide budget. There is no default
+/// amount: a missing row is not permission to call a provider. `spentMicroUsd`
+/// is cost already kept. `reservedMicroUsd` is the sum of holds whose cost is
+/// not final. Settlement may record more than the limit, because that cost
+/// has already been incurred; the next reservation then fails.
+model PinnedDeploymentExperiment {
+  id               String   @id
+  limitMicroUsd    BigInt
+  spentMicroUsd    BigInt   @default(0)
+  reservedMicroUsd BigInt   @default(0)
+  createdAt        DateTime @default(now())
+
+  holds PinnedDeploymentExperimentHold[]
+}
+
+/// One call's claim on an experiment ceiling.
+///
+/// `deploymentId` is the identifier returned when the placement row was
+/// stored. It is not a relation. A relation here would make ordinary nested
+/// reads look like reads of the still-dark deployment table.
+///
+/// `released` means the provider call was confirmed not to have started.
+/// `occupied` keeps the reservation after dispatch when the cost is unknown.
+/// `settled` is a measured cost. Unknown is not stored as zero.
+model PinnedDeploymentExperimentHold {
+  id               String    @id
+  experimentId     String
+  deploymentId     String
+  logicalModelId   String
+  reservedMicroUsd BigInt
+  settledMicroUsd  BigInt?
+  /// held | settled | released | occupied
+  status           String
+  createdAt        DateTime  @default(now())
+  closedAt         DateTime?
+
+  experiment PinnedDeploymentExperiment @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([experimentId, status])
 }
 
 /// One separately approved, content-free Prompt Refiner staging shadow.
@@ -6518,8 +6718,9 @@ model MarketingPost {
   assetRegistryVersion Int
   factSnapshot         Json
   /// Full digest of every resolver answer used by the recorded Guard decision.
-  /// Nullable only for rows that predate the expand migration; every new write sets it.
-  factsDigest          String?
+  /// NOT NULL since 20260923140000: the expand migration left it nullable for rows
+  /// that predate the column, and that migration refuses to run while any remain.
+  factsDigest          String
   guardDecision        String
   guardCodes           String[]
   guardRuleIds         String[]
@@ -6623,42 +6824,125 @@ model AmuxWorkerRuntime {
   @@index([instanceId, generation])
 }
 
+model AmuxIncidentTransition {
+  id                      String   @id @default(cuid())
+  fromState               String
+  toState                 String
+  reason                  String
+  ticket                  String
+  approvalId              String?
+  authorizationAuditLogId String?
+  changeAuditLogId        String   @unique
+  createdAt               DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([toState, createdAt])
+}
+
+model AmuxResourcePolicy {
+  scope                String
+  key                  String
+  displayName          String
+  active               Boolean   @default(true)
+  wipLimit             Int?
+  capacityPoints       Int?
+  costBudgetMicrousd   BigInt?
+  budgetWindowStartsAt DateTime?
+  budgetWindowEndsAt   DateTime?
+  updatedById          String?
+  updatedByEmail       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@id([scope, key])
+  @@index([active, scope])
+  @@index([budgetWindowEndsAt])
+}
+
+model AmuxQuotaObservation {
+  id                    String    @id @default(cuid())
+  worker                String
+  provider              String
+  remainingBasisPoints  Int
+  confidenceBasisPoints Int
+  exhausted             Boolean   @default(false)
+  source                String
+  observedAt            DateTime
+  resetAt               DateTime?
+  createdAt             DateTime  @default(now())
+
+  @@index([worker, observedAt])
+  @@index([provider, observedAt])
+  @@index([createdAt])
+}
+
 model AmuxWorkItem {
-  id             String    @id @default(cuid())
-  title          String
-  description    String?
+  id                    String    @id @default(cuid())
+  title                 String
+  description           String?
   /// New rows default to non-dispatchable backlog. This schema imports no
   /// cards and does not promote backlog rows to runnable Todo.
-  status         String   @default("backlog")
-  kind           String   @default("unknown")
-  priority       String   @default("p3")
-  pinned         Boolean  @default(false)
-  drag           Int      @default(0)
-  owner          String?
-  classification Json?
-  revision       Int       @default(0)
-  claimedAt      DateTime?
-  archivedAt     DateTime?
+  status                String    @default("backlog")
+  kind                  String    @default("unknown")
+  priority              String    @default("p3")
+  pinned                Boolean   @default(false)
+  drag                  Int       @default(0)
+  owner                 String?
+  classification        Json?
+  projectKey            String?
+  teamKey               String?
+  dueAt                 DateTime?
+  duePrecision          String?
+  dueSource             String?
+  dueParseState         String    @default("none")
+  dueRaw                String?
+  effortPoints          Int       @default(1)
+  estimatedCostMicrousd BigInt?
+  requiredRoutingRole   String?
+  requiresHumanReview   Boolean   @default(false)
+  reviewSpecialty       String?
+  reviewPrNumber        Int?
+  revision              Int       @default(0)
+  claimedAt             DateTime?
+  archivedAt            DateTime?
   /// Null together for pre-migration or independently created cards. Imported
   /// cards supply canonical lowercase source system, uppercase source key,
   /// printable non-whitespace version, SHA-256 digest, and a nonempty object snapshot.
-  sourceSystem   String?
-  sourceKey      String?
-  sourceVersion  String?
-  sourceDigest   String?
-  sourceSnapshot Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  sourceSystem          String?
+  sourceKey             String?
+  sourceVersion         String?
+  sourceDigest          String?
+  sourceSnapshot        Json?
+  /// Null until a manual promotion stores the operator brief. Catalog import
+  /// leaves both null. The pair check and the sourced-todo check live in SQL.
+  executionBrief        String?
+  executionBriefDigest  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
   routeDecisions    AmuxRouteDecision[]
   executionAttempts AmuxExecutionAttempt[]
+  humanEscalations  AmuxHumanEscalation[]
+  costLedgerEntries AmuxCostLedgerEntry[]
+  reviewProposals   AmuxReviewProposal[]
+  intakeDrafts      AmuxIntakeDraft[]
+  intakeApprovals   AmuxIntakeApproval[]
+  sourceRevisions  AmuxWorkItemSourceRevision[]
+  /// Points at an accepted revision of this same card. Null until the R0
+  /// backfill or a later accept sets it. The source columns above stay the
+  /// immutable import snapshot.
+  acceptedSourceRevision   AmuxWorkItemSourceRevision? @relation("AmuxAcceptedSourceRevision", fields: [acceptedSourceRevisionId], references: [id], onDelete: Restrict)
+  acceptedSourceRevisionId String?                     @unique
 
+  @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
   @@index([priority, createdAt])
   @@index([owner, status])
-  @@unique([sourceSystem, sourceKey])
+  @@index([projectKey, status, owner])
+  @@index([teamKey, status, owner])
+  @@index([dueAt, status])
 }
 
 model AmuxWorkDependency {
@@ -6675,13 +6959,20 @@ model AmuxWorkDependency {
 
 model AmuxExecutionAttempt {
   /// Server-minted execution fence. A worker never chooses this id.
-  id               String @id
-  taskId           String
-  worker           String
-  workerInstanceId String
-  workerGeneration Int
+  id                   String  @id
+  taskId               String
+  worker               String
+  workerInstanceId     String
+  workerGeneration     Int
   /// Task revision after the atomic todo -> doing transition.
-  taskRevision     Int
+  taskRevision         Int
+  /// Monotonic within one task for attempts created after the bounded-retry
+  /// migration. Historical attempts remain NULL rather than receiving an
+  /// invented order when their real creation race cannot be reconstructed.
+  attemptNumber        Int?
+  reservedCostMicrousd BigInt  @default(0)
+  settledCostMicrousd  BigInt?
+  costConfirmed        Boolean @default(false)
 
   heartbeatAt    DateTime
   leaseExpiresAt DateTime?
@@ -6698,12 +6989,115 @@ model AmuxExecutionAttempt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  task     AmuxWorkItem      @relation(fields: [taskId], references: [id], onDelete: Restrict)
-  delivery AmuxWorkDelivery?
+  task              AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  delivery          AmuxWorkDelivery?
+  costLedgerEntries AmuxCostLedgerEntry[]
+  reviewProposals   AmuxReviewProposal[]
 
+  @@unique([id, taskId])
+  @@unique([taskId, attemptNumber])
   @@index([taskId, startedAt])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+}
+
+model AmuxCostLedgerEntry {
+  id                   String   @id @default(cuid())
+  scope                String
+  resourceKey          String
+  budgetWindowStartsAt DateTime
+  budgetWindowEndsAt   DateTime
+  taskId               String
+  attemptId            String
+  kind                 String
+  amountMicrousd       BigInt
+  createdAt            DateTime @default(now())
+
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, scope, resourceKey, kind])
+  @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
+  @@index([taskId, createdAt])
+}
+
+model AmuxHumanEscalation {
+  id                  String    @id @default(cuid())
+  taskId              String
+  specialty           String?
+  reason              String
+  status              String    @default("open")
+  openedBy            String
+  openedTaskRevision  Int?
+  acknowledgedById    String?
+  acknowledgedByEmail String?
+  acknowledgedAt      DateTime?
+  resolvedById        String?
+  resolvedByEmail     String?
+  resolvedAt          DateTime?
+  resolution          String?
+  resolutionOutcome   String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  task            AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  reviewProposals AmuxReviewProposal[]
+
+  @@unique([id, taskId])
+  @@index([status, createdAt])
+  @@index([taskId, createdAt])
+  @@index([specialty, status])
+}
+
+/// A server-issued, immutable proposal for one AMUX task-review decision.
+/// Consumption is recorded by AmuxReviewDecision, never by updating this row.
+model AmuxReviewProposal {
+  id               String   @id @default(cuid())
+  decisionId       String   @unique @db.Uuid
+  escalationId     String
+  taskId           String
+  taskRevision     Int
+  outcome          String
+  sourceStatus     String
+  targetStatus     String
+  subjectDigest    String
+  attemptId        String?
+  reviewPrNumber   Int?
+  reviewBaseSha    String?
+  reviewHeadSha    String?
+  reviewDiffDigest String?
+  issuedAt         DateTime
+  expiresAt        DateTime
+
+  escalation AmuxHumanEscalation   @relation(fields: [escalationId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task       AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempt    AmuxExecutionAttempt? @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  decision   AmuxReviewDecision?
+
+  @@unique([id, escalationId])
+  @@index([escalationId, issuedAt])
+  @@index([taskId, taskRevision, issuedAt])
+  @@index([expiresAt])
+}
+
+/// One immutable human decision per proposal and per escalation. No original
+/// review content or prompt is stored here, only IDs, digests and the outcome.
+model AmuxReviewDecision {
+  id                 String   @id @db.Uuid
+  proposalId         String   @unique
+  escalationId       String   @unique
+  outcome            String
+  requestDigest      String
+  idempotencyKeyHash String
+  actorUserId        String
+  auditLogId         String   @unique
+  decidedAt          DateTime @default(now())
+
+  proposal AmuxReviewProposal @relation(fields: [proposalId, escalationId], references: [id, escalationId], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog      @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([proposalId, escalationId])
+  @@index([actorUserId, decidedAt])
 }
 
 model AmuxWorkDelivery {
@@ -7123,4 +7517,150 @@ model AmuxBoardImportApproval {
 
   @@index([status, expiresAt])
   @@index([actorUserId, createdAt])
+}
+
+/// Operator evidence for one manual promotion batch. No User foreign key.
+/// Apply stays off until a separate latch is enabled. This table existing
+/// does not promote a card.
+model AmuxBoardPromotionApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  requestDigest           String
+  rawBodyDigest           String
+  itemBindings            Json
+  itemBindingsDigest      String
+  cardCount               Int
+  scannerVersion          String
+  scannerRulesetDigest    String
+  policyVersion           Int
+  outcomeUnknownAt        DateTime?
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  expiredAt               DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// One observed source snapshot. Append-only. The original import is
+/// backfilled as an accepted revision with no run. A later run does not
+/// rewrite AmuxWorkItem source columns.
+model AmuxWorkItemSourceRevision {
+  id                  String    @id
+  workItemId          String
+  parentRevisionId    String?
+  sourceVersion       String
+  detailDigest        String
+  sectionCode         String
+  reconciliationRunId String?
+  state               String
+  observedAt          DateTime
+  decidedAt           DateTime?
+  decisionAuditLogId  String?
+  createdAt           DateTime  @default(now())
+
+  workItem          AmuxWorkItem                 @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+  parentRevision    AmuxWorkItemSourceRevision?  @relation("AmuxSourceRevisionParent", fields: [parentRevisionId], references: [id], onDelete: Restrict)
+  childRevisions    AmuxWorkItemSourceRevision[] @relation("AmuxSourceRevisionParent")
+  reconciliationRun AmuxReconciliationRun?       @relation(fields: [reconciliationRunId], references: [id], onDelete: Restrict)
+  acceptedBy        AmuxWorkItem[]               @relation("AmuxAcceptedSourceRevision")
+
+  @@index([workItemId, createdAt])
+  @@index([reconciliationRunId])
+}
+
+/// One comparison of a pinned source commit with the stored cards.
+/// Item drift is not derived from this row's manifest digest.
+model AmuxReconciliationRun {
+  id                      String    @id
+  status                  String
+  sourceCommit            String
+  boardDigest             String
+  manifestDigest          String
+  canonicalizationVersion String
+  plannerVersion          String
+  validatorVersion        String
+  scannerVersion          String
+  scannerRulesetDigest    String
+  activeItemCount         Int
+  sectionCount            Int
+  itemDriftCount          Int
+  missingCount            Int
+  extraCount              Int
+  globalSnapshotDrift     Int
+  actorUserId             String
+  approvalAuditLogId      String?   @unique
+  preparedAt              DateTime
+  approvedAt              DateTime?
+  applyingAt              DateTime?
+  consumedAt              DateTime?
+  rejectedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  revisions AmuxWorkItemSourceRevision[]
+
+  @@index([status, expiresAt])
+  @@index([sourceCommit])
+}
+
+/// Digest-only record of one explicit intake. Proposal text stays null.
+/// Preview does not insert a row. A second digest for the same source key
+/// conflicts instead of replacing this row.
+model AmuxIntakeDraft {
+  id            String    @id
+  sourceSystem  String
+  sourceKey     String
+  sourceVersion String
+  draftDigest   String
+  policyVersion Int
+  status        String
+  actorUserId   String
+  title         String?
+  scope         String?
+  completion    String?
+  workItemId    String
+  createdAt     DateTime  @default(now())
+  consumedAt    DateTime?
+  expiresAt     DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, sourceKey])
+  @@index([status, expiresAt])
+  @@index([actorUserId, createdAt])
+}
+
+/// Human approval consumed in the same transaction as the backlog card.
+/// This is not an AmuxBoardImportApproval row.
+model AmuxIntakeApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  draftDigest             String
+  sourceDigest            String
+  policyVersion           Int
+  scannerVersion          String
+  cardCount               Int
+  workItemId              String
+  consumedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([workItemId])
 }

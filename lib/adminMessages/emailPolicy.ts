@@ -22,7 +22,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       },
       reasonLabel: "Why this version is being activated",
       reasonHelp:
-        "Activation needs a second administrator’s approval. The first submission records the request; the change lands when the approval is granted and the request is repeated. While only one administrator can approve, that administrator activates it directly and the audit log records it.",
+        "Activation is audited. The administrator who submits it activates the version, and the audit log records who did it and why.",
       activate: "Activate",
       profile: {
         subjectPrefix: "Subject prefix",
@@ -41,8 +41,6 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       nothingSelected: "Nothing selected.",
       toast: {
         loadFailed: "Could not load jurisdiction policy versions.",
-        approvalRecorded:
-          "Recorded. A second administrator has to approve this in the work queue before it takes effect.",
         refused: "The request was refused.",
         draftCreated: "Draft created. It changes nothing until it is activated.",
         draftExists: "That draft already exists.",
@@ -94,7 +92,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       },
       reasonLabel: "이 버전을 활성화하는 이유",
       reasonHelp:
-        "활성화에는 두 번째 관리자의 승인이 필요합니다. 첫 제출은 요청을 기록하고, 승인이 난 뒤 요청을 다시 보내면 변경이 적용됩니다. 승인할 수 있는 관리자가 한 명뿐이면 그 관리자가 바로 활성화하고 감사 로그에 남습니다.",
+        "활성화는 감사 로그에 남습니다. 제출한 관리자가 그 버전을 활성화하고, 누가 왜 했는지가 기록됩니다.",
       activate: "활성화",
       profile: {
         subjectPrefix: "제목 접두어",
@@ -113,8 +111,6 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       nothingSelected: "선택된 버전이 없습니다.",
       toast: {
         loadFailed: "관할권 정책 버전을 불러오지 못했습니다.",
-        approvalRecorded:
-          "기록되었습니다. 적용되려면 두 번째 관리자가 작업 대기열에서 승인해야 합니다.",
         refused: "요청이 거절되었습니다.",
         draftCreated: "초안이 생성되었습니다. 활성화되기 전에는 아무것도 바뀌지 않습니다.",
         draftExists: "해당 초안이 이미 있습니다.",

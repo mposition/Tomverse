@@ -321,6 +321,7 @@ before(async () => {
 });
 
 beforeEach(() => {
+    delete process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED;
     deferred = [];
     reported = [];
     securityReady = true;
@@ -361,6 +362,7 @@ type ReadinessBody = {
         emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
         searchProviderBudget: boolean;
+        amuxReviewApproval: boolean;
     };
     traceId: string;
 };
@@ -395,6 +397,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailConsentKeyring: true,
         emailBusinessIdentity: true,
         searchProviderBudget: true,
+        amuxReviewApproval: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -410,6 +413,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         name: keyof ReadinessBody["checks"];
         arrange: () => void;
     }> = [
+        {
+            name: "amuxReviewApproval",
+            arrange: () => {
+                process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED = "true";
+                delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+                delete process.env.AMUX_REVIEW_GITHUB_READ_TOKEN;
+                delete process.env.NEXTAUTH_URL;
+            },
+        },
         {
             name: "securityEnvironment",
             arrange: () => {
@@ -524,6 +536,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
     ];
 
     for (const { name, arrange } of cases) {
+        delete process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED;
         deferred = [];
         reported = [];
         securityReady = true;

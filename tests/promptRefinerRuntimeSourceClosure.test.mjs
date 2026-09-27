@@ -187,12 +187,37 @@ const compilerOptions = parsedConfig.options;
 // type-level index this inventory does not collect. The count is still 228 and
 // the position-free inventory still hashes to the value above, so this is a
 // repin and not a review.
+//
+// 2026-09-24, the pinned-deployment experiment note above the fingerprint.
+// Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, those notes now stand together after merging develop. Comment
+// only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, apex usage class: `lib/models.ts` gains the apex class, its
+// credit weight and the usage-profile case, and `lib/modelPricing.ts` treats
+// that class as premium. Both files are in this closure. Neither addition is
+// a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "21d448943f260fcf4c6a96c4ac2ebcf3",
-  "6bc000bfc8b58d81382ff055aff6d849",
+  "45e44993df9550021dc9a7eb888248fe",
+  "cd2e50c5ae92c2e46bfaa16de61cec01",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

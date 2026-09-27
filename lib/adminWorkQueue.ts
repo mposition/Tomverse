@@ -54,7 +54,6 @@ export const workQueueAgeHours = (openedAt: string | null, now: Date) =>
 
 export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQueue> {
   const [
-    approvals,
     refunds,
     feedback,
     privacyRequests,
@@ -64,11 +63,6 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
     modelLifecycle,
     jobs,
   ] = await Promise.allSettled([
-    prisma.adminActionApproval.findMany({
-      where: { status: "pending", expiresAt: { gt: now } },
-      orderBy: { createdAt: "asc" },
-      take: WORK_QUEUE_SOURCE_LIMIT,
-    }),
     prisma.refundRequest.findMany({
       where: { status: "pending" },
       orderBy: { requestedAt: "asc" },
@@ -166,19 +160,6 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
     }
     items.push(...result.value.map(map));
   };
-
-  collect("Approvals", approvals, (row) => ({
-    id: `approval:${row.id}`,
-    category: "Approval",
-    severity: "critical",
-    title: `${row.action} awaiting a second approver`,
-    detail: `Requested by ${row.requestedByEmail || "an administrator"} · expires ${row.expiresAt
-      .toISOString()
-      .replace("T", " ")
-      .slice(0, 16)} UTC`,
-    href: "/admin/work-queue?tab=approvals",
-    openedAt: row.createdAt.toISOString(),
-  }));
 
   collect("Refunds", refunds, (row) => ({
     id: `refund:${row.id}`,

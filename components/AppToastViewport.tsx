@@ -104,7 +104,7 @@ export function AppToastViewport() {
       ref={viewportRef}
       data-testid="app-toast-viewport"
       data-ready="false"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[95] flex flex-col items-center gap-2 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] empty:hidden sm:items-end sm:px-6"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-[140] flex flex-col items-center gap-2 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] empty:hidden sm:items-end sm:px-6"
     >
       {toasts.map((toast) => (
         <div
