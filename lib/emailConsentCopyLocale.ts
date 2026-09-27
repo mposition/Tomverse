@@ -17,7 +17,7 @@ import {
  *
  * It reads as an ordinary locale section to whoever renders it, which is
  * correct: the difference is not in how it is displayed, it is in what may
- * edit it. `docs/policy/email-consent-copy-draft.md` section 9 is the edit
+ * edit it. `docs/policy/email-consent-copy-draft.md` section 10 is the edit
  * procedure, and it is not "change the string".
  */
 export const consentCopyForLanguage = (

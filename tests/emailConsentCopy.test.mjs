@@ -3,8 +3,13 @@
 // Contract: docs/policy/email-consent-copy-draft.md, approved 2026-09-23.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmTable } from "micromark-extension-gfm-table";
 
 import {
   CONSENT_COPY_KEYS,
@@ -261,161 +266,123 @@ test("the canonical form separates the fields it hashes", () => {
 
 // --- the approved document and this file are the same words --------------
 
+/* -------------------------------------------------------------------------- */
+/* The approved document, read the way it renders                              */
+/* -------------------------------------------------------------------------- */
+
 /**
- * The document with everything markdown does not render stripped out.
+ * The document as a GFM syntax tree.
  *
- * Every slice below reads raw lines, and that was a way through: a reviewer
- * reading the rendered document sees neither a fenced code block nor an HTML
- * comment, so the approved digest could be moved inside a fence, or the whole
- * approved table wrapped in `<!-- -->`, and the suite still found its lines.
- * The record has to be the record somebody reads.
+ * Three versions of this read raw lines and looked for `|` at the start, and a
+ * review broke each of them by writing something that renders differently from
+ * the way those lines were being read: a comment opened and closed mid-line, a
+ * four-space-indented `<!--`, an invalid info string containing a backtick, a
+ * heading indented three spaces, a table row whose trailing pipe was dropped so
+ * its cell count changed. Every one of them let the approved record and the
+ * code drift apart while the suite stayed green.
  *
- * Both are blanked rather than removed, so a slice's line numbering is not
- * disturbed.
- *
- * The first version treated any run of backticks or tildes as a fence toggle
- * and only removed closed comments, and a review found three ways through it.
- * A fence indented four spaces is not a fence at all -- it is an indented code
- * block whose content is the literal delimiter -- so treating it as one blanked
- * the real table that followed. A backtick fence is not closed by a tilde one,
- * nor by a shorter run. And an unterminated `<!--` swallows the rest of the
- * document, so a reader saw no section 3 while the test read one.
- *
- * So: a fence opens on three or more backticks or tildes indented at most
- * three spaces, and closes only on a run of the same character at least as
- * long, with no trailing text. An unterminated comment or fence blanks
- * everything to the end.
+ * A hand-written parser was the wrong tool. This is the parser the product
+ * already renders markdown with (`remark-gfm`'s table extension over
+ * `mdast-util-from-markdown`), so what the test reads is what a reader sees --
+ * including CRLF, which the parser handles and `split("\n")` did not.
  */
-const renderedOnly = (doc) => {
-  const lines = doc.split("\n");
-  const out = [];
-  let fence = null;
-  let inComment = false;
+const approvedTree = () =>
+  fromMarkdown(readFileSync(APPROVED_DOCUMENT, "utf8"), {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
 
-  for (const line of lines) {
-    if (inComment) {
-      const end = line.indexOf("-->");
-      out.push("");
-      if (end >= 0) {
-        inComment = false;
-        // Anything after the close is rendered, and a table cannot start
-        // mid-line, so keeping the remainder is enough.
-        const rest = line.slice(end + 3);
-        out[out.length - 1] = rest.trim() === "" ? "" : rest;
-      }
-      continue;
-    }
-    if (fence !== null) {
-      out.push("");
-      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
-      if (close && close[1][0] === fence.char && close[1].length >= fence.length) {
-        fence = null;
-      }
-      continue;
-    }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (open) {
-      fence = { char: open[1][0], length: open[1].length };
-      out.push("");
-      continue;
-    }
-    const comment = line.indexOf("<!--");
-    if (comment >= 0) {
-      const end = line.indexOf("-->", comment + 4);
-      if (end >= 0) {
-        out.push(line.slice(0, comment) + line.slice(end + 3));
-      } else {
-        inComment = true;
-        out.push(line.slice(0, comment).trim() === "" ? "" : line.slice(0, comment));
-      }
-      continue;
-    }
-    out.push(line);
-  }
-  return out.join("\n");
+/** A node's text, as the reader sees it, with emphasis markers dropped. */
+const textOf = (node) => {
+  if (node.type === "text" || node.type === "inlineCode") return node.value;
+  if (node.type === "break") return " ";
+  if (!Array.isArray(node.children)) return "";
+  return node.children.map(textOf).join("");
 };
 
-const approvedDocument = () =>
-  renderedOnly(readFileSync("docs/policy/email-consent-copy-draft.md", "utf8"));
+const cellsOf = (row) => row.children.map((cell) => textOf(cell).trim());
 
-// Where each key's approved cell is: the subsection, the bold label the table
-// follows (null when the subsection holds exactly one table), and for the
-// transposed button table the role row. A string is compared with that one
-// cell and nothing else, so neither a copy of the sentence elsewhere nor a
-// swap between two cells of the same language can stand in for it.
-const APPROVED_CELL = {
-  signupOptIn: { heading: "### 3.A", label: null, role: null },
-  signupNotice: { heading: "### 3.B", label: null, role: null },
-  signupRefuse: { heading: "### 3.C", label: null, role: null },
-  noticeTitle: { heading: "### 3.D", label: "**제목**", role: null },
-  noticeBody: { heading: "### 3.D", label: "**본문**", role: null },
-  noticeAccept: { heading: "### 3.D", label: "**세 버튼**", role: "동의" },
-  noticeRefuse: { heading: "### 3.D", label: "**세 버튼**", role: "거부" },
-  noticeDismiss: { heading: "### 3.D", label: "**세 버튼**", role: "닫기" },
-};
-
-/** The text of one section, from its heading to the next heading of the same or higher level. */
-const sectionOf = (doc, heading) => {
-  const lines = doc.split("\n");
-  // The heading must be unique. Taking the first match let a second
-  // `### 3.D ...` (or `## 8. ...`) placed above the real one shadow it: the
-  // matcher read the decoy section, and the approved cells below it could then
-  // be edited freely.
-  const found = [];
-  lines.forEach((line, index) => {
-    if (line.startsWith(heading)) found.push(index);
+/**
+ * The nodes of one section: from the heading whose text starts with `prefix` to
+ * the next heading of the same or higher depth.
+ *
+ * The heading must be unique. Taking the first match let a second `### 3.D …`
+ * above the real one shadow it, and the approved cells below could then be
+ * edited freely.
+ */
+const sectionOf = (tree, prefix, depth) => {
+  const at = [];
+  tree.children.forEach((node, index) => {
+    if (node.type === "heading" && node.depth === depth && textOf(node).startsWith(prefix)) {
+      at.push(index);
+    }
   });
   assert.equal(
-    found.length,
+    at.length,
     1,
-    `the approved document must hold exactly one ${heading} heading`
+    `the approved document must hold exactly one depth-${depth} ${prefix} heading`
   );
-  const from = found[0];
-  const level = heading.match(/^#+/)[0].length;
-  let to = lines.length;
-  for (let i = from + 1; i < lines.length; i++) {
-    const m = lines[i].match(/^(#+) /);
-    if (m && m[1].length <= level) {
+  const from = at[0];
+  const sectionDepth = tree.children[from].depth;
+  let to = tree.children.length;
+  for (let i = from + 1; i < tree.children.length; i += 1) {
+    const node = tree.children[i];
+    if (node.type === "heading" && node.depth <= sectionDepth) {
       to = i;
       break;
     }
   }
-  return lines.slice(from, to).join("\n");
+  return tree.children.slice(from, to);
 };
 
+/** Every heading in a section's nodes, as `prefix` strings. */
+const headingsOf = (nodes, depth) =>
+  nodes
+    .filter((node) => node.type === "heading" && node.depth === depth)
+    .map((node) => textOf(node).replace(/^(\S+).*$/, "$1"));
+
 /**
- * Every table in a section, each with the last non-blank line before it (its
- * label) and its rows as trimmed cells, separator rows dropped.
+ * Every table in a section, with the last paragraph before it as its label.
+ *
+ * A heading is not a label: treating it as one made each subsection's single
+ * table compare as `null` by accident, which hid a `**제목**` repeated above
+ * another subsection's table.
  */
-const tablesOf = (section) => {
-  const clean = (cell) => cell.trim().replace(/^\*\*(.*)\*\*$/, "$1");
+const tablesOf = (nodes) => {
   const tables = [];
   let label = null;
-  let current = null;
-  for (const line of section.split("\n")) {
-    if (line.startsWith("|")) {
-      if (!current) {
-        current = { label, rows: [] };
-        tables.push(current);
-      }
-      if (!/^\|[-\s|:]+\|$/.test(line)) {
-        current.rows.push(line.split("|").slice(1, -1).map(clean));
-      }
+  for (const node of nodes) {
+    if (node.type === "table") {
+      tables.push({ label, rows: node.children.map(cellsOf) });
       continue;
     }
-    current = null;
-    // A heading is not a label. Keeping it as one made every subsection's
-    // single table compare as `null` by accident, which meant a repeated
-    // `**제목**` above another subsection's table went unnoticed.
-    if (line.trim() !== "") label = /^#/.test(line.trim()) ? null : line.trim();
+    label = node.type === "paragraph" ? textOf(node).trim() : null;
   }
   return tables;
 };
 
+/**
+ * Where each key's approved cell is: the subsection, the bold label the table
+ * follows (null when the subsection holds exactly one table), and for the
+ * transposed button table the role row. A string is compared with that one cell
+ * and nothing else, so neither a copy of the sentence elsewhere nor a swap
+ * between two cells of the same language can stand in for it.
+ */
+const APPROVED_CELL = {
+  signupOptIn: { heading: "3.A", label: null, role: null },
+  signupNotice: { heading: "3.B", label: null, role: null },
+  signupRefuse: { heading: "3.C", label: null, role: null },
+  noticeTitle: { heading: "3.D", label: "제목", role: null },
+  noticeBody: { heading: "3.D", label: "본문", role: null },
+  noticeAccept: { heading: "3.D", label: "세 버튼", role: "동의" },
+  noticeRefuse: { heading: "3.D", label: "세 버튼", role: "거부" },
+  noticeDismiss: { heading: "3.D", label: "세 버튼", role: "닫기" },
+};
+
 /** The one cell a key's approved string must equal. Fails unless it is unique. */
-const approvedCell = (doc, key, language) => {
+const approvedCell = (tree, key, language) => {
   const { heading, label, role } = APPROVED_CELL[key];
-  const tables = tablesOf(sectionOf(doc, heading)).filter(
+  const tables = tablesOf(sectionOf(tree, heading, 3)).filter(
     (table) => label === null || table.label === label
   );
   assert.equal(tables.length, 1, `${key}: expected exactly one table under ${heading} ${label ?? ""}`);
@@ -438,6 +405,96 @@ const approvedCell = (doc, key, language) => {
   return matches[0][column];
 };
 
+const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
+
+/**
+ * The whole of what the owner approved, as one digest per version.
+ *
+ * The per-string pins and the version digest cover section 3's fifty-six
+ * strings, which is what the code renders. They cover nothing else, and a
+ * review showed what that left open: section 4's notice wording could be
+ * replaced, section 5's and section 6's clauses rewritten, and the status line
+ * at the top changed from 승인됨 to 반려됨, with all twenty-three tests still
+ * green. The approval says sections 1 to 6, so all six are frozen here.
+ *
+ * Over the rendered tree rather than the bytes: a heading's own text, a
+ * paragraph's text, a table's cells, a list item's text, in document order.
+ * That way reflowing a paragraph or changing markdown that renders the same is
+ * not a change to the record, and every difference a reader would see is.
+ *
+ * Recorded, not computed: a digest this test derives from whatever it is handed
+ * proves only that sha256 is deterministic. Moving it means editing a line that
+ * says, in this file, that the owner's record has changed — which is the edit
+ * section 10 forbids, and the one a reviewer sees for what it is.
+ */
+const APPROVED_RECORD_DIGEST = "100760c3d292593ac5b7d09d6d053580";
+
+/** The sections the owner's approval covers, by heading prefix and depth. */
+const APPROVED_SECTIONS = [
+  ["1.", 2],
+  ["2.", 2],
+  ["3.", 2],
+  ["4.", 2],
+  ["5.", 2],
+  ["6.", 2],
+];
+
+/** The rendered content of a section's nodes, flattened in document order. */
+const renderedContent = (nodes) => {
+  const out = [];
+  const walk = (node) => {
+    if (node.type === "heading") {
+      out.push(`h${node.depth}:${textOf(node).trim()}`);
+      return;
+    }
+    if (node.type === "paragraph") {
+      // Collapsed: a reflowed paragraph reads the same, and the record is what
+      // a reader reads.
+      out.push(`p:${textOf(node).trim().replace(/\s+/g, " ")}`);
+      return;
+    }
+    if (node.type === "table") {
+      for (const row of node.children) out.push(`r:${cellsOf(row).join("|")}`);
+      return;
+    }
+    if (node.type === "listItem") {
+      out.push(`li:${textOf(node).trim().replace(/\s+/g, " ")}`);
+      return;
+    }
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return out;
+};
+
+test("the whole approved record is the one the owner signed", () => {
+  const tree = approvedTree();
+  const content = [
+    // The status block above section 1: who approved it, when, and that it is
+    // approved at all.
+    ...renderedContent(
+      tree.children.slice(
+        0,
+        tree.children.findIndex(
+          (node) => node.type === "heading" && textOf(node).startsWith("1.")
+        )
+      )
+    ),
+    ...APPROVED_SECTIONS.flatMap(([prefix, depth]) =>
+      renderedContent(sectionOf(tree, prefix, depth))
+    ),
+  ];
+  const digest = createHash("sha256").update(content.join("\n")).digest("hex").slice(0, 32);
+
+  assert.equal(
+    digest,
+    APPROVED_RECORD_DIGEST,
+    "The approved record changed. Sections 1 to 6 and the status block are what " +
+      "the owner signed, and section 10 says a change is a new version in a new " +
+      `section rather than an edit here. If this is that, record "${digest}".`
+  );
+});
+
 test("every approved string is exactly its own cell of the approved document", () => {
   // The document is what the owner signed. If this file drifts from it, the
   // hash names words nobody approved.
@@ -448,13 +505,13 @@ test("every approved string is exactly its own cell of the approved document", (
   // survived in another table. Pooling per subsection let the title and body
   // cells, or two buttons, trade places. Now each key has one cell -- section,
   // table, role and language -- and must equal it, whole.
-  const doc = approvedDocument();
+  const tree = approvedTree();
   for (const key of CONSENT_COPY_KEYS) {
     assert.ok(APPROVED_CELL[key], `${key} has no approved cell`);
     for (const language of CONSENT_COPY_LANGUAGES) {
       assert.equal(
         consentCopy(key, language),
-        approvedCell(doc, key, language),
+        approvedCell(tree, key, language),
         `${key}.${language} differs from its approved cell`
       );
     }
@@ -468,28 +525,24 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
   // an extra language column with an approved-looking sentence in it would all
   // pass while the code knew nothing about them. The owner signed section 3 as
   // a whole, so the whole of it is compared.
-  const doc = approvedDocument();
-  const section = sectionOf(doc, "## 3.");
+  const tree = approvedTree();
+  const section = sectionOf(tree, "3.", 2);
 
-  const subsections = section
-    .split("\n")
-    .filter((line) => /^### /.test(line))
-    .map((line) => line.replace(/^(### \S+).*$/, "$1"));
-  assert.deepEqual(subsections, ["### 3.0", "### 3.A", "### 3.B", "### 3.C", "### 3.D"]);
+  assert.deepEqual(headingsOf(section, 3), ["3.0", "3.A", "3.B", "3.C", "3.D"]);
 
   // 3.0 is the summary of what the four devices are; the four that follow carry
   // the approved strings, and their tables are exactly the ones the keys name.
   // The labels are compared as they are, not nulled outside 3.D: a repeated
   // `**제목**` above another subsection's table would otherwise pass.
   const expectedTables = {
-    "### 3.0": [null],
-    "### 3.A": [null],
-    "### 3.B": [null],
-    "### 3.C": [null],
-    "### 3.D": ["**제목**", "**본문**", "**세 버튼**"],
+    "3.0": [null],
+    "3.A": [null],
+    "3.B": [null],
+    "3.C": [null],
+    "3.D": ["제목", "본문", "세 버튼"],
   };
   for (const [heading, labels] of Object.entries(expectedTables)) {
-    const tables = tablesOf(sectionOf(doc, heading));
+    const tables = tablesOf(sectionOf(tree, heading, 3));
     assert.deepEqual(
       tables.map((table) => table.label),
       labels,
@@ -499,26 +552,26 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
 
   // 3.0's table says there are four devices and what each records. A fifth row
   // there is a fifth approved device, and the eight keys would not notice.
-  const devices = tablesOf(sectionOf(doc, "### 3.0"))[0].rows;
-  assert.deepEqual(devices[0], ["#", "장치", "어디에", "무엇을 기록하는가"]);
-  assert.deepEqual(
-    devices.slice(1).map((row) => row[0]),
-    ["A", "B", "C", "D"],
-    "3.0 does not name exactly the four approved devices"
-  );
-  for (const row of devices) {
-    assert.equal(row.length, 4);
-  }
+  // Whole rows, not just their first column: "A" saying something else about
+  // where the checkbox lives or what it records is a different approved device
+  // under the same letter, and comparing the letters alone let that through.
+  assert.deepEqual(tablesOf(sectionOf(tree, "3.0", 3))[0].rows, [
+    ["#", "장치", "어디에", "무엇을 기록하는가"],
+    ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],
+    ["B", "고지 문장", "가입 흐름, A 옆", "notice_shown"],
+    ["C", "독립 거부 수단", "가입 흐름, A와 별개", "objected"],
+    ["D", "제품 내 일회성 안내", "기존 계정의 다음 접속", "A·B·C와 같은 세 상태"],
+  ]);
 
   // The language tables: one row per language and no more, so an eighth row
   // cannot claim an eighth approved language.
-  for (const heading of ["### 3.A", "### 3.B", "### 3.C"]) {
-    const [header, ...rows] = tablesOf(sectionOf(doc, heading))[0].rows;
+  for (const heading of ["3.A", "3.B", "3.C"]) {
+    const [header, ...rows] = tablesOf(sectionOf(tree, heading, 3))[0].rows;
     assert.deepEqual(header, ["언어", "문안"]);
     assert.deepEqual(rows.map((row) => row[0]), [...CONSENT_COPY_LANGUAGES]);
   }
-  for (const label of ["**제목**", "**본문**"]) {
-    const [header, ...rows] = tablesOf(sectionOf(doc, "### 3.D")).find(
+  for (const label of ["제목", "본문"]) {
+    const [header, ...rows] = tablesOf(sectionOf(tree, "3.D", 3)).find(
       (table) => table.label === label
     ).rows;
     assert.deepEqual(header, ["언어", "문안"]);
@@ -528,8 +581,8 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
   // The button table: the whole header, in order, and exactly three roles. An
   // extra column was how an approved sentence could be added beside the cell
   // the code reads.
-  const buttons = tablesOf(sectionOf(doc, "### 3.D")).find(
-    (table) => table.label === "**세 버튼**"
+  const buttons = tablesOf(sectionOf(tree, "3.D", 3)).find(
+    (table) => table.label === "세 버튼"
   );
   assert.deepEqual(buttons.rows[0], ["역할", ...CONSENT_COPY_LANGUAGES]);
   assert.deepEqual(buttons.rows.slice(1).map((row) => row[0]), ["동의", "거부", "닫기"]);
@@ -545,7 +598,7 @@ test("the approval table binds every approved section to the version's approver 
   // each one is read as a row, and each must carry the approver and date the
   // code records for the current version.
   const current = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
-  const tables = tablesOf(sectionOf(approvedDocument(), "## 8."));
+  const tables = tablesOf(sectionOf(approvedTree(), current.recordSection, 2));
   const approvals = tables.filter(
     (table) => table.rows[0]?.[0] === "절" && table.rows[0]?.[2] === "승인"
   );
@@ -555,12 +608,20 @@ test("the approval table binds every approved section to the version's approver 
   const approval = approvals[0];
   assert.deepEqual(approval.rows[0], ["절", "내용", "승인"]);
 
+  // The whole table, not only its first and third columns: what each row says
+  // was approved is part of the record, and comparing the numbers alone let the
+  // description beside them be rewritten.
+  assert.deepEqual(approval.rows, [
+    ["절", "내용", "승인"],
+    ["§1", "R5 — 철회 시까지", "mposition, 2026-09-23"],
+    ["§2", "동의 장치는 7개 언어, 법률 문서는 fallback 유지", "mposition, 2026-09-23"],
+    ["§3.A–D", "동의 장치 4개의 문안", "mposition, 2026-09-23"],
+    ["§4.1–4.3", "통지 3건의 문안", "mposition, 2026-09-23"],
+    ["§5", "/terms 조항", "mposition, 2026-09-23"],
+    ["§6", "/privacy 추가 2문장", "mposition, 2026-09-23"],
+  ]);
+
   const rows = approval.rows.slice(1);
-  assert.deepEqual(
-    rows.map((row) => row[0]),
-    ["§1", "§2", "§3.A–D", "§4.1–4.3", "§5", "§6"],
-    "the approved sections are not the ones section 8 lists"
-  );
   for (const row of rows) {
     assert.equal(row.length, 3, `${row[0]} has extra cells`);
     assert.equal(
@@ -578,28 +639,28 @@ test("the approval section records the digest of each version, once, on that ver
   // means editing that record -- which section 10 forbids and which a reviewer
   // sees for what it is.
   //
-  // Only section 8 counts, only as the digest's own line directly under the
-  // line naming its version, and only once. `doc.includes()` was satisfied by
-  // the digest anywhere; the first line-based version by the first matching
-  // line, so a correct copy placed above the approval hid an edited one.
-  const approval = sectionOf(approvedDocument(), "## 8.");
-  const lines = approval.split("\n");
-  const TICK = String.fromCharCode(96); // a backtick
-  const digestLines = lines.filter((line) => /^`sha256:[0-9a-f]*`$/.test(line.trim()));
-  assert.equal(
-    digestLines.length,
-    CONSENT_COPY_VERSIONS.length,
-    "section 8 must hold exactly one digest line per version"
-  );
-  for (const { version } of CONSENT_COPY_VERSIONS) {
-    const digest = consentCopyVersionDigest(version);
-    const at = lines.indexOf(TICK + digest + TICK);
-    assert.ok(at >= 0, `version ${version} digest ${digest} is not its own line in section 8`);
-    assert.equal(lines.lastIndexOf(TICK + digest + TICK), at, `version ${version} digest appears twice`);
-    const label = lines.slice(0, at).reverse().find((line) => line.trim() !== "");
-    assert.ok(
-      label?.includes("버전 " + TICK + version + TICK),
-      `the digest line for ${version} is not under the line naming that version`
+  // Each version's own record section, named in code, holds exactly one
+  // paragraph that is nothing but a sha256 digest, and the paragraph before it
+  // names that version. Section 10 says a new version is added as a new section
+  // rather than by editing an approved one, so the section is part of the
+  // version's identity and not something this test assumes.
+  for (const { version, recordSection } of CONSENT_COPY_VERSIONS) {
+    const nodes = sectionOf(approvedTree(), recordSection, 2);
+    const paragraphs = nodes
+      .filter((node) => node.type === "paragraph")
+      .map((node) => textOf(node).trim());
+    const digests = paragraphs.filter((text) => /^sha256:[0-9a-f]+$/.test(text));
+    assert.deepEqual(
+      digests,
+      [consentCopyVersionDigest(version)],
+      `section ${recordSection} must hold exactly one digest, this version's`
+    );
+    const at = paragraphs.indexOf(digests[0]);
+    assert.ok(at > 0, `the digest in ${recordSection} has nothing above it naming a version`);
+    assert.match(
+      paragraphs[at - 1],
+      new RegExp(`버전 ${version.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`),
+      `the digest in ${recordSection} does not follow the line naming ${version}`
     );
   }
 });

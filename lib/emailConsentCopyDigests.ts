@@ -1,7 +1,7 @@
 /**
  * The digest of every approved string, pinned.
  *
- * Contract: docs/policy/email-consent-copy-draft.md section 9.
+ * Contract: docs/policy/email-consent-copy-draft.md section 10.
  *
  * ## Why a second list of hashes exists
  *
@@ -13,7 +13,7 @@
  * sentence as though it had been on the screen all along, and every
  * `copyHash` already stored against that version resolved to nothing.
  *
- * That is precisely the failure section 9 forbids, and nothing in CI could
+ * That is precisely the failure section 10 forbids, and nothing in CI could
  * see it. A pinned digest can: changing an approved byte changes the digest,
  * and the test that compares them fails with the key and language that moved.
  *

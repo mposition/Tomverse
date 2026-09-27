@@ -2,7 +2,7 @@
  * The approved wording of the consent devices, frozen at its approved bytes.
  *
  * Contract: docs/policy/email-consent-copy-draft.md, approved by mposition on
- * 2026-09-23. That document's sections 3 and its section 9 govern this file.
+ * 2026-09-23. That document's section 3 and its section 10 govern this file.
  *
  * ## Why the strings live here rather than in `locales/`
  *
@@ -156,12 +156,23 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
   readonly version: string;
   readonly approvedBy: string;
   readonly approvedAt: string;
+  /**
+   * The section of docs/policy/email-consent-copy-draft.md that holds this
+   * version approval record: its table of approved sections and its digest.
+   *
+   * Named here because section 10 adds a new version as a **new section** and
+   * forbids editing an approved one, so the section is part of the version
+   * identity. A test that assumed section 8 for every version would have made
+   * the second version either rewrite the first record or fail.
+   */
+  readonly recordSection: string;
   readonly copy: ConsentCopyTable;
 }> = Object.freeze([
   Object.freeze({
     version: "2026-09-23",
     approvedBy: "mposition",
     approvedAt: "2026-09-23",
+    recordSection: "8.",
     copy: V2026_09_23,
   }),
 ]);

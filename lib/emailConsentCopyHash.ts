@@ -18,7 +18,7 @@ import {
  * `EmailPermissionEvent.evidence.candidates[].copyHash`, which is append-only
  * and outlives every deploy. So the hash has to keep naming the same words for
  * as long as the consent it evidences, which is why
- * `docs/policy/email-consent-copy-draft.md` section 9 says approved wording is
+ * `docs/policy/email-consent-copy-draft.md` section 10 says approved wording is
  * versioned rather than edited.
  *
  * Its own module because `node:crypto` cannot go in `lib/emailConsentCopy.ts`:
