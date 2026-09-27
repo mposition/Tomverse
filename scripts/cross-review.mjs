@@ -127,6 +127,7 @@ import {
   packageExclusionProblems,
   preflightGate,
   preflightReportProblems,
+  redactCrossReviewDiagnosticText,
   renderPreflightPrompt,
   renderReviewPrompt,
   replayExchange,
@@ -249,12 +250,23 @@ const runCommand = (command) => {
     return { passed: false, output, durationMs: Date.now() - startedAt };
   }
 };
-const runTestCommand = () => (testCommand ? [{ command: testCommand, ...runCommand(testCommand) }] : []);
+const redactTestRun = (run) => ({
+  ...run,
+  command: redactCrossReviewDiagnosticText(run.command),
+  output: redactCrossReviewDiagnosticText(run.output),
+});
+const redactGuardRun = (run) => ({
+  ...run,
+  rule: redactCrossReviewDiagnosticText(run.rule),
+  detail: redactCrossReviewDiagnosticText(run.detail),
+});
+const runTestCommand = () => (testCommand ? [redactTestRun({ command: testCommand, ...runCommand(testCommand) })] : []);
 /** Every --guard-command, run once, as the guard runs the control program records. */
 const runGuardCommands = () =>
   guardCommands.map((command) => {
     const run = runCommand(command);
-    return { rule: command, passed: run.passed, detail: run.output.slice(-400), durationMs: run.durationMs };
+    const recorded = redactGuardRun({ rule: command, passed: run.passed, detail: run.output, durationMs: run.durationMs });
+    return { ...recorded, detail: recorded.detail.slice(-400) };
   });
 
 // ---------------------------------------------------------------------------
@@ -605,7 +617,7 @@ if (mode === "package") {
     diffExcluded,
     excludedDigests: excludedSnapshots(diffExcluded.filter((path) => generatedPaths.includes(path))),
     testResults,
-    guardCommands,
+    guardCommands: guardCommands.map(redactCrossReviewDiagnosticText),
     guardRuns,
     producedAt: new Date().toISOString(),
     diff,
@@ -866,7 +878,7 @@ if (mode === "mock") {
   reviewer = mockReviewer(roles.reviewer, (fixture.reviewer ?? []).map((entry) => ("ok" in entry ? entry : { ok: true, value: entry })));
   fixtureTests = fixture.tests ?? null;
   fixtureGuards = fixture.guards ?? null;
-  guards = async () => [...(fixtureGuards ? fixtureGuards[current] ?? [] : []), ...runGuardCommands()];
+  guards = async () => [...(fixtureGuards ? fixtureGuards[current] ?? [] : []).map(redactGuardRun), ...runGuardCommands()];
 } else {
   if (mode === "live" && !authorised) {
     die("--mode=live runs external tools that edit and spend. Pass --i-have-authorised-live-execution to confirm.");
@@ -887,7 +899,7 @@ if (mode === "mock") {
       passed: unseen.length === 0,
       detail: unseen.length === 0 ? `${tree.tracked.length} tracked change(s), no untracked file` : `untracked: ${unseen.join(", ")}`,
     };
-    return [treeRule, ...runGuardCommands()];
+    return [redactGuardRun(treeRule), ...runGuardCommands()];
   };
 }
 
@@ -901,7 +913,7 @@ const outcome = await runCrossReview({
   timeoutMs,
   runTests: async () => {
     current += 1;
-    const fromFixture = fixtureTests ? fixtureTests[current] ?? [] : [];
+    const fromFixture = fixtureTests ? (fixtureTests[current] ?? []).map(redactTestRun) : [];
     return testCommand ? runTestCommand() : fromFixture;
   },
   guards,

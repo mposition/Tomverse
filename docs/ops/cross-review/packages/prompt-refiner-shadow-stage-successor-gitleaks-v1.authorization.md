@@ -4,7 +4,7 @@
 - approvedAt: `2026-09-28` (Australia/Brisbane)
 - author: `codex`
 - independentReviewer: `claude-code-max`
-- reviewedHead: `16d7aded4eb3f002e28cc1b3507dca5f88da42dd`
+- reviewedHead: `370ae752bdbf2db990b25a965a23cfb2e6959923`
 - baseCommit: `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 
 사용자는 CHAT-01을 완료할 때까지 권장 순서로 자동 개발하고 독립 검토가 필요할 때
@@ -19,15 +19,21 @@ Claude 검토를 받도록 지시했다. 이 작업의 Claude 검토에 `--skip-
 `commit:path:rule:line` fingerprint로만 무시하는 변경의 읽기 전용 독립 검토에 적용한다.
 검토자는 24개 각각의 provenance, 기존 package bytes와 digest의 불변성, 기존 allowlist의
 비확장성 및 더 넓은 suppression이 없는지를 확인한다.
+또한 향후 생성되는 cross-review 진단은 위 DB fixture의 정확한 세 `KEY=VALUE` token만
+마스킹하고, 변경된 값·유사 key·일반 문맥과 검토 대상 source diff 및 digest는 그대로
+보존하는지 확인한다.
 
 ## 결정적 검사 계약
 
+- `node --import tsx --test tests/crossReview.test.mjs`
 - `node --test tests/gitleaksAllowlist.test.mjs`
 - `npm run security:regression`
+- `npm run typecheck`
+- `npx eslint lib/crossReviewCore.ts scripts/cross-review.mjs tests/crossReview.test.mjs`
 - `npm run check:encoding`
 - `git diff --check 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 - 로컬에 기존 Gitleaks 8.24.3 binary가 있을 때만 그 binary의 버전을 먼저 확인하고,
-  `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646^..16d7aded4eb3f002e28cc1b3507dca5f88da42dd`
+  `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646^..370ae752bdbf2db990b25a965a23cfb2e6959923`
   first-parent exact range를 현재 `.gitleaksignore`로 scan한다. 이번 작업을 위해 binary를
   내려받거나 다른 버전·container·원격 action으로 대체하지 않는다.
 

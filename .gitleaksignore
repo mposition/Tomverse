@@ -327,6 +327,9 @@ f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
 # are not provider credentials or deployable secrets. Changing those records
 # would invalidate their recorded digests, so the history scan is pinned to
 # these 24 exact commit/path/rule/line fingerprints and nothing broader.
+# These fingerprints also bind to that commit identity: preserve it with
+# merge commits only. Squash or rebase would mint new commits and invalidate
+# the exact exceptions rather than carrying this evidence forward.
 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:117
 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:261
 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:347

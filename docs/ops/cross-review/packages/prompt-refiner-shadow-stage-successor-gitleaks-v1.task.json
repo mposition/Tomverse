@@ -8,7 +8,9 @@
     "무시 대상 문자열은 검토 package가 기록한 합성 DB 통합 테스트 환경 placeholder이며 provider key, Railway credential, 사용자 비밀 또는 배포 가능한 secret이 아니다.",
     "기존 successor package 및 실패 시도 보존본의 bytes, SHA-256 manifest, verdict와 exchange는 수정하지 않고 새 allow entry로 소급 재작성하지 않는다.",
     "기존 .gitleaksignore entry를 삭제·변경·완화하지 않고 wildcard, regex, directory suppression, commit-only, path-only 또는 rule-only 예외를 추가하지 않는다.",
-    "tests/gitleaksAllowlist.test.mjs, security regression, encoding과 git diff whitespace 검사가 통과하고, 로컬에 기존 gitleaks 8.24.3 실행 경로가 있으면 82caecfd의 첫 부모부터 검토 HEAD까지의 exact first-parent range secret scan도 통과한다.",
+    "24개 exact fingerprint는 commit identity에 결속되므로 squash·rebase를 금지하고 merge commit만 허용한다.",
+    "향후 cross-review package가 실행한 check의 command와 output에는 세 합성 fixture assignment만 결정적으로 마스킹하되, 다른 값과 문맥은 보존하고 reviewed source diff와 change digest bytes는 변경하지 않는다.",
+    "tests/crossReview.test.mjs, tests/gitleaksAllowlist.test.mjs, security regression, typecheck, generator lint, encoding과 git diff whitespace 검사가 통과하고, 로컬에 기존 gitleaks 8.24.3 실행 경로가 있으면 82caecfd의 첫 부모부터 검토 HEAD까지의 exact first-parent range secret scan도 통과한다.",
     "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
     "이 exchange의 exact package output 디렉터리만 recursive review-record 팽창 방지를 위해 diff에서 제외하며 .gitleaksignore, task와 authorization은 검토 대상에 남는다."
   ],
@@ -16,7 +18,10 @@
   "writableScope": [
     ".gitleaksignore",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.authorization.md",
-    "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.task.json"
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.task.json",
+    "lib/crossReviewCore.ts",
+    "scripts/cross-review.mjs",
+    "tests/crossReview.test.mjs"
   ],
   "generatedPaths": []
 }

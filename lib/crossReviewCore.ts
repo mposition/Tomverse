@@ -69,6 +69,42 @@ export const DEFAULT_ROLE_ASSIGNMENT: RoleAssignment = {
     reviewer: "codex",
 };
 
+/**
+ * Synthetic values used by the repository's DB integration fixture. They are
+ * harmless test data, but copying their secret-shaped assignments into a
+ * generated package makes the immutable review record look like a credential
+ * to the history scanner. Keep this list exact: this is not a general-purpose
+ * secret scrubber and must not hide a different value supplied to a check.
+ */
+const CROSS_REVIEW_DIAGNOSTIC_FIXTURE_ASSIGNMENTS = [
+    ["NEXTAUTH_SECRET", ["tomverse-db-integration-", "test-secret-2026"].join("")],
+    ["MANIFEST_HASH_KEYS", ["db-integration-test:", "tomverse-db-integration-", "manifest-key-2026"].join("")],
+    ["MANIFEST_HASH_ACTIVE_KEY_ID", "db-integration-test"],
+] as const;
+
+const escapeRegularExpression = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const CROSS_REVIEW_DIAGNOSTIC_FIXTURE_PATTERNS = CROSS_REVIEW_DIAGNOSTIC_FIXTURE_ASSIGNMENTS.map(([key, value]) => ({
+    key,
+    // Generated check commands use shell assignment tokens separated by
+    // whitespace. Requiring both token boundaries prevents a similarly named
+    // variable or a changed/superstring value from being hidden.
+    pattern: new RegExp(`(^|\\s)${escapeRegularExpression(key)}=${escapeRegularExpression(value)}(?=$|\\s)`, "g"),
+}));
+
+/**
+ * Redacts only known synthetic KEY=VALUE tokens from generated check
+ * diagnostics. Values elsewhere remain evidence; so do changed values,
+ * similarly named keys and superstrings.
+ * Callers deliberately apply this to recorded commands and output, never to
+ * the reviewed source diff whose exact bytes and digest are evidence.
+ */
+export const redactCrossReviewDiagnosticText = (text: string): string =>
+    CROSS_REVIEW_DIAGNOSTIC_FIXTURE_PATTERNS.reduce(
+        (redacted, { key, pattern }) => redacted.replace(pattern, (_assignment, prefix: string) => `${prefix}${key}=[REDACTED:test-fixture]`),
+        text
+    );
+
 export type CrossReviewTask = {
     taskId: string;
     /** The original requirement, verbatim. What the reviewer reads first. */

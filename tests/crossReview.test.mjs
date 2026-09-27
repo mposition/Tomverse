@@ -25,6 +25,7 @@ import {
   parseExecutorJson,
   preflightGate,
   preflightReportProblems,
+  redactCrossReviewDiagnosticText,
   renderPreflightPrompt,
   renderReviewPrompt,
   replayExchange,
@@ -83,6 +84,36 @@ const pass = (command = "npm test") => [{ command, passed: true, output: "ok", d
 const fail = (command = "npm test") => [{ command, passed: false, output: "1 failing", durationMs: 1 }];
 const guardPass = (rule = "npm run lint") => [{ rule, passed: true, detail: "no problems", durationMs: 1 }];
 const guardFail = (rule = "protected files", detail = "tests/protected.test.mjs was modified") => [{ rule, passed: false, detail, durationMs: 1 }];
+const DB_INTEGRATION_FIXTURE_VALUES = {
+  nextAuth: ["tomverse-db-integration-", "test-secret-2026"].join(""),
+  manifestKeys: ["db-integration-test:", "tomverse-db-integration-", "manifest-key-2026"].join(""),
+  activeKey: "db-integration-test",
+};
+
+test("cross-review diagnostics redact only the three exact DB fixture assignments", () => {
+  const input =
+    `before NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ` +
+    `MANIFEST_HASH_KEYS=${DB_INTEGRATION_FIXTURE_VALUES.manifestKeys} ` +
+    `MANIFEST_HASH_ACTIVE_KEY_ID=${DB_INTEGRATION_FIXTURE_VALUES.activeKey} after`;
+  assert.equal(
+    redactCrossReviewDiagnosticText(input),
+    "before NEXTAUTH_SECRET=[REDACTED:test-fixture] " +
+      "MANIFEST_HASH_KEYS=[REDACTED:test-fixture] " +
+      "MANIFEST_HASH_ACTIVE_KEY_ID=[REDACTED:test-fixture] after"
+  );
+  assert.equal(
+    redactCrossReviewDiagnosticText(
+      `NEXTAUTH_SECRET=another-value ` +
+        `NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth}-suffix ` +
+        `OTHER_NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ` +
+        `${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ordinary context`
+    ),
+    `NEXTAUTH_SECRET=another-value ` +
+      `NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth}-suffix ` +
+      `OTHER_NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ` +
+      `${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ordinary context`
+  );
+});
 
 const finding = (overrides = {}) => ({
   location: "lib/sum.ts:1",
@@ -1004,6 +1035,75 @@ const runScript = (cwd, args) => {
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };
 
+test("guard fixture assignments are redacted before the 400-character persisted tail is taken", { timeout: 180_000 }, () => {
+  const work = mkdtempSync(join(tmpdir(), "cross-review-redaction-"));
+  try {
+    const repo = join(work, "repo");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    const git = (...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "src", "a.txt"), "before\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    writeFileSync(join(repo, "src", "a.txt"), "after\n");
+    const taskFile = join(work, "task.json");
+    writeFileSync(
+      taskFile,
+      JSON.stringify({ taskId: "T-redaction", requirement: "r", completionCriteria: ["c"], baseCommit: base, writableScope: ["src/a.txt"] })
+    );
+
+    const cases = [
+      { key: "NEXTAUTH_SECRET", value: DB_INTEGRATION_FIXTURE_VALUES.nextAuth, channel: "stdout" },
+      { key: "MANIFEST_HASH_KEYS", value: DB_INTEGRATION_FIXTURE_VALUES.manifestKeys, channel: "stderr" },
+      { key: "MANIFEST_HASH_ACTIVE_KEY_ID", value: DB_INTEGRATION_FIXTURE_VALUES.activeKey, channel: "stdout" },
+    ];
+    assert.deepEqual(cases.map(({ value }) => value.length), [40, 61, 19], "the three reviewed fixture boundaries remain exact");
+    const guardArgs = cases.map(({ key, value, channel }) => {
+      // With the old slice-then-redact order, the 400-character tail started
+      // halfway through VALUE and persisted its raw suffix without KEY=.
+      const tail = "x".repeat(400 - Math.ceil(value.length / 2) - 1);
+      const redirect = channel === "stderr" ? " >&2; exit 1" : "";
+      return `--guard-command=${key}=${value} sh -c 'printf "%s" "${key}=$${key} ${tail}"${redirect}'`;
+    });
+    const result = runScript(repo, [
+      "--mode=package",
+      `--task=${taskFile}`,
+      "--out=artifacts/pkg",
+      "--test-command=true",
+      ...guardArgs,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const packageDir = join(repo, "artifacts", "pkg");
+    const record = JSON.parse(readFileSync(join(packageDir, "package-round0.json"), "utf8"));
+    const exactDiff = readFileSync(join(packageDir, "change.diff"), "utf8");
+    const exchangeText = readFileSync(join(packageDir, "exchange.json"), "utf8");
+    const reviewPrompt = readFileSync(join(packageDir, "review-prompt.md"), "utf8");
+    assert.deepEqual(record.guardRuns.map(({ passed }) => passed), [true, false, true], "stdout and stderr guard paths both persist");
+    assert.ok(record.guardRuns.every(({ detail }) => detail.length <= 400));
+    assert.equal(exactDiff, record.diff);
+    assert.equal(record.changeDigest, digest(exactDiff));
+    assert.ok(reviewPrompt.includes(exactDiff), "the source diff stays byte-exact in the reviewer prompt");
+    const persistedDiagnostics =
+      JSON.stringify({ guardCommands: record.guardCommands, testResults: record.testResults, guardRuns: record.guardRuns }) +
+      exchangeText +
+      reviewPrompt.replace(exactDiff, "");
+    for (const { value } of cases) {
+      const fragments = [value, value.slice(0, Math.floor(value.length / 2)), value.slice(Math.floor(value.length / 2))];
+      for (const fragment of fragments) {
+        assert.doesNotMatch(persistedDiagnostics, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      }
+    }
+    assert.match(persistedDiagnostics, /NEXTAUTH_SECRET=\[REDACTED:test-fixture\]/);
+    assert.match(persistedDiagnostics, /MANIFEST_HASH_KEYS=\[REDACTED:test-fixture\]/);
+    assert.match(persistedDiagnostics, /MANIFEST_HASH_ACTIVE_KEY_ID=\[REDACTED:test-fixture\]/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("the script's package and review paths hold the rules end to end: exact exclusions, absent snapshots, and the newest preflight", { timeout: 180_000 }, () => {
   const work = mkdtempSync(join(tmpdir(), "cross-review-script-"));
   try {
@@ -1035,11 +1135,22 @@ test("the script's package and review paths hold the rules end to end: exact exc
         generatedPaths: ["reports/generated.md", "reports/absent.md"],
       })
     );
-    writeFileSync(join(repo, "src", "[b].txt"), "b2\n");
+    const fixtureValues = DB_INTEGRATION_FIXTURE_VALUES;
+    writeFileSync(
+      join(repo, "src", "[b].txt"),
+      `b2\nNEXTAUTH_SECRET=${fixtureValues.nextAuth}\nMANIFEST_HASH_KEYS=${fixtureValues.manifestKeys}\nMANIFEST_HASH_ACTIVE_KEY_ID=${fixtureValues.activeKey}\n`
+    );
     writeFileSync(join(repo, "reports", "generated.md"), "g2\n");
     const common = [`--task=${taskFile}`, "--out=artifacts/pkg", "--round=0"];
     const excludes = ["--diff-exclude=reports/generated.md", "--diff-exclude=reports/absent.md", "--diff-exclude=artifacts/pkg"];
-    const checks = ["--test-command=true", "--guard-command=true"];
+    const fixtureAssignments =
+      `NEXTAUTH_SECRET=${fixtureValues.nextAuth} ` +
+      `MANIFEST_HASH_KEYS=${fixtureValues.manifestKeys} ` +
+      `MANIFEST_HASH_ACTIVE_KEY_ID=${fixtureValues.activeKey}`;
+    const checks = [
+      `--test-command=${fixtureAssignments} sh -c 'printf "test context NEXTAUTH_SECRET=%s MANIFEST_HASH_KEYS=%s MANIFEST_HASH_ACTIVE_KEY_ID=%s\\n" "$NEXTAUTH_SECRET" "$MANIFEST_HASH_KEYS" "$MANIFEST_HASH_ACTIVE_KEY_ID"'`,
+      `--guard-command=${fixtureAssignments} sh -c 'printf "guard context NEXTAUTH_SECRET=%s MANIFEST_HASH_KEYS=%s MANIFEST_HASH_ACTIVE_KEY_ID=%s\\n" "$NEXTAUTH_SECRET" "$MANIFEST_HASH_KEYS" "$MANIFEST_HASH_ACTIVE_KEY_ID"'`,
+    ];
     const pkg = (extra) => runScript(repo, ["--mode=package", ...common, ...checks, ...extra]);
     const packageRecord = join(repo, "artifacts", "pkg", "package-round0.json");
 
@@ -1070,6 +1181,24 @@ test("the script's package and review paths hold the rules end to end: exact exc
     assert.deepEqual(record.filesChanged, ["reports/generated.md", "src/[b].txt"]);
     assert.equal(record.testResults[0].passed, true);
     assert.equal(record.guardRuns[0].passed, true);
+    const diagnostics = JSON.stringify({ guardCommands: record.guardCommands, testResults: record.testResults, guardRuns: record.guardRuns });
+    for (const value of Object.values(fixtureValues)) assert.doesNotMatch(diagnostics, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(record.testResults[0].command, /NEXTAUTH_SECRET=\[REDACTED:test-fixture\]/);
+    assert.match(record.testResults[0].output, /^test context NEXTAUTH_SECRET=\[REDACTED:test-fixture\] MANIFEST_HASH_KEYS=\[REDACTED:test-fixture\] MANIFEST_HASH_ACTIVE_KEY_ID=\[REDACTED:test-fixture\]$/);
+    assert.match(record.guardRuns[0].detail, /^guard context NEXTAUTH_SECRET=\[REDACTED:test-fixture\] MANIFEST_HASH_KEYS=\[REDACTED:test-fixture\] MANIFEST_HASH_ACTIVE_KEY_ID=\[REDACTED:test-fixture\]$/);
+    const exactDiff = readFileSync(join(repo, "artifacts", "pkg", "change.diff"), "utf8");
+    assert.equal(exactDiff, record.diff, "the review diff is not redacted with diagnostics");
+    assert.equal(record.changeDigest, digest(exactDiff));
+    for (const value of Object.values(fixtureValues)) assert.match(exactDiff, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const exchangeText = readFileSync(join(repo, "artifacts", "pkg", "exchange.json"), "utf8");
+    const reviewPrompt = readFileSync(join(repo, "artifacts", "pkg", "review-prompt.md"), "utf8");
+    assert.ok(reviewPrompt.includes(exactDiff), "the reviewer sees the exact source diff");
+    const promptDiagnostics = reviewPrompt.replace(exactDiff, "");
+    for (const value of Object.values(fixtureValues)) {
+      const pattern = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      assert.doesNotMatch(exchangeText, pattern);
+      assert.doesNotMatch(promptDiagnostics, pattern);
+    }
 
     // The reviewer's reproduction from round 1: a generated file that did not
     // exist at packaging appears before the review. The review refuses; so
