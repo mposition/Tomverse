@@ -537,6 +537,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
+    count: 1,
+    reason:
+      "The waiver-sealed trigger reads the approval it is about to be pointed at, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
     path: "prisma/migrations/20260923400000_release_notes_country_rule/migration.sql",
     count: 2,
     reason:

@@ -15,6 +15,11 @@ import {
   releaseNotesRuleSeedProblems,
 } from "@/lib/releaseNotesCountryRuleCore";
 import { releaseNotesRuleVersionConflicts } from "@/lib/releaseNotesCountryRules";
+import {
+  releaseNotesObligationSeed,
+  releaseNotesObligationSeedProblems,
+} from "@/lib/releaseNotesObligationCore";
+import { releaseNotesRuleKey as obligationRuleKey } from "@/lib/releaseNotesCountryRuleCore";
 
 /**
  * Policy versions: creating a draft, reading one, and activating one.
@@ -155,7 +160,11 @@ export async function ensureJurisdictionPolicyDraft(input?: {
   version?: string;
   changeSummary?: string;
 }) {
-  const problems = [...jurisdictionSeedProblems(), ...releaseNotesRuleSeedProblems()];
+  const problems = [
+    ...jurisdictionSeedProblems(),
+    ...releaseNotesRuleSeedProblems(),
+    ...releaseNotesObligationSeedProblems(),
+  ];
   if (problems.length > 0) {
     throw new JurisdictionPolicyError(
       "JURISDICTION_SEED_INVALID",
@@ -245,6 +254,30 @@ export async function ensureJurisdictionPolicyDraft(input?: {
         ruleVersion: rule.ruleVersion,
         notes: rule.notes,
       })),
+    });
+    // The duty states that are settled without anybody deciding anything --
+    // the ones a readiness check confirms (draft section 7.8). A waiver is not
+    // among them: an approval is a person's act, so a duty the owner decided
+    // not to do stays unsettled here until that approval exists, and its rule
+    // does not send. That is what an undecided duty is supposed to do.
+    //
+    // Keyed on the rule version, so a later policy version carrying the same
+    // rule version finds the states already there.
+    const ruleVersionOf = new Map(rules.map((rule) => [rule.countryCode, rule.ruleVersion]));
+    await tx.releaseNotesRuleObligation.createMany({
+      data: releaseNotesObligationSeed()
+        .filter((duty) => ruleVersionOf.has(duty.countryCode))
+        .map((duty) => ({
+          ruleKey: obligationRuleKey(duty.countryCode),
+          ruleVersion: ruleVersionOf.get(duty.countryCode)!,
+          obligationKey: duty.obligationKey,
+          state: duty.state,
+          readinessCheck: duty.readinessCheck,
+          dueBy: duty.dueByIso === null ? null : new Date(duty.dueByIso),
+          warnDaysBefore: duty.warnDaysBefore,
+          notes: duty.notes,
+        })),
+      skipDuplicates: true,
     });
     return tx.emailPolicyVersion.findUniqueOrThrow({
       where: { id: policyVersion.id },

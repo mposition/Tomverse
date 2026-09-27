@@ -16,6 +16,7 @@ import { getSearchProviderBudgetReadiness } from "@/lib/searchProviderBudgetRead
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
+import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
@@ -243,6 +244,19 @@ const readinessResponse = async (head = false) => {
   // yes -- the exact state EM-10 describes for the keyring.
   const businessIdentity = businessIdentityReadiness();
   const emailBusinessIdentity = businessIdentity.ready;
+  // The subject labels a statute requires, read from the rows a send composes
+  // under rather than from the seed (draft section 7.8). A warning until
+  // MARKETING_EMAIL_FROM is set, for the reason the keyring gives, and only
+  // asked at all once the database answered -- it reads the active policy
+  // version, and a failing database has already made this endpoint not-ready.
+  const subjectLabels = databaseResult.ready
+    ? await withDeadline(
+        subjectLabelReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The email subject label readiness check timed out."
+      ).catch(() => null)
+    : null;
+  const emailSubjectLabels = subjectLabels === null ? true : subjectLabels.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -250,7 +264,7 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity;
+    emailBusinessIdentity && emailSubjectLabels;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -623,6 +637,7 @@ const readinessResponse = async (head = false) => {
         emailUnsubscribeKeyRetention,
         emailConsentKeyring,
         emailBusinessIdentity,
+        emailSubjectLabels,
       },
       traceId,
     },

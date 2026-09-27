@@ -279,6 +279,10 @@ run(
     // cannot have its rules changed, and one (ruleKey, ruleVersion) names one
     // content -- both enforced by trigger, because a waiver is scoped to it.
     "tests/integration/release-notes-country-rule.db.test.ts",
+    // The duty states: each one carries its own evidence and only its own, and a
+    // waiver has to name a sealed approval of the waiver kind. All three are
+    // constraints and a trigger, so only the database can answer for them.
+    "tests/integration/release-notes-rule-obligation.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
