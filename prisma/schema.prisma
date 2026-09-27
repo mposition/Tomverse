@@ -4574,14 +4574,22 @@ model ReleaseNotesRuleVersion {
   createdAt DateTime @default(now())
 
   countryRules ReleaseNotesCountryRule[]
-  obligations  ReleaseNotesRuleObligation[]
 
   @@id([ruleKey, ruleVersion])
   @@index([countryCode])
 }
 
-/// How one statutory duty of one rule version is settled. Contract:
-/// docs/policy/email-product-news-redesign-draft.md sections 7.7 and 7.8.
+/// How one statutory duty of one country's rule is settled, in one policy
+/// version. Contract: docs/policy/email-product-news-redesign-draft.md sections
+/// 7.7 and 7.8.
+///
+/// Keyed on the **country rule**, which is what section 7.8 says and what an
+/// obligation waiver's scope requires: a waiver names a policy version, a rule
+/// key, a rule version, a country and a duty, and all five have to match. The
+/// first version keyed these on the rule version alone, which cannot express
+/// that -- two policy versions carrying the same rule version would share one
+/// duty row, so a waiver approved for one of them failed for the other, and
+/// updating the row to suit the new one broke the old.
 ///
 /// Which duties exist is declared in `lib/releaseNotesObligationCore.ts`, not
 /// here: a duty with no row is unsettled and blocks its rule, which is the whole
@@ -4589,14 +4597,13 @@ model ReleaseNotesRuleVersion {
 /// that confirms an `implemented` duty, the date a `deferred` one must exist
 /// by, the sealed approval that `waived` it -- and a CHECK enforces that.
 ///
-/// Not append-only, unlike the rule version whose content it hangs off: a
-/// deferral becoming an implementation is the lifecycle this records. The only
-/// state that can loosen a send is `waived`, and that needs an approval nothing
-/// but a person can write.
+/// Not append-only, unlike the rule version: a deferral becoming an
+/// implementation is the lifecycle this records. The only state that can loosen
+/// a send is `waived`, and that needs an approval nothing but a person can
+/// write.
 model ReleaseNotesRuleObligation {
-  ruleKey     String
-  ruleVersion Int
-  rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict)
+  countryRuleId String
+  countryRule   ReleaseNotesCountryRule @relation(fields: [countryRuleId], references: [id], onDelete: Cascade)
 
   obligationKey String
 
@@ -4622,7 +4629,7 @@ model ReleaseNotesRuleObligation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@id([ruleKey, ruleVersion, obligationKey])
+  @@id([countryRuleId, obligationKey])
   @@index([waiverApprovalId])
 }
 
@@ -4646,6 +4653,8 @@ model ReleaseNotesCountryRule {
   rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict)
 
   notes String
+
+  obligations ReleaseNotesRuleObligation[]
 
   createdAt DateTime @default(now())
 

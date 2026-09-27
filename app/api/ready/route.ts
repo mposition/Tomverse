@@ -279,8 +279,13 @@ const readinessResponse = async (head = false) => {
         "The biennial consent notice readiness check timed out."
       ).catch(() => null)
     : null;
+  // Reported, not gating. A Korean duty falling due is a reason to refuse
+  // Korean marketing -- which the rule verdict does, from the same
+  // `biennialNoticeReadiness()` answer -- and not a reason to take the whole
+  // deployment down. A review was right that failing readiness here would have
+  // done exactly that.
   const emailBiennialConsentNotice =
-    biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.ready;
+    biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.healthy;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -288,7 +293,7 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity && emailSubjectLabels && emailBiennialConsentNotice;
+    emailBusinessIdentity && emailSubjectLabels;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -508,6 +513,56 @@ const readinessResponse = async (head = false) => {
           warnings:
             snapshotKeyring.warnings.map((problem) => problem.code).join(",") ||
             "none",
+          traceId,
+        },
+      }),
+      // The two Korean duty checks. Both are reported rather than only folded
+      // into a boolean: the subject label's own failure names which country is
+      // refused, and the biennial notice's warning is the whole point of
+      // section 7.7's "device that stops it being forgotten" -- a warning that
+      // reaches nobody is a calculation.
+      reportOperationalDependencyStatus({
+        dependency: "email-subject-labels",
+        healthy: emailSubjectLabels,
+        code: "EMAIL_SUBJECT_LABEL_MISSING",
+        title: "A statutory subject label is not on the rows that send",
+        error:
+          subjectLabels === null
+            ? "The subject label readiness check could not be answered."
+            : subjectLabels.problems.length > 0
+              ? subjectLabels.problems.map((problem) => problem.message).join(" | ")
+              : "Every required subject label is present.",
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          required: String(subjectLabels?.required ?? "unknown"),
+          labelsPresent: String(subjectLabels?.labelsPresent ?? "unknown"),
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "email-biennial-consent-notice",
+        healthy: emailBiennialConsentNotice && (biennialNotice?.problems.length ?? 0) === 0,
+        code: "EMAIL_BIENNIAL_CONSENT_NOTICE_DUE",
+        title: "Korea's two-yearly consent notice is due or close to it",
+        error:
+          biennialNotice === null
+            ? "The biennial consent notice readiness check could not be answered."
+            : biennialNotice.problems.length > 0
+              ? biennialNotice.problems.map((problem) => problem.message).join(" | ")
+              : biennialNotice.earliestDueAt === null
+                ? "No Korean recipient is anchored, so nothing is due."
+                : `The earliest deadline is ${biennialNotice.earliestDueAt.toISOString().slice(0, 10)}.`,
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // A count and a date, and nothing that identifies anybody: the
+          // deadline is reported to the day rather than the millisecond, so a
+          // single-recipient count cannot be correlated back to one consent.
+          recipients: String(biennialNotice?.recipients ?? "unknown"),
+          earliestDueOn: biennialNotice?.earliestDueAt?.toISOString().slice(0, 10) ?? "none",
           traceId,
         },
       }),

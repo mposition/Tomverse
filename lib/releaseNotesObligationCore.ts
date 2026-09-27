@@ -164,6 +164,17 @@ export const obligationsVerdict = (input: {
   stored: readonly StoredObligation[];
   readiness: Readonly<Record<string, boolean>>;
   waivers: readonly WaiverApproval[];
+  /**
+   * A deadline the caller has computed from rows, per duty key, where it knows
+   * one.
+   *
+   * A deferral's `dueBy` is written by a seed, which cannot know when the
+   * earliest anchor actually is -- section 7.7's 2028 is the year it reasoned
+   * to, not a date it measured. Where a caller has measured one, the earlier of
+   * the two blocks: the row is a backstop and this is the fact, and a deferral
+   * watched only by its backstop expires on the day somebody guessed.
+   */
+  deadlines?: Readonly<Record<string, Date>>;
   now: Date;
 }): ObligationsVerdict => {
   const declared = obligationsFor(input.countryCode);
@@ -208,11 +219,18 @@ export const obligationsVerdict = (input: {
 
     if (row.state === "deferred") {
       if (row.dueBy === null) return refused("deferral_overdue");
-      if (row.dueBy.getTime() <= input.now.getTime()) return refused("deferral_overdue");
+      const measured = input.deadlines?.[obligationKey];
+      const dueAt =
+        measured !== undefined && measured.getTime() < row.dueBy.getTime()
+          ? measured
+          : row.dueBy;
+      if (dueAt.getTime() <= input.now.getTime()) return refused("deferral_overdue");
       const warnFrom =
         row.warnDaysBefore === null
           ? null
-          : row.dueBy.getTime() - row.warnDaysBefore * DAY_MS;
+          : dueAt.getTime() - row.warnDaysBefore * DAY_MS;
+      // The window counts back from whichever deadline applies, not from the
+      // row's own.
       return settled(
         warnFrom !== null && input.now.getTime() >= warnFrom ? "deferral_due_soon" : null
       );

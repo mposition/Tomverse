@@ -19,7 +19,7 @@ import {
   releaseNotesObligationSeed,
   releaseNotesObligationSeedProblems,
 } from "@/lib/releaseNotesObligationCore";
-import { releaseNotesRuleKey as obligationRuleKey } from "@/lib/releaseNotesCountryRuleCore";
+
 
 /**
  * Policy versions: creating a draft, reading one, and activating one.
@@ -246,7 +246,10 @@ export async function ensureJurisdictionPolicyDraft(input?: {
         500
       );
     }
-    await tx.releaseNotesCountryRule.createMany({
+    // `createManyAndReturn` rather than `createMany`: the duty states below are
+    // keyed on the country rule's id, so the ids have to come back from the same
+    // write rather than from a second read that could see a different set.
+    const countryRules = await tx.releaseNotesCountryRule.createManyAndReturn({
       data: rules.map((rule) => ({
         policyVersionId: policyVersion.id,
         countryCode: rule.countryCode,
@@ -254,6 +257,7 @@ export async function ensureJurisdictionPolicyDraft(input?: {
         ruleVersion: rule.ruleVersion,
         notes: rule.notes,
       })),
+      select: { id: true, countryCode: true },
     });
     // The duty states that are settled without anybody deciding anything --
     // the ones a readiness check confirms (draft section 7.8). A waiver is not
@@ -263,13 +267,12 @@ export async function ensureJurisdictionPolicyDraft(input?: {
     //
     // Keyed on the rule version, so a later policy version carrying the same
     // rule version finds the states already there.
-    const ruleVersionOf = new Map(rules.map((rule) => [rule.countryCode, rule.ruleVersion]));
+    const countryRuleOf = new Map(countryRules.map((row) => [row.countryCode, row.id]));
     await tx.releaseNotesRuleObligation.createMany({
       data: releaseNotesObligationSeed()
-        .filter((duty) => ruleVersionOf.has(duty.countryCode))
+        .filter((duty) => countryRuleOf.has(duty.countryCode))
         .map((duty) => ({
-          ruleKey: obligationRuleKey(duty.countryCode),
-          ruleVersion: ruleVersionOf.get(duty.countryCode)!,
+          countryRuleId: countryRuleOf.get(duty.countryCode)!,
           obligationKey: duty.obligationKey,
           state: duty.state,
           readinessCheck: duty.readinessCheck,
@@ -277,7 +280,6 @@ export async function ensureJurisdictionPolicyDraft(input?: {
           warnDaysBefore: duty.warnDaysBefore,
           notes: duty.notes,
         })),
-      skipDuplicates: true,
     });
     return tx.emailPolicyVersion.findUniqueOrThrow({
       where: { id: policyVersion.id },

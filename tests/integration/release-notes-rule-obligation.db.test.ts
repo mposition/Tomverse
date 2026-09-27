@@ -34,11 +34,21 @@ const reset = () =>
 const draft = async () =>
   (await ensureJurisdictionPolicyDraft({ version: `test-${randomUUID()}` })).version;
 
+/** The Korean country rule of the most recent policy version. */
+const koreanRuleId = async () =>
+  (
+    await prisma.releaseNotesCountryRule.findFirstOrThrow({
+      where: { countryCode: "KR" },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    })
+  ).id;
+
 const duty = (
+  countryRuleId: string,
   overrides: Partial<Prisma.ReleaseNotesRuleObligationUncheckedCreateInput> = {}
 ): Prisma.ReleaseNotesRuleObligationUncheckedCreateInput => ({
-  ruleKey: releaseNotesRuleKey("KR"),
-  ruleVersion: 1,
+  countryRuleId,
   obligationKey: "consent_result_notice_14_days",
   state: "implemented",
   readinessCheck: "emailBusinessIdentity",
@@ -88,44 +98,75 @@ after(async () => {
 test("a draft carries the duty states that are settled without a decision", async () => {
   const version = await draft();
   const stored = await prisma.releaseNotesRuleObligation.findMany({
-    select: { ruleKey: true, obligationKey: true, state: true, readinessCheck: true },
-    orderBy: [{ ruleKey: "asc" }, { obligationKey: "asc" }],
+    select: {
+      obligationKey: true,
+      state: true,
+      readinessCheck: true,
+      dueBy: true,
+      countryRule: { select: { countryCode: true, policyVersionId: true } },
+    },
+    orderBy: [{ countryRuleId: "asc" }, { obligationKey: "asc" }],
   });
 
   assert.deepEqual(
-    stored.map((row) => `${row.ruleKey}:${row.obligationKey}`).sort(),
+    stored.map((row) => `${row.countryRule.countryCode}:${row.obligationKey}`).sort(),
     releaseNotesObligationSeed()
-      .map((seeded) => `${releaseNotesRuleKey(seeded.countryCode)}:${seeded.obligationKey}`)
+      .map((seeded) => `${seeded.countryCode}:${seeded.obligationKey}`)
       .sort()
   );
-  // Every one of them is implemented, because an approval is the only thing that
-  // can waive a duty and a seed cannot write one.
-  assert.deepEqual([...new Set(stored.map((row) => row.state))], ["implemented"]);
-  for (const row of stored) assert.ok(row.readinessCheck);
+  // Keyed on this policy version's rules, which is what a waiver's scope names.
+  for (const row of stored) {
+    assert.equal(row.countryRule.policyVersionId, version.id);
+  }
+  // No duty is waived: an approval is the only thing that can waive one, and a
+  // seed cannot write an approval.
+  assert.deepEqual([...new Set(stored.map((row) => row.state))].sort(), [
+    "deferred",
+    "implemented",
+  ]);
+  for (const row of stored) {
+    if (row.state === "implemented") assert.ok(row.readinessCheck);
+    if (row.state === "deferred") assert.ok(row.dueBy);
+  }
 
-  // And Korea's remaining three duties have no row, which is what blocks the
-  // Korean rule until somebody settles them.
+  // Korea's three unsettled duties have no row, which is what would block the
+  // Korean rule once S9 reads these.
   const korean = stored
-    .filter((row) => row.ruleKey === releaseNotesRuleKey("KR"))
+    .filter((row) => row.countryRule.countryCode === "KR")
     .map((row) => row.obligationKey);
   assert.deepEqual(
     obligationsFor("KR").filter((key) => !korean.includes(key)),
-    ["consent_result_notice_14_days", "biennial_consent_notice", "advertising_subject_label"]
+    [
+      "bilingual_unsubscribe_notice",
+      "consent_result_notice_14_days",
+      "advertising_subject_label",
+    ]
   );
-  assert.ok(version.id);
 });
 
-test("a second draft reuses the duty rows rather than restating them", async () => {
-  await draft();
-  await draft();
-  assert.equal(
-    await prisma.releaseNotesRuleObligation.count(),
-    releaseNotesObligationSeed().length
-  );
+test("a second draft gets its own duty rows, because a waiver names a policy version", async () => {
+  // The opposite of the rule versions, which are shared. A duty state belongs to
+  // one policy version's rule: that is what an obligation waiver's scope names,
+  // and sharing one row between two versions is what made a waiver approved
+  // under one of them fail under the other.
+  const first = await draft();
+  const second = await draft();
+  const perDraft = releaseNotesObligationSeed().length;
+
+  assert.equal(await prisma.releaseNotesRuleObligation.count(), perDraft * 2);
+  for (const version of [first, second]) {
+    assert.equal(
+      await prisma.releaseNotesRuleObligation.count({
+        where: { countryRule: { policyVersionId: version.id } },
+      }),
+      perDraft
+    );
+  }
 });
 
 test("each state carries its own evidence and only its own", async () => {
   await draft();
+  const ruleId = await koreanRuleId();
   await prisma.releaseNotesRuleObligation.deleteMany({});
   const sealed = await approval({ sealedAt: new Date("2026-09-20T00:00:00.000Z") });
 
@@ -164,15 +205,15 @@ test("each state carries its own evidence and only its own", async () => {
   ];
   for (const [overrides, pattern] of cases) {
     await refuses(
-      () => prisma.releaseNotesRuleObligation.create({ data: duty(overrides) }),
+      () => prisma.releaseNotesRuleObligation.create({ data: duty(ruleId, overrides) }),
       pattern
     );
   }
 
   // The three shapes that are right.
-  await prisma.releaseNotesRuleObligation.create({ data: duty() });
+  await prisma.releaseNotesRuleObligation.create({ data: duty(ruleId) });
   await prisma.releaseNotesRuleObligation.create({
-    data: duty({
+    data: duty(ruleId, {
       obligationKey: "biennial_consent_notice",
       state: "deferred",
       readinessCheck: null,
@@ -181,7 +222,7 @@ test("each state carries its own evidence and only its own", async () => {
     }),
   });
   await prisma.releaseNotesRuleObligation.create({
-    data: duty({
+    data: duty(ruleId, {
       obligationKey: "advertising_subject_label",
       state: "waived",
       readinessCheck: null,
@@ -194,13 +235,14 @@ test("each state carries its own evidence and only its own", async () => {
 
 test("a waiver must be an approval of the right kind, and sealed", async () => {
   await draft();
+  const ruleId = await koreanRuleId();
   await prisma.releaseNotesRuleObligation.deleteMany({});
 
   const unsealed = await approval();
   await refuses(
     () =>
       prisma.releaseNotesRuleObligation.create({
-        data: duty({
+        data: duty(ruleId, {
           obligationKey: "advertising_subject_label",
           state: "waived",
           readinessCheck: null,
@@ -225,7 +267,7 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
   await refuses(
     () =>
       prisma.releaseNotesRuleObligation.create({
-        data: duty({
+        data: duty(ruleId, {
           obligationKey: "advertising_subject_label",
           state: "waived",
           readinessCheck: null,
@@ -238,7 +280,7 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
   await refuses(
     () =>
       prisma.releaseNotesRuleObligation.create({
-        data: duty({
+        data: duty(ruleId, {
           obligationKey: "advertising_subject_label",
           state: "waived",
           readinessCheck: null,

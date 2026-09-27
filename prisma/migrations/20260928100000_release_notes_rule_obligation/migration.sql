@@ -1,4 +1,5 @@
--- The statutory duties a rule version carries, and how each one is settled.
+-- The statutory duties one country's rule carries in one policy version, and
+-- how each one is settled.
 --
 -- Contract: docs/policy/email-product-news-redesign-draft.md sections 7.7 and
 -- 7.8.
@@ -21,8 +22,17 @@
 -- mechanism and it lives in `lib/releaseNotesObligationCore.ts`, which declares
 -- the duties that exist; this table holds only what has been settled.
 --
--- The duty hangs off the **rule version**, not the country rule, because that
--- is what a waiver is scoped to (`EmailSendApproval.ruleKey`/`ruleVersion`).
+-- The duty hangs off the **country rule**, which is what section 7.8 says and
+-- what a waiver's scope requires: an `obligation_waiver` names a policy version,
+-- a rule key, a rule version, a country and a duty key, and the verdict compares
+-- all five.
+--
+-- The first version keyed these on the rule version alone, and a review showed
+-- that cannot express it: two policy versions carrying the same rule version
+-- would share one duty row, so a waiver approved under one of them failed under
+-- the other, and rewriting the row to suit the new one broke the old. The
+-- country rule is per policy version, so the key and the scope now agree.
+--
 -- Unlike the rule version's own content, a duty state changes over time -- a
 -- deferral becomes an implementation -- so these rows are not append-only. What
 -- protects them is that every state still has to produce its evidence, and the
@@ -34,8 +44,7 @@
 BEGIN;
 
 CREATE TABLE "ReleaseNotesRuleObligation" (
-    "ruleKey" TEXT NOT NULL,
-    "ruleVersion" INTEGER NOT NULL,
+    "countryRuleId" TEXT NOT NULL,
     "obligationKey" TEXT NOT NULL,
     "state" TEXT NOT NULL,
     "readinessCheck" TEXT,
@@ -47,17 +56,20 @@ CREATE TABLE "ReleaseNotesRuleObligation" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ReleaseNotesRuleObligation_pkey" PRIMARY KEY ("ruleKey", "ruleVersion", "obligationKey")
+    CONSTRAINT "ReleaseNotesRuleObligation_pkey" PRIMARY KEY ("countryRuleId", "obligationKey")
 );
 
 CREATE INDEX "ReleaseNotesRuleObligation_waiverApprovalId_idx"
     ON "ReleaseNotesRuleObligation"("waiverApprovalId");
 
+-- Cascade, unlike the rule version's own foreign key: a duty state is about one
+-- policy version's rule, so a draft thrown away takes its duty states with it.
+-- What must not disappear is the rule version, which a waiver names.
 ALTER TABLE "ReleaseNotesRuleObligation"
-    ADD CONSTRAINT "ReleaseNotesRuleObligation_rule_fkey"
-    FOREIGN KEY ("ruleKey", "ruleVersion")
-    REFERENCES "ReleaseNotesRuleVersion"("ruleKey", "ruleVersion")
-    ON DELETE RESTRICT ON UPDATE CASCADE;
+    ADD CONSTRAINT "ReleaseNotesRuleObligation_countryRule_fkey"
+    FOREIGN KEY ("countryRuleId")
+    REFERENCES "ReleaseNotesCountryRule"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- The pair, not the id alone. `EmailSendApproval` carries a unique on
 -- (id, approvalType) for exactly this: a waiver has to be an approval of type
