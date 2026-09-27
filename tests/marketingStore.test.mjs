@@ -10,6 +10,7 @@ import {
 import {
   appendMarketingPostHistory,
   MarketingStoreRefusedError,
+  MARKETING_REQUEUE_ACTION,
   MARKETING_RESUME_AUTONOMOUS_ACTION,
   updateMarketingChannel,
 } from "@/lib/marketingStore";
@@ -237,4 +238,101 @@ test("an unchanged pause reason allows the verified resume", async () => {
     assert.equal(result.id, "channel-1");
     assert.equal(write.where.pauseReasonCode, "incident");
   });
+});
+
+test("a requeue through the history append also ends the old claim", async () => {
+  // The second requeue path. `requeueMarketingPostAfterFailure` is pinned in
+  // tests/marketingS2b1Store.test.mjs; this is the failed-to-scheduled branch
+  // of `appendMarketingPostHistory`, which clears the same two columns and
+  // had nothing holding it there. Two paths to one rule with a test on one of
+  // them is how they drift apart.
+  const failedAt = "2026-09-21T00:00:30.000Z";
+  const hashInput = {
+    previousHash: null,
+    actorUserId: "operator-1",
+    actorEmail: "owner@example.test",
+    action: MARKETING_REQUEUE_ACTION,
+    targetType: "MarketingPost",
+    targetId: "post-1",
+    summary: "Requeue after the failure.",
+    metadata: { actorHadMarketingWrite: true, digest: DIGEST },
+    ipAddress: null,
+    userAgent: null,
+    createdAt: auditAt.toISOString(),
+  };
+  const audit = {
+    id: "audit-requeue",
+    ...hashInput,
+    createdAt: auditAt,
+    entryHash:
+      adminAuditEntryHashVariants(hashInput, auditSecret)[
+        ADMIN_AUDIT_SIGNING_KEY_ORDER
+      ],
+  };
+
+  let write;
+  await withAuditKey(async () => {
+    const result = await appendMarketingPostHistory(
+      {
+        marketingPost: {
+          findUnique: async () => ({
+            history: [
+              {
+                at: "2026-09-21T00:00:00.000Z",
+                type: "draft",
+                envelopeDigest: DIGEST,
+              },
+              {
+                at: failedAt,
+                type: "attempt",
+                attempt: 1,
+                outcome: "failed",
+                errorCode: "provider_rejected",
+              },
+            ],
+            historyVersion: 1,
+            status: "failed",
+            envelopeDigest: DIGEST,
+            envelope: envelope(FIRST_SCHEDULE),
+            scheduledAt: new Date(FIRST_SCHEDULE),
+          }),
+          updateMany: async (args) => {
+            write = args;
+            return { count: 1 };
+          },
+        },
+        adminAuditLog: {
+          findUnique: async () => audit,
+          findFirst: async () => null,
+        },
+      },
+      {
+        id: "post-1",
+        expectedVersion: 1,
+        // An appendable entry of the kind this file's other appends use. The
+        // approval itself is the audit entry, not a history entry -- there is
+        // no such history type -- and what this test is about is the columns
+        // the requeue writes, not the entry that rides along with them.
+        entry: {
+          at: auditAt.toISOString(),
+          type: "guard_result",
+          decision: "approval_required",
+          codes: [],
+          ruleIds: [],
+        },
+        patch: { status: "scheduled" },
+        requeue: { auditLogId: audit.id },
+      },
+    );
+    assert.equal(result.appended, true);
+  });
+
+  assert.ok(write, "the append wrote nothing");
+  assert.equal(write.data.status, "scheduled");
+  assert.equal(write.data.claimToken, null);
+  assert.equal(write.data.leaseUntil, null);
+  assert.ok(
+    !("slotDate" in write.data),
+    "the day is left for the next claim to renew or move",
+  );
 });
