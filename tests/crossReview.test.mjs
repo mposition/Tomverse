@@ -48,6 +48,10 @@ import {
   mockReviewer,
   unwrapClaudeResult,
 } from "../lib/crossReviewExecutors.ts";
+import {
+  GITLEAKS_RANGE_BASE,
+  buildGitleaksFinalSummary,
+} from "../scripts/check-gitleaks-exact-range.mjs";
 
 /**
  * The control program decides; the executors only answer. What these tests
@@ -113,6 +117,21 @@ test("cross-review diagnostics redact only the three exact DB fixture assignment
       `OTHER_NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ` +
       `${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} ordinary context`
   );
+  assert.equal(
+    redactCrossReviewDiagnosticText(
+      `sh -c 'NEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth} node x' ` +
+        `\"MANIFEST_HASH_KEYS=${DB_INTEGRATION_FIXTURE_VALUES.manifestKeys}\" ` +
+        `\`MANIFEST_HASH_ACTIVE_KEY_ID=${DB_INTEGRATION_FIXTURE_VALUES.activeKey}\``
+    ),
+    "sh -c 'NEXTAUTH_SECRET=[REDACTED:test-fixture] node x' " +
+      '"MANIFEST_HASH_KEYS=[REDACTED:test-fixture]" ' +
+      "`MANIFEST_HASH_ACTIVE_KEY_ID=[REDACTED:test-fixture]`"
+  );
+  const punctuation =
+    `xNEXTAUTH_SECRET=${DB_INTEGRATION_FIXTURE_VALUES.nextAuth}, ` +
+    `;MANIFEST_HASH_KEYS=${DB_INTEGRATION_FIXTURE_VALUES.manifestKeys}; ` +
+    `(MANIFEST_HASH_ACTIVE_KEY_ID=${DB_INTEGRATION_FIXTURE_VALUES.activeKey})`;
+  assert.equal(redactCrossReviewDiagnosticText(punctuation), punctuation, "unapproved punctuation is not a shell-token boundary");
 });
 
 const finding = (overrides = {}) => ({
@@ -1099,6 +1118,83 @@ test("guard fixture assignments are redacted before the 400-character persisted 
     assert.match(persistedDiagnostics, /NEXTAUTH_SECRET=\[REDACTED:test-fixture\]/);
     assert.match(persistedDiagnostics, /MANIFEST_HASH_KEYS=\[REDACTED:test-fixture\]/);
     assert.match(persistedDiagnostics, /MANIFEST_HASH_ACTIVE_KEY_ID=\[REDACTED:test-fixture\]/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("a long Gitleaks guard run preserves its bounded integrity footer through package truncation", { timeout: 180_000 }, () => {
+  const work = mkdtempSync(join(tmpdir(), "cross-review-gitleaks-footer-"));
+  try {
+    const repo = join(work, "repo");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    const git = (...args) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        cwd: repo,
+        encoding: "utf8",
+      }).trim();
+    const stdout = Array.from({ length: 12 }, (_, index) => `gitleaks stdout ${index} ${"x".repeat(480)}`).join("\n") + "\n";
+    const stderr = Array.from({ length: 12 }, (_, index) => `gitleaks stderr ${index} ${"y".repeat(480)}`).join("\n") + "\n";
+    const facts = {
+      resolvedPath: "C:\\external-tools\\gitleaks-8.24.3\\gitleaks.exe",
+      version: "8.24.3",
+      executableSha256: "e".repeat(64),
+      range: `${GITLEAKS_RANGE_BASE}^..${"a".repeat(40)}`,
+      status: 0,
+      stdout,
+      stderr,
+    };
+    const summary = buildGitleaksFinalSummary(facts);
+    const guardModuleUrl = new URL("../scripts/check-gitleaks-exact-range.mjs", import.meta.url).href;
+
+    git("init", "-q");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "src", "a.txt"), "before\n");
+    writeFileSync(
+      join(repo, "guard.mjs"),
+      `import { buildGitleaksFinalSummary } from ${JSON.stringify(guardModuleUrl)};\n` +
+        `const facts = ${JSON.stringify(facts)};\n` +
+        "process.stdout.write(facts.stdout);\n" +
+        "process.stdout.write(facts.stderr);\n" +
+        "process.stdout.write(buildGitleaksFinalSummary(facts) + '\\n');\n"
+    );
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    writeFileSync(join(repo, "src", "a.txt"), "after\n");
+    const taskFile = join(work, "task.json");
+    writeFileSync(
+      taskFile,
+      JSON.stringify({
+        taskId: "T-gitleaks-footer",
+        requirement: "r",
+        completionCriteria: ["c"],
+        baseCommit: base,
+        writableScope: ["src/a.txt"],
+      })
+    );
+
+    const result = runScript(repo, [
+      "--mode=package",
+      `--task=${taskFile}`,
+      "--out=artifacts/pkg",
+      "--diff-exclude=artifacts/pkg",
+      "--test-command=true",
+      "--guard-command=node guard.mjs",
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const packageDir = join(repo, "artifacts", "pkg");
+    const record = JSON.parse(readFileSync(join(packageDir, "package-round0.json"), "utf8"));
+    const exchangeText = readFileSync(join(packageDir, "exchange.json"), "utf8");
+    const reviewPrompt = readFileSync(join(packageDir, "review-prompt.md"), "utf8");
+    assert.deepEqual(record.guardCommands, ["node guard.mjs"]);
+    assert.equal(record.guardRuns[0].passed, true);
+    assert.ok(record.guardRuns[0].detail.length <= 400);
+    assert.ok(record.guardRuns[0].detail.endsWith(summary), "the complete final footer survives both tail operations");
+    assert.ok(exchangeText.includes(summary), "the exchange preserves the final footer");
+    assert.ok(reviewPrompt.includes(summary), "the reviewer prompt preserves the final footer");
+    assert.doesNotMatch(record.guardRuns[0].detail, /gitleaks stdout 0/u, "the long body was truncated as intended");
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

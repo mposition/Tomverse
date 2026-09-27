@@ -2,7 +2,7 @@
   "taskId": "prompt-refiner-shadow-stage-successor-gitleaks-v1",
   "requirement": "CHAT-01 Prompt Refiner immutable stage successor 검토 기록을 보존하면서 secret-history 검사를 다시 통과시킨다. commit 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646에 고정된 cross-review package가 기록한 DB 통합 테스트용 합성 환경 placeholder를 실제 credential로 재해석하지 않되, package bytes와 digest는 수정하지 않는다. .gitleaksignore에는 해당 commit·package 경로·generic-api-key rule·line에 결속된 정확한 24개 finding fingerprint만 추가하며 wildcard, path-only/rule-only entry, global allowlist 또는 범위가 넓은 suppression을 허용하지 않는다. author는 Codex, reviewer는 Claude Code Max다.",
   "completionCriteria": [
-    "격리 base 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646 대비 제품 변경은 .gitleaksignore 하나이고, 검토 행정 변경은 이 task, authorization 및 이 task 자체의 package output에만 한정된다.",
+    "격리 base 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646 대비 제품 보안 변경은 .gitleaksignore 하나이고, 검토 행정·하네스 변경은 이 task, authorization, lib/crossReviewCore.ts, scripts/cross-review.mjs, tests/crossReview.test.mjs, scripts/check-gitleaks-exact-range.mjs, tests/gitleaksExactRangeGuard.test.mjs의 정확한 다섯 하네스 파일에만 한정된다.",
     ".gitleaksignore에는 주석·공백을 제외해 정확히 24개 새 entry가 추가되고 각 entry는 full commit SHA, exact repository path, generic-api-key rule과 exact positive line number 네 필드를 모두 가진다.",
     "24개 entry의 commit은 모두 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646이고 path는 docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1 아래의 불변 package, exchange 또는 review-prompt 기록만 가리킨다.",
     "무시 대상 문자열은 검토 package가 기록한 합성 DB 통합 테스트 환경 placeholder이며 provider key, Railway credential, 사용자 비밀 또는 배포 가능한 secret이 아니다.",
@@ -10,7 +10,11 @@
     "기존 .gitleaksignore entry를 삭제·변경·완화하지 않고 wildcard, regex, directory suppression, commit-only, path-only 또는 rule-only 예외를 추가하지 않는다.",
     "24개 exact fingerprint는 commit identity에 결속되므로 squash·rebase를 금지하고 merge commit만 허용한다.",
     "향후 cross-review package가 실행한 check의 command와 output에는 세 합성 fixture assignment만 결정적으로 마스킹하되, 다른 값과 문맥은 보존하고 reviewed source diff와 change digest bytes는 변경하지 않는다.",
-    "tests/crossReview.test.mjs, tests/gitleaksAllowlist.test.mjs, security regression, typecheck, generator lint, encoding과 git diff whitespace 검사가 통과하고, 로컬에 기존 gitleaks 8.24.3 실행 경로가 있으면 82caecfd의 첫 부모부터 검토 HEAD까지의 exact first-parent range secret scan도 통과한다.",
+    "tests/crossReview.test.mjs, tests/gitleaksAllowlist.test.mjs, security regression, typecheck, generator lint, encoding과 git diff whitespace 검사가 통과한다.",
+    "package runner는 공식 https://github.com/gitleaks/gitleaks/releases/tag/v8.24.3의 gitleaks_8.24.3_windows_x64.zip을 저장소 밖에 준비한다. 공식 gitleaks_8.24.3_checksums.txt에 적힌 archive SHA-256 3f1a35578631dbfe633cc5b49e6c906e55ff14a4bfd7336a10fb27fe33b6dcd2와 추출 gitleaks.exe SHA-256 8f397272f513c00b573f50380c4724e4b3ac759be1de313d907bb968c5d14c09를 모두 고정한다.",
+    "package runner가 위 검증을 마친 외부 binary의 경로를 GITLEAKS_BIN으로 주입하고, guard는 네트워크 없이 absolute resolved path, exact executable SHA-256과 `gitleaks version`의 정확한 8.24.3을 강제한 뒤 `82caecfd8a3dbb4815fd9c232f2b42b2dafcf646^..643a5e2a7eeab20384fd3afe89ec15309dbb35e4`를 repo .gitleaksignore, --redact, --no-banner, `--log-opts=--no-merges --first-parent ...`로 scan한다. binary 부재·hash나 버전 불일치·finding은 모두 실패한다.",
+    "guard는 scan 로그 뒤 마지막에 400자 이하 deterministic single-line footer를 출력한다. footer는 resolved path의 SHA-256, version, exe SHA-256, exact range, exit status, versioned domain과 uint64 length frame으로 분리한 full raw stdout+stderr bytes의 SHA-256 및 두 raw byte count를 담는다. 사람용 UTF-8 log decoding은 digest 뒤에 별도로 하며, footer는 package의 last-five-lines와 400-character truncation 뒤에도 guardCommands/guardRuns, exchange와 reviewer prompt에 온전히 남는다.",
+    "authorization의 reviewedHead는 검토 대상 source-fix commit이며 그 뒤의 authorization-only metadata commit의 parent다. source fix를 commit한 뒤 package 전 reviewedHead와 Gitleaks range end를 그 commit으로 함께 한 번 repin하고, authorization commit 자신의 SHA를 요구하지 않는다.",
     "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
     "이 exchange의 exact package output 디렉터리만 recursive review-record 팽창 방지를 위해 diff에서 제외하며 .gitleaksignore, task와 authorization은 검토 대상에 남는다."
   ],
@@ -21,7 +25,9 @@
     "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1.task.json",
     "lib/crossReviewCore.ts",
     "scripts/cross-review.mjs",
-    "tests/crossReview.test.mjs"
+    "tests/crossReview.test.mjs",
+    "scripts/check-gitleaks-exact-range.mjs",
+    "tests/gitleaksExactRangeGuard.test.mjs"
   ],
   "generatedPaths": []
 }

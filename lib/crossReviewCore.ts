@@ -87,9 +87,10 @@ const escapeRegularExpression = (value: string): string => value.replace(/[.*+?^
 const CROSS_REVIEW_DIAGNOSTIC_FIXTURE_PATTERNS = CROSS_REVIEW_DIAGNOSTIC_FIXTURE_ASSIGNMENTS.map(([key, value]) => ({
     key,
     // Generated check commands use shell assignment tokens separated by
-    // whitespace. Requiring both token boundaries prevents a similarly named
-    // variable or a changed/superstring value from being hidden.
-    pattern: new RegExp(`(^|\\s)${escapeRegularExpression(key)}=${escapeRegularExpression(value)}(?=$|\\s)`, "g"),
+    // whitespace or nested quote delimiters. Requiring both token boundaries
+    // prevents punctuation, a similarly named variable, or a
+    // changed/superstring value from being hidden.
+    pattern: new RegExp("(^|[\\s'\"`])" + escapeRegularExpression(key) + "=" + escapeRegularExpression(value) + "(?=$|[\\s'\"`])", "g"),
 }));
 
 /**
