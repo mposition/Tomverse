@@ -381,7 +381,11 @@ test("a write racing an activation waits for its lock, and is then refused", asy
     });
 
   try {
-    await activationHasLock;
+    // Raced with the transaction itself: if the UPDATE or the transaction
+    // start fails before it signals, `activationHasLock` never settles and
+    // this would wait for ever without reporting the failure. Whichever
+    // settles first wins, and a rejected activation rethrows here.
+    await Promise.race([activationHasLock, activation]);
 
     // Both writes must conflict on the policy version's row. `55P03` is
     // `lock_not_available`; Prisma surfaces the message.
@@ -408,7 +412,14 @@ test("a write racing an activation waits for its lock, and is then refused", asy
     // Whatever happened above, the activation must not be left holding its
     // transaction: the suite's TRUNCATE would wait for it.
     commitActivation();
-    await Promise.allSettled([activation]);
+    // The activation is awaited rather than only settled: a rollback or a
+    // timeout here is a fact about the test run, not something to swallow.
+    // Rethrowing from a finally would mask an assertion failure, so it is
+    // reported instead and the assertions below still run.
+    const outcome = await Promise.allSettled([activation]);
+    if (outcome[0].status === "rejected") {
+      console.error("the held activation did not commit cleanly:", outcome[0].reason);
+    }
   }
 
   // And now that it is committed, the same writes are refused for the reason
