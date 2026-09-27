@@ -380,6 +380,7 @@ test("a write racing an activation waits for its lock, and is then refused", asy
       return write(tx);
     });
 
+  let bodyFailure;
   try {
     // Raced with the transaction itself: if the UPDATE or the transaction
     // start fails before it signals, `activationHasLock` never settles and
@@ -408,6 +409,11 @@ test("a write racing an activation waits for its lock, and is then refused", asy
         ),
       /lock timeout|lock_not_available|55P03/i
     );
+  } catch (error) {
+    // Held rather than rethrown here, so the cleanup below always runs and the
+    // activation's own failure can be reported beside this one rather than
+    // instead of it.
+    bodyFailure = error;
   } finally {
     // Whatever happened above, the activation must not be left holding its
     // transaction: the suite's TRUNCATE would wait for it.
@@ -416,9 +422,25 @@ test("a write racing an activation waits for its lock, and is then refused", asy
     // timeout here is a fact about the test run, not something to swallow.
     // Rethrowing from a finally would mask an assertion failure, so it is
     // reported instead and the assertions below still run.
-    const outcome = await Promise.allSettled([activation]);
-    if (outcome[0].status === "rejected") {
-      console.error("the held activation did not commit cleanly:", outcome[0].reason);
+    const [outcome] = await Promise.allSettled([activation]);
+    // A rejected activation is a failure, not a log line: `console.error` does
+    // not fail a node:test run. It can also mean the COMMIT reached the server
+    // and the answer did not, which leaves the rows in the state the assertions
+    // below read as correct -- a green test over an unknown outcome.
+    //
+    // Both are reported, with the body's first because that is what was being
+    // tested.
+    if (outcome.status === "rejected" && bodyFailure !== undefined) {
+      throw new AggregateError(
+        [bodyFailure, outcome.reason],
+        "the test failed, and the held activation did not commit cleanly"
+      );
+    }
+    if (bodyFailure !== undefined) throw bodyFailure;
+    if (outcome.status === "rejected") {
+      throw new Error(
+        "the held activation did not commit cleanly: " + String(outcome.reason)
+      );
     }
   }
 
