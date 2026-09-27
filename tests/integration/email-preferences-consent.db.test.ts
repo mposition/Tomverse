@@ -4,12 +4,16 @@ import { after, beforeEach, mock, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import {
+  BULK_UNSUBSCRIBE_PURPOSES,
+  type EmailPurpose,
+} from "@/lib/emailPreferenceCore";
+import {
   ensureDefaultPreferences,
   readPreferences,
   setPreference,
   withdrawAllMarketing,
 } from "@/lib/emailPreferences";
-import { suppressionCheck } from "@/lib/emailSuppression";
+import { recordSuppression, suppressionCheck } from "@/lib/emailSuppression";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { consentAddressDigest } from "@/lib/emailConsentToken";
 import {
@@ -514,6 +518,139 @@ test("unsubscribing from a purpose that was never on still suppresses it, once",
     purpose: "promotions",
   });
   assert.equal(verdict.allowed, false);
+});
+
+/** Leaves a purpose with a pending confirmation request, switch still off. */
+const requestPending = async (userId: string, purpose: EmailPurpose) => {
+  await ensureDefaultPreferences(userId);
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId, purpose } },
+    data: {
+      confirmationRequestedAt: new Date(Date.now() - 1_000),
+      confirmationRequestId: randomUUID(),
+    },
+  });
+};
+
+const liveCauses = (email: string, purpose: string) =>
+  prisma.suppressionCause.count({
+    where: {
+      emailAddress: email,
+      scope: "purpose",
+      purposeKey: purpose,
+      reason: "unsubscribe",
+      releasedAt: null,
+    },
+  });
+
+test("unsubscribing while a confirmation is pending records the refusal too", async () => {
+  // The defect this pins: the pending branch cleared the mailed link and
+  // returned, so the person had unsubscribed, the route said so, and nothing a
+  // send reads had changed. A cohort member who had once pressed the switch was
+  // in that state for ever after.
+  const user = await someone();
+  await requestPending(user.id, "promotions");
+
+  const result = await setPreference({
+    userId: user.id,
+    purpose: "promotions",
+    enabled: false,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+    viaToken: true,
+  });
+
+  assert.deepEqual(result, { changed: true, purpose: "promotions", enabled: false });
+  const row = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "promotions" } },
+  });
+  assert.equal(row.confirmationRequestId, null, "the mailed link stops working");
+  assert.equal(await liveCauses(user.email!, "promotions"), 1);
+});
+
+test("cancelling the confirmation email records no refusal", async () => {
+  // The settings control beside a pending confirmation. Its words are about the
+  // mailed link, and the switch it sits under is already off, so it is not an
+  // unsubscribe -- and a refusal written here would be one nobody expressed.
+  const user = await someone();
+  await requestPending(user.id, "promotions");
+
+  const result = await setPreference({
+    userId: user.id,
+    purpose: "promotions",
+    enabled: false,
+    capturedVia: "preference_center",
+    source: "preference_center",
+    cancelRequestOnly: true,
+  });
+
+  assert.deepEqual(result, { changed: true, purpose: "promotions", enabled: false });
+  const row = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "promotions" } },
+  });
+  assert.equal(row.confirmationRequestId, null);
+  assert.equal(await liveCauses(user.email!, "promotions"), 0);
+});
+
+test("withdrawing everything records a refusal for each pending purpose", async () => {
+  // all=1 with every marketing purpose requested: the old code cancelled each
+  // link and wrote nothing at all.
+  const user = await someone();
+  for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+    await requestPending(user.id, purpose);
+  }
+
+  await withdrawAllMarketing({
+    userId: user.id,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+  });
+
+  for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+    assert.equal(await liveCauses(user.email!, purpose), 1, purpose);
+  }
+});
+
+test("a live refusal at a wider scope is not duplicated, but a bounce is not one", async () => {
+  // The refusal is already recorded when a cause that *is* a refusal covers
+  // this purpose -- a complaint, a privacy request, an unsubscribe -- at any
+  // scope. A hard bounce is not a refusal: it can be released when the address
+  // starts accepting mail again, and releasing it would take the refusal too.
+  const covered = await someone();
+  await recordSuppression({
+    emailAddress: covered.email!,
+    scope: "classification",
+    purposeKey: "marketing",
+    reason: "privacy_request",
+    source: "admin",
+    occurredAt: new Date(),
+    sourceEventKey: "test-covered-" + randomUUID(),
+  });
+  await setPreference({
+    userId: covered.id,
+    purpose: "promotions",
+    enabled: false,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  assert.equal(await liveCauses(covered.email!, "promotions"), 0);
+
+  const bounced = await someone();
+  await recordSuppression({
+    emailAddress: bounced.email!,
+    reason: "hard_bounce",
+    source: "provider_webhook",
+    occurredAt: new Date(),
+    sourceEventKey: "test-bounced-" + randomUUID(),
+  });
+  await setPreference({
+    userId: bounced.id,
+    purpose: "promotions",
+    enabled: false,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  assert.equal(await liveCauses(bounced.email!, "promotions"), 1);
 });
 
 test("a token cannot switch anything on", async () => {

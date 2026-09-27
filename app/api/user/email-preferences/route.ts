@@ -39,6 +39,15 @@ const updateSchema = z
     purpose: z.enum(EMAIL_PURPOSES).optional(),
     enabled: z.boolean().optional(),
     withdrawAllMarketing: z.literal(true).optional(),
+    /**
+     * Only invalidate the confirmation link already mailed for this purpose.
+     *
+     * The one control that means that and not "stop sending me this": the
+     * cancel link beside a pending confirmation. Sent as a literal so a
+     * client cannot switch a purpose off *without* recording the refusal by
+     * passing a falsy value of some other shape.
+     */
+    cancelRequestOnly: z.literal(true).optional(),
     country: z
       .string()
       .trim()
@@ -223,6 +232,7 @@ export async function PATCH(req: Request) {
         capturedVia: "preference_center",
         source: "preference_center",
         userAgent: req.headers.get("user-agent"),
+        ...(body.cancelRequestOnly ? { cancelRequestOnly: true } : {}),
       });
       // `locked` is the one refusal worth naming: the client renders those
       // rows as unswitchable, so reaching here means the two disagree and a

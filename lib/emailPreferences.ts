@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -12,6 +12,7 @@ import {
   consentActionFor,
   consentConfirmationState,
   defaultPreferenceEnabled,
+  emailPurposeClassification,
   preferenceChangeDecision,
   recordsConsent,
   type ConsentConfirmationState,
@@ -257,6 +258,17 @@ export type SetPreferenceInput = {
   /** The country the person confirmed in the same opt-in action. */
   confirmedCountry?: string | null;
   /**
+   * Only invalidate a pending confirmation link; do not record a refusal.
+   *
+   * The settings screen's "cancel the confirmation email" control, and nothing
+   * else. It sits beside a switch that is already off, and its words are about
+   * the mailed link rather than about what the person wants to receive, so
+   * pressing it is not an unsubscribe. Every other caller that switches a
+   * purpose off means both -- see `applyPreferenceChange()`, where reading them
+   * as one was the defect.
+   */
+  cancelRequestOnly?: boolean;
+  /**
    * The checked confirmation that authorises switching a consent-based purpose
    * on (docs/policy/email-double-opt-in.md §5 step 5).
    *
@@ -391,10 +403,37 @@ export async function applyPreferenceChange(
     // A second click on the link that already worked.
     if (existing.enabled && existing.confirmedAt) return "already_set" as const;
   } else if (existing.enabled === input.enabled) {
-    // Switching off while only a confirmation is pending: nothing was ever
-    // consented to, so there is nothing to withdraw and no history to write.
-    // Clearing the request is what makes the mailed link stop working.
-    if (!input.enabled && existing.confirmationRequestId) {
+    // Switching off what is already off does up to two separate things, and
+    // the previous version did only the first of them.
+    //
+    // **Clearing a pending confirmation.** Nothing was ever consented to, so
+    // there is no consent to withdraw and no history to write; clearing the
+    // request is what makes the mailed link stop working.
+    //
+    // **Recording the refusal.** "Do not send me this" has to be written
+    // somewhere a send reads. A preference that was never on has no consent
+    // and no transition, so without this the refusal left no trace -- and a
+    // person the `risk_accepted` override mails without consent (draft section
+    // 5.6), who clicks unsubscribe, is exactly that person. The override
+    // cannot cross a suppression, so a purpose-scoped `unsubscribe` cause is
+    // what makes the click stop the mail
+    // (docs/policy/email-product-news-redesign-draft.md section 11.2:
+    // immediate and permanent).
+    //
+    // Doing the first and returning was the defect. A cohort member who had
+    // once switched a marketing purpose on -- which only requests a
+    // confirmation and leaves `enabled` false -- landed in the pending branch
+    // for ever after, so unsubscribe cleared the link, answered `{ ok: true }`
+    // and let the override keep sending. `all=1` did it for every pending
+    // purpose at once.
+    //
+    // `cancelRequestOnly` is for the one control that means only the first: the
+    // settings screen's "cancel the confirmation email" link, which sits beside
+    // a switch that is already off and whose own words are about invalidating
+    // the mailed link. Every other caller -- the unsubscribe link, one-click,
+    // withdraw-all, a privacy intake -- means both.
+    const cancelledRequest = !input.enabled && existing.confirmationRequestId !== null;
+    if (cancelledRequest) {
       await tx.emailPreference.update({
         where: { userId_purpose: { userId: input.userId, purpose } },
         data: {
@@ -403,37 +442,38 @@ export async function applyPreferenceChange(
           confirmedAt: null,
         },
       });
-      return "cancelled" as const;
     }
-    // Switching off what is already off still says "do not send me this", and
-    // that has to be written down somewhere a send reads. A preference that
-    // was never on has no consent to withdraw and no transition to record, so
-    // without this the refusal left no trace at all -- and a person the
-    // `risk_accepted` override mails without consent (draft section 5.6), who
-    // clicks unsubscribe, is exactly that person. The override cannot cross a
-    // suppression, so a purpose-scoped `unsubscribe` cause is what makes the
-    // click stop the mail (docs/policy/email-product-news-redesign-draft.md
-    // section 11.2: immediate and permanent).
-    //
+
     // Idempotent by state rather than by key: the link is followed twice, the
-    // form is double-submitted, the one-click header and the confirmation
-    // page both fire, and only the first finds no live cause. A fixed key
-    // would not do -- once released by the person switching the purpose on,
-    // it would stay released through the next unsubscribe. The address lock
-    // taken above serialises this read with every other cause writer.
-    // No history row either way: nothing about the preference changed.
-    if (!input.enabled) {
-      const live = await tx.suppressionCause.findFirst({
+    // form is double-submitted, the one-click header and the confirmation page
+    // both fire, and only the first finds no live refusal. A fixed key would
+    // not do -- once released by the person switching the purpose on, it would
+    // stay released through the next unsubscribe.
+    //
+    // A live cause counts as the refusal already recorded only when it *is* a
+    // refusal and cannot be lifted as routine maintenance: an unsubscribe, a
+    // complaint, or a privacy request, at any scope that covers this purpose.
+    // A hard or soft bounce is not one -- it says the address did not accept
+    // mail, it can be released when it clears, and writing nothing beside it
+    // would lose the refusal the moment it was.
+    //
+    // The address lock taken above serialises this read with every other cause
+    // writer. No history row either way: nothing about the preference changed.
+    if (!input.enabled && !input.cancelRequestOnly) {
+      const refusal = await tx.suppressionCause.findFirst({
         where: {
           emailAddress: normalizeSuppressionAddress(email),
-          scope: "purpose",
-          purposeKey: purpose,
-          reason: "unsubscribe",
+          reason: { in: ["unsubscribe", "complaint", "privacy_request"] },
           releasedAt: null,
+          OR: [
+            { scope: "global" },
+            { scope: "classification", purposeKey: emailPurposeClassification(purpose) ?? "" },
+            { scope: "purpose", purposeKey: purpose },
+          ],
         },
         select: { id: true },
       });
-      if (!live) {
+      if (!refusal) {
         await recordSuppression(
           {
             emailAddress: email,
@@ -446,13 +486,13 @@ export async function applyPreferenceChange(
             occurredAt: now,
             sourceEventKey:
               input.suppressionEventKey ??
-              `preference-unchanged:${input.userId}:${purpose}:${now.getTime()}`,
+              `preference-unchanged:${input.userId}:${purpose}:${randomUUID()}`,
           },
           tx
         );
       }
     }
-    return "already_set" as const;
+    return cancelledRequest ? ("cancelled" as const) : ("already_set" as const);
   }
 
   // Switching on lifts only this purpose's own unsubscribe. Any other active
