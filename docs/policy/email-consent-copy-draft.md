@@ -617,7 +617,12 @@ zh `向您发送`). 한국어는 `보내드린`의 경어로 표시하므로 해
    목록에서 `"4."`를 빼고, 승인표에서 §4 행을 빼고, 두 digest를 다시 적으면
    §4의 승인된 문안을 고칠 수 있었습니다. 목록이 승인표의 내용이 된 뒤에는
    범위를 줄이는 것이 곧 **소유자가 서명한 표를 고치는 것**입니다.
-9. `UNVERSIONED_SECTIONS`는 **어느 버전도 소유하지 않는 절**의 목록입니다.
+9. 문서 전체 digest와 `UNVERSIONED_SECTIONS`는 `lib/emailConsentCopyDocumentPins.ts`에
+   있습니다 — 테스트 파일이 아니라 `lib/`에 있는 이유는 **base와 비교되어야**
+   하기 때문입니다. 테스트 파일 안의 값은 같은 commit이 고치고 다시 적으면
+   base 비교에 아무것도 걸리지 않습니다.
+
+   `UNVERSIONED_SECTIONS`는 **어느 버전도 소유하지 않는 절**의 목록입니다.
    새 버전의 절과 승인란은 그 버전의 두 digest가 덮으므로 여기에 들어가지
    않고, 그래서 버전을 추가해도 `UNVERSIONED_SECTIONS_DIGEST`는 움직이지
    않습니다. 새 절을 만들고 어느 버전에도 등록하지 않으면 유도된 목록이 기록된
@@ -626,12 +631,30 @@ zh `向您发送`). 한국어는 `보내드린`의 경어로 표시하므로 해
    이것이 있는 이유: 문서 전체 digest는 버전을 추가할 때 반드시 움직이고, 그
    움직임은 §0·§7·§9·§10과 상단 상태 블록의 편집도 함께 덮어 줍니다. 14차
    검토가 그 세 줄을 표로 만들어 보였습니다.
-10. **기존 버전 항목은 base와 byte 단위로 같아야 합니다.** in-tree digest는
-   편집을 **보이게** 만들지 편집을 막지는 못합니다 — 같은 commit이 값과 pin을
-   함께 고칠 수 있기 때문입니다. `npm run check:consent-copy-immutability`가
-   PR base의 `lib/emailConsentCopy.ts`를 읽어 기존 항목의 바이트를 대조하고,
-   추가만 허용합니다. base에 그 파일이 없으면(이 기능이 아직 base에 없는 동안)
-   대조 대상이 없다고 적고 통과합니다.
+10. **기존 버전 기록은 base와 같아야 합니다.** in-tree digest는 편집을
+   **보이게** 만들지 편집을 막지는 못합니다 — 같은 commit이 값과 pin을 함께
+   고칠 수 있기 때문입니다. `npm run check:consent-copy-immutability`가 PR
+   base의 `lib/emailConsentCopy.ts`와 `lib/emailConsentCopyDocumentPins.ts`를
+   읽어 기존 항목의 기록(버전·승인자·승인일·승인란·두 digest·승인표·copy 표
+   이름)을 대조하고 **추가만** 허용합니다. 주석과 서식은 비교 대상이 아닙니다.
+
+   파서는 **TypeScript AST**입니다. 문자열 검색판은 독립 검토가 한 자리에서 세
+   번 뚫었습니다 — 주석 안의 옛 배열, 계산식 위 주석의 옛 값, literal 뒤의
+   spread. 읽을 수 없는 형태(spread·computed key·중복 key·literal이 아닌 값·
+   배열 두 번 선언)는 "변경 없음"이 아니라 **거절**입니다.
+
+   digest가 계산 방식 변경으로 움직일 때는 `RECOMPUTED`에 정확한 전후 값과
+   이유를 적습니다. 이것이 정직하게 제공하는 것은 **감사 신호**이며 승인이
+   아닙니다 — 같은 commit 안에 있으므로 그 변경이 재계산인지 문안 변조인지
+   기계적으로 판별하지 못합니다. 그래서 **digest 두 field로만** 제한되고,
+   승인자·승인일·승인표·copy 표는 어떤 항목으로도 면제되지 않습니다.
+   §9·§10의 개정은 `DOCUMENT_AMENDMENTS`에 같은 방식으로 적습니다.
+
+   base에 그 파일이 아직 없는 **최초 landing**에는
+   `docs/policy/email-consent-copy-baseline.json`이 대조 대상입니다. 같은
+   commit 안의 두 파일 대조이므로 더 약한 주장이고, 출력이 그렇게 적습니다 —
+   기록을 고치려면 옆에 있는 두 번째 편집이 함께 필요하다는 것까지입니다.
+   base에 파일이 올라간 다음 commit에서 baseline을 지웁니다.
 11. **새 문안이 의미를 바꾸는 경우에만** 해당합니다. 지금 현재 버전만 보는 검사는
    한국어 opt-in 문구, 세 종류 메일, 로그인 없는 철회, "보낸 적이 없다"는 시작
    문장, 독자 지칭, 닫기와 거부의 구분, 그리고 판촉성 표현 금지입니다. 이들은

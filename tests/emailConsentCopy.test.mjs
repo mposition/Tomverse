@@ -30,6 +30,11 @@ import {
   consentCopyDigestKey,
 } from "../lib/emailConsentCopyDigests.ts";
 import {
+  APPROVED_DOCUMENT_DIGEST,
+  UNVERSIONED_SECTIONS,
+  UNVERSIONED_SECTIONS_DIGEST,
+} from "../lib/emailConsentCopyDocumentPins.ts";
+import {
   MAKES_NO_SEND_PROMISE_VERSIONS,
   PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
   consentCopyPromisesNoUnrequestedSend,
@@ -461,20 +466,71 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * version is added and that move would otherwise cover for an edit to an
  * earlier version's approval table in the same commit.
  */
-const APPROVED_DOCUMENT_DIGEST = "ffd4c383a7f33b5b8e3b2c92814387ad";
 
-/** The source bytes of a section, from the parser's own offsets. */
-const sourceOf = (source, nodes) => {
+
+/**
+ * The source bytes of a section: from its heading to the next section's heading,
+ * or to the end of the document.
+ *
+ * Not "to the end of the last node in it", which is what the first version did.
+ * A review counted what that left out: the blank line between two sections and
+ * the newline at the end of the file belonged to no part of any digest, twenty-one
+ * bytes in the current document -- and, worse, a depth-1 heading with a body
+ * inserted between two sections sat in the same gap, so its whole text was
+ * covered by nothing but the document digest that a new version moves anyway.
+ *
+ * Taking the range to the next heading's start means every byte after the first
+ * heading belongs to exactly one section, whatever is in it.
+ */
+const sourceOf = (source, nodes, endOffset) => {
   const from = nodes[0].position.start.offset;
-  const to = nodes[nodes.length - 1].position.end.offset;
-  return source.slice(from, to);
+  return source.slice(from, endOffset ?? nodes[nodes.length - 1].position.end.offset);
 };
 
-/** Every depth-2 section number, in the order the document holds them. */
-const sectionNumbers = (tree) =>
-  tree.children
+/** Where one depth-2 section's bytes end: the next one's heading, or the end. */
+const sectionEnd = (tree, source, number) => {
+  const at = tree.children.findIndex(
+    (node) =>
+      node.type === "heading" &&
+      node.depth === 2 &&
+      textOf(node).trim().split(/\s+/)[0] === number
+  );
+  for (let i = at + 1; i < tree.children.length; i += 1) {
+    const node = tree.children[i];
+    if (node.type === "heading" && node.depth === 2) return node.position.start.offset;
+  }
+  return source.length;
+};
+
+/** One depth-2 section, as the bytes between its heading and the next one's. */
+const sectionSource = (source, tree, number) =>
+  sourceOf(source, sectionOf(tree, number, 2), sectionEnd(tree, source, number));
+
+/**
+ * Every depth-2 section number, in the order the document holds them.
+ *
+ * Each one has to be a number followed by a dot, and each has to be unique. A
+ * heading that is not numbered would otherwise be a section this file's pins
+ * cannot name, and a repeated number would make "section 4" two places.
+ */
+const sectionNumbers = (tree) => {
+  const numbers = tree.children
     .filter((node) => node.type === "heading" && node.depth === 2)
     .map((node) => textOf(node).trim().split(/\s+/)[0]);
+  for (const number of numbers) {
+    assert.match(
+      number,
+      /^[0-9]+\.$/,
+      `the approved document has a depth-2 heading numbered "${number}", which no pin can name`
+    );
+  }
+  assert.equal(
+    new Set(numbers).size,
+    numbers.length,
+    "two depth-2 headings of the approved document carry the same number"
+  );
+  return numbers;
+};
 
 /**
  * The sections one version's approval covers, in document order.
@@ -528,27 +584,6 @@ const canonicalParts = (parts) =>
 const digestOf = (input) =>
   createHash("sha256").update(input).digest("hex").slice(0, 32);
 
-/**
- * The sections no version owns, and the digest over them.
- *
- * A review walked the gap between the two pins that existed. The document
- * digest covers every byte but has to move when a version is added; each
- * version's own two digests cover its approved sections and its record, and
- * nothing else. So a commit adding a version could edit section 9's decisions,
- * section 10's procedure or the status block at the top, behind the repin that
- * the addition justifies.
- *
- * This digest does not move when a version is added: a new version's sections
- * and its record belong to that version, so they are not in this list. Which
- * also means a new section that no version claims fails here rather than
- * passing as part of the addition -- the derived list would no longer be the
- * recorded one.
- *
- * Recorded, not computed, for the same reason as the others.
- */
-const UNVERSIONED_SECTIONS = ["0.", "7.", "9.", "10."];
-const UNVERSIONED_SECTIONS_DIGEST = "516ce2084a42b83dff2707d75d29af30";
-
 test("the sections no version owns have not changed either", () => {
   const source = approvedSource();
   const tree = approvedTree();
@@ -574,10 +609,7 @@ test("the sections no version owns have not changed either", () => {
   const digest = digestOf(
     canonicalParts([
       ["status block", source.slice(0, firstHeading.position.start.offset)],
-      ...UNVERSIONED_SECTIONS.map((number) => [
-        number,
-        sourceOf(source, sectionOf(tree, number, 2)),
-      ]),
+      ...UNVERSIONED_SECTIONS.map((number) => [number, sectionSource(source, tree, number)]),
     ])
   );
   assert.equal(
@@ -587,6 +619,42 @@ test("the sections no version owns have not changed either", () => {
       "a version does not do this. If this change is meant, record " +
       `"${digest}".`
   );
+});
+
+test("every byte of the approved document belongs to exactly one pin", () => {
+  // The thing three earlier attempts got wrong. Each was an argument about which
+  // bytes matter, and each left a gap: a flattening of the tree, then chosen
+  // ranges with the space between them, then ranges that stopped at the last node
+  // of a section. A review found twenty-one bytes in the current document that no
+  // part digest covered, and a depth-1 heading with a body that could be inserted
+  // into the same space.
+  //
+  // So rather than arguing, this reassembles the document from the parts the pins
+  // are taken over and compares it with the file. There is no third thing to
+  // reason about: either every byte is in exactly one part or this fails.
+  const source = approvedSource();
+  const tree = approvedTree();
+  const firstHeading = tree.children.find(
+    (node) => node.type === "heading" && node.depth === 2
+  );
+  const owned = new Set(
+    CONSENT_COPY_VERSIONS.flatMap((version) => [
+      ...approvedSectionNumbersOf(tree, version),
+      version.recordSection,
+    ])
+  );
+  const numbers = sectionNumbers(tree);
+  assert.deepEqual(
+    numbers.filter((number) => !owned.has(number)),
+    UNVERSIONED_SECTIONS,
+    "a depth-2 section belongs to no version and is not in UNVERSIONED_SECTIONS"
+  );
+
+  const parts = [
+    source.slice(0, firstHeading.position.start.offset),
+    ...numbers.map((number) => sectionSource(source, tree, number)),
+  ];
+  assert.equal(parts.join(""), source, "the parts the pins cover are not the document");
 });
 
 test("the approved document has not changed since this digest was recorded", () => {
@@ -615,10 +683,7 @@ test("each version pins its own record and the body it approved", () => {
   const source = approvedSource();
   const tree = approvedTree();
   for (const version of CONSENT_COPY_VERSIONS) {
-    const record = createHash("sha256")
-      .update(sourceOf(source, sectionOf(tree, version.recordSection, 2)))
-      .digest("hex")
-      .slice(0, 32);
+    const record = digestOf(sectionSource(source, tree, version.recordSection));
     assert.equal(
       record,
       version.recordDigest,
@@ -631,7 +696,7 @@ test("each version pins its own record and the body it approved", () => {
       canonicalParts(
         [...numbers, version.recordSection].map((number) => [
           number,
-          sourceOf(source, sectionOf(tree, number, 2)),
+          sectionSource(source, tree, number),
         ])
       )
     );

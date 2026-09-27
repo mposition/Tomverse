@@ -5,116 +5,239 @@
 // Pure, so the judgement can be tested against pairs of sources rather than
 // against whatever two revisions happen to be checked out. The script beside this
 // one supplies the two sources: the working tree and the base revision.
+//
+// ## Why the parser is the TypeScript one
+//
+// The first version found entries by searching for `CONSENT_COPY_VERSIONS`, then
+// for `Object.freeze({`, and read each field with the first matching regex. A
+// review broke it three ways in one sitting: an old copy of the array inside a
+// comment answered for the real one, an old `field: "value"` in a comment above a
+// computed value answered for the value, and `...changedRecord` after the literal
+// fields would have changed them at runtime with the literals still there to be
+// read.
+//
+// None of those is a subtle failure. A check that can be defeated by a comment is
+// a check that reports "unchanged" about a file that changed, which is worse than
+// no check because it is quoted as evidence. So this parses the file the way the
+// compiler does and refuses anything it cannot read exactly: a spread, a computed
+// key, a duplicated key, a value that is not a literal, a second declaration of
+// the array.
+
+import ts from "typescript";
 
 const SOURCE = "lib/emailConsentCopy.ts";
 const ARRAY = "CONSENT_COPY_VERSIONS";
 
-/**
- * Walk source text, ignoring what is inside strings and comments.
- *
- * Needed because the entries hold Korean prose in quotes and a `{` or `[` in it
- * would otherwise close a block early. Template literals are walked as plain
- * strings: the array holds none, and a `${}` with a brace in it would be a reason
- * to fail rather than to guess.
- */
-export const blockEnd = (source, open) => {
-  const pairs = { "{": "}", "[": "]", "(": ")" };
-  const stack = [pairs[source[open]]];
-  let i = open + 1;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === "/" && source[i + 1] === "/") {
-      i = source.indexOf("\n", i);
-      if (i < 0) break;
-      continue;
-    }
-    if (ch === "/" && source[i + 1] === "*") {
-      const to = source.indexOf("*/", i + 2);
-      if (to < 0) break;
-      i = to + 2;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      i += 1;
-      while (i < source.length && source[i] !== ch) i += source[i] === "\\" ? 2 : 1;
-      i += 1;
-      continue;
-    }
-    if (pairs[ch]) {
-      stack.push(pairs[ch]);
-    } else if (ch === stack[stack.length - 1]) {
-      stack.pop();
-      if (stack.length === 0) return i;
-    }
-    i += 1;
-  }
-  throw new Error(`${SOURCE}: a block opened at ${open} never closes`);
-};
-
-/** The text of each `Object.freeze({ ... })` entry of the versions array. */
-export const entriesOf = (source, where) => {
-  const at = source.indexOf(ARRAY);
-  if (at < 0) throw new Error(`${where}: ${SOURCE} holds no ${ARRAY}`);
-  const open = source.indexOf("([", at);
-  if (open < 0) throw new Error(`${where}: ${ARRAY} is not an array literal`);
-  const region = source.slice(open + 1, blockEnd(source, open + 1) + 1);
-
-  const entries = [];
-  let i = 0;
-  for (;;) {
-    const found = region.indexOf("Object.freeze({", i);
-    if (found < 0) break;
-    const brace = region.indexOf("{", found);
-    const to = blockEnd(region, brace);
-    entries.push(region.slice(brace, to + 1));
-    i = to + 1;
-  }
-  if (entries.length === 0) throw new Error(`${where}: ${ARRAY} holds no entries`);
-  return entries;
-};
-
-const SCALARS = [
+/** The fields that make up the record, in the order a failure reports them. */
+export const RECORD_FIELDS = [
   "version",
   "approvedBy",
   "approvedAt",
   "recordSection",
   "recordDigest",
   "approvedBodyDigest",
+  "approvedSections",
+  "copy",
 ];
 
-/** The fields compared, in the order a failure reports them. */
-export const RECORD_FIELDS = [...SCALARS, "approvedSections", "copy"];
+/** The two fields a recomputation may ever move. */
+export const DIGEST_FIELDS = ["recordDigest", "approvedBodyDigest"];
+
+class Unreadable extends Error {}
+
+const fail = (where, message) => {
+  throw new Unreadable(`${where}: ${message}`);
+};
+
+const parse = (source, where) => {
+  const file = ts.createSourceFile(SOURCE, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  // `parseDiagnostics` is not part of the public type, and a file that does not
+  // parse is one whose entries cannot be trusted either way.
+  const syntax = file.parseDiagnostics ?? [];
+  if (syntax.length > 0) fail(where, `${SOURCE} does not parse (${syntax.length} error(s))`);
+  return file;
+};
+
+/** The one `export const CONSENT_COPY_VERSIONS = Object.freeze([...])` initialiser. */
+const arrayLiteral = (file, where) => {
+  const found = [];
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === ARRAY
+    ) {
+      found.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (found.length !== 1) {
+    fail(where, `${SOURCE} declares ${ARRAY} ${found.length} time(s); it must declare it once`);
+  }
+  let initialiser = found[0].initializer;
+  if (initialiser === undefined) fail(where, `${ARRAY} has no initialiser`);
+  // `Object.freeze([...])`, or the array on its own.
+  if (ts.isCallExpression(initialiser)) {
+    const callee = initialiser.expression;
+    const frozen =
+      ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === "Object" &&
+      callee.name.text === "freeze";
+    if (!frozen) fail(where, `${ARRAY} is initialised by a call this check cannot read`);
+    if (initialiser.arguments.length !== 1) fail(where, `Object.freeze takes one argument`);
+    initialiser = initialiser.arguments[0];
+  }
+  if (!ts.isArrayLiteralExpression(initialiser)) {
+    fail(where, `${ARRAY} is not an array literal`);
+  }
+  return initialiser;
+};
+
+/** One entry's object literal, unwrapping the `Object.freeze` around it. */
+const objectLiteral = (element, where) => {
+  let node = element;
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    const frozen =
+      ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === "Object" &&
+      callee.name.text === "freeze";
+    if (!frozen) fail(where, "an entry is produced by a call this check cannot read");
+    if (node.arguments.length !== 1) fail(where, "Object.freeze takes one argument");
+    node = node.arguments[0];
+  }
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression?.(node)) node = node.expression;
+  if (!ts.isObjectLiteralExpression(node)) fail(where, "an entry is not an object literal");
+  return node;
+};
+
+/** A string literal's value, and nothing else. */
+const stringOf = (node, where, field) => {
+  let value = node;
+  if (ts.isAsExpression(value)) value = value.expression;
+  if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value)) {
+    fail(where, `${field} is not a plain string literal, so its value cannot be compared`);
+  }
+  return value.text;
+};
 
 /**
- * The record an entry states, with comments and formatting left out.
+ * The approved-section table, as a canonical string.
  *
- * `approvedSections` is the table the owner signed, so its content is part of the
- * record; whitespace inside it is not. `copy` is compared by the name of the copy
- * table, which is what ties the entry to the fifty-six pinned strings. Everything
- * else in the entry -- the comments, the device map, the line breaks -- may be
- * improved without this check having an opinion.
+ * Read as nested array literals of string literals rather than as source text:
+ * the table is the record, and comparing its source would report a reflow as a
+ * change while a computed element would read as unchanged.
  */
-export const recordOf = (entry, where) => {
-  const record = {};
-  for (const field of SCALARS) {
-    const found = new RegExp(`(?:^|[\\s,{])${field}:\\s*"([^"]*)"`).exec(entry);
-    if (!found) throw new Error(`${where}: an entry has no ${field}`);
-    record[field] = found[1];
+const sectionsOf = (node, where) => {
+  let value = node;
+  if (ts.isAsExpression(value)) value = value.expression;
+  if (!ts.isArrayLiteralExpression(value)) fail(where, "approvedSections is not an array literal");
+  return JSON.stringify(
+    value.elements.map((row) => {
+      let entry = row;
+      if (ts.isAsExpression(entry)) entry = entry.expression;
+      if (!ts.isArrayLiteralExpression(entry)) {
+        fail(where, "an approvedSections row is not an array literal");
+      }
+      return entry.elements.map((cell) => stringOf(cell, where, "an approvedSections cell"));
+    })
+  );
+};
+
+/** The record one entry states, read from the syntax and nothing else. */
+const recordOf = (entry, where) => {
+  const object = objectLiteral(entry, where);
+  const seen = new Map();
+  for (const property of object.properties) {
+    if (ts.isSpreadAssignment(property)) {
+      fail(
+        where,
+        "an entry holds a spread, which can change any field without the field being written"
+      );
+    }
+    if (!ts.isPropertyAssignment(property)) {
+      // A shorthand or a method: either way the value is not here to be read.
+      fail(where, "an entry holds a property this check cannot read");
+    }
+    const name = property.name;
+    if (ts.isComputedPropertyName(name)) {
+      fail(where, "an entry holds a computed key");
+    }
+    const key = ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : null;
+    if (key === null) fail(where, "an entry holds a key this check cannot read");
+    if (seen.has(key)) fail(where, `an entry holds ${key} twice`);
+    seen.set(key, property.initializer);
   }
-  const sections = entry.indexOf("approvedSections:");
-  if (sections < 0) throw new Error(`${where}: an entry has no approvedSections`);
-  const bracket = entry.indexOf("[", sections);
-  record.approvedSections = entry
-    .slice(bracket, blockEnd(entry, bracket) + 1)
-    .replace(/\s+/g, " ");
-  const copy = /(?:^|[\s,{])copy:\s*([A-Za-z0-9_$.]+)/.exec(entry);
-  if (!copy) throw new Error(`${where}: an entry has no copy table`);
-  record.copy = copy[1];
+
+  const record = {};
+  for (const field of RECORD_FIELDS) {
+    const value = seen.get(field);
+    if (value === undefined) fail(where, `an entry has no ${field}`);
+    if (field === "approvedSections") {
+      record[field] = sectionsOf(value, where);
+    } else if (field === "copy") {
+      // An identifier: the name of the copy table, which is what ties the entry
+      // to the fifty-six pinned strings.
+      if (!ts.isIdentifier(value)) fail(where, "copy is not the name of a copy table");
+      record[field] = value.text;
+    } else {
+      record[field] = stringOf(value, where, field);
+    }
+  }
   return record;
 };
 
-export const recordsOf = (source, where) =>
-  entriesOf(source, where).map((entry) => recordOf(entry, where));
+/** Every entry's record, in the order the array holds them. */
+export const recordsOf = (source, where) => {
+  const array = arrayLiteral(parse(source, where), where);
+  if (array.elements.length === 0) fail(where, `${ARRAY} holds no entries`);
+  return array.elements.map((element) => recordOf(element, where));
+};
+
+/**
+ * The document-level pins, read from `lib/emailConsentCopyDocumentPins.ts`.
+ *
+ * Separate from the versions because they answer a different question: the
+ * unversioned sections are the part of the document no version owns, and a review
+ * pointed out that leaving their digest in the test file left round 14's finding
+ * standing for sections 9 and 10 -- edit them, repin, and the base comparison saw
+ * nothing because no version's record had moved.
+ */
+export const PINS_SOURCE = "lib/emailConsentCopyDocumentPins.ts";
+
+/** A flat array literal of string literals. */
+const stringsOf = (node, where, field) => {
+  let value = node;
+  if (ts.isAsExpression(value)) value = value.expression;
+  if (!ts.isArrayLiteralExpression(value)) fail(where, `${field} is not an array literal`);
+  return value.elements.map((element) => stringOf(element, where, field));
+};
+
+export const pinsOf = (source, where) => {
+  const file = parse(source, where);
+  const found = new Map();
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      if (found.has(node.name.text)) fail(where, `${PINS_SOURCE} declares ${node.name.text} twice`);
+      found.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+
+  const digest = found.get("UNVERSIONED_SECTIONS_DIGEST");
+  const sections = found.get("UNVERSIONED_SECTIONS");
+  if (digest === undefined || sections === undefined) {
+    fail(where, `${PINS_SOURCE} does not declare the unversioned pins`);
+  }
+  return {
+    unversionedSectionsDigest: stringOf(digest, where, "UNVERSIONED_SECTIONS_DIGEST"),
+    unversionedSections: stringsOf(sections, where, "UNVERSIONED_SECTIONS").join(","),
+  };
+};
 
 /**
  * The recomputations this repository has decided are not changes to a record.
@@ -123,28 +246,35 @@ export const recordsOf = (source, where) =>
  * the second changes -- the body digest's input became length-prefixed, and its
  * section list became derived from the approval table rather than written beside
  * it -- an existing version's recorded value has to move although nothing the
- * owner signed did. Refusing that outright would mean never being able to
- * strengthen the pin; letting it through silently would mean the gate says
- * nothing.
+ * owner signed did.
  *
- * So each one is written down, with the exact pair of values and why. A wording
- * edit matches no entry here and still fails, and an entry only ever excuses the
- * one transition it names. An entry whose `from` is no longer what the base holds
- * is dead, and goes out with the branch that needed it.
+ * What an entry here honestly buys, and a review was right to press on this: it
+ * is an audit signal and not an approval. The list is in the same commit as the
+ * change it excuses, so it cannot prove that the change was a recomputation
+ * rather than a rewording. What it does is make the exemption a line in the diff
+ * that names the exact pair of values and says why -- and it is narrowed to the
+ * two digest fields, so no entry here can ever excuse a moved approver, date,
+ * section list or copy table. Those fail, full stop.
+ *
+ * An entry whose `from` is no longer what the base holds is dead, and goes out
+ * with the branch that needed it. The list is empty on the branch that introduced
+ * it, for exactly that reason: this branch's own digests moved twice while the
+ * canonical form was being fixed, and the base holds neither value, so an entry
+ * naming either would excuse nothing and read as though something had been
+ * excused.
  */
-export const RECOMPUTED = [
-  {
-    version: "2026-09-23",
-    field: "approvedBodyDigest",
-    from: "641a53ca88b3a0fd7d276426c1ee2a29",
-    to: "4d4f8824c4a859fbc1f2007eca022af2",
-    why:
-      "The digest's input changed, not the document: each part now carries its " +
-      "own length instead of being joined by a NUL, and the section list is " +
-      "derived from the approval table. Sections 1 to 6 and section 8 are the " +
-      "same bytes.",
-  },
-];
+export const RECOMPUTED = [];
+
+/**
+ * Amendments to the sections no version owns.
+ *
+ * Sections 9 and 10 are amendable -- section 10 is the procedure, and the
+ * document's own revision history amends it -- so their digest legitimately
+ * moves. Which is exactly why it needs a line saying so: without one, an edit to
+ * section 9's recorded decisions is invisible to a base comparison that only
+ * watches version records.
+ */
+export const DOCUMENT_AMENDMENTS = [];
 
 /**
  * What changed between the base revision's approved versions and this tree's.
@@ -152,7 +282,15 @@ export const RECOMPUTED = [
  * Returns the problems, which is the answer: no problems is the pass. Versions
  * may be appended and nothing else -- not removed, not reordered, not edited.
  */
-export const immutabilityProblems = ({ before, now, base, recomputed = RECOMPUTED }) => {
+export const immutabilityProblems = ({
+  before,
+  now,
+  base,
+  recomputed = RECOMPUTED,
+  pinsBefore = null,
+  pinsNow = null,
+  amendments = DOCUMENT_AMENDMENTS,
+}) => {
   const problems = [];
   const notes = [];
   const excuse = (version, field, was, next) =>
@@ -161,7 +299,9 @@ export const immutabilityProblems = ({ before, now, base, recomputed = RECOMPUTE
         entry.version === version &&
         entry.field === field &&
         entry.from === was &&
-        entry.to === next
+        entry.to === next &&
+        // Narrowed to the digests, so no entry can excuse a moved approver.
+        DIGEST_FIELDS.includes(entry.field)
     );
 
   before.forEach((was, index) => {
@@ -194,12 +334,46 @@ export const immutabilityProblems = ({ before, now, base, recomputed = RECOMPUTE
         `version ${was.version}'s ${field} changed from ${JSON.stringify(was[field])} ` +
           `to ${JSON.stringify(current[field])}. That record is what a stored ` +
           `consent's copyHash points at; section 10 says a change to approved ` +
-          `wording is a new version in a new section, not an edit to this one.`
+          `wording is a new version in a new section, not an edit to this one.` +
+          (DIGEST_FIELDS.includes(field)
+            ? ""
+            : " No recomputation entry can excuse this field.")
       );
     }
   });
+
+  // The part of the document no version owns.
+  if (pinsBefore !== null && pinsNow !== null) {
+    if (pinsBefore.unversionedSections !== pinsNow.unversionedSections) {
+      problems.push(
+        `the list of sections no version owns changed from ` +
+          `${pinsBefore.unversionedSections} to ${pinsNow.unversionedSections}. A new ` +
+          `version's sections belong to that version, so adding one does not change ` +
+          `this list; a section that no version claims is a section nobody approved.`
+      );
+    }
+    if (pinsBefore.unversionedSectionsDigest !== pinsNow.unversionedSectionsDigest) {
+      const amendment = amendments.find(
+        (entry) =>
+          entry.from === pinsBefore.unversionedSectionsDigest &&
+          entry.to === pinsNow.unversionedSectionsDigest
+      );
+      if (amendment) {
+        notes.push(`the sections no version owns were amended: ${amendment.why}`);
+      } else {
+        problems.push(
+          `the digest of the sections no version owns changed from ` +
+            `${pinsBefore.unversionedSectionsDigest} to ${pinsNow.unversionedSectionsDigest} ` +
+            `with no entry in DOCUMENT_AMENDMENTS saying what was amended. Sections 9 ` +
+            `and 10 may be amended; an amendment nobody wrote down cannot be told ` +
+            `from an edit to the approved wording hiding behind one.`
+        );
+      }
+    }
+  }
 
   return { problems, notes, added: now.slice(before.length).map((entry) => entry.version) };
 };
 
 export const CONSENT_COPY_SOURCE = SOURCE;
+export { Unreadable };

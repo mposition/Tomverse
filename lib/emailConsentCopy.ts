@@ -241,8 +241,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     recordSection: "8.",
     // Recorded, not computed. Moving it means saying that the owner's record
     // for this version has changed.
-    recordDigest: "c1cb328e70178109be557037025ef807",
-    approvedBodyDigest: "4d4f8824c4a859fbc1f2007eca022af2",
+    recordDigest: "be4413d4121f878a969425836c394e2f",
+    approvedBodyDigest: "d46ce9c67452464ca55f92aa6217c608",
     deviceCells: {
       signupOptIn: { section: "3.A", label: null, role: null },
       signupNotice: { section: "3.B", label: null, role: null },

@@ -1,0 +1,19 @@
+{
+  "note": "The bootstrap baseline. See scripts/check-consent-copy-immutability.mjs, section \"The first landing\". Delete this file once lib/emailConsentCopy.ts is on develop.",
+  "records": [
+    {
+      "version": "2026-09-23",
+      "approvedBy": "mposition",
+      "approvedAt": "2026-09-23",
+      "recordSection": "8.",
+      "recordDigest": "be4413d4121f878a969425836c394e2f",
+      "approvedBodyDigest": "d46ce9c67452464ca55f92aa6217c608",
+      "approvedSections": "[[\"§1\",\"R5 — 철회 시까지\"],[\"§2\",\"동의 장치는 7개 언어, 법률 문서는 fallback 유지\"],[\"§3.A–D\",\"동의 장치 4개의 문안\"],[\"§4.1–4.3\",\"통지 3건의 문안\"],[\"§5\",\"/terms 조항\"],[\"§6\",\"/privacy 추가 2문장\"]]",
+      "copy": "V2026_09_23"
+    }
+  ],
+  "pins": {
+    "unversionedSectionsDigest": "76c7caacc7729901db77707c80826d07",
+    "unversionedSections": "0.,7.,9.,10."
+  }
+}
