@@ -30,7 +30,10 @@ import { join, relative, resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const ROOTS = ["app", "lib", "scripts"];
 const EXTENSIONS = [".ts", ".tsx", ".mjs", ".js"];
-const CALL = "runBoundedMarketingTransaction(";
+const NAME = "runBoundedMarketingTransaction";
+const CALL = NAME + "(";
+/** Where it is defined, and the one place its name is not a call. */
+const DEFINITION = "lib/marketingPublisherRun.ts";
 
 const sourceFiles = () => {
   const found = [];
@@ -130,6 +133,68 @@ const callSites = () => {
   return sites;
 };
 
+/**
+ * Two shapes this scan cannot follow, refused rather than resolved.
+ *
+ * Calls are found by their text, so an alias -- assign the function to a name
+ * and call that -- is a call the scan never sees, and a call it never sees has
+ * a body it never reads. Following an identifier across a module is a type
+ * checker's job; refusing the indirection costs a caller nothing, because there
+ * is no reason to alias it.
+ *
+ * Import declarations are removed first, since naming it in one is how a caller
+ * gets at it. Nothing else is removed -- no export form in particular -- so a
+ * re-export is refused too, which is the point: a second name for it is a
+ * second name these checks cannot search for.
+ */
+const withoutImportDeclarations = (source) =>
+  // Safe because an import declaration holds no ";" before its own, which is
+  // what keeps this from eating the statement after it.
+  source.replace(/^[ \t]*import\b[^;]*?;/gms, "");
+
+test("the function is only ever called, never aliased or re-exported", () => {
+  for (const path of sourceFiles()) {
+    const file = relative(ROOT, path).split("\\").join("/");
+    if (file === DEFINITION) continue;
+    const source = withoutImportDeclarations(readFileSync(path, "utf8"));
+    let from = 0;
+    while (true) {
+      const at = source.indexOf(NAME, from);
+      if (at === -1) break;
+      from = at + NAME.length;
+      // A longer identifier that happens to contain the name is not the name.
+      if (/[\w$]/.test(source[at - 1] ?? "")) continue;
+      if (/[\w$]/.test(source[from] ?? "")) continue;
+      assert.equal(
+        source[from],
+        "(",
+        file +
+          ": " +
+          NAME +
+          " is named without being called. Call it directly -- an alias or a re-export is a call the checks in this file cannot find, and the bound they enforce is why they exist.",
+      );
+    }
+  }
+});
+
+/**
+ * The work is written where it is passed.
+ *
+ * Passing a named function leaves the body in another place, where it may use
+ * the module-level client while this scan reads the work as the letters of its
+ * name. Refused for the same reason.
+ */
+test("the work is an inline function, not a name", () => {
+  for (const site of callSites()) {
+    const work = site.work.trim();
+    assert.ok(
+      work.includes("=>") || /^(async\s+)?function\b/.test(work),
+      site.file +
+        ": the work passed to runBoundedMarketingTransaction must be written inline. A function passed by name carries its body somewhere these checks cannot read it, and its body is the thing that has to be free of the module-level client.",
+    );
+  }
+});
+
 test("no bounded publisher transaction reaches the module-level client", () => {
   for (const site of callSites()) {
     assert.equal(
@@ -174,4 +239,51 @@ test("the scanner finds a planted call and reads its whole body", () => {
     ),
   );
   assert.equal(/(^|[^.\w])prisma\s*\./.test(clean), false);
+});
+
+test("the two indirections are refused, and an import is not", () => {
+  // Both rules pass trivially today, because S2d2 writes the first caller. What
+  // is proved here is that they refuse, which is the part a tree with no
+  // callers cannot show.
+  const byName = workArgument(
+    callArguments("runBoundedMarketingTransaction(prisma, publishBatch);", CALL.length - 1),
+  ).trim();
+  assert.equal(byName.includes("=>"), false);
+  assert.equal(/^(async\s+)?function\b/.test(byName), false);
+
+  const inline = workArgument(
+    callArguments("runBoundedMarketingTransaction(prisma, async (tx) => { await tx.a.b(); });", CALL.length - 1),
+  ).trim();
+  assert.equal(inline.includes("=>"), true);
+
+  // An import naming it is how a caller reaches it, and is removed before the
+  // alias rule looks.
+  assert.equal(
+    withoutImportDeclarations(
+      'import { runBoundedMarketingTransaction } from "@/lib/marketingPublisherRun";\nconst x = 1;',
+    ).trim(),
+    "const x = 1;",
+  );
+  // A multi-line named import is the same declaration and is removed too.
+  assert.equal(
+    withoutImportDeclarations(
+      'import {\n  runBoundedMarketingTransaction,\n} from "@/lib/marketingPublisherRun";\nconst x = 1;',
+    ).trim(),
+    "const x = 1;",
+  );
+  // An alias survives it, which is what makes the rule above able to fail.
+  assert.match(
+    withoutImportDeclarations("const run = runBoundedMarketingTransaction;"),
+    /const run = runBoundedMarketingTransaction;/,
+  );
+  // And a re-export survives it, because a second name is a second search.
+  assert.match(
+    withoutImportDeclarations("export { runBoundedMarketingTransaction };"),
+    /export \{ runBoundedMarketingTransaction \};/,
+  );
+  // The statement after an import is not eaten.
+  assert.match(
+    withoutImportDeclarations('import x from "y";\nconst after = runBoundedMarketingTransaction;'),
+    /const after = runBoundedMarketingTransaction;/,
+  );
 });
