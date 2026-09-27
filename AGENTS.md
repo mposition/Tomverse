@@ -1126,6 +1126,10 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   이 절에 추가합니다.
 - **P1a(결정적 핵심)**: `lib/engineeringAgentCore.ts`,
   `tests/engineeringAgentCore.test.mjs`.
+- **P1b(소유권 manifest와 tier)**: `lib/agentAuthorityFiles.ts`, `lib/agentPushPolicy.ts`,
+  `tests/agentAuthorityFiles.test.mjs`, `tests/agentPushPolicy.test.mjs`. **새 최상위
+  디렉터리나 에이전트·AMUX 이름이 든 파일을 추가하면 manifest 분류가 먼저입니다** —
+  `tests/agentAuthorityFiles.test.mjs`가 분류되지 않은 것을 실패로 만듭니다.
 
 # AI Review (교차검토) 품질과 M5
 
