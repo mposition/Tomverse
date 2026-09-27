@@ -283,6 +283,11 @@ run(
     // waiver has to name a sealed approval of the waiver kind. All three are
     // constraints and a trigger, so only the database can answer for them.
     "tests/integration/release-notes-rule-obligation.db.test.ts",
+    // The two statutory display checks, whose question is which (policy version,
+    // profile) a message could still be composed under. Both earlier readings of
+    // that were wrong in ways only rows show: the active version alone, and a
+    // profile key assumed equal to a country code.
+    "tests/integration/email-statutory-display-readiness.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",

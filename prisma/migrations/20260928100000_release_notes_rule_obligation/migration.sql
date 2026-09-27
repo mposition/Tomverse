@@ -207,4 +207,61 @@ CREATE TRIGGER "release_notes_rule_obligation_waiver_scope"
     BEFORE INSERT OR UPDATE ON "ReleaseNotesRuleObligation"
     FOR EACH ROW EXECUTE FUNCTION "release_notes_rule_obligation_waiver_scope"();
 
+-- ## And the other direction
+--
+-- Comparing the scope when the duty row is written is half of it. A review found
+-- the other half: a draft's country rule may still be edited (that is what a
+-- draft is for), so moving its country, its rule key or its rule version after a
+-- waiver has been attached leaves a waived row whose approval waives something
+-- else. The send verdict would refuse it, but the stored state and the admin
+-- screen would both say a duty was waived that nobody waived -- and a state that
+-- reads as a decision somebody made is exactly what must not be writable by
+-- accident.
+--
+-- So the four columns a waiver's scope names are frozen once a waived duty hangs
+-- off the rule. Not the whole row: the notes are editable, and a rule with no
+-- waived duty is as editable as it was. Detaching the waiver first is the way to
+-- move the rule, which is the right order -- the waiver was for the rule as it
+-- was.
+CREATE FUNCTION "release_notes_country_rule_waived_scope"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    waived_count INTEGER;
+BEGIN
+    IF NEW."policyVersionId" = OLD."policyVersionId"
+        AND NEW."countryCode" = OLD."countryCode"
+        AND NEW."ruleKey" = OLD."ruleKey"
+        AND NEW."ruleVersion" = OLD."ruleVersion"
+    THEN
+        RETURN NEW;
+    END IF;
+
+    -- FOR SHARE on the duty rows, so a waiver committed by another transaction
+    -- either is already visible here or waits for this one.
+    EXECUTE pg_catalog.format(
+        'SELECT pg_catalog.count(*) FROM (
+             SELECT 1 FROM %I."ReleaseNotesRuleObligation" o
+              WHERE o."countryRuleId" = $1 AND o."state" = ''waived''
+              FOR SHARE
+         ) s',
+        TG_TABLE_SCHEMA
+    ) INTO waived_count USING OLD."id";
+
+    IF waived_count > 0 THEN
+        RAISE EXCEPTION
+            'ReleaseNotesCountryRule % carries % waived duty state(s) whose approval names its current scope, so that scope cannot be changed. Detach the waiver first.',
+            OLD."id", waived_count
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "release_notes_country_rule_waived_scope"
+    BEFORE UPDATE ON "ReleaseNotesCountryRule"
+    FOR EACH ROW EXECUTE FUNCTION "release_notes_country_rule_waived_scope"();
+
 COMMIT;

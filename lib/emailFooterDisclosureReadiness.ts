@@ -7,6 +7,7 @@ import {
   identityBlocksWithoutValue,
 } from "@/lib/emailBusinessIdentity";
 import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
+import { sendableCountryProfiles } from "@/lib/emailSendableProfiles";
 import { obligationsFor } from "@/lib/releaseNotesObligationCore";
 
 /**
@@ -39,7 +40,9 @@ import { obligationsFor } from "@/lib/releaseNotesObligationCore";
  * The active one and every version a pending delivery is pinned to, for the same
  * reason as `subjectLabelReadiness()`: the lane composes a queued message under
  * the version that message carries (EM-04), so activating a corrected version
- * does not reach anything already enqueued.
+ * does not reach anything already enqueued. And the profile each of those names,
+ * rather than one whose key happens to equal a country code --
+ * `sendableCountryProfiles()` says why that is not the same question.
  */
 
 /**
@@ -144,28 +147,17 @@ export async function footerDisclosureReadiness(
     );
   }
 
-  const pending = await prisma.emailDelivery.findMany({
-    where: {
-      status: "pending",
-      jurisdictionProfileKey: { in: FOOTER_DISCLOSURE_COUNTRIES },
-    },
-    select: { policyVersionId: true, jurisdictionProfileKey: true },
-    distinct: ["policyVersionId", "jurisdictionProfileKey"],
+  const { pairs, unmappedCountries } = await sendableCountryProfiles({
+    countryCodes: FOOTER_DISCLOSURE_COUNTRIES,
+    activePolicyVersionId: active.id,
   });
-
-  const wanted = new Map<string, Set<string>>();
-  const want = (policyVersionId: string, profileKey: string) => {
-    const keys = wanted.get(policyVersionId) ?? new Set<string>();
-    keys.add(profileKey);
-    wanted.set(policyVersionId, keys);
-  };
-  for (const countryCode of FOOTER_DISCLOSURE_COUNTRIES) want(active.id, countryCode);
-  for (const row of pending) want(row.policyVersionId, row.jurisdictionProfileKey);
 
   const profiles = await prisma.jurisdictionProfile.findMany({
     where: {
-      policyVersionId: { in: [...wanted.keys()] },
-      profileKey: { in: FOOTER_DISCLOSURE_COUNTRIES },
+      OR: pairs.map((pair) => ({
+        policyVersionId: pair.policyVersionId,
+        profileKey: pair.profileKey,
+      })),
     },
     select: { profileKey: true, policyVersionId: true, footerBlocks: true },
   });
@@ -176,42 +168,48 @@ export async function footerDisclosureReadiness(
     ])
   );
 
-  const failures: { countryCode: string; policyVersionId: string; missing: string[] }[] = [];
-  for (const [policyVersionId, keys] of wanted) {
-    for (const countryCode of keys) {
-      const blocks = footerBlocksRequired(countryCode);
-      const named = stored.get(`${policyVersionId}:${countryCode}`);
-      // An absent row prints no footer at all, which is every block missing.
-      const notNamed =
-        named === undefined ? [...blocks] : blocks.filter((block) => !named.includes(block));
-      const withoutValue = identityBlocksWithoutValue(env, blocks);
-      const missing = [...new Set([...notNamed, ...withoutValue])].sort();
-      if (missing.length > 0) failures.push({ countryCode, policyVersionId, missing });
-    }
-  }
+  const failures = pairs.flatMap((pair) => {
+    const blocks = footerBlocksRequired(pair.countryCode);
+    const named = stored.get(`${pair.policyVersionId}:${pair.profileKey}`);
+    // An absent row prints no footer at all, which is every block missing.
+    const notNamed =
+      named === undefined ? [...blocks] : blocks.filter((block) => !named.includes(block));
+    const withoutValue = identityBlocksWithoutValue(env, blocks);
+    const missing = [...new Set([...notNamed, ...withoutValue])].sort();
+    return missing.length > 0 ? [{ ...pair, missing }] : [];
+  });
 
-  const checked = [...wanted.keys()].sort();
-  if (failures.length === 0) return answer(true, checked, []);
+  const checked = [...new Set(pairs.map((pair) => pair.policyVersionId))].sort();
+  if (failures.length === 0 && unmappedCountries.length === 0) return answer(true, checked, []);
 
-  const queued = failures.filter((entry) => entry.policyVersionId !== active.id);
+  const queued = failures.filter((entry) => entry.queued);
   return answer(false, checked, [
     {
       severity: "error",
       code: "EMAIL_FOOTER_DISCLOSURE_MISSING",
       message:
-        "The footer a statute requires is incomplete for " +
-        `${failures
-          .map(
-            (entry) =>
-              `${entry.countryCode}@${entry.policyVersionId} (${entry.missing.join(", ")})`
-          )
-          .join("; ")}. ` +
+        (failures.length > 0
+          ? "The footer a statute requires is incomplete for " +
+            `${failures
+              .map(
+                (entry) =>
+                  `${entry.countryCode}/${entry.profileKey}@${entry.policyVersionId} ` +
+                  `(${entry.missing.join(", ")})`
+              )
+              .join("; ")}. `
+          : "") +
         (queued.length > 0
-          ? "Some of those are versions pending deliveries are pinned to, which activating a " +
-            "corrected version does not change. "
+          ? "Some of those are carried by pending deliveries, which activating a corrected " +
+            "version does not change. "
+          : "") +
+        (unmappedCountries.length > 0
+          ? `The active version maps no profile for ${unmappedCountries.join(", ")}, so a ` +
+            "message to those countries would be composed from no profile at all. "
           : "") +
         "Marketing to those countries is refused while that is true.",
-      countryCodes: [...new Set(failures.map((entry) => entry.countryCode))].sort(),
+      countryCodes: [
+        ...new Set([...failures.map((entry) => entry.countryCode), ...unmappedCountries]),
+      ].sort(),
     },
   ]);
 }

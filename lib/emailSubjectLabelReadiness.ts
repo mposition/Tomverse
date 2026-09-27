@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { sendableCountryProfiles } from "@/lib/emailSendableProfiles";
 import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
 import {
   RELEASE_NOTES_OBLIGATIONS,
@@ -25,7 +26,13 @@ import {
  * as a reason to stop rather than a detail.
  *
  * It answers about the active policy version **and about every version a
- * pending delivery is pinned to**. The lane reads the profile of
+ * pending delivery is pinned to**, and about the profile each of those actually
+ * names rather than about a profile whose key happens to equal a country code.
+ * A review found the second half: `profileKey === countryCode` is true for the
+ * three countries with duties today and false in general -- the EEA is thirty
+ * countries and one profile -- so a queued message carrying `SG`/`SG-v2` was not
+ * in `profileKey IN ('SG')`, and the check passed on the `SG` row while the
+ * message was composed from `SG-v2`. The lane reads the profile of
  * `delivery.policyVersionId`, not the active one (EM-04), so a message enqueued
  * under an older version is sent under that version's labels however good the
  * active one is. The first version of this check read only the active version,
@@ -120,34 +127,17 @@ export async function subjectLabelReadiness(
     ]);
   }
 
-  // Every version a message could still go out under: the active one, and the
-  // ones already-queued deliveries carry. A profile key is checked per version
-  // only where it is actually reachable -- the active version for anything about
-  // to be enqueued, and a pinned version only for the profile keys queued under
-  // it, because a version nothing is queued under for SG cannot send an SG
-  // message however its row reads.
-  const pending = await prisma.emailDelivery.findMany({
-    where: {
-      status: "pending",
-      jurisdictionProfileKey: { in: Object.keys(REQUIRED_SUBJECT_PREFIX) },
-    },
-    select: { policyVersionId: true, jurisdictionProfileKey: true },
-    distinct: ["policyVersionId", "jurisdictionProfileKey"],
+  const { pairs, unmappedCountries } = await sendableCountryProfiles({
+    countryCodes: Object.keys(REQUIRED_SUBJECT_PREFIX),
+    activePolicyVersionId: active.id,
   });
-
-  const wanted = new Map<string, Set<string>>();
-  const want = (policyVersionId: string, profileKey: string) => {
-    const keys = wanted.get(policyVersionId) ?? new Set<string>();
-    keys.add(profileKey);
-    wanted.set(policyVersionId, keys);
-  };
-  for (const profileKey of Object.keys(REQUIRED_SUBJECT_PREFIX)) want(active.id, profileKey);
-  for (const row of pending) want(row.policyVersionId, row.jurisdictionProfileKey);
 
   const profiles = await prisma.jurisdictionProfile.findMany({
     where: {
-      policyVersionId: { in: [...wanted.keys()] },
-      profileKey: { in: Object.keys(REQUIRED_SUBJECT_PREFIX) },
+      OR: pairs.map((pair) => ({
+        policyVersionId: pair.policyVersionId,
+        profileKey: pair.profileKey,
+      })),
     },
     select: { profileKey: true, policyVersionId: true, subjectPrefix: true },
   });
@@ -157,21 +147,19 @@ export async function subjectLabelReadiness(
 
   // A profile row that is absent is as missing as one with the wrong value: the
   // lane's `findUnique` returns nothing and the message is composed with no
-  // prefix at all.
-  const missing: { policyVersionId: string; profileKey: string }[] = [];
-  for (const [policyVersionId, keys] of wanted) {
-    for (const profileKey of keys) {
-      const prefix = REQUIRED_SUBJECT_PREFIX[profileKey];
-      if ((stored.get(`${policyVersionId}:${profileKey}`) ?? "").trimEnd() !== prefix) {
-        missing.push({ policyVersionId, profileKey });
-      }
-    }
+  // prefix at all. So is a country the active version does not map to any
+  // profile.
+  const missing = pairs.filter((pair) => {
+    const prefix = REQUIRED_SUBJECT_PREFIX[pair.countryCode];
+    return (stored.get(`${pair.policyVersionId}:${pair.profileKey}`) ?? "").trimEnd() !== prefix;
+  });
+
+  const checked = [...new Set(pairs.map((pair) => pair.policyVersionId))].sort();
+  if (missing.length === 0 && unmappedCountries.length === 0) {
+    return answer(true, active.id, [], checked);
   }
 
-  const checked = [...wanted.keys()].sort();
-  if (missing.length === 0) return answer(true, active.id, [], checked);
-
-  const queued = missing.filter((entry) => entry.policyVersionId !== active.id);
+  const queued = missing.filter((pair) => pair.queued);
   return answer(
     false,
     active.id,
@@ -180,15 +168,23 @@ export async function subjectLabelReadiness(
         severity: "error",
         code: "EMAIL_SUBJECT_LABEL_MISSING",
         message:
-          `The required subject prefix is not on ${missing.length} policy version and profile ` +
-          `pair(s): ${missing.map((entry) => `${entry.profileKey}@${entry.policyVersionId}`).join(", ")}. ` +
+          (missing.length > 0
+            ? `The required subject prefix is not on ${missing.length} version and profile ` +
+              `pair(s): ${missing
+                .map((pair) => `${pair.countryCode}/${pair.profileKey}@${pair.policyVersionId}`)
+                .join(", ")}. `
+            : "") +
           (queued.length > 0
-            ? "Some of those are versions pending deliveries are pinned to, which activating a " +
-              "corrected version does not change -- those messages are composed under the version " +
-              "they carry. "
+            ? "Some of those are carried by pending deliveries, which activating a corrected " +
+              "version does not change -- those messages are composed under the version and " +
+              "profile they carry. "
+            : "") +
+          (unmappedCountries.length > 0
+            ? `The active version maps no profile for ${unmappedCountries.join(", ")}, so a ` +
+              "message to those countries would be composed from no profile at all. "
             : "") +
           "Marketing to those countries is refused while that is true.",
-        profileKeys: [...new Set(missing.map((entry) => entry.profileKey))].sort(),
+        profileKeys: [...new Set(missing.map((pair) => pair.profileKey))].sort(),
       },
     ],
     checked

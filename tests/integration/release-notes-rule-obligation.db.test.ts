@@ -7,6 +7,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureJurisdictionPolicyDraft } from "@/lib/emailJurisdictionPolicy";
 import { releaseNotesRuleKey } from "@/lib/releaseNotesCountryRuleCore";
+import { recordObligationWaiver } from "@/lib/releaseNotesObligationStore";
 import {
   obligationsFor,
   releaseNotesObligationSeed,
@@ -375,6 +376,163 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
   });
   assert.equal(await prisma.releaseNotesRuleObligation.count(), 1);
   assert.ok(version.id);
+});
+
+test("the waiver writer records what the database accepts and reports what it refuses", async () => {
+  // `waived` is the one state a seed cannot produce, because a waiver is a
+  // person's act. This is the writer that can, and what it will not do.
+  await draft();
+  const ruleId = await koreanRuleId();
+  await prisma.releaseNotesRuleObligation.deleteMany({});
+  const rule = await prisma.releaseNotesCountryRule.findUniqueOrThrow({
+    where: { id: ruleId },
+    select: { ruleKey: true, ruleVersion: true, policyVersionId: true },
+  });
+  const sealedFor = (obligationKey: string | null, overrides = {}) =>
+    approval({
+      sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+      policyVersionId: rule.policyVersionId,
+      ruleKey: rule.ruleKey,
+      ruleVersion: rule.ruleVersion,
+      country: "KR",
+      obligationKey,
+      ...overrides,
+    });
+
+  const exact = await sealedFor("advertising_subject_label");
+  const recorded = await recordObligationWaiver({
+    countryRuleId: ruleId,
+    obligationKey: "advertising_subject_label",
+    approvalId: exact.id,
+    notes: "The owner decided not to print the advertising label.",
+  });
+  assert.equal(recorded.ok, true);
+  const stored = await prisma.releaseNotesRuleObligation.findUniqueOrThrow({
+    where: {
+      countryRuleId_obligationKey: {
+        countryRuleId: ruleId,
+        obligationKey: "advertising_subject_label",
+      },
+    },
+    select: { state: true, waiverApprovalId: true, readinessCheck: true, dueBy: true },
+  });
+  assert.equal(stored.state, "waived");
+  assert.equal(stored.waiverApprovalId, exact.id);
+  // A waived duty carries no other state's evidence, which the CHECK holds and
+  // the writer therefore does not have to remember.
+  assert.equal(stored.readinessCheck, null);
+  assert.equal(stored.dueBy, null);
+
+  // Recording the same waiver again is the same row.
+  const again = await recordObligationWaiver({
+    countryRuleId: ruleId,
+    obligationKey: "advertising_subject_label",
+    approvalId: exact.id,
+    notes: "Same decision, recorded twice.",
+  });
+  assert.equal(again.ok, true);
+  assert.equal(await prisma.releaseNotesRuleObligation.count(), 1);
+
+  // An approval that waives another duty: refused, and named as a scope
+  // mismatch rather than as something an operator has to guess at.
+  const wrongDuty = await sealedFor("body_disclosures");
+  const mismatch = await recordObligationWaiver({
+    countryRuleId: ruleId,
+    obligationKey: "consent_result_notice_14_days",
+    approvalId: wrongDuty.id,
+    notes: "x",
+  });
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.ok === false && mismatch.refusal, "approval_scope_mismatch");
+
+  // The refusals it can name without asking the database.
+  const unsealed = await sealedFor("consent_result_notice_14_days", { sealedAt: null });
+  for (const [input, refusal] of [
+    [{ approvalId: unsealed.id }, "approval_not_sealed"],
+    [{ approvalId: randomUUID() }, "approval_not_found"],
+    [{ obligationKey: "not_a_duty" }, "unknown_obligation"],
+    [{ countryRuleId: randomUUID() }, "rule_not_found"],
+  ] as const) {
+    const result = await recordObligationWaiver({
+      countryRuleId: ruleId,
+      obligationKey: "consent_result_notice_14_days",
+      approvalId: exact.id,
+      notes: "x",
+      ...input,
+    });
+    assert.equal(result.ok, false, JSON.stringify(input));
+    assert.equal(result.ok === false && result.refusal, refusal);
+  }
+
+  // And a database error that is not about the scope is thrown, not relabelled.
+  // The first version reported an empty `notes` as a wrong approval, which sends
+  // an operator to check an approval that is fine.
+  const forNotice = await sealedFor("consent_result_notice_14_days");
+  await assert.rejects(
+    () =>
+      recordObligationWaiver({
+        countryRuleId: ruleId,
+        obligationKey: "consent_result_notice_14_days",
+        approvalId: forNotice.id,
+        notes: "   ",
+      }),
+    (error: unknown) => {
+      assert.match(error instanceof Error ? error.message : String(error), /notes_check/);
+      return true;
+    }
+  );
+});
+
+test("a rule carrying a waived duty cannot have the scope that waiver names changed", async () => {
+  // The other direction of the scope comparison. A draft's rule is editable --
+  // that is what a draft is for -- so moving its country or rule version after a
+  // waiver is attached would leave a `waived` row whose approval waives something
+  // else, and the admin screen would show a decision nobody made.
+  await draft();
+  const ruleId = await koreanRuleId();
+  await prisma.releaseNotesRuleObligation.deleteMany({});
+  const rule = await prisma.releaseNotesCountryRule.findUniqueOrThrow({
+    where: { id: ruleId },
+    select: { ruleKey: true, ruleVersion: true, policyVersionId: true, notes: true },
+  });
+
+  // Before the waiver, the scope moves freely.
+  await prisma.releaseNotesCountryRule.update({
+    where: { id: ruleId },
+    data: { ruleVersion: rule.ruleVersion },
+  });
+
+  const waiver = await approval({
+    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    policyVersionId: rule.policyVersionId,
+    ruleKey: rule.ruleKey,
+    ruleVersion: rule.ruleVersion,
+    country: "KR",
+    obligationKey: "advertising_subject_label",
+  });
+  await recordObligationWaiver({
+    countryRuleId: ruleId,
+    obligationKey: "advertising_subject_label",
+    approvalId: waiver.id,
+    notes: "The owner decided not to print the advertising label.",
+  });
+
+  for (const data of [
+    { countryCode: "SG" },
+    { ruleVersion: rule.ruleVersion + 1 },
+    { ruleKey: releaseNotesRuleKey("SG") },
+  ]) {
+    await refuses(
+      () => prisma.releaseNotesCountryRule.update({ where: { id: ruleId }, data }),
+      /waived duty state|cannot be changed/
+    );
+  }
+
+  // The notes are not part of any waiver's scope, so they still move.
+  await prisma.releaseNotesCountryRule.update({
+    where: { id: ruleId },
+    data: { notes: `${rule.notes} (amended)` },
+  });
 });
 
 test("a rule version a duty hangs off cannot be deleted", async () => {

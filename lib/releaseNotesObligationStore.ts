@@ -1,7 +1,5 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
-
 import { prisma } from "@/lib/prisma";
 import { obligationsFor } from "@/lib/releaseNotesObligationCore";
 
@@ -32,6 +30,12 @@ import { obligationsFor } from "@/lib/releaseNotesObligationCore";
  * time, one layer earlier. This function passes the caller's ids to it and reports
  * what it said.
  */
+
+/**
+ * The scope trigger's own words, which is the one database error this reports as
+ * a refusal rather than rethrowing.
+ */
+const SCOPE_REFUSAL = /waives .* version|ReleaseNotesCountryRule .* does not exist/;
 
 export type ObligationWaiverRefusal =
   | "rule_not_found"
@@ -127,14 +131,20 @@ export async function recordObligationWaiver(input: {
       update: data,
     });
   } catch (error) {
-    // The scope comparison is the trigger's, and it raises `check_violation`.
-    // Reported rather than rethrown: an operator attaching the wrong approval
-    // has made a mistake this can name, and the two refusals above cover the
-    // cases that can be named without asking the database.
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError ||
-      error instanceof Prisma.PrismaClientUnknownRequestError
-    ) {
+    // Only the scope trigger's own refusal becomes a refusal. Everything else is
+    // rethrown, which a review was right about: the first version turned every
+    // Prisma request error into `approval_scope_mismatch`, so an empty `notes`,
+    // a foreign-key race and a statement timeout all reported that an operator
+    // had attached the wrong approval. A wrong cause is worse than no cause --
+    // the operator goes and checks the approval, and the approval is fine.
+    //
+    // Matched on the message the trigger raises, because a plpgsql RAISE reaches
+    // the client as a message rather than as a distinguishable Prisma code. The
+    // wording is this repository's own, in the migration beside this file, and
+    // `tests/integration/release-notes-rule-obligation.db.test.ts` is what keeps
+    // the two in step.
+    const message = error instanceof Error ? error.message : String(error);
+    if (SCOPE_REFUSAL.test(message)) {
       return {
         ok: false,
         refusal: "approval_scope_mismatch",
