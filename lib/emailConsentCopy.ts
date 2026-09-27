@@ -166,6 +166,12 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    * the second version either rewrite the first record or fail.
    */
   readonly recordSection: string;
+  /**
+   * The rows of that section approval table: the section the owner approved,
+   * and what it says was approved. Held here so a second version brings its own
+   * table rather than the test naming one version rows for every version.
+   */
+  readonly approvedSections: ReadonlyArray<readonly [string, string]>;
   readonly copy: ConsentCopyTable;
 }> = Object.freeze([
   Object.freeze({
@@ -173,6 +179,14 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     approvedBy: "mposition",
     approvedAt: "2026-09-23",
     recordSection: "8.",
+    approvedSections: [
+      ["§1", "R5 — 철회 시까지"],
+      ["§2", "동의 장치는 7개 언어, 법률 문서는 fallback 유지"],
+      ["§3.A–D", "동의 장치 4개의 문안"],
+      ["§4.1–4.3", "통지 3건의 문안"],
+      ["§5", "/terms 조항"],
+      ["§6", "/privacy 추가 2문장"],
+    ],
     copy: V2026_09_23,
   }),
 ]);

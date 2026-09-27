@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
-import { gfmTable } from "micromark-extension-gfm-table";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
 
 import {
   CONSENT_COPY_KEYS,
@@ -171,7 +171,7 @@ test("the wording defects waiting on a new version are the ones we know about", 
   // `A Tomverse não enviou novidades do produto` reads literally as a claim
   // about everybody. The other five pronoun languages name the reader.
   //
-  // It is not corrected here, and that restraint is the point. Section 9 says
+  // It is not corrected here, and that restraint is the point. Section 10 says
   // approved wording is versioned rather than edited, and this string is
   // approved. Nothing has rendered it yet, so no evidence points at it, which
   // makes the correction cheap -- but cheap is not the same as ours to make.
@@ -281,15 +281,24 @@ test("the canonical form separates the fields it hashes", () => {
  * its cell count changed. Every one of them let the approved record and the
  * code drift apart while the suite stayed green.
  *
- * A hand-written parser was the wrong tool. This is the parser the product
- * already renders markdown with (`remark-gfm`'s table extension over
- * `mdast-util-from-markdown`), so what the test reads is what a reader sees --
- * including CRLF, which the parser handles and `split("\n")` did not.
+ * A hand-written parser was the wrong tool. This is `remark-gfm`'s whole
+ * extension set over `mdast-util-from-markdown` -- the same GFM the product
+ * renders markdown with, minus the two CJK plugins, which amend emphasis and
+ * strikethrough and change nothing this document's headings or tables depend
+ * on. So what the test reads is what a reader sees, including CRLF, which the
+ * parser handles and `split("\n")` did not.
+ *
+ * The source is returned beside the tree because the record digest hashes bytes
+ * and the tree is what says which bytes: a node's `position.offset` is the
+ * parser's own idea of where a section starts and ends, so the ranges cannot
+ * drift from what was parsed.
  */
+const approvedSource = () => readFileSync(APPROVED_DOCUMENT, "utf8").replace(/\r\n/g, "\n");
+
 const approvedTree = () =>
-  fromMarkdown(readFileSync(APPROVED_DOCUMENT, "utf8"), {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
+  fromMarkdown(approvedSource(), {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
   });
 
 /** A node's text, as the reader sees it, with emphasis markers dropped. */
@@ -417,17 +426,29 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * at the top changed from 승인됨 to 반려됨, with all twenty-three tests still
  * green. The approval says sections 1 to 6, so all six are frozen here.
  *
- * Over the rendered tree rather than the bytes: a heading's own text, a
- * paragraph's text, a table's cells, a list item's text, in document order.
- * That way reflowing a paragraph or changing markdown that renders the same is
- * not a change to the record, and every difference a reader would see is.
+ * Over the **bytes**, not a flattening of the tree. The first version hashed
+ * headings, paragraph text, table cells and list items, and a review got past it
+ * five ways: a fenced code block added inside section 1, an image added to an
+ * approved Korean cell, a whole new section claiming the approval was withdrawn,
+ * a link's URL changed, emphasis removed, a soft break made hard, a bullet list
+ * made numbered. None of that is a hash collision -- the flattening simply threw
+ * the difference away before hashing, which costs an attacker nothing.
+ *
+ * Nothing is thrown away now. Section 10 does not permit reflowing an approved
+ * paragraph either, so a digest that tolerated it was being generous about
+ * something the contract is not generous about. CRLF is normalised to LF first,
+ * because a checkout style is not a change to the record, and .gitattributes
+ * pins the file to LF anyway.
+ *
+ * The ranges come from the parser (`position.offset`), so what is hashed is
+ * exactly what was parsed as those sections.
  *
  * Recorded, not computed: a digest this test derives from whatever it is handed
  * proves only that sha256 is deterministic. Moving it means editing a line that
  * says, in this file, that the owner's record has changed — which is the edit
  * section 10 forbids, and the one a reviewer sees for what it is.
  */
-const APPROVED_RECORD_DIGEST = "100760c3d292593ac5b7d09d6d053580";
+const APPROVED_RECORD_DIGEST = "ed08fdbcccaa4a497fbe5a26b5e1e864";
 
 /** The sections the owner's approval covers, by heading prefix and depth. */
 const APPROVED_SECTIONS = [
@@ -439,59 +460,41 @@ const APPROVED_SECTIONS = [
   ["6.", 2],
 ];
 
-/** The rendered content of a section's nodes, flattened in document order. */
-const renderedContent = (nodes) => {
-  const out = [];
-  const walk = (node) => {
-    if (node.type === "heading") {
-      out.push(`h${node.depth}:${textOf(node).trim()}`);
-      return;
-    }
-    if (node.type === "paragraph") {
-      // Collapsed: a reflowed paragraph reads the same, and the record is what
-      // a reader reads.
-      out.push(`p:${textOf(node).trim().replace(/\s+/g, " ")}`);
-      return;
-    }
-    if (node.type === "table") {
-      for (const row of node.children) out.push(`r:${cellsOf(row).join("|")}`);
-      return;
-    }
-    if (node.type === "listItem") {
-      out.push(`li:${textOf(node).trim().replace(/\s+/g, " ")}`);
-      return;
-    }
-    if (Array.isArray(node.children)) node.children.forEach(walk);
-  };
-  nodes.forEach(walk);
-  return out;
+/** The source bytes of a section, from the parser's own offsets. */
+const sourceOf = (source, nodes) => {
+  const from = nodes[0].position.start.offset;
+  const to = nodes[nodes.length - 1].position.end.offset;
+  return source.slice(from, to);
 };
 
 test("the whole approved record is the one the owner signed", () => {
+  const source = approvedSource();
   const tree = approvedTree();
-  const content = [
-    // The status block above section 1: who approved it, when, and that it is
-    // approved at all.
-    ...renderedContent(
-      tree.children.slice(
-        0,
-        tree.children.findIndex(
-          (node) => node.type === "heading" && textOf(node).startsWith("1.")
-        )
-      )
+  const firstSection = tree.children.findIndex(
+    (node) => node.type === "heading" && textOf(node).startsWith("1.")
+  );
+  assert.ok(firstSection > 0, "the status block above section 1 is missing");
+
+  const ranges = [
+    // The status block: who approved it, when, and that it is approved at all.
+    sourceOf(source, tree.children.slice(0, firstSection)),
+    ...APPROVED_SECTIONS.map(([prefix, depth]) =>
+      sourceOf(source, sectionOf(tree, prefix, depth))
     ),
-    ...APPROVED_SECTIONS.flatMap(([prefix, depth]) =>
-      renderedContent(sectionOf(tree, prefix, depth))
+    // Every version's approval record, so adding a version cannot stop the
+    // earlier ones' tables and digests from being covered.
+    ...CONSENT_COPY_VERSIONS.map(({ recordSection }) =>
+      sourceOf(source, sectionOf(tree, recordSection, 2))
     ),
   ];
-  const digest = createHash("sha256").update(content.join("\n")).digest("hex").slice(0, 32);
+  const digest = createHash("sha256").update(ranges.join("\u0000")).digest("hex").slice(0, 32);
 
   assert.equal(
     digest,
     APPROVED_RECORD_DIGEST,
-    "The approved record changed. Sections 1 to 6 and the status block are what " +
-      "the owner signed, and section 10 says a change is a new version in a new " +
-      `section rather than an edit here. If this is that, record "${digest}".`
+    "The approved record changed. The status block, sections 1 to 6 and every " +
+      "version's approval record are what the owner signed, and section 10 says " +
+      `a change is a new version in a new section. If this is that, record "${digest}".`
   );
 });
 
@@ -597,38 +600,33 @@ test("the approval table binds every approved section to the version's approver 
   // name somewhere else in the document. The rows are what the owner signed, so
   // each one is read as a row, and each must carry the approver and date the
   // code records for the current version.
-  const current = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
-  const tables = tablesOf(sectionOf(approvedTree(), current.recordSection, 2));
-  const approvals = tables.filter(
-    (table) => table.rows[0]?.[0] === "절" && table.rows[0]?.[2] === "승인"
-  );
-  // Exactly one. `find()` took the first, so a second table with the same
-  // header and every cell reading "rejected" sat below it and passed.
-  assert.equal(approvals.length, 1, "section 8 must hold exactly one approval table");
-  const approval = approvals[0];
-  assert.deepEqual(approval.rows[0], ["절", "내용", "승인"]);
-
-  // The whole table, not only its first and third columns: what each row says
-  // was approved is part of the record, and comparing the numbers alone let the
-  // description beside them be rewritten.
-  assert.deepEqual(approval.rows, [
-    ["절", "내용", "승인"],
-    ["§1", "R5 — 철회 시까지", "mposition, 2026-09-23"],
-    ["§2", "동의 장치는 7개 언어, 법률 문서는 fallback 유지", "mposition, 2026-09-23"],
-    ["§3.A–D", "동의 장치 4개의 문안", "mposition, 2026-09-23"],
-    ["§4.1–4.3", "통지 3건의 문안", "mposition, 2026-09-23"],
-    ["§5", "/terms 조항", "mposition, 2026-09-23"],
-    ["§6", "/privacy 추가 2문장", "mposition, 2026-09-23"],
-  ]);
-
-  const rows = approval.rows.slice(1);
-  for (const row of rows) {
-    assert.equal(row.length, 3, `${row[0]} has extra cells`);
-    assert.equal(
-      row[2],
-      `${current.approvedBy}, ${current.approvedAt}`,
-      `${row[0]} is not approved by the version's own approver and date`
+  // Every version, each against its own record section and its own approved
+  // sections. Reading only the last version's table, with the rows written out
+  // here, meant a second version could not pass at all: its approver and date
+  // differ, and fixing that for it would have stopped checking the first
+  // version's table.
+  const tree = approvedTree();
+  for (const version of CONSENT_COPY_VERSIONS) {
+    const where = `section ${version.recordSection}`;
+    const approvals = tablesOf(sectionOf(tree, version.recordSection, 2)).filter(
+      (table) => table.rows[0]?.[0] === "절" && table.rows[0]?.[2] === "승인"
     );
+    // Exactly one. `find()` took the first, so a second table with the same
+    // header and every cell reading "rejected" sat below it and passed.
+    assert.equal(approvals.length, 1, `${where} must hold exactly one approval table`);
+
+    // The whole table, not only its first and third columns: what each row says
+    // was approved is part of the record, and comparing the numbers alone let
+    // the description beside them be rewritten. The expected rows come from the
+    // version's own metadata, so a new version brings its own.
+    assert.deepEqual(approvals[0].rows, [
+      ["절", "내용", "승인"],
+      ...version.approvedSections.map(([section, what]) => [
+        section,
+        what,
+        `${version.approvedBy}, ${version.approvedAt}`,
+      ]),
+    ], `${where}'s approval table is not this version's record`);
   }
 });
 
@@ -714,5 +712,3 @@ test("a missing string is an error rather than an empty label", () => {
     }
   }
 });
-
-
