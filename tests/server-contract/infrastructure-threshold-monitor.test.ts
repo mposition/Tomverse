@@ -16,11 +16,6 @@ import { resolve } from "node:path";
  * incident reporter are replaced. The monitor and the alert policy are real.
  */
 
-import {
-  marketingPublisherSilenceWhere,
-  marketingPublisherSilentRuns,
-} from "@/lib/marketingPublisherRunCore";
-
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relativePath: string) =>
   pathToFileURL(resolve(ROOT, relativePath)).href;
@@ -39,67 +34,12 @@ type PublisherRun = {
   heartbeatAt: Date | null;
 };
 
-type PublisherQuery = {
-  where?: {
-    jobKey?: string;
-    status?: string;
-    OR?: Array<{
-      heartbeatAt?: { lt?: Date } | null;
-      startedAt?: { lt?: Date };
-    }>;
-  };
-  orderBy?: unknown;
-  take?: number;
-};
-
-/**
- * The subset of Prisma's semantics this monitor's query actually uses.
- *
- * Written out rather than stubbed because the bug it has to catch lives in the
- * query: a predicate that selects healthy rows, or a page taken before the rows
- * are ordered, both return the wrong fifty. A fake that ignored `where`,
- * `orderBy` and `take` would agree with either version.
- *
- * `nulls: "first"` matches PostgreSQL's own ordering for `ASC NULLS FIRST`, and
- * a null heartbeat means the run has never reported one -- older than any
- * timestamp, so it sorts before all of them.
- */
-const applyQuery = (rows: PublisherRun[], args: PublisherQuery): PublisherRun[] => {
-  const where = args.where ?? {};
-  let selected = rows.filter((row) => {
-    if (where.jobKey !== undefined && where.jobKey !== "marketing_publisher") return false;
-    if (where.status !== undefined && where.status !== "running") return false;
-    if (!where.OR) return true;
-    return where.OR.some((clause) => {
-      if (clause.heartbeatAt === null) {
-        if (row.heartbeatAt !== null) return false;
-        const limit = clause.startedAt?.lt;
-        return limit === undefined || row.startedAt < limit;
-      }
-      const limit = clause.heartbeatAt?.lt;
-      if (limit === undefined) return false;
-      return row.heartbeatAt !== null && row.heartbeatAt < limit;
-    });
-  });
-  if (args.orderBy) {
-    selected = [...selected].sort((left, right) => {
-      const leftAt = left.heartbeatAt;
-      const rightAt = right.heartbeatAt;
-      if (leftAt === null && rightAt !== null) return -1;
-      if (leftAt !== null && rightAt === null) return 1;
-      if (leftAt !== null && rightAt !== null && leftAt.getTime() !== rightAt.getTime()) {
-        return leftAt.getTime() - rightAt.getTime();
-      }
-      return left.startedAt.getTime() - right.startedAt.getTime();
-    });
-  }
-  return args.take === undefined ? selected : selected.slice(0, args.take);
-};
-
 type World = {
   dashboard: Record<string, unknown> | null;
   dashboardError: Error | null;
   runningPublisherRuns: PublisherRun[];
+  /** What the query said the total was, when it differs from the rows given. */
+  silentTotal: number | null;
   publisherQueryError: Error | null;
   incidents: Incident[];
   completedResults: unknown[];
@@ -110,6 +50,7 @@ const world: World = {
   dashboard: null,
   dashboardError: null,
   runningPublisherRuns: [],
+  silentTotal: null,
   publisherQueryError: null,
   incidents: [],
   completedResults: [],
@@ -120,6 +61,7 @@ const resetWorld = () => {
   world.dashboard = null;
   world.dashboardError = null;
   world.runningPublisherRuns = [];
+  world.silentTotal = null;
   world.publisherQueryError = null;
   world.incidents = [];
   world.completedResults = [];
@@ -157,18 +99,23 @@ const loadMonitor = () => {
             // throw `findMany is not a function` on every single call while
             // the unit suite stayed green -- the gate that catches it is this
             // file, and only because this file loads the real monitor.
-            findMany: async (args: PublisherQuery) => {
-              if (world.publisherQueryError) throw world.publisherQueryError;
-              return applyQuery(world.runningPublisherRuns, args);
-            },
-            count: async (args: PublisherQuery) => {
-              if (world.publisherQueryError) throw world.publisherQueryError;
-              return applyQuery(world.runningPublisherRuns, {
-                ...args,
-                take: undefined,
-              }).length;
-            },
           },
+        },
+      },
+    });
+    mock.module(mod("lib/marketingPublisherRun.ts"), {
+      namedExports: {
+        // A canned answer, not a simulation of the statement. Whether the SQL
+        // selects the right rows in the right order is asked of a real
+        // PostgreSQL in tests/integration/marketing-automation-schema.db.test.ts;
+        // a fake that interpreted the statement would agree with whatever it
+        // said, including the two orderings that were wrong.
+        findSilentMarketingPublisherRuns: async () => {
+          if (world.publisherQueryError) throw world.publisherQueryError;
+          return {
+            total: world.silentTotal ?? world.runningPublisherRuns.length,
+            runs: world.runningPublisherRuns,
+          };
         },
       },
     });
@@ -346,11 +293,12 @@ test("a silent marketing publisher run pages, and is counted as an alert", async
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   const now = new Date("2026-09-24T00:30:00.000Z");
   world.dashboard = dashboard();
+  // The query decides which rows are silent, so what it hands back is silent by
+  // construction. Whether it picks the right ones -- and puts the longest-silent
+  // first -- is asked of a real PostgreSQL in the integration suite; a fake that
+  // filtered here would only be agreeing with itself.
   world.runningPublisherRuns = [
-    // Started 20 minutes ago, never heartbeat: past the 15-minute threshold.
     { id: "run_silent", startedAt: new Date(now.getTime() - 20 * 60_000), heartbeatAt: null },
-    // Heartbeat a minute ago: alive, and must not be named.
-    { id: "run_alive", startedAt: new Date(now.getTime() - 20 * 60_000), heartbeatAt: new Date(now.getTime() - 60_000) },
   ];
 
   const result = await monitorInfrastructureThresholdsIfDue(now);
@@ -360,6 +308,12 @@ test("a silent marketing publisher run pages, and is counted as an alert", async
   );
   assert.equal(incident?.context?.component, "marketing-publisher");
   assert.equal(incident?.context?.silentRuns, "1");
+  // The message names how long the worst one has been quiet, computed by the
+  // pure rule from the row the query chose.
+  assert.equal(
+    incident?.context?.oldestLastSignOfLife,
+    new Date(now.getTime() - 20 * 60_000).toISOString(),
+  );
   // The count and the alert number are the same fact. Reporting an incident
   // and returning `alerts: 0` told an operator reading either the row or the
   // API that the monitor had done nothing.
@@ -394,70 +348,31 @@ test("a silence check that cannot read records null, not zero, and pages nothing
   assert.equal(world.failedRuns, 0);
 });
 
-test("a page of healthy long-running rows cannot crowd out a silent one", () => {
-  // Codex's scenario, and the reason the predicate moved into the query. Fifty
-  // rows that started long ago and beat a moment ago satisfied the old
-  // `startedAt`-only filter, filled the unordered page of fifty, and left the
-  // one genuinely silent run outside it -- so the alert reported nothing while a
-  // dead worker's row sat open.
-  //
-  // This is a unit assertion on the two forms of the rule rather than a monitor
-  // run, because what has to agree is the predicate and the page, and both are
-  // arguments.
-  const now = new Date("2026-09-24T12:00:00.000Z");
-  const healthy: PublisherRun[] = Array.from({ length: 50 }, (_, index) => ({
-    id: `healthy_${index}`,
-    startedAt: new Date(now.getTime() - 6 * 60 * 60_000),
-    heartbeatAt: new Date(now.getTime() - 1_000),
+test("the incident reports the count the query returned, not the rows it named", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  const now = new Date("2026-09-24T00:30:00.000Z");
+  world.dashboard = dashboard();
+  // The query caps its page at fifty and its count is not capped by that, so
+  // the two are different facts and the message has to use the right one. They
+  // come from one statement, which is what stops them disagreeing about the
+  // snapshot -- the defect that made them two queries a defect.
+  world.silentTotal = 137;
+  world.runningPublisherRuns = Array.from({ length: 50 }, (_, index) => ({
+    id: "run_" + index,
+    startedAt: new Date(now.getTime() - 60 * 60_000),
+    heartbeatAt: null,
   }));
-  const silentRun: PublisherRun = {
-    id: "silent",
-    startedAt: new Date(now.getTime() - 6 * 60 * 60_000),
-    heartbeatAt: new Date(now.getTime() - 40 * 60_000),
-  };
-  const query = {
-    where: marketingPublisherSilenceWhere(now),
-    orderBy: [{ heartbeatAt: { sort: "asc", nulls: "first" } }, { startedAt: "asc" }],
-    take: 50,
-  } as PublisherQuery;
 
-  const page = applyQuery([...healthy, silentRun], query);
+  const result = await monitorInfrastructureThresholdsIfDue(now);
 
-  assert.deepEqual(
-    page.map((row) => row.id),
-    ["silent"],
-    "only the silent row satisfies the predicate, so the page cannot omit it",
+  const incident = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_RUN_SILENT",
   );
-  assert.equal(applyQuery([...healthy, silentRun], { ...query, take: undefined }).length, 1);
-  // And the rule the monitor reports with agrees with the rule it selected by.
-  assert.deepEqual(
-    marketingPublisherSilentRuns(page, now).map((row) => row.id),
-    ["silent"],
+  assert.equal(incident?.context?.silentRuns, "137");
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(
+    (world.completedResults.at(-1) as { silentPublisherRuns: number }).silentPublisherRuns,
+    137,
   );
-});
-
-test("the query form and the predicate form of the silence rule agree", () => {
-  // Two forms of one rule is the hazard this pair is worth, so they are held
-  // together on a case table rather than trusted to stay in step.
-  const now = new Date("2026-09-24T12:00:00.000Z");
-  const cases: PublisherRun[] = [
-    // never beat, started long ago: silent
-    { id: "a", startedAt: new Date(now.getTime() - 40 * 60_000), heartbeatAt: null },
-    // never beat, started a moment ago: not silent, and must not be reported
-    { id: "b", startedAt: new Date(now.getTime() - 60_000), heartbeatAt: null },
-    // beat long ago: silent
-    { id: "c", startedAt: new Date(now.getTime() - 40 * 60_000), heartbeatAt: new Date(now.getTime() - 20 * 60_000) },
-    // beat a moment ago: not silent, whatever its start says
-    { id: "d", startedAt: new Date(now.getTime() - 6 * 60 * 60_000), heartbeatAt: new Date(now.getTime() - 1_000) },
-    // exactly at the threshold is not past it, on either form
-    { id: "e", startedAt: new Date(now.getTime() - 15 * 60_000), heartbeatAt: null },
-  ];
-  const byQuery = applyQuery(cases, { where: marketingPublisherSilenceWhere(now) })
-    .map((row) => row.id)
-    .sort();
-  const byPredicate = marketingPublisherSilentRuns(cases, now)
-    .map((row) => row.id)
-    .sort();
-  assert.deepEqual(byQuery, ["a", "c"]);
-  assert.deepEqual(byPredicate, byQuery);
 });

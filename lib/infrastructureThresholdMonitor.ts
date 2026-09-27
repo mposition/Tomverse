@@ -2,10 +2,8 @@ import "server-only";
 
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
-import {
-  marketingPublisherSilenceWhere,
-  marketingPublisherSilentRuns,
-} from "@/lib/marketingPublisherRunCore";
+import { findSilentMarketingPublisherRuns } from "@/lib/marketingPublisherRun";
+import { marketingPublisherSilentRuns } from "@/lib/marketingPublisherRunCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import {
@@ -30,37 +28,18 @@ const MONITOR_INTERVAL_MS = 15 * 60 * 1_000;
  * same queue and notifications as everything else this monitor raises.
  */
 async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
-  // **The database decides which rows are silent, and in what order.**
-  //
-  // The first version filtered only on `startedAt` and then cut the result to
-  // fifty rows with no `orderBy`, so fifty long-running but healthy rows -- ones
-  // that started hours ago and beat a second ago -- could fill the page and
-  // leave the one genuinely silent run out of it. The alert then reported
-  // nothing while a dead worker's row sat open.
-  //
-  // So the predicate is the silence rule itself, expressed once in
-  // `marketingPublisherSilenceWhere`, and the rows come back oldest signal
-  // first. The count is read separately, because "how many are silent" must not
-  // be capped by how many this alert bothers to name.
-  const silenceWhere = marketingPublisherSilenceWhere(now);
-  const [total, running] = await Promise.all([
-    prisma.scheduledJobRun.count({ where: silenceWhere }),
-    prisma.scheduledJobRun.findMany({
-      where: silenceWhere,
-      select: { id: true, startedAt: true, heartbeatAt: true },
-      // Oldest sign of life first: a null heartbeat has never had one, so it is
-      // older than any timestamp, and the cut below keeps the worst cases.
-      orderBy: [
-        { heartbeatAt: { sort: "asc", nulls: "first" } },
-        { startedAt: "asc" },
-      ],
-      // Bounded: this is an alert, and one incident naming the count says as
-      // much as fifty naming each row.
-      take: 50,
-    }),
-  ]);
-  const silent = marketingPublisherSilentRuns(running, now);
-  if (total === 0 || silent.length === 0) return 0;
+  // The query is in lib/marketingPublisherRun.ts with the rest of the run's
+  // database access, so an integration test can run it against a real
+  // PostgreSQL and this file's fake can stand in for one function rather than
+  // for a SQL engine. A fake that interpreted the statement would agree with
+  // whatever the statement said, including the two orderings that were wrong.
+  const { total, runs } = await findSilentMarketingPublisherRuns(prisma, now);
+  if (total === 0) return 0;
+  // The pure rule computes what the message says. It cannot disagree with the
+  // query about *which* rows -- it is handed rows the query already chose; what
+  // it adds is how long each has been silent.
+  const silent = marketingPublisherSilentRuns(runs, now);
+  if (silent.length === 0) return 0;
   await reportOperationalIncident({
     code: "MARKETING_PUBLISHER_RUN_SILENT",
     title: "Marketing publisher run went silent",

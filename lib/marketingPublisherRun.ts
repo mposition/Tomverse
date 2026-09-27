@@ -22,6 +22,7 @@ import {
   MARKETING_PUBLISHER_JOB_KEY,
   MARKETING_PUBLISHER_MAX_STATEMENTS,
   MARKETING_PUBLISHER_MIN_SERVER_VERSION_NUM,
+  MARKETING_PUBLISHER_SILENCE_THRESHOLD_MS,
   MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
   MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
 } from "@/lib/marketingPublisherRunCore";
@@ -194,6 +195,75 @@ export async function heartbeatMarketingPublisherRun(
     }
     throw error;
   }
+}
+
+/**
+ * The publisher runs that started and then went quiet, and how many there are.
+ *
+ * **One statement, so the rule, the order and the count are one read.** Three
+ * versions of this were wrong, each because part of the question was answered
+ * outside the database.
+ *
+ * The first filtered on `startedAt` alone and took fifty rows with no order, so
+ * fifty rows that started hours ago and beat a second ago could fill the page
+ * and leave the one silent run outside it.
+ *
+ * The second ordered by `heartbeatAt` with nulls first -- which is not the value
+ * the rule compares. The last sign of life is `COALESCE(heartbeatAt, startedAt)`,
+ * so a row that never beat and started sixteen minutes ago sorted *ahead* of one
+ * whose heartbeat was ten hours ago, and the ten-hour row was the one cut. The
+ * alert then named sixteen minutes as its oldest.
+ *
+ * The third read the count and the rows as two queries, which are two
+ * snapshots: ten silent rows could be counted, nine recover, and the incident
+ * would report ten while carrying evidence for one.
+ *
+ * Prisma cannot order by an expression, so this is raw SQL -- and being one raw
+ * statement is what makes the count and the page the same snapshot. It is a
+ * read; the protected-writer check is about writes.
+ */
+export async function findSilentMarketingPublisherRuns(
+  client: PrismaClient,
+  now: Date,
+  thresholdMs: number = MARKETING_PUBLISHER_SILENCE_THRESHOLD_MS,
+): Promise<{
+  readonly total: number;
+  readonly runs: Array<{ id: string; startedAt: Date; heartbeatAt: Date | null }>;
+}> {
+  const cutoff = new Date(now.getTime() - thresholdMs);
+  const rows = await client.$queryRaw<
+    Array<{ total: bigint; id: string; startedAt: Date; heartbeatAt: Date | null }>
+  >(Prisma.sql`
+    WITH silent AS (
+      SELECT
+        "id",
+        "startedAt",
+        "heartbeatAt",
+        COALESCE("heartbeatAt", "startedAt") AS last_seen
+      FROM "ScheduledJobRun"
+      WHERE "jobKey" = ${MARKETING_PUBLISHER_JOB_KEY}
+        AND "status" = 'running'
+        AND COALESCE("heartbeatAt", "startedAt") < ${cutoff}
+    )
+    SELECT
+      (SELECT count(*) FROM silent) AS "total",
+      "id",
+      "startedAt",
+      "heartbeatAt"
+    FROM silent
+    ORDER BY last_seen ASC
+    -- Bounded: this is an alert, and one incident naming the count says as much
+    -- as fifty naming each row. The count above is not capped by this limit.
+    LIMIT 50
+  `);
+  return {
+    total: Number(rows[0]?.total ?? 0),
+    runs: rows.map((row) => ({
+      id: row.id,
+      startedAt: row.startedAt,
+      heartbeatAt: row.heartbeatAt,
+    })),
+  };
 }
 
 export type MarketingPublisherRunOutcome =

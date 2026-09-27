@@ -35,6 +35,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import {
   finishMarketingPublisherRun,
+  findSilentMarketingPublisherRuns,
   heartbeatMarketingPublisherRun,
   runBoundedMarketingTransaction,
   startMarketingPublisherRun,
@@ -43,6 +44,7 @@ import {
   MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
   MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
   MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
+  marketingPublisherSilentRuns,
 } from "@/lib/marketingPublisherRunCore";
 
 // The marketing tables' invariants against a real database.
@@ -2895,6 +2897,111 @@ test("a heartbeat before the deadline still moves to the database's clock", asyn
   // The caller's value is discarded: it asked for a time it chose and got the
   // database's.
   assert.ok(Math.abs(after.heartbeatAt.getTime() - Date.now()) < 60_000);
+});
+
+test("the silence query compares and orders by the last sign of life", async () => {
+  // Codex's scenario, round 3, and the reason this is asked of PostgreSQL rather
+  // than of a fake: fifty rows that never beat and started just past the
+  // threshold, and one row whose heartbeat was ten hours ago. Ordering by
+  // `heartbeatAt` -- with nulls first or last -- gets this wrong, because the
+  // value the rule compares is `COALESCE(heartbeatAt, startedAt)`. Nulls first
+  // put the fifty sixteen-minute rows ahead of the ten-hour one and the page cut
+  // it off; nulls last would drop them instead.
+  const now = new Date();
+  const runIds = [];
+  for (let index = 0; index < 50; index += 1) {
+    const runId = runUuid();
+    runIds.push(runId);
+    await prisma.scheduledJobRun.create({
+      data: {
+        id: runId,
+        jobKey: "marketing_publisher",
+        status: "running",
+        startedAt: new Date(now.getTime() - 16 * 60_000),
+      },
+    });
+  }
+  const stale = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: stale,
+      jobKey: "marketing_publisher",
+      status: "running",
+      startedAt: new Date(now.getTime() - 11 * 60 * 60_000),
+      heartbeatAt: new Date(now.getTime() - 10 * 60 * 60_000),
+    },
+  });
+  // Alive: beat a moment ago, however long ago it started. It must not be
+  // counted, which the `startedAt`-only predicate got wrong.
+  const alive = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: alive,
+      jobKey: "marketing_publisher",
+      status: "running",
+      startedAt: new Date(now.getTime() - 6 * 60 * 60_000),
+      heartbeatAt: new Date(now.getTime() - 1_000),
+    },
+  });
+  // A different job's row, however silent, is not this alert's.
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: runUuid(),
+      jobKey: "infrastructure_threshold_monitor",
+      status: "running",
+      startedAt: new Date(now.getTime() - 40 * 60_000),
+    },
+  });
+
+  const { total, runs } = await findSilentMarketingPublisherRuns(prisma, now);
+
+  // Fifty-one silent: the fifty at sixteen minutes and the stale one. Not the
+  // one that beat a second ago, and not the other job's.
+  assert.equal(total, 51);
+  // The page is fifty, and the count is not capped by it -- they came out of one
+  // statement, so they describe one snapshot.
+  assert.equal(runs.length, 50);
+  // And the longest-silent row is first, which is the assertion the two wrong
+  // orderings failed.
+  assert.equal(runs[0]?.id, stale);
+  assert.equal(runs.some((run) => run.id === alive), false);
+  // The pure rule, handed these rows, names the same oldest signal.
+  const silent = marketingPublisherSilentRuns(runs, now);
+  assert.equal(silent[0]?.id, stale);
+  assert.equal(
+    silent[0]?.lastSignOfLifeAt,
+    new Date(now.getTime() - 10 * 60 * 60_000).toISOString(),
+  );
+
+  await prisma.scheduledJobRun.deleteMany({
+    where: { id: { in: [...runIds, stale, alive] } },
+  });
+});
+
+test("a run exactly at the silence threshold is not yet silent", async () => {
+  // The boundary is strict, on the database's side of the comparison as well as
+  // the application's -- the two forms of this rule have to agree there or the
+  // alert fires a threshold early.
+  const now = new Date();
+  const runId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: runId,
+      jobKey: "marketing_publisher",
+      status: "running",
+      startedAt: new Date(now.getTime() - 15 * 60_000),
+    },
+  });
+  const { total } = await findSilentMarketingPublisherRuns(prisma, now);
+  assert.equal(total, 0);
+  assert.deepEqual(
+    marketingPublisherSilentRuns(
+      [{ id: runId, startedAt: new Date(now.getTime() - 15 * 60_000), heartbeatAt: null }],
+      now,
+    ),
+    [],
+  );
+  await prisma.scheduledJobRun.delete({ where: { id: runId } });
 });
 
 test("a closed run stays closed", async () => {

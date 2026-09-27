@@ -91,9 +91,28 @@ export async function POST(request: Request) {
   try {
     started = await startMarketingPublisherRun(prisma, { runId, deadlineAt });
   } catch (error) {
-    // Opening the row failed for a reason that is not an answer. No row
-    // exists, so there is no run to close; say so rather than hand the
-    // service a framework 500 with no code.
+    // Opening the row failed for a reason that is not an answer. No row exists,
+    // so there is no run to close; say so rather than hand the service a
+    // framework 500 with no code.
+    //
+    // **And report it**, because this is the one failure with nothing else
+    // watching it. Every other way a run can go wrong leaves a row, and a row
+    // is what the silence monitor reads. A run that could not create one leaves
+    // nothing: no row, so no silence incident, and no delayed-job warning
+    // either, because `marketing_publisher` sits in
+    // `PENDING_SCHEDULED_JOB_KEYS` until an operator has applied the catalogue
+    // and a first run has been recorded. Without this the first run after
+    // activation could fail forever in silence.
+    await reportOperationalIncident({
+      code: "MARKETING_PUBLISHER_RUN_START_FAILED",
+      title: "Marketing publisher run could not be opened",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-publisher", runId },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing publisher incident could not be reported:", reportError);
+    });
     console.error("Marketing publisher run could not start:", error);
     return NextResponse.json(
       { runId, code: "run_start_failed" },
