@@ -20,7 +20,7 @@ import {
 } from "@/lib/releaseNotesCountryRuleCore";
 
 /** The seed, for tests that compare stored rows against what it describes. */
-const releaseNotesObligationSafeSeed = () => releaseNotesCountryRuleSeed();
+const seedRules = () => releaseNotesCountryRuleSeed();
 import {
   releaseNotesRuleVersionConflicts,
   releaseNotesRulesForVersion,
@@ -327,6 +327,94 @@ test("an active version's rules cannot be changed, removed or added to", async (
   );
 });
 
+test("a write racing an activation waits for it, and is then refused", async () => {
+  // The migration's claim about `FOR SHARE`: a rule written while a draft is
+  // being activated either waits and then sees the new status, or holds the
+  // activation back until the rule is committed into what was still a draft.
+  // Every other test here activates first and writes afterwards, which an
+  // ordinary `SELECT` would satisfy just as well -- so nothing pinned the lock.
+  const version = await draft();
+  await prisma.releaseNotesRuleVersion.create({
+    data: ruleVersion({ ruleKey: releaseNotesRuleKey("ZW"), countryCode: "ZW" }),
+  });
+  const existing = await prisma.releaseNotesCountryRule.findFirstOrThrow({
+    where: { policyVersionId: version.id, countryCode: "KR" },
+    select: { id: true },
+  });
+
+  // Hold an activation open: the policy version row is locked, uncommitted.
+  let commitActivation = () => {};
+  const activationHeld = new Promise<void>((resolve) => {
+    commitActivation = resolve;
+  });
+  const activation = prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`
+        UPDATE "EmailPolicyVersion"
+           SET "status" = 'active', "activatedAt" = now()
+         WHERE "id" = ${version.id}
+      `;
+      await activationHeld;
+    },
+    { timeout: 20_000 }
+  );
+
+  // Let the activation take its lock before the writes ask for it.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+
+  const insert = prisma.releaseNotesCountryRule
+    .create({
+      data: countryRule(version.id, {
+        countryCode: "ZW",
+        ruleKey: releaseNotesRuleKey("ZW"),
+      }),
+    })
+    .then(
+      () => "inserted" as const,
+      (error: unknown) => ({ refused: error instanceof Error ? error.message : String(error) })
+    );
+  const remove = prisma.releaseNotesCountryRule
+    .delete({ where: { id: existing.id } })
+    .then(
+      () => "deleted" as const,
+      (error: unknown) => ({ refused: error instanceof Error ? error.message : String(error) })
+    );
+
+  // Neither may settle while the activation holds the row. Without `FOR SHARE`
+  // both would read the old status and succeed here.
+  const waited = Symbol("waited");
+  for (const pending of [insert, remove]) {
+    assert.equal(
+      await Promise.race([
+        pending,
+        new Promise((resolve) => setTimeout(() => resolve(waited), 600)),
+      ]),
+      waited,
+      "a write did not wait for the activation to commit"
+    );
+  }
+
+  commitActivation();
+  await activation;
+
+  for (const [what, pending] of [
+    ["insert", insert],
+    ["delete", remove],
+  ] as const) {
+    const outcome = await pending;
+    assert.ok(
+      typeof outcome === "object" && /draft policy version|cannot be changed/.test(outcome.refused),
+      `the ${what} was not refused after the activation committed: ${JSON.stringify(outcome)}`
+    );
+  }
+
+  // And the active version's rules are the ones it was activated with.
+  assert.equal(
+    await prisma.releaseNotesCountryRule.count({ where: { policyVersionId: version.id } }),
+    releaseNotesCountryRuleSeed().length
+  );
+});
+
 test("a rule cannot be moved onto an active policy version", async () => {
   const active = await draft();
   await activatePolicyVersion({ versionId: active.id, ...actor() });
@@ -390,7 +478,7 @@ test("a conflict in either JSON field is a conflict too", async () => {
   // The comparison covers four fields and only two of them were pinned, so
   // dropping the two array comparisons left the suite green while an edited
   // seed would have been accepted in silence.
-  const seed = releaseNotesObligationSafeSeed();
+  const seed = seedRules();
   const au = seed.find((rule) => rule.countryCode === "AU");
   assert.ok(au, "the seed has no Australian rule");
 
