@@ -9,6 +9,7 @@ import {
   docEvidenceReportLines,
   docParseFromStored,
   docPricePrefill,
+  docProblemWithholdsPrice,
   docSourcesFromStored,
   parseAnthropicPricingPage,
   parseOpenAiModelPage,
@@ -172,6 +173,33 @@ test("a model the pricing table does not list has nothing to agree with", () => 
   const parse = openAiModel("gpt-6-astra", undefined, table);
   assert.ok(parse.problems.includes("model_not_in_pricing_table"));
   assert.equal(proposal(parse), null);
+});
+
+test("a model page miss does not throw away a price the table stated", () => {
+  assert.equal(docProblemWithholdsPrice("model_page_names_other_model"), false);
+  assert.equal(docProblemWithholdsPrice("model_page:not_found"), false);
+  assert.equal(docProblemWithholdsPrice("pricing_table_cell_unreadable"), true);
+  const fields = {
+    displayName: null,
+    contextWindowTokens: null,
+    maxInputTokens: null,
+    maxOutputTokens: null,
+    imageInput: null,
+    inputUsdPerMillionTokens: 0.15,
+    cachedInputUsdPerMillionTokens: null,
+    cacheWriteUsdPerMillionTokens: null,
+    outputUsdPerMillionTokens: 0.5,
+    longContext: { kind: "flat" as const },
+    promotional: null,
+  };
+  assert.equal(
+    prefill({ status: "parsed", fields, problems: ["model_page_names_other_model"] }).refusal,
+    null
+  );
+  assert.equal(
+    prefill({ status: "parsed", fields, problems: ["pricing_table_cell_unreadable"] }).refusal,
+    "problems"
+  );
 });
 
 test("without the pricing table there is no price", () => {
@@ -424,6 +452,24 @@ test("the daily report prints failures, degraded parses and unread models", () =
   assert.equal(lines.summary, " · docs clean 1/3 · docs not read 1");
   assert.match(lines.failures.join("\n"), /parsed_with_problems \(pricing_table:standard_table_shape_changed\)/);
   assert.match(lines.failures.join("\n"), /gpt-8`: cap/);
+  const modelPageLine = docEvidenceReportLines({
+    attempted: 1,
+    byStatus: { parsed: 1, not_found: 0, fetch_failed: 0, parse_failed: 0 },
+    degraded: 0,
+    failures: [],
+    notAttempted: [],
+    unacknowledgedNotices: [
+      {
+        provider: "zhipu",
+        sentence: "GLM-5.3-FlashX promotional pricing ends October 1, 2026.",
+        source: "model_page",
+        apiModels: ["glm-5.3-flashx"],
+      },
+    ],
+  });
+  assert.match(modelPageLine.failures.join("\n"), /model page/);
+  assert.match(modelPageLine.failures.join("\n"), /`glm-5.3-flashx`/);
+  assert.doesNotMatch(modelPageLine.failures.join("\n"), /every documented price/);
   assert.match(docEvidenceReportLines(undefined).failures[0], /did not run/);
   assert.deepEqual(
     docEvidenceReportLines({
@@ -553,6 +599,24 @@ test("the daily email carries each provider's documentation result on its own ro
   assert.equal(docEvidenceProviderNote(summary, "groq"), null);
   assert.equal(docEvidenceProviderNote(undefined, "openai"), "documentation read did not run");
   assert.equal(docEvidenceProviderNote(null, "openai"), null);
+  const modelPage = docEvidenceProviderNote(
+    {
+      ...summary,
+      unacknowledgedNotices: [
+        {
+          provider: "zhipu",
+          sentence: "GLM-5.3-FlashX promotional pricing ends October 1, 2026.",
+          source: "model_page",
+          apiModels: ["glm-5.3-flashx"],
+        },
+      ],
+    },
+    "zhipu"
+  );
+  assert.match(modelPage ?? "", /model page/);
+  assert.match(modelPage ?? "", /`glm-5.3-flashx`/);
+  assert.doesNotMatch(modelPage ?? "", /pricing page/);
+  assert.doesNotMatch(modelPage ?? "", /every documented price/);
 });
 
 // ---- review round 4 ----
@@ -570,7 +634,9 @@ test("temporary pricing in other words is still caught on the model's own page",
       "## Endpoints",
       `${sentence}\n\n## Endpoints`
     );
-    assert.equal(prefill(openAiModel("gpt-5.2", page)).refusal, "promotional", sentence);
+    const parse = openAiModel("gpt-5.2", page);
+    assert.equal(prefill(parse).refusal, "promotional", sentence);
+    assert.ok(parse.problems.includes("unacknowledged_promotion_notice_on_model_page"), sentence);
   }
 });
 

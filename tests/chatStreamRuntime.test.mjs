@@ -7,6 +7,7 @@ import {
   chatRuntimeIdentityKey,
   chatRuntimeKey,
   chatRuntimeKeyIdentity,
+  captureChatRuntimeCompleteView,
   claimChatRuntimeLoad,
   endChatRuntimeRun,
   getChatRuntimeLastPrompt,
@@ -17,10 +18,12 @@ import {
   isChatRuntimeLoadInFlight,
   isChatRuntimeStreaming,
   isCurrentChatRuntimeLoad,
+  isChatRuntimeCompleteViewRecordCurrent,
   markChatRuntimeJobResumed,
   ownsChatRuntimeTranscript,
   releaseChatRuntimeForOtherIdentities,
   releaseChatRuntimeLoad,
+  restoreChatRuntimeCompleteViewForSend,
   resetChatStreamRuntime,
   setChatRuntimeLastPrompt,
   settleChatRuntimeLoad,
@@ -190,6 +193,40 @@ test("a failed load releases its claim so a later attempt can retry", () => {
   );
 });
 
+test("refreshing a cached transcript invalidates the loaded send barrier until it settles", () => {
+  const first = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, first, { loaded: true });
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
+
+  const refresh = claimChatRuntimeLoad(A);
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
+  releaseChatRuntimeLoad(A, refresh);
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
+
+  const retry = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, retry, { loaded: true });
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
+});
+
+test("a failed load notifies a remounted subscriber and a new ticket clears only its own failure", () => {
+  const snapshots = [];
+  const unsubscribe = subscribeChatRuntime(A, () => {
+    const { isLoaded, loadFailed } = getChatRuntimeSnapshot(A);
+    snapshots.push({ isLoaded, loadFailed });
+  });
+  const first = claimChatRuntimeLoad(A);
+  releaseChatRuntimeLoad(A, first);
+  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: true });
+
+  const retry = claimChatRuntimeLoad(A);
+  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: false });
+  releaseChatRuntimeLoad(A, first);
+  assert.deepEqual(snapshots.at(-1), { isLoaded: false, loadFailed: false });
+  settleChatRuntimeLoad(A, retry, { loaded: true });
+  assert.deepEqual(snapshots.at(-1), { isLoaded: true, loadFailed: false });
+  unsubscribe();
+});
+
 test("a transcript this session produced is never re-read from the server", () => {
   const requestId = claimChatRuntimeLoad(A);
   settleChatRuntimeLoad(A, requestId, { loaded: true });
@@ -220,6 +257,78 @@ test("an unloaded key is never treated as owning a transcript", () => {
     false,
     "a load still on its way must be allowed to settle the view"
   );
+});
+
+test("a confirmed send restores only the complete view it captured before a remount load", () => {
+  writeChatRuntimeMessages(A, [{ id: "saved-51", role: "user", content: "Complete history" }]);
+  const initial = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, initial, { loaded: true });
+  const completeView = captureChatRuntimeCompleteView(A);
+  assert.ok(completeView);
+
+  const refresh = claimChatRuntimeLoad(A);
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
+  assert.equal(restoreChatRuntimeCompleteViewForSend(completeView), true);
+  assert.equal(isCurrentChatRuntimeLoad(A, refresh), false);
+  assert.equal(isChatRuntimeLoadInFlight(A), false);
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
+  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["saved-51"]);
+  releaseChatRuntimeLoad(A, refresh);
+  assert.equal(getChatRuntimeSnapshot(A).loadFailed, false);
+
+  advanceChatRuntimeRevision(A);
+  assert.equal(restoreChatRuntimeCompleteViewForSend(completeView), false);
+  assert.equal(isChatRuntimeCompleteViewRecordCurrent(completeView), true);
+  assert.equal(captureChatRuntimeCompleteView(A)?.revision, 1);
+});
+
+test("a confirmed send keeps a newer complete GET instead of its older capture", () => {
+  writeChatRuntimeMessages(A, [{ id: "saved-52", role: "user", content: "Older complete view" }]);
+  const initial = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, initial, { loaded: true });
+  const capture = captureChatRuntimeCompleteView(A);
+  assert.ok(capture);
+
+  const refresh = claimChatRuntimeLoad(A);
+  writeChatRuntimeMessages(A, [
+    { id: "saved-52", role: "user", content: "Older complete view" },
+    { id: "saved-53", role: "user", content: "New durable row from another tab" },
+  ]);
+  settleChatRuntimeLoad(A, refresh, { loaded: true });
+  assert.equal(restoreChatRuntimeCompleteViewForSend(capture), true);
+  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["saved-52", "saved-53"]);
+});
+
+test("a captured view cannot overwrite a new record for the same identity after A-B-A", () => {
+  writeChatRuntimeMessages(A, [{ id: "old-a", role: "user", content: "Old session" }]);
+  const oldLoad = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, oldLoad, { loaded: true });
+  const oldCapture = captureChatRuntimeCompleteView(A);
+  assert.ok(oldCapture);
+  assert.equal(isChatRuntimeCompleteViewRecordCurrent(oldCapture), true);
+
+  releaseChatRuntimeForOtherIdentities("account:other-user");
+  assert.equal(isChatRuntimeCompleteViewRecordCurrent(oldCapture), false);
+  writeChatRuntimeMessages(A, [{ id: "new-a", role: "user", content: "New session" }]);
+  const newLoad = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, newLoad, { loaded: true });
+  assert.equal(isChatRuntimeCompleteViewRecordCurrent(oldCapture), false);
+  assert.equal(restoreChatRuntimeCompleteViewForSend(oldCapture), false);
+  assert.deepEqual(getChatRuntimeSnapshot(A).messages.map((item) => item.id), ["new-a"]);
+});
+
+test("a pre-switch load ticket cannot settle a new A record after A-B-A", () => {
+  const oldTicket = claimChatRuntimeLoad(A);
+  releaseChatRuntimeForOtherIdentities("account:other-user");
+  const newTicket = claimChatRuntimeLoad(A);
+  assert.notEqual(oldTicket, newTicket);
+  assert.equal(isCurrentChatRuntimeLoad(A, oldTicket), false);
+  settleChatRuntimeLoad(A, oldTicket, { loaded: true });
+  releaseChatRuntimeLoad(A, oldTicket);
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, false);
+  assert.equal(isChatRuntimeLoadInFlight(A), true);
+  settleChatRuntimeLoad(A, newTicket, { loaded: true });
+  assert.equal(getChatRuntimeSnapshot(A).isLoaded, true);
 });
 
 test("a deep-research job is re-attached to once, not once per remount", () => {

@@ -13,6 +13,8 @@ export const AMUX_CLAIM_CLOSED_REFUSAL_REASONS = [
   "worker_catalog_unavailable",
   "no_authoritative_worker",
   "authoritative_worker_mismatch",
+  "incident_admission_blocked",
+  "wip_limit_reached",
   "execution_lifecycle_unavailable",
   "invalid_routing_evidence",
 ] as const;

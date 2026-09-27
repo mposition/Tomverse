@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
-use reqwest::{header, Client, StatusCode};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use anyhow::{Context, Result, bail};
+use reqwest::{Client, StatusCode, header};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+use crate::scheduler::ScoreBreakdown;
 use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
 
 #[derive(Clone)]
@@ -35,6 +36,12 @@ pub struct QueueTask {
     pub revision: i64,
     pub created_at: String,
     pub dependent_count: i64,
+    #[serde(default)]
+    pub scheduler_score: i64,
+    #[serde(default)]
+    pub scoring_version: String,
+    #[serde(default)]
+    pub scheduler_signals: ScoreBreakdown,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,7 +74,7 @@ struct ClaimRequest<'a> {
 #[derive(Debug, Serialize)]
 struct ClaimDecision {
     scheduler_score: i64,
-    scoring_version: &'static str,
+    scoring_version: String,
     signals: Value,
 }
 
@@ -85,16 +92,16 @@ pub const TOMVERSE_INTERNAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 /// response transport; the shorter default remains for other requests.
 pub const TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Claim can perform a clock-anchor, snapshot and bounded mutation. Keep the
-/// client above the app's six-second DB-clock route budget plus one second for
-/// connect and one second for response transport. Unknown outcomes still stop
-/// the scheduler; they are never retried blindly.
-pub const TOMVERSE_INTERNAL_CLAIM_TIMEOUT: Duration = Duration::from_secs(8);
+/// Claim can perform a clock-anchor, snapshot and bounded mutation. The
+/// advanced admission transaction includes incident, resource, WIP and audit
+/// fences, so keep the client above the app's bounded route budget. Unknown
+/// outcomes still stop the scheduler; they are never retried blindly.
+pub const TOMVERSE_INTERNAL_CLAIM_TIMEOUT: Duration = Duration::from_secs(18);
 
-/// Future lifecycle routes use a six-second shared DB-clock route budget.
-/// Nine seconds covers that budget, one second to connect, and two seconds of
-/// bounded response transport. Unknown outcomes stop; never blindly retry.
-pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(9);
+/// Future lifecycle routes use a twelve-second shared DB-clock route budget.
+/// Fifteen seconds covers that budget plus bounded connection and response
+/// transport. Unknown outcomes stop; never blindly retry.
+pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(15);
 
 const MAX_CLAIM_RESPONSE_BYTES: usize = 8 * 1024;
 
@@ -177,6 +184,8 @@ pub enum ClaimRefusalReason {
     WorkerCatalogUnavailable,
     NoAuthoritativeWorker,
     AuthoritativeWorkerMismatch,
+    IncidentAdmissionBlocked,
+    WipLimitReached,
     ExecutionLifecycleUnavailable,
     InvalidRoutingEvidence,
 }
@@ -189,6 +198,8 @@ impl ClaimRefusalReason {
         Self::WorkerCatalogUnavailable,
         Self::NoAuthoritativeWorker,
         Self::AuthoritativeWorkerMismatch,
+        Self::IncidentAdmissionBlocked,
+        Self::WipLimitReached,
         Self::ExecutionLifecycleUnavailable,
         Self::InvalidRoutingEvidence,
     ];
@@ -201,6 +212,8 @@ impl ClaimRefusalReason {
             Self::WorkerCatalogUnavailable => "worker_catalog_unavailable",
             Self::NoAuthoritativeWorker => "no_authoritative_worker",
             Self::AuthoritativeWorkerMismatch => "authoritative_worker_mismatch",
+            Self::IncidentAdmissionBlocked => "incident_admission_blocked",
+            Self::WipLimitReached => "wip_limit_reached",
             Self::ExecutionLifecycleUnavailable => "execution_lifecycle_unavailable",
             Self::InvalidRoutingEvidence => "invalid_routing_evidence",
         }
@@ -399,6 +412,13 @@ impl TomverseApi {
                     || !(0..=8).contains(&task.drag)
                     || !(0..=PRISMA_INT_MAX).contains(&task.revision)
                     || task.dependent_count < 0
+                    || !(0..=6_010_428).contains(&task.scheduler_score)
+                    || !matches!(
+                        task.scoring_version.as_str(),
+                        "" | "amux-global-priority-v1" | "amux-global-priority-v2"
+                    )
+                    || (task.scoring_version == "amux-global-priority-v2"
+                        && task.scheduler_score != task.scheduler_signals.total())
                     || chrono::DateTime::parse_from_rfc3339(&task.created_at).is_err()
             })
         {
@@ -490,6 +510,7 @@ impl TomverseApi {
         worker: &str,
         expected_revision: i64,
         scheduler_score: i64,
+        scoring_version: &str,
         signals: Value,
     ) -> Result<ClaimResponse> {
         let response = self
@@ -503,7 +524,7 @@ impl TomverseApi {
                 expected_revision,
                 decision: ClaimDecision {
                     scheduler_score,
-                    scoring_version: "amux-global-priority-v1",
+                    scoring_version: scoring_version.to_owned(),
                     signals,
                 },
             })
@@ -541,7 +562,7 @@ mod tests {
             expected_revision: 1,
             decision: ClaimDecision {
                 scheduler_score: 32,
-                scoring_version: "amux-global-priority-v1",
+                scoring_version: "amux-global-priority-v1".to_owned(),
                 signals,
             },
         })
@@ -590,17 +611,21 @@ mod tests {
 
     #[test]
     fn claim_response_rejects_unknown_or_malformed_refusal_reasons() {
-        assert!(parse_claim_response_body(
-            reqwest::StatusCode::CONFLICT,
-            br#"{"claimed":false,"reason":"future_unreviewed_reason"}"#,
-        )
-        .is_err());
+        assert!(
+            parse_claim_response_body(
+                reqwest::StatusCode::CONFLICT,
+                br#"{"claimed":false,"reason":"future_unreviewed_reason"}"#,
+            )
+            .is_err()
+        );
 
-        assert!(parse_claim_response_body(
-            reqwest::StatusCode::CONFLICT,
-            br#"{"claimed":false,"reason":{"value":"execution_api_disabled"}}"#,
-        )
-        .is_err());
+        assert!(
+            parse_claim_response_body(
+                reqwest::StatusCode::CONFLICT,
+                br#"{"claimed":false,"reason":{"value":"execution_api_disabled"}}"#,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -958,6 +983,8 @@ struct ExecutionSettleRequest<'a> {
     outcome: &'a str,
     to_status: &'a str,
     reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cost_microusd: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -966,6 +993,17 @@ pub struct ExecutionSettleResponse {
     pub settled: bool,
     #[serde(rename = "taskRevision")]
     pub task_revision: Option<i64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionRecoveryResponse {
+    pub recovered: bool,
+    pub reclaimed: Option<i64>,
+    pub reclaimed_claims: Option<i64>,
+    pub quota_observations_deleted: Option<i64>,
+    pub more: Option<bool>,
     pub reason: Option<String>,
 }
 
@@ -1121,7 +1159,10 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX delivery-pull response invariant");
         }
         if let Some(delivery) = body.delivery.as_ref() {
-            if !is_canonical_machine_id(&delivery.task_id)
+            if uuid::Uuid::parse_str(&delivery.attempt_id).is_err()
+                || uuid::Uuid::parse_str(&delivery.receipt_id).is_err()
+                || chrono::DateTime::parse_from_rfc3339(&delivery.lease_expires_at).is_err()
+                || !is_canonical_machine_id(&delivery.task_id)
                 || !is_canonical_machine_id(&delivery.worker)
                 || !(0..=PRISMA_INT_MAX).contains(&delivery.task_revision)
                 || delivery.prompt.len() > 96 * 1024
@@ -1338,6 +1379,7 @@ impl TomverseApi {
                 outcome,
                 to_status,
                 reason,
+                cost_microusd: None,
             })
             .send()
             .await?;
@@ -1368,6 +1410,52 @@ impl TomverseApi {
         };
         if !valid {
             bail!("invalid Tomverse AMUX execution-settle response invariant");
+        }
+        Ok(body)
+    }
+
+    pub async fn execution_recover(&self) -> Result<ExecutionRecoveryResponse> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/execution/recover",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&QueueRequest {})
+            .send()
+            .await?;
+
+        let (status, body): (_, ExecutionRecoveryResponse) = read_bounded_json(
+            response,
+            &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_LIFECYCLE_RESPONSE_BYTES,
+        )
+        .await?;
+        let nonnegative = |value: Option<i64>| value.is_none_or(|value| value >= 0);
+        let valid = match status {
+            StatusCode::OK => {
+                body.recovered
+                    && nonnegative(body.reclaimed)
+                    && nonnegative(body.reclaimed_claims)
+                    && nonnegative(body.quota_observations_deleted)
+                    && body.reason.is_none()
+            }
+            StatusCode::CONFLICT => {
+                !body.recovered
+                    && body.reclaimed.is_none()
+                    && body.reclaimed_claims.is_none()
+                    && nonnegative(body.quota_observations_deleted)
+                    && body
+                        .reason
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty())
+            }
+            _ => false,
+        };
+        if !valid {
+            bail!("invalid Tomverse AMUX execution-recover response invariant");
         }
         Ok(body)
     }

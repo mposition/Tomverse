@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { isAdminSession } from "@/lib/adminAuth";
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { MARKETING_CONSOLE_SECTIONS } from "@/lib/marketingConsoleSections";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
@@ -49,7 +49,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unknown section." }, { status: 400 });
     }
 
-    return NextResponse.json(await readMarketingConsole(parsed.data.section));
+    return NextResponse.json(
+      await readMarketingConsole(
+        parsed.data.section,
+        hasAdminPermission(session, "marketing:write")
+      )
+    );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

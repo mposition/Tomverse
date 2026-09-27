@@ -90,6 +90,15 @@ export const MARKETING_RESUME_REASON_CODES = [
 export type MarketingResumeReasonCode =
   (typeof MARKETING_RESUME_REASON_CODES)[number];
 
+/** Why an account was stopped. */
+export const MARKETING_PAUSE_REASON_CODES = [
+  "operator_requested",
+  "operator_problem_report",
+  "incident_review",
+] as const;
+export type MarketingPauseReasonCode =
+  (typeof MARKETING_PAUSE_REASON_CODES)[number];
+
 /** What a draft row is for. */
 export const MARKETING_POST_KINDS = [
   "social",

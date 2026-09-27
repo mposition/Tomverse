@@ -45,25 +45,36 @@ import { metadataClaimsSystemActor } from "@/lib/adminAuditSystemActors";
 
 export type MarketingAuditReader = PrismaClient | Prisma.TransactionClient;
 
-/** Why an audit entry is not evidence of what a caller said it was. */
-export type MarketingAuditProblem =
-  | "entry_missing"
-  | "action_mismatch"
-  | "actor_not_human"
-  | "marketing_write_not_recorded"
-  | "target_mismatch"
-  | "metadata_mismatch"
-  | "entry_predates_decision"
-  | "entry_unhashed"
-  | "entry_hash_mismatch"
-  | "entry_not_linked";
+/**
+ * Why an audit entry is not evidence of what a caller said it was.
+ *
+ * A value rather than a type union, because callers build refusal codes from
+ * it -- `resume_evidence_${problem}` and two others -- and a list that only
+ * exists at compile time left thirty such codes with no HTTP meaning and no
+ * test able to notice. The type is derived from the array so there is still
+ * one list.
+ */
+export const MARKETING_AUDIT_PROBLEMS = [
+  "entry_missing",
+  "action_mismatch",
+  "actor_not_human",
+  "marketing_write_not_recorded",
+  "target_mismatch",
+  "metadata_mismatch",
+  "entry_predates_decision",
+  "entry_unhashed",
+  "entry_hash_mismatch",
+  "entry_not_linked",
+] as const;
+
+export type MarketingAuditProblem = (typeof MARKETING_AUDIT_PROBLEMS)[number];
 
 export type MarketingAuditRequirement = {
   auditLogId: string;
   action: string;
   targetId: string;
   /** Metadata keys that must be present with exactly these values. */
-  metadata?: Readonly<Record<string, string>>;
+  metadata?: Readonly<Record<string, string | number | boolean>>;
   /**
    * The moment the entry has to be later than: the pause it resumes, the
    * failure it re-queues. Without it an entry written for an earlier decision

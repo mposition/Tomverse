@@ -379,6 +379,10 @@ test("each provider's catalogue URL is the one that provider actually serves", (
       qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
       zhipu: "https://api.z.ai/api/paas/v4/models",
       perplexity: "https://api.perplexity.ai/v1/models",
+      deepinfra: "https://api.deepinfra.com/v1/openai/models",
+      together: "https://api.together.ai/v1/models",
+      openrouter: "https://openrouter.ai/api/v1/models",
+      sail: "https://api.sailresearch.com/v1/models",
     }
   );
 });

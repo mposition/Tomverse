@@ -222,8 +222,20 @@ test("the benchmark's transitive production import graph has no provider dispatc
     for (const match of code.matchAll(/(?:from\s*|import\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier === "node:crypto") continue;
-      assert.ok(specifier.startsWith("./") || specifier.startsWith("@/lib/"), `${path} imports non-pure ${specifier}`);
-      const target = specifier.startsWith("@/") ? specifier.slice(2) : resolve(dirname(resolve(root, path)), specifier).slice(root.length + 1).replaceAll("\\", "/");
+      // A workspace package is walked, not trusted. `check:shared-packages`
+      // already holds that `packages/*` reaches no framework, but this walk is
+      // about I/O and provider dispatch, which that check does not look for --
+      // so the package source joins the queue like any other file.
+      const workspace = /^@tomverse\/([\w-]+)$/.exec(specifier);
+      assert.ok(
+        specifier.startsWith("./") || specifier.startsWith("@/lib/") || workspace,
+        `${path} imports non-pure ${specifier}`
+      );
+      const target = workspace
+        ? `packages/${workspace[1]}/src/index.ts`
+        : specifier.startsWith("@/")
+          ? specifier.slice(2)
+          : resolve(dirname(resolve(root, path)), specifier).slice(root.length + 1).replaceAll("\\", "/");
       pending.push(target.endsWith(".ts") ? target : `${target}.ts`);
     }
     assert.doesNotMatch(code, /\b(?:fetch|generateText|streamText|getActiveAiModel|eval)\s*\(/, path);

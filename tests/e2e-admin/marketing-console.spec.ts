@@ -6,7 +6,7 @@ import {
 } from "./support/console";
 
 /**
- * The read-only Marketing console
+ * The Marketing console
  * (docs/policy/marketing-automation.md §6.1, docs/ui-contracts/admin-console-ia.md).
  *
  * Two things are being pinned here, and they are different claims.
@@ -176,6 +176,53 @@ test.describe("marketing console", () => {
 
     const api = await page.request.get("/api/admin/marketing?section=queue");
     expect(api.status()).toBe(200);
+  });
+
+  test("an operator with marketing write sees the controls, and a reader does not", async ({
+    page,
+    signInAs,
+  }) => {
+    // The permission split again, one layer up. Policy
+    // docs/policy/marketing-automation.md §6.1 gives 기록 열람 to any
+    // administrator and every mutation to `marketing:write`, so both people
+    // open this page and only one of them may press anything. Drawing the
+    // controls for both would give the reader a 403 for each one -- a screen
+    // whose buttons are guesses, which is what
+    // docs/ui-contracts/admin-console-ia.md calls stating the requirement at
+    // the last step instead of up front.
+    await signInAs("ops");
+    await page.goto("/admin/marketing?tab=queue");
+    await expect(page.getByTestId("marketing-action-approve").first()).toBeVisible();
+    await expect(page.getByTestId("marketing-action-reject").first()).toBeVisible();
+
+    await signInAs("readonly");
+    await page.goto("/admin/marketing?tab=queue");
+    // The row is there; the controls are not.
+    await expect(page.getByText(FIXTURE_MARKETING.pending.renderedText)).toBeVisible();
+    await expect(page.getByTestId("marketing-action-approve")).toHaveCount(0);
+    await expect(page.getByTestId("marketing-action-reject")).toHaveCount(0);
+  });
+
+  test("a control refused for a stale step-up offers the way back", async ({
+    page,
+    signInAs,
+  }) => {
+    // The defect docs/ui-contracts/admin-console-ia.md says has been got wrong
+    // three times: the refusal names the remedy and gives no way to reach it,
+    // so the screen reads as broken rather than gated. Reading is unaffected
+    // -- the row is still on screen behind the message.
+    await signInAs("ops", { authenticatedMinutesAgo: 45 });
+    await page.goto("/admin/marketing?tab=queue");
+
+    // Registered before the click: the control asks first, and Playwright
+    // dismisses an unhandled dialog, which would mean no request at all.
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByTestId("marketing-action-reject").first().click();
+
+    const link = page.getByTestId("marketing-reauthenticate-link");
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", /callback/);
+    await expect(page.getByText(FIXTURE_MARKETING.pending.renderedText)).toBeVisible();
   });
 
   test("someone who is not an administrator gets nothing, from the page or the API", async ({

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { adminApprovalErrorResponse, runWithAdminApproval } from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
@@ -29,7 +30,9 @@ import {
 import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
+  adoptionReplacementRefusal,
 } from "@/lib/modelAdoptionDraft";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
   getModelPricingProfile,
   PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
@@ -53,9 +56,12 @@ const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number])
  * has to undo the create rather than be reported beside it.
  */
 class AdoptionRefused extends Error {
-  constructor(message: string) {
+  readonly status: number;
+
+  constructor(message: string, status = 409) {
     super(message);
     this.name = "AdoptionRefused";
+    this.status = status;
   }
 }
 
@@ -277,6 +283,48 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    // The existing model this adoption retires. Its row gains the new id as
+    // `replacementModelId` and is disabled in the same transaction as the
+    // create. Absent on an ordinary adoption.
+    const replacesModelId = url.searchParams.get("replacesModelId")?.trim() || null;
+    if (replacesModelId && !workItemId) {
+      return NextResponse.json(
+        { error: "Choosing a model to replace is part of adopting a discovered model." },
+        { status: 400 }
+      );
+    }
+    if (replacesModelId) {
+      const [predecessor, guestDefault] = await Promise.all([
+        prisma.modelRegistryEntry.findUnique({
+          where: { id: replacesModelId },
+          select: { catalogDeleted: true, replacementModelId: true, provider: true },
+        }),
+        prisma.appSetting.findUnique({
+          where: { key: "guestDefaultModelId" },
+          select: { value: true },
+        }),
+      ]);
+      const replacementRefusal = adoptionReplacementRefusal({
+        adoptedModelId: id,
+        adoptedProvider: body.provider,
+        replacesModelId,
+        predecessor: predecessor
+          ? {
+              catalogDeleted: predecessor.catalogDeleted,
+              replacementModelId: predecessor.replacementModelId,
+              provider: predecessor.provider,
+              isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
+              isGuestDefault: guestDefault?.value === replacesModelId,
+            }
+          : null,
+      });
+      if (replacementRefusal) {
+        return NextResponse.json(
+          { error: replacementRefusal.message },
+          { status: replacementRefusal.status }
+        );
+      }
+    }
 
     const adoptionContext = workItemId ? await readAdoptionContext(workItemId, body) : null;
     const adoptionRefusal = adoptionContext
@@ -293,7 +341,12 @@ export async function POST(req: Request) {
       targetType: "Model",
       targetId: id,
       summary: `Started model registry creation for ${id}.`,
-      metadata: { provider: body.provider, status: body.status, workItemId },
+      metadata: {
+        provider: body.provider,
+        status: body.status,
+        workItemId,
+        ...(replacesModelId ? { replacesModelId } : {}),
+      },
     });
     let adoptedTo: string | null = null;
     // What the queue was showing about this item when it was adopted, kept on
@@ -328,7 +381,7 @@ export async function POST(req: Request) {
       }
       adoptionAnalysis = entry.analysisKo;
     }
-    const row = await prisma.$transaction(async (tx) => {
+    const performAdoption = () => prisma.$transaction(async (tx) => {
       if (workItemId) {
         // Everything that decides happens before the row exists. Creating it
         // first and checking afterwards made the transaction find its own
@@ -371,13 +424,60 @@ export async function POST(req: Request) {
         if (refusal) throw new AdoptionRefused(refusal.message);
       }
 
+      // Re-checked under the row lock. The read before the transaction is what
+      // the operator was shown; this is what the write is allowed to retire.
+      if (replacesModelId) {
+        await tx.$queryRaw`
+          SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ${replacesModelId} FOR UPDATE
+        `;
+        const predecessor = await tx.modelRegistryEntry.findUnique({
+          where: { id: replacesModelId },
+          select: { catalogDeleted: true, replacementModelId: true, provider: true },
+        });
+        const guestDefault = await tx.appSetting.findUnique({
+          where: { key: "guestDefaultModelId" },
+          select: { value: true },
+        });
+        const replacementRefusal = adoptionReplacementRefusal({
+          adoptedModelId: id,
+          adoptedProvider: body.provider,
+          replacesModelId,
+          predecessor: predecessor
+            ? {
+                catalogDeleted: predecessor.catalogDeleted,
+                replacementModelId: predecessor.replacementModelId,
+                provider: predecessor.provider,
+                isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
+                isGuestDefault: guestDefault?.value === replacesModelId,
+              }
+            : null,
+        });
+        if (replacementRefusal) {
+          throw new AdoptionRefused(replacementRefusal.message, replacementRefusal.status);
+        }
+      }
+
       const created = await tx.modelRegistryEntry.create({
         data: {
           id,
           ...registryInputToData(fields, { id: session.user.id, email: session.user.email }),
         },
       });
-      if (!workItemId) return created;
+      const retired = replacesModelId
+        ? await tx.modelRegistryEntry.update({
+            where: { id: replacesModelId },
+            data: {
+              enabled: false,
+              publiclyListed: false,
+              status: "disabled",
+              replacementModelId: id,
+              operationalReason: `Replaced by ${id}.`,
+              updatedById: session.user.id,
+              updatedByEmail: session.user.email || null,
+            },
+          })
+        : null;
+      if (!workItemId) return { created, retired };
 
       const workItem = (
         await tx.modelLifecycleWorkItem.findUnique({
@@ -425,8 +525,27 @@ export async function POST(req: Request) {
           pendingValidations: ADOPTION_PENDING_VALIDATIONS,
         },
       });
-      return created;
+      return { created, retired };
     });
+    const { created: row, retired: retiredRow } = replacesModelId
+      ? await runWithAdminApproval(
+          {
+            session,
+            request: req,
+            action: "model.disable",
+            targetType: "Model",
+            targetId: replacesModelId,
+            payload: {
+              adoptedModelId: id,
+              replacesModelId,
+              workItemId,
+              adoptionReason,
+            },
+            reason: `Replace ${replacesModelId} with ${id}. ${adoptionReason}`,
+          },
+          performAdoption
+        )
+      : await performAdoption();
     await writeAdminAuditLog({
       session,
       request: req,
@@ -447,6 +566,7 @@ export async function POST(req: Request) {
               workItemStatus: adoptedTo,
               adoptionReason,
               pendingValidations: ADOPTION_PENDING_VALIDATIONS,
+              ...(replacesModelId ? { replacesModelId } : {}),
             }
           : {}),
       },
@@ -456,14 +576,23 @@ export async function POST(req: Request) {
     // created as absent until the TTL lapses.
     invalidatePublicSnapshot("model-catalog");
     const model = registryRowToModel(row);
-    return NextResponse.json({ model: adminModel(model) }, { status: 201 });
+    const retired = retiredRow ? registryRowToModel(retiredRow) : null;
+    return NextResponse.json(
+      {
+        model: adminModel(model),
+        ...(retired ? { retired: adminModel(retired) } : {}),
+      },
+      { status: 201 }
+    );
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const response = apiSecurityResponse(error);
     if (response) return response;
     if (error instanceof AdoptionRefused) {
       // The registry row went back with it. Reporting the queue's own words
       // rather than a generic failure: the refusal names which rule stopped it.
-      return NextResponse.json({ error: error.message }, { status: 409 });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json({ error: "That model ID already exists." }, { status: 409 });

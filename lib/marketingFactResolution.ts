@@ -41,6 +41,10 @@ import {
   marketingClaimById,
   resolveMarketingClaim,
 } from "@/lib/marketingClaims";
+import {
+  MARKETING_LOCALES,
+  type MarketingLocale,
+} from "@/lib/marketingAutomationSchema";
 import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
 import {
   catalogueClaimSourceDecision,
@@ -51,6 +55,15 @@ import { getRuntimeModel } from "@/lib/modelRegistry";
 import type { PrismaClient } from "@prisma/client";
 
 /** The usage table this file reads through the caller's transaction/client. */
+/**
+ * Whether a string is one of the four locales this system knows.
+ *
+ * Small enough to inline, kept as a named predicate because the call site is
+ * the difference between checking a value and asserting it away.
+ */
+const isMarketingLocale = (value: string): value is MarketingLocale =>
+  (MARKETING_LOCALES as readonly string[]).includes(value);
+
 export type MarketingFactDatabase = Pick<PrismaClient, "marketingPost">;
 
 /**
@@ -258,10 +271,18 @@ export async function resolveMarketingFacts(
       if (claim.evidence?.kind !== "page") {
         return { ...fact, featurePublic: false };
       }
+      // Checked rather than asserted. `request.locale` is a `string` by
+      // construction (`String(rawRequest.locale)`), and the resolver wants one
+      // of the four. A locale outside them has no page to be evidence, which
+      // is the answer below; `as never` reached the same place by telling the
+      // compiler not to look.
+      if (!isMarketingLocale(request.locale)) {
+        return { ...fact, featurePublic: false };
+      }
       const evidence = resolveMarketingPageEvidence({
         pageRoute: claim.evidence.pageRoute,
         localeKey: claim.evidence.localeKey,
-        locale: request.locale as never,
+        locale: request.locale,
       });
       return evidence.ok
         ? { ...fact, featurePublic: true, evidenceStatement: evidence.text }

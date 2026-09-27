@@ -146,12 +146,78 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` records `AmuxBoardImportApproval`. The
 // count is still 228 and the position-free inventory still hashes to the
 // value above, so this is a repin and not a review.
+//
+// 2026-09-23, S2b1 on top: the marketing switch writer left
+// `lib/appSettings.ts` for `lib/marketingSwitchWriter.ts`, so everything below
+// where it used to sit moves up. It went because `lib/appSettings.ts` is in
+// this closure and the writer had come to need the branded marketing
+// transaction -- importing it from here would have added a file to a set a
+// database CHECK is bound to, and the count did move to 179 before the writer
+// was moved out. The new module is not in the closure, nothing in the closure
+// imports it, and the writer's own computed accesses went with it. The count
+// is back to 228 and the position-free inventory still hashes to the value
+// above, so this is a repin and not a review.
+//
+// 2026-09-23, S7 alongside: the release-notes link table moved into
+// `lib/productAnnouncementEmail.ts` and pushed the access below it down that
+// file. It brought none of its own -- the id lookups ask a `Map`, the rejected
+// field names are written out, and the type predicate asks that `Map` rather
+// than `Object.prototype.hasOwnProperty.call`, which this closure's
+// prototype-capability check refuses outright. The count is still 228 and the
+// position-free inventory still hashes to the value above, so this is a repin
+// and not a review.
+//
+// Both notes stand because both changes are in this tree, and the value below
+// is recomputed over the merged tree rather than taken from either side of the
+// conflict.
+//
+// 2026-09-23, the routing ADR branch alongside: three closure files gain
+// lines and everything below them moves down.
+//
+//   lib/routingAttemptStore.ts        the error class vocabulary, as an array
+//                                     literal, and `model_output` added to the
+//                                     failure layers;
+//   lib/chatAttemptCostLedger.ts      one parameter typed to that vocabulary
+//                                     instead of `string`;
+//   lib/marketingAutomationAccess.ts  a review note above the watched-schema
+//                                     fingerprint, which is comment only.
+//
+// None of them brought a computed access. The vocabulary is a literal array
+// of string literals and the one bracket beside it is `(typeof …)[number]`, a
+// type-level index this inventory does not collect. The count is still 228 and
+// the position-free inventory still hashes to the value above, so this is a
+// repin and not a review.
+//
+// 2026-09-24, the pinned-deployment experiment note above the fingerprint.
+// Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, those notes now stand together after merging develop. Comment
+// only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, apex usage class: `lib/models.ts` gains the apex class, its
+// credit weight and the usage-profile case, and `lib/modelPricing.ts` treats
+// that class as premium. Both files are in this closure. Neither addition is
+// a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e405145a9f6d68d57321a96de4623e4",
-  "d8b9896f638040fdd05adb0259657cdbc",
+  "45e44993df9550021dc9a7eb888248fe",
+  "cd2e50c5ae92c2e46bfaa16de61cec01",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

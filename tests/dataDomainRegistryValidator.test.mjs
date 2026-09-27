@@ -164,7 +164,11 @@ test("a planned row with a work reference is accepted", () => {
     row.plannedWorkRef = "PRIVACY-01: trace the comparison review deletion path";
   });
   assert.equal(code, 0, output);
-  assert.match(output, /1 domain\(s\) are decided but not yet built/);
+  // Named rather than counted. The count is however many planned rows the
+  // registry happens to carry, and pinning it made this test fail the day a
+  // real one was added -- which is a change to the registry, not to the rule
+  // this test is about.
+  assert.match(output, /domain\(s\) are decided but not yet built --[^\n]*comparisonReview/);
 });
 
 test("an implemented row cannot carry a work reference", () => {

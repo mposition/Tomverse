@@ -146,7 +146,8 @@ const REGISTRY = {
     owner: "list",
     module: "lib/memoryValidatorCore.ts",
     list: "MEMORY_SENSITIVITIES",
-    reason: "Whether a memory is sensitive decides whether it can be injected at all.",
+    reason:
+      "Whether a memory is sensitive decides whether it can be injected at all.",
   },
   AssistantKnowledgeFile_processingStatus_allowed: {
     owner: "list",
@@ -187,7 +188,8 @@ const REGISTRY = {
     owner: "list",
     module: "lib/memoryExtractionLaunch.ts",
     list: "MEMORY_EXTRACTION_RUN_STATUSES",
-    reason: "The run lifecycle the dispatcher and the orphan sweep both transition.",
+    reason:
+      "The run lifecycle the dispatcher and the orphan sweep both transition.",
   },
   ProductAnalyticsEvent_language_check: {
     owner: "list",
@@ -269,10 +271,150 @@ const REGISTRY = {
     reason:
       "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
+  AvailabilityObservation_source_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_SOURCES",
+    reason:
+      "real_traffic, synthetic_probe, operator_verification -- kept apart for the reason ProviderHealthState already keeps them apart in separate columns: an operator proving the API answers is not the same claim as real user traffic being served, and a synthetic probe is neither. Folding them would let a passing probe cover for traffic that is failing.",
+  },
+  AvailabilityObservation_outcome_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_OBSERVATION_OUTCOMES",
+    reason:
+      "succeeded or failed. Two values because a rollup divides one by the total; a third would need every consumer to decide which side it counted on, and they would not all decide the same way.",
+  },
+  DeploymentPriceSnapshot_knowledge_check: {
+    owner: "list",
+    module: "lib/routingHeldDecisions.ts",
+    list: "DEPLOYMENT_PRICE_KNOWLEDGE",
+    reason:
+      "unknown, estimate, verified. Unknown is a missing amount, not zero. Estimate and verified are stated prices with a source and an effective time. A fourth value would be a price the record-only rule has not decided how to store, and the amount check beside this list would not know which side it was on. Routing and billing do not read the row.",
+  },
+  DeploymentPriceSnapshot_rate_kind_check: {
+    owner: "list",
+    module: "lib/routingHeldDecisions.ts",
+    list: "DEPLOYMENT_PRICE_RATE_KINDS",
+    reason:
+      "input, output, cache_read, cache_write. The same four rates lib/modelPricing.ts already prices per million tokens. One amount without a kind cannot say which of those rates it is, and a fifth kind would be a rate the record has no column for. The unit check beside this list fixes the scale at per million tokens.",
+  },
+  PinnedDeploymentExperimentHold_status_check: {
+    owner: "list",
+    module: "lib/pinnedDeploymentExecution.ts",
+    list: "PINNED_EXPERIMENT_HOLD_STATUSES",
+    reason:
+      "held, settled, released, occupied. Released is only a call that was confirmed not to have started. Occupied keeps the reservation when the cost is unknown after dispatch. Settled is a measured cost. A fifth value would be a close this ledger has not decided how to apply to the ceiling.",
+  },
+  AvailabilityRollupApplication_grain_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_ROLLUP_GRAINS",
+    reason:
+      "deployment, endpoint, provider -- the same grains an observation can be rolled up to. One list, so a rollup application cannot name a grain the observation module does not. Applying the provider grain does not record that the deployment grain was applied.",
+  },
+  AvailabilityObservation_errorClass_check: {
+    owner: "list",
+    module: "lib/availabilityObservation.ts",
+    list: "AVAILABILITY_FAILURE_CLASSES",
+    reason:
+      "A subset of ROUTING_ATTEMPT_ERROR_CLASSES, sharing its spelling so an attempt and an observation cannot call a rate limit different things, but not its membership. The first draft admitted the whole vocabulary, which would have counted a rate limit, an empty answer, a client disconnect and our own process stopping as the provider being unavailable -- RoutingAttempt draws those lines with failureLayer and an observation has no layer, so the line is which classes may appear at all. A rate limit counted here would undo QuotaCapacityState in the summary it feeds. Nullable because a success has nothing to classify.",
+  },
+  RoutingRun_allocationMode_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_MODES",
+    reason:
+      "deterministic or explore_bounded, nullable because a run written before an allocator existed genuinely recorded neither and a default of deterministic would read as 'we took the top candidate' on runs where nobody chose. A separate column from RoutingRun.mode, which answers whether the decision was acted on rather than how the candidate was picked: a combined value like shadow_explore has to be pulled apart again by every reader, and the first to get it wrong reports exploration rate over the wrong denominator. A third constraint, RoutingRun_allocation_axis_check, binds this to the seed grain and is not a closed list.",
+  },
+  RoutingRun_allocationSeedGrain_check: {
+    owner: "list",
+    module: "lib/routingAllocation.ts",
+    list: "ROUTING_ALLOCATION_SEED_GRAINS",
+    reason:
+      "request or session. The ADR's own first risk is that a per-request seed breaks cache affinity: a conversation that re-rolls every turn never returns to the placement holding its prefix, and the saving disappears with nothing reporting a failure. Recorded beside the mode so that DeploymentCacheAffinity (where turns landed) and this (what the allocator was seeded on) can together say whether affinity was broken on purpose. An exploration must name its grain; a deterministic allocation rolled nothing and names none.",
+  },
+  ModelDeployment_promptCacheSupport_check: {
+    owner: "list",
+    module: "lib/deploymentCacheAffinity.ts",
+    list: "PROMPT_CACHE_SUPPORT_STATES",
+    reason:
+      "unproven is the default and a third answer, not a synonym for either of the others: a deployment nobody has checked is not no-cache, which would write off a saving nobody measured, and it is not a cache either. verified_absent is a finding. The last two split on who sends what -- a provider caching a repeated prefix on its own, versus one where the request must carry a marker and the write costs a premium -- because a ranking that could not tell them apart would be assuming a marker either is or is not needed. These values do not decide whether a request carries a marker; that is lib/anthropicPromptCaching.ts, which gates on provider identity.",
+  },
+  RoutingCandidateVerdict_verdict_check: {
+    owner: "list",
+    module: "lib/routingCandidateVerdict.ts",
+    list: "ROUTING_CANDIDATE_VERDICTS",
+    reason:
+      "eligible or rejected. An earlier draft of this table held only rejections, which left it unable to say why a model that passed every filter still lost -- the question the table exists for. A nullable reason carries both, bound to the verdict by its own CHECK so the two cannot disagree.",
+  },
+  RoutingCandidateVerdict_reason_check: {
+    owner: "list",
+    module: "lib/routerCandidates.ts",
+    list: "CANDIDATE_REJECTIONS",
+    reason:
+      "The eleven reasons the candidate filter can give, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
+  },
+  QuotaScope_scopeKind_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "QUOTA_SCOPE_KINDS",
+    reason:
+      "What a capacity limit is counted against: credential, endpoint_credential, deployment_credential, account, provider. The first design was one `(scopeKind, scopeId)` pair of strings, and an independent review rejected it because nothing would stop a scope id matching no row -- a limit counted against nothing is indistinguishable from no limit until somebody spends against it. So each kind names its own typed columns behind a foreign key, and `QuotaScope_shape_check` says which ones the kind requires and which it forbids. 'account' rather than 'workspace' because BYOK ownership is the account and no workspace entity exists to point at.",
+  },
+  CredentialBinding_billingOwner_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BILLING_OWNERS",
+    reason:
+      "tomverse or account. It decides which budget a call draws down, and they are separate namespaces on purpose: an account's own spend must not consume an allowance Tomverse funded. Two further CHECKs bind the funding columns to it, because without them 'who is paying for this call' has two possible answers and the settlement takes whichever column happens to be set.",
+  },
+  CredentialBinding_status_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "CREDENTIAL_BINDING_STATUSES",
+    reason:
+      "disabled, active, revoked. 'revoked' is separate from 'disabled' because they are different facts -- one was switched off and can be switched back on, the other was withdrawn and the secret behind it should be assumed gone. Collapsing them would leave an operator reading a withdrawn credential as merely paused. Nothing in the database prevents a revoked row being set active again -- the values are a vocabulary, not a state machine -- so whatever ends up writing this has to hold that rule itself.",
+  },
+  ProviderEndpoint_residencyClass_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "ENDPOINT_RESIDENCY_CLASSES",
+    reason:
+      "proven and unproven, and deliberately no third value for 'probably'. The question this answers is binary -- may a residency-constrained request be served from here -- and a middle value would be read as a yes by whoever needed one. 'unproven' is the honest default rather than a gap: it says nobody has read a contract naming a recipient entity and a processing region, which is where every provider stands until the contract review lands.",
+  },
+  RoutingIdentityManifestEntry_versionPinStrength_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "VERSION_PIN_STRENGTHS",
+    reason:
+      "The same three values as ModelDeployment_versionPinStrength_check. A published entry copies the pin, and a copy that allowed a fourth spelling would be a publication the live row could not have.",
+  },
+  ModelDeployment_versionPinStrength_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "VERSION_PIN_STRENGTHS",
+    reason:
+      "strong, weak, alias_only. strong is an immutable revision and versionMayDrift() refuses to widen it even when allowVersionDrift is set. weak and alias_only may move only when that flag is also true. The column default is strong, so a row that predates the column cannot drift by omission. The same list is on RoutingIdentityManifestEntry, because a publication that stored a different vocabulary would be a second answer to what the pin was.",
+  },
+  ModelDeployment_qualityGateStatus_check: {
+    owner: "list",
+    module: "lib/deploymentIdentity.ts",
+    list: "DEPLOYMENT_QUALITY_GATE_STATUSES",
+    reason:
+      "pending, passed, failed, stale -- per deployment rather than per equivalence class, because no provider in the pool has been shown to attest the immutable artifact that would let one placement's quality evidence stand for another's. 'stale' is its own value rather than a flavour of 'failed': evidence that expired is not evidence the model got worse, and collapsing them would make an expiry read as a regression.",
+  },
+  RoutingAttempt_errorClass_check: {
+    owner: "list",
+    module: "lib/routingAttemptStore.ts",
+    list: "ROUTING_ATTEMPT_ERROR_CLASSES",
+    reason:
+      "Why an attempt ended, as a fixed identifier. Bare TEXT until now -- five strings written by four call sites, with nothing stopping a sixth, because nothing branches on it and an operator-facing field no code reads has no other guard than a constraint. The provider_* half mirrors ProviderFailureCategory in lib/providerErrorClassification.ts, which the routing layer computed and then dropped: telling a rate limit apart from an outage is a later change and cannot be made from records that never kept the difference. 'provider_pre_token_failure' is in the list although nothing writes it any more, because rows already carry it and a constraint that refuses its own history can never be validated.",
+  },
   RoutingAttempt_failureLayer_check: {
     owner: "type_only",
     reason:
-      "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+      "RoutingFailureLayer in lib/routingAttemptStore.ts. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed. Three of the values exist to keep something out of provider health rather than to describe a provider: 'process' is this host stopping, 'storage' is an object store that no longer holds what the turn needed, and 'model_output' is the provider answering with nothing usable -- the call succeeded, so counting it as an outage would make a quality problem look like one.",
   },
   ModelMigrationRecord_field_check: {
     owner: "database",
@@ -492,6 +634,70 @@ const REGISTRY = {
     reason:
       "AmuxWorkerRuntimeStatus in lib/amux/workerRuntime.ts carries starting, idle, busy, error and stopped. The authenticated heartbeat route validates the same five values with zod, but neither copy is an exported runtime array the audit can compare mechanically.",
   },
+  AmuxIncidentTransition_from_state_check: {
+    owner: "list",
+    module: "lib/amux/incidentCore.ts",
+    list: "AMUX_INCIDENT_STATES",
+    reason:
+      "The prior state on each append-only AMUX incident transition uses the same normal/frozen vocabulary as the current AppSetting authority.",
+  },
+  AmuxIncidentTransition_to_state_check: {
+    owner: "list",
+    module: "lib/amux/incidentCore.ts",
+    list: "AMUX_INCIDENT_STATES",
+    reason:
+      "The next state on each append-only AMUX incident transition uses the same normal/frozen vocabulary as the current AppSetting authority.",
+  },
+  AmuxResourcePolicy_scope_check: {
+    owner: "database",
+    reason:
+      "Planning policy is scoped only to a project or team. The admin mutation surface validates the same pair, while the database remains the durable authority for stored rows.",
+  },
+  AmuxWorkItem_due_precision_check: {
+    owner: "type_only",
+    reason:
+      "The canonical deadline parser emits date or instant precision; the stored value preserves which interpretation produced dueAt.",
+  },
+  AmuxWorkItem_due_source_check: {
+    owner: "type_only",
+    reason:
+      "The canonical deadline stores whether an explicit classification field, title marker or description marker supplied the accepted instant.",
+  },
+  AmuxWorkItem_due_parse_state_check: {
+    owner: "type_only",
+    reason:
+      "Deadline intake distinguishes absent, valid, invalid and ambiguous input so malformed scheduling data cannot silently become no deadline.",
+  },
+  AmuxCostLedgerEntry_scope_check: {
+    owner: "database",
+    reason:
+      "Each append-only cost entry charges exactly one configured project or team resource, using the same durable scope vocabulary as policy rows.",
+  },
+  AmuxCostLedgerEntry_kind_check: {
+    owner: "database",
+    reason:
+      "Cost evidence records the conservative execution reservation and an optional provider-confirmed settlement delta as separate append-only facts.",
+  },
+  AmuxQuotaObservation_source_check: {
+    owner: "type_only",
+    reason:
+      "Quota confidence weights provider API and wrapper observations differently; an unknown source must not inherit a made-up reliability.",
+  },
+  AmuxHumanEscalation_status_check: {
+    owner: "database",
+    reason:
+      "A human escalation is open, acknowledged or resolved. Lifecycle columns and the partial unique index make unresolved ownership visible and singular per task.",
+  },
+  AmuxReviewProposal_outcome_check: {
+    owner: "type_only",
+    reason:
+      "The server creates only approve, retry or block task-review proposals through AmuxReviewOutcome in lib/amux/reviewApprovalCore.ts. The database also binds each value to an exact source and target status; no client-supplied outcome can widen that transition set.",
+  },
+  AmuxReviewDecision_outcome_check: {
+    owner: "type_only",
+    reason:
+      "A decision copies the proposal's closed AmuxReviewOutcome union and the database verifies that match before appending the immutable ledger row. This is a one-person task-review record, not AdminActionApproval or permission for an external action.",
+  },
   AmuxExecutionAttempt_outcome_check: {
     owner: "type_only",
     reason:
@@ -508,6 +714,41 @@ const REGISTRY = {
     list: "BOARD_IMPORT_APPROVAL_STATUSES",
     reason:
       "The catalog-import approval lifecycle: prepared, approved, rejected, expired, consumed. Cards are written only on the approved-to-consumed transition, and a conflict or exclude burns the approval id as rejected. The same list is what the service compares before every state change.",
+  },
+  AmuxReconciliationRun_status_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_RECONCILIATION_RUN_STATUSES",
+    reason:
+      "prepared, approved, applying, consumed, rejected, outcome_unknown. A run records one pinned source comparison. Item drift is not inferred from the run manifest digest, and the shipped apply latch stays off.",
+  },
+  AmuxWorkItemSourceRevision_state_check: {
+    owner: "list",
+    module: "lib/amux/boardReconciliationCore.ts",
+    list: "AMUX_SOURCE_REVISION_STATES",
+    reason:
+      "observed, accepted, rejected. Rows are append-only. accepted is the only state a card pointer may reference, and the original import is backfilled as accepted without rewriting source columns.",
+  },
+  AmuxBoardPromotionApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/boardPromotionCore.ts",
+    list: "BOARD_PROMOTION_APPROVAL_STATUSES",
+    reason:
+      "The manual promotion approval lifecycle: prepared, approved, rejected, expired, consumed. A card leaves backlog only on the approved-to-consumed transition, and that transition stays behind the shipped-off code latch. The service compares this same list before every state change.",
+  },
+  AmuxIntakeDraft_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_DRAFT_STATUSES",
+    reason:
+      "consumed, rejected, expired. A draft row stores digests only. Proposal text stays null, and the shipped apply latch keeps the public route from inserting one.",
+  },
+  AmuxIntakeApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/intakeRegistrationCore.ts",
+    list: "AMUX_INTAKE_APPROVAL_STATUSES",
+    reason:
+      "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
   AmuxWorkDelivery_status_check: {
     owner: "database",
@@ -692,7 +933,7 @@ const REGISTRY = {
   EmailDelivery_skip_reason_check: {
     owner: "database",
     reason:
-      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
+      'Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to "why did this person not get it", which is a question support has to be able to answer without reading the send code.',
   },
 
   MarketingChannel_channel_check: {
@@ -770,7 +1011,7 @@ const REGISTRY = {
     module: "lib/marketingAutomationSchema.ts",
     list: "MARKETING_POST_MODES",
     reason:
-      "Whether a human approved this post or an approved template did. Two values and no third: a post is covered by one authority or the other, and a mode meaning \"partly\" would have no answer to which digest the approval bound to.",
+      'Whether a human approved this post or an approved template did. Two values and no third: a post is covered by one authority or the other, and a mode meaning "partly" would have no answer to which digest the approval bound to.',
   },
   MarketingPost_verificationMethod_check: {
     owner: "list",
@@ -893,7 +1134,10 @@ const migrations = readdirSync(migrationsDirectory)
       return [
         {
           name: directory,
-          sql: readFileSync(join(migrationsDirectory, directory, "migration.sql"), "utf8"),
+          sql: readFileSync(
+            join(migrationsDirectory, directory, "migration.sql"),
+            "utf8",
+          ),
         },
       ];
     } catch {
@@ -906,9 +1150,11 @@ const constraints = readEnumConstraints(migrations);
 // Alias entries let a second copy of one list be checked against the same
 // constraint. They are registry keys, not constraint names, so they are folded
 // in here rather than confusing the "stale entry" rule.
-const aliases = Object.entries(REGISTRY).filter(([, entry]) => entry.constraintAlias);
+const aliases = Object.entries(REGISTRY).filter(
+  ([, entry]) => entry.constraintAlias,
+);
 const registry = Object.fromEntries(
-  Object.entries(REGISTRY).filter(([, entry]) => !entry.constraintAlias)
+  Object.entries(REGISTRY).filter(([, entry]) => !entry.constraintAlias),
 );
 
 const modules = new Map();
@@ -923,7 +1169,7 @@ const resolve = (entry) => {
 for (const key of new Set(
   [...Object.values(registry), ...aliases.map(([, entry]) => entry)]
     .filter((entry) => entry.owner === "list")
-    .map((entry) => entry.module)
+    .map((entry) => entry.module),
 )) {
   const imported = await import(`../${key}`);
   modules.set(key, imported);
@@ -933,7 +1179,7 @@ const problems = auditEnumConstraints({ constraints, registry, resolve });
 
 for (const [key, entry] of aliases) {
   const constraint = constraints.find(
-    (candidate) => candidate.constraint === entry.constraintAlias
+    (candidate) => candidate.constraint === entry.constraintAlias,
   );
   if (!constraint) {
     problems.push({
@@ -970,7 +1216,7 @@ if (problems.length > 0) {
       "\n\nA constraint the application does not know about answers 500 where it\n" +
       "should answer 400. Compare the list in scripts/check-enum-constraints.mjs\n" +
       "against the migration that last recreated the constraint, and register a\n" +
-      "new constraint with a reason rather than leaving it undecided.\n"
+      "new constraint with a reason rather than leaving it undecided.\n",
   );
   process.exit(1);
 }
@@ -984,5 +1230,5 @@ console.log(
   `Enum constraint check passed: ${constraints.length} closed list(s) in the schema — ` +
     `${counts.list || 0} compared against an application list, ` +
     `${counts.type_only || 0} held only as a TypeScript union, ` +
-    `${counts.database || 0} written down only in the database.`
+    `${counts.database || 0} written down only in the database.`,
 );

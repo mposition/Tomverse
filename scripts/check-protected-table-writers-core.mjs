@@ -328,6 +328,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/marketingStore.ts",
+    table: "MarketingChannel",
+    tableMentions: 2,
+    writeVerbs: 8,
+    reason:
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do.",
+  },
+  {
+    path: "lib/marketingStore.ts",
+    table: "MarketingPost",
+    tableMentions: 11,
+    writeVerbs: 8,
+    reason:
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -448,6 +464,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The execution-runner migration fails closed on existing attempts, then replaces the exact v3 binding and insert guard for tokenizer facts. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no attempt.",
   },
   {
+    path: "prisma/migrations/20260921160000_amux_agent_review_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 24,
+    reason:
+      "The AMUX approval migration creates only its proposal/decision ledger and reads AdminAuditLog through a restrictive foreign key and SELECT FOR KEY SHARE. It never writes AdminAuditLog; lib/adminAudit.ts remains its sole writer. Exact counts fail closed if this SQL changes.",
+  },
+  {
     path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 8,
@@ -515,6 +539,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 1,
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
+  },
+  {
+    path: "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER TABLE that follows it, and the count in the error message. Both write verbs are that one statement's own ALTER TABLE and ALTER COLUMN -- this migration issues no UPDATE and no DELETE, because the disposition of a row with no digest is an operator's decision carried out separately.",
+  },
+  {
+    path: "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
   },
 ];
 

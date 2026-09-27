@@ -1,8 +1,11 @@
 export const dynamic = "force-dynamic";
 
+import { getServerSession } from "next-auth/next";
 import { AdminMarketingPanel } from "@/components/admin/AdminMarketingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { authOptions } from "@/lib/auth";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
@@ -17,17 +20,23 @@ const TABS = adminNavItemTabs("marketing");
  * The panel's refresh control calls `GET /api/admin/marketing`, which runs the
  * same loader.
  *
- * This slice adds no control that changes marketing state. Approving a draft,
- * pausing an account and marking a template reusable arrive in S2b1 with their
- * own permission and step-up; reading this page takes ordinary admin
- * authentication, which the console layout has already established.
+ * Reading takes ordinary admin authentication, which the console layout has
+ * already established. The controls S2b1 adds -- approving a draft, pausing an
+ * account, marking a template reusable -- take `marketing:write` and a recent
+ * sign-in, and each route checks both again. Which of the two this viewer is
+ * travels with the payload, so a reader who may only read is not offered
+ * buttons that can only refuse.
  */
 export default async function AdminMarketingPage({
   searchParams,
 }: PageProps<"/admin/marketing">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
-  const initial = await readMarketingConsole(tab.id as MarketingConsoleSection);
+  const session = await getServerSession(authOptions);
+  const initial = await readMarketingConsole(
+    tab.id as MarketingConsoleSection,
+    hasAdminPermission(session, "marketing:write")
+  );
 
   return (
     <div className="flex min-w-0 flex-col gap-5">

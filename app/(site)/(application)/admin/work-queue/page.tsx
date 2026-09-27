@@ -1,49 +1,25 @@
 export const dynamic = "force-dynamic";
 
-import { AdminApprovalsPanel } from "@/components/admin/AdminApprovalsPanel";
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { OperatorPlaybooksPanel, SupportAgePanel } from "@/components/admin/AdminRiskPanels";
 import { AdminWorkQueuePanel } from "@/components/admin/AdminWorkQueuePanel";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { feedbackSlaRows, loadFeedbackRows } from "@/lib/adminConsoleData";
 import { loadAdminWorkQueue } from "@/lib/adminWorkQueue";
 
-const TABS = adminNavItemTabs("work-queue");
-
 /**
- * Two sections, and only the open one is loaded.
+ * One list of work that is actually waiting.
  *
- * The Queue tab runs the work-queue aggregation; the Approvals tab renders the
- * approval panel, which fetches its own rows client-side. Neither pays for the
- * other, which is the point of putting the section in the URL.
+ * Two-person approval used to be a second tab. It is not a queue anymore:
+ * an eligible administrator executes the action, and the audit log is the
+ * record. `/admin/approvals` redirects here.
  */
-export default async function AdminWorkQueuePage({
-  searchParams,
-}: PageProps<"/admin/work-queue">) {
-  const query = await searchParams;
-  const tab = resolveAdminTab(TABS, query.tab);
+export default async function AdminWorkQueuePage() {
   const now = new Date();
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <AdminPageTabs
-        basePath="/admin/work-queue"
-        tabs={TABS}
-        activeTabId={tab.id}
-        label="Work queue sections"
-        query={query}
-      />
-      {tab.id === "approvals" ? (
-        <AdminApprovalsPanel />
-      ) : (
-        <>
-          <AdminWorkQueuePanel queue={await loadAdminWorkQueue(now)} now={now} />
-          <SupportAgePanel
-            slaRows={feedbackSlaRows(await loadFeedbackRows(), now)}
-          />
-          <OperatorPlaybooksPanel />
-        </>
-      )}
+      <AdminWorkQueuePanel queue={await loadAdminWorkQueue(now)} now={now} />
+      <SupportAgePanel slaRows={feedbackSlaRows(await loadFeedbackRows(), now)} />
+      <OperatorPlaybooksPanel />
     </div>
   );
 }

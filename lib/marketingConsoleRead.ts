@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
+import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
 import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
 import {
   MARKETING_READ_PAGE_SIZE,
@@ -62,6 +63,27 @@ export type MarketingConsolePayload = {
   pageSize: number;
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
+  /**
+   * Whether this viewer may change anything, or only read.
+   *
+   * docs/policy/marketing-automation.md §6.1 gives record viewing to any
+   * administrator and every mutation to `marketing:write`. Both people open
+   * the same page, so without this the screen draws the same controls for
+   * both and one of them gets a 403 for every one they press. The routes
+   * decide it again and it is their answer that counts; this only decides
+   * what is worth drawing.
+   */
+  canWrite: boolean;
+  /**
+   * The version token a switch change must send back, or null when it cannot
+   * be read.
+   *
+   * Beside the switches rather than inside them: it is not a switch state, and
+   * putting it in that map made the map stop being a map of states. Read from
+   * the same snapshot as the values, because a screen showing old values with
+   * a new generation would save against a state nobody saw.
+   */
+  configGeneration: number | null;
 };
 
 const state = (
@@ -88,6 +110,13 @@ const applyScopeState = (
   const status = marketingWebhookApplyScopeStatus(read.value);
   if (status === "absent") return "no-scope";
   return status === "valid" ? "scope-valid" : "scope-invalid";
+};
+
+/** A draft's own words, in full, for the control that edits them. */
+const renderedText = (envelope: unknown): string | null => {
+  if (!envelope || typeof envelope !== "object") return null;
+  const value = (envelope as { renderedText?: unknown }).renderedText;
+  return typeof value === "string" ? value : null;
 };
 
 /** A draft's own words, shortened for a list row. */
@@ -121,38 +150,48 @@ const PUBLISH_STATE_STATUSES = [
   "deleted",
 ] as const;
 
-async function readSwitches(): Promise<MarketingSwitchStates> {
+async function readSwitches(): Promise<{
+  switches: MarketingSwitchStates;
+  configGeneration: number | null;
+}> {
   try {
     const settings = await readMarketingAutomationSettings();
     return {
+      configGeneration: settings.configGenerationValue.ok
+        ? marketingConfigGenerationFromValue(settings.configGenerationValue.value)
+        : null,
+      switches: {
       drafts: state(settings.draftsEnabled),
       publish: state(settings.publishEnabled),
       autoPublish: state(settings.autoPublishEnabled),
       experiments: state(settings.experimentsEnabled),
       webhookShadow: state(settings.webhookShadowEnabled),
       webhookApplyScope: applyScopeState(settings.webhookApplyScopeValue),
+      },
     };
   } catch {
     // A switch strip that cannot be read says so. It never says "off",
     // because "off" is a claim and a failed read is not evidence for it.
     return {
+      configGeneration: null,
+      switches: {
       drafts: "unreadable",
       publish: "unreadable",
       autoPublish: "unreadable",
       experiments: "unreadable",
       webhookShadow: "unreadable",
       webhookApplyScope: "unreadable",
+      },
     };
   }
 }
 
 export async function readMarketingConsole(
-  section: MarketingConsoleSection
+  section: MarketingConsoleSection,
+  canWrite: boolean
 ): Promise<MarketingConsolePayload> {
-  const [availability, switches] = [
-    marketingSectionAvailability(section),
-    await readSwitches(),
-  ];
+  const availability = marketingSectionAvailability(section);
+  const { switches, configGeneration } = await readSwitches();
 
   if (!availability.available) {
     return {
@@ -162,6 +201,8 @@ export async function readMarketingConsole(
       pageSize: 0,
       rows: [],
       switches,
+      configGeneration,
+      canWrite,
     };
   }
 
@@ -176,6 +217,10 @@ export async function readMarketingConsole(
         kind: true,
         status: true,
         mode: true,
+        envelopeDigest: true,
+        historyVersion: true,
+        legalHold: true,
+        reusableAsTemplate: true,
         guardDecision: true,
         guardCodes: true,
         guardRuleIds: true,
@@ -191,6 +236,8 @@ export async function readMarketingConsole(
       ordering: "newest",
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
+      configGeneration,
+      canWrite,
       rows: posts.map((post) => ({
         id: post.id,
         accountSlug: post.channel.accountSlug,
@@ -199,10 +246,21 @@ export async function readMarketingConsole(
         kind: post.kind,
         status: post.status,
         mode: post.mode,
+        // The two values every post writer compares against. They are what
+        // makes a decision about *this* version of the draft rather than
+        // whichever version is there when the request lands.
+        envelopeDigest: post.envelopeDigest,
+        historyVersion: post.historyVersion,
+        legalHold: post.legalHold,
+        reusableAsTemplate: post.reusableAsTemplate,
         guardDecision: post.guardDecision,
         guardCodes: post.guardCodes,
         guardRuleIds: post.guardRuleIds,
         excerpt: excerpt(post.envelope),
+        // The words themselves, not only the shortened line above them: the
+        // edit control starts from what is actually there, and an edit box
+        // that opened empty would replace a draft with whatever was typed.
+        renderedText: renderedText(post.envelope),
         approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
         createdAt: post.createdAt.toISOString(),
       })),
@@ -219,7 +277,12 @@ export async function readMarketingConsole(
         locale: true,
         status: true,
         mode: true,
+        envelopeDigest: true,
+        historyVersion: true,
+        legalHold: true,
+        reusableAsTemplate: true,
         scheduledAt: true,
+        externalPostId: true,
         externalUrl: true,
         publishedAt: true,
         verifiedPublicAt: true,
@@ -236,6 +299,8 @@ export async function readMarketingConsole(
       ordering: "newest",
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
+      configGeneration,
+      canWrite,
       rows: posts.map((post) => ({
         id: post.id,
         accountSlug: post.channel.accountSlug,
@@ -243,7 +308,17 @@ export async function readMarketingConsole(
         locale: post.locale,
         status: post.status,
         mode: post.mode,
+        envelopeDigest: post.envelopeDigest,
+        historyVersion: post.historyVersion,
+        legalHold: post.legalHold,
+        // Without it the console offered "mark reusable" on rows that already
+        // were, and the only outcome was a 409.
+        reusableAsTemplate: post.reusableAsTemplate,
         scheduledAt: post.scheduledAt?.toISOString() ?? null,
+        // The id the unpublish writer compares against, not a link: an
+        // operator saying a post is gone has to be saying it about the post
+        // the row names.
+        externalPostId: post.externalPostId,
         externalUrl: post.externalUrl,
         publishedAt: post.publishedAt?.toISOString() ?? null,
         verifiedPublicAt: post.verifiedPublicAt?.toISOString() ?? null,
@@ -264,6 +339,13 @@ export async function readMarketingConsole(
         channel: true,
         accountSlug: true,
         provider: true,
+        // The four values the identity and connection writers compare
+        // against. Without them the console can display an account it cannot
+        // act on, which is the defect the round-2 review found one table over.
+        connectionGeneration: true,
+        scopesDigest: true,
+        policyVersion: true,
+        graduationEpoch: true,
         defaultLocale: true,
         allowedLocales: true,
         status: true,
@@ -282,6 +364,8 @@ export async function readMarketingConsole(
       ordering: "newest",
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
+      configGeneration,
+      canWrite,
       rows: channels.map((channel) => ({
         ...channel,
         approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
@@ -309,6 +393,8 @@ export async function readMarketingConsole(
     ordering: "newest",
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
+    configGeneration,
+    canWrite,
     rows: reports.map((report) => ({
       ...report,
       periodStart: report.periodStart.toISOString(),

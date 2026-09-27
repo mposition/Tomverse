@@ -39,6 +39,62 @@ import { prisma } from "@/lib/prisma";
 
 export type PlannerMode = "planned" | "pass_through";
 
+/**
+ * Why an attempt ended the way it did, as a fixed identifier.
+ *
+ * Open text until now: five strings written by four call sites, with nothing
+ * stopping a sixth. Nothing reads it to decide anything -- it is operator
+ * telemetry -- and that is exactly why it drifted.
+ *
+ * The provider-derived half mirrors `ProviderFailureCategory` in
+ * `lib/providerErrorClassification.ts`, which the routing layer computed and
+ * then threw away: `classifyStreamFailure` read the category, kept
+ * `PAYMENT_REQUIRED`, and let a rate limit, a 5xx, a DNS failure and an
+ * unrecognised error all arrive as one `failureLayer: "provider"`. Separating
+ * capacity from availability is a later change with its own scope, and it
+ * cannot be made at all from records that never kept the difference.
+ *
+ * The two halves are prefixed apart on purpose. `provider_*` is a verdict
+ * about the provider's answer; the rest is about this turn, this process or
+ * this connection.
+ */
+export const ROUTING_ATTEMPT_ERROR_CLASSES = [
+  /** The stream ended cleanly and produced nothing. */
+  "empty_response",
+  /** The first token did not arrive inside the turn's deadline. */
+  "first_token_deadline_exceeded",
+  /** The request failed before any classification was reached. */
+  "request_failed",
+  /** The process stopped after dispatching. Written only by the sweep. */
+  "process_stopped_after_dispatch",
+  /** The person's connection was gone, or the turn was aborted. */
+  "client_gone",
+  /** Tomverse's own completion handling failed after the stream finished. */
+  "completion_handling_failed",
+  /**
+   * A provider failure recorded before the category was carried through.
+   *
+   * No longer written. Kept in the vocabulary because rows already carry it,
+   * and a constraint that refuses its own history is a constraint that cannot
+   * be validated.
+   */
+  "provider_pre_token_failure",
+  "provider_policy_refusal",
+  "provider_payment_required",
+  "provider_rate_limited",
+  "provider_server_error",
+  "provider_network",
+  "provider_authentication",
+  "provider_request_contract",
+  "provider_model_not_found",
+  "provider_model_transient",
+  "provider_local_rejection",
+  "provider_unknown",
+] as const;
+
+export type RoutingAttemptErrorClass =
+  (typeof ROUTING_ATTEMPT_ERROR_CLASSES)[number];
+
 export type RoutingAttemptOutcome =
   | "not_dispatched"
   | "failed_pre_token"
@@ -80,6 +136,27 @@ export type RoutingFailureLayer =
   | "storage"
   /** Our own code or database failed before anything was dispatched. */
   | "application"
+  /**
+   * The provider answered, and the answer was not usable.
+   *
+   * Separate from `provider` and `stream` because those are availability: one
+   * says the provider could not serve the request, the other that this process
+   * or this connection did not survive it. An empty completion is neither. The
+   * call succeeded, the stream ended cleanly, and what came back was nothing.
+   *
+   * Keeping it apart is what stops a quality problem being counted as an
+   * outage. `lib/providerErrorClassification.ts` already draws this line for
+   * the same case under a different name -- `AI_EMPTY_RESPONSE` classifies as
+   * `MODEL_TRANSIENT` with `scope: "model"`, and `PROVIDER_SCOPED` excludes
+   * it, so it never reaches `ProviderHealthState`. This is that decision
+   * arriving in the attempt record, which previously called it `stream`.
+   *
+   * Not fallback-eligible: `lib/routingFallbackPolicy.ts` falls back only on
+   * `adapter` and `provider`, and it should stay that way here. A second model
+   * asked the same question may well answer, but that is a retry policy with
+   * its own cost, not something a layer name should decide by accident.
+   */
+  | "model_output"
   | "provider"
   | "stream"
   | "none";
@@ -303,7 +380,7 @@ export const closeAttempt = async (input: {
   firstVisibleTokenAt?: Date | null;
   actualInputTokens?: number | null;
   actualOutputTokens?: number | null;
-  errorClass?: string | null;
+  errorClass?: RoutingAttemptErrorClass | null;
   /**
    * The transaction to close in, when the caller has one.
    *

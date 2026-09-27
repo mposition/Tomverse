@@ -78,6 +78,15 @@ export type FallbackRefusal =
   | "visible_token_emitted"
   /** §7: cancellation is never an automatic fallback candidate. */
   | "cancelled"
+  /**
+   * The connection ended without an answer, and nobody asked it to.
+   *
+   * Refused for the same reason as a cancellation -- a stream that died
+   * mid-flight is no evidence that another model would have answered -- and
+   * reported under its own name, because an operator reading a refusal log
+   * should not be told somebody changed their mind when nobody did.
+   */
+  | "connection_lost"
   /** §7: a safety refusal is not something to find another model for. */
   | "provider_policy_rejection"
   /** §7: a provider that cannot fund the call has not judged the model. */
@@ -116,7 +125,20 @@ export type ProviderRefusal = "policy" | "insufficient_credits";
 
 export type FailedAttempt = {
   modelId: string;
+  /**
+   * The disposition: what may be done about this failure.
+   *
+   * Conservative by design, which is why it is not the same value as what was
+   * observed. See `observedOutcome`.
+   */
   outcome: RoutingAttemptOutcome;
+  /**
+   * What actually happened, when the caller separates it from the verdict.
+   *
+   * Optional, so a caller carrying only one value keeps the behaviour it had.
+   * `classifyStreamFailure` supplies both.
+   */
+  observedOutcome?: RoutingAttemptOutcome;
   failureLayer: RoutingFailureLayer;
   /**
    * Set by `classifyStreamFailure` when the provider's failure was one of
@@ -184,8 +206,18 @@ export const decideFallback = (input: FallbackInput): FallbackDecision => {
 
   // §7 names cancellation as not a fallback candidate. It is also the case
   // where retrying is most obviously wrong: the user asked for it to stop.
+  //
+  // A lost connection carries the same verdict for a different reason, so the
+  // refusal says which it was rather than reporting a decision nobody made.
   if (attempt.outcome === "cancelled") {
-    return { action: "terminate", reason: "cancelled", version };
+    const abandoned =
+      attempt.observedOutcome === undefined ||
+      attempt.observedOutcome === "cancelled";
+    return {
+      action: "terminate",
+      reason: abandoned ? "cancelled" : "connection_lost",
+      version,
+    };
   }
 
   // §7's sentence lists these next to cancellation for the same reason: the

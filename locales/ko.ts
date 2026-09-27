@@ -130,6 +130,7 @@ export const ko = {
     },
    chat: {
         sendPreparationChanged: "답변 준비 중 대화 또는 모델이 변경되었습니다. 질문을 확인한 뒤 다시 전송해 주세요.",
+        savedQuestionNotSent: "질문은 저장되었지만 답변 요청은 전송되지 않았습니다. 다시 시도하기 전에 이 대화를 새로고침해 상태를 확인해 주세요.",
         conversationOpenFailed: "이 대화를 열지 못했습니다. 현재 대화는 그대로 유지됩니다.",
         questionSaveFailed: "파일과 함께 질문을 저장하지 못했습니다. 작성 중인 초안은 유지됩니다.",
         retryQuestionSaveFailed: "다시 시도할 질문을 저장하지 못했습니다. 답변 요청은 전송되지 않았습니다.",
@@ -1010,6 +1011,8 @@ export const ko = {
         premium: "프리미엄",
         reasoning: "추론",
         research: "리서치",
+        frontier: "프론티어",
+        apex: "에이펙스",
     },
     onboarding: {
         title: "무료 모델을 지금 바로 비교하세요",

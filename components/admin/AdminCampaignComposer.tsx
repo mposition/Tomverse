@@ -9,7 +9,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 import {
   type AssistantKnowledgeCampaignLanguage,
-  type ProductAnnouncementPayload,
+  type ProductAnnouncementContent,
 } from "@/lib/productAnnouncementEmail";
 
 const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
@@ -33,7 +33,7 @@ export function AdminCampaignComposer({
 }: {
   mayWrite: boolean;
   campaignsEnabled: boolean;
-  starterContent: Record<ComposerLocale, ProductAnnouncementPayload>;
+  starterContent: Record<ComposerLocale, ProductAnnouncementContent>;
 }) {
   const router = useRouter();
   const m = useAdminMessages(adminEmailCampaignsMessages).composer;
@@ -49,9 +49,9 @@ export function AdminCampaignComposer({
   const current = content[locale];
   const currentPreview = previews.find((preview) => preview.language === locale);
 
-  const update = <K extends keyof ProductAnnouncementPayload>(
+  const update = <K extends keyof ProductAnnouncementContent>(
     key: K,
-    value: ProductAnnouncementPayload[K]
+    value: ProductAnnouncementContent[K]
   ) => {
     editRevision.current += 1;
     setContent((previous) => ({
