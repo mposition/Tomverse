@@ -428,8 +428,14 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * at the top changed from 승인됨 to 반려됨, with all twenty-three tests still
  * green. The approval says sections 1 to 6, so all six are frozen here.
  *
- * The **whole document**, because selecting ranges leaves gaps and the gaps are
- * where a review kept getting through.
+ * An integrity pin over the **whole document**, because selecting ranges leaves
+ * gaps and the gaps are where a review kept getting through.
+ *
+ * Not a claim that the owner approved every byte: the approval covers sections 1
+ * to 6 and says so, section 7 puts itself out of scope, and section 9 is what
+ * was found afterwards. This says the document has not changed since the commit
+ * that recorded this value -- which is what makes an edit to any of it visible
+ * in review, whatever its status.
  *
  * The first version hashed a flattening of the tree, and seven reader-visible
  * edits survived it. The second hashed the source of chosen ranges, and a whole
@@ -455,7 +461,7 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * version is added and that move would otherwise cover for an edit to an
  * earlier version's approval table in the same commit.
  */
-const APPROVED_DOCUMENT_DIGEST = "ceab5b00849e7254fa8b80018d7581b9";
+const APPROVED_DOCUMENT_DIGEST = "c71174cc6a65bdc672d85f4448fc3186";
 
 /** The source bytes of a section, from the parser's own offsets. */
 const sourceOf = (source, nodes) => {
@@ -464,15 +470,16 @@ const sourceOf = (source, nodes) => {
   return source.slice(from, to);
 };
 
-test("the approved document is the one the owner signed, every byte of it", () => {
+test("the approved document has not changed since this digest was recorded", () => {
   const digest = createHash("sha256").update(approvedSource()).digest("hex").slice(0, 32);
   assert.equal(
     digest,
     APPROVED_DOCUMENT_DIGEST,
-    "The approved document changed. Section 10 says a change to approved wording " +
-      "is a new version in a new section rather than an edit, and everything else " +
-      "here -- the decisions in section 9, the procedure in section 10 -- is cited " +
-      `by code. If this change is meant, record "${digest}".`
+    "The approved document changed. Sections 1 to 6 are approved wording, and " +
+      "section 10 says a change to those is a new version in a new section rather " +
+      "than an edit; the rest -- the decisions in section 9, the procedure in " +
+      "section 10 -- is cited by code and by these tests. Section 10.1 lists what " +
+      `a new version actually requires. If this change is meant, record "${digest}".`
   );
 });
 
@@ -523,95 +530,83 @@ test("every approved string is exactly its own cell of the approved document", (
 });
 
 test("each version's device sections hold exactly its devices, tables and roles", () => {
-  // Reverse completeness. Every test above walks the eight keys the code
-  // declares and finds each one's cell, which says nothing about what else the
-  // document claims was approved: a `### 3.E` device, a fourth button role, or
-  // an extra language column with an approved-looking sentence in it would all
-  // pass while the code knew nothing about them. The owner signed section 3 as
-  // a whole, so the whole of it is compared.
+  // Reverse completeness, per version. Every test above walks the eight keys the
+  // code declares and finds each one's cell, which says nothing about what else
+  // the document claims was approved: a fifth device, a fourth button role, an
+  // eighth language row, or an extra table with an approved-looking sentence in
+  // it would all pass while the code knew nothing about them.
+  //
+  // Derived from the version rather than written out, because a version's
+  // wording is approved in a new section and a check hardcoded at 3.A-3.D would
+  // have left a second version's structure unexamined. Only the summary table's
+  // words are in the metadata; the shape comes from `deviceCells` and the key
+  // and language lists.
   const tree = approvedTree();
   for (const version of CONSENT_COPY_VERSIONS) {
-    // The device subsections this version names, and the summary that sits
-    // above them. Derived from the version rather than written here, so a second
-    // version is checked against its own section rather than against 3.A-3.D.
-    const sections = [...new Set(Object.values(version.deviceCells).map((cell) => cell.section))];
-    const parent = sections[0].split(".")[0] + ".";
+    const cells = CONSENT_COPY_KEYS.map((key) => ({ key, ...version.deviceCells[key] }));
+    const sections = [...new Set(cells.map((cell) => cell.section))];
+    const parent = version.deviceSummary.section.split(".")[0] + ".";
     assert.ok(
       sections.every((name) => name.startsWith(parent)),
-      `${version.version}'s devices are spread across more than one section`
+      `${version.version}'s devices are not all under ${parent}`
     );
+
+    // The section holds the summary and this version's device subsections, and
+    // nothing else claiming to be one.
     assert.deepEqual(
       headingsOf(sectionOf(tree, parent, 2), 3),
-      [parent + "0", ...sections.sort()],
+      [version.deviceSummary.section, ...[...sections].sort()],
       `section ${parent} does not hold exactly ${version.version}'s devices`
     );
-  }
 
-  // The rest is this version's shape, which is the only one written down.
-  const version = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
-  assert.equal(version.version, "2026-09-23", "a new version needs its own expected shape here");
-  const section = sectionOf(tree, "3.", 2);
-
-  assert.deepEqual(headingsOf(section, 3), ["3.0", "3.A", "3.B", "3.C", "3.D"]);
-
-  // 3.0 is the summary of what the four devices are; the four that follow carry
-  // the approved strings, and their tables are exactly the ones the keys name.
-  // The labels are compared as they are, not nulled outside 3.D: a repeated
-  // `**제목**` above another subsection's table would otherwise pass.
-  const expectedTables = {
-    "3.0": [null],
-    "3.A": [null],
-    "3.B": [null],
-    "3.C": [null],
-    "3.D": ["제목", "본문", "세 버튼"],
-  };
-  for (const [heading, labels] of Object.entries(expectedTables)) {
-    const tables = tablesOf(sectionOf(tree, heading, 3));
+    // The summary says how many devices there are and what each records.
     assert.deepEqual(
-      tables.map((table) => table.label),
-      labels,
-      `${heading} does not hold exactly the approved tables`
+      tablesOf(sectionOf(tree, version.deviceSummary.section, 3))[0].rows,
+      version.deviceSummary.rows.map((row) => [...row]),
+      `${version.deviceSummary.section} is not ${version.version}'s device summary`
     );
-  }
 
-  // 3.0's table says there are four devices and what each records. A fifth row
-  // there is a fifth approved device, and the eight keys would not notice.
-  // Whole rows, not just their first column: "A" saying something else about
-  // where the checkbox lives or what it records is a different approved device
-  // under the same letter, and comparing the letters alone let that through.
-  assert.deepEqual(tablesOf(sectionOf(tree, "3.0", 3))[0].rows, [
-    ["#", "장치", "어디에", "무엇을 기록하는가"],
-    ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],
-    ["B", "고지 문장", "가입 흐름, A 옆", "notice_shown"],
-    ["C", "독립 거부 수단", "가입 흐름, A와 별개", "objected"],
-    ["D", "제품 내 일회성 안내", "기존 계정의 다음 접속", "A·B·C와 같은 세 상태"],
-  ]);
+    for (const section of sections) {
+      const here = cells.filter((cell) => cell.section === section);
+      // The labels this section's keys name, in key order, without repeats. A
+      // label the keys do not name is a table nobody approved.
+      const labels = [...new Set(here.map((cell) => cell.label))];
+      const tables = tablesOf(sectionOf(tree, section, 3));
+      assert.deepEqual(
+        tables.map((table) => table.label),
+        labels,
+        `${section} does not hold exactly the approved tables`
+      );
 
-  // The language tables: one row per language and no more, so an eighth row
-  // cannot claim an eighth approved language.
-  for (const heading of ["3.A", "3.B", "3.C"]) {
-    const [header, ...rows] = tablesOf(sectionOf(tree, heading, 3))[0].rows;
-    assert.deepEqual(header, ["언어", "문안"]);
-    assert.deepEqual(rows.map((row) => row[0]), [...CONSENT_COPY_LANGUAGES]);
-  }
-  for (const label of ["제목", "본문"]) {
-    const [header, ...rows] = tablesOf(sectionOf(tree, "3.D", 3)).find(
-      (table) => table.label === label
-    ).rows;
-    assert.deepEqual(header, ["언어", "문안"]);
-    assert.deepEqual(rows.map((row) => row[0]), [...CONSENT_COPY_LANGUAGES]);
-  }
+      for (const label of labels) {
+        const table = tables.find((entry) => entry.label === label);
+        const [header, ...rows] = table.rows;
+        const keys = here.filter((cell) => cell.label === label);
+        const roles = keys.map((cell) => cell.role);
 
-  // The button table: the whole header, in order, and exactly three roles. An
-  // extra column was how an approved sentence could be added beside the cell
-  // the code reads.
-  const buttons = tablesOf(sectionOf(tree, "3.D", 3)).find(
-    (table) => table.label === "세 버튼"
-  );
-  assert.deepEqual(buttons.rows[0], ["역할", ...CONSENT_COPY_LANGUAGES]);
-  assert.deepEqual(buttons.rows.slice(1).map((row) => row[0]), ["동의", "거부", "닫기"]);
-  for (const row of buttons.rows) {
-    assert.equal(row.length, 1 + CONSENT_COPY_LANGUAGES.length);
+        if (roles.every((role) => role === null)) {
+          // One language per row and no more, so an eighth row cannot claim an
+          // eighth approved language.
+          assert.deepEqual(header, ["언어", "문안"], `${section} ${label ?? ""} header`);
+          assert.deepEqual(
+            rows.map((row) => row[0]),
+            [...CONSENT_COPY_LANGUAGES],
+            `${section} ${label ?? ""} languages`
+          );
+          for (const row of rows) assert.equal(row.length, 2);
+          continue;
+        }
+
+        // The transposed table: its whole header in order, exactly the roles the
+        // keys name, and no extra column -- which was how an approved sentence
+        // could sit beside the cell the code reads.
+        assert.deepEqual(header, ["역할", ...CONSENT_COPY_LANGUAGES], `${section} ${label} header`);
+        assert.deepEqual(rows.map((row) => row[0]), roles, `${section} ${label} roles`);
+        for (const row of table.rows) {
+          assert.equal(row.length, 1 + CONSENT_COPY_LANGUAGES.length);
+        }
+      }
+    }
   }
 });
 

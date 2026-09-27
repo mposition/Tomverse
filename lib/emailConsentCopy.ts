@@ -196,6 +196,21 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
   readonly deviceCells: Readonly<
     Record<ConsentCopyKey, { section: string; label: string | null; role: string | null }>
   >;
+  /**
+   * The subsection that summarises what this version's devices are, and that
+   * table's rows.
+   *
+   * Held here because the summary is prose about the devices rather than a
+   * device, so nothing in `deviceCells` implies it -- and a fifth row there is a
+   * fifth approved device that the eight keys would not notice. The rest of a
+   * version's structure (which tables, which languages, which button roles) is
+   * derived from `deviceCells` and the key and language lists, so only the words
+   * are written down.
+   */
+  readonly deviceSummary: {
+    readonly section: string;
+    readonly rows: ReadonlyArray<readonly string[]>;
+  };
   readonly copy: ConsentCopyTable;
 }> = Object.freeze([
   Object.freeze({
@@ -216,6 +231,16 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
       noticeRefuse: { section: "3.D", label: "세 버튼", role: "거부" },
       noticeDismiss: { section: "3.D", label: "세 버튼", role: "닫기" },
     },
+    deviceSummary: {
+      section: "3.0",
+      rows: [
+        ["#", "장치", "어디에", "무엇을 기록하는가"],
+        ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],
+        ["B", "고지 문장", "가입 흐름, A 옆", "notice_shown"],
+        ["C", "독립 거부 수단", "가입 흐름, A와 별개", "objected"],
+        ["D", "제품 내 일회성 안내", "기존 계정의 다음 접속", "A·B·C와 같은 세 상태"],
+      ],
+    },
     approvedSections: [
       ["§1", "R5 — 철회 시까지"],
       ["§2", "동의 장치는 7개 언어, 법률 문서는 fallback 유지"],
@@ -223,7 +248,7 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
       ["§4.1–4.3", "통지 3건의 문안"],
       ["§5", "/terms 조항"],
       ["§6", "/privacy 추가 2문장"],
-    ],
+    ] as const,
     copy: V2026_09_23,
   }),
 ]);
