@@ -2039,6 +2039,18 @@ test("package output rejects repository escapes, junctions, and supported symlin
         "--guard-command=true",
       ]);
 
+    const subdirectoryRun = runScript(join(repo, "src"), [
+      "--mode=package",
+      `--task=${taskFile}`,
+      "--out=artifacts/subdirectory-refusal",
+      "--diff-exclude=artifacts/subdirectory-refusal",
+      "--test-command=true",
+      "--guard-command=true",
+    ]);
+    assert.equal(subdirectoryRun.status, 1, subdirectoryRun.stderr);
+    assert.match(subdirectoryRun.stderr, /cross-review must run from the physical repository root/u);
+    assert.equal(existsSync(join(repo, "artifacts", "subdirectory-refusal")), false, "a subdirectory invocation creates no output");
+
     const escaped = packageAt("../escaped/pkg");
     assert.equal(escaped.status, 1, escaped.stderr);
     assert.match(escaped.stderr, /refusing output path outside the repository/u);

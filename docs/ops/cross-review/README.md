@@ -54,6 +54,12 @@ npm run cross-review -- --task=<task.json> --mode=preflight --out=<dir> [--i-hav
 npm run cross-review -- --task=<task.json> --mode=review --out=<dir> [--i-have-authorised-live-execution]
 ```
 
+Run the command from the repository's physical root. The control program
+resolves both `process.cwd()` and `git rev-parse --show-toplevel` to real paths
+and refuses any other working directory before creating or replacing an output
+file. This keeps every relative scope, package, verdict and preflight path in
+one namespace; launching from a repository subdirectory is not supported.
+
 `mock` runs the whole loop from a fixture. `dry-run` builds the command-line
 executors and proves they do not run. `package` calls no executor: it takes
 the diff against the task's base commit (or `--base`), digests it, runs the

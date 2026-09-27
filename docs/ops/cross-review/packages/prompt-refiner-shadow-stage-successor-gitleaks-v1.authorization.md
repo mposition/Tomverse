@@ -86,6 +86,9 @@ Windows junction/reparse point, alias와 repository escape를 mutation 전에 �
 쓴 뒤에는 tracked/untracked tree, scoped diff digest와 generated-path snapshots를 다시 읽고,
 exact prior canonical files와 이번 round가 방금 만든 exact files 이외의 mutation이 있으면
 성공을 출력하지 않는다. 이 fail-closed 경로는 사용자 파일을 삭제하지 않는다.
+command 시작 시 `process.cwd()`와 `git rev-parse --show-toplevel`의 real path가 정확히
+같지 않으면 어떤 output도 만들기 전에 거부한다. repository subdirectory나 alias cwd에서
+상대 package/verdict/preflight namespace를 나누어 쓰는 실행은 지원하지 않는다.
 
 기존 destination은 hardlink count가 정확히 1인 regular file만 허용한다. writer는 같은
 directory에서 exclusive private temp를 만들고 내용을 쓴 뒤 `fsync`·`close`한다. parent,

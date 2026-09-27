@@ -345,11 +345,15 @@ const excludedSnapshots = (excluded) => Object.fromEntries(excluded.map((path) =
 
 const repositoryRoot = resolve(git("rev-parse", "--show-toplevel").trim());
 const repositoryReal = realpathSync(repositoryRoot);
-const outputAbsolute = resolve(repositoryRoot, outDir);
 const pathKey = (path) => {
   const named = resolve(path);
   return process.platform === "win32" ? named.toLowerCase() : named;
 };
+const invocationCwdReal = realpathSync(process.cwd());
+if (pathKey(invocationCwdReal) !== pathKey(repositoryReal)) {
+  die(`cross-review must run from the physical repository root (${repositoryReal}); current directory is ${invocationCwdReal}`);
+}
+const outputAbsolute = resolve(repositoryRoot, outDir);
 const repositoryRelativeOutput = relative(repositoryRoot, outputAbsolute);
 if (
   repositoryRelativeOutput === "" ||
