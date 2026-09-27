@@ -16,6 +16,7 @@ const change = (overrides = {}) => ({
   addedLines: 3,
   removedLines: 1,
   addedText: "const x = 1;\n",
+  newText: "export const y = 0;\nconst x = 1;\n",
   ...overrides,
 });
 
@@ -24,7 +25,7 @@ const clean = (changes, overrides = {}) => ({
   policyNamedTests: new Set(),
   installedVersions: { ...CONVENTION_VERSIONS },
   credential: { status: "analysed", forbidsAll: false, forbiddenPaths: new Set() },
-  slice: { status: "analysed", touchedPaths: new Set() },
+  slice: { status: "analysed", slicePaths: new Set() },
   ...overrides,
 });
 
@@ -148,15 +149,40 @@ test("code that assembles what it loads is T2", () => {
     "new Function('return 1')",
     "eval(code)",
   ];
-  for (const addedText of samples) {
+  for (const newText of samples) {
     assert.ok(
-      reasons(decideTier(clean([change({ addedText })]))).includes("runtime_discovery"),
-      addedText,
+      reasons(decideTier(clean([change({ newText })]))).includes("runtime_discovery"),
+      newText,
     );
   }
-  for (const addedText of ['const m = await import("./x.ts");', "const m = require('x');"]) {
-    assert.equal(decideTier(clean([change({ addedText })])).tier, "T1", addedText);
+  for (const newText of ['const m = await import("./x.ts");', "const m = require('x');"]) {
+    assert.equal(decideTier(clean([change({ newText })])).tier, "T1", newText);
   }
+});
+
+test("a loader completed by an added line whose other half was already there is still T2", () => {
+  // The base had `import(` on its own line; the patch adds only the argument.
+  const verdict = decideTier(
+    clean([
+      change({
+        addedText: "  moduleName\n);",
+        newText: "const module = await import(\n  moduleName\n);\n",
+      }),
+    ]),
+  );
+  assert.ok(reasons(verdict).includes("runtime_discovery"));
+  // A commented-out loader in the file is still counted; not parsing means
+  // erring towards T2.
+  assert.ok(
+    reasons(decideTier(clean([change({ newText: "// const m = require(path);\n" })]))).includes(
+      "runtime_discovery",
+    ),
+  );
+  // A literal import split across lines is not a loader.
+  assert.equal(
+    decideTier(clean([change({ newText: 'const m = await import(\n  "./x.ts"\n);\n' })])).tier,
+    "T1",
+  );
 });
 
 test("a reserved decision value outside the control-plane files still raises the alarm", () => {
@@ -221,7 +247,7 @@ test("a slice hit is T2, and a slice analysis failure fails the whole patch", ()
     reasons(
       decideTier(
         clean([change()], {
-          slice: { status: "analysed", touchedPaths: new Set(["lib/chatInput.ts"]) },
+          slice: { status: "analysed", slicePaths: new Set(["lib/chatInput.ts"]) },
         }),
       ),
     ).includes("control_plane_slice"),
@@ -230,6 +256,41 @@ test("a slice hit is T2, and a slice analysis failure fails the whole patch", ()
     reasons(decideTier(clean([change()], { slice: { status: "failed" } }))).includes(
       "slice_analysis_failed",
     ),
+  );
+});
+
+test("moving or copying a slice member to a fresh product path is still a slice change", () => {
+  const slice = { status: "analysed", slicePaths: new Set(["lib/productBridge.ts"]) };
+  for (const status of ["renamed", "copied"]) {
+    const verdict = decideTier(
+      clean(
+        [
+          change({
+            path: "lib/helpers/productBridge.ts",
+            previousPath: "lib/productBridge.ts",
+            status,
+          }),
+        ],
+        { slice },
+      ),
+    );
+    assert.ok(
+      verdict.findings.some(
+        (finding) =>
+          finding.reason === "control_plane_slice" && finding.path === "lib/productBridge.ts",
+      ),
+      status,
+    );
+  }
+  // Deleting a slice member is a change to it too.
+  assert.ok(
+    reasons(
+      decideTier(
+        clean([change({ path: "lib/productBridge.ts", status: "deleted", newType: null, newMode: null, newText: "" })], {
+          slice,
+        }),
+      ),
+    ).includes("control_plane_slice"),
   );
 });
 

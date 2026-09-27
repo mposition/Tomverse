@@ -229,19 +229,52 @@ export const pathCarriesControlPlaneName = (path: string) => {
 };
 
 /**
- * Files whose values AGENTS.md reserves for a person, with the constant that
- * marks each. The test greps the tree for each constant's definition and
- * fails if it is defined in a file the manifest does not treat as
- * control-plane.
+ * Constants whose values AGENTS.md reserves for a person. The test checks each
+ * is defined in exactly the files listed and that those files are
+ * control-plane, so a value moving into a product file fails the build.
  */
-export const RESERVED_DECISION_CONSTANTS: readonly string[] = [
-  "PENDING_VERIFIED_PRICE_REGISTER",
-  "STATIC_CATALOG_RECONCILIATION_MODEL_IDS",
-  "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS",
-  "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS",
-  "DEFAULT_BILLING_PRICE_CATALOG",
-  "DEFAULT_MODEL_ID",
-  "GUEST_DEFAULT_MODEL_ID",
-  "GUEST_BRAND_TRIO_MODEL_IDS",
-  "CONVERSATION_PRODUCT_KEYS",
+export const RESERVED_DECISION_CONSTANTS: ReadonlyArray<{
+  name: string;
+  definedIn: readonly string[];
+}> = [
+  {
+    name: "PENDING_VERIFIED_PRICE_REGISTER",
+    definedIn: ["lib/modelPricing.ts", "scripts/report-issue-backlog-core.mjs"],
+  },
+  { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
+  { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
+  { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
+  { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
+  { name: "DEFAULT_BILLING_PRICE_CATALOG", definedIn: ["lib/billingPriceCatalog.ts"] },
+  { name: "DEFAULT_MODEL_ID", definedIn: ["lib/models.ts"] },
+  { name: "GUEST_DEFAULT_MODEL_ID", definedIn: ["lib/appDefaults.ts"] },
+  { name: "GUEST_BRAND_TRIO_MODEL_IDS", definedIn: ["lib/appDefaults.ts"] },
+  { name: "CONVERSATION_PRODUCT_KEYS", definedIn: ["lib/conversationProduct.ts"] },
+  { name: "KNOWN_ROLES", definedIn: ["scripts/check-accent-tokens.mjs"] },
+  { name: "GUARDED_FILES", definedIn: ["scripts/check-accent-tokens.mjs"] },
+];
+
+/**
+ * Constants AGENTS.md names that are contracts rather than values reserved for
+ * a person: the single table a feature derives from, an error code, a limit a
+ * contract states. Their files stay product, so a change to one can reach tier
+ * one -- where it is still a pull request a person reviews against the named
+ * contract. Listing them here is what makes the coverage test two-way: a new
+ * constant named in AGENTS.md fails the build until someone decides which of
+ * the two lists it belongs to.
+ */
+export const AGENTS_NAMED_CONTRACT_CONSTANTS: readonly string[] = [
+  "ISSUE_PROBES",
+  "GATE_EVIDENCE",
+  "OPERATIONAL_COST_GUARDRAIL_TRIGGERED",
+  "PROVIDER_BUDGET_EXHAUSTED",
+  "CHAT_ATTACHMENT_FORMATS",
+  "PUBLIC_MESSAGE_ATTACHMENT_SELECT",
+  "ARTIFACT_FORMAT_TABLE",
+  "REFUSED_ARTIFACT_EXTENSIONS",
+  "ARTIFACT_TOOL_CAPABILITIES",
+  "ARTIFACT_LIMITS",
+  "LOCKED_EMAIL_PURPOSES",
+  "IMAGE_INLINE_MODEL_DISCOVERY_LIMIT",
+  "CHAT_STARTER_MAX_VISIBLE",
 ];

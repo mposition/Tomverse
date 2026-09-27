@@ -47,8 +47,14 @@ export type ChangedEntry = {
   isText: boolean;
   addedLines: number;
   removedLines: number;
-  /** Lines added by the change, for the content rules. Empty for a deletion. */
+  /** Lines added by the change, for the decision-value alarms. Empty for a deletion. */
   addedText: string;
+  /**
+   * The whole file after the change, for the runtime-discovery rule. Empty for
+   * a deletion or non-text. Added lines alone are not enough: a construct can
+   * be completed by an added line whose other half was already there.
+   */
+  newText: string;
 };
 
 /** Proposed values (policy §9-5); fixed by revision before shadow. */
@@ -83,8 +89,10 @@ const ENTRY_CONVENTION_NAMES = [
  * imports cannot see where these lead, so a change that introduces one is T2.
  */
 const RUNTIME_DISCOVERY_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/\bimport\s*\(\s*(?!["'`][^"'`$]*["'`]\s*[,)])/, "dynamic_import_non_literal"],
-  [/\brequire\s*\(\s*(?!["'][^"']*["']\s*\))/, "require_non_literal"],
+  // The whitespace sits inside the lookahead: outside it, the engine can give
+  // back a newline and let the lookahead fail on the wrong character.
+  [/\bimport\s*\((?!\s*["'`][^"'`$]*["'`]\s*[,)])/, "dynamic_import_non_literal"],
+  [/\brequire\s*\((?!\s*["'][^"']*["']\s*\))/, "require_non_literal"],
   [/\brequire\.resolve\b/, "require_resolve"],
   [/\bimport\.meta\.glob\b/, "import_meta_glob"],
   [/\bcreateRequire\b/, "create_require"],
@@ -152,8 +160,13 @@ export type TierInput = {
   credential:
     | { status: "analysed"; forbidsAll: boolean; forbiddenPaths: ReadonlySet<string> }
     | { status: "failed" };
-  /** The control-plane slice result for this change set. */
-  slice: { status: "analysed"; touchedPaths: ReadonlySet<string> } | { status: "failed" };
+  /**
+   * The control-plane slice: every product path, in the base or the result,
+   * that already reaches a control-plane symbol, plus every path that names an
+   * environment variable, AppSetting key, registry or configuration the slice
+   * reads. Checked against both sides of every change.
+   */
+  slice: { status: "analysed"; slicePaths: ReadonlySet<string> } | { status: "failed" };
 };
 
 export type TierVerdict =
@@ -245,8 +258,12 @@ const entryChecks = (entry: ChangedEntry, input: TierInput): PushFinding[] => {
       findings.push({ reason: "entry_convention", path: entry.path });
     }
 
+    // The whole resulting file, not the added lines: `import(` on a line the
+    // base already had and `name)` on an added one make a non-literal import
+    // that no added line shows. A file that already contains such a construct
+    // is T2 on any change -- that is the conservative side of not parsing.
     for (const [pattern, detail] of RUNTIME_DISCOVERY_PATTERNS) {
-      if (pattern.test(entry.addedText)) {
+      if (pattern.test(entry.newText)) {
         findings.push({ reason: "runtime_discovery", path: entry.path, detail });
       }
     }
@@ -264,8 +281,14 @@ const entryChecks = (entry: ChangedEntry, input: TierInput): PushFinding[] => {
       }
     }
   }
-  if (input.slice.status === "analysed" && input.slice.touchedPaths.has(entry.path)) {
-    findings.push({ reason: "control_plane_slice", path: entry.path });
+  // Both sides of a rename or copy: moving a slice member to a fresh product
+  // path is still a change to that member.
+  if (input.slice.status === "analysed") {
+    for (const path of paths) {
+      if (input.slice.slicePaths.has(path)) {
+        findings.push({ reason: "control_plane_slice", path });
+      }
+    }
   }
 
   return findings;

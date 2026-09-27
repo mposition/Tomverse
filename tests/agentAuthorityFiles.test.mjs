@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  AGENTS_NAMED_CONTRACT_CONSTANTS,
   CONTROL_PLANE_PATTERNS,
   CONVENTION_VERSIONS,
   KNOWN_TOP_LEVEL_DIRECTORIES,
@@ -46,20 +47,37 @@ test("the known top-level directories are exactly the tree's", () => {
   assert.deepEqual(actual, [...KNOWN_TOP_LEVEL_DIRECTORIES].sort());
 });
 
-test("every reserved decision constant is defined in a control-plane file", () => {
-  for (const name of RESERVED_DECISION_CONSTANTS) {
-    const definition = new RegExp(`\\b(?:export\\s+)?(?:const|let|var)\\s+${name}\\b`);
-    const definedIn = trackedFiles.filter(
-      (path) =>
-        /\.(?:ts|tsx|mjs|js)$/.test(path) &&
-        !path.startsWith("tests/") &&
-        definition.test(readFileSync(new URL(path, repoRoot), "utf8")),
-    );
-    assert.ok(definedIn.length > 0, `${name} is defined nowhere -- update the list`);
+const sourceTexts = trackedFiles
+  .filter((path) => /\.(?:ts|tsx|mjs|js)$/.test(path) && !path.startsWith("tests/"))
+  .map((path) => [path, readFileSync(new URL(path, repoRoot), "utf8")]);
+
+const definitionsOf = (name) => {
+  const definition = new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`);
+  return sourceTexts.filter(([, text]) => definition.test(text)).map(([path]) => path);
+};
+
+test("every reserved decision constant is defined exactly where listed, in control-plane files", () => {
+  for (const { name, definedIn } of RESERVED_DECISION_CONSTANTS) {
+    assert.deepEqual(definitionsOf(name).sort(), [...definedIn].sort(), name);
     for (const path of definedIn) {
       assert.equal(classifyPath(path), "control-plane", `${name} is defined in ${path}`);
     }
   }
+});
+
+test("every constant AGENTS.md names is either a reserved decision or a named contract", () => {
+  const agents = readFileSync(new URL("AGENTS.md", repoRoot), "utf8");
+  const named = [...new Set([...agents.matchAll(/`([A-Z][A-Z0-9_]{2,})`/g)].map((m) => m[1]))];
+  const definedInCode = named.filter((name) => definitionsOf(name).length > 0).sort();
+  const categorised = [
+    ...RESERVED_DECISION_CONSTANTS.map(({ name }) => name),
+    ...AGENTS_NAMED_CONTRACT_CONSTANTS,
+  ].sort();
+  assert.deepEqual(
+    definedInCode,
+    categorised,
+    "decide whether each new constant is a value reserved for a person or a contract, and list it",
+  );
 });
 
 test("the recorded convention versions are the installed ones", () => {
