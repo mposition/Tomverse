@@ -29,6 +29,7 @@ const reset = () =>
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
+      "AmuxReviewDecision",
       "AdminAuditLog"
     RESTART IDENTITY
   `);

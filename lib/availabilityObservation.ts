@@ -14,10 +14,10 @@
  * So an observation is written once, carries an `eventId`, and the deployment,
  * endpoint and provider views are derived from it. The id is the key a
  * projection would be idempotent on; a unique index stops the same observation
- * being inserted twice, and that is all it stops. No rollup table exists yet
- * and nothing records which events a rollup has applied, so a rollup is not
- * safe to re-run today. `shouldApply` states the rule ahead of the projection
- * that will need it.
+ * being inserted twice, and that is all it stops. `shouldApply` is that
+ * insert check. It is not grain application: one event still rolls up to
+ * provider, endpoint, and deployment separately, and that record is
+ * `AvailabilityRollupApplication`.
  *
  * ## Nothing is backfilled
  *
@@ -200,13 +200,14 @@ export const rollupGrainsFor = (
 };
 
 /**
- * Whether an event has already been applied to a rollup.
+ * Whether this observation event id was already recorded.
  *
- * The whole idempotency rule in one place: a projection keeps the ids it has
- * seen for a window and applies each at most once. Written as a function so
- * the rule is testable before there is a projection to test.
+ * This is the insert check only. It does not record which grain was
+ * applied, and a caller must not treat one hit here as every rollup of
+ * that event. Grain application lives in the rollup module.
  */
 export const shouldApply = (
     eventId: string,
     alreadyApplied: ReadonlySet<string>
-): boolean => Boolean(eventId.trim()) && !alreadyApplied.has(eventId);
+): boolean =>
+    eventId.length > 0 && eventId === eventId.trim() && !alreadyApplied.has(eventId);

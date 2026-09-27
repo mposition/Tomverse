@@ -28,7 +28,7 @@ export const adminEmailDeliveryMessages = defineAdminMessages({
     suppressions: {
       title: "Suppressions",
       intro:
-        "Addresses this system will not send to. A hard bounce or a complaint has no expiry; a soft bounce holds for a day. Lifting one is audited and needs a written reason, and lifting a hard bounce or a complaint needs a second administrator unless only one administrator can approve it.",
+        "Addresses this system will not send to. A hard bounce or a complaint has no expiry; a soft bounce holds for a day. Lifting one is audited and needs a written reason.",
       providerNotice:
         "This is our list, not the provider's. Resend keeps its own suppression list across the whole account and region, so an address removed here can still be refused there — and a promotion's complaint can refuse a login code no matter what this table says.",
       columns: {
@@ -70,7 +70,7 @@ export const adminEmailDeliveryMessages = defineAdminMessages({
     suppressions: {
       title: "수신 차단",
       intro:
-        "이 시스템이 메일을 보내지 않는 주소입니다. hard bounce나 스팸 신고(complaint)는 만료되지 않고, soft bounce는 하루 동안 유지됩니다. 차단 해제는 감사 로그에 남고 사유를 적어야 하며, hard bounce나 스팸 신고로 인한 차단을 해제하려면 두 번째 관리자가 필요합니다(승인할 수 있는 관리자가 한 명뿐이면 단독 실행).",
+        "이 시스템이 메일을 보내지 않는 주소입니다. hard bounce나 스팸 신고(complaint)는 만료되지 않고, soft bounce는 하루 동안 유지됩니다. 차단 해제는 감사 로그에 남고 사유를 적어야 합니다.",
       providerNotice:
         "이 목록은 공급자의 목록이 아니라 우리 목록입니다. Resend는 계정과 region 전체에 걸쳐 자체 수신 차단 목록을 유지하므로, 여기서 제거한 주소도 그쪽에서 여전히 거절될 수 있습니다 — 그리고 프로모션 메일의 스팸 신고 하나가 이 표와 상관없이 로그인 코드 발송을 막을 수 있습니다.",
       columns: {

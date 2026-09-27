@@ -1,0 +1,162 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat01-progress-evidence-v2",
+  "requirement": "chat01-progress-evidence-v1은 제품 receipt store를 confirmatory evidence와 사람 승인보다 앞에 두는 잘못된 수락 계약 때문에 on_hold(reviewer_blocked)로 종결됐다. 그 기록은 보존한다. 이 successor는 같은 source commit의 CHAT-01 진행 증거를 governing prompt-refiner-observability 정책 8절에 따라 검토한다. 이미 독립 검토·통합된 confirmatory v4 실행 계약과 content-free case evidence 기반에서 별도 승인된 bounded confirmatory를 실행하고 품질·비용·지연 결과를 사람이 disposition한 뒤에만 제품 request/execution·disposition receipt의 retention/privacy를 결정하고 product adapter와 server-owned content-free writer/store를 default-off로 구현한다. 그 제품 diff가 Cursor/CI를 통과한 뒤 suggestion UI와 disposition collection을 연결하고, 사용자 증거 뒤 Router/Auto shadow를 별도 실험으로 진행한다. 진행률 네 축은 planning-estimate-v2와 다른 readiness-estimate-v3이며 직접 비교하지 않는다.",
+  "completionCriteria": [
+    "v1의 on_hold(reviewer_blocked), 세 round verdict와 stale task-contract finding을 수정하거나 삭제하지 않고 supersedes lineage와 inherited finding으로 보존한다.",
+    "#1673 merge SHA, staging deployment ID·SUCCESS·완료 시각, desktop/mobile focused E2E 38/38과 signed-in reload 관측을 제공된 범위 이상으로 과장하지 않는다.",
+    "saved-but-undispatched interactive staging 재현을 safe seam 부재로 분류하고 pass/fail이나 provider 검증으로 바꾸지 않는다.",
+    "readiness-estimate-v3의 79%·65%·40%·95%는 planning-estimate-v2의 72%·30%·95%와 분모·방법이 달라 직접 비교하지 않으며 각 축의 불확실성과 launch 승인 아님을 명시한다.",
+    "confirmatory v4가 strict case evidence와 token·cost·latency receipt를 저장하고 content-free aggregate를 재구성한다는 완료 사실과 제품 receipt 공백을 구분한다.",
+    "권장 순서는 별도 승인 bounded v4 confirmatory와 deterministic gate, 사람 release disposition, 그 뒤 제품 receipt retention/privacy 결정, default-off product adapter와 content-free writer/store 구현, 그 제품 diff의 Cursor/CI, suggestion UI와 disposition collection, 마지막 Router/Auto shadow다.",
+    "제품 receipt writer/store와 disposition collection을 confirmatory evidence·사람 승인보다 앞당기지 않고 prompt-refiner-observability 정책 8절 4-6을 따른다.",
+    "Cursor verdict는 exact package digest에 결속하고 각 finding에 location, severity, evidence와 reproduction을 제공하며 source edit, provider API call, paid call, push, PR, merge 또는 deploy를 하지 않는다."
+  ],
+  "baseCommit": "90380a7bd5b1589531741dd02fb2c88c041cc1df",
+  "roles": {
+    "author": "codex",
+    "reviewer": "cursor"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:beac50cd0ec18841e0c9da618b63d10c44c14912dfa9a3c17a13443aeeb3a19f",
+      "commit": null,
+      "filesChanged": [
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/authorization.md",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round0.diff",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round1.diff",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round2.diff",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change.diff",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/exchange.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round0.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round1.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round2.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-prompt.md",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round0.cursor-result.captured.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round1.cursor-result.captured.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round2.cursor-result.captured.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round0.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round1.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round2.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v1/task.json",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v2/authorization.md",
+        "docs/ops/cross-review/packages/chat01-progress-evidence-v2/task.json",
+        "docs/ops/tomverse-chat-progress.md"
+      ],
+      "changeSummary": "Supersede the stale v1 acceptance contract and review the same CHAT-01 evidence against the governing confirmatory-evidence-first product receipt and suggestion order.",
+      "testResults": [
+        {
+          "command": "npm run check:doc-references",
+          "passed": true,
+          "output": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 921 referenced path(s) across 124 instruction document(s), and 1066 path(s) named by comments across 3356 source file(s), all present.",
+          "durationMs": 1587
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4666 citation(s) against 43 policy document(s). 3098 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 234 predate this change).",
+          "durationMs": 1106
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1488
+        },
+        {
+          "rule": "git diff --check 90380a7bd5b1589531741dd02fb2c88c041cc1df -- docs/ops/tomverse-chat-progress.md docs/ops/cross-review/packages/chat01-progress-evidence-v2",
+          "passed": true,
+          "detail": "",
+          "durationMs": 52
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "v1의 stale 수락 순서는 그대로 보존된 채 successor 계약에서 폐기됐고, 진행 문서는 정책 8절 4-6의 순서와 관측 한계를 지키며 readiness-estimate-v3를 planning-estimate-v2와 직접 비교하지 않으므로 이 digest를 승인한다."
+    }
+  ],
+  "changeDigest": "sha256:beac50cd0ec18841e0c9da618b63d10c44c14912dfa9a3c17a13443aeeb3a19f",
+  "commit": null,
+  "changeSummary": "Supersede the stale v1 acceptance contract and review the same CHAT-01 evidence against the governing confirmatory-evidence-first product receipt and suggestion order.",
+  "testResults": [
+    {
+      "command": "npm run check:doc-references",
+      "passed": true,
+      "output": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 921 referenced path(s) across 124 instruction document(s), and 1066 path(s) named by comments across 3356 source file(s), all present.",
+      "durationMs": 1587
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4666 citation(s) against 43 policy document(s). 3098 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 234 predate this change).",
+      "durationMs": 1106
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1488
+    },
+    {
+      "rule": "git diff --check 90380a7bd5b1589531741dd02fb2c88c041cc1df -- docs/ops/tomverse-chat-progress.md docs/ops/cross-review/packages/chat01-progress-evidence-v2",
+      "passed": true,
+      "detail": "",
+      "durationMs": 52
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "v1의 stale 수락 순서는 그대로 보존된 채 successor 계약에서 폐기됐고, 진행 문서는 정책 8절 4-6의 순서와 관측 한계를 지키며 readiness-estimate-v3를 planning-estimate-v2와 직접 비교하지 않으므로 이 digest를 승인한다.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-24T20:46:26.954Z",
+  "packagedRounds": 1,
+  "concludedAtRound": 0,
+  "lineage": [
+    "chat01-progress-evidence-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "docs/ops/cross-review/packages/chat01-progress-evidence-v1/task.json:11",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "v1 수락 순서는 제품 receipt retention/privacy와 content-free product store를 paid confirmatory와 사람 disposition보다 앞에 두어 정책 8절 4항과 충돌하고, 진행 문서는 그 정책을 따르므로 이 기준은 소스를 정책 위반으로 바꾸지 않고는 충족되지 않는다.",
+      "reproduction": "docs/policy/prompt-refiner-observability.md 214행은 품질·비용·지연 증거가 승인된 뒤에만 제품 adapter와 서버 receipt writer를 붙이고, 208-209행은 UI가 없으면 disposition을 만들지 않으며, 215행은 제안형 UI가 실제로 제공될 때만 disposition API를 연결한다. 같은 문서 3-5행의 승인 범위는 confirmatory shadow v4 계약과 content-free evidence writer의 구현·독립 검토까지이고 유료 실행·제품 노출은 포함하지 않는다. task.json 3행 마지막 문장과 11행은 수락 순서를 product receipt retention/privacy, content-free product request/execution+disposition store, Cursor/CI, separately approved paid confirmatory, human disposition, product suggestion, Router/Auto shadow로 고정한다. docs/ops/tomverse-chat-progress.md 1506-1509행과 1517-1524행은 별도 비용·stage·run 승인 뒤 confirmatory를 한 번 실행하고 사람이 품질·비용·지연을 release disposition한 뒤에만 retention/privacy를 동결하고, 그 다음 product adapter와 content-free writer/store를 default-off·비노출로 구현한다. 1525-1529행은 그 diff의 Cursor/CI 통과 뒤에 suggestion UI와 disposition collection을 연결하고, 그 증거 뒤에만 Router/Auto shadow를 ROUTE-03 별도 실험으로 둔다. 태스크 순서를 이 목록에 적용하면 writer/store와 disposition store가 증거 승인과 제안형 UI보다 앞이 되어 214행과 215행을 위반한다. 라운드 1 nextAction이 요구한 순서 복귀와 1506-1509행 삭제가 그 변경이다. 기대 조치는 진행 문서를 태스크 순서로 고치는 것이 아니라, 사람이 그 수락 순서를 정책 8절에 맞게 폐기하거나 개정하는 것이다."
+    }
+  ],
+  "headCommit": "6131ad77401d58de3c3fbfbed05a6d0637af87db",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/authorization.md",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round0.diff",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round1.diff",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change-round2.diff",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/change.diff",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/exchange.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round0.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round1.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/package-round2.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-prompt.md",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round0.cursor-result.captured.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round1.cursor-result.captured.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/review-round2.cursor-result.captured.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round0.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round1.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/records/verdict-round2.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1/task.json",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v2/authorization.md",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v2/task.json",
+    "docs/ops/tomverse-chat-progress.md"
+  ]
+}

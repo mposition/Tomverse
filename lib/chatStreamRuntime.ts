@@ -99,6 +99,8 @@ export type ChatRuntimeSnapshot = {
   messages: Message[];
   /** True once `messages` describes this exact key -- not a previous view. */
   isLoaded: boolean;
+  /** The newest history load failed; any remounted panel may offer a manual retry. */
+  loadFailed: boolean;
   /** A request, stream or deep-research poll this key owns is in flight. */
   isStreaming: boolean;
 };
@@ -142,10 +144,13 @@ const EMPTY_MESSAGES = Object.freeze([]) as unknown as Message[];
 export const EMPTY_CHAT_RUNTIME_SNAPSHOT: ChatRuntimeSnapshot = Object.freeze({
   messages: EMPTY_MESSAGES,
   isLoaded: false,
+  loadFailed: false,
   isStreaming: false,
 });
 
 type ChatRuntimeRecord = {
+  /** Unique for each lifetime of a key, including after identity release. */
+  generation: number;
   snapshot: ChatRuntimeSnapshot;
   listeners: Set<() => void>;
   /** Stops the run this key owns. Null when nothing is in flight. */
@@ -174,6 +179,10 @@ type ChatRuntimeRecord = {
 };
 
 const records = new Map<string, ChatRuntimeRecord>();
+let nextRecordGeneration = 1;
+// A key can be deleted on A→B and recreated on B→A. Tickets must remain
+// unique across those record lifetimes, not merely within one record.
+let nextLoadRequestId = 1;
 
 const notify = (record: ChatRuntimeRecord) => {
   for (const listener of record.listeners) listener();
@@ -204,6 +213,7 @@ const ensureRecord = (key: string): ChatRuntimeRecord => {
     return existing;
   }
   const created: ChatRuntimeRecord = {
+    generation: nextRecordGeneration++,
     snapshot: EMPTY_CHAT_RUNTIME_SNAPSHOT,
     listeners: new Set(),
     controller: null,
@@ -226,6 +236,7 @@ const patchSnapshot = (key: string, patch: Partial<ChatRuntimeSnapshot>): void =
   if (
     next.messages === record.snapshot.messages &&
     next.isLoaded === record.snapshot.isLoaded &&
+    next.loadFailed === record.snapshot.loadFailed &&
     next.isStreaming === record.snapshot.isStreaming
   ) {
     return;
@@ -305,6 +316,50 @@ export function advanceChatRuntimeRevision(key: string): number {
   return record.revision;
 }
 
+/** A complete server view witnessed before an awaited durable Message save. */
+export type ChatRuntimeCompleteView = {
+  key: string;
+  messages: Message[];
+  revision: number;
+  generation: number;
+};
+
+export function captureChatRuntimeCompleteView(key: string): ChatRuntimeCompleteView | null {
+  const record = records.get(key);
+  if (!record?.snapshot.isLoaded || record.snapshot.isStreaming) return null;
+  return { key, messages: record.snapshot.messages, revision: record.revision,
+    generation: record.generation };
+}
+
+/** A stale continuation must not announce its old account's result after identity release. */
+export function isChatRuntimeCompleteViewRecordCurrent(view: ChatRuntimeCompleteView): boolean {
+  return records.get(view.key)?.generation === view.generation;
+}
+
+/**
+ * A confirmed send may use its previously complete view even if a remount
+ * started another GET while the Message POST was on the wire. Supersede that
+ * GET before publishing the local turn; its late result cannot hide or replace
+ * the answer. Never restore over a newer local send or stream.
+ */
+export function restoreChatRuntimeCompleteViewForSend(view: ChatRuntimeCompleteView): boolean {
+  const record = records.get(view.key);
+  if (!record || record.generation !== view.generation ||
+      record.revision !== view.revision || record.snapshot.isStreaming) return false;
+  record.loadRequestId = nextLoadRequestId++;
+  record.isLoading = false;
+  patchSnapshot(view.key, {
+    // A refresh may have completed while the Message POST was pending. Its
+    // complete server view can include newer rows from another tab and must
+    // not be replaced by the older capture. Only an incomplete/failed load
+    // needs the captured complete view restored.
+    messages: record.snapshot.isLoaded ? record.snapshot.messages : view.messages,
+    isLoaded: true,
+    loadFailed: false,
+  });
+  return true;
+}
+
 export function setChatRuntimeLastPrompt(
   key: string,
   prompt: ChatRuntimeLastPrompt | null
@@ -338,11 +393,15 @@ export function isChatRuntimeLoadInFlight(key: string): boolean {
   return records.get(key)?.isLoading ?? false;
 }
 
-/** Claims the newest load ticket for this key. */
+/** Claims the newest load ticket and closes the send barrier until it settles. */
 export function claimChatRuntimeLoad(key: string): number {
   const record = ensureRecord(key);
-  record.loadRequestId += 1;
+  record.loadRequestId = nextLoadRequestId++;
   record.isLoading = true;
+  // A cached server view is not proof that this refresh completed. Invalidate
+  // it synchronously so neither this panel nor the parent composer can send
+  // with an incomplete or failed later page.
+  patchSnapshot(key, { isLoaded: false, loadFailed: false });
   return record.loadRequestId;
 }
 
@@ -365,7 +424,7 @@ export function settleChatRuntimeLoad(
   const record = records.get(key);
   if (!record || record.loadRequestId !== requestId) return;
   record.isLoading = false;
-  patchSnapshot(key, { isLoaded: outcome.loaded });
+  patchSnapshot(key, { isLoaded: outcome.loaded, loadFailed: false });
 }
 
 /**
@@ -377,6 +436,7 @@ export function releaseChatRuntimeLoad(key: string, requestId: number): void {
   const record = records.get(key);
   if (!record || record.loadRequestId !== requestId) return;
   record.isLoading = false;
+  patchSnapshot(key, { isLoaded: false, loadFailed: true });
 }
 
 /* -------------------------------------------------------------------------

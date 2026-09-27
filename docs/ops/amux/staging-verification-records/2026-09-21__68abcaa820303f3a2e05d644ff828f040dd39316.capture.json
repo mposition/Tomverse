@@ -1,0 +1,36 @@
+{
+  "schema_version": "amux-staging-evidence-v1",
+  "evidence_scope": "observed_facts_only",
+  "generated_at": "2026-09-21T13:28:53.688Z",
+  "deployment_revision": "68abcaa820303f3a2e05d644ff828f040dd39316",
+  "capture_process_revision_matches_expected": true,
+  "human_judgement": {
+    "result": null,
+    "signature": null,
+    "note": "This capture does not approve, freeze or sign a staging result."
+  },
+  "incident": {
+    "valid": true,
+    "blocks_admission": false,
+    "problem": null,
+    "state": {
+      "version": 1,
+      "state": "normal",
+      "transition_id": null,
+      "changed_at": "2026-09-21T13:28:10.476Z",
+      "reason": "Initial incident-mode rollout state.",
+      "ticket": "migration:20260921123000"
+    },
+    "setting_updated_at": "2026-09-21T13:28:10.476Z"
+  },
+  "tasks": [],
+  "route_decisions": [],
+  "execution_attempts": [],
+  "deliveries": [],
+  "resource_policies": [],
+  "latest_quota_by_worker": [],
+  "human_escalations": [],
+  "cost_ledger": [],
+  "stable_state_digest_sha256": "6c9d19d2ce29946e101e102d0f3e2bfc6a7bac87f410668369ccecf803ee1ff5",
+  "observation_digest_sha256": "454a86542cd1b317c5239cb9f22d7bebadf2f28fe4dd3a4f04e9b92abc4ffca2"
+}

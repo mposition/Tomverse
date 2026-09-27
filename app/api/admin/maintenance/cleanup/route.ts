@@ -204,17 +204,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // A single-administrator organisation cannot satisfy
-    // `requestedById !== reviewerId`, so `retention.cleanup.execute` -- the
-    // recovery path for a sweep that has fallen behind -- was unreachable for
-    // it. The exception is scoped to this action and bound to the dry run the
-    // operator just looked at (lib/adminSoleApproverCore.ts). With a second
-    // administrator configured this condition is false and the ordinary
-    // two-person path runs, which is condition 6 needing no migration.
-    // Not conditioned on the binding being present: with one administrator
-    // this is the only path there is, so an execution that skipped the dry run
-    // must be told to run one rather than fall through to an approval nobody
-    // can grant.
+    // Bound to the dry run the operator just looked at
+    // (lib/adminSoleApproverCore.ts). A second administrator does not send
+    // this execution to a queue. An execution that skipped the dry run is
+    // told to run one.
     const soleApprover = soleApproverAvailability(
       "retention.cleanup.execute",
       session

@@ -24,6 +24,7 @@ import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { amuxReviewApprovalReadiness } from "@/lib/amux/reviewApprovalCore";
 import {
   getActiveProviders,
   getProviderBudgetReadiness,
@@ -303,6 +304,8 @@ const readinessResponse = async (head = false) => {
   // done exactly that.
   const emailBiennialConsentNotice =
     biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.healthy;
+  const amuxReviewStatus = amuxReviewApprovalReadiness(process.env);
+  const amuxReviewApproval = amuxReviewStatus.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -310,7 +313,8 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity && emailSubjectLabels && emailFooterDisclosures;
+    emailBusinessIdentity && emailSubjectLabels && emailFooterDisclosures &&
+    amuxReviewApproval;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -710,6 +714,23 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "amux-review-approval",
+        healthy: amuxReviewApproval,
+        code: "AMUX_REVIEW_APPROVAL_NOT_READY",
+        title: "AMUX human review approval is not configured correctly",
+        error: amuxReviewApproval
+          ? "AMUX human review approval is configured (or its flag is off)."
+          : `Missing or invalid: ${amuxReviewStatus.missing.join(", ")}`,
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          enabled: amuxReviewStatus.enabled,
+          missingVariableNames: amuxReviewStatus.missing.join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -756,6 +777,7 @@ const readinessResponse = async (head = false) => {
         emailSubjectLabels,
         emailFooterDisclosures,
         emailBiennialConsentNotice,
+        amuxReviewApproval,
       },
       traceId,
     },

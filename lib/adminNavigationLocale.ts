@@ -56,10 +56,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     label: "작업 대기열",
     description: "운영자 조치를 기다리는 모든 항목, 오래된 순",
     aliases: ["대기열", "할 일", "대기", "승인"],
-    tabs: {
-      queue: { label: "대기열", description: "우선순위와 경과 시간순으로 정렬한 미처리 항목" },
-      approvals: { label: "승인", description: "2인 승인 요청" },
-    },
   },
   analytics: {
     label: "분석",
@@ -252,6 +248,14 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "prompt-refiner-shadow": {
     label: "Prompt Refiner shadow 실행",
     description: "동결된 합성 shadow run의 owner 전용 승인과 실행",
+  },
+  "amux-board-promotion": {
+    label: "AMUX 카드 승격",
+    description: "owner 전용 backlog 카드 1~3건 승격, 꺼진 운영 적용",
+  },
+  "amux-intake": {
+    label: "AMUX 등록",
+    description: "owner 전용 명시적 등록 미리보기, 꺼진 운영 적용",
   },
   "user-detail": {
     label: "고객 상세",

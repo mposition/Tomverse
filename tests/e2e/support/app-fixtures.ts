@@ -1245,6 +1245,7 @@ export async function mockAuthenticatedApi(
         ...conversation(),
         messages: savedMessages as unknown as JsonValue,
         nextCursor: null,
+        messagePage: { hasMore: false, nextCursor: null },
       })
     );
   });
@@ -1313,6 +1314,7 @@ export async function mockAuthenticatedApi(
             ...extraBody(extra),
             messages: extra.savedMessages as unknown as JsonValue,
             nextCursor: null,
+            messagePage: { hasMore: false, nextCursor: null },
           })
         );
       }

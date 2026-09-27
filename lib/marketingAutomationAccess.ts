@@ -33,7 +33,8 @@ export const MARKETING_AUTOMATION_FEATURES = [
 export type MarketingAutomationFeature =
   (typeof MARKETING_AUTOMATION_FEATURES)[number];
 
-export type MarketingAutomationInputName = keyof MarketingAutomationAccessInputs;
+export type MarketingAutomationInputName =
+  keyof MarketingAutomationAccessInputs;
 
 export type MarketingAutomationAccessReason =
   | `input_unreadable:${MarketingAutomationInputName}`
@@ -66,10 +67,8 @@ export const TOMVERSE_DEPLOY_ENV = "TOMVERSE_DEPLOY_ENV";
 export const APP_ENV = "APP_ENV";
 export const RAILWAY_ENVIRONMENT_NAME = "RAILWAY_ENVIRONMENT_NAME";
 
-export const MARKETING_DRAFTS_KEY =
-  "marketingAutomation.draftsEnabled";
-export const MARKETING_PUBLISH_KEY =
-  "marketingAutomation.publishEnabled";
+export const MARKETING_DRAFTS_KEY = "marketingAutomation.draftsEnabled";
+export const MARKETING_PUBLISH_KEY = "marketingAutomation.publishEnabled";
 export const MARKETING_AUTO_PUBLISH_KEY =
   "marketingAutomation.autoPublishEnabled";
 export const MARKETING_EXPERIMENTS_KEY =
@@ -93,8 +92,7 @@ export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
  */
 export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = false;
 
-export const MARKETING_WEBHOOK_SCHEMA_VERSION =
-  "marketing-webhook-shadow-v1";
+export const MARKETING_WEBHOOK_SCHEMA_VERSION = "marketing-webhook-shadow-v1";
 export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [] as const;
 
 /** Only pipeline files that exist in S1. S2 must extend this closed list. */
@@ -138,7 +136,9 @@ const canonicalPipelinePath = (value: string): string => {
     /^[A-Za-z]:\//.test(path) ||
     path.split("/").some((part) => part === "" || part === "." || part === "..")
   ) {
-    throw new Error(`Marketing webhook pipeline path is not relative POSIX: ${value}`);
+    throw new Error(
+      `Marketing webhook pipeline path is not relative POSIX: ${value}`,
+    );
   }
   return path;
 };
@@ -154,7 +154,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
     }))
     .sort((left, right) => codePointCompare(left.path, right.path));
 
-  if (new Set(canonicalFiles.map((file) => file.path)).size !== canonicalFiles.length) {
+  if (
+    new Set(canonicalFiles.map((file) => file.path)).size !==
+    canonicalFiles.length
+  ) {
     throw new Error("Marketing webhook pipeline file paths must be unique.");
   }
 
@@ -219,9 +222,9 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * defect. This was the look.
  *
  * 2026-09-21, S1f: the updated writer preserves the complete resolver digest in
- * `MarketingPost.factsDigest`; legacy/rollout rows remain nullable until row
- * evidence backs a separate NOT NULL transition. Webhook admission never reads
- * this column; the fingerprint moves because the schema is watched as a whole.
+ * `MarketingPost.factsDigest`, nullable for rows predating the column. S2b3
+ * (2026-09-23) made it NOT NULL once both databases read zero. Webhook
+ * admission never reads it; the fingerprint moves because the schema is watched.
  *
  * 2026-09-21: Prompt Refiner confirmatory shadow v4 adds nullable evidence
  * columns and a new attempt check to the same schema. Those additions do not
@@ -270,9 +273,61 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * back-relations only -- `User` gains two and `Conversation` gains one, and
  * neither gains a column. The digest moves because the schema file is
  * watched whole.
+ *
+ * 2026-09-23, the version gate columns on ModelDeployment and
+ * RoutingIdentityManifestEntry. Both tables are already dark. The columns
+ * are not marketing models and do not touch a webhook writer. The digest
+ * moves because the schema file is watched whole.
+ *
+ * 2026-09-23, rotation and expiry instants on CredentialBinding. The table
+ * is already dark. Neither column is a marketing model, and neither touches
+ * a webhook writer. The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, two nullable version columns on RoutingRun for the versions a
+ * request holds from the moment it starts. The table is already a marketing
+ * neighbour only by living in the same schema file. The columns are not
+ * marketing models and do not touch a webhook writer. The digest moves
+ * because the schema file is watched whole.
+ *
+ * 2026-09-23, a nullable millisecond deadline on RoutingRun and two nullable
+ * affinity columns on the dark cache-affinity table. None is a marketing
+ * model and none touches a webhook writer. The digest moves because the
+ * schema file is watched whole.
+ *
+ * 2026-09-23, a nullable pre-commit buffer duration on RoutingRun. The
+ * column is not a marketing model and does not touch a webhook writer.
+ * The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-23, the routing snapshot ceiling, merged onto the stack above:
+ * RoutingSnapshotCeilingApproval, two columns on RoutingIdentityManifest
+ * that cite it, a `slot` column on RoutingIdentityManifestEntry and an
+ * index the migration already created. All dark, none a marketing model,
+ * nothing here touches the descriptor, the config snapshot, a webhook
+ * writer or an admission decision. The digest below is the merged schema,
+ * not either parent's.
+ *
+ * 2026-09-24, AvailabilityRollupApplication. Dark, no marketing model, no
+ * webhook writer. The digest moves because the schema file is watched whole.
+ *
+ * 2026-09-24, DeploymentPriceSnapshot. Dark, no marketing model, no webhook
+ * writer, and not the credit reservation snapshot. Its amount is one rate
+ * per million tokens. The digest moves because the schema is watched whole.
+ *
+ * 2026-09-24, PinnedDeploymentExperiment and its hold. Not a marketing
+ * model, not a webhook writer, and not a credit balance. The limit is
+ * whatever row is stored; the schema has no default amount. The digest
+ * moves because the schema is watched whole.
+ *
+ * 2026-09-24: the release reconciliation adds the latched-off
+ * `AmuxBoardPromotionApproval` model and nullable execution-brief evidence to
+ * `AmuxWorkItem`. Neither is a marketing model or webhook input. The digest
+ * still moves because the whole Prisma schema is deliberately watched.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "aefc70008ac2fc186577f99632e563d107db69e5e218f8b412af75ffbb56d252";
+  "0cc70a30edb4ba905a5e484924d03f9df173c6c9e9987101ebbadba543419bbd";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -294,10 +349,12 @@ export const marketingWebhookEnvDigests = (
   names: readonly string[],
 ): Readonly<Record<string, string | null>> =>
   Object.fromEntries(
-    [...names].sort(codePointCompare).map((name) => [
-      name,
-      env[name] === undefined ? null : sha256(env[name]),
-    ]),
+    [...names]
+      .sort(codePointCompare)
+      .map((name) => [
+        name,
+        env[name] === undefined ? null : sha256(env[name]),
+      ]),
   );
 
 const sameSortedStrings = (
@@ -351,7 +408,9 @@ export const computeMarketingWebhookConfigSnapshotDigest = (
   );
   return sha256(
     canonicalMarketingWebhookJson({
-      acceptedEventTypes: [...snapshot.acceptedEventTypes].sort(codePointCompare),
+      acceptedEventTypes: [...snapshot.acceptedEventTypes].sort(
+        codePointCompare,
+      ),
       appSettings,
       envDigests,
       schemaVersion: snapshot.schemaVersion,
@@ -466,12 +525,12 @@ export const marketingWebhookApplyScopeSchema = z
 export type MarketingWebhookApplyScopeStatus = "absent" | "valid" | "invalid";
 
 export const marketingWebhookApplyScopeStatus = (
-  value: string | null | undefined
+  value: string | null | undefined,
 ): MarketingWebhookApplyScopeStatus => {
   if (typeof value !== "string") return "absent";
   try {
     return marketingWebhookApplyScopeSchema.safeParse(
-      JSON.parse(canonicalMarketingWebhookFileText(value))
+      JSON.parse(canonicalMarketingWebhookFileText(value)),
     ).success
       ? "valid"
       : "invalid";
@@ -630,12 +689,17 @@ const webhookApplyDecision = (
     marketingWebhookVerificationSignatureSchema,
   );
 
-  if (record && record.pipelineFingerprint !== MARKETING_WEBHOOK_PIPELINE_FINGERPRINT) {
+  if (
+    record &&
+    record.pipelineFingerprint !== MARKETING_WEBHOOK_PIPELINE_FINGERPRINT
+  ) {
     add(reasons, "webhook_pipeline_fingerprint_stale");
   }
   if (!input.webhookConfigSnapshot.ok) {
     add(reasons, "input_unreadable:webhookConfigSnapshot");
-  } else if (!isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)) {
+  } else if (
+    !isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)
+  ) {
     add(reasons, "webhook_config_snapshot_invalid");
   } else if (record) {
     const currentConfigDigest = computeMarketingWebhookConfigSnapshotDigest(
@@ -682,7 +746,9 @@ const webhookApplyDecision = (
     if (
       configured.scope.some(
         (entry) =>
-          !record.observedScope.some((observed) => sameScopeEntry(entry, observed)),
+          !record.observedScope.some((observed) =>
+            sameScopeEntry(entry, observed),
+          ),
       )
     ) {
       add(reasons, "webhook_scope_not_observed");

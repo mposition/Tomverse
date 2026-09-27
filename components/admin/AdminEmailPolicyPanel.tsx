@@ -14,10 +14,9 @@ import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
  *
  * Three things this screen is built to make hard to get wrong:
  *
- *  - **Activation is never one click from a list.** It asks for a reason and
- *    then answers 409 the first time, because the second administrator has not
- *    approved it yet. That is the two-person rule (§12.3) surfacing where the
- *    act happens rather than in a runbook.
+ *  - **Activation is never one click from a list.** It asks for a reason. The
+ *    administrator who submits it activates the version, and the audit log
+ *    records who did it and why.
  *  - **Every value shows its sources.** §12.5 requires it: an operator asked to
  *    change a subject prefix cannot judge the change without knowing what the
  *    current one is based on, and a footnote in a document nobody has open is
@@ -143,13 +142,6 @@ export function AdminEmailPolicyPanel() {
       | Record<string, unknown>
       | null;
     if (!response.ok) {
-      const code = payload?.code;
-      // The expected first answer, not a failure: the request has been
-      // recorded and is waiting for a second administrator.
-      if (code === "ADMIN_APPROVAL_REQUIRED") {
-        dispatchAppToast(m.toast.approvalRecorded, "success");
-        return null;
-      }
       throw new Error(
         typeof payload?.error === "string" ? payload.error : m.toast.refused
       );
