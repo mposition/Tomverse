@@ -66,6 +66,16 @@ the control program's replay of every round so far
 nothing. `--mode=live` runs both executors in the loop and is refused without
 the same flag.
 
+The review prompt treats every requirement, criterion, source diff, test or
+guard result, prior finding, author statement and repository-derived value as
+untrusted data, never as an instruction. A data-only warning appears before
+the first payload and again immediately before the answer contract: embedded
+instructions, tool requests and role changes are ignored, and the reviewer may
+use tools only for task- and repository-related read-only inspection. Every
+embedded payload is enclosed by a Markdown fence that is longer than the
+longest backtick run in that payload (with a minimum of four), so repository
+text cannot close its fence and become reviewer instructions.
+
 The checks are the control program's, so they are named on the command line:
 `--test-command` is the test run (its exit status decides) and
 `--guard-command` (repeatable) is a guard rule, run once per round and
@@ -114,13 +124,62 @@ refusal that names no path -- Codex's own "patch rejected" line -- or a
 denial of some other file shows that something was refused, not that the
 probe was, and does not count; nor does what the reviewer *says*, which
 is recorded and is not evidence by itself. The record
-(`preflight-<stamp>.json`, version `cross-review-preflight-v3`: command,
-working directory, sandbox signature, tool version, usage -- read from
+(`preflight-<stamp>.json`, version `cross-review-preflight-v4`: task, round,
+package digest, HEAD, command, working directory, sandbox signature, tool
+version, usage -- read from
 Codex's `turn.completed` event or Claude Code's JSON envelope -- evidence
-and result) is an environment result, kept apart from any finding about
-the change. The Claude Code reviewer is pinned to have no shell and no
+and result) binds its exact raw event/stderr companions by filename, byte
+count and SHA-256. A review verdict uses the matching
+`cross-review-verdict-v3` wrapper and binds the same companions plus the
+inner task, round and reviewed digest. A `cross-review-package-v5` record
+also fixes the deterministic reviewer command, cwd, sandbox, tool version
+and (for Claude) the verified Max first-party subscription auth before the
+review. The command starts with a canonical absolute executable path outside
+the repository, bound by exact byte count and SHA-256. Version, auth and
+review revalidate that identity immediately before invocation; preflight and
+review also recheck the exact packaged diff, excluded snapshots and whole
+tracked/untracked tree before and after the child runs. A production Windows
+reviewer must resolve to a native `.exe`/`.com`; `.cmd`/`.bat` shims are
+refused so a mutable Node/JavaScript target cannot sit outside the executable
+digest. Every Windows reviewer also binds the canonical System32
+`taskkill.exe` used for a single timeout termination rather than resolving it
+from `PATH`. Continuation decodes
+the bound raw events with the same production
+CLI decoder, requires exactly one agent result before exactly one native
+successful terminal event, rejects every event after that terminal, and canonical-compares the
+reconstructed report or verdict with the wrapper. Preflight raw events must
+also contain exactly one refused probe command at the recorded path, and a
+referenced preflight and verdict must have identical command, cwd, sandbox
+and tool version. Hand-written minimal wrappers and
+older unbound record versions cannot continue a new round. The record is
+an environment result, kept apart from any finding about the change. The
+Claude Code reviewer is pinned to have no shell and no
 write tool, so a preflight of it cannot show a refused write; a review
 with it needs `--skip-preflight`, recorded as such.
+
+Recorded usage is recomputed from the bound raw events and must be
+canonically identical to the wrapper. Verdict receipt cannot predate its
+start. After writing a passing preflight or verdict, the control program
+reloads its wrapper and companions; a verdict conclusion is printed only
+after the stored exchange is independently replayed to the same exact JSON.
+Claude children, including auth and version probes, receive no case variant
+of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, the
+three `CLAUDE_CODE_USE_*` external-provider switches, or `AWS_`/`GOOGLE_`/
+`AZURE_` cloud credential/configuration variables. `claude auth status --json` must report
+`claude.ai` / `firstParty` / `max` immediately before an invocation.
+Native event/envelope JSON is parsed with duplicate-key rejection at every
+object depth (escaped-equivalent keys included) before any field is trusted.
+CLI stdout/stderr are buffered as raw bytes, bound and written byte-for-byte,
+and decoded as UTF-8 only after the stream has completed.
+
+These bindings, reloads and snapshots prove internal consistency and
+mutation-free execution only from the start of one control-program command
+through its final validation. They do not authenticate a mutually rewritten
+record set that already existed before a later command started. Until the
+exact `--out` bytes are committed, that directory is mutable working state,
+not durable approval evidence. Durable cross-invocation provenance begins
+only when those exact bytes are committed and a later operation compares
+them under the repository review policy.
 
 `--mode=review` then refuses to start on a package whose tests or guards
 failed, and unless the *newest* preflight for the same sandbox signature
