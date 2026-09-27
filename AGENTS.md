@@ -1097,6 +1097,36 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
 
+# 엔지니어링 Agent
+
+engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이전트가 AMUX에 붙는
+경로를 건드리기 전에 읽습니다.
+
+- `docs/policy/engineering-agent.md`
+
+절대 조건:
+
+- **작업은 승격된 AMUX 카드로만 받습니다.** GitHub issue·label·comment는 작업
+  원천도 승인 증거도 아닙니다. 에이전트가 AMUX backlog에 카드를 **등록**할 수는
+  있지만 승격하지 않으며, 등록 원천과 상한은 docs/policy/engineering-agent.md §2.2가
+  고정합니다.
+- **허용 판정은 본 앱 하나가 하고, 본 앱은 patch를 적용하지 않습니다.** 본 앱은
+  Git tree 목록만 검증하며, 게시 서비스의 검사는 거절만 할 수 있습니다.
+- **에이전트는 어떤 PR도 승인·병합하지 않고 auto-merge를 켜지 않습니다.** 공개된
+  PR의 승인 증거는 docs/policy/engineering-agent.md §9-10의 일곱 조건입니다.
+- **상태 전이는 `lib/engineeringAgentCore.ts`의 표에만 있습니다.** trigger·store·
+  테스트는 그 표에서 생성하거나 대조하며, 전이를 다른 곳에 옮겨 적지 않습니다.
+  특히 lease 만료는 게시 항목을 `queued`로 되돌리지 않고 `needs_lookup`으로
+  보냅니다 — 조회 없이 다시 쓰는 경로가 생기지 않게 하는 것이 그 표의 목적입니다.
+- **소비된 capability는 되돌아가지 않습니다.** 조회 전용 claim은 capability를
+  발급하지도 소비하지도 않습니다.
+- **판정 코드는 런타임 내장 모듈만 import합니다.** 초안·게시 서비스가 clone한
+  트리의 의존성을 설치·실행하지 않고 그 코드를 불러 쓰기 때문입니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/engineering-agent.md §14를 따르며, 새 경로는 그 단계의 PR이
+  이 절에 추가합니다.
+- **P1a(결정적 핵심)**: `lib/engineeringAgentCore.ts`,
+  `tests/engineeringAgentCore.test.mjs`.
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
