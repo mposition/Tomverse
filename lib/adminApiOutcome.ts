@@ -5,10 +5,9 @@
  * copy was never under pressure to be accurate. Two answers in particular were
  * being flattened into a plain error:
  *
- * - **409 with an `approvalId`** is not a failure. The request is queued and a
- *   second administrator has to approve that exact payload
- *   (`lib/adminApproval.ts`). Reporting it as "failed" tells the operator to
- *   retry, which queues a second request.
+ * - **409 with an `approvalId`** is a leftover from the retired two-person
+ *   queue. The action was not applied. The operator sends it again; an
+ *   eligible administrator's own request runs immediately.
  * - **428** means the administrator's own sign-in is too old for a high-risk
  *   action. The fix is to sign in again, not to retry.
  *
@@ -25,7 +24,7 @@ export type AdminApiFailure = {
   tone: AdminApiTone;
   /** True when the operator has to sign in again before retrying. */
   requiresReauthentication: boolean;
-  /** Set when the action is queued for a second administrator. */
+  /** Set when a retired two-person response still names an approval row. */
   approvalId: string | null;
 };
 
@@ -36,7 +35,7 @@ export const ADMIN_NETWORK_FAILURE_MESSAGE =
   "The request failed before the server answered. Check the connection and retry.";
 
 export const adminApprovalPendingMessage = (approvalId: string) =>
-  `Queued for a second administrator. Nothing has changed yet -- approval ${approvalId} has to be approved, then the same request re-sent.`;
+  `This action was not applied. Two-person approval is no longer used. Send the same request again. Reference ${approvalId}.`;
 
 /**
  * The same sentences for a console read in Korean. English stays the default
@@ -47,7 +46,7 @@ const ADMIN_API_OUTCOME_KO = {
   reauthentication:
     "관리자 로그인이 이 작업에 필요한 만큼 최근이 아닙니다. 다시 로그인한 뒤 작업을 재시도하세요.",
   approvalPending: (approvalId: string) =>
-    `두 번째 관리자의 승인을 기다리는 중입니다. 아직 아무것도 바뀌지 않았습니다. 승인 ${approvalId} 항목이 승인된 뒤 같은 요청을 다시 보내야 합니다.`,
+    `이 작업은 적용되지 않았습니다. 두 번째 관리자 승인은 더 이상 쓰지 않습니다. 같은 요청을 다시 보내세요. 참조 ${approvalId}.`,
   serverAnswered: (fallback: string, status: number) =>
     `${fallback} 서버 응답 코드: ${status}.`,
 };
@@ -86,8 +85,7 @@ export const describeAdminApiFailure = ({
       message: ko
         ? ADMIN_API_OUTCOME_KO.approvalPending(approvalId)
         : adminApprovalPendingMessage(approvalId),
-      // Not an error: the request did exactly what the policy requires.
-      tone: "info",
+      tone: "error",
       requiresReauthentication: false,
       approvalId,
     };

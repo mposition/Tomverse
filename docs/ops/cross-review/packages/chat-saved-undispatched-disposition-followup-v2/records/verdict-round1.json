@@ -1,0 +1,60 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-saved-undispatched-disposition-followup-v2",
+  "round": 1,
+  "reviewer": "cursor",
+  "toolVersion": "Cursor CLI (version not recorded)",
+  "command": null,
+  "sandboxSignature": "cursor-cli plan read-only @ H:\\Project\\tomverse-chat-history-pagination-recovery-20260922 model:grok-4.7-xhigh",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: operator-approved for this successor review"
+  ],
+  "model": "grok-4.7-xhigh",
+  "mode": "plan",
+  "sessionId": "3a13625f-bb90-4e7d-9021-6a92310f8974",
+  "requestId": "79791c3e-c297-43ff-95a7-b5e5b871d9a1",
+  "durationMs": 1345353,
+  "durationApiMs": 1345353,
+  "usage": {
+    "tool": "cursor-cli",
+    "inputTokens": 303204,
+    "outputTokens": 79258,
+    "cacheReadTokens": 7325824
+  },
+  "receivedAt": "2026-09-24T19:43:18.4774058+10:00",
+  "capture": {
+    "source": "operator-observed Cursor CLI wrapper result",
+    "exitStatus": 0,
+    "rawStdoutPath": null,
+    "rawStdoutDigest": null,
+    "note": "The wrapper result was observed through the execution channel, but no raw stdout file was captured; this normalized record does not claim byte-exact raw stdout provenance."
+  },
+  "verdict": {
+    "taskId": "chat-saved-undispatched-disposition-followup-v2",
+    "round": 1,
+    "reviewedDigest": "sha256:adda26cb486b36b41d99353ea95449193a946b4969519921be52efe5e53a33d0",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "severity": "error",
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:2429",
+        "basis": "evidence",
+        "claim": "A durably saved Chat turn that is still waiting on history is dropped when this page unmounts or the open row is clicked again, so returning to that conversation shows no saved-question notice and sends no provider request.",
+        "evidence": "After a durable save, runGlobalSubmit stores the turn in pendingDurableUndispatchedTurnsRef and setPromptPayload (ChatPageClient.tsx:5467-5474 and 5669). While history is unloaded, ChatApp.tsx:2461-2480 registers a conversation-left cleanup and does not call /api/chat. That cleanup reaches handleSavedQuestionNotSent. At ChatPageClient.tsx:2428-2444, when currentChatIdRef still equals the origin and the selection ticket is unchanged, the handler deletes the pending turn, removes any sessionStorage key, and returns without persistSavedQuestionNotSent or a toast. The comment at ChatApp.tsx:2466-2471 assumes that path is only a shell remount, which keeps promptPayload on this ChatPageClient. A full unmount destroys that state, and a re-click takes the same cleanup after setPromptPayload(null): commitConversationSelection returns false at ChatPageClient.tsx:3866-3868 without promoting, then ChatPageClient.tsx:3988-3990 still clears the payload. Sidebar rows call onSelectConversation even when aria-current is already set (ChatSidebar.tsx:2050 and 2075).",
+        "reproduction": "Run the fixture behind an undispatched saved Chat Message is reported only on its originating conversation through the visible history error and persistentChatPostCount 0, then stop before choosing another conversation. Path A: open Settings from the account menu (this unmounts ChatPageClient; the full-unmount spec already uses account-email-updates) and come back to the same conversation. Path B: click that conversation's already-active sidebar row, then retry history or leave and reselect it. Expected: one chat.savedQuestionNotSent toast and zero /api/chat posts for that prompt. Actual: sessionStorage key tomverse_saved_question_not_sent_dispositions_v1 has no origin entry, the toast count stays 0, and the provider post count stays 0 while the saved user Message remains.",
+        "minimalFix": "On conversation-left with the same id and ticket, still write the opaque sessionStorage key. Skip consume while that turn's promptPayload is still mounted and provider dispatch has not started, so a viewport remount keeps the existing zero-toast result. Consume once the payload is gone (full unmount, or the re-click that nulls it)."
+      },
+      {
+        "severity": "error",
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:3550",
+        "basis": "evidence",
+        "claim": "New Chat on a continuation, after the global payload is armed, deletes the origin disposition and toasts on the tree that is leaving, so the continuation shows no notice when opened again.",
+        "evidence": "handleNewChat increments the selection ticket at ChatPageClient.tsx:3537 and, when mountedSurface is continuation, calls router.push(LEGACY_REVIEW_PATH) and returns at ChatPageClient.tsx:3550-3554. It does not change currentChatIdRef, clear promptPayload, or call promoteCurrentUndispatchedTurns. Continuation mounts ReviewWorkspaceShell with mountedSurface continuation (app/(site)/(application)/continuations/[conversationId]/page.tsx:41-44), so the global payload is handled by the model-scope effect. Its cleanup at ChatApp.tsx:2573-2576 reports conversation-left before fetch if providerStarted is still false. handleSavedQuestionNotSent then takes the same-id branch at ChatPageClient.tsx:2429-2444: the ticket differs, so it removeSavedQuestionNotSentKey and showToast on this ChatPageClient. /continuations/[id] and /chat are different page trees, so that toast state and the removed key do not reach the later visit. The model-only callback is a different branch: handleDurableUndispatchedAccepted persists on ticket mismatch at ChatPageClient.tsx:2470-2474, and this finding is the armed global payload path.",
+        "reproduction": "On /continuations/<A>, submit with the global composer and hold the model-settings flush that onBeforeSend awaits, after the Message response has been committed and before /api/chat. Click New Chat, then release the flush and open continuation A again. Expected: zero /api/chat posts whose messages contain that prompt, and one saved-question toast on A. Actual: the leaving tree removes the disposition and shows the toast locally; the return to A has toast count 0 and provider post count 0, with the durable Message still stored.",
+        "minimalFix": "When the conversation id matches and the selection ticket does not, persist the opaque key and do not showToast or removeSavedQuestionNotSentKey. Before the continuation router.push, promote pending turns so an armed payload's cleanup cannot be the only record."
+      }
+    ],
+    "nextAction": "Persist same-id conversation-left dispositions across full unmount and continuation New Chat, and re-review those two returns against this digest's successor."
+  }
+}

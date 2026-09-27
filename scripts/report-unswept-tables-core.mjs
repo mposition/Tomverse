@@ -54,6 +54,8 @@ export const BOUNDED_TABLES = {
         "at most 100 permanent tombstones under the fixed stage; released and expired rows consume their slot and cannot be deleted or reused",
     MarketingChannel:
         "one row per connected marketing account; disconnection is a status, so the ceiling is the number of accounts the programme connects, not the time it runs",
+    AmuxResourcePolicy:
+        "one mutable policy row per project or team key known to the AMUX board; revisions replace that row rather than append policy snapshots",
 };
 
 /**
@@ -124,6 +126,16 @@ export const RETAINED_TABLES = {
         "the evidence that somebody agreed, on which policy version and how it was captured; it is the answer to a regulator asking why a message was sent, and it has to outlive the consent it records",
     EmailPolicyVersion:
         "the labelling rules a delivery was rendered under, pinned by id on every EmailDelivery; deleting a version makes every message sent beneath it unexplainable",
+    AmuxIncidentTransition:
+        "append-only incident declaration and recovery history linked to the administrator audit chain",
+    AmuxCostLedgerEntry:
+        "append-only operational cost ledger; settlement corrects a reservation with a delta rather than rewriting spend history",
+    AmuxHumanEscalation:
+        "the durable record of why autonomous work stopped for a person and how that person resolved it",
+    AmuxRouteDecision:
+        "append-only evidence of the server-authoritative scheduler and worker signals that assigned a task",
+    AmuxExecutionAttempt:
+        "bounded per task and retained as success, latency, rework and cost calibration evidence",
 };
 
 /**

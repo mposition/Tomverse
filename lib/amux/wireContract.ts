@@ -25,6 +25,23 @@ export const amuxQueueResponseSchema = z
         revision: prismaInt,
         created_at: timestamp,
         dependent_count: prismaInt,
+        scheduler_score: z.number().int().min(0).max(6_010_428),
+        scoring_version: z.literal("amux-global-priority-v2"),
+        scheduler_signals: z
+          .object({
+            pin: z.number().int().min(0).max(10_000),
+            age_hours: z.number().int().min(0).max(1_000_000),
+            type_weight: z.number().int().min(0).max(40),
+            priority_weight: z.number().int().min(0).max(40),
+            dependents: prismaInt,
+            dependent_weight: z.number().int().min(0).max(5_000_000),
+            drag: z.number().int().min(0).max(8),
+            urgency: z.number().int().min(0).max(240),
+            capacity_weight: z.number().int().min(0).max(20),
+            incident_bonus: z.number().int().min(0).max(80),
+            total: z.number().int().min(0).max(6_010_428),
+          })
+          .strict(),
       })
       .strict(),
   )
@@ -71,6 +88,62 @@ const routingCandidateSchema = z
   })
   .strict();
 
+const observedRoutingMetricSchema = z
+  .object({
+    value: z.number().min(0).max(1),
+    raw_value: z.number().min(0).max(1).nullable(),
+    confidence: z.number().min(0).max(1),
+    observed: z.boolean(),
+    source: z
+      .enum([
+        "historical_attempts",
+        "historical_cost",
+        "provider_api",
+        "wrapper",
+      ])
+      .nullable(),
+    sample_size: prismaInt.nullable(),
+    observed_at: timestamp.nullable(),
+  })
+  .strict();
+
+const quotaTelemetrySchema = z.union([
+  observedRoutingMetricSchema.extend({
+    state: z.enum(["unknown", "fresh", "stale", "invalid"]),
+    provider_exhausted: z.boolean(),
+    reset_at: timestamp.nullable(),
+  }),
+  z
+    .object({
+      state: z.literal("unknown"),
+      provider_exhausted: z.literal(false),
+    })
+    .strict(),
+]);
+
+const routingTelemetrySchema = z
+  .record(
+    amuxMachineIdSchema,
+    z
+      .object({
+        history: z
+          .object({
+            sample_size: prismaInt,
+            predicted_success: observedRoutingMetricSchema.optional(),
+            expected_speed: observedRoutingMetricSchema.optional(),
+            low_rework: observedRoutingMetricSchema.optional(),
+            low_human_attention: observedRoutingMetricSchema.optional(),
+            cost_efficiency: observedRoutingMetricSchema.optional(),
+          })
+          .strict(),
+        quota: quotaTelemetrySchema,
+      })
+      .strict(),
+  )
+  .refine((value) => Object.keys(value).length <= 128, {
+    message: "Routing telemetry exceeds the worker catalog bound.",
+  });
+
 export const amuxRoutingResponseSchema = z.discriminatedUnion("eligible", [
   z
     .object({
@@ -83,6 +156,7 @@ export const amuxRoutingResponseSchema = z.discriminatedUnion("eligible", [
       ]),
       task: z.null(),
       candidates: z.tuple([]),
+      telemetry: z.object({}).strict(),
     })
     .strict(),
   z
@@ -99,6 +173,7 @@ export const amuxRoutingResponseSchema = z.discriminatedUnion("eligible", [
         })
         .strict(),
       candidates: z.array(routingCandidateSchema).max(128),
+      telemetry: routingTelemetrySchema,
     })
     .strict(),
 ]);

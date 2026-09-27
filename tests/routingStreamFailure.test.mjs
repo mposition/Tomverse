@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { classifyStreamFailure } from "../lib/routingStreamFailure.ts";
@@ -350,4 +351,45 @@ test("the refusal says which of the two it was", () => {
     assert.equal(refusal(lost).reason, "connection_lost");
     assert.equal(refusal(abandoned).action, "terminate");
     assert.equal(refusal(abandoned).reason, "cancelled");
+});
+
+test("the classifier does not mint provider_pre_token_failure", () => {
+    assert.equal(ROUTING_ATTEMPT_ERROR_CLASSES.includes("provider_pre_token_failure"), true);
+    assert.equal(ROUTING_ATTEMPT_ERROR_CLASSES.some((value) => value == null || value === "NULL"), false);
+
+    const source = readFileSync(new URL("../lib/routingStreamFailure.ts", import.meta.url), "utf8");
+    assert.equal(source.includes("provider_pre_token_failure"), false);
+    const migration = readFileSync(
+        new URL(
+            "../prisma/migrations/20260922130000_routing_attempt_error_class_vocabulary/migration.sql",
+            import.meta.url
+        ),
+        "utf8"
+    );
+    const inStart = migration.indexOf("IN (");
+    const notValid = migration.lastIndexOf("NOT VALID");
+    assert.ok(inStart >= 0);
+    assert.ok(notValid > inStart);
+    const inList = migration.slice(inStart, notValid);
+    assert.equal(inList.includes("'NULL'"), false);
+    assert.equal(inList.includes("provider_pre_token_failure"), true);
+
+    const cases = [
+        classify(),
+        classify({ error: errorWith({ statusCode: 401 }) }),
+        classify({ error: errorWith({ statusCode: 402 }) }),
+        classify({ error: errorWith({ statusCode: 404 }) }),
+        classify({ error: errorWith({ statusCode: 429 }) }),
+        classify({ error: errorWith({ statusCode: 500 }) }),
+        classify({ error: errorWith({ code: "ECONNRESET" }) }),
+        classify({ error: errorWith({ name: "AbortError" }) }),
+        classify({ error: errorWith({ name: "TimeoutError" }) }),
+        classify({ phase: "completion" }),
+        classify({ phase: "emit" }),
+        classify({ downstreamOpen: false }),
+        classify({ error: errorWith({ statusCode: 400, message: "content_policy" }) }),
+    ];
+    for (const classified of cases) {
+        assert.notEqual(classified.errorClass, "provider_pre_token_failure");
+    }
 });

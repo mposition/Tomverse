@@ -50,6 +50,10 @@ const PROVIDER_LABELS: Record<AiProvider, string> = {
   qwen: "Qwen",
   zhipu: "Zhipu AI",
   perplexity: "Perplexity",
+  deepinfra: "DeepInfra",
+  together: "Together",
+  openrouter: "OpenRouter",
+  sail: "Sail Research",
 };
 
 export function ModelCatalogueBlock() {

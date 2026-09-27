@@ -64,13 +64,13 @@ export class AdminSoleApproverRefusedError extends Error {
 
 const REFUSAL_MESSAGES: Record<string, string> = {
     action_not_eligible:
-        "This action always requires a second administrator's approval.",
+        "This action is confirmed against what was just shown.",
+    action_has_bound_path:
+        "This action is confirmed against what was just shown, not queued for a second administrator.",
     no_eligible_approver:
         "No active administrator holds the permission this action requires.",
-    multiple_eligible_approvers:
-        "More than one administrator can approve, so this action needs the usual second approval.",
     requester_is_not_the_sole_approver:
-        "Only the single eligible administrator may execute this action alone.",
+        "This session is not an administrator who can run this action.",
     preview_missing: "Run a dry run before executing.",
     preview_not_a_dry_run: "The most recent retention run was not a dry run.",
     preview_superseded:
@@ -90,19 +90,18 @@ const REFUSAL_MESSAGES: Record<string, string> = {
         "An approved request for this change is being carried out right now.",
 };
 
-const refuse = (reason: string): never => {
+export const refuseSoleApprover = (reason: string): never => {
     throw new AdminSoleApproverRefusedError(
         reason,
-        REFUSAL_MESSAGES[reason] || "This action requires a second approval."
+        REFUSAL_MESSAGES[reason] || "This action cannot be run from this session."
     );
 };
 
 /**
  * Identities that could approve this action today.
  *
- * Recomputed per call, which is condition 6: a second administrator being
- * configured closes this path on the next request with nothing to migrate and
- * no flag anybody has to remember to clear.
+ * Recomputed per call. A second administrator is counted, and that count is
+ * written on the audit row. It does not put the action back in a queue.
  *
  * `ADMIN_USER_IDS` rows are counted whatever role they show. An administrator
  * admitted by user id takes their role from their *session email* appearing
@@ -171,11 +170,8 @@ export const soleApproverIsAvailable = (
  * Whether any other two-person action may run on this administrator's word
  * alone (docs/policy/admin-sole-approver.md).
  *
- * Counted against the permission the action itself requires, the same one the
- * approvals route checks before a reviewer may review it. An organisation with
- * one owner and one billing administrator has two people who can approve a
- * refund, so a refund stays two-person there even though only one of them can
- * approve a retention run.
+ * Counted against the permission the action itself requires. The count is
+ * written on the audit row. It does not decide whether the action runs.
  */
 export const generalSoleApprovalAvailability = (
     action: string,
@@ -272,7 +268,7 @@ const supersedeOpenRequestsAndRecordStart = async (input: {
         const inFlight = await tx.adminActionApproval.count({
             where: { ...scope, status: "executing", expiresAt: { gt: now } },
         });
-        if (inFlight > 0) refuse("approval_executing");
+        if (inFlight > 0) refuseSoleApprover("approval_executing");
         // The ids recorded are the rows this update actually closed, not the
         // rows an earlier read saw: a reviewer rejecting in between is not
         // something this execution superseded.
@@ -341,7 +337,10 @@ export async function runAsSoleAdministrator<T>(
         metadata: {
             action: input.action,
             rule: "general_sole_administrator",
-            eligibleApproverCount: 1,
+            eligibleApproverCount: eligibleApproverIdentities(
+                approvalPermissionForAction(input.action),
+                input.session
+            ).length,
             confirmed: "request_payload",
             payloadHash,
             reason: input.reason.slice(0, 500),
@@ -442,7 +441,7 @@ export async function runAsSoleApprover<T>(
         eligibleApproverIdentities: eligibleApproverIdentities("ops:write", input.session),
         requesterIdentity: input.session.user?.email,
     });
-    if (!eligibility.allowed) refuse(eligibility.reason);
+    if (!eligibility.allowed) refuseSoleApprover(eligibility.reason);
 
     if (input.confirmation.kind === "retention_dry_run") {
         // The latest run of any mode, so a preview that something has already
@@ -473,7 +472,7 @@ export async function runAsSoleApprover<T>(
             requesterId: actorId,
             now: new Date(),
         });
-        if (!binding.bound) refuse(binding.reason);
+        if (!binding.bound) refuseSoleApprover(binding.reason);
     } else {
         // The caller reads the current digest, for the same reason the branch
         // above reads the latest run here rather than trusting the request:
@@ -483,7 +482,7 @@ export async function runAsSoleApprover<T>(
             submittedDigest: input.confirmation.submittedDigest,
             currentDigest: input.confirmation.currentDigest,
         });
-        if (!binding.bound) refuse(binding.reason);
+        if (!binding.bound) refuseSoleApprover(binding.reason);
     }
 
     // Condition 5, first half. A durable record of the intent exists before
@@ -499,10 +498,12 @@ export async function runAsSoleApprover<T>(
         targetId: input.targetId,
         metadata: {
             action: input.action,
-            // Named so the record says why one approver was enough, rather
-            // than leaving a reader to work it out from configuration that
-            // may have changed since.
-            eligibleApproverCount: 1,
+            // The count is whoever could run this action, not a claim that
+            // they were the only one. A second administrator does not queue.
+            eligibleApproverCount: eligibleApproverIdentities(
+                "ops:write",
+                input.session
+            ).length,
             ...confirmationMetadata(input.confirmation),
         },
     });
