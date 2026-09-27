@@ -380,7 +380,10 @@ test("a write racing an activation waits for its lock, and is then refused", asy
       return write(tx);
     });
 
-  let bodyFailure;
+  // A boolean beside the value, because `undefined` is a throwable value and
+  // using it as the sentinel would read a `throw undefined` as no failure.
+  let bodyFailed = false;
+  let bodyFailure: unknown;
   try {
     // Raced with the transaction itself: if the UPDATE or the transaction
     // start fails before it signals, `activationHasLock` never settles and
@@ -413,6 +416,7 @@ test("a write racing an activation waits for its lock, and is then refused", asy
     // Held rather than rethrown here, so the cleanup below always runs and the
     // activation's own failure can be reported beside this one rather than
     // instead of it.
+    bodyFailed = true;
     bodyFailure = error;
   } finally {
     // Whatever happened above, the activation must not be left holding its
@@ -420,28 +424,36 @@ test("a write racing an activation waits for its lock, and is then refused", asy
     commitActivation();
     // The activation is awaited rather than only settled: a rollback or a
     // timeout here is a fact about the test run, not something to swallow.
-    // Rethrowing from a finally would mask an assertion failure, so it is
-    // reported instead and the assertions below still run.
-    const [outcome] = await Promise.allSettled([activation]);
-    // A rejected activation is a failure, not a log line: `console.error` does
-    // not fail a node:test run. It can also mean the COMMIT reached the server
-    // and the answer did not, which leaves the rows in the state the assertions
-    // below read as correct -- a green test over an unknown outcome.
+    // `console.error` does not fail a node:test run, and a rejected COMMIT can
+    // mean the server committed and the answer never arrived -- which leaves
+    // the rows in the state the assertions after this read as correct, so a
+    // green test over an unknown outcome.
     //
-    // Both are reported, with the body's first because that is what was being
-    // tested.
-    if (outcome.status === "rejected" && bodyFailure !== undefined) {
+    // Throwing from here replaces the body's completion, which the `catch`
+    // above has already taken, so the body's failure is rethrown here rather
+    // than being lost.
+    const [outcome] = await Promise.allSettled([activation]);
+    const activationFailed = outcome.status === "rejected";
+    // The race means a pre-signal rejection arrives as *both* failures. It is
+    // one failure and is reported once.
+    const sameFailure = bodyFailed && activationFailed && bodyFailure === outcome.reason;
+
+    if (bodyFailed && activationFailed && !sameFailure) {
+      // The outer message carries both, because the default TAP reporter the
+      // DB runner uses prints an AggregateError's own message and stack and
+      // not the errors inside it.
       throw new AggregateError(
         [bodyFailure, outcome.reason],
-        "the test failed, and the held activation did not commit cleanly"
+        "the test failed (" +
+          String(bodyFailure) +
+          "), and the held activation did not commit cleanly (" +
+          String(outcome.reason) +
+          ")"
       );
     }
-    if (bodyFailure !== undefined) throw bodyFailure;
-    if (outcome.status === "rejected") {
-      throw new Error(
-        "the held activation did not commit cleanly: " + String(outcome.reason)
-      );
-    }
+    if (bodyFailed) throw bodyFailure;
+    // Thrown as it is, so its own type, stack and properties survive.
+    if (activationFailed) throw outcome.reason;
   }
 
   // And now that it is committed, the same writes are refused for the reason
