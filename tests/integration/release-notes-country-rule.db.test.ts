@@ -18,6 +18,9 @@ import {
   releaseNotesCountryRuleSeed,
   releaseNotesRuleKey,
 } from "@/lib/releaseNotesCountryRuleCore";
+
+/** The seed, for tests that compare stored rows against what it describes. */
+const releaseNotesObligationSafeSeed = () => releaseNotesCountryRuleSeed();
 import {
   releaseNotesRuleVersionConflicts,
   releaseNotesRulesForVersion,
@@ -185,6 +188,10 @@ test("a rule version's content cannot change, with or without a second row", asy
     { status: "closed" },
     { releaseConditions: ["something_else"] },
     { countryCode: "KR" },
+    // Renumbering is how the name would be freed without a delete: v1 becomes
+    // v2 and nothing says what v1 meant any more, which is the invariant the
+    // delete refusal exists for.
+    { ruleVersion: 2 },
   ]) {
     await refuses(
       () =>
@@ -195,6 +202,26 @@ test("a rule version's content cannot change, with or without a second row", asy
       /a different content is a new version/
     );
   }
+
+  // The gates are content too. Only `inferred_consent` may carry any, so this
+  // needs a rule that has some: swapping one non-empty list for another passes
+  // every CHECK, and the trigger is the only thing that refuses it.
+  await prisma.releaseNotesRuleVersion.create({
+    data: ruleVersion({
+      ruleKey: releaseNotesRuleKey("AU"),
+      countryCode: "AU",
+      basis: "inferred_consent",
+      activationGates: ["relationship_model_built", "policy_amendment_e_in_force"],
+    }),
+  });
+  await refuses(
+    () =>
+      prisma.releaseNotesRuleVersion.update({
+        where: { ruleKey_ruleVersion: { ruleKey: releaseNotesRuleKey("AU"), ruleVersion: 1 } },
+        data: { activationGates: ["something_else_entirely"] },
+      }),
+    /a different content is a new version/
+  );
 
   // A new version number is how the content changes.
   await prisma.releaseNotesRuleVersion.create({
@@ -357,6 +384,54 @@ test("a seed that disagrees with a stored rule version is refused, not silently 
   const conflicts = await releaseNotesRuleVersionConflicts(prisma, seed);
   assert.deepEqual(conflicts, ["release_notes.KR v1 (basis, status)"]);
   await assert.rejects(() => ensureJurisdictionPolicyDraft({ version: `x-${randomUUID()}` }), /new rule version/);
+});
+
+test("a conflict in either JSON field is a conflict too", async () => {
+  // The comparison covers four fields and only two of them were pinned, so
+  // dropping the two array comparisons left the suite green while an edited
+  // seed would have been accepted in silence.
+  const seed = releaseNotesObligationSafeSeed();
+  const au = seed.find((rule) => rule.countryCode === "AU");
+  assert.ok(au, "the seed has no Australian rule");
+
+  await prisma.releaseNotesRuleVersion.create({
+    data: ruleVersion({
+      ruleKey: releaseNotesRuleKey("AU"),
+      countryCode: "AU",
+      basis: au.basis,
+      status: au.status,
+      // One item short of what the seed describes.
+      releaseConditions: [...au.releaseConditions].slice(1),
+      activationGates: [...au.activationGates],
+    }),
+  });
+  assert.deepEqual(await releaseNotesRuleVersionConflicts(prisma, seed), [
+    "release_notes.AU v1 (releaseConditions)",
+  ]);
+  await assert.rejects(
+    () => ensureJurisdictionPolicyDraft({ version: `x-${randomUUID()}` }),
+    /new rule version/
+  );
+
+  await reset();
+  await prisma.releaseNotesRuleVersion.create({
+    data: ruleVersion({
+      ruleKey: releaseNotesRuleKey("AU"),
+      countryCode: "AU",
+      basis: au.basis,
+      status: au.status,
+      releaseConditions: [...au.releaseConditions],
+      // Reordered, which is a different rule: the order is part of the value.
+      activationGates: [...au.activationGates].reverse(),
+    }),
+  });
+  assert.deepEqual(await releaseNotesRuleVersionConflicts(prisma, seed), [
+    "release_notes.AU v1 (activationGates)",
+  ]);
+  await assert.rejects(
+    () => ensureJurisdictionPolicyDraft({ version: `x-${randomUUID()}` }),
+    /new rule version/
+  );
 });
 
 test("the row's own shape is checked", async () => {
