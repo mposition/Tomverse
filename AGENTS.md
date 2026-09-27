@@ -1130,6 +1130,9 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `tests/agentAuthorityFiles.test.mjs`, `tests/agentPushPolicy.test.mjs`. **새 최상위
   디렉터리나 에이전트·AMUX 이름이 든 파일을 추가하면 manifest 분류가 먼저입니다** —
   `tests/agentAuthorityFiles.test.mjs`가 분류되지 않은 것을 실패로 만듭니다.
+- **P1e(tree 목록 검증)**: `lib/engineeringAgentTreeVerify.ts`,
+  `tests/engineeringAgentTreeVerify.test.mjs`. **patch를 적용하는 코드를 여기에 넣지
+  않습니다** — 본 앱은 tree 목록의 hash를 다시 계산하고 비교할 뿐입니다.
 
 # AI Review (교차검토) 품질과 M5
 
