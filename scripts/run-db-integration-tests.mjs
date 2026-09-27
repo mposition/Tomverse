@@ -283,6 +283,10 @@ run(
     // waiver has to name a sealed approval of the waiver kind. All three are
     // constraints and a trigger, so only the database can answer for them.
     "tests/integration/release-notes-rule-obligation.db.test.ts",
+    // The send verdict written down: the evidence it cited is rows the database
+    // will not lose, the seal closes the set in the same transaction, and one
+    // phase of one delivery is recorded once however many times it is evaluated.
+    "tests/integration/release-notes-send-decision.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
