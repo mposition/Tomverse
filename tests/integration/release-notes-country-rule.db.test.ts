@@ -327,12 +327,20 @@ test("an active version's rules cannot be changed, removed or added to", async (
   );
 });
 
-test("a write racing an activation waits for it, and is then refused", async () => {
+test("a write racing an activation waits for its lock, and is then refused", async () => {
   // The migration's claim about `FOR SHARE`: a rule written while a draft is
   // being activated either waits and then sees the new status, or holds the
   // activation back until the rule is committed into what was still a draft.
   // Every other test here activates first and writes afterwards, which an
-  // ordinary `SELECT` would satisfy just as well -- so nothing pinned the lock.
+  // ordinary `SELECT` satisfies equally well -- so nothing pinned the lock.
+  //
+  // The first attempt at this test raced timers, and a review was right that a
+  // timer proves nothing: a slow runner could fail a correct implementation, and
+  // a write that had not yet reached the trigger would pass and then be refused
+  // after the commit, which an ordinary `SELECT` would also do. So the writes
+  // run under `lock_timeout` instead, and the lock conflict itself is what is
+  // asserted -- with no `FOR SHARE` the trigger takes no lock and there is
+  // nothing to time out on.
   const version = await draft();
   await prisma.releaseNotesRuleVersion.create({
     data: ruleVersion({ ruleKey: releaseNotesRuleKey("ZW"), countryCode: "ZW" }),
@@ -342,8 +350,11 @@ test("a write racing an activation waits for it, and is then refused", async () 
     select: { id: true },
   });
 
-  // Hold an activation open: the policy version row is locked, uncommitted.
-  let commitActivation = () => {};
+  let lockHeld: () => void = () => {};
+  const activationHasLock = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+  let commitActivation: () => void = () => {};
   const activationHeld = new Promise<void>((resolve) => {
     commitActivation = resolve;
   });
@@ -354,64 +365,73 @@ test("a write racing an activation waits for it, and is then refused", async () 
            SET "status" = 'active', "activatedAt" = now()
          WHERE "id" = ${version.id}
       `;
+      // The UPDATE returning is the lock being held, which is a fact rather
+      // than an elapsed interval.
+      lockHeld();
       await activationHeld;
     },
     { timeout: 20_000 }
   );
 
-  // Let the activation take its lock before the writes ask for it.
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  /** Runs one write in its own transaction, refusing to wait for a lock. */
+  const underLockTimeout = <T>(write: (tx: Prisma.TransactionClient) => Promise<T>) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '2s'");
+      return write(tx);
+    });
 
-  const insert = prisma.releaseNotesCountryRule
-    .create({
-      data: countryRule(version.id, {
-        countryCode: "ZW",
-        ruleKey: releaseNotesRuleKey("ZW"),
+  try {
+    await activationHasLock;
+
+    // Both writes must conflict on the policy version's row. `55P03` is
+    // `lock_not_available`; Prisma surfaces the message.
+    await refuses(
+      () =>
+        underLockTimeout((tx) =>
+          tx.releaseNotesCountryRule.create({
+            data: countryRule(version.id, {
+              countryCode: "ZW",
+              ruleKey: releaseNotesRuleKey("ZW"),
+            }),
+          })
+        ),
+      /lock timeout|lock_not_available|55P03/i
+    );
+    await refuses(
+      () =>
+        underLockTimeout((tx) =>
+          tx.releaseNotesCountryRule.delete({ where: { id: existing.id } })
+        ),
+      /lock timeout|lock_not_available|55P03/i
+    );
+  } finally {
+    // Whatever happened above, the activation must not be left holding its
+    // transaction: the suite's TRUNCATE would wait for it.
+    commitActivation();
+    await Promise.allSettled([activation]);
+  }
+
+  // And now that it is committed, the same writes are refused for the reason
+  // they were waiting to find out.
+  await refuses(
+    () =>
+      prisma.releaseNotesCountryRule.create({
+        data: countryRule(version.id, {
+          countryCode: "ZW",
+          ruleKey: releaseNotesRuleKey("ZW"),
+        }),
       }),
-    })
-    .then(
-      () => "inserted" as const,
-      (error: unknown) => ({ refused: error instanceof Error ? error.message : String(error) })
-    );
-  const remove = prisma.releaseNotesCountryRule
-    .delete({ where: { id: existing.id } })
-    .then(
-      () => "deleted" as const,
-      (error: unknown) => ({ refused: error instanceof Error ? error.message : String(error) })
-    );
+    /draft policy version/
+  );
+  await refuses(
+    () => prisma.releaseNotesCountryRule.delete({ where: { id: existing.id } }),
+    /cannot be changed/
+  );
 
-  // Neither may settle while the activation holds the row. Without `FOR SHARE`
-  // both would read the old status and succeed here.
-  const waited = Symbol("waited");
-  for (const pending of [insert, remove]) {
-    assert.equal(
-      await Promise.race([
-        pending,
-        new Promise((resolve) => setTimeout(() => resolve(waited), 600)),
-      ]),
-      waited,
-      "a write did not wait for the activation to commit"
-    );
-  }
-
-  commitActivation();
-  await activation;
-
-  for (const [what, pending] of [
-    ["insert", insert],
-    ["delete", remove],
-  ] as const) {
-    const outcome = await pending;
-    assert.ok(
-      typeof outcome === "object" && /draft policy version|cannot be changed/.test(outcome.refused),
-      `the ${what} was not refused after the activation committed: ${JSON.stringify(outcome)}`
-    );
-  }
-
-  // And the active version's rules are the ones it was activated with.
+  // The active version's rules are the ones it was activated with.
   assert.equal(
     await prisma.releaseNotesCountryRule.count({ where: { policyVersionId: version.id } }),
-    releaseNotesCountryRuleSeed().length
+    seedRules().length
   );
 });
 
