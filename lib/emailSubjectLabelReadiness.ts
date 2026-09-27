@@ -24,9 +24,15 @@ import {
  * does — otherwise it is a duty nobody is confirming, which invariant 9 treats
  * as a reason to stop rather than a detail.
  *
- * It answers about the **active** policy version, because that is the one a
- * send composes under. With no active version there is nothing to check and
- * nothing that could send, which is a problem to report rather than a pass.
+ * It answers about the active policy version **and about every version a
+ * pending delivery is pinned to**. The lane reads the profile of
+ * `delivery.policyVersionId`, not the active one (EM-04), so a message enqueued
+ * under an older version is sent under that version's labels however good the
+ * active one is. The first version of this check read only the active version,
+ * which a review pointed out: activating a corrected version would have turned
+ * the check green while every already-queued Singaporean message still went out
+ * with no label. With no active version there is nothing to check and nothing
+ * that could newly enqueue, which is a problem to report rather than a pass.
  *
  * ## Two answers, because there are two questions
  *
@@ -79,18 +85,22 @@ export async function subjectLabelReadiness(
   labelsPresent: boolean;
   /** Null when no policy version is active. */
   policyVersionId: string | null;
+  /** The versions checked: the active one and any a pending delivery is pinned to. */
+  policyVersionIds: string[];
   problems: SubjectLabelProblem[];
 }> {
   const required = marketingSendingConfigured(env);
   const answer = (
     labelsPresent: boolean,
     policyVersionId: string | null,
-    problems: SubjectLabelProblem[]
+    problems: SubjectLabelProblem[],
+    policyVersionIds: string[] = policyVersionId === null ? [] : [policyVersionId]
   ) => ({
     ready: labelsPresent || !required,
     required,
     labelsPresent,
     policyVersionId,
+    policyVersionIds,
     problems,
   });
 
@@ -110,30 +120,79 @@ export async function subjectLabelReadiness(
     ]);
   }
 
+  // Every version a message could still go out under: the active one, and the
+  // ones already-queued deliveries carry. A profile key is checked per version
+  // only where it is actually reachable -- the active version for anything about
+  // to be enqueued, and a pinned version only for the profile keys queued under
+  // it, because a version nothing is queued under for SG cannot send an SG
+  // message however its row reads.
+  const pending = await prisma.emailDelivery.findMany({
+    where: {
+      status: "pending",
+      jurisdictionProfileKey: { in: Object.keys(REQUIRED_SUBJECT_PREFIX) },
+    },
+    select: { policyVersionId: true, jurisdictionProfileKey: true },
+    distinct: ["policyVersionId", "jurisdictionProfileKey"],
+  });
+
+  const wanted = new Map<string, Set<string>>();
+  const want = (policyVersionId: string, profileKey: string) => {
+    const keys = wanted.get(policyVersionId) ?? new Set<string>();
+    keys.add(profileKey);
+    wanted.set(policyVersionId, keys);
+  };
+  for (const profileKey of Object.keys(REQUIRED_SUBJECT_PREFIX)) want(active.id, profileKey);
+  for (const row of pending) want(row.policyVersionId, row.jurisdictionProfileKey);
+
   const profiles = await prisma.jurisdictionProfile.findMany({
     where: {
-      policyVersionId: active.id,
+      policyVersionId: { in: [...wanted.keys()] },
       profileKey: { in: Object.keys(REQUIRED_SUBJECT_PREFIX) },
     },
-    select: { profileKey: true, subjectPrefix: true },
+    select: { profileKey: true, policyVersionId: true, subjectPrefix: true },
   });
-  const byKey = new Map(profiles.map((row) => [row.profileKey, row.subjectPrefix]));
+  const stored = new Map(
+    profiles.map((row) => [`${row.policyVersionId}:${row.profileKey}`, row.subjectPrefix])
+  );
 
-  const missing = Object.entries(REQUIRED_SUBJECT_PREFIX)
-    .filter(([profileKey, prefix]) => (byKey.get(profileKey) ?? "").trimEnd() !== prefix)
-    .map(([profileKey]) => profileKey);
+  // A profile row that is absent is as missing as one with the wrong value: the
+  // lane's `findUnique` returns nothing and the message is composed with no
+  // prefix at all.
+  const missing: { policyVersionId: string; profileKey: string }[] = [];
+  for (const [policyVersionId, keys] of wanted) {
+    for (const profileKey of keys) {
+      const prefix = REQUIRED_SUBJECT_PREFIX[profileKey];
+      if ((stored.get(`${policyVersionId}:${profileKey}`) ?? "").trimEnd() !== prefix) {
+        missing.push({ policyVersionId, profileKey });
+      }
+    }
+  }
 
-  if (missing.length === 0) return answer(true, active.id, []);
-  return answer(false, active.id, [
-    {
-      severity: "error",
-      code: "EMAIL_SUBJECT_LABEL_MISSING",
-      message:
-        `The active policy version does not carry the required subject prefix for ${missing.join(", ")}. ` +
-        "Marketing to those countries is refused while that is true.",
-      profileKeys: missing,
-    },
-  ]);
+  const checked = [...wanted.keys()].sort();
+  if (missing.length === 0) return answer(true, active.id, [], checked);
+
+  const queued = missing.filter((entry) => entry.policyVersionId !== active.id);
+  return answer(
+    false,
+    active.id,
+    [
+      {
+        severity: "error",
+        code: "EMAIL_SUBJECT_LABEL_MISSING",
+        message:
+          `The required subject prefix is not on ${missing.length} policy version and profile ` +
+          `pair(s): ${missing.map((entry) => `${entry.profileKey}@${entry.policyVersionId}`).join(", ")}. ` +
+          (queued.length > 0
+            ? "Some of those are versions pending deliveries are pinned to, which activating a " +
+              "corrected version does not change -- those messages are composed under the version " +
+              "they carry. "
+            : "") +
+          "Marketing to those countries is refused while that is true.",
+        profileKeys: [...new Set(missing.map((entry) => entry.profileKey))].sort(),
+      },
+    ],
+    checked
+  );
 }
 
 /**

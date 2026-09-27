@@ -254,6 +254,64 @@ mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
     },
 });
 
+/**
+ * The two Korean duty checks (draft section 7.7).
+ *
+ * Mocked like every other input: they read the jurisdiction policy and the
+ * accounts, and this suite is about what the route does with an answer rather
+ * than about how either one is worked out. Those are unit-tested in
+ * tests/biennialConsentNoticeCore.test.mjs and
+ * tests/releaseNotesObligationCore.test.mjs.
+ *
+ * `null` is the third state and not a boolean: the question could not be
+ * answered, which the route reads as not-ready once marketing is configured.
+ */
+let subjectLabels: { ready: boolean } | null = { ready: true };
+mock.module(mod("lib/emailSubjectLabelReadiness.ts"), {
+    namedExports: {
+        subjectLabelReadiness: async () => {
+            if (subjectLabels === null) throw new Error("subject label check exploded");
+            return {
+                ready: subjectLabels.ready,
+                required: 1,
+                labelsPresent: subjectLabels.ready ? 1 : 0,
+                problems: subjectLabels.ready
+                    ? []
+                    : [
+                          {
+                              severity: "error",
+                              code: "EMAIL_SUBJECT_LABEL_MISSING",
+                              message: "SG has no <ADV> prefix",
+                          },
+                      ],
+            };
+        },
+    },
+});
+
+let biennialNotice: { healthy: boolean } | null = { healthy: true };
+mock.module(mod("lib/biennialConsentNoticeReadiness.ts"), {
+    namedExports: {
+        biennialNoticeReadiness: async () => {
+            if (biennialNotice === null) throw new Error("biennial notice check exploded");
+            return {
+                healthy: biennialNotice.healthy,
+                recipients: 1,
+                earliestDueAt: new Date("2028-01-01T00:00:00.000Z"),
+                problems: biennialNotice.healthy
+                    ? []
+                    : [
+                          {
+                              severity: "error",
+                              code: "EMAIL_BIENNIAL_CONSENT_NOTICE_DUE",
+                              message: "the two-yearly notice fell due on 2028-01-01",
+                          },
+                      ],
+            };
+        },
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 let incidents: Array<{ code: string; severity?: string }> = [];
@@ -331,6 +389,8 @@ beforeEach(() => {
     voiceModelPrice = { ready: true, flagEnabled: false };
     searchBudget = { ready: true };
     keyRetention = { ready: true };
+    subjectLabels = { ready: true };
+    biennialNotice = { healthy: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
     snapshotKeyringReady = true;
@@ -360,6 +420,8 @@ type ReadinessBody = {
         emailUnsubscribeKeyRetention: boolean;
         emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
+        emailSubjectLabels: boolean;
+        emailBiennialConsentNotice: boolean;
         searchProviderBudget: boolean;
     };
     traceId: string;
@@ -394,6 +456,8 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailUnsubscribeKeyRetention: true,
         emailConsentKeyring: true,
         emailBusinessIdentity: true,
+        emailSubjectLabels: true,
+        emailBiennialConsentNotice: true,
         searchProviderBudget: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
@@ -521,6 +585,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 setBusinessIdentity(false);
             },
         },
+        {
+            // A statutory subject label missing from the rows that send. It
+            // gates readiness because sending without it is the offence, and it
+            // is not something a later deploy can take back.
+            name: "emailSubjectLabels",
+            arrange: () => {
+                subjectLabels = { ready: false };
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -534,6 +607,8 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         voiceModelPrice = { ready: true, flagEnabled: false };
         searchBudget = { ready: true };
         keyRetention = { ready: true };
+        subjectLabels = { ready: true };
+        biennialNotice = { healthy: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
         delete process.env.MARKETING_EMAIL_FROM;

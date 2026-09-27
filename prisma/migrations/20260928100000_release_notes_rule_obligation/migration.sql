@@ -100,7 +100,7 @@ ALTER TABLE "ReleaseNotesRuleObligation" ADD CONSTRAINT "ReleaseNotesRuleObligat
             AND "dueBy" IS NULL AND "warnDaysBefore" IS NULL
             AND "waiverApprovalId" IS NULL AND "waiverApprovalType" IS NULL)
         OR ("state" = 'deferred'
-            AND "dueBy" IS NOT NULL
+            AND "dueBy" IS NOT NULL AND "warnDaysBefore" IS NOT NULL
             AND "readinessCheck" IS NULL
             AND "waiverApprovalId" IS NULL AND "waiverApprovalType" IS NULL)
         OR ("state" = 'waived'
@@ -109,13 +109,19 @@ ALTER TABLE "ReleaseNotesRuleObligation" ADD CONSTRAINT "ReleaseNotesRuleObligat
             AND "dueBy" IS NULL AND "warnDaysBefore" IS NULL)
     );
 
+-- A deferral carries its warning window, and the window is a window. Section
+-- 7.7 asks a deferred duty for a date *and* a device that stops the date being
+-- forgotten, and the first version let the second be NULL -- which reads as "no
+-- warning" and passes, so the row that most needs a reminder is the one that can
+-- be stored without one. The clause above makes it required for `deferred`; this
+-- one keeps it absent everywhere else and positive where it is present.
 ALTER TABLE "ReleaseNotesRuleObligation" ADD CONSTRAINT "ReleaseNotesRuleObligation_warnDaysBefore_check"
     CHECK ("warnDaysBefore" IS NULL OR "warnDaysBefore" > 0);
 
 ALTER TABLE "ReleaseNotesRuleObligation" ADD CONSTRAINT "ReleaseNotesRuleObligation_notes_check"
     CHECK (length(btrim("notes")) > 0);
 
--- ## What the trigger holds
+-- ## What the trigger holds (the seal, and the scope)
 --
 -- A waiver may only be named while it is sealed. An unsealed approval is one
 -- somebody is still writing, and a duty that pointed at it would be settled by
@@ -123,38 +129,82 @@ ALTER TABLE "ReleaseNotesRuleObligation" ADD CONSTRAINT "ReleaseNotesRuleObligat
 -- (`obligationsVerdict()`), and this is so the row cannot be written that way in
 -- the first place.
 --
+-- The scope too, and not only the seal. An `obligation_waiver`'s scope names a
+-- policy version, a rule key, a rule version, a country and an obligation key
+-- (section 7.8), and the foreign key only holds the pair (id, type). So an
+-- approval waiving Singapore's subject label could be named by Korea's
+-- fourteen-day notice, and the row would read `waived` -- which the verdict
+-- refuses at send time, but the stored state and the admin screen would both
+-- say a duty was waived that nobody waived. A review found exactly that.
+--
+-- Every member is compared, and `IS DISTINCT FROM` so a NULL on either side is
+-- a mismatch rather than a comparison that answers nothing. The duty's own rule
+-- is read through `countryRuleId`, which is where its scope actually lives.
+--
 -- Revocation is deliberately *not* checked here. A revoked waiver has to stay
 -- named: the duty goes back to unsettled and the rule stops sending, which is
 -- what a revocation is for, and deleting the link would erase the record of
 -- what had been decided. Section 7.8 says the admin screen shows it as it is.
-CREATE FUNCTION "release_notes_rule_obligation_waiver_sealed"()
+CREATE FUNCTION "release_notes_rule_obligation_waiver_scope"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    sealed TIMESTAMP(3);
+    approval RECORD;
+    rule RECORD;
 BEGIN
     IF NEW."waiverApprovalId" IS NULL THEN
         RETURN NEW;
     END IF;
 
     EXECUTE pg_catalog.format(
-        'SELECT a."sealedAt" FROM %I."EmailSendApproval" a WHERE a."id" = $1 FOR SHARE',
+        'SELECT a."sealedAt", a."policyVersionId", a."ruleKey", a."ruleVersion",
+                a."country", a."obligationKey"
+         FROM %I."EmailSendApproval" a WHERE a."id" = $1 FOR SHARE',
         TG_TABLE_SCHEMA
-    ) INTO sealed USING NEW."waiverApprovalId";
+    ) INTO approval USING NEW."waiverApprovalId";
 
-    IF sealed IS NULL THEN
+    IF approval."sealedAt" IS NULL THEN
         RAISE EXCEPTION 'EmailSendApproval % is not sealed, so it cannot waive %.',
             NEW."waiverApprovalId", NEW."obligationKey"
             USING ERRCODE = 'check_violation';
     END IF;
+
+    -- FOR SHARE on the rule as well: the scope compared here has to still be
+    -- the scope when this commits, and the rule version is the one a waiver
+    -- names.
+    EXECUTE pg_catalog.format(
+        'SELECT r."policyVersionId", r."countryCode", r."ruleKey", r."ruleVersion"
+         FROM %I."ReleaseNotesCountryRule" r WHERE r."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO rule USING NEW."countryRuleId";
+
+    IF rule IS NULL THEN
+        RAISE EXCEPTION 'ReleaseNotesCountryRule % does not exist.', NEW."countryRuleId"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF approval."policyVersionId" IS DISTINCT FROM rule."policyVersionId"
+        OR approval."ruleKey" IS DISTINCT FROM rule."ruleKey"
+        OR approval."ruleVersion" IS DISTINCT FROM rule."ruleVersion"
+        OR approval."country" IS DISTINCT FROM rule."countryCode"
+        OR approval."obligationKey" IS DISTINCT FROM NEW."obligationKey"
+    THEN
+        RAISE EXCEPTION
+            'EmailSendApproval % waives %/%/% version %, not %/% of rule % version %.',
+            NEW."waiverApprovalId", approval."country", approval."ruleKey",
+            approval."obligationKey", approval."ruleVersion",
+            rule."countryCode", NEW."obligationKey", rule."ruleKey", rule."ruleVersion"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER "release_notes_rule_obligation_waiver_sealed"
+CREATE TRIGGER "release_notes_rule_obligation_waiver_scope"
     BEFORE INSERT OR UPDATE ON "ReleaseNotesRuleObligation"
-    FOR EACH ROW EXECUTE FUNCTION "release_notes_rule_obligation_waiver_sealed"();
+    FOR EACH ROW EXECUTE FUNCTION "release_notes_rule_obligation_waiver_scope"();
 
 COMMIT;

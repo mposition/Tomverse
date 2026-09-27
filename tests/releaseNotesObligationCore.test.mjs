@@ -212,8 +212,13 @@ test("a deferral settles until its date, and warns before it", () => {
   const exactly = verdict({ stored: withDeferral(new Date(NOW.getTime()), 7) });
   assert.equal(exactly.obligations[0].reason, "deferral_overdue");
 
-  // No warning window is not a warning at every moment.
+  // A deferral with no warning window does not settle. The first version read it
+  // as "no warning" and settled -- a duty whose deadline nobody would be told
+  // about, which is the one thing section 7.7 asks a deferral to have. The CHECK
+  // refuses to store one now, and this is what a row from before it gets.
   const noWindow = verdict({ stored: withDeferral(new Date(NOW.getTime() + DAY), null) });
+  assert.equal(noWindow.allSettled, false);
+  assert.equal(noWindow.obligations[0].reason, "deferral_not_watched");
   assert.deepEqual(noWindow.warnings, []);
 });
 

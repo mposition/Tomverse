@@ -37,10 +37,17 @@ import {
  * timing, the latest consent, and conflicts -- so this asks
  * `jurisdictionForUser()`, the same call the drain makes, per candidate.
  *
- * Candidates are the accounts that could receive marketing at all: anyone with
- * a consent record for a consent-required purpose, and the members of a sealed,
- * unrevoked `risk_accepted` approval. Asking the whole user table would be a
+ * Candidates are the accounts a Korean marketing message could reach: anyone
+ * whose current address has a consent record for a consent-required purpose, and
+ * the members of a sealed, unrevoked `risk_accepted` approval scoped to such a
+ * purpose on the active policy version. Asking the whole user table would be a
  * jurisdiction lookup per account for a question about a few.
+ *
+ * "Could reach" is an upper bound, and deliberately so. The two filters this
+ * cannot apply -- the member's address digest against the account's address now,
+ * and whatever the send decides about suppression -- can only shrink the set, and
+ * a smaller set has a later deadline. Being wrong in this direction refuses
+ * Korean marketing early; being wrong in the other sends without the notice.
  *
  * ## Which anchor, and whose
  *
@@ -76,17 +83,31 @@ async function candidates(): Promise<
 > {
   const out = new Map<string, { consentAnchor: Date | null; deemedAnchor: Date | null }>();
 
-  // The latest action per (user, purpose), by address, which is where consent
-  // attaches -- the same reading the send's own withdrawal check uses.
+  // The latest action per (user, purpose), among the records for the address the
+  // account uses now.
+  //
+  // Consent attaches to an address rather than to an account
+  // (docs/policy/email-notifications.md section 13.4), and `ConsentRecord` keeps
+  // the address as it was. So a `granted` record for a mailbox somebody has since
+  // stopped using is not a consent that could be relied on, and counting it put
+  // an anchor -- and therefore a deadline -- on a person no Korean message would
+  // go to. The first version of this query said "by address" in a comment and
+  // did not do it, which a review pointed out.
+  //
+  // Normalised the way suppression normalises an address, so a change of case is
+  // not a change of mailbox.
   const latest = await prisma.$queryRaw<
     { userId: string; action: string; occurredAt: Date }[]
   >`
-    SELECT DISTINCT ON ("userId", purpose)
-           "userId", action, "occurredAt"
-      FROM "ConsentRecord"
-     WHERE "userId" IS NOT NULL
-       AND purpose = ANY(${[...CONSENT_REQUIRED_PURPOSES]}::text[])
-     ORDER BY "userId", purpose, "occurredAt" DESC, "createdAt" DESC
+    SELECT DISTINCT ON (c."userId", c.purpose)
+           c."userId", c.action, c."occurredAt"
+      FROM "ConsentRecord" c
+      JOIN "User" u ON u."id" = c."userId"
+     WHERE c."userId" IS NOT NULL
+       AND c.purpose = ANY(${[...CONSENT_REQUIRED_PURPOSES]}::text[])
+       AND u."email" IS NOT NULL
+       AND lower(btrim(c."emailAddress")) = lower(btrim(u."email"))
+     ORDER BY c."userId", c.purpose, c."occurredAt" DESC, c."createdAt" DESC
   `;
   for (const row of latest) {
     if (row.action !== "granted" && row.action !== "reconfirmed") continue;
@@ -97,16 +118,37 @@ async function candidates(): Promise<
     out.set(row.userId, seen);
   }
 
-  const members = await prisma.emailSendApprovalMember.findMany({
-    where: {
-      approval: {
-        approvalType: "risk_accepted",
-        sealedAt: { not: null },
-        revocations: { none: {} },
-      },
-    },
-    select: { userId: true, noticeAnchorAt: true },
+  // The cohort of an override that could actually mail somebody: sealed,
+  // unrevoked, scoped to a purpose that needs consent, and on the policy version
+  // a send composes under. The first version asked only for sealed and unrevoked,
+  // so an approval from an older policy version, or one scoped to a purpose that
+  // needs no consent at all, put its members' anchors into this answer.
+  //
+  // What is still not compared here is the member's address digest against the
+  // account's address now. That comparison is the send's own
+  // (`overrideWouldSend()`), and it needs the normalisation the cohort was sealed
+  // with; this module cannot reproduce it without the slice that writes these
+  // rows. Until the two meet, a member who has changed address is still counted,
+  // and the effect is a deadline earlier than it needs to be -- which refuses
+  // Korean marketing rather than sending it, and is the direction to be wrong in.
+  const active = await prisma.emailPolicyVersion.findFirst({
+    where: { status: "active" },
+    select: { id: true },
   });
+  const members = active
+    ? await prisma.emailSendApprovalMember.findMany({
+        where: {
+          approval: {
+            approvalType: "risk_accepted",
+            sealedAt: { not: null },
+            revocations: { none: {} },
+            policyVersionId: active.id,
+            purposeKey: { in: ["*", ...CONSENT_REQUIRED_PURPOSES] },
+          },
+        },
+        select: { userId: true, noticeAnchorAt: true },
+      })
+    : [];
   for (const row of members) {
     const seen = out.get(row.userId) ?? { consentAnchor: null, deemedAnchor: null };
     if (seen.deemedAnchor === null || row.noticeAnchorAt < seen.deemedAnchor) {

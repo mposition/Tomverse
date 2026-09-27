@@ -124,6 +124,24 @@ const BLOCK_VALUE: Record<
   abn: (identity) => identity.abn,
 };
 
+/**
+ * Which of these blocks the environment has no value for.
+ *
+ * Exported because a readiness check that answers for one country's duty has to
+ * ask the same question the renderer asks -- `businessIdentityProblems()` folds
+ * the answer into a warning, and a warning is not an answer to "is this duty
+ * done". A review found a Korean duty settling while the telephone number the
+ * statute names had no value, because the only thing that looked was that
+ * warning.
+ */
+export const identityBlocksWithoutValue = (
+  env: Env,
+  blocks: readonly string[]
+): string[] => {
+  const identity = readBusinessIdentity(env);
+  return blocks.filter((block) => !BLOCK_VALUE[block]?.(identity));
+};
+
 export type BusinessIdentityProblem = {
   severity: "error" | "warning";
   code: "EMAIL_BUSINESS_IDENTITY_INCOMPLETE" | "EMAIL_BUSINESS_IDENTITY_JURISDICTION_INCOMPLETE";

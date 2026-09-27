@@ -169,6 +169,13 @@ test("each state carries its own evidence and only its own", async () => {
   const ruleId = await koreanRuleId();
   await prisma.releaseNotesRuleObligation.deleteMany({});
   const sealed = await approval({ sealedAt: new Date("2026-09-20T00:00:00.000Z") });
+  // Sealed for the duty the fixture is about, so an evidence case fails on its
+  // evidence rather than on the waiver's scope -- two different refusals, and a
+  // case that could be either proves neither.
+  const sealedForFixture = await approval({
+    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    obligationKey: "consent_result_notice_14_days",
+  });
 
   const cases: Array<[Partial<Prisma.ReleaseNotesRuleObligationUncheckedCreateInput>, RegExp]> = [
     // implemented without its check, or with another state's evidence
@@ -176,11 +183,16 @@ test("each state carries its own evidence and only its own", async () => {
     [{ readinessCheck: "   " }, /evidence_check/],
     [{ dueBy: new Date("2028-01-01T00:00:00.000Z") }, /evidence_check/],
     [
-      { waiverApprovalId: sealed.id, waiverApprovalType: "obligation_waiver" },
+      { waiverApprovalId: sealedForFixture.id, waiverApprovalType: "obligation_waiver" },
       /evidence_check/,
     ],
-    // deferred without a date, or with a check
+    // deferred without a date, without a warning window, or with a check
     [{ state: "deferred", readinessCheck: null }, /evidence_check/],
+    [
+      // A deadline and no window: a duty whose date nobody would be told about.
+      { state: "deferred", readinessCheck: null, dueBy: new Date("2028-01-01T00:00:00.000Z") },
+      /evidence_check/,
+    ],
     [
       { state: "deferred", dueBy: new Date("2028-01-01T00:00:00.000Z") },
       /evidence_check/,
@@ -190,7 +202,7 @@ test("each state carries its own evidence and only its own", async () => {
     [
       {
         state: "waived",
-        waiverApprovalId: sealed.id,
+        waiverApprovalId: sealedForFixture.id,
         waiverApprovalType: "obligation_waiver",
       },
       /evidence_check/,
@@ -290,6 +302,79 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
       }),
     /[Ff]oreign key/
   );
+});
+
+test("a waiver has to waive this duty, of this rule, of this policy version", async () => {
+  // The foreign key holds the pair (id, approvalType) and nothing more, so an
+  // approval waiving Singapore's subject label could be named by Korea's
+  // fourteen-day notice. The verdict refuses that at send time, but the stored
+  // state and the admin screen would both say a duty was waived that nobody
+  // waived -- so the row cannot be written.
+  const version = await draft();
+  const ruleId = await koreanRuleId();
+  await prisma.releaseNotesRuleObligation.deleteMany({});
+  const rule = await prisma.releaseNotesCountryRule.findUniqueOrThrow({
+    where: { id: ruleId },
+    select: { ruleKey: true, ruleVersion: true, policyVersionId: true },
+  });
+
+  const other = await ensureJurisdictionPolicyDraft({ version: `test-${randomUUID()}` });
+  const scopes: Array<[Partial<Prisma.EmailSendApprovalUncheckedCreateInput>, string]> = [
+    [{ country: "SG" }, "another country"],
+    [{ obligationKey: "body_disclosures" }, "another duty"],
+    [{ ruleVersion: rule.ruleVersion + 1 }, "another rule version"],
+    [{ ruleKey: releaseNotesRuleKey("SG") }, "another rule"],
+    [{ policyVersionId: other.version.id }, "another policy version"],
+    [{ country: null }, "no country at all"],
+    [{ obligationKey: null }, "no duty at all"],
+  ];
+
+  for (const [overrides, what] of scopes) {
+    const waiver = await approval({
+      sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+      ...overrides,
+    });
+    await refuses(
+      () =>
+        prisma.releaseNotesRuleObligation.create({
+          data: duty(ruleId, {
+            obligationKey: "advertising_subject_label",
+            state: "waived",
+            readinessCheck: null,
+            waiverApprovalId: waiver.id,
+            waiverApprovalType: "obligation_waiver",
+          }),
+        }),
+      /waives|does not exist/
+    );
+    assert.equal(
+      await prisma.releaseNotesRuleObligation.count(),
+      0,
+      `a waiver for ${what} was stored`
+    );
+  }
+
+  // The one that matches, so the test is about the comparison and not about the
+  // trigger refusing everything.
+  const exact = await approval({
+    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    policyVersionId: rule.policyVersionId,
+    ruleKey: rule.ruleKey,
+    ruleVersion: rule.ruleVersion,
+    country: "KR",
+    obligationKey: "advertising_subject_label",
+  });
+  await prisma.releaseNotesRuleObligation.create({
+    data: duty(ruleId, {
+      obligationKey: "advertising_subject_label",
+      state: "waived",
+      readinessCheck: null,
+      waiverApprovalId: exact.id,
+      waiverApprovalType: "obligation_waiver",
+    }),
+  });
+  assert.equal(await prisma.releaseNotesRuleObligation.count(), 1);
+  assert.ok(version.id);
 });
 
 test("a rule version a duty hangs off cannot be deleted", async () => {
