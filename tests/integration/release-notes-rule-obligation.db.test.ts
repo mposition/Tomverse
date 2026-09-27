@@ -369,8 +369,12 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
         }),
       /RNO_SCOPE_MISMATCH/
     );
+    // Scoped to this rule, not the whole table: creating the second policy draft
+    // below seeds that draft its own duty rows, so a global count answers about
+    // those too. A review found this exact line asserting 0 where the answer is
+    // the other draft seed.
     assert.equal(
-      await prisma.releaseNotesRuleObligation.count(),
+      await prisma.releaseNotesRuleObligation.count({ where: { countryRuleId: ruleId } }),
       0,
       `a waiver for ${what} was stored`
     );
@@ -418,7 +422,10 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
       waiverApprovalType: "obligation_waiver",
     }),
   });
-  assert.equal(await prisma.releaseNotesRuleObligation.count(), 1);
+  assert.equal(
+    await prisma.releaseNotesRuleObligation.count({ where: { countryRuleId: ruleId } }),
+    1
+  );
   assert.ok(version.id);
 });
 
@@ -475,7 +482,11 @@ test("the waiver writer records what the database accepts and reports what it re
     notes: "Same decision, recorded twice.",
   });
   assert.equal(again.ok, true);
-  assert.equal(await prisma.releaseNotesRuleObligation.count(), 1);
+  assert.equal(
+    await prisma.releaseNotesRuleObligation.count({ where: { countryRuleId: ruleId } }),
+    1,
+    "recording the same waiver twice made a second row"
+  );
 
   // An approval that waives another duty: refused, and named as a scope
   // mismatch rather than as something an operator has to guess at.
