@@ -216,12 +216,17 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-27, stage successor v3: the flag precondition adds no computed
 // element access. Source positions in promptRefinerStageAdmission.ts moved;
 // count and position-free inventory remain unchanged.
+//
+// 2026-09-27, package-gate repin: the reviewed marketing webhook fingerprint
+// provenance above MARKETING_WEBHOOK_PIPELINE_FINGERPRINT adds comment lines in
+// lib/marketingAutomationAccess.ts. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c1010043e9ded44250e2ac3884c528ee",
-  "18c6f88ac9fb95dceed9be2e55cb8c27",
+  "f45b025701de762d84c06ae51b561ea3",
+  "24775911c6e8cc13cf7b3b86bc5bf943",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

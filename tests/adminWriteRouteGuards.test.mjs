@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ADMIN_API_DIR = fileURLToPath(new URL("../app/api/admin/", import.meta.url));
@@ -95,7 +95,8 @@ const routes = routeFiles(ADMIN_API_DIR).map((path) => {
   const source = withoutComments(readFileSync(path, "utf8"));
   const imported = importedSources(source);
   return {
-    name: path.slice(ADMIN_API_DIR.length),
+    // Route identities are repository-style paths even when the filesystem is Windows.
+    name: path.slice(ADMIN_API_DIR.length).split(sep).join("/"),
     source,
     /**
      * Whether the route, or a service it calls, performs `name`.
