@@ -102,8 +102,31 @@ test("the seed settles no duty by waiving it", () => {
     .filter((duty) => duty.countryCode === "KR")
     .map((duty) => duty.obligationKey);
   assert.ok(!korean.includes("advertising_subject_label"));
-  assert.ok(!korean.includes("biennial_consent_notice"));
-  assert.ok(!korean.includes("consent_result_notice_14_days"));
+});
+
+test("the duties this build does not do have no row", () => {
+  // A seeded state is a claim that the duty is done, so the ones that are not
+  // are absent and their rule does not send. Two of Korea's are in that state
+  // for different reasons, and both are the mechanism working:
+  //
+  // - `bilingual_unsubscribe_notice`: the footer renders one language, never
+  //   both, so the duty is simply not done.
+  // - `consent_result_notice_14_days`: the notice needs the wording approved
+  //   in S2 section 4, which is not in this tree, so there is nothing to
+  //   confirm yet.
+  // - `advertising_subject_label`: waived by the owner, and a waiver is an
+  //   approval that only a person can write.
+  const korean = releaseNotesObligationSeed()
+    .filter((duty) => duty.countryCode === "KR")
+    .map((duty) => duty.obligationKey);
+  assert.deepEqual(
+    obligationsFor("KR").filter((key) => !korean.includes(key)),
+    [
+      "bilingual_unsubscribe_notice",
+      "consent_result_notice_14_days",
+      "advertising_subject_label",
+    ]
+  );
 });
 
 test("a duty with no row blocks its rule", () => {
@@ -140,6 +163,29 @@ test("implemented settles only while its own check passes", () => {
     stored: allImplemented().map((row) => ({ ...row, readinessCheck: null })),
   });
   assert.equal(nameless.obligations[0].reason, "readiness_check_unknown");
+
+  // An inherited property is not an answer. Reading `readiness[name]` reached
+  // the prototype, so a duty naming `toString` found a function, read it as
+  // truthy, and settled -- the fail-closed rule defeated by a name nobody
+  // checked.
+  for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+    const inherited = verdict({
+      stored: allImplemented().map((row) => ({ ...row, readinessCheck: name })),
+      readiness: {},
+    });
+    assert.equal(
+      inherited.obligations[0].reason,
+      "readiness_check_unknown",
+      `${name} settled a duty`
+    );
+  }
+
+  // And an own property that is not a boolean says nothing either way.
+  const notBoolean = verdict({
+    stored: allImplemented(),
+    readiness: { check: "yes" },
+  });
+  assert.equal(notBoolean.obligations[0].reason, "readiness_check_unknown");
 });
 
 test("a deferral settles until its date, and warns before it", () => {

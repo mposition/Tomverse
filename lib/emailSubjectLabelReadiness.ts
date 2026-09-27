@@ -49,11 +49,12 @@ import {
  * The profile keys whose subject prefix a statute requires, and the token it
  * has to be.
  *
- * Compared against the stored prefix **trimmed**: the seed carries
- * `"<ADV> "` with the space that separates the label from the subject, and an
- * operator storing `"<ADV>"` has satisfied the Spam Control Act just as well.
- * Trimmed equality still refuses an empty prefix, a different token, and a
- * prefix with anything else in it.
+ * The stored prefix may carry trailing space and nothing else. The seed's
+ * `"<ADV> "` separates the label from the subject, and `"<ADV>"` satisfies the
+ * Spam Control Act just as well -- but the composer concatenates the stored
+ * value unchanged, so a leading space makes the subject `" <ADV>Hello"`, which
+ * does not start with the label at all. Trimming both sides accepted exactly
+ * that, which a review found: readiness has to check the string the send sends.
  */
 export const REQUIRED_SUBJECT_PREFIX: Record<string, string> = {
   SG: "<ADV>",
@@ -119,7 +120,7 @@ export async function subjectLabelReadiness(
   const byKey = new Map(profiles.map((row) => [row.profileKey, row.subjectPrefix]));
 
   const missing = Object.entries(REQUIRED_SUBJECT_PREFIX)
-    .filter(([profileKey, prefix]) => (byKey.get(profileKey) ?? "").trim() !== prefix)
+    .filter(([profileKey, prefix]) => (byKey.get(profileKey) ?? "").trimEnd() !== prefix)
     .map(([profileKey]) => profileKey);
 
   if (missing.length === 0) return answer(true, active.id, []);

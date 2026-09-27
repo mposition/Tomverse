@@ -194,8 +194,15 @@ export const obligationsVerdict = (input: {
       // The CHECK holds a readiness check name here, so a null is a schema that
       // moved ahead of this build rather than a duty with no check.
       if (row.readinessCheck === null) return refused("readiness_check_unknown");
+      // An own property, and a boolean. `input.readiness[name]` reached the
+      // prototype, so a duty naming `toString` found an inherited function,
+      // read it as truthy and settled -- which is the fail-closed rule this
+      // branch exists for, defeated by a name nobody checked.
+      if (!Object.prototype.hasOwnProperty.call(input.readiness, row.readinessCheck)) {
+        return refused("readiness_check_unknown");
+      }
       const passing = input.readiness[row.readinessCheck];
-      if (passing === undefined) return refused("readiness_check_unknown");
+      if (typeof passing !== "boolean") return refused("readiness_check_unknown");
       return passing ? settled() : refused("readiness_check_failing");
     }
 
@@ -286,15 +293,16 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     warnDaysBefore: null,
     notes: `${DRAFT} section 7.7: name, address, email and telephone number (시행령 별표 6). The KR profile names contact_phone and the renderer drops a footer whose named block has no value, so readiness confirming the identity values is what confirms this.`,
   },
-  {
-    countryCode: "KR",
-    obligationKey: "bilingual_unsubscribe_notice",
-    state: "implemented",
-    readinessCheck: "emailUnsubscribeKeyring",
-    dueByIso: null,
-    warnDaysBefore: null,
-    notes: `${DRAFT} section 7.7: the unsubscribe notice in both languages and a simple means of acting on it. The footer prints both, and one-click already exists; the keyring check is what confirms the link can be produced at all.`,
-  },
+  // `bilingual_unsubscribe_notice` is deliberately absent. Section 7.7 marks it
+  // implemented, and this build does not do it: `renderJurisdictionFooter()`
+  // picks one language for the whole footer, so a Korean recipient is told about
+  // unsubscribing in Korean and an English one in English -- never both, which is
+  // what 별표 6 asks for. A review caught the first version claiming otherwise
+  // and resting it on the keyring check, which confirms neither language.
+  //
+  // So the duty has no row, it is unsettled, and its rule does not send. That is
+  // the mechanism reporting an unimplemented duty rather than a seed asserting
+  // one, and it is what has to be built before Korea can be sent to.
   {
     countryCode: "KR",
     obligationKey: "no_login_for_unsubscribe",
@@ -302,7 +310,22 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     readinessCheck: "emailUnsubscribeKeyring",
     dueByIso: null,
     warnDaysBefore: null,
-    notes: `${DRAFT} section 7.7: unsubscribing may not require a login. The token path is what makes that true, so the keyring check confirms it.`,
+    notes: `${DRAFT} section 7.7: unsubscribing may not require a login. What makes that true at runtime is that the link carries its own authority, so the keyring is the configuration this rests on -- with no keys the link is not produced and the send is refused rather than going out with a login-only route. That the route itself accepts the token without a session is a property of the code, pinned by tests/unsubscribeToken.test.mjs and the unsubscribe route's own tests, not something a readiness check can answer.`,
+  },
+  {
+    countryCode: "KR",
+    obligationKey: "biennial_consent_notice",
+    state: "deferred",
+    readinessCheck: null,
+    // Section 7.7 defers this one and says why the first deadline is 2028: the
+    // existing accounts all signed up in 2026, and the anchor is the signup
+    // date. This is the year that section names, as a backstop -- the precise
+    // per-recipient deadline is `biennialNoticeReadiness()`, which computes
+    // `actual consent ?? noticeAnchorAt` + two years for every Korean
+    // recipient and warns sixty days out.
+    dueByIso: "2028-01-01T00:00:00.000Z",
+    warnDaysBefore: 60,
+    notes: `${DRAFT} section 7.7: every two years, state the consent held (제50조제8항). Deferred with the section's own reasoning -- the earliest anchor is a 2026 signup, so the first deadline is in 2028 -- and watched per recipient by biennialNoticeReadiness() rather than by this date alone.`,
   },
   {
     countryCode: "SG",

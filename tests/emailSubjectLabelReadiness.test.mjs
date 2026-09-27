@@ -54,7 +54,10 @@ test("each required prefix is the one that country's profile carries", () => {
     assert.ok(profile, `${profileKey} has no seeded profile`);
     // Trimmed, for the reason the module gives: the space after the label is
     // separation, not part of the statutory token.
-    assert.equal(profile.subjectPrefix?.trim(), prefix, `${profileKey}'s prefix`);
+    // Trailing space only, for the reason the module gives: the composer
+    // concatenates the stored value, so a leading space would push the label
+    // off the front of the subject.
+    assert.equal(profile.subjectPrefix?.trimEnd(), prefix, `${profileKey}'s prefix`);
   }
 });
 

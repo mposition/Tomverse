@@ -17,6 +17,8 @@ import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
+import { biennialNoticeReadiness } from "@/lib/biennialConsentNoticeReadiness";
+import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
@@ -249,6 +251,14 @@ const readinessResponse = async (head = false) => {
   // MARKETING_EMAIL_FROM is set, for the reason the keyring gives, and only
   // asked at all once the database answered -- it reads the active policy
   // version, and a failing database has already made this endpoint not-ready.
+  //
+  // When it cannot answer -- a timeout or an error on this query alone, after
+  // the database probe succeeded -- the result depends on whether the answer
+  // matters. Before marketing is configured there is nothing to hold back, so
+  // not knowing is not a reason to fail. Once it is, not knowing is exactly the
+  // state EM-10 describes: answering ready while every Singaporean send would
+  // be refused. Reading an unknown as ready was fail-open in the half where it
+  // counts.
   const subjectLabels = databaseResult.ready
     ? await withDeadline(
         subjectLabelReadiness(),
@@ -256,7 +266,21 @@ const readinessResponse = async (head = false) => {
         "The email subject label readiness check timed out."
       ).catch(() => null)
     : null;
-  const emailSubjectLabels = subjectLabels === null ? true : subjectLabels.ready;
+  const emailSubjectLabels =
+    subjectLabels === null ? !marketingSendingConfigured(process.env) : subjectLabels.ready;
+  // The two-yearly Korean notice is deferred, and section 7.7 asks for the
+  // device that stops it being forgotten: the deadline is a fact about rows,
+  // not the constant on the duty. Same shape as above, including what an
+  // unanswerable query means.
+  const biennialNotice = databaseResult.ready
+    ? await withDeadline(
+        biennialNoticeReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The biennial consent notice readiness check timed out."
+      ).catch(() => null)
+    : null;
+  const emailBiennialConsentNotice =
+    biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -264,7 +288,7 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity && emailSubjectLabels;
+    emailBusinessIdentity && emailSubjectLabels && emailBiennialConsentNotice;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -638,6 +662,7 @@ const readinessResponse = async (head = false) => {
         emailConsentKeyring,
         emailBusinessIdentity,
         emailSubjectLabels,
+        emailBiennialConsentNotice,
       },
       traceId,
     },
