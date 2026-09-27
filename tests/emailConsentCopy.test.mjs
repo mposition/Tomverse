@@ -29,7 +29,11 @@ import {
   CONSENT_COPY_DIGESTS,
   consentCopyDigestKey,
 } from "../lib/emailConsentCopyDigests.ts";
-import { consentCopyPromisesNoUnrequestedSend } from "../lib/emailConsentCopy.ts";
+import {
+  MAKES_NO_SEND_PROMISE_VERSIONS,
+  PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
+  consentCopyPromisesNoUnrequestedSend,
+} from "../lib/emailConsentCopy.ts";
 import { consentCopyForLanguage } from "../lib/emailConsentCopyLocale.ts";
 
 test("every device has every approved language", () => {
@@ -181,7 +185,9 @@ test("the wording defects waiting on a new version are the ones we know about", 
   // adding a version.
   // The first clause only. The second one ("a menos que você peça") does name
   // the reader, which is what makes this read as a slip rather than a choice.
-  const firstClause = consentCopy("noticeBody", "pt").split(" e não enviará")[0];
+  // Bound to the version whose wording it is. A later version correcting it is
+  // the outcome this test is waiting for, and it must not fail that version.
+  const firstClause = consentCopy("noticeBody", "pt", "2026-09-23").split(" e não enviará")[0];
   assert.equal(firstClause, "A Tomverse não enviou novidades do produto");
   assert.ok(
     !/você|lhe |te /.test(firstClause),
@@ -319,17 +325,24 @@ const cellsOf = (row) => row.children.map((cell) => textOf(cell).trim());
  * above the real one shadow it, and the approved cells below could then be
  * edited freely.
  */
-const sectionOf = (tree, prefix, depth) => {
+const sectionOf = (tree, number, depth) => {
   const at = [];
   tree.children.forEach((node, index) => {
-    if (node.type === "heading" && node.depth === depth && textOf(node).startsWith(prefix)) {
+    // The heading's first token, compared exactly. `startsWith("1.")` also
+    // matched `1.5`, so a section inserted with a nearby number could be taken
+    // for the one being located.
+    if (
+      node.type === "heading" &&
+      node.depth === depth &&
+      textOf(node).trim().split(/\s+/)[0] === number
+    ) {
       at.push(index);
     }
   });
   assert.equal(
     at.length,
     1,
-    `the approved document must hold exactly one depth-${depth} ${prefix} heading`
+    `the approved document must hold exactly one depth-${depth} ${number} heading`
   );
   const from = at[0];
   const sectionDepth = tree.children[from].depth;
@@ -344,11 +357,11 @@ const sectionOf = (tree, prefix, depth) => {
   return tree.children.slice(from, to);
 };
 
-/** Every heading in a section's nodes, as `prefix` strings. */
+/** Every heading number in a section's nodes, at one depth. */
 const headingsOf = (nodes, depth) =>
   nodes
     .filter((node) => node.type === "heading" && node.depth === depth)
-    .map((node) => textOf(node).replace(/^(\S+).*$/, "$1"));
+    .map((node) => textOf(node).trim().split(/\s+/)[0]);
 
 /**
  * Every table in a section, with the last paragraph before it as its label.
@@ -371,30 +384,19 @@ const tablesOf = (nodes) => {
 };
 
 /**
- * Where each key's approved cell is: the subsection, the bold label the table
- * follows (null when the subsection holds exactly one table), and for the
- * transposed button table the role row. A string is compared with that one cell
- * and nothing else, so neither a copy of the sentence elsewhere nor a swap
- * between two cells of the same language can stand in for it.
+ * The one cell a key's approved string must equal, in one version's own part of
+ * the document. Fails unless that cell is unique.
+ *
+ * The location comes from the version (`deviceCells`), not a constant: a new
+ * version's wording is approved in a new section, so a map fixed at 3.A–3.D
+ * meant the second version could not be checked against its own record at all.
  */
-const APPROVED_CELL = {
-  signupOptIn: { heading: "3.A", label: null, role: null },
-  signupNotice: { heading: "3.B", label: null, role: null },
-  signupRefuse: { heading: "3.C", label: null, role: null },
-  noticeTitle: { heading: "3.D", label: "제목", role: null },
-  noticeBody: { heading: "3.D", label: "본문", role: null },
-  noticeAccept: { heading: "3.D", label: "세 버튼", role: "동의" },
-  noticeRefuse: { heading: "3.D", label: "세 버튼", role: "거부" },
-  noticeDismiss: { heading: "3.D", label: "세 버튼", role: "닫기" },
-};
-
-/** The one cell a key's approved string must equal. Fails unless it is unique. */
-const approvedCell = (tree, key, language) => {
-  const { heading, label, role } = APPROVED_CELL[key];
-  const tables = tablesOf(sectionOf(tree, heading, 3)).filter(
+const approvedCell = (tree, version, key, language) => {
+  const { section, label, role } = version.deviceCells[key];
+  const tables = tablesOf(sectionOf(tree, section, 3)).filter(
     (table) => label === null || table.label === label
   );
-  assert.equal(tables.length, 1, `${key}: expected exactly one table under ${heading} ${label ?? ""}`);
+  assert.equal(tables.length, 1, `${key}: expected exactly one table under ${section} ${label ?? ""}`);
   const [header, ...rows] = tables[0].rows;
 
   if (role === null) {
@@ -426,39 +428,34 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * at the top changed from 승인됨 to 반려됨, with all twenty-three tests still
  * green. The approval says sections 1 to 6, so all six are frozen here.
  *
- * Over the **bytes**, not a flattening of the tree. The first version hashed
- * headings, paragraph text, table cells and list items, and a review got past it
- * five ways: a fenced code block added inside section 1, an image added to an
- * approved Korean cell, a whole new section claiming the approval was withdrawn,
- * a link's URL changed, emphasis removed, a soft break made hard, a bullet list
- * made numbered. None of that is a hash collision -- the flattening simply threw
- * the difference away before hashing, which costs an attacker nothing.
+ * The **whole document**, because selecting ranges leaves gaps and the gaps are
+ * where a review kept getting through.
  *
- * Nothing is thrown away now. Section 10 does not permit reflowing an approved
- * paragraph either, so a digest that tolerated it was being generous about
- * something the contract is not generous about. CRLF is normalised to LF first,
- * because a checkout style is not a change to the record, and .gitattributes
- * pins the file to LF anyway.
+ * The first version hashed a flattening of the tree, and seven reader-visible
+ * edits survived it. The second hashed the source of chosen ranges, and a whole
+ * new section could be written into the space between two of them: an inserted
+ * `## 승인 철회` ends the preceding range early, so its entire body sits outside
+ * every range. Both attempts were arguments about which bytes matter, and this
+ * document does not have any that do not -- section 9 holds the owner's decision
+ * B and the rule against fabricating consent, section 10 is the edit procedure
+ * this very digest enforces, and the tests and four modules cite both.
  *
- * The ranges come from the parser (`position.offset`), so what is hashed is
- * exactly what was parsed as those sections.
+ * So: every byte, CRLF normalised to LF because a checkout style is not a change
+ * to the record (and .gitattributes pins the file to LF anyway). Any edit at all
+ * moves it, including an editorial one, which is what section 10 already says
+ * about this document.
  *
  * Recorded, not computed: a digest this test derives from whatever it is handed
  * proves only that sha256 is deterministic. Moving it means editing a line that
  * says, in this file, that the owner's record has changed — which is the edit
  * section 10 forbids, and the one a reviewer sees for what it is.
+ *
+ * Each version **also** pins its own record section
+ * (`CONSENT_COPY_VERSIONS[].recordDigest`), because this one has to move when a
+ * version is added and that move would otherwise cover for an edit to an
+ * earlier version's approval table in the same commit.
  */
-const APPROVED_RECORD_DIGEST = "ed08fdbcccaa4a497fbe5a26b5e1e864";
-
-/** The sections the owner's approval covers, by heading prefix and depth. */
-const APPROVED_SECTIONS = [
-  ["1.", 2],
-  ["2.", 2],
-  ["3.", 2],
-  ["4.", 2],
-  ["5.", 2],
-  ["6.", 2],
-];
+const APPROVED_DOCUMENT_DIGEST = "ceab5b00849e7254fa8b80018d7581b9";
 
 /** The source bytes of a section, from the parser's own offsets. */
 const sourceOf = (source, nodes) => {
@@ -467,35 +464,37 @@ const sourceOf = (source, nodes) => {
   return source.slice(from, to);
 };
 
-test("the whole approved record is the one the owner signed", () => {
-  const source = approvedSource();
-  const tree = approvedTree();
-  const firstSection = tree.children.findIndex(
-    (node) => node.type === "heading" && textOf(node).startsWith("1.")
-  );
-  assert.ok(firstSection > 0, "the status block above section 1 is missing");
-
-  const ranges = [
-    // The status block: who approved it, when, and that it is approved at all.
-    sourceOf(source, tree.children.slice(0, firstSection)),
-    ...APPROVED_SECTIONS.map(([prefix, depth]) =>
-      sourceOf(source, sectionOf(tree, prefix, depth))
-    ),
-    // Every version's approval record, so adding a version cannot stop the
-    // earlier ones' tables and digests from being covered.
-    ...CONSENT_COPY_VERSIONS.map(({ recordSection }) =>
-      sourceOf(source, sectionOf(tree, recordSection, 2))
-    ),
-  ];
-  const digest = createHash("sha256").update(ranges.join("\u0000")).digest("hex").slice(0, 32);
-
+test("the approved document is the one the owner signed, every byte of it", () => {
+  const digest = createHash("sha256").update(approvedSource()).digest("hex").slice(0, 32);
   assert.equal(
     digest,
-    APPROVED_RECORD_DIGEST,
-    "The approved record changed. The status block, sections 1 to 6 and every " +
-      "version's approval record are what the owner signed, and section 10 says " +
-      `a change is a new version in a new section. If this is that, record "${digest}".`
+    APPROVED_DOCUMENT_DIGEST,
+    "The approved document changed. Section 10 says a change to approved wording " +
+      "is a new version in a new section rather than an edit, and everything else " +
+      "here -- the decisions in section 9, the procedure in section 10 -- is cited " +
+      `by code. If this change is meant, record "${digest}".`
   );
+});
+
+test("each version's own record is pinned to that version", () => {
+  // The document digest moves whenever a version is added, legitimately. These
+  // do not: an edit to an earlier version's approval table or digest fails
+  // against the version it belongs to, rather than against a number that was
+  // going to change in that commit anyway.
+  const source = approvedSource();
+  const tree = approvedTree();
+  for (const version of CONSENT_COPY_VERSIONS) {
+    const digest = createHash("sha256")
+      .update(sourceOf(source, sectionOf(tree, version.recordSection, 2)))
+      .digest("hex")
+      .slice(0, 32);
+    assert.equal(
+      digest,
+      version.recordDigest,
+      `section ${version.recordSection} is no longer the record approved for ` +
+        `${version.version}. If this change is meant, record "${digest}".`
+    );
+  }
 });
 
 test("every approved string is exactly its own cell of the approved document", () => {
@@ -509,19 +508,21 @@ test("every approved string is exactly its own cell of the approved document", (
   // cells, or two buttons, trade places. Now each key has one cell -- section,
   // table, role and language -- and must equal it, whole.
   const tree = approvedTree();
-  for (const key of CONSENT_COPY_KEYS) {
-    assert.ok(APPROVED_CELL[key], `${key} has no approved cell`);
-    for (const language of CONSENT_COPY_LANGUAGES) {
-      assert.equal(
-        consentCopy(key, language),
-        approvedCell(tree, key, language),
-        `${key}.${language} differs from its approved cell`
-      );
+  for (const version of CONSENT_COPY_VERSIONS) {
+    for (const key of CONSENT_COPY_KEYS) {
+      assert.ok(version.deviceCells[key], `${version.version}.${key} has no approved cell`);
+      for (const language of CONSENT_COPY_LANGUAGES) {
+        assert.equal(
+          consentCopy(key, language, version.version),
+          approvedCell(tree, version, key, language),
+          `${version.version}.${key}.${language} differs from its approved cell`
+        );
+      }
     }
   }
 });
 
-test("section 3 holds exactly the approved devices, tables and roles", () => {
+test("each version's device sections hold exactly its devices, tables and roles", () => {
   // Reverse completeness. Every test above walks the eight keys the code
   // declares and finds each one's cell, which says nothing about what else the
   // document claims was approved: a `### 3.E` device, a fourth button role, or
@@ -529,6 +530,26 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
   // pass while the code knew nothing about them. The owner signed section 3 as
   // a whole, so the whole of it is compared.
   const tree = approvedTree();
+  for (const version of CONSENT_COPY_VERSIONS) {
+    // The device subsections this version names, and the summary that sits
+    // above them. Derived from the version rather than written here, so a second
+    // version is checked against its own section rather than against 3.A-3.D.
+    const sections = [...new Set(Object.values(version.deviceCells).map((cell) => cell.section))];
+    const parent = sections[0].split(".")[0] + ".";
+    assert.ok(
+      sections.every((name) => name.startsWith(parent)),
+      `${version.version}'s devices are spread across more than one section`
+    );
+    assert.deepEqual(
+      headingsOf(sectionOf(tree, parent, 2), 3),
+      [parent + "0", ...sections.sort()],
+      `section ${parent} does not hold exactly ${version.version}'s devices`
+    );
+  }
+
+  // The rest is this version's shape, which is the only one written down.
+  const version = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
+  assert.equal(version.version, "2026-09-23", "a new version needs its own expected shape here");
   const section = sectionOf(tree, "3.", 2);
 
   assert.deepEqual(headingsOf(section, 3), ["3.0", "3.A", "3.B", "3.C", "3.D"]);
@@ -660,6 +681,31 @@ test("the approval section records the digest of each version, once, on that ver
       new RegExp(`버전 ${version.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`),
       `the digest in ${recordSection} does not follow the line naming ${version}`
     );
+  }
+});
+
+test("every version says whether it promises not to send unasked", () => {
+  // Whether a version makes that promise decides whether the risk_accepted
+  // override may mail somebody who was shown it (section 9.1). A new version
+  // inheriting a silent default would decide that by accident, so each one has
+  // to be in exactly one of the two sets.
+  for (const { version } of CONSENT_COPY_VERSIONS) {
+    const promises = PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(version);
+    const does_not = MAKES_NO_SEND_PROMISE_VERSIONS.has(version);
+    assert.notEqual(
+      promises,
+      does_not,
+      `${version} is in neither promise set, or in both`
+    );
+    assert.equal(consentCopyPromisesNoUnrequestedSend(version), promises);
+  }
+  // And neither set names a version that does not exist.
+  const known = new Set(CONSENT_COPY_VERSIONS.map((entry) => entry.version));
+  for (const version of [
+    ...PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
+    ...MAKES_NO_SEND_PROMISE_VERSIONS,
+  ]) {
+    assert.ok(known.has(version), `${version} is classified but is not a version`);
   }
 });
 

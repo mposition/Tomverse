@@ -172,6 +172,30 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    * table rather than the test naming one version rows for every version.
    */
   readonly approvedSections: ReadonlyArray<readonly [string, string]>;
+  /**
+   * The digest of that record section's own bytes in the approved document.
+   *
+   * The document as a whole is pinned by one digest in
+   * `tests/emailConsentCopy.test.mjs`, and that pin has to move whenever a
+   * version is added -- legitimately. A review pointed out what that covers
+   * for: the same commit could edit an earlier version's approval table and
+   * record one new document digest, and nothing would tell the two apart.
+   *
+   * So each version also pins its own record. Adding a version does not touch
+   * these, and an edit to an approved record fails against the version it
+   * belongs to rather than against a number that was going to change anyway.
+   */
+  readonly recordDigest: string;
+  /**
+   * Where this version's four devices live in the approved document: the
+   * subsection, the bold label its table follows, and the button table's role
+   * row. Held per version because a new version's wording is approved in a new
+   * section (section 10), so the location is part of the version and not a
+   * constant the tests can assume.
+   */
+  readonly deviceCells: Readonly<
+    Record<ConsentCopyKey, { section: string; label: string | null; role: string | null }>
+  >;
   readonly copy: ConsentCopyTable;
 }> = Object.freeze([
   Object.freeze({
@@ -179,6 +203,19 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     approvedBy: "mposition",
     approvedAt: "2026-09-23",
     recordSection: "8.",
+    // Recorded, not computed. Moving it means saying that the owner's record
+    // for this version has changed.
+    recordDigest: "c1cb328e70178109be557037025ef807",
+    deviceCells: {
+      signupOptIn: { section: "3.A", label: null, role: null },
+      signupNotice: { section: "3.B", label: null, role: null },
+      signupRefuse: { section: "3.C", label: null, role: null },
+      noticeTitle: { section: "3.D", label: "제목", role: null },
+      noticeBody: { section: "3.D", label: "본문", role: null },
+      noticeAccept: { section: "3.D", label: "세 버튼", role: "동의" },
+      noticeRefuse: { section: "3.D", label: "세 버튼", role: "거부" },
+      noticeDismiss: { section: "3.D", label: "세 버튼", role: "닫기" },
+    },
     approvedSections: [
       ["§1", "R5 — 철회 시까지"],
       ["§2", "동의 장치는 7개 언어, 법률 문서는 fallback 유지"],
@@ -227,8 +264,20 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
  * section 5.6 rule 1 says we do not write `ConsentRecord(granted)` for these
  * accounts, and section 9.1.1 of the approved document records why.
  */
+/**
+ * Which approved versions promise we have not sent and will not unless asked.
+ *
+ * Every version has to be in here or in `MAKES_NO_SEND_PROMISE_VERSIONS`, and a
+ * test fails on one that is in neither: whether a version makes that promise
+ * decides whether the `risk_accepted` override may mail the person who was
+ * shown it (section 9.1), so a new version inheriting a silent default would
+ * decide that by accident.
+ */
 export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
   new Set(["2026-09-23"]);
+
+/** Versions that deliberately make no such promise. Empty, and stated. */
+export const MAKES_NO_SEND_PROMISE_VERSIONS: ReadonlySet<string> = new Set([]);
 
 export const consentCopyPromisesNoUnrequestedSend = (version: string) =>
   PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(version);
