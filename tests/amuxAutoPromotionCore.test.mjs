@@ -27,9 +27,10 @@ const day = 24 * 60 * 60 * 1000;
 const now = new Date("2026-09-25T00:00:00.000Z");
 const at = (ms) => new Date(now.getTime() + ms);
 
-test("version 8 ships the auto latch closed and leaves the recommendation latch closed", () => {
-  assert.equal(AUTO_LATCH, false);
+test("version 9 ships the auto latch open and leaves the recommendation latch closed", () => {
+  assert.equal(AUTO_LATCH, true);
   assert.equal(RECOMMENDATION_CODE_LATCH, false);
+  assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(autoPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);
   assert.equal(AUTO_GRADUATION_DECISIONS, 20);
@@ -133,12 +134,13 @@ test("a consume request is one card and a worker id is refused", () => {
   assert.equal(grant.ok, true);
 });
 
-test("the public auto route returns before the service while the latch is false", () => {
+test("the public auto route checks the latch before the service", () => {
   const route = readFileSync(new URL("../app/api/admin/amux/board-auto-promotion/route.ts", import.meta.url), "utf8");
   const service = readFileSync(new URL("../lib/amux/autoPromotionService.ts", import.meta.url), "utf8");
   const core = readFileSync(new URL("../lib/amux/autoPromotionCore.ts", import.meta.url), "utf8");
   assert.match(route, /if \(!AUTO_PROMOTION_CODE_LATCH\)/);
   assert.match(route, /apply_disabled/);
+  assert.match(core, /AUTO_PROMOTION_CODE_LATCH = true/);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(core.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTION_API_ENABLED"), false);
