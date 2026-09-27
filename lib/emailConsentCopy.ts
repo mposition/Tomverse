@@ -209,6 +209,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    */
   readonly deviceSummary: {
     readonly section: string;
+    /** The bold label its table follows, or null where the heading introduces it. */
+    readonly label: string | null;
     readonly rows: ReadonlyArray<readonly string[]>;
   };
   readonly copy: ConsentCopyTable;
@@ -233,6 +235,7 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     },
     deviceSummary: {
       section: "3.0",
+      label: null,
       rows: [
         ["#", "장치", "어디에", "무엇을 기록하는가"],
         ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],

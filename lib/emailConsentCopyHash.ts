@@ -107,7 +107,8 @@ export const allConsentCopyHashes = (): ReadonlyArray<{
  * a code-only check can tell that commit from a legitimate new version.
  *
  * So the version digest is also written into the approved document itself,
- * beside the approval (docs/policy/email-consent-copy-draft.md section 8).
+ * beside the approval, in that version's own record section
+ * (`CONSENT_COPY_VERSIONS[].recordSection`; section 8 for the first one).
  * Changing an approved byte now means editing the owner's signed record, which
  * is the edit section 10 forbids and the one a reviewer will see for what it
  * is. That does not make the change impossible; it makes it impossible to make

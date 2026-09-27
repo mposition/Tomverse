@@ -461,7 +461,7 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * version is added and that move would otherwise cover for an edit to an
  * earlier version's approval table in the same commit.
  */
-const APPROVED_DOCUMENT_DIGEST = "c71174cc6a65bdc672d85f4448fc3186";
+const APPROVED_DOCUMENT_DIGEST = "3b63e7c477450c63aaca8d59282c01d2";
 
 /** The source bytes of a section, from the parser's own offsets. */
 const sourceOf = (source, nodes) => {
@@ -559,9 +559,17 @@ test("each version's device sections hold exactly its devices, tables and roles"
       `section ${parent} does not hold exactly ${version.version}'s devices`
     );
 
-    // The summary says how many devices there are and what each records.
+    // The summary says how many devices there are and what each records, and
+    // it is the only table there: comparing the first one let a second table
+    // holding a fifth device sit below it, which is exactly what this is for.
+    const summary = tablesOf(sectionOf(tree, version.deviceSummary.section, 3));
     assert.deepEqual(
-      tablesOf(sectionOf(tree, version.deviceSummary.section, 3))[0].rows,
+      summary.map((table) => table.label),
+      [version.deviceSummary.label],
+      `${version.deviceSummary.section} does not hold exactly one summary table`
+    );
+    assert.deepEqual(
+      summary[0].rows,
       version.deviceSummary.rows.map((row) => [...row]),
       `${version.deviceSummary.section} is not ${version.version}'s device summary`
     );
@@ -643,6 +651,19 @@ test("the approval table binds every approved section to the version's approver 
         `${version.approvedBy}, ${version.approvedAt}`,
       ]),
     ], `${where}'s approval table is not this version's record`);
+
+    // And it approves the section the wording is actually in. Without this, a
+    // version could keep its devices in section 11 while its approval table
+    // named other sections entirely -- the two agreeing with each other and
+    // neither agreeing with the copy.
+    const parent = version.deviceSummary.section.split(".")[0];
+    assert.ok(
+      version.approvedSections.some(([section]) =>
+        new RegExp(`^§${parent}(\\.|$|[^0-9])`).test(section)
+      ),
+      `${where}'s approval table does not approve section ${parent}, where ` +
+        `${version.version}'s wording is`
+    );
   }
 });
 
@@ -660,21 +681,41 @@ test("the approval section records the digest of each version, once, on that ver
   // version's identity and not something this test assumes.
   for (const { version, recordSection } of CONSENT_COPY_VERSIONS) {
     const nodes = sectionOf(approvedTree(), recordSection, 2);
-    const paragraphs = nodes
-      .filter((node) => node.type === "paragraph")
-      .map((node) => textOf(node).trim());
-    const digests = paragraphs.filter((text) => /^sha256:[0-9a-f]+$/.test(text));
+    const at = nodes
+      .map((node, index) => ({ node, index }))
+      .filter(
+        ({ node }) =>
+          node.type === "paragraph" && /^sha256:[0-9a-f]+$/.test(textOf(node).trim())
+      );
     assert.deepEqual(
-      digests,
+      at.map(({ node }) => textOf(node).trim()),
       [consentCopyVersionDigest(version)],
       `section ${recordSection} must hold exactly one digest, this version's`
     );
-    const at = paragraphs.indexOf(digests[0]);
-    assert.ok(at > 0, `the digest in ${recordSection} has nothing above it naming a version`);
-    assert.match(
-      paragraphs[at - 1],
-      new RegExp(`버전 ${version.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`),
-      `the digest in ${recordSection} does not follow the line naming ${version}`
+
+    // The node immediately before it, not merely the paragraph before it.
+    // Filtering to paragraphs first let a table, a list or a quote sit between
+    // the version's line and its digest, which section 10.1 says it may not and
+    // which a reader would see as two separate claims.
+    const before = nodes[at[0].index - 1];
+    assert.ok(
+      before?.type === "paragraph",
+      `the digest in ${recordSection} does not directly follow a paragraph`
+    );
+    // The version named there, compared as a whole token: a substring match
+    // let `2026-09-2` answer for `2026-09-23`. Compared without a regex so the
+    // version id needs no escaping.
+    const line = textOf(before).trim();
+    const marker = "버전 " + version;
+    const start = line.indexOf(marker);
+    assert.ok(
+      start >= 0,
+      `the digest in ${recordSection} does not directly follow the line naming ${version}`
+    );
+    const after = line[start + marker.length];
+    assert.ok(
+      after === undefined || !/[w.-]/.test(after),
+      `the line above the digest in ${recordSection} names a longer version than ${version}`
     );
   }
 });
