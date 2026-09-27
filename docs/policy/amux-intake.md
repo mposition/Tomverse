@@ -3,11 +3,12 @@
 상태: **승인됨.** 운영자 `mposition`이 2026-09-24에 v1 설계를 승인했다.
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 1
 
-이 승인은 설계 권고 16개를 승인한다. 법적 보존 기간은 정하지 않는다. USD 상한 숫자는 정하지 않는다. production backlog 등록은 이 문서의 단계 목록이 요구하는 별도 승인 전이다. 코드 래치 `AMUX_INTAKE_APPLY_CODE_LATCH`는 꺼진 채로 둔다.
+이 승인은 설계 권고 16개를 승인한다. 법적 보존 기간은 정하지 않는다. USD 상한 숫자는 정하지 않는다. production backlog 등록은 2026-09-24에 mposition이 단계 8로 승인했다. 코드 래치 `AMUX_INTAKE_APPLY_CODE_LATCH`는 그 승인으로 켜진다. 환경 값이 `TOMVERSE_AMUX_INTAKE_APPLY=enabled`가 아니면 writer는 열리지 않는다.
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-24 mposition | 수동 Codex draft를 owner Admin이 확인하는 intake. 앱은 LLM을 호출하지 않고, Codex는 앱에 직접 쓰지 않는다. |
+| 1 | 2026-09-24 mposition | 단계 8 production backlog write를 승인한다. 코드 래치를 켠다. 법적 보존 기간과 USD 상한은 정하지 않는다. |
 
 실행 제어는 `docs/policy/development-agent-orchestration.md`가 정한다. 두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
 
@@ -70,7 +71,7 @@ raw 대화 원문은 앱 DB에 두지 않는다. 승인 전 draft의 기술적 �
 
 감사 metadata에는 approval id, digest, count, policy version, scanner version만 넣는다. 원문, 제목, secret finding은 넣지 않는다.
 
-Preview는 DB에 쓰지 않는다. 응답을 잃으면 즉시 재시도하지 않고 read-back한다. 일부만 있으면 `outcome_unknown`이고 자동 재시도를 멈춘다. card 생성, approval consume, audit는 한 트랜잭션이다.
+Preview는 DB에 쓰지 않는다. 등록 트랜잭션의 결과가 불명확하면 카드, draft, approval, audit를 한 번 읽는다. 넷이 같은 digest로 있으면 그 등록은 성공이다. 하나도 없으면 `outcome_unknown`이고 read-back은 `absent`다. 일부만 있으면 `outcome_unknown`이고 read-back은 `partial`이다. 그 읽기는 쓰지 않고 두 번째 트랜잭션을 열지 않는다. 자동 재시도는 없다. card 생성, approval consume, audit는 한 트랜잭션이다.
 
 ## 표시와 지역
 
@@ -78,14 +79,15 @@ draft를 등록 완료로, backlog를 실행 중으로, 제안을 검증 완료�
 
 ## 아직 열지 않는 것
 
-다음이 따로 승인되기 전에는 production 등록을 열지 않는다.
+다음은 단계 8과 별개로 닫혀 있다.
 
 - 법적 보존 기간
 - S0 실측 뒤의 USD 상한
-- 이 문서 단계 목록의 production backlog write
 - 앱이 LLM을 호출하는 경로
 - Codex direct connector
 - backlog에서 todo로의 승격
+
+production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 ## 단계
 
@@ -96,7 +98,7 @@ draft를 등록 완료로, backlog를 실행 중으로, 제안을 검증 완료�
 5. staging에서 preview만.
 6. staging backlog write.
 7. production에서 preview만.
-8. 별도 승인 뒤 production backlog write.
+8. production backlog write. 2026-09-24에 mposition이 승인했다. 코드 래치와 `TOMVERSE_AMUX_INTAKE_APPLY=enabled`가 함께 있어야 writer가 열린다.
 
 ## 책임
 
@@ -109,6 +111,6 @@ draft를 등록 완료로, backlog를 실행 중으로, 제안을 검증 완료�
 
 ## 등록 트랜잭션
 
-미리보기는 DB에 쓰지 않는다. 공개 route는 `AMUX_INTAKE_APPLY_CODE_LATCH`가 꺼져 있는 동안 트랜잭션을 열지 않는다. 래치가 켜진 뒤의 한 트랜잭션이 backlog 카드, 본문이 비어 있는 draft, consumed approval, human audit를 함께 쓴다. 그 트랜잭션은 todo, owner, claim, attempt, delivery, route decision, provider 비용, 사용자 credit를 늘리지 않는다.
+미리보기는 DB에 쓰지 않는다. 공개 route는 코드 래치가 켜져 있고 환경 값이 `enabled`일 때만 트랜잭션을 연다. 그 한 트랜잭션이 backlog 카드, 본문이 비어 있는 draft, consumed approval, human audit를 함께 쓴다. 그 트랜잭션은 todo, owner, claim, attempt, delivery, route decision, provider 비용, 사용자 credit를 늘리지 않는다. 같은 source key의 동시 등록이 유니크 제약에 걸리면 conflict다. 응답이 끊기면 위 read-back을 한 번 하고, 확정되지 않으면 `outcome_unknown`이며 자동 재시도를 멈춘다.
 
 저장하는 `sourceKey`는 HMAC의 대문자 hex다. 기존 카드의 source key 검사에 맞추기 위한 형태이고, 원문 task id는 저장하지 않는다.
