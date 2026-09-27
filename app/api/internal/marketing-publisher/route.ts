@@ -116,7 +116,25 @@ export async function POST(request: Request) {
 
   try {
     const skipped = whyNothingToDo();
-    await heartbeatMarketingPublisherRun(prisma, runId);
+    const beat = await heartbeatMarketingPublisherRun(prisma, runId);
+    if (!beat.beat) {
+      // The run is not this request's to finish: either something closed the
+      // row, or the database's clock says the deadline has passed. Closing it
+      // `succeeded` from here would be asking the trigger a question it has
+      // already answered, and continuing would be work nobody is waiting for.
+      const closedEarly = await finishMarketingPublisherRun(prisma, runId, {
+        status: "failed",
+        error: `heartbeat_${beat.reason}`,
+      }).catch(() => ({ status: "not_running" as const }));
+      return NextResponse.json(
+        {
+          runId,
+          status: closedEarly.status,
+          code: `heartbeat_${beat.reason}`,
+        },
+        { status: beat.reason === "not_running" ? 409 : 500 },
+      );
+    }
     const closed = await finishMarketingPublisherRun(prisma, runId, {
       status: "succeeded",
       processedCount: 0,

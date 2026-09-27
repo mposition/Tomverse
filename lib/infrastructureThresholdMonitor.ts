@@ -3,8 +3,7 @@ import "server-only";
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
 import {
-  MARKETING_PUBLISHER_JOB_KEY,
-  MARKETING_PUBLISHER_SILENCE_THRESHOLD_MS,
+  marketingPublisherSilenceWhere,
   marketingPublisherSilentRuns,
 } from "@/lib/marketingPublisherRunCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -31,19 +30,37 @@ const MONITOR_INTERVAL_MS = 15 * 60 * 1_000;
  * same queue and notifications as everything else this monitor raises.
  */
 async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
-  const running = await prisma.scheduledJobRun.findMany({
-    where: {
-      jobKey: MARKETING_PUBLISHER_JOB_KEY,
-      status: "running",
-      startedAt: { lt: new Date(now.getTime() - MARKETING_PUBLISHER_SILENCE_THRESHOLD_MS) },
-    },
-    select: { id: true, startedAt: true, heartbeatAt: true },
-    // Bounded: this is an alert, and one incident naming the count says as
-    // much as fifty naming each row.
-    take: 50,
-  });
+  // **The database decides which rows are silent, and in what order.**
+  //
+  // The first version filtered only on `startedAt` and then cut the result to
+  // fifty rows with no `orderBy`, so fifty long-running but healthy rows -- ones
+  // that started hours ago and beat a second ago -- could fill the page and
+  // leave the one genuinely silent run out of it. The alert then reported
+  // nothing while a dead worker's row sat open.
+  //
+  // So the predicate is the silence rule itself, expressed once in
+  // `marketingPublisherSilenceWhere`, and the rows come back oldest signal
+  // first. The count is read separately, because "how many are silent" must not
+  // be capped by how many this alert bothers to name.
+  const silenceWhere = marketingPublisherSilenceWhere(now);
+  const [total, running] = await Promise.all([
+    prisma.scheduledJobRun.count({ where: silenceWhere }),
+    prisma.scheduledJobRun.findMany({
+      where: silenceWhere,
+      select: { id: true, startedAt: true, heartbeatAt: true },
+      // Oldest sign of life first: a null heartbeat has never had one, so it is
+      // older than any timestamp, and the cut below keeps the worst cases.
+      orderBy: [
+        { heartbeatAt: { sort: "asc", nulls: "first" } },
+        { startedAt: "asc" },
+      ],
+      // Bounded: this is an alert, and one incident naming the count says as
+      // much as fifty naming each row.
+      take: 50,
+    }),
+  ]);
   const silent = marketingPublisherSilentRuns(running, now);
-  if (silent.length === 0) return 0;
+  if (total === 0 || silent.length === 0) return 0;
   await reportOperationalIncident({
     code: "MARKETING_PUBLISHER_RUN_SILENT",
     title: "Marketing publisher run went silent",
@@ -51,13 +68,13 @@ async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
     cooldownMs: 30 * 60 * 1_000,
     context: {
       component: "marketing-publisher",
-      silentRuns: String(silent.length),
+      silentRuns: String(total),
       oldestLastSignOfLife: silent
         .map((run) => run.lastSignOfLifeAt)
         .sort()[0] ?? "unknown",
     },
   });
-  return silent.length;
+  return total;
 }
 
 export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {

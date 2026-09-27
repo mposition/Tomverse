@@ -2685,7 +2685,7 @@ test("a publisher run starts on the database's clock and closes on it", async ()
   assert.ok(opened.heartbeatAt, "the trigger stamps the first heartbeat");
   assert.equal(opened.completedAt, null);
 
-  assert.equal(await heartbeatMarketingPublisherRun(prisma, runId), true);
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), { beat: true });
 
   const closed = await finishMarketingPublisherRun(prisma, runId, {
     status: "succeeded",
@@ -2842,6 +2842,59 @@ test("an ordinary scheduled job row is still writable end to end", async () => {
   // Its completion time is its own: the trigger returns before touching a row
   // with no deadline, so the process clock still stamps these.
   assert.ok(row.completedAt instanceof Date);
+});
+
+test("a run past its deadline cannot report a sign of life", async () => {
+  // The heartbeat had become a way to hide the thing the silence monitor
+  // watches for: the worker is force-killed at the deadline but the app route it
+  // called is not, and every beat moved `heartbeatAt` to the database's current
+  // time -- so a run whose worker died an hour ago looked alive and the incident
+  // was deferred indefinitely.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  const before = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+
+  // The deadline is moved into the past directly, because the only other way is
+  // to wait four minutes. The trigger refuses to move a deadline, so it is
+  // disabled for that one statement and immediately re-enabled.
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    await prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60_000) },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), {
+    beat: false,
+    reason: "past_deadline",
+  });
+  // And the column did not move, which is the whole point -- a beat that was
+  // refused but still stamped would leave the monitor exactly as blind.
+  const after = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(after.heartbeatAt?.getTime(), before.heartbeatAt?.getTime());
+  assert.equal(after.status, "running");
+});
+
+test("a heartbeat before the deadline still moves to the database's clock", async () => {
+  // The rule above must not have switched the ordinary case off.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  const before = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), { beat: true });
+  const after = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.ok(after.heartbeatAt);
+  assert.ok(before.heartbeatAt);
+  assert.ok(after.heartbeatAt.getTime() >= before.heartbeatAt.getTime());
+  // The caller's value is discarded: it asked for a time it chose and got the
+  // database's.
+  assert.ok(Math.abs(after.heartbeatAt.getTime() - Date.now()) < 60_000);
 });
 
 test("a closed run stays closed", async () => {

@@ -46,7 +46,9 @@
 import { z } from "zod";
 
 // One job key, defined where the scheduled-job catalogue keeps its keys.
-export { MARKETING_PUBLISHER_JOB_KEY } from "@/lib/scheduledJobsCore";
+import { MARKETING_PUBLISHER_JOB_KEY } from "@/lib/scheduledJobsCore";
+
+export { MARKETING_PUBLISHER_JOB_KEY };
 
 /**
  * What the service sends: exactly these two fields.
@@ -216,6 +218,34 @@ export const marketingPublisherDeadlineProblem = (
   // deadline exists to prevent.
   if (at - now.getTime() > timing.cronPeriodMs) return "deadline_too_far";
   return null;
+};
+
+/**
+ * The same silence rule as `marketingPublisherSilentRuns`, as a query.
+ *
+ * Two forms of one rule is a hazard, and the reason this is written as a
+ * function beside the predicate rather than inlined at the call site: a test
+ * runs the same case table through both and requires them to agree. What forced
+ * the query form is that a post-filter cannot page -- selecting rows the rule
+ * would reject and then cutting the page left the silent ones outside it.
+ *
+ * `heartbeatAt ?? startedAt` is the last sign of life, so a row is silent when
+ * it has a heartbeat older than the threshold, or no heartbeat and a start
+ * older than the threshold.
+ */
+export const marketingPublisherSilenceWhere = (
+  now: Date,
+  thresholdMs: number = MARKETING_PUBLISHER_SILENCE_THRESHOLD_MS,
+) => {
+  const cutoff = new Date(now.getTime() - thresholdMs);
+  return {
+    jobKey: MARKETING_PUBLISHER_JOB_KEY,
+    status: "running",
+    OR: [
+      { heartbeatAt: { lt: cutoff } },
+      { heartbeatAt: null, startedAt: { lt: cutoff } },
+    ],
+  };
 };
 
 /** A marketing publisher run that has gone quiet, for the operational monitor. */

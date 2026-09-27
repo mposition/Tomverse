@@ -13,6 +13,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   finishMarketingPublisherRun,
+  heartbeatMarketingPublisherRun,
+  MARKETING_PUBLISHER_HEARTBEAT_AFTER_DEADLINE_SQLSTATE,
   MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE,
   MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE,
   MarketingPublisherTransactionRefusedError,
@@ -363,4 +365,56 @@ test("a transaction_timeout of zero is the ordinary case and proceeds", async ()
       ["transaction_timeout", "statement_timeout", "idle_in_transaction_session_timeout"],
     );
   }
+});
+
+/**
+ * The shape Prisma raises for a SQLSTATE it does not map: `P2039`, with no
+ * `cause`, and the code buried in the adapter error. Built by the same helper
+ * the late-close tests use, because a test that invents a shape Prisma never
+ * produces passes while the path it claims to cover is dead -- which is exactly
+ * what happened to the late-close path for two review rounds.
+ */
+const unmappedSqlstateError = (code: string) =>
+  Object.assign(new Error("Raw query failed"), {
+    code: "P2039",
+    meta: { driverAdapterError: { cause: { originalCode: code } } },
+  });
+
+test("a heartbeat the trigger refused is past_deadline, not a crash", async () => {
+  const client = {
+    scheduledJobRun: {
+      async updateMany() {
+        throw unmappedSqlstateError(MARKETING_PUBLISHER_HEARTBEAT_AFTER_DEADLINE_SQLSTATE);
+      },
+    },
+  } as unknown as PrismaClient;
+  assert.deepEqual(await heartbeatMarketingPublisherRun(client, "run_1"), {
+    beat: false,
+    reason: "past_deadline",
+  });
+});
+
+test("a heartbeat that matched no row is not_running, and one that matched beat", async () => {
+  for (const [count, expected] of [
+    [0, { beat: false, reason: "not_running" }],
+    [1, { beat: true }],
+  ] as const) {
+    const client = {
+      scheduledJobRun: { async updateMany() { return { count }; } },
+    } as unknown as PrismaClient;
+    assert.deepEqual(await heartbeatMarketingPublisherRun(client, "run_1"), expected);
+  }
+});
+
+test("any other database error on a heartbeat is not mistaken for a deadline", async () => {
+  // Swallowing an unrelated failure as "past the deadline" would close a healthy
+  // run and say the wrong reason for it.
+  const client = {
+    scheduledJobRun: {
+      async updateMany() {
+        throw unmappedSqlstateError("40001");
+      },
+    },
+  } as unknown as PrismaClient;
+  await assert.rejects(heartbeatMarketingPublisherRun(client, "run_1"));
 });

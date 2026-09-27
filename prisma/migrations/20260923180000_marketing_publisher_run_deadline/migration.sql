@@ -29,6 +29,7 @@
 --
 --   TMDL1  a run that closed after its deadline asked to be `succeeded`
 --   TMDL2  a run asked to start after its own deadline
+--   TMDL3  a run asked to record a sign of life after its own deadline
 --
 -- The rest are `check_violation`: they mean the caller is wrong, and nothing
 -- is expected to catch them.
@@ -96,9 +97,26 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- Still running: a heartbeat is the database's time, not the caller's.
+    -- Still running: a heartbeat is the database's time, not the caller's,
+    -- and a run past its deadline has no sign of life left to give.
+    --
+    -- Without the second rule the heartbeat became a way to hide the very thing
+    -- the silence monitor watches for. The service is force-killed at the
+    -- deadline but the app route it called is not, and that route kept beating:
+    -- each beat moved `heartbeatAt` to the database's *current* time, so a run
+    -- whose worker had been dead for an hour looked alive, and the incident
+    -- that exists to notice it was deferred indefinitely.
+    --
+    -- Refused here rather than in the caller's predicate, because "is it past
+    -- the deadline" is a question about the clock, and the caller's clock is
+    -- not the one this column is stamped from.
     IF NEW."status" = 'running' THEN
         IF NEW."heartbeatAt" IS DISTINCT FROM OLD."heartbeatAt" THEN
+            IF database_now > NEW."deadlineAt" THEN
+                RAISE EXCEPTION 'ScheduledJobRun % cannot report a sign of life at % after its deadline %',
+                    OLD."id", database_now, NEW."deadlineAt"
+                    USING ERRCODE = 'TMDL3';
+            END IF;
             NEW."heartbeatAt" := database_now;
         END IF;
         NEW."completedAt" := NULL;

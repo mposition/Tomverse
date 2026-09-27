@@ -34,6 +34,7 @@ import {
  */
 export const MARKETING_PUBLISHER_LATE_SUCCESS_SQLSTATE = "TMDL1";
 export const MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE = "TMDL2";
+export const MARKETING_PUBLISHER_HEARTBEAT_AFTER_DEADLINE_SQLSTATE = "TMDL3";
 
 /**
  * Whether a database error was raised with this SQLSTATE, wherever Prisma put it.
@@ -154,22 +155,45 @@ export async function startMarketingPublisherRun(
   };
 }
 
-/** Record that the run is still alive. The trigger stamps the database's time. */
+/** What a heartbeat found, rather than a boolean that cannot say which. */
+export type MarketingPublisherHeartbeat =
+  | { readonly beat: true }
+  | { readonly beat: false; readonly reason: "not_running" | "past_deadline" };
+
+/**
+ * Record that the run is still alive. The trigger stamps the database's time.
+ *
+ * Two different answers, and the caller acts differently on each. `not_running`
+ * means something else closed the row -- this request no longer owns the run.
+ * `past_deadline` means the run is over on the database's clock, whatever this
+ * process believes; the trigger refuses the write rather than let a beat move
+ * the row's last sign of life forward past its own deadline.
+ */
 export async function heartbeatMarketingPublisherRun(
   client: PrismaClient,
   runId: string,
-): Promise<boolean> {
-  const updated = await client.scheduledJobRun.updateMany({
-    where: {
-      id: runId,
-      jobKey: MARKETING_PUBLISHER_JOB_KEY,
-      status: "running",
-    },
-    // The value is overwritten by the trigger with the database clock; what
-    // matters is that the column changes, which is what the trigger looks for.
-    data: { heartbeatAt: new Date() },
-  });
-  return updated.count === 1;
+): Promise<MarketingPublisherHeartbeat> {
+  try {
+    const updated = await client.scheduledJobRun.updateMany({
+      where: {
+        id: runId,
+        jobKey: MARKETING_PUBLISHER_JOB_KEY,
+        status: "running",
+      },
+      // The value is overwritten by the trigger with the database clock; what
+      // matters is that the column changes, which is what the trigger looks
+      // for.
+      data: { heartbeatAt: new Date() },
+    });
+    return updated.count === 1
+      ? { beat: true }
+      : { beat: false, reason: "not_running" };
+  } catch (error) {
+    if (hasSqlstate(error, MARKETING_PUBLISHER_HEARTBEAT_AFTER_DEADLINE_SQLSTATE)) {
+      return { beat: false, reason: "past_deadline" };
+    }
+    throw error;
+  }
 }
 
 export type MarketingPublisherRunOutcome =

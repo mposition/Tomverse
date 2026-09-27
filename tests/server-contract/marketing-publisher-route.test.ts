@@ -41,6 +41,7 @@ type World = {
   start: { started: true } | { started: false; reason: string };
   startThrows: Error | null;
   heartbeatThrows: Error | null;
+  heartbeat: { beat: true } | { beat: false; reason: "not_running" | "past_deadline" };
   closed: Closed;
   closeThrows: Error | null;
   closeCalls: { status: string; error?: string }[];
@@ -52,6 +53,7 @@ const world: World = {
   start: { started: true },
   startThrows: null,
   heartbeatThrows: null,
+  heartbeat: { beat: true },
   closed: { status: "succeeded" },
   closeThrows: null,
   closeCalls: [],
@@ -63,6 +65,7 @@ const resetWorld = () => {
   world.start = { started: true };
   world.startThrows = null;
   world.heartbeatThrows = null;
+  world.heartbeat = { beat: true };
   world.closed = { status: "succeeded" };
   world.closeThrows = null;
   world.closeCalls = [];
@@ -85,7 +88,7 @@ const loadRoute = () => {
         },
         heartbeatMarketingPublisherRun: async () => {
           if (world.heartbeatThrows) throw world.heartbeatThrows;
-          return { beat: true };
+          return world.heartbeat;
         },
         finishMarketingPublisherRun: async (
           _client: unknown,
@@ -267,4 +270,49 @@ test("a duplicate id while the first still runs is answered, not run twice", asy
   assert.equal(status, 202);
   assert.equal(body.code, "already_running");
   assert.deepEqual(world.closeCalls, []);
+});
+
+test("a heartbeat the database refused past the deadline stops the run", async () => {
+  resetWorld();
+  // The service is force-killed at the deadline; the route it called is not.
+  // Walking past a refused heartbeat let that route carry on and then ask for
+  // `succeeded`, and -- before the trigger refused a late beat -- kept moving the
+  // row's last sign of life forward so the silence monitor never saw it.
+  world.heartbeat = { beat: false, reason: "past_deadline" };
+  world.closed = { status: "failed" };
+
+  const { status, body } = await post();
+
+  assert.equal(status, 500);
+  assert.equal(body.code, "heartbeat_past_deadline");
+  // Closed failed, with the reason, rather than left running for the monitor to
+  // discover fifteen minutes later.
+  assert.equal(world.closeCalls.at(-1)?.status, "failed");
+  assert.equal(world.closeCalls.at(-1)?.error, "heartbeat_past_deadline");
+  // Exactly one close: the success close must not also have been attempted.
+  assert.equal(world.closeCalls.length, 1);
+});
+
+test("a heartbeat on a row nothing owns any more is a conflict", async () => {
+  resetWorld();
+  world.heartbeat = { beat: false, reason: "not_running" };
+  world.closed = { status: "not_running" };
+
+  const { status, body } = await post();
+
+  assert.equal(status, 409);
+  assert.equal(body.code, "heartbeat_not_running");
+  assert.equal(world.closeCalls.length, 1);
+});
+
+test("a close that also fails after a refused heartbeat still answers", async () => {
+  resetWorld();
+  world.heartbeat = { beat: false, reason: "past_deadline" };
+  world.closeThrows = new Error("the database is gone");
+
+  const { status, body } = await post();
+
+  assert.equal(status, 500);
+  assert.equal(body.code, "heartbeat_past_deadline");
+  assert.equal(body.status, "not_running");
 });
