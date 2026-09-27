@@ -155,6 +155,17 @@ pre-existing record set은 인증하지 않는다. commit 전 `--out`은 mutable
 durable approval evidence가 아니다. 교차 실행 provenance는 exact bytes를 commit하고 후속
 작업이 repository review policy 아래 그 commit bytes와 비교하는 시점부터 성립한다.
 
+이 task의 own output directory와 raw companion은 **transient local review evidence**다.
+해당 directory는 diff에서 제외하고 stage·commit·push하지 않으며 repository approval evidence나
+상태 저장소로 사용하지 않는다. finding text가 합성 `NEXTAUTH_SECRET` assignment를 그대로
+인용하더라도 provenance를 위해 raw event bytes를 redact하지 않는다. 보존이 필요하면 exact
+bytes를 checkout 밖 operator-controlled storage로 복사하고, 최종 PR에는 package/verdict digest와
+conclusion만 보고한다. commit되지 않은 output을 위해 새 `.gitleaksignore` fingerprint를 만들지
+않는다. 따라서 이 output directory는 task의 `generatedPaths`와 `writableScope`에도 포함하지 않는다.
+필수 `tests/crossReview.test.mjs`는 `git ls-files --cached -z`의 NUL 구분 index 경로를 separator
+통일과 ASCII case-folding 후 검사하고, 이 exact directory 자체나 그 아래 경로가 indexed되면
+실패한다. 현재 untracked evidence는 허용하지만 stage되는 즉시 CI가 계약 위반으로 차단한다.
+
 ## 유지되는 경계
 
 - Claude는 저장된 Claude Code Max `claude.ai` 로그인만 사용한다. review child와 auth/version

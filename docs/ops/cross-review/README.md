@@ -187,6 +187,26 @@ not durable approval evidence. Durable cross-invocation provenance begins
 only when those exact bytes are committed and a later operation compares
 them under the repository review policy.
 
+A task authorization may instead classify its own cross-review output as
+transient local review evidence. Such an output directory stays untracked and
+excluded from the reviewed diff, is never staged, committed or pushed, and is
+not repository approval evidence or a state store. Raw event companions remain
+byte-exact (never redacted); if they must be retained, the operator copies them
+to operator-controlled storage outside the checkout. A final PR may report the
+package/verdict digests and conclusion without committing raw event bytes, and
+an uncommitted transient output never receives a new secret-scanner ignore
+fingerprint.
+
+이 task처럼 authorization이 own cross-review output을 transient local review
+evidence로 분류하면 해당 디렉터리는 검토 diff에서 제외하고 stage·commit·push하지 않으며
+repository approval evidence나 상태 저장소로 사용하지 않는다. raw event companion은
+redact하지 않고, 보존이 필요하면 checkout 밖 operator-controlled storage에 exact bytes로
+보관한다. 최종 PR에는 package/verdict digest와 conclusion만 보고할 수 있고, commit하지
+않은 output을 위해 새 `.gitleaksignore` fingerprint를 추가하지 않는다.
+필수 cross-review test는 `git ls-files --cached -z`의 NUL 구분 index 경로를
+separator 통일과 ASCII case-folding 후 비교하여 이 exact output directory 자체나 그 아래
+경로가 하나라도 indexed되면 실패한다. untracked transient evidence는 이 가드를 통과한다.
+
 `--mode=review` then refuses to start on a package whose tests or guards
 failed, and unless the *newest* preflight for the same sandbox signature
 (the command line with the model choice taken out, the directory, and the

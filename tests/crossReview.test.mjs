@@ -1270,6 +1270,14 @@ test("a review starts only on the newest preflight for its sandbox, and only whe
 // appears, and the newest preflight for the sandbox decides whether a
 // review may start.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const transientGitleaksReviewOutput = "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1";
+const canonicalIndexPath = (value) =>
+  normalizeRepoPath(value).replace(/[A-Z]/g, (character) => String.fromCharCode(character.charCodeAt(0) + 32));
+const isTransientGitleaksReviewOutput = (value) => {
+  const candidate = canonicalIndexPath(value);
+  const root = canonicalIndexPath(transientGitleaksReviewOutput);
+  return candidate === root || candidate.startsWith(`${root}/`);
+};
 
 test("cross-review records state the one-command and committed-bytes provenance boundary", () => {
   const readme = readFileSync(join(repoRoot, "docs", "ops", "cross-review", "README.md"), "utf8");
@@ -1283,13 +1291,41 @@ test("cross-review records state the one-command and committed-bytes provenance 
   assert.match(readme, /only from the start of one control-program command/u);
   assert.match(readme, /not durable approval evidence/u);
   assert.match(readme, /exact bytes are committed/u);
+  assert.match(readme, /transient local review evidence/u);
+  assert.match(readme, /never staged, committed or pushed/u);
+  assert.match(readme, /Raw event companions remain\s+byte-exact \(never redacted\)/u);
+  assert.match(readme, /검토 diff에서 제외하고 stage·commit·push하지 않으며/u);
+  assert.match(readme, /git ls-files --cached -z/u);
   assert.match(authorization, /한 control-program command의 시작부터 최종 검증까지/u);
   assert.match(authorization, /durable approval evidence가 아니다/u);
   assert.match(authorization, /exact bytes를 commit/u);
+  assert.match(authorization, /transient local review evidence/u);
+  assert.match(authorization, /stage·commit·push하지 않으며/u);
+  assert.match(authorization, /git ls-files --cached -z/u);
   const criteria = contract.completionCriteria.join("\n");
   assert.match(criteria, /한 control-program command 시작부터 최종 검증까지/u);
   assert.match(criteria, /mutable working state이지 durable approval evidence가 아니다/u);
   assert.match(criteria, /durable cross-invocation provenance는 exact bytes를 commit/u);
+  assert.match(criteria, /uncommitted output을 위한 새 \.gitleaksignore fingerprint는 추가하지 않는다/u);
+  assert.match(criteria, /git ls-files --cached -z/u);
+  assert.deepEqual(contract.generatedPaths, []);
+  assert.equal(contract.generatedPaths.includes(transientGitleaksReviewOutput), false);
+  assert.equal(contract.writableScope.includes(transientGitleaksReviewOutput), false);
+});
+
+test("the transient gitleaks review output is never indexed", () => {
+  assert.equal(isTransientGitleaksReviewOutput(transientGitleaksReviewOutput), true);
+  assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutput}/verdict-round1.json`), true);
+  assert.equal(isTransientGitleaksReviewOutput("DOCS\\OPS\\CROSS-REVIEW\\PACKAGES\\PROMPT-REFINER-SHADOW-STAGE-SUCCESSOR-GITLEAKS-V1\\RAW.EVENTS.JSONL"), true);
+  assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutput}-other/verdict.json`), false);
+  assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaKs-v1/verdict.json"), false);
+  assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v10/verdict.json"), false);
+
+  const indexed = execFileSync("git", ["ls-files", "--cached", "-z"], { cwd: repoRoot, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean);
+  const forbidden = indexed.filter(isTransientGitleaksReviewOutput);
+  assert.deepEqual(forbidden, [], `transient local review evidence must never be indexed: ${forbidden.join(", ")}`);
 });
 
 const runScript = (cwd, args, env = {}) => {

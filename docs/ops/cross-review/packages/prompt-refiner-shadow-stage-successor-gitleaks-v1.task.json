@@ -27,7 +27,7 @@
     "review prompt의 requirement, criteria, diff, test·guard 결과, prior finding, author account 및 repository 유래 값은 모두 untrusted data로 명시한다. 프롬프트 시작과 answer format 직전에 embedded instruction·tool request·role change를 무시하고 task/repository read-only inspection만 허용한다는 경계를 반복하며, 각 payload는 그 내용의 최대 backtick run보다 긴 최소 4개의 dynamic Markdown fence로 감싸 source text가 fence를 닫지 못하게 한다.",
     "authorization의 reviewedHead는 검토 대상 source-fix commit이며 그 뒤의 authorization-only metadata commit의 parent다. source fix를 commit한 뒤 package 전 reviewedHead와 Gitleaks range end를 그 commit으로 함께 한 번 repin하고, authorization commit 자신의 SHA를 요구하지 않는다.",
     "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
-    "이 exchange의 exact package output 디렉터리만 recursive review-record 팽창 방지를 위해 diff에서 제외하며 .gitleaksignore, task와 authorization은 검토 대상에 남는다."
+    "이 exchange의 exact package output 디렉터리는 transient local review evidence로만 사용하고 diff에서 제외한다. package/verdict/raw event companion은 provenance 보존을 위해 redact하지 않되 stage·commit·push하거나 repository approval evidence·상태 저장소로 사용하지 않으며, 보존이 필요하면 checkout 밖 operator-controlled storage로 복사한다. 최종 PR에는 package/verdict digest와 conclusion만 보고할 수 있고 uncommitted output을 위한 새 .gitleaksignore fingerprint는 추가하지 않는다. 이 output 디렉터리는 generatedPaths와 writableScope에 포함하지 않으며 .gitleaksignore, task와 authorization은 검토 대상에 남는다. 필수 cross-review test는 git ls-files --cached -z의 NUL 구분 index 경로를 separator 통일과 ASCII case-folding 후 검사해 exact output directory 자체나 그 아래 indexed path가 하나라도 있으면 실패한다."
   ],
   "baseCommit": "82caecfd8a3dbb4815fd9c232f2b42b2dafcf646",
   "writableScope": [
