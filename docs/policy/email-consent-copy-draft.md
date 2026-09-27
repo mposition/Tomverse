@@ -6,9 +6,10 @@
 - 승인일: **2026-09-23**
 - 승인 범위: §1부터 §6까지 전부. §2의 선택(동의 장치 4개는 7개 언어,
   `/privacy`·`/terms` 본문은 기존 영어 fallback 유지)을 포함합니다.
-- 상위 계약: [email-notifications.md](email-notifications.md) (정본),
-  [email-product-news-redesign-draft.md](email-product-news-redesign-draft.md)
-  §5.1 · §5.4 · §7.7 · §12의 S2 행
+- 상위 계약: `docs/policy/email-notifications.md` (정본),
+  그리고 docs/policy/email-product-news-redesign-draft.md §5.1, §5.4, §7.7, §12의 S2 행
+- 절 번호를 적을 때는 **어느 문서의 절인지 경로로 함께 적습니다.** 두 상위
+  계약의 번호가 겹치므로, 번호만 적으면 어느 쪽인지 문장으로만 구분됩니다
 - 이 문서가 만드는 것: **문안 자체**. 화면·route·locale 키 배선은 S2b이며,
   **승인 전에는 어디에도 붙이지 않습니다.**
 
@@ -33,7 +34,7 @@
 
 **소유자 결정(2026-09-23): 철회하실 때까지. 별도의 만료 기간을 두지 않습니다.**
 
-ACMA는 숫자를 주지 않고, **약관에 적은 것이 기준**이 됩니다(초안 §13의 R5).
+ACMA는 숫자를 주지 않고, **약관에 적은 것이 기준**이 됩니다(docs/policy/email-product-news-redesign-draft.md §13의 R5).
 그러므로 이 결정은 `/terms`에 적히는 순간 효력을 가집니다.
 
 이 결정이 **바꾸지 않는 것**을 같이 적어 둡니다. 세 가지가 흔히 혼동됩니다.
@@ -43,13 +44,13 @@ ACMA는 숫자를 주지 않고, **약관에 적은 것이 기준**이 됩니다
 - **수신거부는 즉시 유효합니다.** 무기한이라는 것은 우리가 계속 보내도 된다는
   뜻이 아니라, **철회가 없는 동안** 유효하다는 뜻입니다.
 - **`risk_accepted` cohort는 이 결정과 무관합니다.** 그분들은 동의한 적이
-  없으므로 만료시킬 동의도 없습니다(초안 §5.5).
+  없으므로 만료시킬 동의도 없습니다(docs/policy/email-product-news-redesign-draft.md §5.5).
 
 ---
 
 ## 2. 몇 개 언어인가 — 승인된 선택
 
-초안 §12의 S2 행은 "7개 언어"라고 적지만, 저장소의 `lib/localeLaunchPolicy.ts`는
+docs/policy/email-product-news-redesign-draft.md §12의 S2 행은 "7개 언어"라고 적지만, 저장소의 `lib/localeLaunchPolicy.ts`는
 **`PAID_MARKETING_LOCALES = ["en", "ko"]`** 이고 `zh`·`de`·`es`·`fr`·`pt`는
 `marketTier: "limited"`로 **의도적으로 영어로 대체**됩니다. 두 사실이 그대로
 충돌합니다.
@@ -72,7 +73,9 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 
 ---
 
-## 3. 동의 장치 (§5.1 · §5.4)
+## 3. 동의 장치
+
+docs/policy/email-product-news-redesign-draft.md §5.1, §5.4가 요구하는 네 장치입니다.
 
 ### 3.0 네 장치가 무엇이고 왜 넷인가
 
@@ -99,7 +102,7 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 | pt | Quero receber novidades e ofertas por e-mail (opcional) |
 | zh | 接收产品资讯和优惠邮件（可选） |
 
-**한국어는 초안 §5.1이 지정한 문구 그대로입니다** — 채널("이메일")과
+**한국어는 docs/policy/email-product-news-redesign-draft.md §5.1이 지정한 문구 그대로입니다** — 채널("이메일")과
 선택성("선택")을 둘 다 명시합니다. 다른 언어도 같은 두 가지를 담았습니다.
 
 **쓰지 않은 것**: "최신 소식", "놓치지 마세요" 같은 권유. 체크박스 라벨은
@@ -118,9 +121,11 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 | pt | Se você ativar, a Tomverse envia novidades do produto, boletins e promoções para o endereço da sua conta. Códigos de acesso, recibos de cobrança e avisos de serviço são enviados de qualquer forma. Você pode desativar a qualquer momento, sem fazer login. |
 | zh | 开启后，Tomverse 会向您账户中的地址发送产品动态、资讯邮件和优惠信息。登录验证码、账单收据和服务通知无论是否开启都会发送。您可以随时关闭，无需登录。 |
 
-**충족하는 것**: §5.1의 "무엇을 보내는지 적고"; 정본 §3의 분류 경계(로그인
-코드·영수증·서비스 공지는 동의 대상이 아님); 한국 안내서와 정본 §11.3의
-"수신거부에 로그인을 요구하지 않는다".
+**충족하는 것**: docs/policy/email-product-news-redesign-draft.md §5.1의 "무엇을 보내는지
+적고". 그리고 docs/policy/email-notifications.md §3의 분류 경계(로그인
+코드·영수증·서비스 공지는 동의 대상이 아님). 그리고 한국 안내서와
+docs/policy/email-notifications.md §11.3의 "수신거부에 로그인을
+요구하지 않는다".
 
 **쓰지 않은 것**: "스팸을 보내지 않습니다". 지키겠다는 약속이 아니라 **평가**이고,
 그 문장이 무엇을 금지하는지 아무도 말할 수 없습니다.
@@ -167,7 +172,7 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 | zh | Tomverse 尚未向您发送过产品动态，未经您同意也不会发送。开启后，我们会向您账户中的地址发送产品动态、资讯邮件和优惠信息。登录验证码、收据和服务通知不受影响。您可以随时关闭，无需登录。 |
 
 **첫 문장이 중요합니다.** 기존 계정은 **어느 법역에서도 근거가 없습니다**
-(초안 §5.5). "지금까지 보낸 적이 없다"는 사실을 먼저 적는 것은, 이 안내가
+(docs/policy/email-product-news-redesign-draft.md §5.5). "지금까지 보낸 적이 없다"는 사실을 먼저 적는 것은, 이 안내가
 **이미 하고 있던 일을 통지하는 것이 아니라 처음 여쭙는 것**임을 분명히 하기
 위해서입니다. 방침 변경 고지처럼 읽히면 그것이 소급 적격화로 오인됩니다.
 
@@ -338,7 +343,7 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 
 1. `locales/*.ts`에 키 추가 — 동의 장치 4개, 통지 3건, `/terms` 조항,
    `/privacy` 추가 2문장.
-2. **불변 artifact와 해시** — §5.1이 요구하는 "정확한 문안과 선택 상태의 보존".
+2. **불변 artifact와 해시** — docs/policy/email-product-news-redesign-draft.md §5.1이 요구하는 "정확한 문안과 선택 상태의 보존".
    해시는 S8의 `recordNoticeShown({ candidates: [{ copyHash }] })`가 받는
    값이며, `EmailPermissionEvent.evidence`에 영구 보존됩니다.
 3. 가입 흐름에 A·B·C 배치, 제품 내 안내에 D 배치.
@@ -388,13 +393,14 @@ GDPR·ePrivacy에서 "informed"인지 다투게 됩니다 — 그리고 대체 �
 > Tomverse는 지금까지 제품 소식을 보내드린 적이 없고, 요청하지 않으시면
 > 앞으로도 보내지 않습니다.
 
-**승인된 다른 결정**(초안 §5.6, 소유자 2026-09-16)은 기존 78계정에게 **동의 없이**
+**승인된 다른 결정**(docs/policy/email-product-news-redesign-draft.md §5.6, 소유자 2026-09-16)은 기존 78계정에게 **동의 없이**
 `risk_accepted`로 보내는 것입니다.
 
 한 통이라도 나가면 "요청하지 않으면 보내지 않는다"가 거짓이 되고, 그 뒤에 이
 안내를 보여 주면 "보낸 적이 없다"까지 거짓입니다. 그리고 그 화면의 `copyHash`는
-**우리가 이미 깬 약속을 보여 줬다는 증거**로 영구 보존됩니다. §5.5가 인용한
-FTC Section 5 위험이 바로 이 모양입니다.
+**우리가 이미 깬 약속을 보여 줬다는 증거**로 영구 보존됩니다.
+docs/policy/email-product-news-redesign-draft.md §5.5가 인용한 FTC Section 5
+위험이 바로 이 모양입니다.
 
 **소유자 결정(2026-09-23): B.** `risk_accepted` cohort는 이 안내를 보지
 않습니다. override는 78계정 전부에 그대로 유지되고, 문안은 **그것이 참인
@@ -404,7 +410,7 @@ FTC Section 5 위험이 바로 이 모양입니다.
 |---|---|---|---|
 | A | 안내를 본 주소는 override 대상에서 빠짐 | 발송 대상이 줄어듦 | |
 | **B** | **cohort는 이 안내를 보지 않음** | **override는 78계정 전부 유지** | **선택됨** |
-| C | 약속하지 않는 새 문안 버전 승인 | §5.5의 "처음 여쭙는다"는 인상이 약해짐 | |
+| C | 약속하지 않는 새 문안 버전 승인 | docs/policy/email-product-news-redesign-draft.md §5.5의 "처음 여쭙는다"는 인상이 약해짐 | |
 
 **구현(S8a, 별도 브랜치에서 검토 중이며 아직 병합되지 않음)**: 아래에 적은
 함수(`noticeStateForUser()`, `overrideWouldSend()`, `overrideBlockers()`)는 이
@@ -435,7 +441,7 @@ digest가 다시 일치하는데, 그때 override가 돌아오면 기록된 약�
 결정 B는 **누구에게 안내를 보일지**를 정했습니다. 그것이 **동의 기록을 만드는
 근거가 되지는 않습니다.**
 
-초안 §5.6 규칙 1(소유자 승인 2026-09-16)은 한 문장입니다.
+docs/policy/email-product-news-redesign-draft.md §5.6 규칙 1(소유자 승인 2026-09-16)은 한 문장입니다.
 
 > **동의를 지어내지 않습니다.** `ConsentRecord(granted)`를 쓰지 않습니다.
 
@@ -463,7 +469,7 @@ digest가 다시 일치하는데, 그때 override가 돌아오면 기록된 약�
 앞으로 만들 경로가 읽습니다.
 
 - **발송이 동의에 의한 것으로 기록됩니다(S9 이후).** 설계된 발송은 동의가 있으면
-  override를 쓰지 않습니다(초안 §5.6 규칙 4). 동의가 없으면 규칙 2대로
+  override를 쓰지 않습니다(docs/policy/email-product-news-redesign-draft.md §5.6 규칙 4). 동의가 없으면 규칙 2대로
   `legalAllowed: false`와 `overrideApplied`가 함께 남는데, 부여 행이 있으면 같은
   발송이 **명시적 동의에 의한 발송으로** 남습니다. 그 원장은 규칙 1이 금지한 것이고,
   규칙 3(admin 화면에 override를 그대로 보인다)이 지키려는 구분 — 다음 사람이
