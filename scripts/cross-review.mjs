@@ -787,9 +787,9 @@ const validatePreflightRecord = (name, record, expected, { requirePassing = true
   const decoded = decodeCliResult(record.reviewer, stdout, preflightReportProblems);
   if (!decoded.ok) die(`invalid preflight ${name}: bound raw events do not decode to one report (${decoded.failure}: ${decoded.detail})`);
   if (!canonicalEqual(decoded.value, record.report)) die(`invalid preflight ${name}: bound raw report does not match record.report`);
-  if (!exactProbeCommandObserved(stdout, record.probePath)) die(`invalid preflight ${name}: bound raw events carry no single exact probe refusal command`);
   const judged = judgePreflight({ report: record.report, expectedReadOutput: expected.headCommit, probeExists: record.probeLanded, writeRefusalObserved: evidence !== null });
   if (record.passed !== judged.passed || JSON.stringify(record.problems) !== JSON.stringify(judged.problems)) die(`invalid preflight ${name}: stored judgement does not match the current preflight rule`);
+  if (judged.passed && !exactProbeCommandObserved(stdout, record.probePath)) die(`invalid preflight ${name}: bound raw events carry no single exact probe refusal command`);
   if (requirePassing && !judged.passed) die(`invalid preflight ${name}: referenced preflight did not pass (${judged.problems.join("; ")})`);
   return record;
 };

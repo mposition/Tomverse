@@ -1023,7 +1023,7 @@ test("a package may exclude exactly the task's generated paths and exactly its o
   refused([`${outDir}/../../../../../../etc`], /climbs above the repository/);
   refused([".."], /climbs above the repository/);
   // The reviewer's reproduction from round 2: a name git would read as a
-  // pattern. `lib/[c]rossReviewCore.ts` is not a file, it is a pattern that
+  // pattern. The bracketed-c pathspec below is not a file; it is a pattern that
   // matches lib/crossReviewCore.ts -- as an exclusion it would hide that
   // source from the diff, and as a package directory it would let the
   // exact match pass. Both are refused, and the script hands git every
@@ -2316,6 +2316,65 @@ test("the script's package and review paths hold the rules end to end: exact exc
         })
       );
     };
+
+    const judgementFailureName = "preflight-2025-12-29T00-00-00-000Z";
+    const judgementFailureProbe = `artifacts/pkg/preflight-write-probe-${judgementFailureName}.txt`;
+    const judgementFailureReport = { readOutput: head, writeAttempted: true, writeResult: "EPERM denied" };
+    const judgementFailureEvents =
+      `${JSON.stringify({ type: "item.completed", item: { id: "preflight-result", type: "agent_message", text: JSON.stringify(judgementFailureReport) } })}\n` +
+      `${JSON.stringify({ type: "turn.completed" })}\n`;
+    const judgementFailureEventsName = `${judgementFailureName}.events.jsonl`;
+    const judgementFailure = judgePreflight({
+      report: judgementFailureReport,
+      expectedReadOutput: head,
+      probeExists: false,
+      writeRefusalObserved: false,
+    });
+    assert.equal(judgementFailure.passed, false);
+    writeFileSync(join(repo, "artifacts", "pkg", judgementFailureEventsName), judgementFailureEvents);
+    writeFileSync(
+      join(repo, "artifacts", "pkg", `${judgementFailureName}.json`),
+      JSON.stringify({
+        version: PREFLIGHT_RECORD_VERSION,
+        taskId: "T-script",
+        round: 0,
+        changeDigest: record.changeDigest,
+        headCommit: head,
+        reviewer: "codex",
+        toolVersion: record.reviewerContract.toolVersion,
+        command: reviewerCommand,
+        cwd: repo,
+        sandboxSignature: record.reviewerContract.sandboxSignature,
+        codexShell: "default",
+        codexAuth: "login",
+        claudeAuth: record.reviewerContract.claudeAuth,
+        expectedReadOutput: head,
+        probePath: judgementFailureProbe,
+        probeLanded: false,
+        writeRefusalObserved: false,
+        writeRefusalEvidence: null,
+        startedAt: "2025-12-29T00:00:00.000Z",
+        durationMs: 1,
+        usage: null,
+        exitStatus: 0,
+        report: judgementFailureReport,
+        executorFailure: null,
+        passed: false,
+        problems: judgementFailure.problems,
+        companions: {
+          events: { name: judgementFailureEventsName, bytes: Buffer.byteLength(judgementFailureEvents), digest: digest(judgementFailureEvents) },
+          stderr: null,
+        },
+      })
+    );
+    const refusedJudgementFailure = review([]);
+    assert.equal(refusedJudgementFailure.status, 1, refusedJudgementFailure.stderr);
+    assert.match(refusedJudgementFailure.stderr, /FAILED: the tool's own output shows no refused write at the probe path/u);
+    const skippedJudgementFailure = review(["--skip-preflight"]);
+    assert.equal(skippedJudgementFailure.status, 2, skippedJudgementFailure.stderr);
+    assert.match(skippedJudgementFailure.stdout, /T-script round 0: reviewer not_executed/u);
+    rmSync(join(repo, "artifacts", "pkg", `${judgementFailureName}.json`));
+    rmSync(join(repo, "artifacts", "pkg", judgementFailureEventsName));
 
     const processFailureName = "preflight-2025-12-30T00-00-00-000Z";
     const processFailure = { failure: "execution_failed", detail: "fake reviewer crashed" };
