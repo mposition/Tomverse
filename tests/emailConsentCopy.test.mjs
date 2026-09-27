@@ -461,7 +461,7 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
  * version is added and that move would otherwise cover for an edit to an
  * earlier version's approval table in the same commit.
  */
-const APPROVED_DOCUMENT_DIGEST = "3b63e7c477450c63aaca8d59282c01d2";
+const APPROVED_DOCUMENT_DIGEST = "5728d5603e4a8f4f600c2557de4204ed";
 
 /** The source bytes of a section, from the parser's own offsets. */
 const sourceOf = (source, nodes) => {
@@ -483,23 +483,48 @@ test("the approved document has not changed since this digest was recorded", () 
   );
 });
 
-test("each version's own record is pinned to that version", () => {
-  // The document digest moves whenever a version is added, legitimately. These
-  // do not: an edit to an earlier version's approval table or digest fails
-  // against the version it belongs to, rather than against a number that was
-  // going to change in that commit anyway.
+test("each version pins its own record and the body it approved", () => {
+  // The document digest moves whenever a version is added, legitimately, and a
+  // review showed what that covers for: the same commit could edit section 4's
+  // approved wording and record one new document digest, with the only
+  // per-version pin being over the approval table.
+  //
+  // So each version pins two things, and adding a version touches neither: the
+  // approval record it signed, and the body that record approved. An edit to
+  // either fails against the version it belongs to rather than against a number
+  // that was going to change anyway.
   const source = approvedSource();
   const tree = approvedTree();
   for (const version of CONSENT_COPY_VERSIONS) {
-    const digest = createHash("sha256")
+    const record = createHash("sha256")
       .update(sourceOf(source, sectionOf(tree, version.recordSection, 2)))
       .digest("hex")
       .slice(0, 32);
     assert.equal(
-      digest,
+      record,
       version.recordDigest,
       `section ${version.recordSection} is no longer the record approved for ` +
-        `${version.version}. If this change is meant, record "${digest}".`
+        `${version.version}. If this change is meant, record "${record}".`
+    );
+
+    const body = createHash("sha256")
+      .update(
+        [
+          ...version.approvedSectionNumbers.map((number) =>
+            sourceOf(source, sectionOf(tree, number, 2))
+          ),
+          sourceOf(source, sectionOf(tree, version.recordSection, 2)),
+        ].join("\u0000")
+      )
+      .digest("hex")
+      .slice(0, 32);
+    assert.equal(
+      body,
+      version.approvedBodyDigest,
+      `the body approved for ${version.version} (sections ` +
+        `${version.approvedSectionNumbers.join(", ")} and ${version.recordSection}) ` +
+        `has changed. Section 10 says that is a new version, not an edit. If this ` +
+        `change is meant, record "${body}".`
     );
   }
 });
@@ -656,14 +681,33 @@ test("the approval table binds every approved section to the version's approver 
     // version could keep its devices in section 11 while its approval table
     // named other sections entirely -- the two agreeing with each other and
     // neither agreeing with the copy.
+    // Compared as a section number, not as a prefix: `§3A` and `§3 anything`
+    // are not references to section 3, and a two-digit number starting with 3
+    // is a different section entirely. The entry is either the number itself or
+    // the number followed by a dot.
     const parent = version.deviceSummary.section.split(".")[0];
     assert.ok(
-      version.approvedSections.some(([section]) =>
-        new RegExp(`^§${parent}(\\.|$|[^0-9])`).test(section)
-      ),
+      version.approvedSections.some(([section]) => {
+        const named = /^§([0-9]+)(\.|$)/.exec(section);
+        return named !== null && named[1] === parent;
+      }),
       `${where}'s approval table does not approve section ${parent}, where ` +
         `${version.version}'s wording is`
     );
+
+    // Every entry names one of the sections this version says it approved, so
+    // the table and the metadata cannot drift into approving different things.
+    // What this does **not** check is the description beside each number: it is
+    // compared against the code's copy of it above, not derived from anything,
+    // so the guarantee here is the section link.
+    for (const [section] of version.approvedSections) {
+      const named = /^§([0-9]+)(\.|$)/.exec(section);
+      assert.ok(named, `${where}: "${section}" is not a section reference`);
+      assert.ok(
+        version.approvedSectionNumbers.includes(named[1] + "."),
+        `${where}: "${section}" is not one of this version's approved sections`
+      );
+    }
   }
 });
 
@@ -712,9 +756,12 @@ test("the approval section records the digest of each version, once, on that ver
       start >= 0,
       `the digest in ${recordSection} does not directly follow the line naming ${version}`
     );
+    // The next character must not continue the token. The first version wrote
+    // this class with the backslash eaten -- `[w.-]` rather than `[\w.-]` --
+    // so it barred a literal "w" and let `2026-09-23x` pass for `2026-09-23`.
     const after = line[start + marker.length];
     assert.ok(
-      after === undefined || !/[w.-]/.test(after),
+      after === undefined || !/[\p{L}\p{N}_.-]/u.test(after),
       `the line above the digest in ${recordSection} names a longer version than ${version}`
     );
   }

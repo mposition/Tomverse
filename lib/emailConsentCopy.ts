@@ -187,6 +187,27 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
    */
   readonly recordDigest: string;
   /**
+   * The depth-2 heading numbers of the document sections this version's
+   * approval covers, as its approval table names them.
+   *
+   * Written as heading numbers rather than derived from `approvedSections`,
+   * whose entries are prose ("§3.A–D", "§4.1–4.3") and would have to be parsed
+   * to be useful. The test compares the two: every entry has to name one of
+   * these sections.
+   */
+  readonly approvedSectionNumbers: readonly string[];
+  /**
+   * The digest of those sections' bytes, plus this version's record section.
+   *
+   * The document digest has to move whenever a version is added, legitimately,
+   * and a review showed what that covers for: the same commit could edit
+   * section 4's approved wording and record one new document digest, and the
+   * only per-version pin was over the approval table. So each version also pins
+   * the body it approved. Adding a version does not touch this, and section
+   * 10.1 forbids changing an existing one's.
+   */
+  readonly approvedBodyDigest: string;
+  /**
    * Where this version's four devices live in the approved document: the
    * subsection, the bold label its table follows, and the button table's role
    * row. Held per version because a new version's wording is approved in a new
@@ -223,6 +244,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     // Recorded, not computed. Moving it means saying that the owner's record
     // for this version has changed.
     recordDigest: "c1cb328e70178109be557037025ef807",
+    approvedSectionNumbers: ["1.", "2.", "3.", "4.", "5.", "6."],
+    approvedBodyDigest: "641a53ca88b3a0fd7d276426c1ee2a29",
     deviceCells: {
       signupOptIn: { section: "3.A", label: null, role: null },
       signupNotice: { section: "3.B", label: null, role: null },
