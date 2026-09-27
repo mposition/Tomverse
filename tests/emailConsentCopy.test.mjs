@@ -280,8 +280,20 @@ const APPROVED_CELL = {
 /** The text of one section, from its heading to the next heading of the same or higher level. */
 const sectionOf = (doc, heading) => {
   const lines = doc.split("\n");
-  const from = lines.findIndex((line) => line.startsWith(heading));
-  assert.ok(from >= 0, `section ${heading} not found in the approved document`);
+  // The heading must be unique. Taking the first match let a second
+  // `### 3.D ...` (or `## 8. ...`) placed above the real one shadow it: the
+  // matcher read the decoy section, and the approved cells below it could then
+  // be edited freely.
+  const found = [];
+  lines.forEach((line, index) => {
+    if (line.startsWith(heading)) found.push(index);
+  });
+  assert.equal(
+    found.length,
+    1,
+    `the approved document must hold exactly one ${heading} heading`
+  );
+  const from = found[0];
   const level = heading.match(/^#+/)[0].length;
   let to = lines.length;
   for (let i = from + 1; i < lines.length; i++) {
