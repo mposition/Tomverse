@@ -288,13 +288,18 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 - 내부 route 인증은 32자 이상 secret, `Authorization: Bearer`, SHA-256 후
   constant-time 비교, POST, `no-store`, 요청 timeout, 상한 있는 엄격한 본문 schema다.
   실패는 구조화 incident 로그로 남는다.
-- **AMUX에는 본 앱 안의 engineering adapter가 붙는다.** AMUX 내부 route는 secret 하나로
-  모든 worker를 인증하고 worker 이름을 요청 본문이 말하므로, 그 secret을 가진 서비스는
-  어떤 worker인 척도 할 수 있다. 그래서 두 서비스는 그 secret을 갖지 않고 engineering
-  route만 부르며, adapter가 worker identity를 **서버에서 결속**해 AMUX의 store 함수를
-  같은 프로세스·같은 트랜잭션에서 부른다. AMUX 내부 route에 worker별 secret을 두어
-  서비스가 AMUX를 직접 부르는 방식은 택하지 않으며, 그렇게 바꾸려면 이 문서의 새 버전
-  승인이 필요하다. AMUX가 이 부착을 지원하기 전에는 본 앱 구현에 들어가지 않는다.
+- **AMUX에는 본 앱 안의 engineering adapter가 붙는다.** 두 서비스는 AMUX 자격증명을
+  갖지 않고 engineering route만 부른다. adapter가 worker identity를 **서버에서 결속**하고
+  AMUX의 단일 writer를 같은 프로세스·같은 트랜잭션에서 부른다. 다른 부착 방식은 이
+  문서의 새 버전 승인과 독립 검토가 필요하다.
+- **이 부착은 AMUX 쪽 개정이 먼저다.** `docs/policy/development-agent-orchestration.md`의
+  Authority 절은 모든 claim·전이·승인·감사가 AMUX 내부 route 경계를 지난다고 정한다. 그
+  절이 본 앱 안의 engineering route와 adapter를 같은 앱 경계로 인정하도록 AMUX 정책
+  소유자가 개정·승인하고 AMUX writer가 그 부착을 지원하기 전에는 본 앱 구현에 들어가지
+  않는다. §0의 "좁은 쪽이 이긴다"로 그 절을 덮지 않는다.
+- **clone한 트리의 의존성을 설치하거나 실행하지 않는다.** 두 서비스는 clone한 저장소의
+  npm 의존성을 설치하지 않고 그 lifecycle script와 코드를 실행하지 않는다. 진입 코드는
+  런타임 내장 모듈과 의존성 없는 core만 import한다.
 - **모델이 지시한 명령·코드는 실행되지 않는다.** 모델에게 주는 도구는 새로 clone한
   트리의 추적 파일을 읽는 것 하나이며, 요청 경로는 추적 목록에 정확히 있고 clone
   루트 안이며 경로의 어느 구성 요소도 symlink가 아니고 일반 파일이며 자격증명 성격의
@@ -347,8 +352,8 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     2. 병합 직전 head가 본 앱에 기록된 검증 통과 commit과 같다.
     3. 그 commit의 required check가 모두 통과했다. 읽기 실패·목록 불완전은 비승인이
        아니라 **미확정**이고 다음 회차에 다시 본다.
-    4. required review가 1건 이상 있고, 그 계정이 사람이며
-       `docs/policy/agent-operator-allowlist.md`의 승인 권한자다.
+    4. required review가 1건 이상 있고, 그 계정이 아래 **PR 승인 권한자 목록**에 있다.
+       대조는 login이 아니라 GitHub의 숫자 user id로 한다.
     5. 그 review가 유효하다 — 보호 branch에 stale-approval dismissal이 **실제로 걸려
        있음을 확인**한 뒤에만 센다. 걸 수 없는 동안에는 결속 snapshot 기록 시각 이후
        제출된 review만 인정한다.
@@ -358,6 +363,18 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     7. review 제출 시각이 snapshot 기록 시각보다 뒤다. snapshot을 다시 기록하는
        트랜잭션은 그 시점의 승인 review를 무효 목록에 넣고, 무효가 된 review는 다시
        세지 않는다.
+
+    **PR 승인 권한자 목록**(바꾸는 것은 이 문서의 개정): `mposition`. 이 목록은
+    `docs/policy/agent-operator-allowlist.md`와 별개다 — 그 파일은 정책 `approvedBy`의
+    대조 목록이며 권한을 주지 않는다. 숫자 user id는 승인 시 이 줄에 고정한다.
+
+    **조건 4가 증명하지 못하는 것.** 이 저장소의 다른 Agent 세션은 운영자 계정으로
+    일할 수 있으므로, 운영자 계정의 review가 사람이 직접 남긴 것인지는 이 관측으로
+    구별되지 않는다. 이 에이전트 자신은 사용자 토큰을 갖지 않고 게시 App은 review를 남길
+    주체가 아니므로 **자기 승인**은 구조적으로 막히지만, 다른 세션의 대리 승인은 막히지
+    않는다. 사람만 쓸 수 있는 서명 수단이나 Agent 세션이 쓰지 않는 별도 reviewer 계정은
+    `t1` 진입 전의 운영자 결정이며(§14), 그 결정 전까지 조건 4는 절차를 증명할 뿐
+    사람을 증명한다고 말하지 않는다.
 
     **승인 판정은 병합 전에 확정한다.** 병합 전에 승인이 기록되지 않은 PR의 병합과
     review 없이 병합된 PR은 비승인이고 정지 대상이다. 관측은 PR 번호 기준 멱등이고
@@ -409,10 +426,21 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
 **상태 기록**
 
-- run·초안·결정·capability·결속·등록·요청 idempotency는 **본 앱의 engineering 전용
-  테이블**에 있다. 사용자 콘텐츠 컬럼이 없고, 쓰기는 단일 store 모듈만 하며, 상태 전이는
-  허용 목록 trigger가 강제한다. 카드·실행 시도·전달·작업 검토는 **AMUX가 소유**하고
-  이 에이전트는 AMUX의 writer를 통해서만 그 행에 닿는다.
+- engineering 상태는 **본 앱의 전용 테이블 일곱 개**에만 있다. 사용자 콘텐츠 컬럼이
+  없고, 쓰기는 단일 store 모듈만 하며, 상태 전이는 허용 목록 trigger가 강제한다.
+
+  | 테이블 | 책임 |
+  |---|---|
+  | `EngineeringAgentRun` | 작업 회차. AMUX 실행 시도 하나와 1:1이고 그 시작과 같은 트랜잭션에서 생긴다 |
+  | `EngineeringAgentWorkItem` | T2 초안·게시·만료 close·정리·결정·불일치 항목. patch digest와 base commit은 불변 |
+  | `EngineeringAgentApproval` | **T2 결정만.** 게시 승인에 쓰지 않는다 |
+  | `EngineeringAgentCapability` | 게시 인스턴스 허가. 소비는 한 번이고 소비 뒤 불변 |
+  | `EngineeringAgentBinding` | T1 PR 결속, 결속 snapshot, review·병합 관측 |
+  | `EngineeringAgentRegistration` | 등록 제안의 원천·digest·Guard 결과·AMUX 카드 id. 제안 본문은 저장하지 않는다 |
+  | `EngineeringAgentRequest` | 내부 요청 idempotency |
+
+  카드·실행 시도·전달·작업 검토는 **AMUX가 소유**하고 이 에이전트는 AMUX의 writer를
+  통해서만 그 행에 닿는다.
 - engineering run은 AMUX 실행 시도 하나와 1:1이고 AMUX 실행 시작과 같은 트랜잭션에서
   만들어진다. 두 쪽 상태가 어긋나면 한쪽을 다른 쪽에 맞춰 고치지 않고 **불일치 항목**을
   만들어 사람에게 넘긴다. 사람의 조치는 양쪽을 한 트랜잭션에서 잠그고 다시 읽은 뒤에만
@@ -438,8 +466,19 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 - 본 앱 route는 hard timeout을 주장하지 않는다. handler는 자기 자신을 강제로 끝낼 수
   없고 이미 보낸 `COMMIT`을 취소할 수 없다.
 - DB가 강제하는 것은 문장 단위의 `statement_timeout`과 유휴 트랜잭션 timeout뿐이다.
-  트랜잭션당 최대 시간은 앱이 유도한 값이며 DB 상한이라고 부르지 않는다. 트랜잭션 전체
-  timeout이 있는 PostgreSQL 버전으로 확인되기 전에는 그 기능을 전제하지 않는다.
+  트랜잭션당 최대 시간은 앱이 유도한 값이며 DB 상한이라고 부르지 않는다.
+- **production이 PostgreSQL 16이라고 전제한다.** 16에는 트랜잭션 전체 timeout이 없다.
+  17로 확인되면 그 설정은 트랜잭션 안에서 설정한 시점부터만 점유를 묶으며, 그때 문장·
+  유휴 timeout은 그 값보다 짧을 때만 효력이 있으므로 아래 축소 규칙은 그 조건을 지키는
+  동안에만 쓴다.
+- **문장마다 남은 예산으로 줄인다.** 각 문장 전에 `statement_timeout`을 기본값과 남은
+  예산 중 작은 값으로 다시 설정한다. 고정값을 문장 수만큼 허용하면 앞 문장이 예산을 다
+  써도 뒤 문장이 기본값을 다시 받기 때문이다.
+- **트랜잭션은 보수적 pre-COMMIT 예산이 남아 있을 때만 시작한다.** 그 예산은 문장 수와
+  문장·유휴 timeout에서 유도하며 트랜잭션 최대 시간이 아니다.
+- **DB 밖의 계산은 종료 가능한 worker thread에서 한다.** tree 목록 검증과 도달 분석처럼
+  CPU를 쓰는 판정은 worker에서 돌고, 부모는 cooperative budget이 끝나면 그 worker를
+  종료한다. 서비스 쪽 watchdog과 함께 둔다.
 - 묶이지 않는 구간을 이름 대어 둔다 — 트랜잭션 시작과 첫 설정 사이, 그리고 `COMMIT`의
   durable 단계. 둘 다 예산 뒤에 끝날 수 있다.
 - **DB가 반드시 강제하는 것은 하나다 — 늦은 실행이 성공으로 기록되지 않는 것.** 성공
@@ -549,9 +588,21 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 | `t1` | 게시 활성. PR을 열되 병합은 사람이 한다 |
 | 무인 병합 | 이 정책이 부여하지 않는다 |
 
-각 구현 단계의 종료는 그 단계의 구현 독립 검토다. 본 앱 단계는 교차 잠금 순서를 AMUX의
-settle·전달 확인·만료 정리와 동시에 돌려 교착이 없음을 보이는 DB 통합 테스트, capability
-단일 소비, idempotency, 늦은 실행 거절 테스트를 요구한다.
+각 구현 단계는 아래 증거가 모두 있어야 끝난다. 이 증거는 품질 권고가 아니라 권한
+판정이 보수적이고 우회되지 않음을 `shadow` 전에 보이는 조건이다.
+
+- **결정적 판정 코드**: (1) 모든 상태 전이표가 코드 상수 하나이고 trigger와 테스트가 그
+  상수에서 생성·대조된다. (2) tree 목록 검증 fixture — 초안 서비스가 실제 적용과 다른
+  **거짓 목록**을 내면 게시 서비스의 대조에서 반드시 거절되고, 목록 hash 재계산·blob
+  hash·base 대조가 rename·copy·binary·mode·symlink·CRLF·`.gitattributes`·헤더와 hunk가
+  다른 patch에서 결정적으로 동작하며, 지원하지 않는 것은 T2다. (3) 대표 corpus에서의
+  T1/T2 비율 보고(push 금지 규칙의 보수성이 치르는 비용). (4) 등록 Guard fixture — 중복,
+  digest 불일치, 스캐너 거절, 상한. (5) 구현 독립 검토.
+- **본 앱**: 교차 잠금 순서를 AMUX의 settle·전달 확인·만료 정리와 동시에 돌려 교착이
+  없음을 보이는 DB 통합 테스트, capability 단일 소비, idempotency, 늦은 실행 거절, 구현
+  독립 검토.
+- **서비스**: watchdog 진입, 이미지 digest 고정 배포, 보안 회귀 고정, 구현 독립 검토,
+  모든 스위치 `off`.
 
 `shadow` 진입은 구현 병합과 배포, **이 문서의 운영자 승인**, 모델 호출 모듈의 구현
 독립 검토 통과, 게시 App 등록, 그리고 dead-man monitor 두 개가 실제로 알린다는 **탐지
@@ -563,7 +614,9 @@ settle·전달 확인·만료 정리와 동시에 돌려 교착이 없음을 보
 그리고 §13-18의 확인, 도달 분석 결과 기록, 게시 App 설치와 ruleset의 실제 저장소
 검증 기록, stale-approval dismissal 설정 확인, 병합 관측 일곱 조건이 승인·비승인을 맞게
 내는지의 관측, AMUX 작업 검토와의 순서 관측, last-look과 기대 old OID의 관측, **게시 App
-자격증명 전용성 기록**(날짜 있음, key·설치 범위·이미지 digest를 바꿀 때마다)을 요구한다.
+자격증명 전용성 기록**(날짜 있음, key·설치 범위·이미지 digest를 바꿀 때마다), 그리고
+§9-10 조건 4가 사람을 증명하도록 하는 운영자 결정(서명 수단 또는 별도 reviewer 계정)을
+요구한다.
 
 ## 15. 이 문서를 고치는 법
 
