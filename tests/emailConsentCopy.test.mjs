@@ -270,24 +270,69 @@ test("the canonical form separates the fields it hashes", () => {
  * approved table wrapped in `<!-- -->`, and the suite still found its lines.
  * The record has to be the record somebody reads.
  *
- * Fences are dropped whole, including their content, and a comment's lines are
- * blanked rather than removed so a slice's line numbering is not disturbed.
+ * Both are blanked rather than removed, so a slice's line numbering is not
+ * disturbed.
+ *
+ * The first version treated any run of backticks or tildes as a fence toggle
+ * and only removed closed comments, and a review found three ways through it.
+ * A fence indented four spaces is not a fence at all -- it is an indented code
+ * block whose content is the literal delimiter -- so treating it as one blanked
+ * the real table that followed. A backtick fence is not closed by a tilde one,
+ * nor by a shorter run. And an unterminated `<!--` swallows the rest of the
+ * document, so a reader saw no section 3 while the test read one.
+ *
+ * So: a fence opens on three or more backticks or tildes indented at most
+ * three spaces, and closes only on a run of the same character at least as
+ * long, with no trailing text. An unterminated comment or fence blanks
+ * everything to the end.
  */
 const renderedOnly = (doc) => {
-  const withoutComments = doc.replace(/<!--[\s\S]*?-->/g, (block) =>
-    block.replace(/[^\n]/g, " ")
-  );
-  let fenced = false;
-  return withoutComments
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        fenced = !fenced;
-        return "";
+  const lines = doc.split("\n");
+  const out = [];
+  let fence = null;
+  let inComment = false;
+
+  for (const line of lines) {
+    if (inComment) {
+      const end = line.indexOf("-->");
+      out.push("");
+      if (end >= 0) {
+        inComment = false;
+        // Anything after the close is rendered, and a table cannot start
+        // mid-line, so keeping the remainder is enough.
+        const rest = line.slice(end + 3);
+        out[out.length - 1] = rest.trim() === "" ? "" : rest;
       }
-      return fenced ? "" : line;
-    })
-    .join("\n");
+      continue;
+    }
+    if (fence !== null) {
+      out.push("");
+      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (open) {
+      fence = { char: open[1][0], length: open[1].length };
+      out.push("");
+      continue;
+    }
+    const comment = line.indexOf("<!--");
+    if (comment >= 0) {
+      const end = line.indexOf("-->", comment + 4);
+      if (end >= 0) {
+        out.push(line.slice(0, comment) + line.slice(end + 3));
+      } else {
+        inComment = true;
+        out.push(line.slice(0, comment).trim() === "" ? "" : line.slice(0, comment));
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
 };
 
 const approvedDocument = () =>
@@ -359,7 +404,10 @@ const tablesOf = (section) => {
       continue;
     }
     current = null;
-    if (line.trim() !== "") label = line.trim();
+    // A heading is not a label. Keeping it as one made every subsection's
+    // single table compare as `null` by accident, which meant a repeated
+    // `**제목**` above another subsection's table went unnoticed.
+    if (line.trim() !== "") label = /^#/.test(line.trim()) ? null : line.trim();
   }
   return tables;
 };
@@ -431,6 +479,8 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
 
   // 3.0 is the summary of what the four devices are; the four that follow carry
   // the approved strings, and their tables are exactly the ones the keys name.
+  // The labels are compared as they are, not nulled outside 3.D: a repeated
+  // `**제목**` above another subsection's table would otherwise pass.
   const expectedTables = {
     "### 3.0": [null],
     "### 3.A": [null],
@@ -441,10 +491,23 @@ test("section 3 holds exactly the approved devices, tables and roles", () => {
   for (const [heading, labels] of Object.entries(expectedTables)) {
     const tables = tablesOf(sectionOf(doc, heading));
     assert.deepEqual(
-      tables.map((table) => (heading === "### 3.D" ? table.label : null)),
+      tables.map((table) => table.label),
       labels,
       `${heading} does not hold exactly the approved tables`
     );
+  }
+
+  // 3.0's table says there are four devices and what each records. A fifth row
+  // there is a fifth approved device, and the eight keys would not notice.
+  const devices = tablesOf(sectionOf(doc, "### 3.0"))[0].rows;
+  assert.deepEqual(devices[0], ["#", "장치", "어디에", "무엇을 기록하는가"]);
+  assert.deepEqual(
+    devices.slice(1).map((row) => row[0]),
+    ["A", "B", "C", "D"],
+    "3.0 does not name exactly the four approved devices"
+  );
+  for (const row of devices) {
+    assert.equal(row.length, 4);
   }
 
   // The language tables: one row per language and no more, so an eighth row
@@ -483,10 +546,14 @@ test("the approval table binds every approved section to the version's approver 
   // code records for the current version.
   const current = CONSENT_COPY_VERSIONS[CONSENT_COPY_VERSIONS.length - 1];
   const tables = tablesOf(sectionOf(approvedDocument(), "## 8."));
-  const approval = tables.find(
+  const approvals = tables.filter(
     (table) => table.rows[0]?.[0] === "절" && table.rows[0]?.[2] === "승인"
   );
-  assert.ok(approval, "section 8 has no approval table");
+  // Exactly one. `find()` took the first, so a second table with the same
+  // header and every cell reading "rejected" sat below it and passed.
+  assert.equal(approvals.length, 1, "section 8 must hold exactly one approval table");
+  const approval = approvals[0];
+  assert.deepEqual(approval.rows[0], ["절", "내용", "승인"]);
 
   const rows = approval.rows.slice(1);
   assert.deepEqual(
@@ -495,6 +562,7 @@ test("the approval table binds every approved section to the version's approver 
     "the approved sections are not the ones section 8 lists"
   );
   for (const row of rows) {
+    assert.equal(row.length, 3, `${row[0]} has extra cells`);
     assert.equal(
       row[2],
       `${current.approvedBy}, ${current.approvedAt}`,

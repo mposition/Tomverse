@@ -412,7 +412,7 @@ docs/policy/email-product-news-redesign-draft.md §5.5가 인용한 FTC Section 
 | **B** | **cohort는 이 안내를 보지 않음** | **override는 78계정 전부 유지** | **선택됨** |
 | C | 약속하지 않는 새 문안 버전 승인 | docs/policy/email-product-news-redesign-draft.md §5.5의 "처음 여쭙는다"는 인상이 약해짐 | |
 
-**구현(S8a, 별도 브랜치에서 검토 중이며 아직 병합되지 않음)**: 아래에 적은
+**구현(S8a)**: 아래에 적은
 함수(`noticeStateForUser()`, `overrideWouldSend()`, `overrideBlockers()`)는 이
 문서와 같은 트리에 없습니다. 이 트리에는 안내를 렌더하는 화면도 없습니다.
 **안내는 S8a가 병합된 뒤에만 렌더해야 합니다** — 그 전에 렌더하면 거절이
@@ -514,9 +514,11 @@ IP를 그대로 쓰고, production 밖에서는 `x-real-ip`도 씁니다. 동의
 로그인 없이 됩니다. 그것은 동의를 유효하게 만드는 조건이 아닙니다.
 
 **"이미 하는 일"은 아닙니다 — 설계됐고 일부 만들어졌습니다.** 78계정에게
-`risk_accepted`로 보내는 **발송 경로는 아직 없습니다.** 지금의 standard lane에는
-`risk_accepted` 분기가 없어 동의 없는 계정은 `no_consent`로 건너뛰고, marketing은
-production에서 비활성이며, 승인은 아직 production에서 봉인되지 않았습니다. 원장과
+`risk_accepted`로 보내는 **발송 경로는 이 트리에 없습니다.** standard lane에
+`risk_accepted` 분기가 없어 동의 없는 계정은 `no_consent`로 건너뛰고, marketing
+flag는 기본값이 off입니다. **production의 flag 값과 승인 봉인 여부는 이 문서가
+말할 수 있는 사실이 아닙니다** — 저장소가 아니라 운영 DB가 가진 값이고, 보내기
+전에 확인해야 하는 것입니다. 원장과
 봉인 장치(S3)는 develop에 있고, cohort 판정(S8a)은 아직 병합되지 않았으며, 발송은
 S9입니다. `EmailPreference`까지 채우면 S9를 기다리지 않고 보낼 수 있다는 점은
 사실입니다 — 그 대가가 위의 목록입니다.
