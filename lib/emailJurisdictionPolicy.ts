@@ -9,6 +9,11 @@ import {
   jurisdictionCountryMapSeed,
   jurisdictionSeedProblems,
 } from "@/lib/emailJurisdictionSeed";
+import {
+  releaseNotesCountryRuleSeed,
+  releaseNotesRuleKey,
+  releaseNotesRuleSeedProblems,
+} from "@/lib/releaseNotesCountryRuleCore";
 
 /**
  * Policy versions: creating a draft, reading one, and activating one.
@@ -149,7 +154,7 @@ export async function ensureJurisdictionPolicyDraft(input?: {
   version?: string;
   changeSummary?: string;
 }) {
-  const problems = jurisdictionSeedProblems();
+  const problems = [...jurisdictionSeedProblems(), ...releaseNotesRuleSeedProblems()];
   if (problems.length > 0) {
     throw new JurisdictionPolicyError(
       "JURISDICTION_SEED_INVALID",
@@ -195,6 +200,22 @@ export async function ensureJurisdictionPolicyDraft(input?: {
         policyVersionId: policyVersion.id,
         countryCode: row.countryCode,
         profileKey: row.profileKey,
+      })),
+    });
+    // The recipient authority per country (docs/policy/email-notifications.md
+    // section 5.1.1). Written with the draft, like the profiles, so a version
+    // is activated with the rules it was reviewed with; the table refuses a
+    // write to any version that is no longer a draft.
+    await tx.releaseNotesCountryRule.createMany({
+      data: releaseNotesCountryRuleSeed().map((rule) => ({
+        policyVersionId: policyVersion.id,
+        countryCode: rule.countryCode,
+        ruleKey: releaseNotesRuleKey(rule.countryCode),
+        ruleVersion: rule.ruleVersion,
+        basis: rule.basis,
+        status: rule.status,
+        conditions: [...rule.conditions],
+        notes: rule.notes,
       })),
     });
     return tx.emailPolicyVersion.findUniqueOrThrow({

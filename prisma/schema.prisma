@@ -4485,6 +4485,8 @@ model EmailPolicyVersion {
   permissionDecisions EmailPermissionDecision[]
   sendApprovals       EmailSendApproval[]
 
+  releaseNotesCountryRules ReleaseNotesCountryRule[]
+
   @@index([status, activatedAt])
 }
 
@@ -4541,6 +4543,36 @@ model JurisdictionProfile {
 
   @@unique([profileKey, policyVersionId])
   @@index([policyVersionId])
+}
+
+/// The recipient authority for release-notes marketing, one row per country per
+/// policy version. Contract: docs/policy/email-notifications.md section 5.1.1;
+/// draft sections 4.1-4.3.
+///
+/// `status` is the marketing allowlist (section 4.1): open or closed. `basis`
+/// is what the recipient side rests on. Rows are written only while their
+/// policy version is a draft, and one (ruleKey, ruleVersion) names one content
+/// in every version that carries it -- both enforced by trigger in the
+/// migration, because an obligation waiver is scoped to that pair.
+model ReleaseNotesCountryRule {
+  id String @id @default(cuid())
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+
+  countryCode String
+  ruleKey     String
+  ruleVersion Int
+
+  basis      String
+  status     String
+  conditions Json   @default("[]")
+  notes      String
+
+  createdAt DateTime @default(now())
+
+  @@unique([policyVersionId, countryCode])
+  @@index([ruleKey, ruleVersion])
 }
 
 /// Which profile a country resolves to, per policy version.

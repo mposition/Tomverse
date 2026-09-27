@@ -947,6 +947,20 @@ const REGISTRY = {
     reason:
       "The receiver authority and the Australian sender authority, which is all of them. Evidence names the one that cited it, and the insert trigger requires that the verdict actually applied it -- so an open string here would be a row resting on an authority no rule defines, in a table that cannot be corrected.",
   },
+  ReleaseNotesCountryRule_basis_check: {
+    owner: "list",
+    module: "lib/releaseNotesCountryRuleCore.ts",
+    list: "RELEASE_NOTES_RULE_BASES",
+    reason:
+      "What the recipient side of a release-notes send rests on: opt_out, express_consent or inferred_consent (docs/policy/email-notifications.md section 5.1.1). The verdict has one branch per value; a fourth stored value would be a rule no branch reads, and the verdict throws on it rather than guessing.",
+  },
+  ReleaseNotesCountryRule_status_check: {
+    owner: "list",
+    module: "lib/releaseNotesCountryRuleCore.ts",
+    list: "RELEASE_NOTES_RULE_STATUSES",
+    reason:
+      "Open or closed: the marketing allowlist as each rule's status (draft section 4.1). A third state -- paused, pending -- would be a question the verdict answers by default, and the default for an unknown permission has to be no.",
+  },
   EmailSendApprovalMember_noticeAnchorSource_check: {
     owner: "list",
     module: "lib/emailPermissionLedgerCore.ts",
