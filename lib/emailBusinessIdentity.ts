@@ -27,6 +27,7 @@ export const BUSINESS_IDENTITY_ENV = {
   legalName: "EMAIL_BUSINESS_LEGAL_NAME",
   postalAddress: "EMAIL_BUSINESS_POSTAL_ADDRESS",
   contactEmail: "EMAIL_BUSINESS_CONTACT_EMAIL",
+  contactPhone: "EMAIL_BUSINESS_CONTACT_PHONE",
   businessRegistrationNumber: "EMAIL_BUSINESS_REGISTRATION_NUMBER",
   mailOrderRegistrationNumber: "EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER",
   abn: "EMAIL_BUSINESS_ABN",
@@ -36,6 +37,7 @@ export const readBusinessIdentity = (env: Env): BusinessIdentity => ({
   legalName: value(env, BUSINESS_IDENTITY_ENV.legalName),
   postalAddress: value(env, BUSINESS_IDENTITY_ENV.postalAddress),
   contactEmail: value(env, BUSINESS_IDENTITY_ENV.contactEmail),
+  contactPhone: value(env, BUSINESS_IDENTITY_ENV.contactPhone),
   businessRegistrationNumber: value(env, BUSINESS_IDENTITY_ENV.businessRegistrationNumber),
   mailOrderRegistrationNumber: value(
     env,
@@ -52,6 +54,7 @@ export const BLOCK_ENV_VARIABLE: Record<string, string | null> = {
   legal_name: BUSINESS_IDENTITY_ENV.legalName,
   postal_address: BUSINESS_IDENTITY_ENV.postalAddress,
   contact_email: BUSINESS_IDENTITY_ENV.contactEmail,
+  contact_phone: BUSINESS_IDENTITY_ENV.contactPhone,
   business_registration: BUSINESS_IDENTITY_ENV.businessRegistrationNumber,
   mail_order_registration: BUSINESS_IDENTITY_ENV.mailOrderRegistrationNumber,
   abn: BUSINESS_IDENTITY_ENV.abn,
@@ -91,6 +94,16 @@ export const UNIVERSAL_IDENTITY_BLOCKS = [
 
 export const JURISDICTION_IDENTITY_BLOCKS: Record<string, readonly string[]> = {
   AU: ["abn"],
+  // 시행령 별표 6 names a telephone number beside the name, address and email
+  // (draft section 7.7, the row marked implemented). Korea only: a number that
+  // one jurisdiction asks for is not a reason to print it to everybody.
+  //
+  // This is invariant 9 in practice. The renderer drops the whole footer when a
+  // named block has no value, so leaving EMAIL_BUSINESS_CONTACT_PHONE unset
+  // refuses every Korean marketing message rather than sending one without the
+  // number -- which is the right way round, and is why readiness reports it as
+  // a jurisdiction problem naming the variable.
+  KR: ["contact_phone"],
   // Not because EU or Swiss law asks for an ABN. Both ask that the sender not
   // be concealed, and for an Australian company the ABN is the shortest
   // identifier that makes the name checkable (Q1 review 2026-09-14, section 6.1).
@@ -105,6 +118,7 @@ const BLOCK_VALUE: Record<
   legal_name: (identity) => identity.legalName,
   postal_address: (identity) => identity.postalAddress,
   contact_email: (identity) => identity.contactEmail,
+  contact_phone: (identity) => identity.contactPhone,
   business_registration: (identity) => identity.businessRegistrationNumber,
   mail_order_registration: (identity) => identity.mailOrderRegistrationNumber,
   abn: (identity) => identity.abn,

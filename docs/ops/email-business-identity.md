@@ -1,6 +1,6 @@
 # 이메일 footer의 사업자 정보
 
-발신자가 누구인지를 말하는 값 여섯 개입니다. 모든 관할권의 스팸 관련 법이
+발신자가 누구인지를 말하는 값 일곱 개입니다. 모든 관할권의 스팸 관련 법이
 가장 먼저 요구하는 것이고, `JurisdictionProfile.footerBlocks`가 **어떤 값을**
 찍을지 정하고 이 환경변수가 **그 값이 무엇인지**를 정합니다.
 
@@ -13,6 +13,7 @@
 EMAIL_BUSINESS_LEGAL_NAME=Tomverse Pty Ltd
 EMAIL_BUSINESS_POSTAL_ADDRESS=1 Example Street, Brisbane QLD 4000, Australia
 EMAIL_BUSINESS_CONTACT_EMAIL=support@tomverse.app
+EMAIL_BUSINESS_CONTACT_PHONE=+61 2 0000 0000
 EMAIL_BUSINESS_ABN=00 000 000 000
 
 # 오늘 요구하는 profile이 없습니다 (아래) -- 설정하지 않습니다
@@ -25,6 +26,7 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 | `EMAIL_BUSINESS_LEGAL_NAME` | `legal_name` | 전부 |
 | `EMAIL_BUSINESS_POSTAL_ADDRESS` | `postal_address` | 전부 |
 | `EMAIL_BUSINESS_CONTACT_EMAIL` | `contact_email` | 전부 |
+| `EMAIL_BUSINESS_CONTACT_PHONE` | `contact_phone` | **KR** (아래) |
 | `EMAIL_BUSINESS_REGISTRATION_NUMBER` | `business_registration` | **없음** (아래) |
 | `EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER` | `mail_order_registration` | **없음** (아래) |
 | `EMAIL_BUSINESS_ABN` | `abn` | AU |
@@ -49,6 +51,7 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 | 값 | 요구하는 profile |
 |---|---|
 | `legal_name` · `postal_address` · `contact_email` | **전부** (`ZZ` 포함) |
+| `contact_phone` | `KR` |
 | `abn` | `AU` |
 | `business_registration` · `mail_order_registration` | **요구하는 profile 없음** |
 
@@ -59,6 +62,25 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 한국 수신자 marketing이 영구히 거부됩니다. **두 환경변수는 설정하지 않습니다** —
 renderer는 block을 그대로 들고 있으므로, 한국 신고 번호가 생기면 seed 한 줄과 새
 policy version으로 되살아납니다.
+
+## 한국 전화번호는 한국 marketing의 선행 조건입니다
+
+`contact_phone`은 2026-09-27에 KR profile에 들어갔습니다. 시행령 별표 6이
+전송자의 명칭·주소·전자우편주소와 **함께 전화번호**를 요구하고,
+`docs/policy/email-product-news-redesign-draft.md` §7.7이 그 행을
+`implemented`로 정했기 때문입니다.
+
+**`EMAIL_BUSINESS_CONTACT_PHONE`을 설정하기 전에는 한국 수신자에게 marketing을
+보낼 수 없습니다.** 위 절대로, renderer는 이름 붙은 block 중 하나라도 값이 없으면
+footer 전체를 버리고, marketing은 footer 없이 나가지 않습니다. 번호 없이 보내는
+것보다 이쪽이 맞습니다 — 표기 의무를 지키지 못한 광고는 회수되지 않습니다.
+
+- 값은 **수신자가 실제로 연락할 수 있는 번호**입니다. 없는 번호를 적는 것은
+  legal_name에 placeholder를 넣는 것과 같은 종류의 거짓입니다.
+- 국제 표기(`+61 …`)를 씁니다. 한국 수신자가 해외에서 걸 수 있어야 합니다.
+- 다른 관할권 profile은 이 block을 이름 대지 않으므로, 설정하지 않아도 한국 밖의
+  메일에는 영향이 없습니다. `/api/ready`는 관할권 전용 값으로서 **경고**로
+  보고합니다(아래).
 
 ## 확인 방법
 
@@ -71,8 +93,10 @@ policy version으로 되살아납니다.
 - `MARKETING_EMAIL_FROM`이 설정되면 **오류**로 바뀝니다. 그 순간부터 marketing은
   전부 거부되는데 `/api/ready`는 계속 통과한다고 답하게 되기 때문입니다 — EM-10이
   unsubscribe 키에 대해 기술한 것과 같은 상태입니다.
-- 관할권 전용 값(오늘은 `AU`의 `abn` 하나)은 marketing이 켜져도 **경고로 남습니다.**
-  이 배포에 그 관할권 수신자가 있는지는 환경변수가 가진 사실이 아닙니다.
+- 관할권 전용 값(`AU`의 `abn`, `KR`의 `contact_phone`)은 marketing이 켜져도
+  **경고로 남습니다.** 이 배포에 그 관할권 수신자가 있는지는 환경변수가 가진
+  사실이 아닙니다. 경고인 것과 그 관할권 발송이 가능한 것은 다릅니다 — 한국
+  수신자에게 보내려면 그 경고를 먼저 없애야 합니다.
 
 빠진 값은 **한 번에 전부** 보고합니다 — 하나 고치고 다시 알게 되는 방식이면 세 번
 배포해야 세 가지를 압니다. 발송 시점의 신호는 여전히
