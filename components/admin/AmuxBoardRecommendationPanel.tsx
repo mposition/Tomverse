@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardRecommendationMessages } from "@/lib/adminMessages/amuxBoardRecommendation";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
@@ -29,7 +28,7 @@ export function AmuxBoardRecommendationPanel() {
   const send = async (action: string) => {
     setPending(true);
     try {
-      const response = await adminFetch(`/api/admin/amux/board-recommendation?action=${action}`, {
+      const response = await fetch(`/api/admin/amux/board-recommendation?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: requestText,
