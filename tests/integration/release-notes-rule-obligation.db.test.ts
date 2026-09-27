@@ -342,8 +342,6 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
     [{ ruleVersion: rule.ruleVersion + 1 }, "another rule version"],
     [{ ruleKey: releaseNotesRuleKey("SG") }, "another rule"],
     [{ policyVersionId: other.version.id }, "another policy version"],
-    [{ country: null }, "no country at all"],
-    [{ obligationKey: null }, "no duty at all"],
   ];
 
   for (const [overrides, what] of scopes) {
@@ -369,12 +367,35 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
             waiverApprovalType: "obligation_waiver",
           }),
         }),
-      /RNO_SCOPE_MISMATCH|RNO_RULE_MISSING/
+      /RNO_SCOPE_MISMATCH/
     );
     assert.equal(
       await prisma.releaseNotesRuleObligation.count(),
       0,
       `a waiver for ${what} was stored`
+    );
+  }
+
+  // A waiver with no country or no duty key cannot be stored at all, and that is
+  // the approval ledger's CHECK rather than this trigger's. It was in the matrix
+  // above until a review pointed out that the approval could not be created, so
+  // the case ended before it reached the trigger and proved nothing about it.
+  // Asserted here, where the refusal belongs.
+  for (const overrides of [{ country: null }, { obligationKey: null }]) {
+    await refuses(
+      () =>
+        approval(
+          {
+            sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+            ruleKey: rule.ruleKey,
+            ruleVersion: rule.ruleVersion,
+            country: "KR",
+            obligationKey: "advertising_subject_label",
+            ...overrides,
+          },
+          rule.policyVersionId
+        ),
+      /scope_check/
     );
   }
 
