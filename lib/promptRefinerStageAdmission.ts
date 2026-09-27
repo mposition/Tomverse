@@ -26,6 +26,7 @@ import {
 import {
   PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
   PROMPT_REFINER_RESERVATION_STAGE_ID,
+  PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
 } from "@/lib/promptRefinerReservationCore";
 import {
   PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
@@ -321,6 +322,9 @@ const promptRefinerStageAuditMetadata = (stage: StoredStage) => ({
   maxReservations: stage.maxReservations,
   costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
   approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+  ...(stage.id === PROMPT_REFINER_RESERVATION_STAGE_V3_ID
+    ? { runApprovalEnabled: true, executionEnabled: true }
+    : {}),
   approvedAt: stage.approvedAt.toISOString(),
   approvalExpiresAt: stage.approvalExpiresAt.toISOString(),
   reason: PROMPT_REFINER_STAGE_REASON,
@@ -515,7 +519,8 @@ export const createPromptRefinerReservationStage = async (input: {
   };
 }) => {
   if (!input.session.user?.id) refuse(403, "PROMPT_REFINER_STAGE_ACTOR_REQUIRED", "Administrator identity is required.");
-  if (!promptRefinerShadowActivationFlags().activationReady) {
+  const activation = promptRefinerShadowActivationFlags();
+  if (!activation.activationReady) {
     refuse(
       503,
       "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
@@ -576,6 +581,8 @@ export const createPromptRefinerReservationStage = async (input: {
         maxReservations: PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
         costCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
         approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+        runApprovalEnabled: activation.runApprovalEnabled,
+        executionEnabled: activation.executionEnabled,
         approvedAt: now.toISOString(),
         approvalExpiresAt: new Date(now.getTime() + PROMPT_REFINER_STAGE_APPROVAL_TTL_MS).toISOString(),
         reason: PROMPT_REFINER_STAGE_REASON,

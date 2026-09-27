@@ -243,6 +243,8 @@ BEGIN
                 'maxReservations', NEW."maxReservations",
                 'costCeilingMicroUsd', NEW."costCeilingMicroUsd",
                 'approvalTtlMinutes', 60,
+                'runApprovalEnabled', true,
+                'executionEnabled', true,
                 'approvedAt', audit."metadata"->'approvedAt',
                 'approvalExpiresAt', audit."metadata"->'approvalExpiresAt',
                 'reason', 'bounded_staging_shadow_cost_approval'

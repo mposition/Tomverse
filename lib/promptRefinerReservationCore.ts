@@ -19,8 +19,10 @@ export const PROMPT_REFINER_RESERVATION_STAGE_IDS = Object.freeze([
     "prompt-refiner-shadow-v2",
     "prompt-refiner-shadow-v3",
 ] as const);
-export const PROMPT_REFINER_RESERVATION_STAGE_ID =
+export const PROMPT_REFINER_RESERVATION_STAGE_V3_ID =
     PROMPT_REFINER_RESERVATION_STAGE_IDS[2];
+export const PROMPT_REFINER_RESERVATION_STAGE_ID =
+    PROMPT_REFINER_RESERVATION_STAGE_V3_ID;
 export const PROMPT_REFINER_RESERVATION_TTL_MS = 5 * 60 * 1_000;
 
 export const PROMPT_REFINER_RESERVATION_STAGE_STATUSES = Object.freeze([

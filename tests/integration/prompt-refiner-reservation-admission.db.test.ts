@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { before, beforeEach, test } from "node:test";
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
@@ -179,6 +180,8 @@ test("migration has no seed and the writer atomically binds provenance to one au
   assert.equal(audit.actorUserId, "mposition");
   assert.equal(audit.action, "prompt_refiner.shadow_stage.activated");
   assert.equal(audit.entryHash?.length, 64);
+  assert.equal((audit.metadata as Record<string, unknown>).runApprovalEnabled, true);
+  assert.equal((audit.metadata as Record<string, unknown>).executionEnabled, true);
   await assert.rejects(
     prisma.$executeRawUnsafe(`
       DO $$
@@ -229,6 +232,8 @@ test("stage audit freshness uses UTC under a non-UTC database session", async ()
           maxReservations: 100,
           costCeilingMicroUsd: 2_491_600,
           approvalTtlMinutes: 60,
+          runApprovalEnabled: true,
+          executionEnabled: true,
           approvedAt: approvedAt.toISOString(),
           approvalExpiresAt: approvalExpiresAt.toISOString(),
           reason: PROMPT_REFINER_STAGE_REASON,
@@ -283,6 +288,55 @@ test("stage audit freshness uses UTC under a non-UTC database session", async ()
     stored.approvalExpiresAt.getTime() - stored.approvedAt.getTime(),
     PROMPT_REFINER_STAGE_APPROVAL_TTL_MS
   );
+});
+
+test("the v3 stage trigger rejects missing or false activation facts in the audit", async () => {
+  const created = await create();
+  const sourceAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: created.stage.authorizationAuditLogId },
+  });
+  const sourceMetadata = sourceAudit.metadata as Record<string, unknown>;
+
+  for (const mutation of [
+    { key: "runApprovalEnabled", mode: "false" },
+    { key: "executionEnabled", mode: "false" },
+    { key: "runApprovalEnabled", mode: "missing" },
+    { key: "executionEnabled", mode: "missing" },
+  ] as const) {
+    await reset();
+    const metadata = structuredClone(sourceMetadata);
+    if (mutation.mode === "missing") delete metadata[mutation.key];
+    else metadata[mutation.key] = false;
+    const auditId = randomUUID();
+    await prisma.adminAuditLog.create({
+      data: {
+        id: auditId,
+        actorUserId: created.stage.approvedBy,
+        actorEmail: "owner@example.com",
+        action: "prompt_refiner.shadow_stage.activated",
+        targetType: "PromptRefinerReservationStage",
+        targetId: created.stage.id,
+        summary: "Approved the bounded Prompt Refiner staging shadow stage.",
+        metadata: metadata as Prisma.InputJsonValue,
+        previousHash: null,
+        entryHash: "d".repeat(64),
+        createdAt: created.stage.approvedAt,
+      },
+    });
+    await assert.rejects(
+      prisma.promptRefinerReservationStage.create({
+        data: {
+          ...created.stage,
+          runtimeSourceManifest: created.stage.runtimeSourceManifest as Prisma.InputJsonValue,
+          executionManifest: created.stage.executionManifest as Prisma.InputJsonValue,
+          authorizationAuditLogId: auditId,
+        },
+      }),
+      /authorization audit binding is invalid/i,
+      `${mutation.key}:${mutation.mode}`
+    );
+    assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
+  }
 });
 
 test("the shared audit writer's monotonic +1ms timestamp remains stage-admissible", async () => {
@@ -433,6 +487,8 @@ test("a structurally exact but forged audit and stage cannot reserve or consume"
         maxReservations: 100,
         costCeilingMicroUsd: 2_491_600,
         approvalTtlMinutes: 60,
+        runApprovalEnabled: true,
+        executionEnabled: true,
         approvedAt: approvedAt.toISOString(),
         approvalExpiresAt: approvalExpiresAt.toISOString(),
         reason: PROMPT_REFINER_STAGE_REASON,

@@ -24,6 +24,11 @@
 서버 preview는 run 승인 flag와 execution flag를 각각 표시하고 두 값의 conjunction인
 `activationReady`를 제공한다. 둘 중 하나라도 false면 브라우저는 stage 승인 버튼을
 비활성화하고, server writer도 audit 또는 stage row를 만들기 전에 fail-closed한다.
+두 환경 변수 `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED`와
+`PROMPT_REFINER_SHADOW_EXECUTION_ENABLED`는 각각 exact 문자열 `"true"`만 허용한다.
+성공한 v3 stage audit metadata는 이 precondition을
+`runApprovalEnabled:true`, `executionEnabled:true`로 정확히 기록하고 DB trigger가 exact
+key set과 값을 강제한다. legacy v1/v2 audit metadata는 변경하지 않는다.
 
 따라서 immutable stage를 만든 뒤 flag 활성화를 위해 재배포하는 순서는 더 이상 가능하지
 않다. 두 flag가 켜진 exact deployment에서만 60분 approval window가 시작된다.

@@ -24,7 +24,10 @@ migration CHECK에 함께 고정되고 운영자는 값을 request로 교체할 
 proposal/runtime-source/execution digest, commit, deployment, 고정 비용·slot·TTL과
 `executionAdmitted:false`, `productAdapterReady:false`를 반환한다. 또한 environment,
 deployment id, commit SHA, 세 digest, 비용·capacity·TTL 전체의 canonical JSON을 결속한
-`previewBindingDigest`를 반환한다. 응답은 `no-store`다.
+`previewBindingDigest`를 반환한다. `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED`와
+`PROMPT_REFINER_SHADOW_EXECUTION_ENABLED`는 각각 환경 변수의 exact 문자열이 `"true"`일
+때만 true이며, 응답의 `activationReady`는 정확히
+`runApprovalEnabled && executionEnabled`다. 응답은 `no-store`다.
 
 ## 3. POST create-only
 
@@ -46,6 +49,10 @@ POST는 owner, recent authentication, 전역 CSRF origin 검사와 DB atomic rat
 (분당 2, 일 10)을 모두 통과해야 한다. 서버는 GET 결과를 신뢰하지 않고 source/evidence를
 다시 검증하고 preview binding을 서버에서 재계산한다. 같은 commit/source라도 deployment id,
 비용, capacity 또는 TTL이 달라진 오래된 preview는 transaction 진입 전에 409로 거부한다.
+또한 서버 writer는 transaction과 audit write 전에 두 activation flag를 다시 읽고
+`activationReady` conjunction을 검사한다. 둘 중 하나라도 exact `"true"`가 아니면 audit과
+stage를 하나도 만들지 않고 HTTP 503
+`PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED`로 fail-closed한다.
 
 ## 4. transaction과 idempotency
 
@@ -115,7 +122,9 @@ error/body는 담지 않는다.
   허용하지 않는다.
 - tamper-evident audit의 actor/action/target와 metadata 전체(digest, cost/capacity,
   승인 시각·만료 시각·TTL, environment/deployment/commit, 서버 고정 reason)가 stage와
-  정확히 일치해야 한다.
+  정확히 일치해야 한다. 현행 v3 success audit는 stage 생성 시 실제로 통과한 flag 사실을
+  `runApprovalEnabled:true`, `executionEnabled:true`로 정확히 포함하며, 키 누락·false·추가
+  키는 DB trigger가 거부한다. legacy v1/v2 audit의 기존 exact metadata 형식은 바꾸지 않는다.
 - DB trigger는 공개 구조와 결속만 검증한다. HMAC key를 소유하지 않으므로 `entryHash`의
   진위를 주장하지 않는다. application writer create/replay와 reserve/consume은 같은 helper로
   stage-linked audit 행의 signed payload를 현재·과거 integrity key와 현재·legacy canonical
@@ -155,7 +164,9 @@ credential lookup, network, provider call 또는 flag mutation은 발생하지 �
 - 400/413: strict JSON 또는 4 KiB 위반
 - 409: stale preview, 환경/source/contract drift, 기존 immutable stage mismatch
 - 429: DB-backed rate limit
-- 503: runtime identity/source 또는 audit signing key 없음
+- 503: activation flag conjunction 미충족
+  (`PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED`), runtime identity/source 또는 audit
+  signing key 없음
 
 409는 retry 신호가 아니다. 새 GET으로 facts를 다시 확인하거나 이미 존재하는 immutable
 행을 조사한다. 최초 `20260918130000_prompt_refiner_stage_admission` migration의

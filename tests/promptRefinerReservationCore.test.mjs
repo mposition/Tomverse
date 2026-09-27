@@ -19,6 +19,7 @@ import {
     PROMPT_REFINER_RESERVATION_REFUSALS,
     PROMPT_REFINER_RESERVATION_STAGE_ID,
     PROMPT_REFINER_RESERVATION_STAGE_IDS,
+    PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
     PROMPT_REFINER_RESERVATION_STAGE_STATUSES,
     PROMPT_REFINER_RESERVATION_STATUSES,
     PROMPT_REFINER_RESERVATION_TTL_MS,
@@ -49,6 +50,8 @@ test("reservation contract freezes one bounded, content-free authority", () => {
         "prompt-refiner-reservation-authority-v3"
     );
     assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v3");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_V3_ID, "prompt-refiner-shadow-v3");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, PROMPT_REFINER_RESERVATION_STAGE_V3_ID);
     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_IDS], [
         "prompt-refiner-shadow-v1",
         "prompt-refiner-shadow-v2",

@@ -221,12 +221,18 @@ const compilerOptions = parsedConfig.options;
 // provenance above MARKETING_WEBHOOK_PIPELINE_FINGERPRINT adds comment lines in
 // lib/marketingAutomationAccess.ts. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-28, successor audit-facts repin: adding the exact activation facts
+// and then binding their generation check to the immutable v3 ID moves later
+// computed accesses in the admission and reservation modules. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so this
+// repin records source-position movement only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f45b025701de762d84c06ae51b561ea3",
-  "24775911c6e8cc13cf7b3b86bc5bf943",
+  "476f291300bd9b1876df62a8f074addf",
+  "607615aee275e1e4625b3e5f73e875d6",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
