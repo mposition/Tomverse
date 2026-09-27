@@ -36,7 +36,7 @@ Claude 검토를 받도록 지시했다. 이 작업의 Claude 검토에 `--skip-
 - `node --test tests/gitleaksExactRangeGuard.test.mjs`
 - `npm run security:regression`
 - `npm run typecheck`
-- `npx eslint lib/crossReviewCore.ts scripts/cross-review.mjs scripts/check-gitleaks-exact-range.mjs tests/crossReview.test.mjs tests/gitleaksExactRangeGuard.test.mjs`
+- `npx eslint lib/crossReviewCore.ts lib/crossReviewExecutors.ts scripts/cross-review.mjs scripts/check-gitleaks-exact-range.mjs tests/crossReview.test.mjs tests/gitleaksExactRangeGuard.test.mjs`
 - `npm run check:encoding`
 - `git diff --check 82caecfd8a3dbb4815fd9c232f2b42b2dafcf646`
 - 공식 provenance는 [gitleaks/gitleaks v8.24.3 release](https://github.com/gitleaks/gitleaks/releases/tag/v8.24.3)다.
