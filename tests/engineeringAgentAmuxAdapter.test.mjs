@@ -4,10 +4,23 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
+  AMUX_DB_BOUNDARIES,
+  AMUX_DB_COMMIT_RESERVE_MS,
+  AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+  AMUX_DB_MAX_WAIT_MS,
+  AMUX_DB_STATEMENT_TIMEOUT_MS,
+} from "../lib/amux/dbBoundary.ts";
+import {
   ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
+  ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   amuxSettlementForRunOutcome,
   engineeringAgentAmuxAdapterPermitted,
+  engineeringPublishResultAttachment,
+  engineeringRunEndAttachment,
+  engineeringRunHeartbeatAttachment,
+  engineeringRunStartAttachment,
   isEngineeringAgentAmuxAdapterOpen,
   mintEngineeringAgentRunId,
 } from "../lib/engineeringAgentAmuxAdapter.ts";
@@ -77,17 +90,59 @@ test("no engineering route takes a worker from its body, and only runner routes 
   for (const file of routeFiles) {
     const text = readFileSync(file, "utf8");
     assert.doesNotMatch(text, /\bworker\s*:/, `${file} names no worker`);
-    if (text.includes("@/lib/engineeringAgentAmuxAdapter")) {
-      assert.match(text, /isEngineeringAgentRouteAuthorized\(request, "runner"\)/, `${file} is a runner route`);
-      assert.match(text, /isEngineeringAgentAmuxAdapterOpen\(\)/, `${file} checks the latch before the body`);
+    if (!text.includes("@/lib/engineeringAgentAmuxAdapter")) continue;
+    if (file.replaceAll("\\", "/").endsWith("publish/result/route.ts")) {
+      // The publisher's result: the adapter checks the latch itself, and only
+      // on the path that records a pull request on the card.
+      assert.match(text, /isEngineeringAgentRouteAuthorized\(request, "publisher"\)/, file);
+      continue;
     }
+    assert.match(text, /isEngineeringAgentRouteAuthorized\(request, "runner"\)/, `${file} is a runner route`);
+    assert.match(text, /isEngineeringAgentAmuxAdapterOpen\(\)/, `${file} checks the latch before the body`);
+  }
+  const adapter = readFileSync("lib/engineeringAgentAmuxAdapter.ts", "utf8");
+  const publisherResult = adapter.slice(adapter.indexOf("export async function recordEngineeringAgentPublisherResult"));
+  assert.match(publisherResult, /requireOpen\(\);\n\s+const item = await prisma/, "the AMUX path is behind the latch");
+});
+
+test("each attached writer fits the adapter routes' budget, as the AMUX routes' writers fit theirs", () => {
+  const perCall = AMUX_DB_STATEMENT_TIMEOUT_MS + AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS;
+  const fits = (boundary, attachment) =>
+    (AMUX_DB_BOUNDARIES[boundary].prismaCallCeiling + attachment.prismaCalls) * perCall +
+      AMUX_DB_COMMIT_RESERVE_MS +
+      AMUX_DB_MAX_WAIT_MS <=
+    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS;
+  assert.ok(fits("executionStart", engineeringRunStartAttachment({ runId: "1", baseSha: "0".repeat(40) })));
+  assert.ok(fits("executionHeartbeat", engineeringRunHeartbeatAttachment({ runId: "1" })));
+  assert.ok(fits("executionSettle", engineeringRunEndAttachment({ runId: "1", outcome: "t2_draft", halt: "none" })));
+  assert.ok(
+    fits(
+      "reviewPullRequest",
+      engineeringPublishResultAttachment({ workItemId: "x", fencingToken: 1n, outcome: "confirmed", pullRequest: null }),
+    ),
+  );
+  for (const attachment of [
+    engineeringRunStartAttachment({ runId: "1", baseSha: "0".repeat(40) }),
+    engineeringRunEndAttachment({ runId: "1", outcome: "t2_draft", halt: "none" }),
+    engineeringPublishResultAttachment({ workItemId: "x", fencingToken: 1n, outcome: "confirmed", pullRequest: null }),
+  ]) {
+    assert.ok(attachment.prismaCalls <= AMUX_ATTACHMENT_MAX_PRISMA_CALLS);
   }
 });
 
 test("the adapter reaches only the AMUX writers version 12 allows it", () => {
   const text = readFileSync("lib/engineeringAgentAmuxAdapter.ts", "utf8");
   const imported = [...text.matchAll(/from "@\/lib\/amux\/([A-Za-z]+)"/g)].map((match) => match[1]).sort();
-  assert.deepEqual([...new Set(imported)], ["dbBoundary", "delivery", "execution", "executionGate", "routing", "store", "workerRuntime"]);
+  assert.deepEqual([...new Set(imported)], [
+    "dbBoundary",
+    "delivery",
+    "execution",
+    "executionGate",
+    "reviewPullRequest",
+    "routing",
+    "store",
+    "workerRuntime",
+  ]);
   assert.doesNotMatch(text, /\breclaimExpiredAmux/, "recovery is the AMUX recover route's alone");
   assert.doesNotMatch(text, /toStatus:\s*"done"/);
   const costs = [...text.matchAll(/actualCostMicrousd:\s*([^,\s]+)/g)].map((match) => match[1]);

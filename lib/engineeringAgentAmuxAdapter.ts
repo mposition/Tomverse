@@ -33,6 +33,7 @@ import {
   type AmuxExecutionToStatus,
 } from "@/lib/amux/execution";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
+import { recordAmuxReviewPullRequest, type AmuxReviewPullRequestFact } from "@/lib/amux/reviewPullRequest";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { listOwnedTodos } from "@/lib/amux/store";
 import {
@@ -50,16 +51,19 @@ import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
   engineeringAgentHalted,
+  openEngineeringAgentWorkItem,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
   openEngineeringAgentRunMismatches,
   readEngineeringAgentHaltState,
+  recordEngineeringAgentPublishResult,
   readEngineeringAgentOwnerQueues,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
   runEngineeringAgentTransaction,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
+import type { WriteResultOutcome } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -137,6 +141,10 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
 const RUN_START_PRISMA_CALLS = 14;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
 const RUN_END_PRISMA_CALLS = 10;
+// A publish result: the settlement (item lock, capability read, update,
+// audit entry -- seven), the run's card, the binding and its audit entry
+// (five) and the request's move -- fourteen, and two to spare.
+const PUBLISH_RESULT_PRISMA_CALLS = 16;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
 export const engineeringRunStartAttachment = (input: {
@@ -201,6 +209,31 @@ export const engineeringRunEndAttachment = (input: {
       }),
     });
     await input.markCommitted?.(tx);
+  },
+});
+
+/** A published result is settled and bound in the transaction that records its card's review pull request. */
+export const engineeringPublishResultAttachment = (input: {
+  workItemId: string;
+  fencingToken: bigint;
+  outcome: WriteResultOutcome;
+  pullRequest: Parameters<typeof recordEngineeringAgentPublishResult>[1]["pullRequest"];
+  markCommitted?: MarkCommitted;
+}): AmuxAttachment<AmuxReviewPullRequestFact> => ({
+  prismaCalls: PUBLISH_RESULT_PRISMA_CALLS,
+  work: async (lent, fact) => {
+    const tx = engineeringAgentTransactionInAmux(lent);
+    if (input.pullRequest?.prNumber !== fact.prNumber) {
+      throw new EngineeringAgentStoreRefusedError("pull_request_mismatch");
+    }
+    await recordEngineeringAgentPublishResult(tx, {
+      workItemId: input.workItemId,
+      fencingToken: input.fencingToken,
+      outcome: input.outcome,
+      pullRequest: input.pullRequest,
+      cardId: fact.taskId,
+    });
+    await input.markCommitted?.(tx, input.workItemId);
   },
 });
 
@@ -392,4 +425,64 @@ export async function finishEngineeringAgentRun(input: {
       markCommitted: input.markCommitted,
     }),
   );
+}
+
+/**
+ * Records the publisher's result for the item it claimed. A result that
+ * published a pull request records that number on the card for its review
+ * (the orchestration policy's "review 대상 PR 번호") and settles and binds
+ * the item in the same AMUX transaction; any other result touches no AMUX row
+ * and settles in an engineering transaction of its own.
+ *
+ * If AMUX will not take the number -- the card is not waiting on this
+ * worker's review -- the pull request still exists: the item is settled and
+ * bound all the same, and a state mismatch goes to a person (§11). A fact the
+ * publisher reports is never dropped because the other side disagrees.
+ */
+export async function recordEngineeringAgentPublisherResult(input: {
+  workItemId: string;
+  fencingToken: bigint;
+  outcome: WriteResultOutcome;
+  reason?: string;
+  pullRequest: Parameters<typeof recordEngineeringAgentPublishResult>[1]["pullRequest"];
+  markCommitted?: MarkCommitted;
+}) {
+  if (input.pullRequest === null) {
+    return runEngineeringAgentTransaction(prisma, async (tx) => {
+      const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest: null });
+      await input.markCommitted?.(tx, input.workItemId);
+      return { recorded: true as const, ...settled };
+    });
+  }
+  requireOpen();
+  const item = await prisma.engineeringAgentWorkItem.findUnique({
+    where: { id: input.workItemId },
+    select: { run: { select: { cardId: true } } },
+  });
+  const cardId = item?.run?.cardId ?? null;
+  if (cardId === null) throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
+  const pullRequest = input.pullRequest;
+  const recorded = await recordAmuxReviewPullRequest(
+    { taskId: cardId, worker: ENGINEERING_AGENT_AMUX_WORKER, prNumber: pullRequest.prNumber },
+    engineeringPublishResultAttachment({
+      workItemId: input.workItemId,
+      fencingToken: input.fencingToken,
+      outcome: input.outcome,
+      pullRequest,
+      markCommitted: input.markCommitted,
+    }),
+  );
+  if (recorded.recorded) return recorded;
+  const refusal = recorded.reason;
+  return runEngineeringAgentTransaction(prisma, async (tx) => {
+    const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest });
+    await openEngineeringAgentWorkItem(tx, {
+      kind: "state_mismatch",
+      causeKey: `review_pr:${input.workItemId}`,
+      runId: null,
+      reason: refusal,
+    });
+    await input.markCommitted?.(tx, input.workItemId);
+    return { recorded: false as const, reason: refusal, ...settled };
+  });
 }

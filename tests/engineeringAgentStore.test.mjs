@@ -107,7 +107,7 @@ test("every exported write takes the engineering transaction and records its aud
     // A function that delegates its one write to another export inherits that audit entry.
     assert.match(
       body,
-      /\b(?:systemAudit|writeAdminAuditLog|claimEngineeringAgentWorkItem|openEngineeringAgentWorkItem)\(/,
+      /\b(?:systemAudit|writeAdminAuditLog|claimEngineeringAgentWorkItem|openEngineeringAgentWorkItem|settleEngineeringAgentWorkItem)\(/,
       `${name} writes its audit entry`,
     );
   }
@@ -137,6 +137,7 @@ const RECORDS_WHAT_HAPPENED = [
   "readEngineeringAgentHaltState",
   "readEngineeringAgentOwnerQueues",
   "openEngineeringAgentRunMismatches",
+  "recordEngineeringAgentPublishResult",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",
   "heartbeatEngineeringAgentRun",

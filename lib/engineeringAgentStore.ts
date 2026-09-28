@@ -1324,6 +1324,46 @@ export async function recordEngineeringAgentBinding(
 }
 
 /**
+ * The publisher's result for the item it claimed (§10, §11): the settlement
+ * the core picks, and -- when that settlement publishes -- the binding of the
+ * pull request in the same transaction, which the database requires by commit.
+ * A pull request reported for a result that does not publish is refused, and
+ * so is a publish reported without one. `cardId`, when given, is the AMUX
+ * card whose transaction this runs in; the item's run must be that card's.
+ */
+export async function recordEngineeringAgentPublishResult(
+  tx: EngineeringAgentTransaction,
+  input: {
+    workItemId: string;
+    fencingToken: bigint;
+    outcome: WriteResultOutcome;
+    reason?: string;
+    pullRequest: Omit<BindingInput, "runId"> | null;
+    cardId?: string;
+  },
+): Promise<{ state: string; decisionItemId: string | null; bindingId: string | null }> {
+  const settled = await settleEngineeringAgentWorkItem(tx, {
+    workItemId: input.workItemId,
+    fencingToken: input.fencingToken,
+    outcome: input.outcome,
+    reason: input.reason,
+  });
+  if (settled.state !== "published") {
+    if (input.pullRequest !== null) refuse("pull_request_without_publish");
+    return { ...settled, bindingId: null };
+  }
+  if (input.pullRequest === null) refuse("published_without_pull_request");
+  const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: input.workItemId },
+    select: { runId: true, run: { select: { cardId: true } } },
+  });
+  const runId = item.runId ?? refuse("publish_item_without_run");
+  if (input.cardId !== undefined && item.run?.cardId !== input.cardId) refuse("card_mismatch");
+  const { bindingId } = await recordEngineeringAgentBinding(tx, { ...input.pullRequest!, runId });
+  return { ...settled, bindingId };
+}
+
+/**
  * Re-binds a pull request: the current row is superseded and its replacement
  * becomes current in the same transaction. The replacement's snapshot lists
  * the reviews the re-bind makes invalid (§9-10 condition 7).
