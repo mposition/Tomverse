@@ -1532,16 +1532,32 @@ EEA·영국을 여는 선행 게이트입니다.
   번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
   `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
   `document_state_unrecorded`로 보고합니다.
-- **변경 고지는 서비스·법적 통지(§3.1의 5번 유형)여야 합니다.** marketing 분류나
-  purpose가 붙은 template이면 거부합니다 — 이미 수신을 거부한 사람이 개정의 가장 큰
-  당사자인데, 그들만 고지를 받지 못하게 되기 때문입니다. 고지 기간은
-  `CHANGE_NOTICE_PERIOD_DAYS`(30일)입니다.
+- **문서는 네 개입니다** — `/privacy`, `/terms`, 가입 화면의 동의 문안, 로그인 화면의
+  동의 문장. 앞의 둘만 두면 뒤의 둘이 옛 문안인 채로 게이트가 열립니다. 그리고
+  **digest는 테스트가 렌더된 원본과 대조하는 것만 증거로 인정합니다**
+  (`DIGEST_VERIFIED_BY`). 표에 손으로 적은 digest는 페이지에 대한 주장이지 증거가
+  아닙니다(`document_state_unverified`).
+- **변경 고지는 `legal` 분류여야 합니다**(§3.1의 5번 유형). 등록 가능한 분류 중
+  purpose도 수신거부도 없는 것은 `legal`뿐입니다 — `service`는 purpose가 필수라
+  끌 수 있고, `transactional`을 가리키면 로그인 코드·영수증이 고지로 세어집니다.
+  고지 기간은 `CHANGE_NOTICE_PERIOD_DAYS`(30일), 이 고지로 인정하는 발송의 범위는
+  시행일 전 `CHANGE_NOTICE_WINDOW_DAYS`(120일)입니다.
+- **"모두에게 갔는가"는 집합 질문입니다.** 시행일 전에 생긴 주소 있는 계정 중 고지
+  **시도가 하나도 없는** 계정 수를 SQL 한 문장으로 셉니다. 시도는 도달(`sent`·
+  `delivered`)과 미도달(`bounced`·`complained`·`suppressed`·`failed`·`abandoned`)
+  모두이고, **죽은 메일함은 보고만 하고 막지 않습니다** — §3.1이 요구하는 것은
+  발송과 미도달 추적이지, 주소 하나가 이후 제품 전체를 막는 것이 아닙니다. 첫
+  버전은 `sent`만 셌고(webhook이 `delivered`로 옮기면 영구히 닫힘) 두 집합의 크기를
+  비교했습니다(한 계정의 추가 발송이 다른 계정의 누락을 메움).
+- **대상은 시행일 기준입니다.** 고지 기간 중 가입한 계정도 고지를 받아야 하며,
+  운영자가 후속 wave를 보냅니다.
 
-**남은 것은 전부 소유자 결정입니다.** (1) `/privacy`·`/terms`·가입 화면·로그인 화면의
-개정 문안(7개 언어) 승인, (2) `/terms`의 기록된 상태 — `SITEMAP_CONTENT_EVIDENCE`
-항목과 개정 전 digest, (3) 변경 고지 template의 문안과 시행일. 문안이 승인되면
-template key를 `CHANGE_NOTICE_TEMPLATE_KEY`에 적고, 개정된 페이지의 digest와 날짜를
-`SITEMAP_CONTENT_EVIDENCE`에 갱신하면 게이트가 스스로 열립니다.
+**남은 것은 전부 소유자 결정입니다.** (1) 네 문서의 개정 문안(7개 언어) 승인,
+(2) `/terms`·가입 문안·로그인 문장의 개정 전 digest와, 현재 digest를 렌더된 원본과
+대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록), (3) `legal` 분류의 변경 고지 template —
+이 개정 전용으로 새로 만든 것 — 과 시행일. 문안이 승인되면 template key를
+`CHANGE_NOTICE_TEMPLATE_KEY`에 적고 개정된 문서의 digest와 날짜를 갱신하면 게이트가
+스스로 열립니다.
 `tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
 있음을 고정하므로, 그때 함께 고칩니다.
 

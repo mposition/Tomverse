@@ -348,6 +348,10 @@ run(
     // will not lose, the seal closes the set in the same transaction, and one
     // phase of one delivery is recorded once however many times it is evaluated.
     "tests/integration/release-notes-send-decision.db.test.ts",
+    // The amendment notice's reach (S10): which owed accounts have no attempt at
+    // all, counted as a set in one statement. The first version counted only
+    // `sent` and compared sizes, and both mistakes are about rows.
+    "tests/integration/email-policy-publication.db.test.ts",
     // The two statutory display checks, whose question is which (policy version,
     // profile) a message could still be composed under. Both earlier readings of
     // that were wrong in ways only rows show: the active version alone, and a

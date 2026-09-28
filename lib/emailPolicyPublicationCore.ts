@@ -1,92 +1,110 @@
 /**
- * S10: what has to be published, and told to whom, before a release-notes rule
- * set may become the active one.
+ * S10: what has to be published, and told to whom, before release notes may go
+ * live.
  *
  * Contract: docs/policy/email-product-news-redesign-draft.md section 10 (the
  * documents), section 11 approval E (the amendment and the notice), section 12
- * S10, and docs/policy/email-notifications.md section 3.1 type 5 (a
- * service/legal notice reaches people who unsubscribed).
+ * S10, and docs/policy/email-notifications.md section 3.1 type 5 (a legal notice
+ * reaches people who unsubscribed).
  *
  * ## Why this is a gate and not a checklist
  *
- * Section 10's table lists four documents and a procedure. A checklist in a
- * runbook is a list somebody ticks; this is the list `activatePolicyVersion()`
- * refuses on. The difference matters because the failure mode is silent: a
- * policy version can be activated while the pages still say what they said
- * before, and nothing about the send path would look wrong. The country rules
- * would simply start authorising mail under a promise the site was still
- * making in the opposite direction -- which is the Gateway Learning shape
- * section 5.5 already names, and the reason approval E exists.
+ * Section 10 lists four documents and a procedure. A checklist in a runbook is a
+ * list somebody ticks; this is the list the release-notes switch is read
+ * through. The failure it prevents is silent: release notes could start going
+ * out while the pages still promised marketing mail only on request, and nothing
+ * about the send path would look wrong.
  *
- * ## The notice is not marketing
+ * ## "Told" is a set question, answered in SQL
  *
- * A policy amendment is section 3.1's fifth type: service or legal, owed to
- * everybody, including the people who turned marketing off. Classifying the
- * change notice as marketing would mean the people most affected by the change
- * -- the ones who already said no -- are the only ones not told, and that the
- * notice itself is gated by the consent the amendment is about. So the
- * classification is a refusal here rather than a convention.
+ * The first version compared two sizes -- accounts owed the notice against
+ * accounts with a `sent` delivery -- and was wrong in both directions. `sent` is
+ * not where a successful message ends: the delivery webhook moves it on to
+ * `delivered`, so thirty days after a campaign that reached everyone the count
+ * was zero and the gate stayed shut for ever. And a size comparison lets one
+ * account's extra delivery stand in for another account's missing one.
+ *
+ * So the question is asked the way it is meant: **how many owed accounts have
+ * no attempt at all**. An attempt is any terminal outcome -- reached (`sent`,
+ * `delivered`) or not (`bounced`, `complained`, `suppressed`, `failed`,
+ * `abandoned`). A dead mailbox is reported, not blocking: section 3.1's fifth
+ * type asks that a legal notice be sent and its non-delivery tracked, not that
+ * one unreachable address hold every later product hostage.
+ *
+ * ## Who is owed
+ *
+ * Every account with an address that existed **before the effective date**. An
+ * account that signs up during the notice period signed up under whatever the
+ * pages said that day, which is not something this gate can see, so it is owed a
+ * notice like everybody else -- the operator sends a later wave. Anchoring the
+ * population at the first send instead, as the first version did, let those
+ * accounts reach the effective date without ever being told.
  *
  * ## What this does not decide
  *
- * The wording. Section 10 is explicit that the legal copy is drafted and
- * approved before it is implemented, and a module that generated the amendment
- * text would be writing rather than publishing. What this knows is that the
- * published digest is no longer the one recorded before the amendment -- not
- * that the new text says the right thing.
+ * The wording. Section 10 has the legal copy drafted and approved before it is
+ * implemented; this knows that a recorded digest moved, not that the new text
+ * says the right thing.
  */
 
 /** A document section 10 names, and what is known about its publication. */
 export type AmendedDocument = {
-  /** The route, as `SITEMAP_CONTENT_EVIDENCE` keys it. */
+  /** A route, or a named piece of product copy. */
   path: string;
-  /**
-   * The digest recorded before the amendment.
-   *
-   * Null where nothing recorded one, which is not a pass: a document whose
-   * previous state nobody wrote down cannot be shown to have changed.
-   */
+  /** The digest recorded before the amendment, or null where nobody recorded one. */
   digestBeforeAmendment: string | null;
-  /** The digest of what the site renders now. */
+  /** The digest of what the product renders now, or null where nothing records it. */
   publishedDigest: string | null;
-  /** The effective date the page itself shows, as a UTC calendar day. */
+  /** The effective date the document shows, as a UTC calendar day. */
   effectiveFrom: string | null;
+  /**
+   * Whether a test recomputes `publishedDigest` from what is actually rendered.
+   *
+   * A digest typed into a table by hand is a claim about the page, not evidence
+   * of it: the gate would treat whatever was typed as what the page shows. Only
+   * a digest some test checks against the rendered source counts.
+   */
+  verified: boolean;
 };
 
 /** The change notice, as the gate reads it. */
 export type ChangeNoticeFacts = {
-  /** The template that carries the amendment notice. */
   templateKey: string | null;
-  /** Its classification, from `emailTemplateDefinition()`. */
+  /** From `emailTemplateDefinition()`. */
   classification: string | null;
-  /** Whether a purpose gates it. A service/legal notice has none. */
   purpose: string | null;
-  /** Accounts that should have received it. */
+  /** Accounts owed the notice. */
   owed: number;
-  /** Accounts a delivery reached a terminal success for. */
-  delivered: number;
-  /** When the first notice went out, or null where none has. */
+  /** Owed accounts with a delivery that reached them. */
+  reached: number;
+  /** Owed accounts attempted and not reached -- reported, not blocking. */
+  unreachable: number;
+  /** Owed accounts with no attempt at all. This is what blocks. */
+  notAttempted: number;
+  /** The earliest successful notice inside the notice window, or null. */
   firstSentAt: Date | null;
 };
 
 export const PUBLICATION_REFUSALS = [
-  /** A document section 10 names has no recorded state to compare against. */
+  /** A document section 10 names has no recorded before-and-after state. */
   "document_state_unrecorded",
-  /** A document still renders what it rendered before the amendment. */
+  /** Its current digest is recorded but no test checks it against the source. */
+  "document_state_unverified",
+  /** It still renders what it rendered before the amendment. */
   "document_not_amended",
-  /** A document shows no effective date. */
+  /** It shows no effective date. */
   "effective_date_missing",
   /** The effective date has not arrived. */
   "effective_date_not_reached",
   /** The notice went out too close to the effective date. */
   "notice_period_too_short",
-  /** No notice has been sent at all. */
+  /** No notice has reached anybody inside the notice window. */
   "change_notice_not_sent",
-  /** Some accounts owed the notice have not received one. */
+  /** Some owed accounts have no attempt at all. */
   "change_notice_incomplete",
-  /** The notice is classified so that an unsubscribed person would not get it. */
-  "change_notice_is_marketing",
-  /** The notice names no template, so nothing can be shown to have been sent. */
+  /** The notice is not a legal notice, so an unsubscribed person may not get it. */
+  "change_notice_not_legal",
+  /** No notice template is named. */
   "change_notice_unidentified",
 ] as const;
 
@@ -94,37 +112,62 @@ export type PublicationRefusal = (typeof PUBLICATION_REFUSALS)[number];
 
 export type PublicationProblem = {
   refusal: PublicationRefusal;
-  /** What it is about -- a document path, or the notice. */
+  /** A document path, or the notice. */
   subject: string;
   detail: string;
 };
 
-/**
- * How long before the effective date the notice has to have gone.
- *
- * Thirty days, which is the interval the amendment notice itself is written
- * against rather than a figure derived here. It lives as a constant so a
- * shorter one is a visible edit rather than an argument passed at one call
- * site.
- */
+/** How long before the effective date the first notice has to have gone. */
 export const CHANGE_NOTICE_PERIOD_DAYS = 30;
+
+/**
+ * How far before the effective date a delivery can be and still be this notice.
+ *
+ * A bound, because the notice is identified by its template. A key pointed by
+ * mistake at a template that has been sending for a year would otherwise supply
+ * a `firstSentAt` from last year and a delivery to nearly everyone -- a notice
+ * condition that is true with no notice ever sent.
+ */
+export const CHANGE_NOTICE_WINDOW_DAYS = 120;
+
+/** Delivery states that mean an attempt was made and finished. */
+export const REACHED_STATUSES = ["sent", "delivered"] as const;
+export const UNREACHED_STATUSES = [
+  "bounced",
+  "complained",
+  "suppressed",
+  "failed",
+  "abandoned",
+] as const;
 
 const DAY_MS = 86_400_000;
 
 /** A UTC calendar day, or null where the string is not one. */
-const dayStart = (value: string | null): Date | null => {
+export const utcDayStart = (value: string | null): Date | null => {
   if (value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const parsed = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())) return null;
+  // `2026-02-31` parses and rolls over; a date the page shows must be one that
+  // exists.
+  return parsed.toISOString().slice(0, 10) === value ? parsed : null;
 };
 
 /**
- * Everything that stops this amendment counting as published.
- *
- * All of them, not the first: an operator asking why activation was refused is
- * asking what is left to do, and being told one thing at a time turns a day's
- * work into a week of attempts.
+ * The effective date the notice population is anchored on: the latest any
+ * document shows, because an account is owed a notice about every document that
+ * changes after it joined. Null while any document shows no usable date.
  */
+export const effectiveDateOf = (documents: readonly AmendedDocument[]): Date | null => {
+  let latest: Date | null = null;
+  for (const document of documents) {
+    const day = utcDayStart(document.effectiveFrom);
+    if (day === null) return null;
+    if (latest === null || day > latest) latest = day;
+  }
+  return latest;
+};
+
+/** Every reason this amendment does not count as published. All of them. */
 export const publicationProblems = (input: {
   documents: readonly AmendedDocument[];
   notice: ChangeNoticeFacts;
@@ -138,7 +181,16 @@ export const publicationProblems = (input: {
         refusal: "document_state_unrecorded",
         subject: document.path,
         detail:
-          "Nothing recorded what this page said before the amendment, so it cannot be shown to have changed.",
+          "Nothing records what this said before the amendment and what it says now, so it cannot be shown to have changed.",
+      });
+      continue;
+    }
+    if (!document.verified) {
+      problems.push({
+        refusal: "document_state_unverified",
+        subject: document.path,
+        detail:
+          "The current digest is recorded, but no test checks it against what is rendered, so it is a claim about the page rather than evidence of it.",
       });
       continue;
     }
@@ -146,15 +198,15 @@ export const publicationProblems = (input: {
       problems.push({
         refusal: "document_not_amended",
         subject: document.path,
-        detail: "The page still renders exactly what it rendered before the amendment.",
+        detail: "It still renders exactly what it rendered before the amendment.",
       });
     }
-    const effective = dayStart(document.effectiveFrom);
+    const effective = utcDayStart(document.effectiveFrom);
     if (effective === null) {
       problems.push({
         refusal: "effective_date_missing",
         subject: document.path,
-        detail: "The page shows no effective date, so nothing says when the amendment applies.",
+        detail: "It shows no effective date, so nothing says when the amendment applies.",
       });
       continue;
     }
@@ -171,7 +223,7 @@ export const publicationProblems = (input: {
         problems.push({
           refusal: "notice_period_too_short",
           subject: document.path,
-          detail: `The notice went out ${Math.floor(gapDays)} day(s) before the effective date; ${CHANGE_NOTICE_PERIOD_DAYS} are owed.`,
+          detail: `The first notice went out ${Math.floor(gapDays)} day(s) before the effective date; ${CHANGE_NOTICE_PERIOD_DAYS} are owed.`,
         });
       }
     }
@@ -187,40 +239,38 @@ export const publicationProblems = (input: {
     return problems;
   }
 
-  // The fifth type of section 3.1: owed to everybody, including the people who
-  // turned marketing off. A marketing classification would gate the notice
-  // behind the consent the amendment is about, so the people most affected are
-  // the only ones not told.
-  if (notice.classification === "marketing" || notice.purpose !== null) {
+  // Section 3.1's fifth type: owed to everybody, including people who turned
+  // everything switchable off. Of the classifications a template may register,
+  // only `legal` is both purpose-free and unsubscribe-free; `service` requires a
+  // purpose, which a person can turn off, and `transactional` is the class of
+  // login codes and receipts -- a key pointing at one of those would count mail
+  // that says nothing about the amendment.
+  if (notice.classification !== "legal" || notice.purpose !== null) {
     problems.push({
-      refusal: "change_notice_is_marketing",
+      refusal: "change_notice_not_legal",
       subject: notice.templateKey,
-      detail:
-        notice.purpose !== null
-          ? `The notice is gated by the "${notice.purpose}" purpose, so anyone who turned it off is not told about the change to it.`
-          : "The notice is classified as marketing, so anyone who unsubscribed is not told about the change.",
+      detail: `The notice is classified "${notice.classification ?? "unknown"}"${
+        notice.purpose !== null ? ` under the "${notice.purpose}" purpose` : ""
+      }; only a legal notice reaches the people who turned mail off, and they are the ones the amendment is most about.`,
     });
   }
 
-  if (notice.firstSentAt === null || notice.delivered === 0) {
+  if (notice.firstSentAt === null || notice.reached === 0) {
     problems.push({
       refusal: "change_notice_not_sent",
       subject: notice.templateKey,
-      detail: "No amendment notice has reached anybody.",
+      detail: `No amendment notice has reached anybody within ${CHANGE_NOTICE_WINDOW_DAYS} days before the effective date.`,
     });
     return problems;
   }
 
-  if (notice.delivered < notice.owed) {
+  if (notice.notAttempted > 0) {
     problems.push({
       refusal: "change_notice_incomplete",
       subject: notice.templateKey,
-      detail: `${notice.owed - notice.delivered} of ${notice.owed} account(s) owed the notice have not received one.`,
+      detail: `${notice.notAttempted} of ${notice.owed} account(s) owed the notice have no attempt at all.`,
     });
   }
 
   return problems;
 };
-
-/** The documents section 10's table names. */
-export const AMENDED_DOCUMENT_PATHS = ["/privacy", "/terms"] as const;
