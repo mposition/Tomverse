@@ -227,12 +227,18 @@ const compilerOptions = parsedConfig.options;
 // computed accesses in the admission and reservation modules. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so this
 // repin records source-position movement only.
+//
+// 2026-09-27, AMUX back-merge: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the latched-off recommendation
+// pool and the closed auto-promotion gate. It is comment only. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so only
+// source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "476f291300bd9b1876df62a8f074addf",
-  "607615aee275e1e4625b3e5f73e875d6",
+  "f09e1e78146afa6b436b5846a6e6592b",
+  "2ebabbc6b965b91b95c4a4cb6576b2dc",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -210,6 +210,13 @@ run(
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
     "tests/integration/amux-intake-registration.db.test.ts",
+    // Source reconciliation appends one consumed run and per-card revisions.
+    // Accept moves only the revision pointer. Reject leaves the pointer. The
+    // public apply function returns before the transaction while the code
+    // latch is false, so this test calls the commit function directly.
+    "tests/integration/amux-reconciliation.db.test.ts",
+    "tests/integration/amux-recommendation-pool.db.test.ts",
+    "tests/integration/amux-auto-promotion.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -255,6 +262,13 @@ run(
     // application alone protects is one a migration or an admin script can
     // rewrite -- and the row it rewrites is the proof that a send was allowed.
     "tests/integration/email-permission-ledger.db.test.ts",
+    // The ledger's first writers: the sealed cohort a risk_accepted approval
+    // covers, and the one-time in-product notice. Here rather than in a unit
+    // test because what is under test is whether the rows those writers build
+    // survive the triggers -- a sealed approval refusing to change, and an
+    // append-only table accepting a repeated render as one row rather than
+    // raising on the second.
+    "tests/integration/email-send-approval-cohort.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.

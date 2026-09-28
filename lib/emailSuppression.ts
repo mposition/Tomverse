@@ -17,6 +17,7 @@ import {
   removalNeedsApproval,
 } from "@/lib/emailSuppressionAuthorityCore";
 import {
+  normalizeEmailAddress,
   suppressionVerdict,
   type SendClassification,
   type SuppressionReason,
@@ -43,8 +44,8 @@ import {
  * for.
  */
 
-export const normalizeSuppressionAddress = (value: string) =>
-  value.trim().toLowerCase();
+/** The name callers know. One implementation, in the core module. */
+export const normalizeSuppressionAddress = normalizeEmailAddress;
 
 /** The scope-carrying key. `*` for a global entry; never NULL (§10.2). */
 export const GLOBAL_PURPOSE_KEY = "*";

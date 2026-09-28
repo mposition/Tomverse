@@ -16,6 +16,8 @@ type IntakeBody = {
   inactive?: boolean;
   applyPermitted?: boolean;
   writes?: number;
+  retry?: boolean;
+  readBack?: string;
   reconfirmRequired?: boolean;
   title?: string | null;
   scope?: string | null;
@@ -84,7 +86,7 @@ export function AmuxIntakePanel() {
         </button>
       </div>
       <p id="amux-intake-register-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
-        {registerReady ? messages.inactive : messages.registerDisabled}
+        {registerReady ? messages.registerPermitted : messages.registerDisabled}
       </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
@@ -93,6 +95,7 @@ export function AmuxIntakePanel() {
       ) : null}
       {result ? (
         <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
+          {result.error === "outcome_unknown" ? <p>{messages.outcomeUnknown}</p> : null}
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.code ? <p>{messages.error(result.code)}</p> : null}
           {result.inactive ? <p>{messages.inactive}</p> : null}

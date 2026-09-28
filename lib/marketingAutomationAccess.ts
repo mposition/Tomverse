@@ -329,11 +329,16 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * column, constraint, webhook writer, descriptor or admission decision changes;
  * the fingerprint moves because schema comments are watched bytes too.
  *
+ * 2026-09-27: the AMUX back-merge adds the latched-off recommendation pool
+ * and the closed auto-promotion gate. Neither is a marketing model or a
+ * webhook input. The digest moves because the whole Prisma schema is
+ * deliberately watched.
+ *
  * Both notes stand because both changes are in this tree, and the value below
  * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "a76456e853a9c7576ce3255a0cafcb31e7f2b3580182f83ba33464088553f3ec";
+  "e37a723fec9effaeb183f9fd498474a3bcea7fdd0f910fd6213ef6fcac57bd2e";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
