@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  PROMPT_REFINER_EXECUTION_MANIFEST_VERSION,
+  PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT,
+  PROMPT_REFINER_RUNTIME_SOURCE_MANIFEST_VERSION,
   PROMPT_REFINER_RUNTIME_SOURCE_PATHS,
   PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES,
   PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES,
@@ -47,6 +50,11 @@ test("durable admission facts are deterministic, content-free, and never admit e
   const right = admissionFacts();
   assert.deepEqual(left, right);
   assert.equal(left.admissionVersion, PROMPT_REFINER_STAGE_ADMISSION_VERSION);
+  assert.equal(PROMPT_REFINER_STAGE_ADMISSION_VERSION, "prompt-refiner-stage-admission-v4");
+  assert.equal(PROMPT_REFINER_RUNTIME_SOURCE_MANIFEST_VERSION, "prompt-refiner-runtime-source-manifest-v5");
+  assert.equal(PROMPT_REFINER_EXECUTION_MANIFEST_VERSION, "prompt-refiner-shadow-execution-manifest-v4");
+  assert.equal(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT, 190);
+  assert.equal(PROMPT_REFINER_RUNTIME_SOURCE_PATHS.length, 190);
   assert.equal(left.executionManifest.executionAdmitted, false);
   assert.equal(left.executionManifest.productAdapterReady, false);
   assert.deepEqual(promptRefinerStageAdmissionProblems(left), []);

@@ -227,6 +227,7 @@ run(
     // One-run approval, atomic dispatch-intent/reservation consume, immutable
     // terminal receipts and stop-without-retry unknown recovery.
     "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",

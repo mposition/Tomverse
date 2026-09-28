@@ -245,15 +245,17 @@ const compilerOptions = parsedConfig.options;
 // writes three known keys through the same tuple `.map` the combined writer
 // already had, and that map is not an element access.
 //
-// Both notes stand on the merged tree. The count remains 228 and the
-// position-free inventory remains 9aa7ec49..., so the digest below is a
-// repin of source positions and not a review of new computed access.
+// The v4/v6 successor moved only reviewed source positions while preserving
+// the same inventory. All notes stand on this successor source. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so the
+// digest below is a repin of source positions and not a review of new
+// computed access.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a4393f97b394865cbce797ed7897729b",
-  "466909ed083384578b9a0d56a0a7e9c6",
+  "147797081ec13411a4bae6cb4298e7bd",
+  "fca0394bcf109ecdb02e731b962aba59",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -361,6 +363,7 @@ const fixedNonImportPaths = Object.freeze([
   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
   "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+  "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
   ...workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))).sort(),
 ]);
 
@@ -1418,6 +1421,10 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     join(repositoryRoot, "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql"),
     "utf8"
   );
+  const confirmatorySuccessorMigration = readFileSync(
+    join(repositoryRoot, "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql"),
+    "utf8"
+  );
   const block = legacyMigration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
   assert.ok(block, "migration expected_paths block is missing");
   const sqlPaths = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
@@ -1431,10 +1438,15 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
   );
   assert.ok(successorPath, "v3 successor migration extension path is missing");
   sqlPaths.splice(7, 0, successorPath[1]);
+  const confirmatorySuccessorPath = confirmatorySuccessorMigration.match(
+    /'path', '(prisma\/migrations\/20260928130000_prompt_refiner_confirmatory_successor_v4\/migration\.sql)'/
+  );
+  assert.ok(confirmatorySuccessorPath, "v4 confirmatory successor migration extension path is missing");
+  sqlPaths.splice(8, 0, confirmatorySuccessorPath[1]);
   assert.equal(sqlPaths.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   assert.deepEqual(sqlPaths, [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS]);
-  const executionManifestFileCount = successorMigration.match(
-    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v3"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
+  const executionManifestFileCount = confirmatorySuccessorMigration.match(
+    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v4"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
   );
   assert.ok(executionManifestFileCount, "migration executionManifest runtimeSource.fileCount is missing");
   assert.equal(
@@ -1443,8 +1455,8 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
   );
   assert.match(
-    successorMigration,
-    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'[\s\S]*?"id" = 'prompt-refiner-shadow-v3'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v4'/,
+    confirmatorySuccessorMigration,
+    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'[\s\S]*?"id" = 'prompt-refiner-shadow-v3'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v4'[\s\S]*?"id" = 'prompt-refiner-shadow-v4'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v5'/,
     "database stage identity must select the matching runtime manifest generation"
   );
 });
@@ -1453,12 +1465,11 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   const expectedCount = String(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   const expectedRuntimeSourceCount = String(runtimeImportClosure().length);
   for (const [path, pattern] of [
-    ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
-    ["docs/ops/tomverse-chat-progress.md", /confirmatory v3\/v5 현재 계약은 exact (\d+)-file/],
+    ["docs/ops/tomverse-chat-progress.md", /confirmatory v4\/v6 현재 계약은 exact (\d+)-file/],
     ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
-    ["docs/ops/prompt-refiner-confirmatory-shadow-v5.md", /\*\*(\d+)개 고정 source 파일\*\*/],
+    ["docs/ops/prompt-refiner-confirmatory-shadow-v6.md", /\*\*(\d+)개 고정 source 파일\*\*/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
     const found = source.match(pattern);
@@ -1467,7 +1478,7 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   }
 
   const contract = readFileSync(
-    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v5.md"),
+    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v6.md"),
     "utf8"
   );
   assert.match(
@@ -1475,6 +1486,15 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개는 8개 실행 root의 local TypeScript/JavaScript`),
     "runtime TypeScript/JavaScript source-count contract drifted"
   );
+  for (const [path, pattern] of [
+    ["prisma/schema.prisma", /Content-free v4 manifest for the exact (\d+)-file runtime import closure/],
+    ["docs/ops/prompt-refiner-confirmatory-shadow-v5.md", /\*\*(\d+)개 고정 source 파일\*\*/],
+  ]) {
+    const source = readFileSync(join(repositoryRoot, path), "utf8");
+    const found = source.match(pattern);
+    assert.ok(found, `${path} has no historical v4 closure count`);
+    assert.equal(found[1], "189", `${path} historical v4 closure count drifted`);
+  }
   const stageContract = readFileSync(
     join(repositoryRoot, "docs/ops/prompt-refiner-durable-stage-writer-contract.md"),
     "utf8"

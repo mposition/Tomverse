@@ -150,104 +150,72 @@ test("stage authorization accepts current and legacy canonical HMAC formats acro
     false
   );
 
-  const successorStage = { ...stage, id: "prompt-refiner-shadow-v3" };
   const successorMetadata = {
     ...metadata,
     runApprovalEnabled: true,
     executionEnabled: true,
   };
-  const successorUnsigned = {
-    ...unsigned,
-    targetId: successorStage.id,
-    metadata: successorMetadata,
+  const signedSuccessorAudit = (stageId, auditMetadata) => {
+    const candidate = { ...unsigned, targetId: stageId, metadata: auditMetadata };
+    return {
+      ...candidate,
+      entryHash: adminAuditEntryHashVariants(
+        {
+          previousHash: candidate.previousHash,
+          actorUserId: candidate.actorUserId,
+          actorEmail: candidate.actorEmail,
+          action: candidate.action,
+          targetType: candidate.targetType,
+          targetId: candidate.targetId,
+          summary: candidate.summary,
+          metadata: candidate.metadata,
+          ipAddress: candidate.ipAddress,
+          userAgent: candidate.userAgent,
+          createdAt: candidate.createdAt.toISOString(),
+        },
+        currentKey
+      ).codepoint,
+    };
   };
-  const successorHash = adminAuditEntryHashVariants(
-    {
-      previousHash: successorUnsigned.previousHash,
-      actorUserId: successorUnsigned.actorUserId,
-      actorEmail: successorUnsigned.actorEmail,
-      action: successorUnsigned.action,
-      targetType: successorUnsigned.targetType,
-      targetId: successorUnsigned.targetId,
-      summary: successorUnsigned.summary,
-      metadata: successorUnsigned.metadata,
-      ipAddress: successorUnsigned.ipAddress,
-      userAgent: successorUnsigned.userAgent,
-      createdAt: successorUnsigned.createdAt.toISOString(),
-    },
-    currentKey
-  ).codepoint;
-  assert.equal(
-    promptRefinerStageAuthorizationAuditEntryIsValid(
-      successorStage,
-      { ...successorUnsigned, entryHash: successorHash },
-      [currentKey]
-    ),
-    true
-  );
-  assert.equal(
-    promptRefinerStageAuthorizationAuditEntryIsValid(
-      successorStage,
-      {
-        ...successorUnsigned,
-        metadata,
-        entryHash: adminAuditEntryHashVariants(
-          {
-            previousHash: successorUnsigned.previousHash,
-            actorUserId: successorUnsigned.actorUserId,
-            actorEmail: successorUnsigned.actorEmail,
-            action: successorUnsigned.action,
-            targetType: successorUnsigned.targetType,
-            targetId: successorUnsigned.targetId,
-            summary: successorUnsigned.summary,
-            metadata,
-            ipAddress: successorUnsigned.ipAddress,
-            userAgent: successorUnsigned.userAgent,
-            createdAt: successorUnsigned.createdAt.toISOString(),
-          },
-          currentKey
-        ).codepoint,
-      },
-      [currentKey]
-    ),
-    false
-  );
-  const falseFlagMetadata = { ...successorMetadata, executionEnabled: false };
-  const falseFlagHash = adminAuditEntryHashVariants(
-    {
-      previousHash: successorUnsigned.previousHash,
-      actorUserId: successorUnsigned.actorUserId,
-      actorEmail: successorUnsigned.actorEmail,
-      action: successorUnsigned.action,
-      targetType: successorUnsigned.targetType,
-      targetId: successorUnsigned.targetId,
-      summary: successorUnsigned.summary,
-      metadata: falseFlagMetadata,
-      ipAddress: successorUnsigned.ipAddress,
-      userAgent: successorUnsigned.userAgent,
-      createdAt: successorUnsigned.createdAt.toISOString(),
-    },
-    currentKey
-  ).codepoint;
-  assert.equal(
-    promptRefinerStageAuthorizationAuditEntryIsValid(
-      successorStage,
-      { ...successorUnsigned, metadata: falseFlagMetadata, entryHash: falseFlagHash },
-      [currentKey]
-    ),
-    false
-  );
+  for (const stageId of ["prompt-refiner-shadow-v3", "prompt-refiner-shadow-v4"]) {
+    const successorStage = { ...stage, id: stageId };
+    assert.equal(
+      promptRefinerStageAuthorizationAuditEntryIsValid(
+        successorStage,
+        signedSuccessorAudit(stageId, successorMetadata),
+        [currentKey]
+      ),
+      true
+    );
+    assert.equal(
+      promptRefinerStageAuthorizationAuditEntryIsValid(
+        successorStage,
+        signedSuccessorAudit(stageId, metadata),
+        [currentKey]
+      ),
+      false
+    );
+    assert.equal(
+      promptRefinerStageAuthorizationAuditEntryIsValid(
+        successorStage,
+        signedSuccessorAudit(stageId, { ...successorMetadata, executionEnabled: false }),
+        [currentKey]
+      ),
+      false
+    );
+  }
 });
 
-test("successor audit facts are tied to immutable v3 identity, not the moving current alias", () => {
+test("successor audit facts are tied to immutable v3/v4 identities, not the moving current alias", () => {
   const source = readFileSync(
     new URL("../lib/promptRefinerStageAdmission.ts", import.meta.url),
     "utf8"
   );
-  assert.match(source, /stage\.id === PROMPT_REFINER_RESERVATION_STAGE_V3_ID/);
+  assert.match(source, /PROMPT_REFINER_RESERVATION_STAGE_V3_ID/);
+  assert.match(source, /PROMPT_REFINER_RESERVATION_STAGE_V4_ID/);
   assert.doesNotMatch(
     source,
-    /stage\.id === PROMPT_REFINER_RESERVATION_STAGE_ID\s*\?\s*\{\s*runApprovalEnabled/
+    /PROMPT_REFINER_RESERVATION_STAGE_ID[^\n]*\.includes\(stage\.id\)/
   );
 });
 

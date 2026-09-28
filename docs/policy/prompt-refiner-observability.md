@@ -47,8 +47,9 @@ profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease
 ## 0. Durable reservation authority 경계
 
 - 완료된 legacy stage는 `prompt-refiner-shadow-v1`, downstream flag 준비 전 생성돼
-  실행할 수 없는 첫 confirmatory stage는 `prompt-refiner-shadow-v2`, 현재 confirmatory
-  authority는 `prompt-refiner-shadow-v3`로 분리한다. 새 승인은 v3 한 행에만 생성되며 요청당 24,916
+  실행할 수 없는 첫 confirmatory stage는 `prompt-refiner-shadow-v2`, 이전 confirmatory
+  authority는 `prompt-refiner-shadow-v3`, 현재 authority는 `prompt-refiner-shadow-v4`로
+  분리한다. 새 승인은 v4 한 행에만 생성되며 요청당 24,916
   microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
 - reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
   검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
@@ -306,15 +307,15 @@ default-off 제품 상태를 유지했다.
 
 ## 11. durable staging approval provenance
 
-현행 `prompt-refiner-stage-admission-v3`와
-`prompt-refiner-reservation-authority-v3`는 과거 proposal을 현재 staging 배포에 다시
+현행 `prompt-refiner-stage-admission-v4`와
+`prompt-refiner-reservation-authority-v4`는 과거 proposal을 현재 staging 배포에 다시
 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
-다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 189개 source
+다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 190개 source
 파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는
-admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 11개는
-root/workspace resolution metadata, Prisma schema와 세 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
+admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 12개는
+root/workspace resolution metadata, Prisma schema와 네 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
 넘으면 거부한다. 별도 execution manifest는
-`prompt-refiner-shadow-execution-manifest-v3`로 고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
+`prompt-refiner-shadow-execution-manifest-v4`로 고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
 `executionAdmitted=false`, `productAdapterReady=false`를 유지한다.
 
 승인 시각과 정확히 60분인 expiry는 PostgreSQL clock이 소유한다. stage insert와
@@ -322,7 +323,7 @@ tamper-evident success audit은 advisory lock 아래 같은 transaction에서 co
 same actor/runtime replay만 audit 추가 없이 idempotent하다. 다른 immutable facts 또는 만료된
 행의 replay는 409다. 최초 `20260918130000_prompt_refiner_stage_admission` migration은
 unexpected existing row를 만나면 중단한 historical 계약이다. successor migration은 exact
-legacy v1/v2 stage와 manifest를 보존·검증하고, 그 밖의 ID 또는 manifest를 CHECK/guard로
+legacy v1/v2/v3 stage와 manifest를 보존·검증하고, 그 밖의 ID 또는 manifest를 CHECK/guard로
 거부하며 어떤 행도 seed하거나 backfill하지 않는다. DB trigger가 provenance 수정·삭제 및
 만료 후 새 reservation/consume을 거부하되 HMAC secret은 소유하지 않으므로 hash shape만 검사한다.
 application writer create/replay와 reserve/consume이 같은 검증 helper로 stage-linked audit
@@ -356,8 +357,9 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
 
 역사적 `prompt-refiner-shadow-run-v3`는 legacy `prompt-refiner-shadow-v1` stage의
 100개 reservation pool을 실제 실행 승인으로 해석하지 않고, 한 번의 합성 shadow를
-동결 corpus 16건으로 좁힌 최초 계약이었다. 현재 successor는
-`prompt-refiner-shadow-v3` stage와 `prompt-refiner-shadow-run-v5` run의 exact pair다.
+동결 corpus 16건으로 좁힌 최초 계약이었다. 직전 successor의
+`prompt-refiner-shadow-v3` stage와 `prompt-refiner-shadow-run-v5` run은 immutable history다.
+현재 successor는 `prompt-refiner-shadow-v4` stage와 `prompt-refiner-shadow-run-v6` run의 exact pair다.
 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
 retry는 0, timeout은 15초다. route의 300초 platform cap보다 짧은 240초 호출 admission
 budget과 10초 terminal-write 여유를 고정해, 다음 case를 안전하게 끝낼 시간이 없으면

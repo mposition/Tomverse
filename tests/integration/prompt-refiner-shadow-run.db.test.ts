@@ -423,7 +423,7 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
     );
 });
 
-test("v5 terminal duration is bounded before an immutable receipt can be stored", async () => {
+test("v6 terminal duration is bounded before an immutable receipt can be stored", async () => {
     await approveStage();
     await approveRun();
     const { attempt } = await dispatch({
@@ -454,7 +454,7 @@ test("v5 terminal duration is bounded before an immutable receipt can be stored"
     const durationConstraints = await prisma.$queryRawUnsafe<Array<{ definition: string }>>(`
         SELECT pg_get_constraintdef(oid) AS definition
         FROM pg_constraint
-        WHERE conname = 'PromptRefinerShadowAttempt_v5_duration_check'
+        WHERE conname = 'PromptRefinerShadowAttempt_v6_duration_check'
     `);
     assert.equal(durationConstraints.length, 1);
     assert.match(
@@ -465,7 +465,7 @@ test("v5 terminal duration is bounded before an immutable receipt can be stored"
     );
 });
 
-test("v4 runtime manifest wrapper preserves strict and parallel-safe validator metadata", async () => {
+test("v5 runtime manifest wrapper preserves strict and parallel-safe validator metadata", async () => {
     const functions = await prisma.$queryRawUnsafe<
         Array<{ name: string; parallel: string; strict: boolean }>
     >(`
@@ -477,7 +477,8 @@ test("v4 runtime manifest wrapper preserves strict and parallel-safe validator m
         WHERE proname IN (
           'prompt_refiner_runtime_manifest_valid',
           'prompt_refiner_runtime_manifest_v2_valid',
-          'prompt_refiner_runtime_manifest_v3_valid'
+          'prompt_refiner_runtime_manifest_v3_valid',
+          'prompt_refiner_runtime_manifest_v4_valid'
         )
         ORDER BY proname
     `);
@@ -493,11 +494,33 @@ test("v4 runtime manifest wrapper preserves strict and parallel-safe validator m
             strict: true,
         },
         {
+            name: "prompt_refiner_runtime_manifest_v4_valid",
+            parallel: "s",
+            strict: true,
+        },
+        {
             name: "prompt_refiner_runtime_manifest_valid",
             parallel: "s",
             strict: true,
         },
     ]);
+});
+
+test("the strict v5 validator preserves top-level SQL NULL semantics", async () => {
+    const rows = await prisma.$queryRawUnsafe<Array<{ resultIsNull: boolean }>>(
+        `
+        SELECT "prompt_refiner_runtime_manifest_valid"(
+          NULL::jsonb,
+          $1,
+          $2,
+          $3
+        ) IS NULL AS "resultIsNull"
+        `,
+        "a".repeat(40),
+        `sha256:${"b".repeat(64)}`,
+        `sha256:${"c".repeat(64)}`
+    );
+    assert.deepEqual(rows, [{ resultIsNull: true }]);
 });
 
 test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {
