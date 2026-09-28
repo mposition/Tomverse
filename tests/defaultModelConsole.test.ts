@@ -97,7 +97,13 @@ test("a fallback transition check fails a registry-only model and the copy does 
 test("one invalid guest-lead row does not reject the rest", () => {
   const seed = staticModelRegistrySeedRows().find((entry) => entry.id === "gpt-5-6-luna");
   assert.ok(seed);
-  const valid = { ...seed, updatedById: null, updatedByEmail: null };
+  const valid = {
+    ...seed,
+    updatedById: null,
+    updatedByEmail: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
   const invalid = {
     ...valid,
     id: "bad-guest-lead",

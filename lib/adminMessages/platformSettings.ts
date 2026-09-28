@@ -130,7 +130,7 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       accountTitle: "Each account's new-chat combination",
       accountBadge: "Set by each account · no administrator edit",
       accountBody:
-        "Existing accounts move only after a model retirement is approved, and only through the reconciliation script (§7). This screen does not run it.",
+        "Existing accounts move only after a model retirement is approved, and only through the reconciliation script (docs/policy/default-model-luna-migration.md §7). This screen does not run it.",
       accountLink: "Default-model distribution in usage analytics",
     },
     selection: {
@@ -266,7 +266,7 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       accountTitle: "계정별 새 대화 기본 조합",
       accountBadge: "각 계정이 설정 · 관리자 변경 없음",
       accountBody:
-        "기존 계정 이동은 모델 은퇴가 승인된 뒤 reconciliation 스크립트로만 합니다(§7). 이 화면에서 실행하지 않습니다.",
+        "기존 계정 이동은 모델 은퇴가 승인된 뒤 reconciliation 스크립트로만 합니다(docs/policy/default-model-luna-migration.md §7). 이 화면에서 실행하지 않습니다.",
       accountLink: "사용량 분석의 기본 모델 분포",
     },
     selection: {
