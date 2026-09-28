@@ -381,7 +381,7 @@ pub fn activation_gate(latch: bool, env_value: Option<&str>) -> ActivationGate {
     if !latch {
         return ActivationGate::LatchOff;
     }
-    if env_value.map(str::trim) != Some("1") {
+    if env_value != Some("1") {
         return ActivationGate::EnvOff;
     }
     ActivationGate::Runner
@@ -985,7 +985,9 @@ pub async fn run_from_env() -> i32 {
 
 fn local_client(local_url: &str) -> Result<reqwest::Client> {
     let url = reqwest::Url::parse(local_url).context("invalid local AMUX url")?;
-    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(15));
     if url.scheme() == "https" {
         builder = builder.danger_accept_invalid_certs(true);
     }
@@ -1138,11 +1140,42 @@ mod tests {
         assert_eq!(activation_gate(false, Some("1")), ActivationGate::LatchOff);
         assert_eq!(activation_gate(true, None), ActivationGate::EnvOff);
         assert_eq!(activation_gate(true, Some("enabled")), ActivationGate::EnvOff);
+        assert_eq!(activation_gate(true, Some("1 ")), ActivationGate::EnvOff);
+        assert_eq!(activation_gate(true, Some(" 1")), ActivationGate::EnvOff);
         assert_eq!(activation_gate(true, Some("1")), ActivationGate::Runner);
         assert!(!local_amux_url_allowed("https://example.com"));
         assert!(!local_amux_url_allowed("https://127.0.0.1:8824/api/board"));
         assert!(local_amux_url_allowed("https://127.0.0.1:8824"));
         assert!(local_amux_url_allowed("http://localhost:8824"));
+    }
+
+    #[test]
+    fn local_client_does_not_follow_a_redirect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 2048];
+            let _ = std::io::Read::read(&mut socket, &mut buffer);
+            let response = b"HTTP/1.1 302 Found\r\nLocation: http://example.com/api/board\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = std::io::Write::write_all(&mut socket, response);
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let status = runtime.block_on(async move {
+            let client = local_client(&format!("http://127.0.0.1:{port}")).unwrap();
+            client
+                .get(format!("http://127.0.0.1:{port}/api/sessions"))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        });
+        assert_eq!(status, 302);
+        server.join().unwrap();
     }
 
     #[test]

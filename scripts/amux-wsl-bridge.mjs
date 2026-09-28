@@ -10,8 +10,7 @@ if (!WSL_BRIDGE_CODE_LATCH) {
   process.exit(0);
 }
 
-const envValue = (process.env[WSL_BRIDGE_ENV_NAME] ?? "").trim();
-if (envValue !== "1") {
+if (process.env[WSL_BRIDGE_ENV_NAME] !== "1") {
   process.stdout.write("amux wsl bridge env is off\n");
   process.exit(0);
 }
