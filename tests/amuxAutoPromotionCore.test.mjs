@@ -27,9 +27,9 @@ const day = 24 * 60 * 60 * 1000;
 const now = new Date("2026-09-25T00:00:00.000Z");
 const at = (ms) => new Date(now.getTime() + ms);
 
-test("version 9 ships the auto latch open and leaves the recommendation latch closed", () => {
+test("version 10 keeps the auto latch open and ships the recommendation latch open", () => {
   assert.equal(AUTO_LATCH, true);
-  assert.equal(RECOMMENDATION_CODE_LATCH, false);
+  assert.equal(RECOMMENDATION_CODE_LATCH, true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(autoPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(autoPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);

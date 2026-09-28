@@ -18,18 +18,19 @@ import { scoreAmuxScheduler } from "./schedulerScoreCore.ts";
 /**
  * Recommendation pool for one human decision on one backlog card.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 7).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 10).
+ * The request schema stays at policy version 7.
  *
  * Parsing and selection are pure. This module does not open a transaction or
- * write a card. The shipped code latch is false. Nothing here starts a worker
- * or spends credits.
+ * write a card. Version 10 ships the code latch true. Apply still needs the
+ * env value exactly `enabled`. Nothing here starts a worker or spends credits.
  */
 
 export const RECOMMENDATION_POLICY_VERSION = 7;
 export const RECOMMENDATION_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
 export const RECOMMENDATION_SCORING_VERSION = AMUX_GLOBAL_PRIORITY_VERSION;
 export const RECOMMENDATION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_RECOMMEND";
-export const RECOMMENDATION_CODE_LATCH = false;
+export const RECOMMENDATION_CODE_LATCH = true;
 export const RECOMMENDATION_LOCK_NAME = "tomverse-amux-recommendation:queue";
 export const RECOMMENDATION_SNAPSHOT_BACKSTOP = 10_000;
 export const RECOMMENDATION_REVIEW_AFTER_MAX_MS = 366 * 24 * 60 * 60 * 1000;

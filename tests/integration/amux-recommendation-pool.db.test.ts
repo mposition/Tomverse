@@ -140,7 +140,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("recommendation decisions honour capacity, rollback, and a closed latch", async () => {
+test("recommendation decisions honour capacity, rollback, and an unset env", async () => {
   const storedIncident = await prisma.appSetting.findUnique({ where: { key: INCIDENT_KEY }, select: { value: true } });
   previousIncident = storedIncident?.value ?? null;
   await prisma.appSetting.upsert({
