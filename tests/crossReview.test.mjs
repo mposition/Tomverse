@@ -1326,6 +1326,7 @@ test("the transient gitleaks review output is never indexed", () => {
   assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutputs[1]}/verdict-round1.json`), true);
   assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutputs[1]}-other/verdict.json`), false);
   assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-lint-v20/verdict.json"), false);
+  assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaKs-lint-v2/verdict.json"), false);
   assert.equal(isTransientGitleaksReviewOutput("DOCS\\OPS\\CROSS-REVIEW\\PACKAGES\\PROMPT-REFINER-SHADOW-STAGE-SUCCESSOR-GITLEAKS-V1\\RAW.EVENTS.JSONL"), true);
   assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutput}-other/verdict.json`), false);
   assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaKs-v1/verdict.json"), false);
