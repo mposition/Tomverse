@@ -48,7 +48,11 @@ const delivery = (
   status: string,
   createdAt: Date,
   sentAt: Date | null = status === "sent" || status === "delivered" ? createdAt : null,
-  lastErrorKind: string | null = null
+  lastErrorKind: string | null = null,
+  // The mailbox's acceptance, which is what the gate times. The provider's
+  // delivered event normally follows the hand-over closely, so by default it
+  // is the same instant; a case about a delayed delivery passes its own.
+  deliveredAt: Date | null = status === "delivered" || status === "complained" ? sentAt : null
 ) =>
   prisma.emailDelivery.create({
     data: {
@@ -66,6 +70,7 @@ const delivery = (
       status,
       createdAt,
       sentAt,
+      deliveredAt,
       lastErrorKind,
     },
   });
@@ -305,13 +310,16 @@ test("the notice period is counted in calendar days", async () => {
   assert.equal(result.late, 1);
 });
 
-test("an account that joined during the notice period has until the effective date", async () => {
+test("an account that joined during the notice period still needs thirty days", async () => {
+  // There is no shorter deadline for a signup inside the period: it is late
+  // until its own thirty days pass, like any other late account.
   const joinedLate = await account(daysBefore(10));
   await delivery(joinedLate.id, "delivered", daysBefore(5), daysBefore(5));
   await account(daysBefore(10));
   const result = await facts();
   assert.equal(result.owed, 2);
-  assert.equal(result.told, 1);
+  assert.equal(result.told, 0);
+  assert.equal(result.late, 1);
   assert.equal(result.untold, 1);
 });
 
@@ -429,12 +437,53 @@ test("a hard bounce stays unreachable even when a later attempt failed", async (
   assert.equal(result.untold, 0);
 });
 
-test("an account created on the first day of the notice period has until it applies", async () => {
-  // Effective 15 November: the period starts on 16 October. Somebody who signed
-  // up that afternoon, after the bulk notice, is told if told before 15 November.
+test("an account created on the first day of the notice period is late with twenty days", async () => {
+  // Effective 15 November. A signup on 16 October could still have had thirty
+  // days; told on 26 October, it had twenty, and waits for its own thirty.
   const joined = await account(new Date(daysBefore(30).getTime() + 15 * 3_600_000));
   await delivery(joined.id, "delivered", daysBefore(20), daysBefore(20));
   const result = await facts();
-  assert.equal(result.told, 1);
-  assert.equal(result.late, 0);
+  assert.equal(result.told, 0);
+  assert.equal(result.late, 1);
+});
+
+test("a notice is timed by when the mailbox accepted it, not the provider", async () => {
+  // Accepted by the provider at 23:00 on the last day, delivered after a delay
+  // the next day: that is a day short.
+  const user = await account(daysBefore(90));
+  const handedOver = new Date(daysBefore(30).getTime() + 23 * 3_600_000);
+  await delivery(
+    user.id,
+    "delivered",
+    daysBefore(30),
+    handedOver,
+    null,
+    new Date(daysBefore(29).getTime() + 3_600_000)
+  );
+  // Delivered, and no delivered time recorded: arrival unknown, not told.
+  const unknown = await account(daysBefore(90));
+  await delivery(unknown.id, "complained", daysBefore(40), daysBefore(40), null, null);
+  const result = await facts();
+  assert.equal(result.told, 0);
+  assert.equal(result.late, 1);
+  assert.equal(result.untold, 1);
+});
+
+test("the accounts holding the gate shut are named, with why", async () => {
+  const late = await account(daysBefore(90));
+  await delivery(late.id, "delivered", daysBefore(5), daysBefore(5));
+  const full = await account(daysBefore(90));
+  await delivery(full.id, "bounced", daysBefore(40), daysBefore(40), "soft_bounce");
+  const never = await account(daysBefore(90));
+  const accepted = await account(daysBefore(90));
+  await delivery(accepted.id, "sent", daysBefore(40), daysBefore(40));
+  const result = await facts();
+  const byId = new Map(result.blockingAccounts.map((entry) => [entry.userId, entry.reason]));
+  assert.equal(byId.get(late.id), "late");
+  // A full mailbox: bounced for good, nothing retries a legal notice, and the
+  // suppression check lets it through -- so it is named, not excused.
+  assert.equal(byId.get(full.id), "refused_but_reachable");
+  assert.equal(byId.get(never.id), "never_sent");
+  assert.equal(byId.get(accepted.id), "sent");
+  assert.ok(!JSON.stringify(result.blockingAccounts).includes("@"));
 });

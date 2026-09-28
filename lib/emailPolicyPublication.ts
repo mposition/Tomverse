@@ -46,8 +46,10 @@ import {
  * files are on disk. Both sides of the comparison are constants, and a current
  * digest and date count only where a test recomputes the digest from what is
  * rendered *and* checks the date against what the page shows
- * (`DIGEST_VERIFIED_BY`; `tests/emailPolicyPublication.test.mjs` checks each
- * named test does both, not merely mentions the path).
+ * (`DIGEST_VERIFIED_BY`; `tests/emailPolicyPublication.test.mjs` runs each
+ * document's verifier in `tests/support/amendedDocumentVerifiers.mjs` and
+ * compares its result with the record, so an entry here fails the build unless
+ * the recomputed digest and the shown date actually match).
  */
 
 /**
@@ -74,19 +76,21 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 > = {};
 
 /**
- * The test that recomputes each document's current digest from the rendered
- * source, compares it with the recorded one, and checks the recorded date is
- * the one the document shows -- and *which record it checks*.
+ * The documents whose current digest and date a test recomputes from the
+ * rendered source and compares with the record -- and *which record*.
+ *
+ * The verifiers live in `tests/support/amendedDocumentVerifiers.mjs` and are
+ * run, not read: an earlier version only checked that a named test file
+ * mentioned the right strings, so a file that read the tokens and hashed
+ * anything at all would have made a hand-typed digest count as evidence.
  *
  * The record matters because a document's state is read from one of two tables
  * (`AMENDED_DOCUMENT_EVIDENCE` first, then the sitemap's). A verifier of the
  * sitemap entry says nothing about a value typed into the other table, and the
  * previous version called the document verified whichever one it read.
  */
-export const DIGEST_VERIFIED_BY: Readonly<
-  Record<string, { file: string; record: "sitemap" | "amended" }>
-> = {
-  "/privacy": { file: "tests/sitemapLastModified.test.mjs", record: "sitemap" },
+export const DIGEST_VERIFIED_BY: Readonly<Record<string, { record: "sitemap" | "amended" }>> = {
+  "/privacy": { record: "sitemap" },
 };
 
 /**
@@ -157,6 +161,7 @@ const UNIDENTIFIED: ChangeNoticeFacts = {
   late: 0,
   unreachable: 0,
   unreachableAccounts: [],
+  blockingAccounts: [],
   untold: 0,
   firstSentAt: null,
 };
@@ -217,11 +222,6 @@ export const noticeFactsFor = async (
   // on the documents anyway, and counting against "now" still reports progress.
   const anchor = effective ?? now;
   const deadline = noticeDeadline(anchor);
-  // The first day of the notice period. An account created on it or later joined
-  // inside the period and has until the effective date; the previous version cut
-  // at the deadline, a day later, so somebody who signed up the afternoon the bulk
-  // notice went out was held to the bulk notice's deadline.
-  const periodStart = new Date(deadline.getTime() - DAY_MS);
   // A notice that reached the mailbox before this has had its full period,
   // measured from today as if today were the effective date: the same calendar
   // rule, so a late account is told on exactly the day thirty days of notice
@@ -241,12 +241,13 @@ export const noticeFactsFor = async (
       firstSentAt: Date | null;
       /** Accounts that may be unreachable, for `suppressionCheck()` to decide. */
       candidates: { id: string; email: string | null; state: "no_address" | "refused" }[] | null;
+      /** The first accounts holding the gate shut, with their latest notice's state. */
+      blocking: { id: string; state: "late" | "untold"; latest: string | null }[] | null;
     }[]
   >`
     WITH params AS (
       SELECT (${utc(anchor)}::timestamptz AT TIME ZONE 'UTC')      AS "effective",
              (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
-             (${utc(periodStart)}::timestamptz AT TIME ZONE 'UTC') AS "periodStart",
              (${utc(ownPeriodCutoff)}::timestamptz AT TIME ZONE 'UTC') AS "ownPeriodCutoff",
              (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart",
              (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now"
@@ -257,7 +258,7 @@ export const noticeFactsFor = async (
        WHERE u."createdAt" IS NULL OR u."createdAt" < p."effective"
     ),
     notice AS (
-      SELECT d."userId", d."status", d."sentAt", d."createdAt", d."lastErrorKind"
+      SELECT d."userId", d."status", d."deliveredAt", d."createdAt"
         FROM "EmailDelivery" d
         JOIN "TemplateVersion" tv ON tv."id" = d."templateVersionId"
         JOIN "EmailTemplate" t ON t."id" = tv."templateId"
@@ -268,21 +269,23 @@ export const noticeFactsFor = async (
          AND d."createdAt" >= p."windowStart"
     ),
     told AS (
-      SELECT n."userId", n."sentAt"
+      SELECT n."userId", n."deliveredAt" AS "arrivedAt"
         FROM notice n
        WHERE n."status" = ANY(${[...TOLD_STATUSES]}::text[])
-         AND n."sentAt" IS NOT NULL
+         AND n."deliveredAt" IS NOT NULL
+    ),
+    latest AS (
+      SELECT DISTINCT ON (n."userId") n."userId", n."status"
+        FROM notice n
+       ORDER BY n."userId", n."createdAt" DESC
     ),
     classified AS (
       SELECT CASE
                WHEN EXISTS (
                  SELECT 1 FROM told t, params p
                   WHERE t."userId" = o."id"
-                    AND (t."sentAt" < p."deadline"
-                         OR (o."createdAt" IS NOT NULL
-                             AND o."createdAt" >= p."periodStart"
-                             AND t."sentAt" < p."effective")
-                         OR t."sentAt" < p."ownPeriodCutoff")
+                    AND (t."arrivedAt" < p."deadline"
+                         OR t."arrivedAt" < p."ownPeriodCutoff")
                ) THEN 'told'
                WHEN EXISTS (SELECT 1 FROM told t WHERE t."userId" = o."id") THEN 'late'
                WHEN o."email" IS NULL THEN 'no_address'
@@ -301,10 +304,17 @@ export const noticeFactsFor = async (
       COUNT(*) FILTER (WHERE "state" = 'told')        AS "told",
       COUNT(*) FILTER (WHERE "state" = 'late')        AS "late",
       COUNT(*) FILTER (WHERE "state" = 'untold')      AS "untold",
-      (SELECT MIN("sentAt") FROM told)                AS "firstSentAt",
+      (SELECT MIN("arrivedAt") FROM told)             AS "firstSentAt",
       json_agg(json_build_object('id', "id", 'email', "email", 'state', "state")
                ORDER BY "id")
-        FILTER (WHERE "state" IN ('no_address', 'refused')) AS "candidates"
+        FILTER (WHERE "state" IN ('no_address', 'refused')) AS "candidates",
+      (SELECT json_agg(b ORDER BY b."id")
+         FROM (SELECT c."id", c."state", l."status" AS "latest"
+                 FROM classified c
+                 LEFT JOIN latest l ON l."userId" = c."id"
+                WHERE c."state" IN ('late', 'untold')
+                ORDER BY c."id"
+                LIMIT ${UNREACHABLE_REPORT_LIMIT}::int) b) AS "blocking"
       FROM classified
   `;
 
@@ -312,6 +322,16 @@ export const noticeFactsFor = async (
   // account is here only when a notice to it was refused or hard-bounced.
   let untold = Number(row?.untold ?? 0);
   const unreachableAccounts: { userId: string; reason: string }[] = [];
+  // Why each named account holds the gate: late, or its latest notice's state
+  // (`never_sent` where there is none). A full mailbox is the case this exists
+  // for -- a soft-bounced legal notice is `bounced` for good, nothing retries it,
+  // and without a name the operator could only see a count.
+  const blockingAccounts: { userId: string; reason: string }[] = (row?.blocking ?? []).map(
+    (account) => ({
+      userId: account.id,
+      reason: account.state === "late" ? "late" : (account.latest ?? "never_sent"),
+    })
+  );
   for (const candidate of row?.candidates ?? []) {
     if (candidate.state === "no_address" || candidate.email === null) {
       unreachableAccounts.push({ userId: candidate.id, reason: "no_address" });
@@ -323,8 +343,12 @@ export const noticeFactsFor = async (
       ...(definition.purpose ? { purpose: definition.purpose } : {}),
       now,
     });
-    if (verdict.allowed) untold += 1;
-    else unreachableAccounts.push({ userId: candidate.id, reason: verdict.skipReason });
+    if (verdict.allowed) {
+      untold += 1;
+      if (blockingAccounts.length < UNREACHABLE_REPORT_LIMIT) {
+        blockingAccounts.push({ userId: candidate.id, reason: "refused_but_reachable" });
+      }
+    } else unreachableAccounts.push({ userId: candidate.id, reason: verdict.skipReason });
   }
 
   return {
@@ -336,6 +360,7 @@ export const noticeFactsFor = async (
     late: Number(row?.late ?? 0),
     unreachable: unreachableAccounts.length,
     unreachableAccounts: unreachableAccounts.slice(0, UNREACHABLE_REPORT_LIMIT),
+    blockingAccounts,
     untold,
     firstSentAt: row?.firstSentAt ?? null,
   };
@@ -455,6 +480,23 @@ export async function isEmailPolicyPublished(now: Date = new Date()): Promise<bo
         cooldownMs: 24 * 60 * 60 * 1_000,
         context: { component: "email-policy-publication" },
       });
+    }
+    // Closed on the notice, with a notice identified: name who is holding it.
+    // Logged per computation, like the pass above -- once a minute per process
+    // at most, and only while a notice is going out.
+    if (!published && report.notice.blockingAccounts.length > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "email_policy_notice_blocking",
+          at: now.toISOString(),
+          owed: report.notice.owed,
+          late: report.notice.late,
+          untold: report.notice.untold,
+          accounts: report.notice.blockingAccounts,
+          accountsTruncated:
+            report.notice.blockingAccounts.length < report.notice.late + report.notice.untold,
+        })
+      );
     }
     cached = { published, at: now.getTime() };
     return published;

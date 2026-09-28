@@ -24,7 +24,8 @@
  *
  * Now each owed account is classified on its own, in one statement:
  *
- * - **told** -- a notice reached the mailbox (`delivered`, `complained`)
+ * - **told** -- a notice reached the mailbox (`delivered`, `complained`, timed
+ *   by `deliveredAt`, the mailbox's acceptance rather than the provider's)
  *   before the account's deadline, or at least thirty days ago. Not `sent`:
  *   that is written the moment the provider accepts the message, before any
  *   bounce, and a webhook that never arrives leaves it `sent` for ever -- a
@@ -32,9 +33,11 @@
  *   notice the provider accepted and the mailbox did not, and the third version
  *   counted it as told -- including a soft bounce, which is a full mailbox that a
  *   legal notice can and should be retried into. The deadline is the
- *   end of the day thirty days before the effective date for an account that
- *   existed then; an account that joined inside the notice period has until the
- *   effective date, because thirty days were never available to it.
+ *   end of the day thirty days before the effective date. There is no shorter
+ *   deadline for an account that joined during the notice period: the previous
+ *   version gave those until the effective date, which excused a signup on the
+ *   first day of the period that could still have had thirty days. Such an
+ *   account is late until its own thirty days pass, like any other.
  *
  *   And a notice that reached the mailbox thirty or more days ago counts
  *   whenever it was sent. Without that, a notice delivered on or after the
@@ -121,9 +124,15 @@ export type ChangeNoticeFacts = {
    * `UNREACHABLE_REPORT_LIMIT`, in id order; `unreachable` is the total.
    */
   unreachableAccounts: readonly { userId: string; reason: string }[];
+  /**
+   * The accounts holding the gate shut (`late` and `untold`), by id and why:
+   * `late`, the latest notice's status, `never_sent`, or
+   * `refused_but_reachable`. At most `UNREACHABLE_REPORT_LIMIT`.
+   */
+  blockingAccounts: readonly { userId: string; reason: string }[];
   /** Not handed over for any other reason. Blocking. */
   untold: number;
-  /** The earliest hand-over, for the report. */
+  /** The earliest confirmed arrival (`deliveredAt`), for the report. */
   firstSentAt: Date | null;
 };
 

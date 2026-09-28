@@ -9,7 +9,6 @@
 // today -- a pass would mean the gate is not looking.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -23,6 +22,7 @@ import {
   AMENDED_DOCUMENTS,
   CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
   CHANGE_NOTICE_TEMPLATE_KEY,
+  AMENDED_DOCUMENT_EVIDENCE,
   APPROVED_AMENDED_CONSENT_COPY_VERSIONS,
   APPROVED_AMENDED_DIGESTS,
   DIGEST_VERIFIED_BY,
@@ -31,6 +31,12 @@ import {
   emailPolicyPublicationProblems,
 } from "../lib/emailPolicyPublication.ts";
 import { SITEMAP_CONTENT_EVIDENCE } from "../lib/sitemapContentDates.ts";
+import {
+  CONSENT_COPY_VERSIONS,
+  MAKES_NO_SEND_PROMISE_VERSIONS,
+  PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
+} from "../lib/emailConsentCopy.ts";
+import { AMENDED_DOCUMENT_VERIFIERS } from "./support/amendedDocumentVerifiers.mjs";
 
 const NOW = new Date("2026-12-01T00:00:00.000Z");
 
@@ -52,6 +58,7 @@ const notice = (overrides = {}) => ({
   late: 0,
   unreachable: 1,
   unreachableAccounts: [{ userId: "u1", reason: "hard_bounce" }],
+  blockingAccounts: [],
   untold: 0,
   firstSentAt: new Date("2026-10-01T00:00:00.000Z"),
   ...overrides,
@@ -212,31 +219,49 @@ test("section 10's documents are the ones the gate reads, and the consent copy i
   assert.equal(facts.promiseState, "promises_no_unrequested_send");
 });
 
-test("every verifier the gate relies on hashes the document and compares it", () => {
-  // Mentioning a path is not verifying it. The named test has to compute a
-  // SHA-256 and compare it with the recorded `contentSha256` for that path, or an
-  // entry here would let a hand-typed digest count as evidence.
-  for (const [path, { file, record }] of Object.entries(DIGEST_VERIFIED_BY)) {
-    assert.ok(existsSync(file), `${path}: ${file} does not exist`);
-    // Comments removed first: a string in a comment verifies nothing.
-    const source = readFileSync(file, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-    const table = record === "sitemap" ? "SITEMAP_CONTENT_EVIDENCE" : "AMENDED_DOCUMENT_EVIDENCE";
-    assert.ok(source.includes(table), `${file} never reads ${table}, the record the gate reads`);
-    assert.match(source, /createHash\(\s*"sha256"\s*\)/, `${file} computes no digest`);
-    assert.ok(
-      source.includes(`["${path}"].contentSha256`),
-      `${file} never compares a digest with the recorded one for ${path}`
-    );
-    // And the date. The gate measures the notice period from the recorded date,
-    // so that date has to be the one the reader sees; /terms is the example of a
-    // page whose shown date did not follow its content.
-    assert.ok(
-      source.includes(`["${path}"].date`) ||
-        source.replace(/\s+/g, "").includes(`{date}=SITEMAP_CONTENT_EVIDENCE["${path}"]`),
-      `${file} never checks the recorded date against what ${path} shows`
-    );
+test("every document the gate calls verified is recomputed here and matches its record", () => {
+  // Run, not read. An earlier version only looked for strings in a named test
+  // file, so a file that mentioned the tokens and hashed anything would have
+  // turned a hand-typed digest into evidence.
+  assert.deepEqual(
+    Object.keys(DIGEST_VERIFIED_BY).sort(),
+    Object.keys(AMENDED_DOCUMENT_VERIFIERS).sort(),
+    "every verified document needs a verifier, and every verifier a claim"
+  );
+  for (const [path, { record }] of Object.entries(DIGEST_VERIFIED_BY)) {
+    const verifier = AMENDED_DOCUMENT_VERIFIERS[path];
+    assert.equal(verifier.record, record, `${path}: the verifier checks a different record`);
+    const recorded =
+      record === "sitemap" ? SITEMAP_CONTENT_EVIDENCE[path] : AMENDED_DOCUMENT_EVIDENCE[path];
+    assert.ok(recorded, `${path}: nothing is recorded in the ${record} table`);
+    assert.equal(verifier.digest(), recorded.contentSha256, `${path}: the recorded digest is not what renders`);
+    assert.ok(verifier.showsDate(recorded.date), `${path}: the page does not show ${recorded.date}`);
+    // And the verifier can tell a wrong date from the right one.
+    assert.equal(verifier.showsDate("1999-01-01"), false, `${path}: the date check accepts anything`);
+  }
+});
+
+test("a consent copy version that makes no promise has changed the promise in every language", () => {
+  // Membership in MAKES_NO_SEND_PROMISE_VERSIONS is a claim; this checks the
+  // words behind it. The in-product notice body is where today's version tells
+  // existing accounts nothing is sent unless they ask. A version filed as
+  // making no promise with that sentence unchanged in any language would open
+  // the gate on copy that still promises.
+  const promising = CONSENT_COPY_VERSIONS.filter((entry) =>
+    PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(entry.version)
+  );
+  assert.ok(promising.length > 0);
+  for (const entry of CONSENT_COPY_VERSIONS) {
+    if (!MAKES_NO_SEND_PROMISE_VERSIONS.has(entry.version)) continue;
+    for (const old of promising) {
+      for (const [language, text] of Object.entries(old.copy.noticeBody)) {
+        assert.notEqual(
+          entry.copy.noticeBody?.[language],
+          text,
+          `${entry.version} ${language}: the notice body still carries ${old.version}'s promise`
+        );
+      }
+    }
   }
 });
 
