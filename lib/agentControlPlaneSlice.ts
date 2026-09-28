@@ -3,14 +3,11 @@
  * control plane does even though the control plane's own files are untouched.
  *
  * docs/policy/engineering-agent.md §4 ("통제 평면에 닿는 제품 파일") is the
- * contract. Two directions count, because both change control-plane
- * behaviour without touching a control-plane path:
- *
- * - dependencies: product modules the runtime control plane imports, directly
- *   or through other product modules -- the control plane executes their code;
- * - callers: product modules from which a control-plane module can be
- *   reached through product modules -- a page that calls a gate through a
- *   barrel decides whether and how it is called as much as the barrel does.
+ * contract. The control plane runs inside the same application, and a
+ * runtime file can change what it does with no import between them -- by a
+ * framework-registered route, shared database or process state, or a callback
+ * handed through other files. So every product file of the app runtime is in
+ * the slice; the import graph is built to prove the tree can be read at all.
  *
  * Configuration is part of it too: an environment variable the control plane
  * or the slice reads, and every AppSetting key, is a name a change may not add.
@@ -20,9 +17,7 @@
  * builtin, a declared dependency nor a workspace package, or a runtime
  * control-plane module that assembles what it loads fails the whole patch --
  * never one file. It runs in the app, which may use the TypeScript compiler;
- * it resolves modules the way `tsc` does with this repository's tsconfig, and
- * where it cannot follow code (registries, callbacks, reflection) it moves the
- * changed file to T2 rather than claim precision.
+ * it resolves modules the way `tsc` does with this repository's tsconfig.
  */
 
 import { builtinModules } from "node:module";
@@ -403,46 +398,21 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
-const isControlPlane = (path: string) => classifyPath(path) === "control-plane";
 
 /**
- * Product files connected to the control plane by imports in either direction,
- * through any number of hops, plus product files that load by a computed name.
+ * Every product file of the app runtime.
  *
- * A module the control plane runs can be handed a callback, registered into or
- * mutated by any file that reaches it, directly or through others, and that
- * file is shaped in turn by whatever it imports. Import edges do not say which
- * of these happens, and this analysis does not try to: everything connected is
- * in the slice. Only code that shares no import path with the control plane,
- * in either direction, stays out.
+ * The control plane runs inside the same application. A runtime file can
+ * reach it without any import: the framework registers routes and pages by
+ * convention and they are called by URL, the database and process-global
+ * state are shared, and a callback can be handed over through any number of
+ * files. No import-based analysis proves a runtime file cannot change what
+ * the control plane does, so none is attempted -- every one is in the slice
+ * (docs/policy/engineering-agent.md §4: a file that cannot be analysed makes
+ * the patch T2). The import graph is still built in full, because an import
+ * that does not resolve, or a file that does not parse, fails the analysis.
  */
-const connectedToControlPlane = (graph: Graph) => {
-  const neighbours = new Map<string, Set<string>>();
-  const link = (from: string, to: string) => {
-    const set = neighbours.get(from) ?? new Set<string>();
-    set.add(to);
-    neighbours.set(from, set);
-  };
-  for (const [from, targets] of graph.edges) {
-    for (const target of targets) {
-      link(from, target);
-      link(target, from);
-    }
-  }
-  const queue = [...graph.edges.keys()].filter(
-    (path) => isControlPlane(path) || (isProduct(path) && graph.facts.get(path)?.runtimeLoader === true),
-  );
-  const seen = new Set(queue);
-  while (queue.length > 0) {
-    const current = queue.pop() as string;
-    for (const next of neighbours.get(current) ?? []) {
-      if (seen.has(next)) continue;
-      seen.add(next);
-      queue.push(next);
-    }
-  }
-  return new Set([...seen].filter(isProduct));
-};
+const appRuntimeSlice = (graph: Graph) => new Set([...graph.edges.keys()].filter(isProduct));
 
 /**
  * The slice for one change set. The base tree gives the slice a changed path
@@ -458,7 +428,7 @@ export const computeControlPlaneSlice = (input: {
 }): SliceResult => {
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = connectedToControlPlane(base);
+  const baseSlice = appRuntimeSlice(base);
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
@@ -487,7 +457,7 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultSlice = connectedToControlPlane(result);
+  const resultSlice = appRuntimeSlice(result);
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
