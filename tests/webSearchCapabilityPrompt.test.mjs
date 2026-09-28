@@ -81,6 +81,7 @@ test("a turn carrying this application's own search tool is a searching turn", (
     "gemini-3-6-flash",
     "gemini-3-1-pro",
     "gemini-2-5-flash",
+    "gemini-flash-lite-latest",
   ]) {
     assert.equal(
       resolveWebSearchTurnState({
