@@ -770,6 +770,45 @@ test("Korea's missing telephone does not hold a US message whose footer is compl
   assert.equal(calls.length, 1);
 });
 
+test("another row's incomplete footer does not hold a US message whose own is complete", async () => {
+  // The footer readiness check folds every pending row's pin into its answer. A
+  // later US row pinned to a profile with no postal address made that answer
+  // false for the country, and the drain skipped -- for good -- a message whose
+  // own footer had every block.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+  const own = await prisma.emailDelivery.findUniqueOrThrow({ where: { id: rows.deliveryId } });
+  await prisma.emailDelivery.create({
+    data: {
+      eventId: own.eventId,
+      recipientKey: `stale:${randomUUID()}`,
+      emailAddress: `stale-${randomUUID().slice(0, 8)}@example.test`,
+      language: "en",
+      lane: "standard",
+      templateVersionId: own.templateVersionId,
+      policyVersionId: own.policyVersionId,
+      jurisdictionCountry: "US",
+      // A profile with no US postal address block.
+      jurisdictionProfileKey: "ZZ",
+      idempotencyKey: randomUUID(),
+      nextAttemptAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  });
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", skipReason: null });
+  assert.equal(calls.length, 1);
+});
+
 test("a transactional message keeps its own stream and carries no unsubscribe", async () => {
   // The marketing stream has its own key by design: it does not fall back to
   // the transactional one, so a promotion cannot be sent on the credential

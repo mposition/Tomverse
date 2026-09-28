@@ -2,7 +2,12 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSettings";
-import { FOOTER_DISCLOSURE_COUNTRIES, footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
+import {
+  FOOTER_DISCLOSURE_COUNTRIES,
+  footerBlocksRequired,
+  footerDisclosureReadiness,
+} from "@/lib/emailFooterDisclosureReadiness";
+import { identityBlocksWithoutValue } from "@/lib/emailBusinessIdentity";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
@@ -295,25 +300,8 @@ export async function releaseNotesSendAuthorization(
         emailSubjectLabels: subject.labelsPresent,
         emailUnsubscribeKeyring: unsubscribeKeyringReadiness().ready,
       },
-      // The countries whose own footer is incomplete or unmapped. The check
-      // examines each country it covers separately; only those it names fail.
-      footerFailing: new Set(footer.problems.flatMap((problem) => problem.countryCodes)),
     };
   });
-  // Each candidate country judged by its own footer. A country the footer check
-  // does not cover keeps the overall answer: a duty that names a check which
-  // never looked at that country has nothing more specific to rest on.
-  const readinessByCountry = Object.fromEntries(
-    countries.map((country) => [
-      country,
-      {
-        ...readiness.checks,
-        emailFooterDisclosures: FOOTER_DISCLOSURE_COUNTRIES.includes(country)
-          ? !readiness.footerFailing.has(country)
-          : readiness.checks.emailFooterDisclosures,
-      },
-    ])
-  );
 
   // By address, not by account. Consent attaches to a mailbox
   // (docs/policy/email-notifications.md section 13.4), and an objection
@@ -441,6 +429,36 @@ export async function releaseNotesSendAuthorization(
     obligations,
     profiles,
   });
+
+  // Each candidate country's footer duty judged by *this message's* footer: the
+  // profile this policy version maps the country to, which is what it renders
+  // from, and the identity values that fill it -- the question
+  // `footerDisclosureReadiness()` asks of every pair, asked of this one.
+  //
+  // Not that check's answer. It folds the active mapping and every pending
+  // row's pin into one verdict, so a stale US row pinned to an incomplete
+  // profile, or Korea's missing telephone, failed a US message whose own footer
+  // was complete -- and a skip is permanent. A country the check does not cover
+  // keeps its overall answer: nothing more specific looked at it.
+  const readinessByCountry = Object.fromEntries(
+    countries.map((country) => {
+      const required = footerBlocksRequired(country);
+      const profile = profiles[country];
+      const ownFooterComplete =
+        profile !== undefined &&
+        required.every((block) => profile.footerBlocks.includes(block)) &&
+        identityBlocksWithoutValue(process.env, required).length === 0;
+      return [
+        country,
+        {
+          ...readiness.checks,
+          emailFooterDisclosures: FOOTER_DISCLOSURE_COUNTRIES.includes(country)
+            ? ownFooterComplete
+            : readiness.checks.emailFooterDisclosures,
+        },
+      ];
+    })
+  );
   const composed =
     gaps.length > 0
       ? null

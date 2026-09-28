@@ -426,6 +426,8 @@ type ClaimedDelivery = {
   emailAddress: string;
   language: string;
   attempts: number;
+  /** This worker's claim, as written by `claimDueDelivery()`. */
+  claimedAt: Date | null;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
   policyVersionId: string;
@@ -490,6 +492,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       emailAddress: true,
       language: true,
       attempts: true,
+      claimedAt: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
       // Pinned at enqueue, read here: this is the step the pin exists for.
@@ -763,6 +766,13 @@ const redactSecrets = (
  * Thrown so the transaction rolls back, which is the point -- the verdict
  * snapshot inside it describes a send that did not happen.
  */
+/**
+ * How close to going stale a claim may be when a release-notes decision is
+ * committed. The provider call follows the commit, so the claim has to outlive
+ * it: a minute is well past the provider timeout.
+ */
+const CLAIM_MARGIN_MS = 60_000;
+
 class ReenqueueRaceError extends Error {
   constructor(readonly reason: "already_superseded" | "not_pending") {
     super(`the delivery was ${reason} when the replacement was written`);
@@ -775,6 +785,9 @@ const decideReleaseNotesSend = async (
   definition: { purpose: string | null; classification: EmailClassification },
   now: Date
 ): Promise<ReleaseNotesSendOutcome> => {
+  // Wall time, not `now`: what matters is how long this worker has held the
+  // claim, and the claim was taken immediately before this call.
+  const startedAt = Date.now();
   const purpose = definition.purpose;
   // Unreachable through `releaseNotesFlagApplies()`, which answers false for a
   // null purpose. Narrowed rather than asserted, so a future caller that asked
@@ -858,6 +871,26 @@ const decideReleaseNotesSend = async (
 
   let outcomeUnknown = false;
   const finished = await runDecisionTransaction(delivery, async (tx) => {
+    // Still ours, and not about to stop being ours. The authorization reads for
+    // a while outside any lock; a claim that went stale in that time may have
+    // been taken by another worker, which could have skipped this row and
+    // written its replacement. Acting on the verdict from here -- sending the
+    // original under its enqueue key, or skipping it again -- would put a second
+    // message beside that replacement, under a different key. Locked, so the
+    // other worker cannot move it between this read and this commit; and a
+    // claim within a minute of going stale is given up rather than raced,
+    // because the provider call still follows the commit.
+    const [claimRow] = await tx.$queryRaw<
+      Array<{ status: string; claimedAt: Date | null }>
+    >`SELECT "status", "claimedAt" FROM "EmailDelivery" WHERE "id" = ${delivery.id} FOR UPDATE`;
+    const ours =
+      claimRow !== undefined &&
+      claimRow.status === "pending" &&
+      delivery.claimedAt !== null &&
+      claimRow.claimedAt?.getTime() === delivery.claimedAt.getTime() &&
+      Date.now() - startedAt < STANDARD_LANE_CLAIM_TTL_MS - CLAIM_MARGIN_MS;
+    if (!ours) throw new ReenqueueRaceError("not_pending");
+
     const recorded = await recordSendDecision(tx, {
       deliveryId: delivery.id,
       userId: delivery.userId,
