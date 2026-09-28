@@ -70,7 +70,8 @@ slice adds, not these screens.
 
 **Engineering agent** is the engineering agent's record and the controls a
 person owns (`docs/policy/engineering-agent.md §11` and `docs/policy/engineering-agent.md §12`): T2 drafts decided,
-decision items acknowledged, and the mode and freeze. It carries no badge in
+decision items acknowledged, the mode and freeze, a halt acknowledged and the
+record that both dead-man monitors alert. It carries no badge in
 this slice. Reading takes ordinary admin authentication; every control takes
 `engineering-agent:write` and a recent sign-in, checked by its own route, and
 `t1` is not a mode this screen can set.
