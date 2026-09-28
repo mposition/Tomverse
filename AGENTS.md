@@ -1137,6 +1137,9 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `lib/engineeringAgentStateMismatch.ts`, `tests/engineeringAgentCapability.test.mjs`.
   교차 잠금 순서는 `CROSS_LOCK_ORDER` 하나이며 AMUX가 자기 순서를 바꾸면 함께
   바뀌어야 합니다.
+- **P1g(등록 Guard와 secret 검사)**: `lib/engineeringAgentRegistrationGuard.ts`,
+  `lib/engineeringAgentSecretPatterns.ts`, `tests/engineeringAgentRegistrationGuard.test.mjs`.
+  모델의 등록 제안은 여섯 필드뿐이며 우선순위·승격·담당자를 담을 자리가 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
