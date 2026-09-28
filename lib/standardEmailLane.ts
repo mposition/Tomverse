@@ -779,7 +779,7 @@ const decideReleaseNotesSend = async (
       emailAddress: normalizedAddress,
       addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
       verdict,
-      countryCandidates: Object.keys(verdict.obligations).sort(),
+      countryCandidates: verdict.countries,
       suppressionCheckedAt: now,
       providerSubmittedAt: null,
       evidence: evidenceOf(verdict),

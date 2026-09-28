@@ -193,6 +193,15 @@ export type SendVerdict = {
    */
   overrideRefusal: string | null;
   blockers: SendBlocker[];
+  /**
+   * The countries this verdict was taken over, whatever it found about them.
+   *
+   * Carried because the snapshot has to record what was considered, and the
+   * obvious substitute -- the keys of `obligations` -- silently drops any
+   * candidate with no country rule. A record that named only the countries that
+   * had rules would say nothing was asked about the one that refused the send.
+   */
+  countries: string[];
   /** Per country, the duty verdict, for the record and for the operator. */
   obligations: Record<string, ObligationsVerdict>;
   displayContract: {
@@ -326,6 +335,7 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
     overrideApplied,
     overrideRefusal,
     blockers,
+    countries: [...new Set(input.countries)].sort(),
     obligations,
     displayContract: {
       pinnedDisplayContractHash: input.display.pinnedDisplayContractHash,

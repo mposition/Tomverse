@@ -105,6 +105,24 @@ export type ProfileForRequirements = {
  */
 export type RequirementGap = { countryCode: string; reason: "no_profile" };
 
+/**
+ * The duty that puts a label at the front of the subject, per country.
+ *
+ * Named separately from `DISPLAY_OBLIGATIONS` because the composition needs to
+ * ask one question the contract does not answer: whether *this* duty is waived,
+ * and therefore whether the profile's `subjectPrefix` should be printed at all.
+ *
+ * Section 7.7 is explicit that an exemption is recorded rather than seeded away:
+ * the profile keeps its value and the send omits the label because a waiver
+ * says so. A build that cleared the profile instead would have no way to tell
+ * an exemption from a country whose rule never asked for one, and reinstating
+ * the label would mean editing a seed rather than withdrawing an approval.
+ */
+export const SUBJECT_LABEL_OBLIGATIONS: Record<string, string> = {
+  KR: "advertising_subject_label",
+  SG: "adv_subject_label",
+};
+
 export const displayRequirementsFor = (input: {
   countries: readonly string[];
   rules: readonly RuleForRequirements[];
@@ -128,11 +146,28 @@ export const displayRequirementsFor = (input: {
     }
 
     const stored = input.obligations[countryCode] ?? [];
+
+    // A waived subject label is not a label this country requires, so it is not
+    // in the contract either. Section 7.7 records the exemption rather than
+    // clearing the seed, which is why the profile still holds the prefix; a
+    // contract that copied it anyway would say the message must carry a label
+    // an approval says it must not, and the composition -- which does read the
+    // waiver -- would print something the hash did not describe.
+    //
+    // It is also what stops an exemption becoming a refusal. Two candidates each
+    // needing a different prefix is `conflicting_subject_prefix`, and counting a
+    // waived one towards that conflict would refuse a recipient over a label
+    // nobody is asking to print.
+    const labelKey = SUBJECT_LABEL_OBLIGATIONS[countryCode];
+    const labelWaived =
+      labelKey !== undefined &&
+      stored.some((entry) => entry.obligationKey === labelKey && entry.state === "waived");
+
     requirements.push({
       countryCode,
       ruleKey: rule.ruleKey,
       ruleVersion: rule.ruleVersion,
-      subjectPrefix: profile.subjectPrefix,
+      subjectPrefix: labelWaived ? null : profile.subjectPrefix,
       footerBlocks: [...profile.footerBlocks],
       unsubscribeSlaBusinessDays: profile.unsubscribeSlaBusinessDays,
       unsubscribeLanguages: UNSUBSCRIBE_NOTICE_LANGUAGES[countryCode] ?? [],
@@ -251,23 +286,6 @@ export const obligationPartitionProblems = (countryCode: string): string[] => {
   return problems;
 };
 
-/**
- * The duty that puts a label at the front of the subject, per country.
- *
- * Named separately from `DISPLAY_OBLIGATIONS` because the composition needs to
- * ask one question the contract does not answer: whether *this* duty is waived,
- * and therefore whether the profile's `subjectPrefix` should be printed at all.
- *
- * Section 7.7 is explicit that an exemption is recorded rather than seeded away:
- * the profile keeps its value and the send omits the label because a waiver
- * says so. A build that cleared the profile instead would have no way to tell
- * an exemption from a country whose rule never asked for one, and reinstating
- * the label would mean editing a seed rather than withdrawing an approval.
- */
-export const SUBJECT_LABEL_OBLIGATIONS: Record<string, string> = {
-  KR: "advertising_subject_label",
-  SG: "adv_subject_label",
-};
 
 /**
  * Whether every candidate country that asks for a subject label has waived it.

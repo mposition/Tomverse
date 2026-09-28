@@ -137,7 +137,7 @@ export async function recordEnqueueDecision(
     emailAddress: input.decision.normalizedAddress,
     addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
     verdict: input.decision.verdict,
-    countryCandidates: Object.keys(input.decision.verdict.obligations).sort(),
+    countryCandidates: input.decision.verdict.countries,
     suppressionCheckedAt: input.decision.suppressionCheckedAt,
     providerSubmittedAt: null,
     evidence: evidenceOf(input.decision.verdict),

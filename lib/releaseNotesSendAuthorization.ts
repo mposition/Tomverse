@@ -51,9 +51,9 @@ import type { ReleaseNotesRuleForVerdict } from "@/lib/releaseNotesCountryRuleCo
  *
  * ## Which countries
  *
- * Section 5.3: the resolved country, or every high-confidence country when they
- * disagree, and each of them has to allow. A person with no resolvable country
- * is `ZZ`, which the pure verdict refuses and which no override crosses.
+ * One, or none -- `candidateCountries()` below says why that is not section
+ * 5.3's list yet. A person with no resolvable country is `ZZ`, which the pure
+ * verdict refuses and which no override crosses.
  *
  * Derived from `jurisdictionForUser()` -- the same call the drain already makes
  * -- rather than from a persisted candidate list, because the list S4 will
@@ -107,19 +107,52 @@ const read = async <T>(what: string, load: () => Promise<T>): Promise<T> => {
 };
 
 /**
- * The candidate countries, per section 5.3.
+ * The candidate countries: one, or none.
  *
- * Every high-confidence country when they disagree, because each of them has to
- * allow; the resolved one otherwise. An empty list is `ZZ` to the pure verdict,
- * which is what a person with no resolvable country is.
+ * ## Why not section 5.3's list
+ *
+ * Section 5.3 describes two or more candidates whose display obligations are
+ * composed as a union, and it says in the same breath that this **requires the
+ * S0 amendment** -- to `email-notifications.md` sections 6.1 and 6.2 and to
+ * `AGENTS.md`, all three of which currently say IP alone does not decide a
+ * jurisdiction. That amendment has not been made. Until it is,
+ * `marketingJurisdictionVerdict()`'s rule is the one in force: a high-confidence
+ * country that is not `ZZ`, or nothing.
+ *
+ * This function implemented 5.3's list first, and a review found what that
+ * costs. Two things, both of which end with mail going out wrong:
+ *
+ * A **conflict** resolves to `countryCode: "ZZ"`, which is what the delivery row
+ * pins and what the send renders from -- while the contract was composed from
+ * the union of the two conflicting countries. So the verdict approved a footer
+ * with a Korean telephone number and the message printed `ZZ`'s footer, which
+ * has none, and recorded `satisfied: true`. The replacement copies the same
+ * pinned profile, so the next drain composes the same union, finds the hash
+ * unchanged, and prints the same wrong footer for ever.
+ *
+ * And a **low-confidence** inference -- language plus time zone, with no billing
+ * country, no declaration and no consent-time country -- became a confirmed
+ * candidate here while the ordinary marketing path refuses it. Release notes
+ * would have gone to Korean rules on the strength of a browser's locale.
+ *
+ * A single candidate has neither problem: the contract is composed from the same
+ * country the row is pinned to, so what was approved is what is printed.
+ *
+ * ## When S0 is amended
+ *
+ * The union is not merely a longer list here. It needs the composition to render
+ * from a set of profiles rather than the one the row pins, and it needs the
+ * replacement to carry that set. Neither exists. Adding candidates back without
+ * them reproduces exactly the defect above, so the amendment and those two are
+ * one piece of work.
  */
-const candidateCountries = (jurisdiction: {
+export const candidateCountries = (jurisdiction: {
   countryCode: string;
   confidence: string;
   conflicts: string[];
 }): string[] => {
-  if (jurisdiction.conflicts.length > 0) return [...new Set(jurisdiction.conflicts)].sort();
-  if (jurisdiction.confidence === "none" || jurisdiction.countryCode === "ZZ") return [];
+  if (jurisdiction.confidence !== "high") return [];
+  if (jurisdiction.countryCode === "ZZ") return [];
   return [jurisdiction.countryCode];
 };
 
