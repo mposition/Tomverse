@@ -5,6 +5,7 @@ import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import { AUTOFIX_OPERATOR_ACTION_STATES } from "@/lib/feedbackAutoFixCore";
+import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -37,6 +38,7 @@ export async function getAdminNavigationCounts(): Promise<{
   const now = new Date();
   const [
     openFeedback,
+    supportFeedback,
     autoFixActionCases,
     openPrivacyRequests,
     pendingRefunds,
@@ -50,7 +52,20 @@ export async function getAdminNavigationCounts(): Promise<{
     overdueCampaignWaves,
     pendingMarketingApprovals,
   ] = await Promise.allSettled([
-    prisma.feedback.count({ where: { status: "open" } }),
+    prisma.feedback.count({
+      where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
+    }),
+    // The same reports, less those whose case is counted in the next read: for
+    // Support the case stands in for the report (lib/adminNavigationBadges.ts).
+    // `NOT is` keeps a report with no case at all.
+    prisma.feedback.count({
+      where: {
+        status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] },
+        NOT: {
+          autoFixCase: { is: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } } },
+        },
+      },
+    }),
     prisma.feedbackAutoFixCase.count({
       where: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } },
     }),
@@ -74,6 +89,7 @@ export async function getAdminNavigationCounts(): Promise<{
   const jobsValue = settled(jobs);
   const counts: AdminNavigationCounts = {
     openFeedback: settled(openFeedback),
+    supportFeedback: settled(supportFeedback),
     autoFixActionCases: settled(autoFixActionCases),
     openPrivacyRequests: settled(openPrivacyRequests),
     pendingRefunds: settled(pendingRefunds),

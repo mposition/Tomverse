@@ -14,7 +14,7 @@ export const adminOverviewMessages = defineAdminMessages({
       apiKeyMissingDetail:
         "Provider calls will fail or remain unavailable until the key is configured.",
       openFeedback: (count: number) =>
-        `${count} open feedback item${count === 1 ? "" : "s"}`,
+        `${count} unresolved feedback item${count === 1 ? "" : "s"}`,
       openFeedbackDetail: "Review user-reported issues before launch traffic grows.",
       pendingRefunds: (count: number) =>
         `${count} pending refund request${count === 1 ? "" : "s"}`,
@@ -29,7 +29,7 @@ export const adminOverviewMessages = defineAdminMessages({
       providers: (available: number, total: number) =>
         `Providers: ${available}/${total} available`,
       monthlySpend: (spend: string) => `Estimated monthly spend: ${spend}`,
-      openFeedback: (count: number) => `Open feedback: ${count}`,
+      openFeedback: (count: number) => `Unresolved feedback: ${count}`,
       pendingRefunds: (count: number) => `Pending refunds: ${count}`,
       missingEnv: (names: string) => `Missing environment setup: ${names}`,
       none: "none",
