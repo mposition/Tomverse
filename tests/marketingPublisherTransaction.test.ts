@@ -79,6 +79,42 @@ const fakeClient = (serverVersionNum: number, existingTransactionTimeout = "0") 
   return { client: client as unknown as PrismaClient, seen };
 };
 
+/**
+ * A client whose `$transaction` hands the same delegates straight back.
+ *
+ * The run's own writes now go through `withStatementBound`, which opens a
+ * transaction and arms `statement_timeout` before the one statement. A fake
+ * without `$transaction` made those calls throw, which is the right way round --
+ * it failed loudly rather than passing while the bound was absent. This adds the
+ * method *and* records the setting, so a test can assert the ceiling was actually
+ * set rather than only that the call went through.
+ */
+const boundClient = (delegates: Record<string, unknown>) => {
+  const armed: string[] = [];
+  const tx = {
+    ...delegates,
+    async $queryRaw(query: unknown) {
+      const sql = statementText(query);
+      if (sql.includes("set_config")) {
+        armed.push(String(statementValues(query)[0]));
+        return [{ set_config: statementValues(query)[0] }];
+      }
+      const inner = delegates.$queryRaw as ((q: unknown) => Promise<unknown>) | undefined;
+      if (inner) return inner(query);
+      return [];
+    },
+  };
+  return {
+    client: {
+      ...tx,
+      async $transaction(fn: (client: unknown) => Promise<unknown>) {
+        return fn(tx);
+      },
+    } as unknown as PrismaClient,
+    armed,
+  };
+};
+
 test("transaction_timeout is set first, and the two ceilings after it", async () => {
   // The ordering trap: statement_timeout and idle_in_transaction_session_timeout
   // are armed only while shorter than transaction_timeout. Set them first and a
@@ -295,13 +331,13 @@ test("a start the database says is already past its deadline is an answer", asyn
   // The route checks the deadline with its own clock; the trigger with the
   // database's. When they disagree the database is right, and the service
   // should hear "this run cannot start", not a framework 500.
-  const client = {
+  const { client } = boundClient({
     scheduledJobRun: {
       create: async () => {
         throw raised(MARKETING_PUBLISHER_START_AFTER_DEADLINE_SQLSTATE, "reworded");
       },
     },
-  } as unknown as PrismaClient;
+  });
   assert.deepEqual(
     await startMarketingPublisherRun(client, {
       runId: "0f8fad5b-d9cb-469f-a165-70867728950e",
@@ -381,13 +417,13 @@ const unmappedSqlstateError = (code: string) =>
   });
 
 test("a heartbeat the trigger refused is past_deadline, not a crash", async () => {
-  const client = {
+  const { client } = boundClient({
     scheduledJobRun: {
       async updateMany() {
         throw unmappedSqlstateError(MARKETING_PUBLISHER_HEARTBEAT_AFTER_DEADLINE_SQLSTATE);
       },
     },
-  } as unknown as PrismaClient;
+  });
   assert.deepEqual(await heartbeatMarketingPublisherRun(client, "run_1"), {
     beat: false,
     reason: "past_deadline",
@@ -399,22 +435,24 @@ test("a heartbeat that matched no row is not_running, and one that matched beat"
     [0, { beat: false, reason: "not_running" }],
     [1, { beat: true }],
   ] as const) {
-    const client = {
+    const { client, armed } = boundClient({
       scheduledJobRun: { async updateMany() { return { count }; } },
-    } as unknown as PrismaClient;
+    });
     assert.deepEqual(await heartbeatMarketingPublisherRun(client, "run_1"), expected);
+    // The bound the run's own writes used to lack entirely.
+    assert.deepEqual(armed, [String(MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS)]);
   }
 });
 
 test("any other database error on a heartbeat is not mistaken for a deadline", async () => {
   // Swallowing an unrelated failure as "past the deadline" would close a healthy
   // run and say the wrong reason for it.
-  const client = {
+  const { client } = boundClient({
     scheduledJobRun: {
       async updateMany() {
         throw unmappedSqlstateError("40001");
       },
     },
-  } as unknown as PrismaClient;
+  });
   await assert.rejects(heartbeatMarketingPublisherRun(client, "run_1"));
 });

@@ -212,11 +212,23 @@ export const marketingPublisherDeadlineProblem = (
   const at = deadlineAt.getTime();
   if (!Number.isFinite(at)) return "deadline_unreadable";
   if (at <= now.getTime()) return "deadline_passed";
-  // The service may start a little before the route sees it; allow the run
-  // deadline plus a small margin for the request, and no more than a cron
-  // period, since a run that could outlast its period is exactly what the
-  // deadline exists to prevent.
-  if (at - now.getTime() > timing.cronPeriodMs) return "deadline_too_far";
+  // **The bound is the run deadline, not the cron period.**
+  //
+  // It was the cron period, and that was the hole. A run's deadline is four
+  // minutes; the period is five. So a deadline up to five minutes out passed,
+  // and once the route began measuring this against the database's clock, a
+  // service running thirty seconds ahead of PostgreSQL submitted
+  // `db_now + 4m30s` and was accepted. The supervisor then killed the worker at
+  // its own four minutes while the database still had thirty seconds to go, so a
+  // close asking for `succeeded` at 4m15s was not late by the only clock the
+  // trigger consults -- and "a late run is never recorded as a success", the one
+  // invariant the plan calls mandatory, did not hold.
+  //
+  // With the run deadline as the bound, agreeing clocks leave `at - now` just
+  // under four minutes because the request itself took time, and any forward
+  // skew pushes it over and is refused. Refusing a skewed service is the point:
+  // it cannot be given a bound that means what it says.
+  if (at - now.getTime() > timing.runDeadlineMs) return "deadline_too_far";
   return null;
 };
 

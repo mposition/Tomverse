@@ -81,6 +81,23 @@ export async function POST(request: Request) {
   try {
     databaseNow = await marketingPublisherDatabaseNow(prisma);
   } catch (error) {
+    // Reported, for the same reason the start failure below is: no row exists, so
+    // the silence monitor cannot see this, and `marketing_publisher` sits in
+    // `PENDING_SCHEDULED_JOB_KEYS` until an operator applies the catalogue, so
+    // there is no delayed-job warning either. A path that can fail from the first
+    // run onwards and leave nothing in the operational queue is a path that fails
+    // silently -- which is the defect this route already fixed once, in the branch
+    // directly below, and which this one reintroduced by being added afterwards.
+    await reportOperationalIncident({
+      code: "MARKETING_PUBLISHER_CLOCK_UNAVAILABLE",
+      title: "Marketing publisher could not read the database clock",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-publisher", runId },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing publisher incident could not be reported:", reportError);
+    });
     console.error("Marketing publisher could not read the database clock:", error);
     return NextResponse.json(
       { runId, code: "database_clock_unavailable" },

@@ -402,3 +402,74 @@ test("a database clock that cannot be read is not guessed at", async () => {
     value: null,
   });
 });
+
+test("a service thirty seconds ahead of the database is refused", async () => {
+  // The band the hour-long skew test walked straight past, and the one that
+  // actually breaks the mandatory invariant. The window's upper bound used to be
+  // the cron period (five minutes) while a run's deadline is four, so a service
+  // half a minute ahead of PostgreSQL submitted `db_now + 4m30s` and was
+  // accepted. The supervisor then killed the worker at its own four minutes while
+  // the database still had thirty seconds left, so a close asking for `succeeded`
+  // at 4m15s was not late by the only clock the trigger consults.
+  //
+  // With the bound at the run deadline, any forward skew pushes the deadline past
+  // it and the run never opens.
+  for (const skewMs of [1_000, 30_000, 59_000]) {
+    resetWorld();
+    world.databaseNow = new Date(Date.now() - skewMs);
+    const { status, body } = await post();
+    assert.equal(status, 400, `skew ${skewMs}ms must be refused`);
+    assert.equal(body.code, "deadline_too_far");
+    assert.deepEqual(world.closeCalls, []);
+  }
+});
+
+test("clocks that agree still accept an ordinary deadline", async () => {
+  // The other direction: the bound must not be so tight that the request's own
+  // latency refuses every run. With agreeing clocks `deadline - now` is just under
+  // four minutes, because the service computed it before the request was made.
+  resetWorld();
+  world.databaseNow = new Date(Date.now() + 500);
+  const { status } = await post();
+  assert.equal(status, 200);
+});
+
+test("a clock that cannot be read is reported, not just logged", async () => {
+  resetWorld();
+  Object.defineProperty(world, "databaseNow", {
+    configurable: true,
+    get() {
+      throw new Error("no connection");
+    },
+  });
+  const { POST } = await loadRoute();
+  const response = await POST(
+    new Request("https://example.test/api/internal/marketing-publisher", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        runId: randomUUID(),
+        deadline: new Date(Date.now() + 4 * 60_000).toISOString(),
+      }),
+    }),
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 503);
+  assert.equal(body.code, "database_clock_unavailable");
+  // No row exists, so the silence monitor cannot see this and the job is still
+  // pending in the catalogue -- the operational queue is the only place it can
+  // land.
+  const incident = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_CLOCK_UNAVAILABLE",
+  );
+  assert.ok(incident, "a clock failure must reach the operational queue");
+  assert.equal((incident?.error as Error)?.message, "no connection");
+  Object.defineProperty(world, "databaseNow", {
+    configurable: true,
+    writable: true,
+    value: null,
+  });
+});

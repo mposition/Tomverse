@@ -102,6 +102,47 @@ export type MarketingPublisherRunStartResult =
  * run that has closed, is refused: it is either a bug or a replay.
  */
 /**
+ * Run one statement with the publisher's statement ceiling actually armed.
+ *
+ * **The run's own bookkeeping had no ceiling at all.** The clock read, the start,
+ * the heartbeat and the close all ran on the bare client, where
+ * `statement_timeout` is whatever the connection came with -- zero, by default. So
+ * another transaction holding the run row could park any of them indefinitely: the
+ * worker dies at its four minutes and the app's statement is still waiting. The
+ * approved contract says the ceilings apply to every transaction, and these were
+ * the transactions nobody had wrapped.
+ *
+ * This is deliberately *not* `runBoundedMarketingTransaction`. That one is for
+ * work with many statements: it demands PostgreSQL 17, takes SERIALIZABLE, arms
+ * three GUCs and counts statements, and none of that earns its round trips for a
+ * single-row update. What a single statement needs is a statement bound, so that
+ * is what this sets -- and `transaction_timeout` is not set here precisely because
+ * there is no multi-statement transaction to bound.
+ */
+async function withStatementBound<T>(
+  client: PrismaClient,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return client.$transaction(
+    async (tx) => {
+      // `set_config(..., true)` rather than `SET LOCAL`: it takes a bound
+      // parameter, and the writer check refuses the `$executeRawUnsafe` that
+      // literal text would need.
+      await tx.$queryRaw(Prisma.sql`
+        SELECT set_config(
+          'statement_timeout',
+          ${String(Math.floor(MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS))},
+          true
+        )
+      `);
+      return work(tx);
+    },
+    // Above the statement ceiling, so the database is what says no.
+    { timeout: MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS + 5_000 },
+  );
+}
+
+/**
  * The database clock, for a caller that has to compare against it.
  *
  * The route judged its deadline window with the process clock while the trigger
@@ -117,9 +158,11 @@ export type MarketingPublisherRunStartResult =
 export async function marketingPublisherDatabaseNow(
   client: PrismaClient,
 ): Promise<Date> {
-  const rows = await client.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
-  `);
+  const rows = await withStatementBound(client, (tx) =>
+    tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `),
+  );
   const now = rows[0]?.now;
   if (!now) {
     throw new Error("The database clock did not return a timestamp");
@@ -132,7 +175,8 @@ export async function startMarketingPublisherRun(
   input: MarketingPublisherRunStart,
 ): Promise<MarketingPublisherRunStartResult> {
   try {
-    await client.scheduledJobRun.create({
+    await withStatementBound(client, (tx) =>
+      tx.scheduledJobRun.create({
       data: {
         id: input.runId,
         jobKey: MARKETING_PUBLISHER_JOB_KEY,
@@ -140,8 +184,9 @@ export async function startMarketingPublisherRun(
         source: "marketing_publisher_service",
         deadlineAt: input.deadlineAt,
       },
-      select: { id: true },
-    });
+        select: { id: true },
+      }),
+    );
     return { started: true, runId: input.runId };
   } catch (error) {
     // The route checked the deadline against its own clock; the trigger
@@ -201,7 +246,8 @@ export async function heartbeatMarketingPublisherRun(
   runId: string,
 ): Promise<MarketingPublisherHeartbeat> {
   try {
-    const updated = await client.scheduledJobRun.updateMany({
+    const updated = await withStatementBound(client, (tx) =>
+      tx.scheduledJobRun.updateMany({
       where: {
         id: runId,
         jobKey: MARKETING_PUBLISHER_JOB_KEY,
@@ -210,8 +256,9 @@ export async function heartbeatMarketingPublisherRun(
       // The value is overwritten by the trigger with the database clock; what
       // matters is that the column changes, which is what the trigger looks
       // for.
-      data: { heartbeatAt: new Date() },
-    });
+        data: { heartbeatAt: new Date() },
+      }),
+    );
     return updated.count === 1
       ? { beat: true }
       : { beat: false, reason: "not_running" };

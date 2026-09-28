@@ -485,8 +485,16 @@ const introducedBy = (node) => {
     ts.isMethodDeclaration(node) ||
     ts.isConstructorDeclaration(node)
   ) {
-    return node.parameters.flatMap((parameter) => boundNames(parameter.name));
+    const parameters = node.parameters.flatMap((parameter) => boundNames(parameter.name));
+    // A named function expression binds its own name inside itself, which is how
+    // it recurses. Omitting it reported `batch` as a free name in
+    // `async function batch(tx) { return batch(tx); }` and refused a safe
+    // callback -- the lint failing in the direction that makes it unusable.
+    return "name" in node && node.name && ts.isIdentifier(node.name)
+      ? [...parameters, node.name.text]
+      : parameters;
   }
+  if (ts.isClassExpression(node) && node.name) return [node.name.text];
   // A catch variable scopes over its own block, and this is reached only when
   // the use is inside that block -- because it is reached by walking upwards.
   if (ts.isCatchClause(node) && node.variableDeclaration) {
@@ -663,11 +671,43 @@ test("the wrapper is only ever called directly, never through another name", () 
     const source = readFileSync(path, "utf8");
     if (!source.includes(WRAPPER)) continue;
     const tree = parse(path, source);
+    // **The names this file knows it by**, not just the name it was declared
+    // under. Watching only the original left a two-step alias open:
+    // `import { runBoundedMarketingTransaction as bounded }` then
+    // `const run = bounded` -- the import specifier is exempt, and nothing
+    // watched `bounded`, so `run(...)` was never a call site and no rule ran on
+    // its body.
+    const localNames = new Set([WRAPPER]);
+    for (const entry of imports(tree)) {
+      if (!/(^|[./@~])lib\/marketingPublisherRun(\.(?:ts|tsx|js|mjs|cjs))?$/.test(entry.specifier)) {
+        continue;
+      }
+      eachNode(tree, (node) => {
+        if (!ts.isImportDeclaration(node)) return;
+        const bindings = node.importClause?.namedBindings;
+        if (!bindings || !ts.isNamedImports(bindings)) return;
+        for (const element of bindings.elements) {
+          if ((element.propertyName ?? element.name).text === WRAPPER) {
+            localNames.add(element.name.text);
+          }
+        }
+      });
+    }
     eachNode(tree, (node) => {
-      if (!ts.isIdentifier(node) || node.text !== WRAPPER) return;
+      if (!ts.isIdentifier(node) || !localNames.has(node.text)) return;
       const parent = node.parent;
-      // Naming it in an import or an export list is how a caller reaches it.
-      if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return;
+      // Naming it in an import is how a caller reaches it. A *renamed* export is
+      // not: it manufactures a second name this file cannot search for, which is
+      // the facade shape review named.
+      if (ts.isImportSpecifier(parent)) return;
+      if (ts.isExportSpecifier(parent)) {
+        if (parent.propertyName && parent.name.text !== parent.propertyName.text) {
+          problems.push(
+            `${file}:${lineOf(tree, node)}: ${WRAPPER} is re-exported under another name. A second name is one these checks cannot search for.`,
+          );
+        }
+        return;
+      }
       // A direct call, or a namespace property that is itself being called.
       if (ts.isCallExpression(parent) && parent.expression === node) return;
       if (
