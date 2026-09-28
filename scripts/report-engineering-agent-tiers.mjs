@@ -169,8 +169,10 @@ for (const commit of commits) {
   // The app refuses a listing past its limits outright, before any tier.
   const baseBlobOids = new Set(listing.map((entry) => entry.oid));
   const introduced = diffs.filter((d) => !zero.test(d.newOid) && d.newMode !== "160000" && !baseBlobOids.has(d.newOid));
+  const resultEntries = treeListing(commit, true);
   const refused =
     baseEntries.length > TREE_LIMITS.maxEntries ||
+    resultEntries.length > TREE_LIMITS.maxEntries ||
     introduced.length > TREE_LIMITS.maxChangedBlobs ||
     introduced.some((d) => (newBlobs.get(d.newOid)?.length ?? 0) > TREE_LIMITS.maxChangedBlobBytes);
 
@@ -181,7 +183,7 @@ for (const commit of commits) {
   const unsupported = unsupportedTreeChanges({
     baseTruncated: false,
     basePaths: leafPaths(baseEntries),
-    resultPaths: leafPaths(treeListing(commit, true)),
+    resultPaths: leafPaths(resultEntries),
     // Undecodable attributes are as unsupported as an unknown attribute line.
     baseGitattributes: rootAttributes !== undefined && attributesText === null ? "[unreadable]" : attributesText,
     changes: changes.map((c) => ({
