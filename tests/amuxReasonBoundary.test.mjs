@@ -49,13 +49,19 @@ test("old reason rows and new worker text cannot cross the routing, storage, or 
     new URL("../lib/amux/execution.ts", import.meta.url),
     "utf8",
   );
+  const prompt = await readFile(
+    new URL("../lib/amux/deliveryPrompt.ts", import.meta.url),
+    "utf8",
+  );
   const report = await readFile(
     new URL("../lib/amux/explainability.ts", import.meta.url),
     "utf8",
   );
   assert.match(execution, /select: \{ outcome: true, toStatus: true \}/);
+  assert.match(execution, /buildAmuxDeliveryPrompt\(/);
   assert.doesNotMatch(execution, /previousAttempt\.reason|input\.reason\?\.trim\(\)|normalizeAmuxUntrustedReason\(input\.reason\)/);
-  assert.match(execution, /Previous status: \$\{previousStatus\}/);
+  assert.match(prompt, /Previous status: \$\{previousStatus\}/);
+  assert.doesNotMatch(prompt, /previousAttempt\.reason|input\.reason\?\.trim\(\)|normalizeAmuxUntrustedReason\(input\.reason\)/);
   assert.match(execution, /reason: budgetDestination\.exhausted_limit/);
   assert.doesNotMatch(execution, /reason:\s*input\.reason\?\.trim\(\)/);
   assert.match(report, /reason_code: publicAmuxEscalationReasonCode\(escalation\.task\.status\)/);
