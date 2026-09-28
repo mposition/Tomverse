@@ -1143,6 +1143,10 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
 - **P1d(자격증명 도달 분석)**: `lib/agentCredentialReachability.ts`,
   `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
   고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.
+- **P1c(통제 평면 slice)**: `lib/agentControlPlaneSlice.ts`,
+  `tests/agentControlPlaneSlice.test.mjs`. 통제 평면이 실행하는 제품 파일과 통제 평면을
+  직접 부르는 제품 파일이 slice입니다. **런타임 통제 평면 코드에 동적 로딩을 넣으면 모든
+  변경이 T2가 됩니다.**
 
 # AI Review (교차검토) 품질과 M5
 
