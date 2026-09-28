@@ -369,6 +369,43 @@ export const MARKETING_S2C_ACTIONS = Object.freeze({
 } as const);
 
 /**
+ * S2d2's actions, spelled as the plan's inventory spells them.
+ *
+ * Copied from rows 212-219 rather than composed, because an action name is the
+ * audit record's only handle on what happened and a near-miss is a record
+ * nobody can query for.
+ */
+export const MARKETING_S2D2_ACTIONS = Object.freeze({
+  dispatchStarted: "marketing_post.dispatch_started",
+  published: "marketing_post.published",
+  failed: "marketing_post.failed",
+  outcomeUnknown: "marketing_post.outcome_unknown",
+  accountOutcomeUnknownPaused: "marketing_account.outcome_unknown_paused",
+  pollPublished: "marketing_post.poll_published",
+  pollVerified: "marketing_post.poll_verified",
+  pollRemovedByPlatform: "marketing_post.poll_removed_by_platform",
+} as const);
+
+/**
+ * Why a dispatch did not start.
+ *
+ * Every one of these means the post stays exactly as it was and **no vendor
+ * call was made**. That is the point of the list: the caller has to be able to
+ * tell "nothing left this process" from "something left and we do not know what
+ * happened", and the second of those is not a refusal, it is
+ * `outcome_unknown`.
+ */
+export type MarketingDispatchRefusal =
+  | "channel_not_publishing"
+  | "not_admitted"
+  | "post_not_found"
+  | "post_not_scheduled"
+  | "claim_not_held"
+  | "claim_expired"
+  | "dispatch_conflict"
+  | "deadline_too_close";
+
+/**
  * How long a claim is good for before a sweep may take it back.
  *
  * A lease, not a lock: the process holding it can die, and something has to be
@@ -4130,6 +4167,223 @@ export async function insertAiVisibilityRun(
       accuracyFlags: accuracyFlags === null ? Prisma.DbNull : asJson(accuracyFlags),
     },
   });
+}
+
+/**
+ * Mark a claimed post as being published, immediately before the vendor call.
+ *
+ * **This is the last thing that happens before something leaves this system,
+ * and the first thing that could make a post go out twice.** So it is written
+ * as a transition rather than as a flag: `scheduled -> publishing`, once, with
+ * `publishAttempt` incremented and `providerRequestKey` set to the post's
+ * `logicalKey`. The database's own
+ * `MarketingPost_dispatched_has_request_key_check` requires exactly that
+ * pairing for every status from `publishing` onwards, so a row that reached
+ * this state without a request key cannot exist.
+ *
+ * ## Why the audit entry is written here and not after the call
+ *
+ * The plan puts `marketing_post.dispatch_started` before the call, and the
+ * reason is the case where nothing comes back. A process that dies between the
+ * request leaving and the response arriving leaves no trace of its own; what
+ * says a call was attempted is this row and this audit entry, committed before
+ * the attempt. Without them the next run sees a `scheduled` post with a stale
+ * claim and no evidence that anything was sent -- and publishes it again.
+ *
+ * That is also why the request key is the post's `logicalKey` rather than
+ * anything this call invents: it is unique in the database, so the idempotency
+ * lookup that recovers an unknown outcome can ask the platform about the exact
+ * key that was sent, without needing anything the failed call returned.
+ *
+ * ## Everything is re-checked here, not carried
+ *
+ * The claim was taken in an earlier transaction, and the plan requires the
+ * *entire* publish resolver to run again immediately before the call, including
+ * the health-freshness rule -- not a subset, and not a cached answer. An account
+ * can be paused, a connection can be rotated and a channel's health can go
+ * stale between the claim and the dispatch, and each of those is a reason not to
+ * post. So this takes the channel lock, re-runs the resolver, and only then
+ * writes.
+ *
+ * The deadline is checked too. A dispatch that starts with less time left than
+ * the call might take is a dispatch whose outcome will be unknown by
+ * construction: the supervisor kills the worker at the deadline, and a request
+ * in flight when that happens is exactly the state `outcome_unknown` exists for.
+ * Refusing early costs a five-minute wait; not refusing costs a human deciding
+ * what happened.
+ */
+export async function startMarketingPostDispatch(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly claimToken: string;
+    readonly expectedLeaseUntil: Date;
+    readonly expectedHistoryVersion: number;
+    /** The run's deadline, so a call with no time left is not begun. */
+    readonly runDeadlineAt: Date;
+    /** How long the vendor call may take, at worst. */
+    readonly callBudgetMs: number;
+    /** The whole resolver, re-run here. Not a boolean carried from the claim. */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+    ) => Promise<{ readonly publish: boolean }>;
+  },
+): Promise<
+  | {
+      readonly started: true;
+      /** What to send, and what to ask about if nothing comes back. */
+      readonly requestKey: string;
+      readonly attempt: number;
+    }
+  | { readonly started: false; readonly reason: MarketingDispatchRefusal }
+> {
+  const id = String(rawInput.id);
+  const claimToken = String(rawInput.claimToken);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const expectedLeaseUntil = new Date(rawInput.expectedLeaseUntil.getTime());
+  const runDeadlineAt = new Date(rawInput.runDeadlineAt.getTime());
+  const callBudgetMs = Number(rawInput.callBudgetMs);
+  if (!Number.isFinite(expectedLeaseUntil.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_lease_unreadable",
+      "A dispatch names the lease it holds, and that is not a time",
+    );
+  }
+  if (!Number.isFinite(runDeadlineAt.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_deadline_unreadable",
+      "A dispatch is bounded by its run's deadline, and that is not a time",
+    );
+  }
+  if (!Number.isFinite(callBudgetMs) || callBudgetMs <= 0) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_call_budget_not_positive",
+      "A dispatch reserves time for the call it is about to make",
+    );
+  }
+  if (claimToken.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_token_empty",
+      "A dispatch presents the claim it holds, and an empty token holds nothing",
+    );
+  }
+
+  // Same order as every other writer here: the audit chain first, then rows.
+  // This function's entry names the post it transitions, so it is written last,
+  // and taking the locks in the other order from the admin paths is how two of
+  // them deadlock.
+  await requireSerializableTransaction(database, "dispatch");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  // **Time for the call, on the database's clock.** Not the process's: the
+  // deadline the supervisor enforces is wall-clock, but every other decision in
+  // this transaction is made against the database's, and mixing the two means
+  // the refusal and the kill disagree about when "now" was.
+  if (now.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
+    return { started: false, reason: "deadline_too_close" };
+  }
+
+  const rows = await database.$queryRaw<
+    Array<{
+      id: string;
+      channelId: string;
+      logicalKey: string;
+      status: string;
+      claimToken: string | null;
+      leaseUntil: Date | null;
+      historyVersion: number;
+      publishAttempt: number;
+    }>
+  >(Prisma.sql`
+    SELECT
+      "id", "channelId", "logicalKey", "status",
+      "claimToken", "leaseUntil", "historyVersion", "publishAttempt"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+      AND "deletedAt" IS NULL
+      AND "contentPurgedAt" IS NULL
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { started: false, reason: "post_not_found" };
+  if (post.status !== "scheduled") return { started: false, reason: "post_not_scheduled" };
+  if (post.claimToken !== claimToken) return { started: false, reason: "claim_not_held" };
+  if (
+    post.leaseUntil === null ||
+    post.leaseUntil.getTime() !== expectedLeaseUntil.getTime()
+  ) {
+    // A different lease under the same token: this worker paused, its lease ran
+    // out, and something renewed it. The renewal is somebody else's to dispatch.
+    return { started: false, reason: "claim_not_held" };
+  }
+  if (post.leaseUntil.getTime() <= now.getTime()) {
+    // Held, by us, and already expired. Not a conflict -- nobody else has it --
+    // but not a licence to publish either: the lease is what says this worker is
+    // still the one entitled to, and it is not.
+    return { started: false, reason: "claim_expired" };
+  }
+
+  const channel = await lockMarketingChannel(database, post.channelId);
+  if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
+    return { started: false, reason: "channel_not_publishing" };
+  }
+  const admission = await rawInput.resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
+  if (!admission.publish) return { started: false, reason: "not_admitted" };
+
+  const attempt = Number(post.publishAttempt) + 1;
+  const started = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "scheduled",
+      claimToken,
+      leaseUntil: expectedLeaseUntil,
+      historyVersion: expectedHistoryVersion,
+      deletedAt: null,
+      contentPurgedAt: null,
+    },
+    data: {
+      status: "publishing",
+      // The post's own key, which is unique in the database and is therefore the
+      // idempotency key end to end. Not a value this call invents: the recovery
+      // lookup has to be able to ask about the exact key that was sent.
+      providerRequestKey: post.logicalKey,
+      publishAttempt: attempt,
+    },
+  });
+  if (started.count !== 1) {
+    // The row is held by FOR UPDATE, so this means the history version moved
+    // before the lock -- somebody edited between the claim and here.
+    return { started: false, reason: "dispatch_conflict" };
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.dispatchStarted,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "About to send a scheduled post to its platform.",
+    metadata: {
+      channelId: post.channelId,
+      claimToken,
+      attempt,
+      // Recorded because it is what a recovery asks the platform about. It is
+      // the post's own key: it identifies a post, not a person.
+      requestKey: post.logicalKey,
+      leaseUntil: expectedLeaseUntil.toISOString(),
+      runDeadlineAt: runDeadlineAt.toISOString(),
+      callBudgetMs,
+    },
+  });
+
+  return { started: true, requestKey: post.logicalKey, attempt };
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */
