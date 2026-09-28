@@ -138,7 +138,9 @@ test.describe("the console says only what it knows", () => {
       page.getByTestId("admin-health-score-incomplete")
     ).toHaveCount(0);
     // A real figure, from the seeded fixture, rather than merely "not unread".
-    await expect(page.getByText("2 feedback / 1 refund")).toBeVisible();
+    // Three: the fixture's `reviewing` report is unresolved work too
+    // (tests/e2e-admin/admin-read-surfaces.spec.ts says why).
+    await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
   });
 
   test("switching Overview sections keeps the workspace and the sidebar entry", async ({
