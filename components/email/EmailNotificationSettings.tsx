@@ -471,6 +471,10 @@ export function EmailNotificationSettings() {
                                                         void save({
                                                             purpose: preference.purpose,
                                                             enabled: false,
+                                                            // The link, not the
+                                                            // subscription: this
+                                                            // records no refusal.
+                                                            cancelRequestOnly: true,
                                                         })
                                                     }
                                                     data-testid={`email-preference-${preference.purpose}-cancel`}

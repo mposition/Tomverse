@@ -238,25 +238,30 @@ test('"*" still has to be asked about a purpose', () => {
 });
 
 test("the cohort needs all three digests to agree", () => {
-  const member = { userId: "u1", addressDigest: "d1" };
+  const member = {
+    userId: "u1",
+    addressDigest: "d1",
+    addressNormalizationVersion: "v1",
+  };
   assert.equal(
     cohortRefusal({
       member,
       userId: "u1",
       deliveryAddressDigest: "d1",
       currentAddressDigest: "d1",
+      addressNormalizationVersion: "v1",
     }),
     null
   );
 
   const cases = [
-    { member: null, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: "d1" },
-    { member, userId: "u2", deliveryAddressDigest: "d1", currentAddressDigest: "d1" },
-    { member, userId: null, deliveryAddressDigest: "d1", currentAddressDigest: "d1" },
-    { member, userId: "u1", deliveryAddressDigest: "d2", currentAddressDigest: "d1" },
-    { member, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: "d2" },
-    { member, userId: "u1", deliveryAddressDigest: null, currentAddressDigest: "d1" },
-    { member, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: null },
+    { member: null, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: "d1", addressNormalizationVersion: "v1" },
+    { member, userId: "u2", deliveryAddressDigest: "d1", currentAddressDigest: "d1", addressNormalizationVersion: "v1" },
+    { member, userId: null, deliveryAddressDigest: "d1", currentAddressDigest: "d1", addressNormalizationVersion: "v1" },
+    { member, userId: "u1", deliveryAddressDigest: "d2", currentAddressDigest: "d1", addressNormalizationVersion: "v1" },
+    { member, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: "d2", addressNormalizationVersion: "v1" },
+    { member, userId: "u1", deliveryAddressDigest: null, currentAddressDigest: "d1", addressNormalizationVersion: "v1" },
+    { member, userId: "u1", deliveryAddressDigest: "d1", currentAddressDigest: null, addressNormalizationVersion: "v1" },
   ];
   for (const input of cases) {
     assert.equal(cohortRefusal(input), "approval_member_mismatch");
@@ -269,10 +274,15 @@ test("changing the address after enqueue stops the pinned delivery too", () => {
   // about and the person has since left.
   assert.equal(
     cohortRefusal({
-      member: { userId: "u1", addressDigest: "d1" },
+      member: {
+        userId: "u1",
+        addressDigest: "d1",
+        addressNormalizationVersion: "v1",
+      },
       userId: "u1",
       deliveryAddressDigest: "d1",
       currentAddressDigest: "d2",
+      addressNormalizationVersion: "v1",
     }),
     "approval_member_mismatch"
   );
