@@ -229,7 +229,11 @@ test("each state carries its own evidence and only its own", async () => {
       /evidence_check/,
     ],
     // an unknown state, and a warning window that is not a window
-    [{ state: "decided_later" }, /state_check/],
+    // Both constraints, because the evidence clause enumerates the three states
+    // and an unknown one satisfies none of its branches. PostgreSQL reports
+    // whichever it evaluated, so the assertion accepts either rather than
+    // depending on an order the database does not promise.
+    [{ state: "decided_later" }, /state_check|evidence_check/],
     [
       { state: "deferred", readinessCheck: null, dueBy: new Date("2028-01-01T00:00:00.000Z"), warnDaysBefore: 0 },
       /warnDaysBefore_check/,
@@ -286,8 +290,13 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
     /is not sealed/
   );
 
-  // An override is not a waiver of anything, and the type travels with the id
-  // so the foreign key refuses the pair rather than trusting the link.
+  // An override is not a waiver of anything, and this is where the layering
+  // shows. A `risk_accepted` approval carries no duty scope -- the ledger's own
+  // CHECK requires its country and obligation key to be null -- so the scope
+  // trigger refuses it before the type CHECK or the composite foreign key are
+  // reached. That is the right order for a BEFORE INSERT trigger, and it means
+  // the refusal to assert here is the trigger's: expecting the CHECK's name was
+  // expecting a constraint this row can no longer reach.
   const override = await approval({
     approvalType: "risk_accepted",
     purposeKey: "*",
@@ -308,7 +317,7 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
           waiverApprovalType: "risk_accepted",
         }),
       }),
-    /waiverApprovalType_check/
+    /RNO_SCOPE_MISMATCH/
   );
   await refuses(
     () =>
@@ -321,7 +330,9 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
           waiverApprovalType: "obligation_waiver",
         }),
       }),
-    /[Ff]oreign key/
+    // Same trigger, same reason: the pair would not resolve either, and the
+    // foreign key is what would say so if the scope had matched.
+    /RNO_SCOPE_MISMATCH/
   );
 });
 
