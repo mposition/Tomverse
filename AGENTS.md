@@ -1144,12 +1144,19 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
   고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.
 - **P1c(통제 평면 slice)**: `lib/agentControlPlaneSlice.ts`,
-  `tests/agentControlPlaneSlice.test.mjs`. 통제 평면이 실행하는 제품 파일과 통제 평면을
-  직접 부르는 제품 파일이 slice입니다. **런타임 통제 평면 코드에 동적 로딩을 넣으면 모든
-  변경이 T2가 됩니다.**
+  `tests/agentControlPlaneSlice.test.mjs`. **배포 이미지에 들어가는 모든 제품 파일이
+  slice입니다** — 이미지가 트리 전체로 만들어지고 런타임 코드가 조립한 경로로 파일을
+  읽으므로, 읽히지 않는다는 것을 증명할 방법이 없습니다. 그래서 지금은 제품 파일을
+  건드리는 모든 변경이 T2입니다. `DEPLOY_EXCLUDED_PREFIXES`는 **이미지의 실제 내용을
+  확인하는 검사가 생기기 전까지 비어 있어야 하며** 테스트가 강제합니다. 런타임 통제 평면
+  코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
 - **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
   `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
-  하위 프로세스·평가·worker·환경변수를 쓰지 않습니다 — 테스트가 syntax tree로 확인합니다.
+  하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한
+  회귀만 잡으므로, **모듈을 고치면 테스트의 `REVIEWED_MODULE_SHA256`이 실패하고 그 digest를
+  갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
+- **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
+  판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
 
 # AI Review (교차검토) 품질과 M5
 
