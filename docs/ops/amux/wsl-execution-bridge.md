@@ -2,13 +2,13 @@
 
 상태: 코드 래치 `WSL_BRIDGE_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이 아니면 runner는 소켓을 열지 않는다. 이 문서는 그 변수를 설정하지 않는다.
 
-정책: `docs/policy/development-agent-orchestration.md` 버전 14.
+정책: `docs/policy/development-agent-orchestration.md` 버전 14, 결과 정산과 claim은 버전 15.
 
 ## 방향
 
 Tomverse가 카드, 추천, 승격, 승인, 실행 원장, 감사의 정본이다. 운영자 워크스테이션의 WSL이 그 정본에서 승인된 작업을 가져온다. Tomverse 서버는 워크스테이션으로 접속하지 않고, 워크스테이션은 새 외부 수신 포트를 열지 않는다.
 
-Rust runtime과 BoardDriver는 같은 WSL 프로세스에 둔다. 클라우드 scheduler와 로컬 runner를 이 단계에서 서로 다른 프로세스로 나누지 않는다. Railway의 `tomverse-orchestrator`는 선택 루프로 남고, `TOMVERSE_AMUX_EXECUTE`는 이 계약의 활성화가 아니다.
+Rust runtime과 BoardDriver는 같은 WSL 프로세스에 둔다. Railway의 `tomverse-orchestrator`는 선택 루프이고, 버전 15의 claim 전용 모드(`TOMVERSE_AMUX_CLAIM`이 정확히 `1`)에서는 owner 없는 Todo를 서버가 execution_ready로 판정한 WSL runtime에 claim한다. claim 전용 모드는 Railway에서 runtime이나 명령 실행기를 시작하지 않는다. `TOMVERSE_AMUX_EXECUTE`는 이 계약의 활성화가 아니며, 두 변수가 함께 설정되면 orchestrator는 시작하지 않는다. 같은 orchestrator가 5분마다 자동 승격 tick(`POST /api/internal/amux/auto-promotion/tick`)을 부른다. 판정은 전부 서버가 한다.
 
 ## 로컬 실행
 
@@ -18,9 +18,15 @@ Bridge는 이미 실행 중인 로컬 AMUX 세션에만 작업을 넘긴다. 세
 
 전송은 `POST /api/sessions/<기존 세션>/send` 하나다. 본문은 `text`, `no_board: true`, `msg_id`만 가진다. `msg_id`는 Tomverse execution attempt id다. `/api/board`로 카드를 만들지 않는다.
 
-로컬 응답에 `no_board_refused`가 있으면 그 전송은 배정이 아니다. 로컬 보드가 같은 작업의 카드를 만들려 한 것이므로 재전송하지 않고, Tomverse attempt를 완료로 정산하지 않는다.
+로컬 AMUX는 실질적인 작업 메시지에 대해 `no_board`를 거절하고 로컬 카드를 만든 뒤 메시지를 전달한다(AMUX-3071). 버전 15부터 응답의 `no_board_refused`는 "전달됨, 로컬 카드 발급"이고, 그 카드가 attempt의 로컬 실행 영수증이다. Bridge는 로컬 보드에 쓰지 않고 `GET /api/board`와 `GET /api/board/{id}`만 읽는다.
 
-로컬 전송이 2xx로 끝나도 작업은 끝나지 않았다. 완료는 worker 결과를 Tomverse에 정산했을 때다. 허용 결과는 `succeeded` → `review`, `failed` → `todo`, `blocked` → `blocked`뿐이다. `done`, 병합, 배포 승인은 결과가 아니다.
+로컬 전송이 2xx로 끝나도 작업은 끝나지 않았다. 완료는 결과를 Tomverse에 정산했을 때다. 매 tick은 heartbeat 뒤에 진행 중인 attempt마다 영수증을 확인한다.
+
+- 연결: 같은 worker 세션의 카드 가운데, 전송 시각 이후에 생성됐고, 그 카드 자신에게 연결된 메시지에 `Execution attempt: <attempt id>` 줄이 있는 카드 하나다. 에픽의 메시지를 표시만 하는 하위 카드는 세지 않는다. 둘 이상이면 `blocked`(`local_card_ambiguous`), 30분 안에 없으면 `blocked`(`local_card_unlinked`)로 정산한다.
+- 정산: 연결된 카드가 `done` 또는 `verified`이면 `succeeded` → `review`, `discarded`·`cancelled`·`quarantined`이면 `blocked` → `blocked`다. 그 밖의 상태는 진행 중이다. 로컬 상태로 `failed` → `todo`를 만들지 않는다.
+- 카드의 제목, 설명, `last_result`, evidence는 Tomverse로 보내지 않는다. `review`일 때 evidence와 `last_result`에서 `https://github.com/mposition/Tomverse/pull/<n>`의 첫 번호 하나만 `review_pr_number`로 보내고, 서버가 GitHub에서 확인한다.
+- 승격된 카드는 서버가 `done`을 받지 않고 `review`와 사람 escalation으로 바꾼다. `review`에서 `done`은 사람 Review뿐이다. 병합과 배포 승인은 결과가 아니다.
+- 정산 응답이 사라지면 attempt를 남기고 다음 tick에 다시 보낸다. 서버는 끝난 attempt와 task revision으로 재전송을 막으므로, 먼저 커밋된 정산은 두 번째에 not-settled로 답하고 그때 attempt를 빼고 halt한다. 로컬 보드 읽기 실패는 결과가 아니므로 다음 tick에 다시 읽는다.
 
 응답이 사라지면 같은 `msg_id`로 조회한 뒤에만 다음을 정한다. 조회가 기존 전송을 찾으면 다시 보내지 않는다. 조회 자체가 실패하면 그 tick의 남은 worker에 `execution_start`를 호출하지 않고, 다음 tick은 halt 상태로 보드를 읽기 전에 거절한다.
 

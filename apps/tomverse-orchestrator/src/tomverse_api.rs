@@ -349,6 +349,10 @@ struct ExecutionSettleRequest<'a> {
     reason: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_microusd: Option<u64>,
+    /// Policy version 15: only with succeeded -> review; the server verifies
+    /// the PR by reading GitHub itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_pr_number: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -357,6 +361,14 @@ pub struct ExecutionSettleResponse {
     #[serde(rename = "taskRevision")]
     pub task_revision: Option<i64>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoPromotionTickResponse {
+    pub promoted: bool,
+    pub reason: Option<String>,
+    pub consumption_id: Option<String>,
+    pub expired: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -597,6 +609,33 @@ impl TomverseApi {
         to_status: &str,
         reason: Option<&str>,
     ) -> Result<ExecutionSettleResponse> {
+        self.execution_settle_with_review_pr(
+            attempt_id,
+            worker,
+            instance_id,
+            generation,
+            task_revision,
+            outcome,
+            to_status,
+            reason,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execution_settle_with_review_pr(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        instance_id: &str,
+        generation: i64,
+        task_revision: i64,
+        outcome: &str,
+        to_status: &str,
+        reason: Option<&str>,
+        review_pr_number: Option<i64>,
+    ) -> Result<ExecutionSettleResponse> {
         let response = self
             .client
             .post(format!(
@@ -614,6 +653,7 @@ impl TomverseApi {
                 to_status,
                 reason,
                 cost_microusd: None,
+                review_pr_number,
             })
             .send()
             .await?;
@@ -628,6 +668,33 @@ impl TomverseApi {
             .json()
             .await
             .context("invalid Tomverse AMUX execution-settle response")
+    }
+
+    /// Policy version 15: the system consumer of pre-approved automatic
+    /// promotion grants. The server decides everything (switch, graduation,
+    /// capacity, cost, halt); a 409 carries its refusal reason.
+    pub async fn auto_promotion_tick(&self) -> Result<AutoPromotionTickResponse> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/auto-promotion/tick",
+                self.base_url
+            ))
+            .bearer_auth(&self.secret)
+            .json(&QueueRequest {})
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
+            response.error_for_status_ref()?;
+        }
+
+        response
+            .json()
+            .await
+            .context("invalid Tomverse AMUX auto-promotion tick response")
     }
 
     pub async fn execution_recover(&self) -> Result<ExecutionRecoveryResponse> {
