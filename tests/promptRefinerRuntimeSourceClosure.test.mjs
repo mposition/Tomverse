@@ -222,17 +222,17 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so only source positions moved.
 //
-// 2026-09-28, successor audit-facts repin: adding the exact activation facts
-// and then binding their generation check to the immutable v3 ID moves later
-// computed accesses in the admission and reservation modules. The count
-// remains 228 and the position-free inventory remains 9aa7ec49..., so this
-// repin records source-position movement only.
-//
 // 2026-09-27, AMUX back-merge: the watched-schema review note in
 // `lib/marketingAutomationAccess.ts` records the latched-off recommendation
 // pool and the closed auto-promotion gate. It is comment only. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so only
 // source positions moved.
+//
+// 2026-09-28, successor audit-facts repin: adding the exact activation facts
+// and then binding their generation check to the immutable v3 ID moves later
+// computed accesses in the admission and reservation modules. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so this
+// repin records source-position movement only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
