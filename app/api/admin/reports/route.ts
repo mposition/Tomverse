@@ -11,6 +11,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
 
 const reportSchema = z
@@ -74,7 +75,9 @@ export async function POST(req: Request) {
             subscriptionStatus: { in: ["active", "trialing"] },
           },
         }),
-        prisma.feedback.count({ where: { status: "open" } }),
+        prisma.feedback.count({
+          where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
+        }),
         prisma.refundRequest.count({ where: { status: "pending" } }),
         prisma.adminNotificationLog.count({ where: { status: "failed" } }),
         prisma.stripeWebhookEventLog.count({ where: { status: "failed" } }),
@@ -85,7 +88,7 @@ export async function POST(req: Request) {
       ``,
       `Users: ${users}`,
       `Active paid users: ${paidUsers}`,
-      `Open feedback: ${openFeedback}`,
+      `Unresolved feedback: ${openFeedback}`,
       `Pending refunds: ${pendingRefunds}`,
       `Failed alert deliveries: ${failedAlerts}`,
       `Failed Stripe webhooks: ${failedWebhooks}`,

@@ -39,6 +39,15 @@ export type BusinessIdentity = {
   legalName?: string | null;
   postalAddress?: string | null;
   contactEmail?: string | null;
+  /**
+   * A telephone number the recipient can reach the sender on.
+   *
+   * Korea's 시행령 별표 6 names it alongside the sender's name, address and
+   * email, so the KR profile asks for it (draft section 7.7). Nothing else
+   * does, and it is not in the common footer: a value that exists only to
+   * satisfy one jurisdiction does not belong in every message.
+   */
+  contactPhone?: string | null;
   /** 사업자등록번호. Korea. */
   businessRegistrationNumber?: string | null;
   /** 통신판매업 신고번호. Korea. */
@@ -88,6 +97,7 @@ const normalizeLanguage = (value: string | null | undefined): FooterLanguage =>
   LANGUAGES.includes(value as FooterLanguage) ? (value as FooterLanguage) : "en";
 
 type FooterCopy = {
+  phone: string;
   businessRegistration: string;
   mailOrderRegistration: string;
   abn: string;
@@ -109,6 +119,7 @@ type FooterCopy = {
  */
 const COPY: Record<FooterLanguage, FooterCopy> = {
   en: {
+    phone: "Phone",
     businessRegistration: "Business registration number",
     mailOrderRegistration: "Mail-order business registration number",
     abn: "ABN",
@@ -120,6 +131,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "You are receiving this because you agreed to receive it from your account settings.",
   },
   ko: {
+    phone: "전화번호",
     businessRegistration: "사업자등록번호",
     mailOrderRegistration: "통신판매업 신고번호",
     abn: "ABN",
@@ -131,6 +143,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "회원님이 계정 설정에서 수신에 동의하셨기 때문에 발송되었습니다.",
   },
   zh: {
+    phone: "电话",
     businessRegistration: "营业执照号码",
     mailOrderRegistration: "邮购业务登记号",
     abn: "ABN",
@@ -141,6 +154,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
     defaultReason: "您收到此邮件是因为您在账户设置中同意接收。",
   },
   fr: {
+    phone: "Téléphone",
     businessRegistration: "Numéro d'enregistrement de l'entreprise",
     mailOrderRegistration: "Numéro d'enregistrement de vente à distance",
     abn: "ABN",
@@ -152,6 +166,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Vous recevez ce message parce que vous y avez consenti dans les paramètres de votre compte.",
   },
   de: {
+    phone: "Telefon",
     businessRegistration: "Handelsregisternummer",
     mailOrderRegistration: "Registernummer für den Versandhandel",
     abn: "ABN",
@@ -163,6 +178,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Sie erhalten diese Nachricht, weil Sie in Ihren Kontoeinstellungen zugestimmt haben.",
   },
   es: {
+    phone: "Teléfono",
     businessRegistration: "Número de registro mercantil",
     mailOrderRegistration: "Número de registro de venta a distancia",
     abn: "ABN",
@@ -174,6 +190,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Recibe este mensaje porque lo aceptó en la configuración de su cuenta.",
   },
   pt: {
+    phone: "Telefone",
     businessRegistration: "Número de registo comercial",
     mailOrderRegistration: "Número de registo de venda à distância",
     abn: "ABN",
@@ -227,6 +244,8 @@ const renderBlock = (
       return plain(identity.postalAddress);
     case "contact_email":
       return labelled(copy.contact, identity.contactEmail);
+    case "contact_phone":
+      return labelled(copy.phone, identity.contactPhone);
     case "business_registration":
       return labelled(copy.businessRegistration, identity.businessRegistrationNumber);
     case "mail_order_registration":
@@ -272,6 +291,7 @@ export const RENDERABLE_FOOTER_BLOCKS = [
   "legal_name",
   "postal_address",
   "contact_email",
+  "contact_phone",
   "business_registration",
   "mail_order_registration",
   "abn",

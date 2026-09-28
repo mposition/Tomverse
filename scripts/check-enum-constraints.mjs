@@ -1251,6 +1251,13 @@ const REGISTRY = {
     reason:
       "The receiver authority and the Australian sender authority, which is all of them. Evidence names the one that cited it, and the insert trigger requires that the verdict actually applied it -- so an open string here would be a row resting on an authority no rule defines, in a table that cannot be corrected.",
   },
+  ReleaseNotesRuleObligation_state_check: {
+    owner: "list",
+    module: "lib/releaseNotesObligationCore.ts",
+    list: "OBLIGATION_STATES",
+    reason:
+      "How a statutory duty is settled: implemented, deferred or waived (docs/policy/email-product-news-redesign-draft.md section 7.8). Each names its own evidence and the evidence CHECK enforces which columns go with which state, so a fourth value would be a duty settled by something no branch reads -- and the one state that can loosen a send, waived, is the one that needs a sealed approval. A duty with no row at all is unsettled and blocks its rule; that is the code list, not this constraint.",
+  },
   ReleaseNotesRuleVersion_basis_check: {
     owner: "list",
     module: "lib/releaseNotesCountryRuleCore.ts",

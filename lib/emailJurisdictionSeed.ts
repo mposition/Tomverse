@@ -66,7 +66,7 @@ import {
 export const JURISDICTION_POLICY_SEED_VERSION = "2026-09-23.jurisdictions.3";
 
 export const JURISDICTION_POLICY_SEED_SUMMARY =
-  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn. KR carries no quiet hours from 2026-09-16: the Network Act's night-time rule names media prescribed by decree and electronic mail is excluded from them (open question Q4, resolved). From 2026-09-23 the version also carries the release-notes country rules of docs/policy/email-notifications.md section 5.1.1 (version 1 of each): the recipient authority per country and the marketing allowlist as each rule's status. Profiles and the country map are unchanged. Nothing sends on the rules until S9 reads them.";
+  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn. KR carries no quiet hours from 2026-09-16: the Network Act's night-time rule names media prescribed by decree and electronic mail is excluded from them (open question Q4, resolved). KR also names contact_phone from 2026-09-27: 시행령 별표 6 asks for a telephone number beside the name, address and email (redesign draft section 7.7, the row marked implemented). EMAIL_BUSINESS_CONTACT_PHONE has to be set before a Korean marketing message can render, because the renderer drops a footer whose named block has no value. From 2026-09-23 the version also carries the release-notes country rules of docs/policy/email-notifications.md section 5.1.1 (version 1 of each): the recipient authority per country and the marketing allowlist as each rule's status. Profiles and the country map are unchanged. Nothing sends on the rules until S9 reads them.";
 
 /**
  * A footer block identifier.
@@ -116,6 +116,7 @@ export const JURISDICTION_PROFILE_SEED: readonly JurisdictionProfileSeed[] = [
       "legal_name",
       "postal_address",
       "contact_email",
+      "contact_phone",
       "unsubscribe_link",
       "unsubscribe_reason",
     ],

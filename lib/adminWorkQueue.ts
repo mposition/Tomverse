@@ -1,3 +1,4 @@
+import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/modelLifecycleWorkItemCore";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
@@ -70,7 +71,9 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
       select: { id: true, email: true, plan: true, reason: true, requestedAt: true },
     }),
     prisma.feedback.findMany({
-      where: { status: "open" },
+      // `reviewing` too: a verified-trace report arrives in it, and until an
+      // operator closes it the report is still theirs to act on.
+      where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
       orderBy: { createdAt: "asc" },
       take: WORK_QUEUE_SOURCE_LIMIT,
       select: {

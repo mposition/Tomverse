@@ -1,0 +1,38 @@
+{
+  "version": "cross-review-package-failed-attempt-v1",
+  "taskId": "prompt-refiner-shadow-stage-successor-v1",
+  "round": 1,
+  "attempt": 1,
+  "archivedAt": "2026-09-28T03:05:00.8627530+10:00",
+  "reason": "The round 1 package gate reused a disposable PostgreSQL database whose migrations had been applied before the author revised the successor migration bytes. The package recorded 46 failures among 52 Prompt Refiner database integration tests. No reviewer was invoked and no verdict exists. These exact canonical bytes were archived before the approved same-round repackage against a new PostgreSQL 17 cluster and database migrated from the current HEAD.",
+  "changeDigest": "sha256:2dab07ed43bd00f620369918687e79e8450f97143ed74fec408fb0b11ce0ff55",
+  "reviewInvoked": false,
+  "verdictRecorded": false,
+  "files": [
+    {
+      "path": "package-round1.failed-attempt1.json",
+      "bytes": 153984,
+      "sha256": "4596e954295617d9d4d728f5cacf12276b4d68f7843d8f7bbf83b9d7eea097a0"
+    },
+    {
+      "path": "change-round1.failed-attempt1.diff",
+      "bytes": 139157,
+      "sha256": "2dab07ed43bd00f620369918687e79e8450f97143ed74fec408fb0b11ce0ff55"
+    },
+    {
+      "path": "change.latest-round1.failed-attempt1.diff",
+      "bytes": 139157,
+      "sha256": "2dab07ed43bd00f620369918687e79e8450f97143ed74fec408fb0b11ce0ff55"
+    },
+    {
+      "path": "review-prompt.round1.failed-attempt1.md",
+      "bytes": 149207,
+      "sha256": "4a8036b5b8381960a0efcf6f2b9b221ca7994fd42fffb1c2232d4798f1622759"
+    },
+    {
+      "path": "exchange.round1.failed-attempt1.json",
+      "bytes": 30754,
+      "sha256": "85d9a9612c65860f73d3ffb7392ed035836e28dd318ba14baef47e2dfecb09dc"
+    }
+  ]
+}

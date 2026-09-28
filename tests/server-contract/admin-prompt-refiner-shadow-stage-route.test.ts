@@ -46,7 +46,7 @@ let world = fresh();
 let installed = false;
 
 const previewFacts = {
-  stageId: "prompt-refiner-shadow-v2",
+  stageId: "prompt-refiner-shadow-v3",
   status: "ready_for_explicit_cost_approval",
   proposalDigest: `sha256:${"1".repeat(64)}`,
   runtimeSourceManifestDigest: `sha256:${"2".repeat(64)}`,
@@ -75,6 +75,9 @@ const preview = {
     approvalTtlMinutes: previewFacts.approvalTtlMinutes,
   }),
   confirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
+  runApprovalEnabled: true,
+  executionEnabled: true,
+  activationReady: true,
   executionAdmitted: false,
   productAdapterReady: false,
 };
