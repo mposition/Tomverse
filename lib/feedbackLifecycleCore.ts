@@ -64,6 +64,26 @@ export const isTerminalFeedbackStatus = (
 ): status is "resolved" | "closed" => status === "resolved" || status === "closed";
 
 /**
+ * The statuses of a report that still needs an operator: every status that
+ * has not closed it. This is what every "is there support work?" surface
+ * counts -- the sidebar badge, the overview, the work queue, the SLA panel,
+ * the inbox header and the operations report.
+ *
+ * Derived from the status list rather than written out, because writing it
+ * out is how it went wrong. Those surfaces each said `status: "open"`, which
+ * meant the same thing until verified-trace reports started arriving as
+ * `reviewing` (lib/feedbackTraceAutoReview.ts). From then on the reports the
+ * server itself had confirmed were the ones no counter saw: on 2026-09-28 a
+ * customer's report sat in the inbox while the badge, the overview and the
+ * queue all read zero. A status added later is counted the day it exists.
+ */
+export const FEEDBACK_AWAITING_OPERATOR_STATUSES: readonly FeedbackStatus[] =
+  FEEDBACK_STATUSES.filter((status) => !isTerminalFeedbackStatus(status));
+
+export const isFeedbackAwaitingOperator = (status: string): boolean =>
+  (FEEDBACK_AWAITING_OPERATOR_STATUSES as readonly string[]).includes(status);
+
+/**
  * Which lifecycle stage a status transition announces, if any. Returning to
  * `open` announces nothing, and neither does any repeat of a stage -- the
  * unique (feedbackId, stage) constraint enforces the "at most once" half; this

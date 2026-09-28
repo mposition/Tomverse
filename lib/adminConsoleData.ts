@@ -8,6 +8,7 @@ import type {
 import type { FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import type { AutoFixReviewRow } from "@/components/admin/AutoFixReviewPanel";
 import { AUTOFIX_CASE_STATE } from "@/lib/feedbackAutoFixCore";
+import { isFeedbackAwaitingOperator } from "@/lib/feedbackLifecycleCore";
 import { NOTIFICATION_KIND } from "@/lib/notificationDeliveries";
 import type { RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import type { SlaRow } from "@/components/admin/AdminRiskPanels";
@@ -294,10 +295,11 @@ export async function loadAutoFixReviewRows(): Promise<AutoFixReviewRow[]> {
   });
 }
 
-/** Open reports older than a day, oldest first, for the work queue. */
+/** Unclosed reports older than a day, oldest first, for the work queue. A
+ * report in review is still waiting on someone, so it ages here too. */
 export const feedbackSlaRows = (rows: FeedbackRow[], now: Date): SlaRow[] =>
   rows
-    .filter((feedback) => feedback.status === "open")
+    .filter((feedback) => isFeedbackAwaitingOperator(feedback.status))
     .map((feedback) => ({
       id: feedback.id,
       email: feedback.email,
