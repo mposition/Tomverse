@@ -101,10 +101,9 @@ const amuxAttempt = async () => {
       attemptNumber: 1,
       heartbeatAt: now,
       startedAt: now,
-      endedAt: now,
-      outcome: "succeeded",
-      toStatus: "review",
-      endedBy: "engineering-runner",
+      // Still running: a run on an ended attempt is an orphaned run, which
+      // halts the agent for every suite after this one (§11).
+      leaseExpiresAt: new Date(now.getTime() + 60 * 60_000),
     },
   });
   return { task, attempt };

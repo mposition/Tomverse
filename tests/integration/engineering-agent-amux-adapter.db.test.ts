@@ -137,8 +137,18 @@ after(async () => {
     user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
     expires: new Date(Date.now() + 3_600_000).toISOString(),
   } as Session;
-  while ((await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx))) > 0) {
-    // the sweep takes a bounded batch per call
+  // Only this file's runs are opened as mismatches: a sweep would open one
+  // for any other suite's orphaned run too, and leave it open.
+  const orphaned = await prisma.engineeringAgentRun.findMany({
+    where: { id: { in: fixtureRunIds }, status: "active", attempt: { endedAt: { not: null } } },
+    select: { id: true },
+  });
+  for (const run of orphaned) {
+    const causeKey = `run_attempt:${run.id}`;
+    if ((await prisma.engineeringAgentWorkItem.count({ where: { causeKey } })) > 0) continue;
+    await runEngineeringAgentTransaction(prisma, (tx) =>
+      openEngineeringAgentWorkItem(tx, { kind: "state_mismatch", causeKey, runId: run.id, reason: "attempt_ended_run_active" }),
+    );
   }
   const open = await prisma.engineeringAgentWorkItem.findMany({
     where: { kind: "state_mismatch", state: "open", runId: { in: fixtureRunIds } },

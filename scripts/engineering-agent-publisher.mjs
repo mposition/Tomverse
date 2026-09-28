@@ -322,6 +322,27 @@ async function mintToken({ appId, installationId, privateKey }, hold) {
   return minted;
 }
 
+/**
+ * A workspace whose writes -- build, push, reading an object -- refuse at the
+ * moment they are called once the process is stopping: a SIGTERM that arrives
+ * while the last look is answering must not be followed by a push (§9-8).
+ * Disposing still works.
+ */
+export const stoppableWorkspace = (open, isStopping) => async (...args) => {
+  if (isStopping()) throw new Error("stopping");
+  const workspace = await open(...args);
+  const guard = (fn) => (...inner) => {
+    if (isStopping()) throw new Error("stopping");
+    return fn(...inner);
+  };
+  return {
+    ...workspace,
+    build: guard(workspace.build),
+    push: guard(workspace.push),
+    commitObjectAt: guard(workspace.commitObjectAt),
+  };
+};
+
 async function main() {
   // The supervisor: a cycle that outlives its deadline is killed with its
   // whole process group -- git included -- not trusted.
@@ -390,7 +411,7 @@ async function main() {
         const ports = githubPorts(token);
         return Object.fromEntries(Object.entries(ports).map(([name, fn]) => [name, unlessStopping(fn)]));
       },
-      workspace: unlessStopping(workspaceAt),
+      workspace: stoppableWorkspace(workspaceAt, () => stopping),
     });
   } catch (error) {
     result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };

@@ -279,6 +279,24 @@ test("an unreadable commit leaves the observation undetermined, and a bound run 
   assert.deepEqual(round, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
   assert.equal(calls.some((call) => call.path === "observe/halt"), false, "nothing recorded for an object not read");
 
+  // One unread entry does not hide a definite one beside it.
+  assert.equal(
+    await observeUnbound({
+      refs: [
+        { ref: "refs/heads/agent/engineering/222", sha: C },
+        { ref: "refs/heads/agent/engineering/333", sha: A },
+      ],
+      pulls: [],
+      known: unbound,
+      commitDigestAt: async () => null,
+    }),
+    "unbound_app_ref",
+  );
+  assert.equal(
+    await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: null }], pulls: [], known: unbound, commitDigestAt: async () => allowed }),
+    "undetermined",
+    "a missing sha cannot be compared either",
+  );
   const bound = {
     bindings: [{ runId: "222", prNumber: 7, headSha: A, verifiedHeadSha: A }],
     consumed: [{ runId: "222", commitDigest: allowed }],

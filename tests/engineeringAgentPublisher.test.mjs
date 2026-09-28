@@ -16,6 +16,7 @@ import {
   PUBLISHER_VARIABLES,
   appJwt,
   bindableDiffDigest,
+  stoppableWorkspace,
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
 import { prBodyCarriesMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
@@ -339,4 +340,23 @@ test("a head that moves while the diff is read binds nothing", async () => {
   const round = await runPublisherCycle(world.ports);
   assert.deepEqual([round.finishedNormally, round.reason], [false, "pull_request_head_changed"]);
   assert.equal(world.calls.some((call) => call.path === "publish/result"), false, "left for the next lookup");
+});
+
+test("once stopping, the workspace refuses a push that was already on its way", async () => {
+  let stopping = false;
+  const pushed = [];
+  const open = stoppableWorkspace(async () => ({
+    build: async () => "built",
+    push: async (sha) => void pushed.push(sha),
+    commitObjectAt: async () => "object",
+    dispose: async () => "disposed",
+  }), () => stopping);
+  const workspace = await open("b".repeat(40));
+  // The SIGTERM lands while the last look is answering.
+  stopping = true;
+  assert.throws(() => workspace.push("c".repeat(40)), /stopping/);
+  assert.throws(() => workspace.build({}), /stopping/);
+  assert.deepEqual(pushed, []);
+  assert.equal(await workspace.dispose(), "disposed", "cleaning up still works");
+  await assert.rejects(open("b".repeat(40)), /stopping/);
 });

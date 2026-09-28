@@ -61,46 +61,53 @@ export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => 
   const boundRuns = new Set(known.bindings.map((binding) => binding.runId));
   // A commit a consumed capability allowed counts only for a run the app has
   // not bound yet -- the publisher's own write before its result. Once bound,
-  // only the bound head is the run's. A commit object that cannot be read
-  // leaves the observation undetermined, never decided either way.
+  // only the bound head is the run's. An object that cannot be read (or a
+  // missing sha) is "undetermined" for that entry, never decided either way.
   const allowedCommit = async (runId, sha) => {
     if (boundRuns.has(runId)) return false;
     const digests = new Set(known.consumed.filter((row) => row.runId === runId).map((row) => row.commitDigest));
-    if (digests.size === 0 || typeof sha !== "string") return false;
+    if (digests.size === 0) return false;
+    if (typeof sha !== "string") return "undetermined";
     const digest = await commitDigestAt(sha);
-    if (digest === null) throw UNDETERMINED;
+    if (digest === null) return "undetermined";
     return digests.has(digest);
   };
-  try {
-    for (const pull of pulls) {
-      const runId = parseEngineeringBranchName(pull.headRef ?? "");
-      const binding = byNumber.get(pull.number);
-      if (binding !== undefined) {
-        // A bound pull request stays at the head it was verified at.
-        if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
-        return "unbound_app_pr";
-      }
-      const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
-      const claimsToBeOurs = runId !== null || (pull.body ?? "").startsWith("<!-- engineering-agent");
-      if (!claimsToBeOurs) continue;
-      if (marked && (await allowedCommit(runId, pull.headSha))) continue;
-      return "unbound_app_pr";
+  // The whole list is read: a definite unbound entry is reported whatever
+  // else could not be read; only when nothing definite was found does an
+  // unread entry leave the observation undetermined.
+  let unboundPr = false;
+  let unboundRef = false;
+  let undetermined = false;
+  for (const pull of pulls) {
+    const runId = parseEngineeringBranchName(pull.headRef ?? "");
+    const binding = byNumber.get(pull.number);
+    if (binding !== undefined) {
+      // A bound pull request stays at the head it was verified at.
+      if (!(binding.runId === runId && pull.headSha === binding.verifiedHeadSha)) unboundPr = true;
+      continue;
     }
-    for (const { ref, sha } of refs) {
-      const runId = parseEngineeringBranchName(ref);
-      if (runId === null) return "unbound_app_ref";
-      if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
-      if (await allowedCommit(runId, sha)) continue;
-      return "unbound_app_ref";
-    }
-  } catch (error) {
-    if (error === UNDETERMINED) return "undetermined";
-    throw error;
+    const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
+    const claimsToBeOurs = runId !== null || (pull.body ?? "").startsWith("<!-- engineering-agent");
+    if (!claimsToBeOurs) continue;
+    const allowed = marked ? await allowedCommit(runId, pull.headSha) : false;
+    if (allowed === "undetermined") undetermined = true;
+    else if (!allowed) unboundPr = true;
   }
-  return "none";
+  for (const { ref, sha } of refs) {
+    const runId = parseEngineeringBranchName(ref);
+    if (runId === null) {
+      unboundRef = true;
+      continue;
+    }
+    if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
+    const allowed = await allowedCommit(runId, sha);
+    if (allowed === "undetermined") undetermined = true;
+    else if (!allowed) unboundRef = true;
+  }
+  if (unboundPr) return "unbound_app_pr";
+  if (unboundRef) return "unbound_app_ref";
+  return undetermined ? "undetermined" : "none";
 };
-
-const UNDETERMINED = Symbol("undetermined");
 
 const knownShape = (json) => Array.isArray(json?.bindings) && Array.isArray(json?.consumed);
 
