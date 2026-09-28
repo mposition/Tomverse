@@ -85,7 +85,10 @@ import {
 } from "@/lib/releaseNotesSendDecision";
 import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
-import { subjectLabelWaived } from "@/lib/releaseNotesDisplayRequirements";
+import {
+  DISPLAY_OBLIGATIONS,
+  subjectLabelWaived,
+} from "@/lib/releaseNotesDisplayRequirements";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 // The cohort's own digest, not the consent-link digest. The two are different
 // functions -- one hex over the normalised address, the other a prefixed
@@ -836,7 +839,7 @@ const decideReleaseNotesSend = async (
     now,
   });
 
-  const skipReason = releaseNotesSkipReason(verdict);
+  const skipReason = releaseNotesSkipReason(verdict, DISPLAY_OBLIGATIONS);
 
   // A replacement is a delivery like any other, so it gets the first of section
   // 7.6's two snapshots too. Taken before the transaction because the

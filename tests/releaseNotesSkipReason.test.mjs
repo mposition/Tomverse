@@ -195,3 +195,61 @@ test("an estimate names what refused, and files the switch last", () => {
   assert.equal(releaseNotesRefusalKey({ blockers: ["feature_disabled"] }), "feature_disabled");
   assert.equal(releaseNotesRefusalKey({ blockers: [] }), "no_basis");
 });
+
+test("a duty that prints something and whose check fails is an incomplete footer", () => {
+  const verdict = (duties) => ({
+    allowed: false,
+    blockers: ["obligation_undecided"],
+    obligations: {
+      KR: {
+        obligations: duties.map(([obligationKey, reason]) => ({
+          obligationKey,
+          settled: reason === null,
+          reason,
+        })),
+      },
+    },
+  });
+  const display = { KR: ["body_disclosures", "bilingual_unsubscribe_notice"] };
+  // The sender's contact address is missing: every duty was decided, and the
+  // footer cannot be printed complete. The ordinary gate's word for that.
+  assert.equal(
+    releaseNotesSkipReason(
+      verdict([
+        ["body_disclosures", "readiness_check_failing"],
+        ["biennial_consent_notice", null],
+      ]),
+      display
+    ),
+    "jurisdiction_footer_incomplete"
+  );
+  // A duty with no state is a decision nobody has made.
+  assert.equal(
+    releaseNotesSkipReason(verdict([["body_disclosures", "no_state"]]), display),
+    "obligation_undecided"
+  );
+  // A failing check on a duty that prints nothing is not a footer.
+  assert.equal(
+    releaseNotesSkipReason(
+      verdict([["consent_result_notice_14_days", "readiness_check_failing"]]),
+      display
+    ),
+    "obligation_undecided"
+  );
+  // Mixed: the undecided one is the one to report.
+  assert.equal(
+    releaseNotesSkipReason(
+      verdict([
+        ["body_disclosures", "readiness_check_failing"],
+        ["consent_result_notice_14_days", "no_state"],
+      ]),
+      display
+    ),
+    "obligation_undecided"
+  );
+  // Without the table the word is unchanged.
+  assert.equal(
+    releaseNotesSkipReason(verdict([["body_disclosures", "readiness_check_failing"]])),
+    "obligation_undecided"
+  );
+});

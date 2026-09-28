@@ -41,6 +41,7 @@ export const RELEASE_NOTES_SKIP_REASONS = [
   "jurisdiction_unconfirmed",
   "marketing_disabled",
   "marketing_country_not_allowed",
+  "jurisdiction_footer_incomplete",
 ] as const;
 
 export type ReleaseNotesSkipReason = (typeof RELEASE_NOTES_SKIP_REASONS)[number];
@@ -86,6 +87,36 @@ const BLOCKER_SKIP_REASON: Record<SendBlocker, ReleaseNotesSkipReason> = {
   display_contract_changed: "display_contract_changed",
 };
 
+/**
+ * Whether every unsettled duty is one the message prints and whose readiness
+ * check is failing -- a footer that cannot be rendered complete, which is what
+ * the ordinary marketing gate already calls `jurisdiction_footer_incomplete`.
+ *
+ * Recorded as `obligation_undecided` it read as a decision nobody had made,
+ * when every duty had been decided and what was missing was, say, the sender's
+ * contact address. Any other unsettled duty -- no state, an overdue deferral, a
+ * waiver problem -- is a decision, and keeps that word.
+ */
+const footerIncomplete = (
+  verdict: { obligations?: SendVerdict["obligations"] },
+  displayDuties: Readonly<Record<string, readonly string[]>> | undefined
+): boolean => {
+  if (!verdict.obligations || !displayDuties) return false;
+  const unsettled = Object.entries(verdict.obligations).flatMap(([country, entry]) =>
+    entry.obligations
+      .filter((duty) => !duty.settled)
+      .map((duty) => ({ country, duty }))
+  );
+  return (
+    unsettled.length > 0 &&
+    unsettled.every(
+      ({ country, duty }) =>
+        duty.reason === "readiness_check_failing" &&
+        (displayDuties[country] ?? []).includes(duty.obligationKey)
+    )
+  );
+};
+
 /** The order refusals are reported in, most decisive first. */
 const REPORTING_ORDER: readonly SendBlocker[] = [
   "objected",
@@ -113,7 +144,14 @@ export const unmappedBlockers = (): string[] =>
 export const releaseNotesSkipReason = (
   verdict: Pick<SendVerdict, "allowed" | "blockers"> & {
     authorities?: SendVerdict["authorities"];
-  }
+    obligations?: SendVerdict["obligations"];
+  },
+  /**
+   * Each country's duties that print something in the message
+   * (`DISPLAY_OBLIGATIONS`). Passed in because that table lives in a
+   * server-only module and this one is pure.
+   */
+  displayDuties?: Readonly<Record<string, readonly string[]>>
 ): ReleaseNotesSkipReason | null => {
   if (verdict.allowed) return null;
   const present = new Set<string>(verdict.blockers);
@@ -135,7 +173,11 @@ export const releaseNotesSkipReason = (
     return "marketing_country_not_allowed";
   }
   for (const blocker of REPORTING_ORDER) {
-    if (present.has(blocker)) return BLOCKER_SKIP_REASON[blocker];
+    if (!present.has(blocker)) continue;
+    if (blocker === "obligation_undecided" && footerIncomplete(verdict, displayDuties)) {
+      return "jurisdiction_footer_incomplete";
+    }
+    return BLOCKER_SKIP_REASON[blocker];
   }
   if (refusals.has("country_undetermined")) return "jurisdiction_unconfirmed";
   // Refused with nothing in the list: the legal refusal itself. See the module
