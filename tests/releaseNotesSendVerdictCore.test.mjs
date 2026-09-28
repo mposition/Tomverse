@@ -464,3 +464,23 @@ test("a measured deadline earlier than the seed's closes the deferral", () => {
   assert.ok(measured.blockers.includes("obligation_undecided"));
   assert.equal(measured.allowed, false);
 });
+
+test("each country's duties are judged by that country's own readiness", () => {
+  // The footer check covers Korea and the United States and used to answer with
+  // one boolean, so Korea's missing telephone failed the US postal-address duty
+  // and skipped US release notes whose footer was complete.
+  const us = [{ ...settledDuty("postal_address"), readinessCheck: "emailFooterDisclosures" }];
+  const base = {
+    countries: ["US"],
+    rules: [rule("US")],
+    obligations: { US: us },
+    readiness: { emailFooterDisclosures: false },
+  };
+  const folded = verdict(base);
+  assert.ok(folded.blockers.includes("obligation_undecided"));
+  const perCountry = verdict({
+    ...base,
+    readinessByCountry: { US: { emailFooterDisclosures: true } },
+  });
+  assert.ok(!perCountry.blockers.includes("obligation_undecided"));
+});

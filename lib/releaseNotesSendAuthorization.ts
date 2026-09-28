@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSettings";
-import { footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
+import { FOOTER_DISCLOSURE_COUNTRIES, footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
@@ -290,11 +290,30 @@ export async function releaseNotesSendAuthorization(
       subjectLabelReadiness(),
     ]);
     return {
-      emailFooterDisclosures: footer.disclosuresPresent,
-      emailSubjectLabels: subject.labelsPresent,
-      emailUnsubscribeKeyring: unsubscribeKeyringReadiness().ready,
+      checks: {
+        emailFooterDisclosures: footer.disclosuresPresent,
+        emailSubjectLabels: subject.labelsPresent,
+        emailUnsubscribeKeyring: unsubscribeKeyringReadiness().ready,
+      },
+      // The countries whose own footer is incomplete or unmapped. The check
+      // examines each country it covers separately; only those it names fail.
+      footerFailing: new Set(footer.problems.flatMap((problem) => problem.countryCodes)),
     };
   });
+  // Each candidate country judged by its own footer. A country the footer check
+  // does not cover keeps the overall answer: a duty that names a check which
+  // never looked at that country has nothing more specific to rest on.
+  const readinessByCountry = Object.fromEntries(
+    countries.map((country) => [
+      country,
+      {
+        ...readiness.checks,
+        emailFooterDisclosures: FOOTER_DISCLOSURE_COUNTRIES.includes(country)
+          ? !readiness.footerFailing.has(country)
+          : readiness.checks.emailFooterDisclosures,
+      },
+    ])
+  );
 
   // By address, not by account. Consent attaches to a mailbox
   // (docs/policy/email-notifications.md section 13.4), and an objection
@@ -564,7 +583,8 @@ export async function releaseNotesSendAuthorization(
     countries,
     rules,
     obligations,
-    readiness,
+    readiness: readiness.checks,
+    readinessByCountry,
     waivers,
     deadlines,
     recipient: {

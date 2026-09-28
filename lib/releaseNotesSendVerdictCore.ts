@@ -198,6 +198,17 @@ export type SendVerdictInput = {
   obligations: Readonly<Record<string, readonly StoredObligation[]>>;
   /** Per readiness check name, whether it passes. */
   readiness: Readonly<Record<string, boolean>>;
+  /**
+   * Per country, the readiness answers that differ by country; each country's
+   * duties are judged with its own entry where there is one, `readiness`
+   * otherwise.
+   *
+   * A check that examines several countries answers each separately. Folded
+   * into one boolean, Korea's missing contact telephone failed the United
+   * States' postal-address duty, which names the same check, and skipped US
+   * release notes whose footer was complete.
+   */
+  readinessByCountry?: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
   waivers: readonly WaiverApproval[];
   /**
    * Measured deadlines, per country and duty, where one is known.
@@ -284,7 +295,7 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
       ruleVersion: rule.ruleVersion,
       policyVersionId: input.policyVersionId,
       stored: input.obligations[countryCode] ?? [],
-      readiness: input.readiness,
+      readiness: input.readinessByCountry?.[countryCode] ?? input.readiness,
       waivers: input.waivers,
       ...(input.deadlines?.[countryCode] ? { deadlines: input.deadlines[countryCode] } : {}),
       now: input.now,

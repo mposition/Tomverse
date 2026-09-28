@@ -748,6 +748,28 @@ test("an incomplete business identity holds marketing rather than sending it", a
   assert.equal(delivery.skipReason, "jurisdiction_footer_incomplete");
 });
 
+test("Korea's missing telephone does not hold a US message whose footer is complete", async () => {
+  // The footer readiness check covers Korea and the United States. Folded into
+  // one answer, Korea's missing contact telephone failed the US postal-address
+  // duty too, and skipped US release notes that had every block they need.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  delete process.env.EMAIL_BUSINESS_CONTACT_PHONE;
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", skipReason: null });
+  assert.equal(calls.length, 1);
+});
+
 test("a transactional message keeps its own stream and carries no unsubscribe", async () => {
   // The marketing stream has its own key by design: it does not fall back to
   // the transactional one, so a promotion cannot be sent on the credential
