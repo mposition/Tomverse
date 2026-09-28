@@ -16,7 +16,9 @@ import { mkdtemp, realpath, lstat, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
+import { createHash } from "node:crypto";
+
+import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.ts";
 import { runModelSession } from "../lib/engineeringAgentModelCall.ts";
 import { runRunnerCycle } from "./engineering-agent-runner-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
@@ -105,6 +107,21 @@ async function cloneAt(baseSha) {
   };
 }
 
+/** The sha256 of one commit's object, fetched without credentials; null when it cannot be read. */
+async function commitDigestAt(sha) {
+  if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha)) return null;
+  const work = await realpath(await mkdtemp(join(tmpdir(), "engineering-observe-")));
+  try {
+    const repo = join(work, "repo");
+    if ((await git(["init", "-q", repo], { home: work })).code !== 0) return null;
+    if ((await git(["-C", repo, "fetch", "-q", "--depth", "1", REPOSITORY_URL, sha], { home: work })).code !== 0) return null;
+    const object = await git(["-C", repo, "cat-file", "commit", sha], { home: work });
+    return object.code === 0 ? createHash("sha256").update(object.stdout).digest("hex") : null;
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 async function main() {
   // The supervisor: a cycle that outlives its deadline is killed with its
   // whole process group, not trusted.
@@ -170,7 +187,12 @@ async function main() {
         const pulls = await githubList("/pulls?state=open&per_page=100");
         return {
           refs: refs.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
-          pulls: pulls.map((pull) => ({ number: pull.number, headRef: pull.head?.ref ?? "", body: pull.body ?? "" })),
+          pulls: pulls.map((pull) => ({
+            number: pull.number,
+            headRef: pull.head?.ref ?? "",
+            headSha: pull.head?.sha ?? null,
+            body: pull.body ?? "",
+          })),
         };
       },
       developHead: async () => {
@@ -188,6 +210,7 @@ async function main() {
         }
         return body.sha;
       },
+      commitDigestAt,
       clone: cloneAt,
       model: (session) =>
         runModelSession({
@@ -210,12 +233,17 @@ async function main() {
       clearInterval,
     });
   } catch (error) {
-    result = { finishedNormally: false, halt: "none", reason: error instanceof Error ? error.message : "failed" };
+    result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };
   }
 
-  // A cycle that ran to its end says so, in mode off too (§12).
-  if (result.finishedNormally) await app("service/finished", {}).catch(() => undefined);
-  const success = shouldSendSuccessHeartbeat({ finishedNormally: result.finishedNormally, halt: result.halt });
+  // A cycle that ran to its end says so, in mode off too (§12), and reads the
+  // halt once more: the signal follows the halt as it stands now.
+  let haltAfter = "unknown";
+  if (result.finishedNormally) {
+    const finished = await app("service/finished", {}).catch(() => null);
+    haltAfter = finished?.status === 200 ? reportedHalt(finished.json?.halt) : "unknown";
+  }
+  const success = finalSignalIsSuccess({ finishedNormally: result.finishedNormally, roundHalt: result.halt, haltAfter });
   await fetch(success ? deadMan : `${deadMan.replace(/\/+$/, "")}/fail`, {
     method: "GET",
     redirect: "error",

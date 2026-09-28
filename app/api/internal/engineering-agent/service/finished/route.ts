@@ -9,7 +9,12 @@ import {
   engineeringAgentUnauthorized,
   isEngineeringAgentRouteAuthorized,
 } from "@/lib/engineeringAgentRouteAuth";
-import { recordEngineeringAgentServiceFinish, runEngineeringAgentTransaction } from "@/lib/engineeringAgentStore";
+import {
+  currentEngineeringAgentHalt,
+  readEngineeringAgentHaltState,
+  recordEngineeringAgentServiceFinish,
+  runEngineeringAgentTransaction,
+} from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
 
 // A service reports that its cycle ran to the end (docs/policy/engineering-
@@ -31,7 +36,10 @@ export async function POST(request: Request) {
     const recorded = await runEngineeringAgentTransaction(prisma, (tx) =>
       recordEngineeringAgentServiceFinish(tx, { service }),
     );
-    return engineeringAgentJson({ service, finishedAt: recorded.finishedAt.toISOString() }, 200);
+    // The halt as it stands now, read after the cycle: the service sends its
+    // success signal only if this, too, is none (docs/policy/engineering-agent.md §12).
+    const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
+    return engineeringAgentJson({ service, finishedAt: recorded.finishedAt.toISOString(), halt }, 200);
   } catch (error) {
     return engineeringAgentErrorResponse("service_finished", error);
   }

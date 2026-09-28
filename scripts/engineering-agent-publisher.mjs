@@ -20,7 +20,7 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
+import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
@@ -188,6 +188,31 @@ const githubRequest = async (token, method, path, { body, accept } = {}) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+/**
+ * The digest AMUX's review binds (lib/amux/reviewGitHub.ts): the diff's own
+ * bytes, and only for a diff AMUX would take -- valid UTF-8, a git diff, no
+ * binary patch, no control or bidirectional character that could hide or
+ * reorder what a person reviews. Anything else is refused, never hashed.
+ */
+export const bindableDiffDigest = (bytes) => {
+  if (bytes.byteLength > MAX_DIFF_BYTES) return { refused: true };
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { refused: true };
+  }
+  if (
+    /[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u.test(text) ||
+    !text.startsWith("diff --git ") ||
+    /^GIT binary patch$/m.test(text) ||
+    /^Binary files .+ differ$/m.test(text)
+  ) {
+    return { refused: true };
+  }
+  return { digest: createHash("sha256").update(bytes).digest("hex") };
+};
+
 const hasNextPage = (link) => link !== null && /<[^>]*>\s*;\s*rel="?next"?/i.test(link);
 
 const pullOf = (value) => ({
@@ -224,12 +249,10 @@ const githubPorts = (token) => ({
   pullDiffDigest: async (number) => {
     const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {
       accept: "application/vnd.github.diff",
-    });
-    if (!response.ok) return null;
+    }).catch(() => null);
+    if (response === null || !response.ok) return null;
     const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_DIFF_BYTES || !bytes.subarray(0, 11).equals(Buffer.from("diff --git "))) return null;
-    // The same digest AMUX's review binds (lib/amux/reviewGitHub.ts): the diff's bytes.
-    return createHash("sha256").update(bytes).digest("hex");
+    return bindableDiffDigest(bytes);
   },
   createPull: async ({ title, body, head }) => {
     let response;
@@ -315,20 +338,36 @@ async function main() {
     return { status: response.status, json };
   };
 
+  // The supervisor's first signal at the deadline: revoke the token this cycle
+  // holds before the group is killed (§13-20), then stop.
+  let heldToken = null;
+  process.on("SIGTERM", () => {
+    void (heldToken?.revoke() ?? Promise.resolve()).finally(() => process.exit(70));
+  });
+
   let result;
   try {
     result = await runPublisherCycle({
       app,
-      mintToken: () => mintToken(credentials),
+      mintToken: async () => {
+        heldToken = await mintToken(credentials);
+        return heldToken;
+      },
       github: githubPorts,
       workspace: workspaceAt,
     });
   } catch (error) {
-    result = { finishedNormally: false, halt: "none", reason: error instanceof Error ? error.message : "failed" };
+    result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };
   }
 
-  if (result.finishedNormally) await app("service/finished", {}).catch(() => undefined);
-  const success = shouldSendSuccessHeartbeat({ finishedNormally: result.finishedNormally, halt: result.halt });
+  // A cycle that ran to its end says so, and reads the halt once more: the
+  // signal follows the halt as it stands now, not as it stood at the claim.
+  let haltAfter = "unknown";
+  if (result.finishedNormally) {
+    const finished = await app("service/finished", {}).catch(() => null);
+    haltAfter = finished?.status === 200 ? reportedHalt(finished.json?.halt) : "unknown";
+  }
+  const success = finalSignalIsSuccess({ finishedNormally: result.finishedNormally, roundHalt: result.halt, haltAfter });
   await fetch(success ? deadMan : `${deadMan.replace(/\/+$/, "")}/fail`, {
     method: "GET",
     redirect: "error",

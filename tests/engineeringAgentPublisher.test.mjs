@@ -15,6 +15,7 @@ import {
   PUBLISHER_TOKEN_PERMISSIONS,
   PUBLISHER_VARIABLES,
   appJwt,
+  bindableDiffDigest,
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
 import { prBodyCarriesMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
@@ -50,7 +51,7 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, halt = "none", lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
+const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
   const calls = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
@@ -70,12 +71,12 @@ const fakeWorld = ({ work, halt = "none", lastLook = { verdict: "no_objection" }
         return branch;
       },
       pullsForHead: async () => openPulls,
-      pullDiffDigest: async () => "d".repeat(64),
+      pullDiffDigest: async () => diff,
       createPull: async (input) => {
         calls.push({ path: "github:createPull", input });
         const answer = createPull ?? { status: "created", number: 42 };
         if (answer.status === "created") {
-          openPulls.push({ number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: COMMIT, body: input.body });
+          openPulls.push({ number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: headAfterPull ?? COMMIT, body: input.body });
         }
         return answer;
       },
@@ -126,6 +127,7 @@ test("a write claim is rebuilt, looked at last, pushed once to a new branch, and
     "git:push",
     "github:branchOid",
     "github:createPull",
+    "github:branchOid",
     "publish/result",
   ]);
   const push = world.calls.find((call) => call.path === "git:push");
@@ -279,4 +281,49 @@ test("a round while anything halts is never reported as healthy, whatever it did
   const silent = fakeWorld({ work: null, halt: undefined });
   silent.ports.app = async () => ({ status: 200, json: { work: null } });
   assert.equal((await runPublisherCycle(silent.ports)).halt, "unknown", "no halt named is not none");
+});
+
+test("a refused claim still carries the halt, and a halted quiet round is not healthy", async () => {
+  const world = fakeWorld({ work: null });
+  world.ports.app = async () => ({ status: 409, json: { refused: "maintenance_not_allowed", halt: "state_mismatch" } });
+  const round = await runPublisherCycle(world.ports);
+  assert.equal(round.finishedNormally, true);
+  assert.equal(shouldSendSuccessHeartbeat(round), false, "off, but halted: no success signal");
+  world.ports.app = async () => ({ status: 409, json: { refused: "maintenance_not_allowed" } });
+  assert.equal((await runPublisherCycle(world.ports)).halt, "unknown");
+});
+
+test("nothing is bound unless the pull request, the branch and the pushed commit are one commit", async () => {
+  const moved = fakeWorld({ work: writeWork(), headAfterPull: "9".repeat(40) });
+  const round = await runPublisherCycle(moved.ports);
+  assert.deepEqual([round.finishedNormally, round.reason], [false, "pull_request_head_changed"]);
+  assert.equal(moved.calls.some((call) => call.path === "publish/result"), false, "left for a lookup");
+
+  const refusedDiff = fakeWorld({ work: writeWork(), diff: { refused: true } });
+  await runPublisherCycle(refusedDiff.ports);
+  assert.deepEqual([result(refusedDiff.calls).outcome, result(refusedDiff.calls).reason], ["lookup_impossible", "diff_not_bindable"], "a diff no review can bind goes to a person");
+
+  const unread = fakeWorld({ work: writeWork(), diff: null });
+  assert.equal((await runPublisherCycle(unread.ports)).reason, "snapshot_unreadable");
+  assert.equal(result(unread.calls), undefined);
+
+  const ours = { number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: COMMIT, body: publisherPrBody(RUN, "card_1") };
+  const object = expectedPublishCommit(writeWork(), DATE);
+  assert.deepEqual(
+    decideLookup({ runId: RUN, branch: BRANCH, consumed: { commitDigest: sha256(object), expectedTreeId: TREE }, branchOid: "9".repeat(40), pulls: [ours], headCommitObject: object }),
+    { outcome: "lookup_impossible", reason: "branch_not_at_head" },
+  );
+});
+
+test("only a diff AMUX would bind is hashed", () => {
+  const good = Buffer.from("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n");
+  assert.match(bindableDiffDigest(good).digest, /^[0-9a-f]{64}$/);
+  for (const bad of [
+    Buffer.from("not a diff"),
+    Buffer.from("diff --git a/x b/x\nGIT binary patch\n"),
+    Buffer.from("diff --git a/x b/x\n+hidden \u202e text\n"),
+    Buffer.from([0x64, 0x69, 0x66, 0x66, 0xff]),
+  ]) {
+    assert.deepEqual(bindableDiffDigest(bad), { refused: true });
+  }
 });

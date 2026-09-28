@@ -20,10 +20,10 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   ENGINEERING_AGENT_COMMIT_IDENTITY,
-  HALT_VALUES,
   expectedCommitObject,
   prBodyCarriesMarker,
   prBodyMarker,
+  reportedHalt,
 } from "../lib/engineeringAgentCore.ts";
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 
@@ -64,6 +64,8 @@ export const expectedPublishCommit = (work, baseCommitterDate) =>
  * a person.
  */
 export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCommitObject }) => {
+  // (The branch must also be at the pull request's head: a found result binds
+  // one commit, and a branch that moved is not that commit.)
   if (branchOid === null && pulls.length === 0) return { outcome: "lookup_no_prior_write" };
   if (consumed === null) return { outcome: "lookup_impossible", reason: "write_without_capability" };
   if (pulls.length !== 1) return { outcome: "lookup_impossible", reason: "pull_request_count" };
@@ -76,6 +78,7 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
   ) {
     return { outcome: "lookup_impossible", reason: "pull_request_not_ours" };
   }
+  if (branchOid !== pull.headSha) return { outcome: "lookup_impossible", reason: "branch_not_at_head" };
   if (headCommitObject === null || sha256(headCommitObject) !== consumed.commitDigest) {
     return { outcome: "lookup_impossible", reason: "commit_not_allowed" };
   }
@@ -89,7 +92,7 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
  *   github(token) -> {
  *     branchOid(branch) -> sha | null,
  *     pullsForHead(branch) -> [{ number, state, baseRef, baseSha, headRef, headSha, body }]  (complete, or throws)
- *     pullDiffDigest(number) -> sha256 | null,
+ *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (null: not read; refused: not a diff AMUX would bind)
  *     createPull({ title, body, head }) -> { status: "created", number } | { status: "rejected" } | { status: "unknown" },
  *   }
  *   workspace(baseSha) -> {
@@ -105,9 +108,9 @@ export async function runPublisherCycle(ports) {
   const claimed = await ports.app("publish/claim", { requestKey: requestKey() });
   if (claimed.status === 409 && typeof claimed.json?.refused === "string") {
     // A switch that is off -- the mode, the freeze, the kill switch -- is a
-    // quiet round the monitor still hears. A halt does not refuse the claim:
-    // it arrives as `halt` beside the work (lookups continue while halted).
-    return { finishedNormally: true, halt: "none", reason: claimed.json.refused };
+    // quiet round the monitor still hears, but only while nothing halts: the
+    // refusal carries the halt too, and no halt named is not none (§12).
+    return { finishedNormally: true, halt: reportedHalt(claimed.json.halt), reason: claimed.json.refused };
   }
   if (claimed.status !== 200 || claimed.json === null || !("work" in claimed.json)) {
     return { finishedNormally: false, halt: "unknown", reason: "claim_unknown" };
@@ -115,7 +118,7 @@ export async function runPublisherCycle(ports) {
   const work = claimed.json.work;
   // The halt the app reads beside the claim: while anything halts, a round is
   // not a healthy one whatever it did (§12). Unknown is never taken as none.
-  const halt = typeof claimed.json.halt === "string" && HALT_VALUES.includes(claimed.json.halt) ? claimed.json.halt : "unknown";
+  const halt = reportedHalt(claimed.json.halt);
   if (work === null) return { finishedNormally: true, halt, reason: "nothing_to_publish" };
 
   const report = async (outcome, extra = {}) => {
@@ -143,15 +146,28 @@ export async function runPublisherCycle(ports) {
     token = await ports.mintToken();
     const github = ports.github(token.token);
 
+    // The binding: one commit -- the pull request's head, the branch and the
+    // verified commit all the same -- and the digest of a diff AMUX would bind.
+    // A diff that can never be bound goes to a person; one not read now is
+    // left for the next lookup (§10).
     const snapshotOf = async (pull, treeId, verifiedHeadSha) => {
-      const diffDigest = await github.pullDiffDigest(pull.number);
-      if (diffDigest === null || !SHA1.test(pull.baseSha) || !SHA1.test(pull.headSha)) return null;
+      if (!SHA1.test(pull.baseSha) || pull.headSha !== verifiedHeadSha) return { unreadable: "pull_request_head_changed" };
+      const diff = await github.pullDiffDigest(pull.number);
+      if (diff === null) return { unreadable: "snapshot_unreadable" };
+      if (diff.refused) return { refused: "diff_not_bindable" };
       return {
-        prNumber: pull.number,
-        headSha: pull.headSha,
-        verifiedHeadSha,
-        snapshot: { baseSha: pull.baseSha, diffDigest, treeId, invalidatedReviewIds: [] },
+        pullRequest: {
+          prNumber: pull.number,
+          headSha: pull.headSha,
+          verifiedHeadSha,
+          snapshot: { baseSha: pull.baseSha, diffDigest: diff.digest, treeId, invalidatedReviewIds: [] },
+        },
       };
+    };
+    const reportSnapshot = async (outcome, snapshot) => {
+      if (snapshot.refused) return report("lookup_impossible", { reason: snapshot.refused });
+      if (snapshot.unreadable) return leave(snapshot.unreadable);
+      return report(outcome, { pullRequest: snapshot.pullRequest });
     };
 
     if (work.mode === "lookup") {
@@ -171,9 +187,10 @@ export async function runPublisherCycle(ports) {
         headCommitObject,
       });
       if (decision.outcome !== "lookup_found_result") return await report(decision.outcome, decision);
-      const pullRequest = await snapshotOf(decision.pull, work.consumed.expectedTreeId, decision.pull.headSha);
-      if (pullRequest === null) return leave("snapshot_unreadable");
-      return await report("lookup_found_result", { pullRequest });
+      return await reportSnapshot(
+        "lookup_found_result",
+        await snapshotOf(decision.pull, work.consumed.expectedTreeId, decision.pull.headSha),
+      );
     }
 
     // A write claim. Everything before the push can only refuse.
@@ -231,9 +248,10 @@ export async function runPublisherCycle(ports) {
       pull = (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === created.number) ?? null;
     }
     if (pull === null) return leave("pull_request_outcome_unknown");
-    const pullRequest = await snapshotOf(pull, work.expectedTreeId, built.commitSha);
-    if (pullRequest === null) return leave("snapshot_unreadable");
-    return await report("confirmed", { pullRequest });
+    // The branch is read again: the pull request, the branch and the pushed
+    // commit must be one commit before anything is bound.
+    if ((await github.branchOid(work.branch)) !== built.commitSha) return leave("pull_request_head_changed");
+    return await reportSnapshot("confirmed", await snapshotOf(pull, work.expectedTreeId, built.commitSha));
   } catch (error) {
     return leave(error instanceof Error ? error.message.slice(0, 64) : "cycle_failed");
   } finally {

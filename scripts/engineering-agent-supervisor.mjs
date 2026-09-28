@@ -3,8 +3,10 @@
 // 그룹을 강제 종료한다"). The entry point runs twice: once as this supervisor,
 // which starts the same entry again as a worker in a process group of its
 // own, and once as that worker, which runs the cycle. At the deadline the
-// supervisor kills the whole group -- the worker and every git it started --
-// with SIGKILL, sends the failure signal, and exits without a success signal.
+// supervisor sends the group SIGTERM -- the worker's one chance to revoke a
+// credential it holds -- and after a short grace kills the whole group, the
+// worker and every git it started, with SIGKILL; then it sends the failure
+// signal and exits without a success signal.
 // A timer inside the worker could not do this: a blocked event loop never
 // fires it, and process.exit leaves the children running.
 //
@@ -17,10 +19,13 @@ export const SUPERVISED_ENV = "ENGINEERING_AGENT_SUPERVISED";
 
 export const isSupervisedWorker = (env = process.env) => env[SUPERVISED_ENV] === "1";
 
-/** Kills a process group; a group already gone is not an error. */
-const killGroup = (kill, pid) => {
+/** The worker's time between SIGTERM and SIGKILL at the deadline. */
+export const SUPERVISOR_TERM_GRACE_MS = 5_000;
+
+/** Signals a process group; a group already gone is not an error. */
+const killGroup = (kill, pid, signal = "SIGKILL") => {
   try {
-    kill(-pid, "SIGKILL");
+    kill(-pid, signal);
   } catch {
     // ESRCH: nothing left in the group.
   }
@@ -43,6 +48,7 @@ export function superviseCycle({
   execArgv = process.execArgv,
   argv = process.argv,
   env = process.env,
+  graceMs = SUPERVISOR_TERM_GRACE_MS,
 }) {
   const child = spawnImpl(execPath, [...execArgv, ...argv.slice(1)], {
     detached: true,
@@ -53,6 +59,8 @@ export function superviseCycle({
     let deadlinePassed = false;
     const timer = setTimer(async () => {
       deadlinePassed = true;
+      killGroup(kill, child.pid, "SIGTERM");
+      await new Promise((wait) => setTimer(wait, graceMs));
       killGroup(kill, child.pid);
       console.error(JSON.stringify({ event, reason: "hard_deadline" }));
       // No success signal after a killed cycle; the failure one if it can go.

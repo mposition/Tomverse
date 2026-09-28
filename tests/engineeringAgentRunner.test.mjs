@@ -24,7 +24,7 @@ const fakeApp = (overrides = {}) => {
   const calls = [];
   const answers = {
     "worker/register": { status: 200, json: { registered: true, generation: 3 } },
-    "observe/known": { status: 200, json: { runIds: [], prNumbers: [] } },
+    "observe/known": { status: 200, json: { bindings: [], consumed: [] } },
     "observe/halt": { status: 200, json: { recorded: true } },
     "worker/heartbeat": (body) => ({
       status: 200,
@@ -67,9 +67,10 @@ const fakeClone = (applies = true) => ({
   dispose: async () => undefined,
 });
 
-const ports = (app, model, clone = fakeClone(), namespace = { refs: [], pulls: [] }) => ({
+const ports = (app, model, clone = fakeClone(), namespace = { refs: [], pulls: [] }, digests = {}) => ({
   app,
   namespace: async () => namespace,
+  commitDigestAt: async (sha) => digests[sha] ?? null,
   developHead: async () => SHA,
   clone: async () => clone,
   model,
@@ -86,7 +87,7 @@ test("a full cycle drafts a T2 patch and ends the run as a T2 draft", async () =
   assert.deepEqual(result, { finishedNormally: true, halt: "none", reason: "t2_draft" });
   assert.deepEqual(
     calls.map((call) => call.path),
-    ["worker/register", "observe/known", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
+    ["worker/register", "observe/known", "observe/known", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
   );
   const start = calls.find((call) => call.path === "run/start").body;
   assert.equal(start.baseSha, SHA);
@@ -220,25 +221,41 @@ test("while anything halts, no round sends a success signal (§12, §13-17)", as
   assert.equal(haltOf({ halt: "made_up" }), "unknown");
 });
 
-test("an unbound branch or pull request under the agent's namespace is recorded and halts the round", async () => {
-  const known = { runIds: ["111"], prNumbers: [7] };
-  const ours = { number: 7, headRef: "agent/engineering/111", body: prBodyMarker("111") };
-  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/111" }], pulls: [ours], known }), "none");
+test("a branch or pull request passes only at a bound head or an allowed commit, by content not by name", async () => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const C = "c".repeat(40);
+  const allowed = "d".repeat(64);
+  const known = {
+    bindings: [{ runId: "111", prNumber: 7, headSha: A, verifiedHeadSha: A }],
+    consumed: [{ runId: "222", commitDigest: allowed }],
+  };
+  const digests = { [C]: allowed, [B]: "e".repeat(64) };
+  const commitDigestAt = async (sha) => digests[sha] ?? null;
+  const observe = (refs, pulls) => observeUnbound({ refs, pulls, known, commitDigestAt });
+  const bound = { number: 7, headRef: "agent/engineering/111", headSha: A, body: prBodyMarker("111") };
+
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/111", sha: A }], [bound]), "none");
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/111", sha: B }], []), "unbound_app_ref", "a bound run's branch moved");
+  assert.equal(await observe([], [{ ...bound, headSha: B }]), "unbound_app_pr", "a bound pull request's head moved");
   assert.equal(
-    observeUnbound({ refs: [], pulls: [{ number: 8, headRef: "agent/engineering/111", body: prBodyMarker("111") }], known }),
+    await observe([{ ref: "refs/heads/agent/engineering/222", sha: C }], [{ number: 8, headRef: "agent/engineering/222", headSha: C, body: prBodyMarker("222") }]),
     "none",
-    "a pull request of a run whose write was allowed, before its result is bound",
+    "the publisher's own push and PR, before its result, at exactly the allowed commit",
   );
-  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 9, headRef: "agent/engineering/222", body: "" }], known }), "unbound_app_pr");
-  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 9, headRef: "feature/x", body: "<!-- engineering-agent run=5 -->" }], known }), "unbound_app_pr");
-  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 10, headRef: "feature/x", body: "hello" }], known }), "none");
-  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222" }], pulls: [], known }), "unbound_app_ref");
-  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/not-a-run" }], pulls: [], known }), "unbound_app_ref");
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/222", sha: B }], []), "unbound_app_ref", "a consumed run at another commit");
+  assert.equal(
+    await observe([], [{ number: 8, headRef: "agent/engineering/222", headSha: C, body: "no marker" }]),
+    "unbound_app_pr",
+    "an unbound pull request needs the run marker too",
+  );
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/333", sha: C }], []), "unbound_app_ref", "no record of the run");
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/not-a-run", sha: A }], []), "unbound_app_ref");
+  assert.equal(await observe([], [{ number: 9, headRef: "feature/x", headSha: A, body: "<!-- engineering-agent run=5 -->" }]), "unbound_app_pr");
+  assert.equal(await observe([], [{ number: 10, headRef: "feature/x", headSha: A, body: "hello" }]), "none");
 
   const { app, calls } = fakeApp();
-  const result = await runRunnerCycle(
-    ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: "a".repeat(40) }], pulls: [] }),
-  );
+  const result = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: A }], pulls: [] }));
   assert.deepEqual(result, { finishedNormally: true, halt: "unbound_app_ref", reason: "observed_unbound" });
   assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
   assert.equal(calls.some((call) => call.path === "run/start"), false, "nothing starts after an unbound observation");
@@ -248,12 +265,28 @@ test("an unbound branch or pull request under the agent's namespace is recorded 
   assert.equal((await runRunnerCycle(ports(unreadable.app, okModel))).finishedNormally, false);
 });
 
+test("the app's records must not move while GitHub is read, or nothing is judged", async () => {
+  let reads = 0;
+  const moving = fakeApp({
+    "observe/known": () => {
+      reads += 1;
+      return { status: 200, json: { bindings: [], consumed: reads === 1 ? [] : [{ runId: "999", commitDigest: "f".repeat(64) }] } };
+    },
+  });
+  const result = await runRunnerCycle(
+    ports(moving.app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: "a".repeat(40) }], pulls: [] }),
+  );
+  assert.deepEqual(result, { finishedNormally: false, halt: "unknown", reason: "observation_raced" });
+  assert.equal(moving.calls.some((call) => call.path === "observe/halt"), false, "a raced reading records no halt");
+});
+
 test("the supervisor runs the cycle in its own process group and kills the group at the deadline", async () => {
   const listeners = {};
   const spawned = [];
   const killed = [];
   const fetched = [];
   let fire = null;
+  const timers = [];
   const child = { pid: 4242, on: (name, fn) => void (listeners[name] = fn) };
   const done = superviseCycle({
     deadlineMs: 1000,
@@ -265,11 +298,15 @@ test("the supervisor runs the cycle in its own process group and kills the group
     },
     kill: (pid, signal) => killed.push([pid, signal]),
     fetchImpl: async (url) => void fetched.push(url),
-    setTimer: (fn) => {
-      fire = fn;
-      return 1;
+    setTimer: (fn, ms) => {
+      timers.push(ms);
+      // The deadline is held for the test to fire; the grace passes at once.
+      if (fire === null) fire = fn;
+      else fn();
+      return timers.length;
     },
     clearTimer: () => undefined,
+    graceMs: 5_000,
     execPath: "/usr/bin/node",
     execArgv: ["--experimental-strip-types"],
     argv: ["/usr/bin/node", "scripts/engineering-agent-runner.mjs"],
@@ -280,10 +317,11 @@ test("the supervisor runs the cycle in its own process group and kills the group
   assert.deepEqual(spawned[0].args, ["--experimental-strip-types", "scripts/engineering-agent-runner.mjs"]);
   await fire();
   assert.equal(await done, 70);
-  assert.deepEqual(killed, [[-4242, "SIGKILL"]], "the whole group, by negative pid");
+  assert.deepEqual(killed, [[-4242, "SIGTERM"], [-4242, "SIGKILL"]], "the whole group, by negative pid: a chance to revoke, then the kill");
+  assert.deepEqual(timers, [1000, 5000]);
   assert.deepEqual(fetched, ["https://deadman.example/fail"], "the failure signal, never the success one");
   listeners.exit?.(137);
-  assert.equal(killed.length, 1, "an exit after the deadline changes nothing");
+  assert.equal(killed.length, 2, "an exit after the deadline changes nothing");
 
   const normal = [];
   const exits = {};

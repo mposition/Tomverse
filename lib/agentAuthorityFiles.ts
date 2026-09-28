@@ -42,6 +42,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "components",
   "config",
   "crates",
+  "docker",
   "docs",
   "lib",
   "locales",
@@ -106,6 +107,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/agent*",
   "lib/engineeringAgent*",
   "packages/engineering-agent/**",
+  // The services' image and their operating runbook (§8, §12).
+  "docker/**",
+  "docs/ops/engineering-agent*",
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/**/engineering-agent*",

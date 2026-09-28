@@ -382,27 +382,36 @@ export const currentEngineeringAgentHalt = (state: EngineeringAgentHaltState): H
 };
 
 /**
- * What the agent itself may have put on GitHub (§12): every run whose publish
- * item consumed a capability -- a write was allowed, whatever became of it --
- * and every pull request number the app bound. Identifiers only. A branch or
- * pull request under the agent's namespace outside this is unbound.
+ * What the agent itself may have put on GitHub (§12), with what it put there:
+ * each current binding's run, pull request and heads, and each consumed
+ * capability's run and commit digest -- a write was allowed exactly that
+ * commit, whatever became of it. Identifiers and digests only. A branch or
+ * pull request under the agent's namespace that none of this accounts for,
+ * by content and not only by name, is unbound.
  */
 export async function readEngineeringAgentKnownPublishes(
   db: PrismaClient | Prisma.TransactionClient,
-): Promise<{ runIds: string[]; prNumbers: number[] }> {
+): Promise<{
+  bindings: Array<{ runId: string; prNumber: number; headSha: string; verifiedHeadSha: string }>;
+  consumed: Array<{ runId: string; commitDigest: string }>;
+}> {
   const [capabilities, bindings] = await Promise.all([
     db.engineeringAgentCapability.findMany({
       where: { consumedAt: { not: null } },
-      select: { workItem: { select: { runId: true } } },
+      orderBy: [{ consumedAt: "asc" }, { id: "asc" }],
+      select: { commitDigest: true, workItem: { select: { runId: true } } },
     }),
-    db.engineeringAgentBinding.findMany({ select: { runId: true, prNumber: true } }),
+    db.engineeringAgentBinding.findMany({
+      where: { supersededAt: null },
+      orderBy: [{ prNumber: "asc" }, { id: "asc" }],
+      select: { runId: true, prNumber: true, headSha: true, verifiedHeadSha: true },
+    }),
   ]);
-  const runIds = new Set<string>();
-  for (const row of capabilities) if (row.workItem.runId !== null) runIds.add(row.workItem.runId);
-  for (const row of bindings) runIds.add(row.runId);
   return {
-    runIds: [...runIds].sort(),
-    prNumbers: [...new Set(bindings.map((row) => row.prNumber))].sort((a, b) => a - b),
+    bindings,
+    consumed: capabilities
+      .filter((row) => row.workItem.runId !== null)
+      .map((row) => ({ runId: row.workItem.runId as string, commitDigest: row.commitDigest })),
   };
 }
 
@@ -1311,8 +1320,8 @@ async function mismatchRunId(
 }
 
 /**
- * The AMUX rows a mismatch concerns -- its run's attempt, then its card, in
- * AMUX's own order -- locked before the audit chain (§11). Passed to
+ * The AMUX rows a mismatch concerns -- its run's attempt, its card, then its
+ * delivery, in AMUX's own order -- locked before the audit chain (§11). Passed to
  * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing.
  */
 export async function lockEngineeringAgentMismatchAmuxRows(
@@ -1330,6 +1339,7 @@ export async function lockEngineeringAgentMismatchAmuxRows(
   if (!run) return;
   await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${run.cardId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT "attemptId" FROM "AmuxWorkDelivery" WHERE "attemptId" = ${run.amuxAttemptId} FOR UPDATE`;
 }
 
 /**
@@ -1348,12 +1358,20 @@ export async function resolveEngineeringAgentStateMismatch(
   if (!(ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS as readonly string[]).includes(input.action)) {
     refuse("mismatch_action_not_offered");
   }
+  // The cause and run never change on an item, so they are read before any
+  // engineering lock; the run is then locked before the work item, in the
+  // cross lock order (run, work item, capability, binding).
+  const item =
+    (await tx.engineeringAgentWorkItem.findUnique({
+      where: { id: input.workItemId },
+      select: { causeKey: true, runId: true },
+    })) ?? refuse("work_item_not_found");
+  const lockedRunId = await mismatchRunId(tx, item);
+  if (lockedRunId !== null) {
+    await tx.$queryRaw`SELECT "id" FROM "EngineeringAgentRun" WHERE "id" = ${lockedRunId} FOR UPDATE`;
+  }
   const locked = await lockWorkItem(tx, input.workItemId);
   if (locked.kind !== "state_mismatch" || locked.state !== "open") refuse("mismatch_not_open");
-  const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
-    where: { id: locked.id },
-    select: { causeKey: true, runId: true },
-  });
   const kind: "A" | "C" = item.causeKey.startsWith("run_attempt:")
     ? "A"
     : item.causeKey.startsWith("review_pr:")

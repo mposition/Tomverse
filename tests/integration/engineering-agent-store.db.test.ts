@@ -931,8 +931,9 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     await inTx((tx) => acknowledgeEngineeringAgentHalt(tx, { session: owner }));
     assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "acknowledged, it no longer holds");
     const known = await readEngineeringAgentKnownPublishes(prisma);
-    assert.ok(Array.isArray(known.runIds) && Array.isArray(known.prNumbers));
-    assert.ok(known.runIds.every((id) => /^[0-9]{1,12}$/.test(id)), "identifiers only");
+    assert.ok(Array.isArray(known.bindings) && Array.isArray(known.consumed));
+    assert.ok(known.consumed.every((row) => /^[0-9]{1,12}$/.test(row.runId) && /^[0-9a-f]{64}$/.test(row.commitDigest)), "identifiers and digests only");
+    assert.ok(known.bindings.every((row) => /^[0-9a-f]{40}$/.test(row.verifiedHeadSha)));
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: observedKey } });
     if (previous) await prisma.appSetting.create({ data: { key: observedKey, value: previous.value } });

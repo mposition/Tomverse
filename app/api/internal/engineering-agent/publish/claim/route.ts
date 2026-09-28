@@ -5,6 +5,7 @@ import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
+  EngineeringAgentStoreRefusedError,
   claimNextEngineeringAgentPublishWork,
   currentEngineeringAgentHalt,
   readEngineeringAgentHaltState,
@@ -49,6 +50,15 @@ export async function POST(request: Request) {
     const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
     return engineeringAgentJson({ work: outcome.value, halt }, 200);
   } catch (error) {
+    // A switch that refuses the claim (mode off, frozen, kill switch) says
+    // nothing about a halt, so the refusal carries it too: a quiet round is
+    // live only while nothing halts (§12).
+    if (error instanceof EngineeringAgentStoreRefusedError) {
+      const halt = await readEngineeringAgentHaltState(prisma)
+        .then(currentEngineeringAgentHalt)
+        .catch(() => "unknown" as const);
+      return engineeringAgentJson({ refused: error.code, halt }, 409);
+    }
     return engineeringAgentErrorResponse("publish_claim", error);
   }
 }

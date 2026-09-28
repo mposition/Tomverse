@@ -816,6 +816,25 @@ export const isCircuitLatched = (input: {
  * halted. Mode `off`, a freeze or the kill switch still send it -- the monitor
  * watches whether the service is alive, not whether it did work (policy §12).
  */
+/**
+ * A halt value the app reported to a service, or `unknown` when it reported
+ * none it knows -- never `none` by default, because `none` is what lets a
+ * success signal out (§12).
+ */
+export const reportedHalt = (value: unknown): HaltValue | "unknown" =>
+  typeof value === "string" && (HALT_VALUES as readonly string[]).includes(value) ? (value as HaltValue) : "unknown";
+
+/**
+ * The success signal after a round: the round finished, the halt the round
+ * saw was none, and the halt read again after the round -- right before the
+ * signal -- is none too (§12, §13-17).
+ */
+export const finalSignalIsSuccess = (input: {
+  finishedNormally: boolean;
+  roundHalt: HaltValue | "unknown";
+  haltAfter: HaltValue | "unknown";
+}) => input.finishedNormally && input.roundHalt === "none" && input.haltAfter === "none";
+
 export const shouldSendSuccessHeartbeat = (input: {
   finishedNormally: boolean;
   halt: HaltValue;

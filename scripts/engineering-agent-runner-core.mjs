@@ -14,7 +14,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
-import { HALT_VALUES, parseEngineeringBranchName, prBodyCarriesMarker } from "../lib/engineeringAgentCore.ts";
+import { parseEngineeringBranchName, prBodyCarriesMarker, reportedHalt } from "../lib/engineeringAgentCore.ts";
 import {
   prepareWorkRunInputs,
   readTrackedFile,
@@ -44,33 +44,51 @@ export const runnerUserContent = (briefText) =>
  * never `none` by default, because `none` is what lets a success signal out
  * (§12: no success signal while halted).
  */
-export const haltOf = (json) =>
-  typeof json?.halt === "string" && HALT_VALUES.includes(json.halt) ? json.halt : "unknown";
+export const haltOf = (json) => reportedHalt(json?.halt);
 
 /**
  * What the runner observes on GitHub (§12): a branch under the agent's
  * namespace, or an open pull request on one or carrying a run marker, that
- * nothing the agent did accounts for. `known` is the app's list of runs whose
- * publish consumed a capability and the pull requests it bound.
+ * the app's records do not account for by content. `known` is the app's
+ * current bindings (with the head each was verified at) and its consumed
+ * capabilities (with the commit digest each allowed). A branch or pull request
+ * passes only at a bound head, or at a commit whose object is exactly one a
+ * consumed capability allowed -- the publisher's own, between its push and its
+ * result. `commitDigestAt(sha)` is the sha256 of that commit's object, or null.
  */
-export const observeUnbound = ({ refs, pulls, known }) => {
-  const runs = new Set(known.runIds);
-  const numbers = new Set(known.prNumbers);
+export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => {
+  const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
+  const allowedCommit = async (runId, sha) => {
+    const digests = new Set(known.consumed.filter((row) => row.runId === runId).map((row) => row.commitDigest));
+    if (digests.size === 0 || typeof sha !== "string") return false;
+    const digest = await commitDigestAt(sha);
+    return digest !== null && digests.has(digest);
+  };
   for (const pull of pulls) {
-    if (numbers.has(pull.number)) continue;
     const runId = parseEngineeringBranchName(pull.headRef ?? "");
+    const binding = byNumber.get(pull.number);
+    if (binding !== undefined) {
+      // A bound pull request stays at the head it was verified at.
+      if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
+      return "unbound_app_pr";
+    }
     const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
     const claimsToBeOurs = runId !== null || (pull.body ?? "").startsWith("<!-- engineering-agent");
-    // A pull request of a run whose write was allowed, not yet bound: the
-    // publisher's own, between its PR and its result.
-    if (claimsToBeOurs && !(marked && runs.has(runId))) return "unbound_app_pr";
+    if (!claimsToBeOurs) continue;
+    if (marked && (await allowedCommit(runId, pull.headSha))) continue;
+    return "unbound_app_pr";
   }
-  for (const { ref } of refs) {
+  for (const { ref, sha } of refs) {
     const runId = parseEngineeringBranchName(ref);
-    if (runId === null || !runs.has(runId)) return "unbound_app_ref";
+    if (runId === null) return "unbound_app_ref";
+    if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
+    if (await allowedCommit(runId, sha)) continue;
+    return "unbound_app_ref";
   }
   return "none";
 };
+
+const knownShape = (json) => Array.isArray(json?.bindings) && Array.isArray(json?.consumed);
 
 /**
  * How a model session ends becomes the run's outcome (policy §13-8: a failure
@@ -86,8 +104,9 @@ export const outcomeForSession = (session) => {
 /**
  * One cycle. `ports`:
  *   app(path, body) -> { status, json }          the engineering routes
- *   namespace() -> { refs: [{ ref, sha }], pulls: [{ number, headRef, body }] }
+ *   namespace() -> { refs: [{ ref, sha }], pulls: [{ number, headRef, headSha, body }] }
  *                                                 GitHub, read-only and complete, or throws
+ *   commitDigestAt(sha) -> sha256 of the commit object, or null
  *   developHead() -> sha                          develop's head, read-only
  *   clone(baseSha) -> { root, trackedPaths, fsPorts, applies(patch) -> bool, dispose() }
  *   model({ system, userContent, readFile }) -> SessionOutcome
@@ -104,11 +123,19 @@ export async function runRunnerCycle(ports) {
 
   // The observation comes first and every round: an unbound pull request or
   // branch halts everything, and is recorded before anything starts.
+  // The app's records are read on both sides of GitHub's, and judged only if
+  // they did not move between: a publish that lands in the gap is not taken
+  // for an unbound branch.
   const known = await ports.app("observe/known", {});
-  if (known.status !== 200 || !Array.isArray(known.json?.runIds) || !Array.isArray(known.json?.prNumbers)) {
+  if (known.status !== 200 || !knownShape(known.json)) {
     return { finishedNormally: false, halt: "unknown", reason: "observation_unreadable" };
   }
-  const observed = observeUnbound({ ...(await ports.namespace()), known: known.json });
+  const namespace = await ports.namespace();
+  const knownAfter = await ports.app("observe/known", {});
+  if (knownAfter.status !== 200 || JSON.stringify(knownAfter.json) !== JSON.stringify(known.json)) {
+    return { finishedNormally: false, halt: "unknown", reason: "observation_raced" };
+  }
+  const observed = await observeUnbound({ ...namespace, known: known.json, commitDigestAt: ports.commitDigestAt });
   if (observed !== "none") {
     const recorded = await ports.app("observe/halt", { halt: observed });
     return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };

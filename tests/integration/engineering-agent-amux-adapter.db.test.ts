@@ -128,6 +128,32 @@ before(async () => {
 });
 
 after(async () => {
+  // AMUX recovery in these tests ends every expired attempt, not only a test's
+  // own, so other fixtures' runs are left active under ended attempts. The
+  // fixture plays the person once more: every such run is opened as a
+  // mismatch, ended as abandoned and resolved, and the halts these tests
+  // recorded are acknowledged -- the next file starts from no halt.
+  while ((await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx))) > 0) {
+    // the sweep takes a bounded batch per call
+  }
+  const open = await prisma.engineeringAgentWorkItem.findMany({
+    where: { kind: "state_mismatch", state: "open" },
+    select: { id: true, run: { select: { id: true, status: true, amuxAttemptId: true } } },
+  });
+  for (const item of open) {
+    if (item.run?.status === "active") {
+      await runEngineeringAgentTransaction(prisma, (tx) =>
+        endEngineeringAgentRun(tx, { runId: item.run!.id, amuxAttemptId: item.run!.amuxAttemptId, outcome: "abandoned", halt: "none" }),
+      );
+    }
+    await prisma.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "resolved" } });
+  }
+  const acknowledgedAt = new Date(Date.now() + 1_000).toISOString();
+  await prisma.appSetting.upsert({
+    where: { key: "engineeringAgent.haltAcknowledgedAt" },
+    create: { key: "engineeringAgent.haltAcknowledgedAt", value: acknowledgedAt },
+    update: { value: acknowledgedAt },
+  });
   await prisma.appSetting.deleteMany({ where: { key: INCIDENT_KEY } });
   if (previousIncident) {
     await prisma.appSetting.create({
