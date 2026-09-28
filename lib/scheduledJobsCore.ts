@@ -69,6 +69,10 @@ export const CRON_TRIGGERS = {
     railwayService: "Provider Usage Sync",
     trigger: { kind: "dailyUtc", hour: 0, minute: 30 },
   },
+  marketingPublisher: {
+    railwayService: "Marketing Publisher",
+    trigger: { kind: "everyMinutes", minutes: 5 },
+  },
 } as const satisfies Record<
   string,
   { railwayService: string; trigger: CronTrigger }
@@ -281,7 +285,22 @@ export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
  */
 export const MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY = "mobile_auth_keyring_health" as const;
 
-export const PENDING_SCHEDULED_JOB_KEYS = [MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY] as const;
+/**
+ *   * `marketing_publisher` -- the Railway service is declared in
+ *     .railway/scheduled-jobs.ts, but it exists only once an operator sets its
+ *     two variables and applies that file, which is an operator step (S2 plan,
+ *     S2d1 prerequisites). Until then nothing starts a run, and judging it
+ *     would report a job nobody has switched on as delayed. Promote it when the
+ *     first real run has been recorded. Its own silence rule -- a run that
+ *     started and went quiet -- lives in lib/infrastructureThresholdMonitor.ts
+ *     and applies from the first run regardless.
+ */
+export const MARKETING_PUBLISHER_JOB_KEY = "marketing_publisher" as const;
+
+export const PENDING_SCHEDULED_JOB_KEYS = [
+  MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY,
+  MARKETING_PUBLISHER_JOB_KEY,
+] as const;
 
 export type PendingScheduledJobKey = (typeof PENDING_SCHEDULED_JOB_KEYS)[number];
 

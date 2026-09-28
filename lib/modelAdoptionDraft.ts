@@ -50,8 +50,10 @@ import {
   buildPricingProfileProposal,
   docEvidenceIsFresh,
   docPricePrefill,
+  docProblemWithholdsPrice,
   type DocEvidenceSource,
   type DocPriceRefusal,
+  type ProviderModelDocFields,
   type ProviderModelDocParse,
   type ProviderModelDocProvider,
 } from "@/lib/providerModelDocsCore";
@@ -211,6 +213,113 @@ export const isCreditFloor = (
 ): value is CreditFloor => "usageClass" in value;
 
 /**
+ * Gemini 3.5 Flash-Lite, sold at one standard credit.
+ *
+ * The worst accepted turn at the published Standard rates and the published
+ * 65,536 output cap is US$0.20224. One standard credit covers US$0.12 of that
+ * turn (1 × the 128,000-token multiplier 3 × 40,000 micro-USD). Approved by
+ * Tommy on 2026-09-28 for this shape only. The ceiling constant does not move.
+ * docs/policy/credit-and-cost-limits.md records the gap.
+ *
+ * `reviewBy` is an inclusive UTC day. The next UTC midnight refuses again, and
+ * moving that date is a code change. A checkbox is the operator's
+ * acknowledgement of this id, not a bypass: the body still has to be this
+ * provider, one of these api models, this class, this weight, these rates and
+ * this cap.
+ *
+ * `gemini-flash-lite-latest` is Google's unversioned alias for the current
+ * Flash-Lite release. Tommy added it on 2026-09-28. The alias can move; this
+ * exception does not. A later release at a different price or cap is refused.
+ */
+export const GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION = {
+  id: "gemini-3.5-flash-lite-standard-2026-09-28",
+  provider: "google",
+  apiModels: ["gemini-3.5-flash-lite", "gemini-flash-lite-latest"] as const,
+  usageClass: "standard",
+  creditWeight: 1,
+  inputUsdPerMillionTokens: 0.3,
+  outputUsdPerMillionTokens: 2.5,
+  cachedInputPriceMultiplier: 0.1,
+  maxOutputTokens: 65_536,
+  reviewBy: "2026-12-27",
+} as const;
+
+export type CreditFloorExceptionVerdict =
+  | "not_applicable"
+  | "needs_acknowledgement"
+  | "accepted"
+  | "expired";
+
+const sameFiniteNumber = (value: number | null | undefined, expected: number) =>
+  typeof value === "number" && Number.isFinite(value) && value === expected;
+
+const flashLiteStandardShapeMatches = (input: {
+  provider: string;
+  apiModel: string;
+  usageClass: string;
+  creditWeight: number;
+  inputUsdPerMillionTokens: number | null;
+  outputUsdPerMillionTokens: number | null;
+  cachedInputPriceMultiplier: number | null;
+  maxOutputTokens: number | null;
+}) => {
+  const rule = GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION;
+  return (
+    input.provider.trim().toLowerCase() === rule.provider &&
+    (rule.apiModels as readonly string[]).includes(input.apiModel.trim()) &&
+    input.usageClass === rule.usageClass &&
+    input.creditWeight === rule.creditWeight &&
+    sameFiniteNumber(input.inputUsdPerMillionTokens, rule.inputUsdPerMillionTokens) &&
+    sameFiniteNumber(input.outputUsdPerMillionTokens, rule.outputUsdPerMillionTokens) &&
+    sameFiniteNumber(input.cachedInputPriceMultiplier, rule.cachedInputPriceMultiplier) &&
+    sameFiniteNumber(input.maxOutputTokens, rule.maxOutputTokens)
+  );
+};
+
+/** The exception id when the body is this shape, otherwise null. Date and acknowledgement are separate. */
+export const creditFloorExceptionShapeKey = (input: {
+  provider: string;
+  apiModel: string;
+  usageClass: string;
+  creditWeight: number;
+  inputUsdPerMillionTokens: number | null;
+  outputUsdPerMillionTokens: number | null;
+  cachedInputPriceMultiplier: number | null;
+  maxOutputTokens: number | null;
+}): string | null =>
+  flashLiteStandardShapeMatches(input)
+    ? `${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id}:${input.apiModel.trim()}`
+    : null;
+
+/**
+ * Whether this adoption may sell below the floor.
+ *
+ * Anything that is not the named shape is `not_applicable` and the floor
+ * stands, including another model at the same list prices. The named shape
+ * past `reviewBy` is `expired` even when the acknowledgement is present.
+ */
+export const creditFloorExceptionVerdict = (input: {
+  provider: string;
+  apiModel: string;
+  usageClass: string;
+  creditWeight: number;
+  inputUsdPerMillionTokens: number | null;
+  outputUsdPerMillionTokens: number | null;
+  cachedInputPriceMultiplier: number | null;
+  maxOutputTokens: number | null;
+  acknowledgement: string | null;
+  now?: Date;
+}): CreditFloorExceptionVerdict => {
+  if (!flashLiteStandardShapeMatches(input)) return "not_applicable";
+  const rule = GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION;
+  const reviewEndsAt = Date.parse(`${rule.reviewBy}T00:00:00.000Z`) + 86_400_000;
+  const now = input.now ?? new Date();
+  if (!Number.isFinite(reviewEndsAt) || now.getTime() >= reviewEndsAt) return "expired";
+  if (input.acknowledgement === rule.id) return "accepted";
+  return "needs_acknowledgement";
+};
+
+/**
  * Why an adoption save must not be sent yet, or null when it may.
  *
  * The dialog covers the page, and a disabled button there has no click, so
@@ -227,7 +336,8 @@ export type AdoptionSaveBlock =
   | "above_every_class"
   | "output_cap_unknown"
   | "prices_unknown"
-  | "credits_below_floor";
+  | "credits_below_floor"
+  | "credit_floor_exception_expired";
 
 export const adoptionSaveBlock = (input: {
   reason: string;
@@ -240,6 +350,11 @@ export const adoptionSaveBlock = (input: {
   priceConfirmed: boolean;
   creditWeight: number;
   floor: CreditFloor | CreditFloorRefusal;
+  /**
+   * Set when the form is the named under-floor exception. Omitted means the
+   * floor stands. `accepted` is the only value that may save below it.
+   */
+  floorException?: CreditFloorExceptionVerdict;
 }): AdoptionSaveBlock | null => {
   if (input.reason.trim().length < 4) return "reason_too_short";
   if (!input.classChosen) return "class_unconfirmed";
@@ -252,7 +367,11 @@ export const adoptionSaveBlock = (input: {
       if (input.floor.reason === "output_cap_unknown") return "output_cap_unknown";
       return "prices_unknown";
     }
-    if (input.creditWeight < input.floor.credits) return "credits_below_floor";
+    if (input.creditWeight < input.floor.credits) {
+      const exception = input.floorException ?? "not_applicable";
+      if (exception === "expired") return "credit_floor_exception_expired";
+      if (exception !== "accepted") return "credits_below_floor";
+    }
   }
   return null;
 };
@@ -484,6 +603,97 @@ const DOC_PRICE_REFUSAL_TEXT: Record<Exclude<DocPriceRefusal, "profile_covers">,
     "문서의 가격이 프로모션 가격이라 채우지 않았습니다. 기간이 끝나면 바뀌는 가격을 고정 override로 넣지 않습니다.",
 };
 
+export type AdoptionPriceBand = {
+  inputUsdPerMillionTokens: number;
+  outputUsdPerMillionTokens: number;
+  cachedInputUsdPerMillionTokens: number | null;
+  cacheWriteUsdPerMillionTokens: number | null;
+};
+
+export type AdoptionPriceView =
+  | { shape: "inherited" }
+  | { shape: "flat" }
+  | { shape: "unset" }
+  /**
+   * The page describes two bands, but the numbers are not safe to display:
+   * a promotion, a parse problem, or a missing rate. The columns stay empty
+   * and out of the default inputs, and no band table is shown.
+   */
+  | { shape: "withheld" }
+  | {
+      shape: "tiered";
+      thresholdTokens: number;
+      inputMultiplier: number;
+      outputMultiplier: number;
+      short: AdoptionPriceBand;
+      long: AdoptionPriceBand;
+    };
+
+const publishedPrice = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+
+const publishedCachePrice = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+
+const scaledPrice = (value: number, factor: number) =>
+  Math.round(value * factor * 1_000_000) / 1_000_000;
+
+/**
+ * The price the dialog may show without inviting a one-number override.
+ *
+ * A profile already on the model is inherited by empty columns. A documented
+ * two-band price is shown as those two bands only when the parse trusts it;
+ * the columns still save empty. A promotion, a price problem, or a missing
+ * rate on a two-band page is `withheld`: no table, and the boxes are not the
+ * default input. A documented single rate is the one case the columns can hold.
+ */
+export const adoptionPriceView = (input: {
+  hasPricingProfile: boolean;
+  doc: ProviderModelDocFields | null;
+  problems?: readonly string[];
+}): AdoptionPriceView => {
+  if (input.hasPricingProfile) return { shape: "inherited" };
+  const doc = input.doc;
+  if (!doc) return { shape: "unset" };
+  const priceWithheld =
+    Boolean(doc.promotional) || (input.problems ?? []).some(docProblemWithholdsPrice);
+  if (doc.longContext.kind === "tiered" && priceWithheld) return { shape: "withheld" };
+  if (priceWithheld) return { shape: "unset" };
+  const inputUsd = publishedPrice(doc.inputUsdPerMillionTokens);
+  const outputUsd = publishedPrice(doc.outputUsdPerMillionTokens);
+  if (doc.longContext.kind === "tiered" && (inputUsd === null || outputUsd === null)) {
+    return { shape: "withheld" };
+  }
+  if (inputUsd === null || outputUsd === null) return { shape: "unset" };
+  if (doc.longContext.kind === "flat") return { shape: "flat" };
+  if (doc.longContext.kind !== "tiered") return { shape: "unset" };
+  const { thresholdTokens, inputMultiplier, outputMultiplier, cacheTakesInputMultiplier } =
+    doc.longContext;
+  const cacheFactor = cacheTakesInputMultiplier ? inputMultiplier : 1;
+  const cached = publishedCachePrice(doc.cachedInputUsdPerMillionTokens);
+  const cacheWrite = publishedCachePrice(doc.cacheWriteUsdPerMillionTokens);
+  const short: AdoptionPriceBand = {
+    inputUsdPerMillionTokens: inputUsd,
+    outputUsdPerMillionTokens: outputUsd,
+    cachedInputUsdPerMillionTokens: cached,
+    cacheWriteUsdPerMillionTokens: cacheWrite,
+  };
+  return {
+    shape: "tiered",
+    thresholdTokens,
+    inputMultiplier,
+    outputMultiplier,
+    short,
+    long: {
+      inputUsdPerMillionTokens: scaledPrice(inputUsd, inputMultiplier),
+      outputUsdPerMillionTokens: scaledPrice(outputUsd, outputMultiplier),
+      cachedInputUsdPerMillionTokens: cached === null ? null : scaledPrice(cached, cacheFactor),
+      cacheWriteUsdPerMillionTokens:
+        cacheWrite === null ? null : scaledPrice(cacheWrite, cacheFactor),
+    },
+  };
+};
+
 export type ModelAdoptionDraft = {
   /**
    * Prefilled registry fields.
@@ -562,6 +772,15 @@ export type ModelAdoptionDraft = {
    * registry's columns cannot hold. Never applied by anything.
    */
   pricingProfileProposal: string | null;
+  /**
+   * How the price boxes should present themselves.
+   *
+   * `inherited` and `tiered` are not empty inputs waiting for a number: a
+   * number saved in those columns replaces every band. `flat` is the one
+   * shape those two boxes can hold. `unset` is a price the documentation did
+   * not give, so the boxes stay the place a person types one rate.
+   */
+  priceView: AdoptionPriceView;
   /** Fields a person still has to answer, in the words the panel shows. */
   unknowns: string[];
   /** Values already settled, in the words the panel shows. */
@@ -881,6 +1100,12 @@ export const buildAdoptionDraft = (input: {
     sources,
     unknowns,
     notes,
+    priceView: adoptionPriceView({
+      hasPricingProfile: Boolean(input.hasPricingProfile),
+      doc,
+      problems:
+        input.docEvidence?.parse?.status === "parsed" ? input.docEvidence.parse.problems : [],
+    }),
   };
 };
 
@@ -932,7 +1157,7 @@ export const adoptionReplacementRefusal = (input: {
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
   } | null;
-}): { status: 400 | 409; message: string } | null => {
+}): { status: 400 | 409; message: string; code?: string } | null => {
   if (!input.replacesModelId) return null;
   if (input.replacesModelId === input.adoptedModelId) {
     return { status: 400, message: "A model cannot replace itself." };
@@ -952,12 +1177,14 @@ export const adoptionReplacementRefusal = (input: {
   if (input.predecessor.isApplicationDefault) {
     return {
       status: 409,
+      code: "APPLICATION_FALLBACK_PROTECTED",
       message: "The application fallback model must remain enabled and Guest-accessible.",
     };
   }
   if (input.predecessor.isGuestDefault) {
     return {
       status: 409,
+      code: "GUEST_LEAD_PROTECTED",
       message:
         "Change the Guest default model in Platform Settings before disabling or restricting this model.",
     };
@@ -994,6 +1221,7 @@ export const adoptionPreflightRefusal = (input: {
     creditWeight: number;
     inputUsdPerMillionTokens?: number | null;
     outputUsdPerMillionTokens?: number | null;
+    cachedInputPriceMultiplier?: number | null;
     maxOutputTokens?: number | null;
   };
   /** The exact pairs a scan has seen, from the item's own sightings. */
@@ -1041,6 +1269,15 @@ export const adoptionPreflightRefusal = (input: {
   inputPriceMultiplier?: number;
   /** A profile registered under the saved id for a different provider or api model. */
   profileForOtherPair?: { provider: string; apiModelId: string } | null;
+  /**
+   * The operator's acknowledgement of one named under-floor exception.
+   *
+   * A query parameter, compared to that exception's id. Any other string,
+   * including a bare "true", leaves the floor in place.
+   */
+  creditFloorExceptionAck?: string | null;
+  /** Clock for the exception's review date. Tests pass it; the route uses now. */
+  now?: Date;
 }): { status: number; message: string } | null => {
   const { workItem } = input;
   if (!workItem) return { status: 404, message: "No such work item." };
@@ -1185,10 +1422,37 @@ export const adoptionPreflightRefusal = (input: {
     };
   }
   if (input.body.creditWeight < floor.credits) {
-    return {
-      status: 409,
-      message: `At this price the worst accepted turn costs US$${(floor.worstCaseMicroUsd / 1_000_000).toFixed(3)}, which needs at least ${floor.credits} credits (${floor.usageClass}). This entry sells it for ${input.body.creditWeight}.`,
-    };
+    const verdict = creditFloorExceptionVerdict({
+      provider: input.body.provider,
+      apiModel: input.body.apiModel,
+      usageClass: input.body.usageClass,
+      creditWeight: input.body.creditWeight,
+      inputUsdPerMillionTokens:
+        input.body.inputUsdPerMillionTokens ??
+        input.profilePrice?.inputUsdPerMillionTokens ??
+        null,
+      outputUsdPerMillionTokens:
+        input.body.outputUsdPerMillionTokens ??
+        input.profilePrice?.outputUsdPerMillionTokens ??
+        null,
+      cachedInputPriceMultiplier: input.body.cachedInputPriceMultiplier ?? null,
+      maxOutputTokens:
+        input.body.maxOutputTokens ?? input.profilePrice?.maxOutputTokens ?? null,
+      acknowledgement: input.creditFloorExceptionAck ?? null,
+      now: input.now,
+    });
+    if (verdict !== "accepted") {
+      if (verdict === "expired") {
+        return {
+          status: 409,
+          message: `The standard-credit exception for ${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.apiModels.join(" and ")} ended after ${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.reviewBy} UTC. This price needs at least ${floor.credits} credits (${floor.usageClass}).`,
+        };
+      }
+      return {
+        status: 409,
+        message: `At this price the worst accepted turn costs US$${(floor.worstCaseMicroUsd / 1_000_000).toFixed(3)}, which needs at least ${floor.credits} credits (${floor.usageClass}). This entry sells it for ${input.body.creditWeight}.`,
+      };
+    }
   }
   return null;
 };

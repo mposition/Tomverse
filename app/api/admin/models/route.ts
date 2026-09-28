@@ -31,8 +31,12 @@ import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
+  creditFloorExceptionVerdict,
+  GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION,
 } from "@/lib/modelAdoptionDraft";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { getModel, type AiModel } from "@/lib/models";
+import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 import {
   getModelPricingProfile,
   PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
@@ -40,11 +44,14 @@ import {
 } from "@/lib/modelPricing";
 import { providerReportedUnservable } from "@/lib/providerModelCatalogCore";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
-import type { AiModel } from "@/lib/models";
 
 const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number]) => ({
   ...model,
   environment: validateProviderConfiguration(model),
+  // Booleans only. The platform checklist asks whether a code catalogue entry
+  // and a pricing profile exist. The USD table stays in this server module.
+  hasPricingProfile: Boolean(getModelPricingProfile(model.id)),
+  inCodeCatalog: Boolean(getModel(model.id)),
 });
 
 /**
@@ -57,12 +64,35 @@ const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number])
  */
 class AdoptionRefused extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(message: string, status = 409) {
+  constructor(message: string, status = 409, code?: string) {
     super(message);
     this.name = "AdoptionRefused";
     this.status = status;
+    this.code = code;
   }
+}
+
+async function predecessorForReplacement(
+  db: Prisma.TransactionClient | typeof prisma,
+  replacesModelId: string
+) {
+  const [predecessor, lead] = await Promise.all([
+    db.modelRegistryEntry.findUnique({
+      where: { id: replacesModelId },
+      select: { catalogDeleted: true, replacementModelId: true, provider: true },
+    }),
+    readGuestLeadFacts(db),
+  ]);
+  if (!predecessor) return null;
+  return {
+    catalogDeleted: predecessor.catalogDeleted,
+    replacementModelId: predecessor.replacementModelId,
+    provider: predecessor.provider,
+    isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
+    isGuestDefault: lead.effective === replacesModelId,
+  };
 }
 
 const WORK_ITEM_ADOPTION_SELECT = {
@@ -141,6 +171,11 @@ const readAdoptionContext = async (
      * it answers about a world the write is not in.
      */
     tx?: Prisma.TransactionClient;
+    /**
+     * The acknowledgement query parameter. Both preflights have to see it, or
+     * the door accepts an exception the till then refuses.
+     */
+    creditFloorExceptionAck?: string | null;
   }
 ): Promise<Parameters<typeof adoptionPreflightRefusal>[0]> => {
   const client = options?.tx ?? prisma;
@@ -205,6 +240,7 @@ const readAdoptionContext = async (
     worstCaseInputTokens,
     inputPriceMultiplier:
       body.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+    creditFloorExceptionAck: options?.creditFloorExceptionAck ?? null,
   };
 };
 
@@ -218,13 +254,15 @@ export async function GET(req: Request) {
       minute: 60,
       day: 1500,
     });
-    const [models, securityFindings] = await Promise.all([
+    const [models, securityFindings, guestLead] = await Promise.all([
       getRuntimeModels({ includeCatalogDeleted: true }),
       getModelRegistrySecurityFindings(),
+      readGuestLeadFacts(),
     ]);
     return NextResponse.json({
       models: models.map(adminModel),
       securityFindings,
+      guestLead,
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
@@ -287,6 +325,11 @@ export async function POST(req: Request) {
     // `replacementModelId` and is disabled in the same transaction as the
     // create. Absent on an ordinary adoption.
     const replacesModelId = url.searchParams.get("replacesModelId")?.trim() || null;
+    // Named under-floor exception. Kept out of the registry body so `.strict()`
+    // stays the registry contract. Compared to the exception id, not treated as
+    // a boolean.
+    const creditFloorExceptionAck =
+      url.searchParams.get("creditFloorExceptionAck")?.trim() || null;
     if (replacesModelId && !workItemId) {
       return NextResponse.json(
         { error: "Choosing a model to replace is part of adopting a discovered model." },
@@ -294,39 +337,23 @@ export async function POST(req: Request) {
       );
     }
     if (replacesModelId) {
-      const [predecessor, guestDefault] = await Promise.all([
-        prisma.modelRegistryEntry.findUnique({
-          where: { id: replacesModelId },
-          select: { catalogDeleted: true, replacementModelId: true, provider: true },
-        }),
-        prisma.appSetting.findUnique({
-          where: { key: "guestDefaultModelId" },
-          select: { value: true },
-        }),
-      ]);
       const replacementRefusal = adoptionReplacementRefusal({
         adoptedModelId: id,
         adoptedProvider: body.provider,
         replacesModelId,
-        predecessor: predecessor
-          ? {
-              catalogDeleted: predecessor.catalogDeleted,
-              replacementModelId: predecessor.replacementModelId,
-              provider: predecessor.provider,
-              isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
-              isGuestDefault: guestDefault?.value === replacesModelId,
-            }
-          : null,
+        predecessor: await predecessorForReplacement(prisma, replacesModelId),
       });
       if (replacementRefusal) {
         return NextResponse.json(
-          { error: replacementRefusal.message },
+          { error: replacementRefusal.message, code: replacementRefusal.code },
           { status: replacementRefusal.status }
         );
       }
     }
 
-    const adoptionContext = workItemId ? await readAdoptionContext(workItemId, body) : null;
+    const adoptionContext = workItemId
+      ? await readAdoptionContext(workItemId, body, { creditFloorExceptionAck })
+      : null;
     const adoptionRefusal = adoptionContext
       ? adoptionPreflightRefusal(adoptionContext)
       : null;
@@ -346,6 +373,27 @@ export async function POST(req: Request) {
         status: body.status,
         workItemId,
         ...(replacesModelId ? { replacesModelId } : {}),
+        ...(adoptionContext &&
+        creditFloorExceptionVerdict({
+          provider: body.provider,
+          apiModel: body.apiModel,
+          usageClass: body.usageClass,
+          creditWeight: body.creditWeight,
+          inputUsdPerMillionTokens:
+            body.inputUsdPerMillionTokens ??
+            adoptionContext.profilePrice?.inputUsdPerMillionTokens ??
+            null,
+          outputUsdPerMillionTokens:
+            body.outputUsdPerMillionTokens ??
+            adoptionContext.profilePrice?.outputUsdPerMillionTokens ??
+            null,
+          cachedInputPriceMultiplier: body.cachedInputPriceMultiplier ?? null,
+          maxOutputTokens:
+            body.maxOutputTokens ?? adoptionContext.profilePrice?.maxOutputTokens ?? null,
+          acknowledgement: creditFloorExceptionAck,
+        }) === "accepted"
+          ? { creditFloorException: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+          : {}),
       },
     });
     let adoptedTo: string | null = null;
@@ -419,7 +467,11 @@ export async function POST(req: Request) {
         `);
         const workItem = locked[0] ?? null;
         const refusal = adoptionPreflightRefusal(
-          await readAdoptionContext(workItemId, body, { workItem, tx })
+          await readAdoptionContext(workItemId, body, {
+            workItem,
+            tx,
+            creditFloorExceptionAck,
+          })
         );
         if (refusal) throw new AdoptionRefused(refusal.message);
       }
@@ -430,30 +482,18 @@ export async function POST(req: Request) {
         await tx.$queryRaw`
           SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ${replacesModelId} FOR UPDATE
         `;
-        const predecessor = await tx.modelRegistryEntry.findUnique({
-          where: { id: replacesModelId },
-          select: { catalogDeleted: true, replacementModelId: true, provider: true },
-        });
-        const guestDefault = await tx.appSetting.findUnique({
-          where: { key: "guestDefaultModelId" },
-          select: { value: true },
-        });
         const replacementRefusal = adoptionReplacementRefusal({
           adoptedModelId: id,
           adoptedProvider: body.provider,
           replacesModelId,
-          predecessor: predecessor
-            ? {
-                catalogDeleted: predecessor.catalogDeleted,
-                replacementModelId: predecessor.replacementModelId,
-                provider: predecessor.provider,
-                isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
-                isGuestDefault: guestDefault?.value === replacesModelId,
-              }
-            : null,
+          predecessor: await predecessorForReplacement(tx, replacesModelId),
         });
         if (replacementRefusal) {
-          throw new AdoptionRefused(replacementRefusal.message, replacementRefusal.status);
+          throw new AdoptionRefused(
+            replacementRefusal.message,
+            replacementRefusal.status,
+            replacementRefusal.code
+          );
         }
       }
 
@@ -592,7 +632,10 @@ export async function POST(req: Request) {
     if (error instanceof AdoptionRefused) {
       // The registry row went back with it. Reporting the queue's own words
       // rather than a generic failure: the refusal names which rule stopped it.
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
     }
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json({ error: "That model ID already exists." }, { status: 409 });

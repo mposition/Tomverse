@@ -948,7 +948,7 @@ workspace 열거를 "import 되는 package만"으로 바꾸거나, package를 wo
 
 | 남은 것 | 막는 것 | 누가 |
 |---|---|---|
-| exploration 켜기 (D-3) | `allocateWithinTie`는 tie 안에서만 배분하므로 품질/비용 trade는 필요 없지만, **어느 모델이 답하는지가 바뀝니다.** 켜는 것은 제품 결정입니다. | 소유자 |
+| exploration 켜기 (D-3) | 제품 결정은 2026-09-28. 코드는 `lib/autoExploration.ts`에 연결됐고 기본은 꺼짐이다 (§14.42). staging에서 같은 대화의 모델 고정과 크레딧 가격 불일치를 확인하기 전에는 완료로 세지 않는다. softmax는 계속 꺼져 있다. | 소유자 (staging 확인) |
 | PACKAGE-01 재승인 | 세 번째 package가 새 사실입니다. `npm run check:shared-packages`가 셋 모두에 통과하는 것이 기계적 절반입니다. | 소유자 |
 | Privacy 페이지 공급자별 데이터 이동 고지 (F-2) | 공급자 계약 조사 결과. `lib/providerDataDestinations.ts`의 12개 공급자가 전부 `unproven`이고, `providerDestinationIsEstablished()`가 fail-closed입니다. | 소유자 (조사 중) |
 | §8.1 cutover 선행조건 2·4·5 | 1번(probe·attempt의 grain 컬럼)은 `13af0bcfe`에서 완료. 2번은 deployment별 canary이고 A-5 배포 이후에 착수 가능합니다. 4번은 계측을 켠 뒤의 시간 조건이고, 5번은 그 표본 위의 규칙입니다. | 혼합 |
@@ -1757,6 +1757,28 @@ workspace 테이블은 없다. `lib/routingPinGate.ts`가 적는다. ADR의 work
 세 `RoutingAttempt`는 `succeeded`다. dispatch 시각이 있고, manifest는 `finalized`이며 요청 hash가 있다. 입력 토큰은 모두 53이고, 출력 토큰은 635, 733, 734다. run은 `manual`, `only_candidate`다. 대화 id와 사용자 크레딧 예약은 없다. 9월 24일 attempt는 `pending` 그대로다. 소급하지 않는다.
 
 플래그를 끄고 기존 경로로 돌아가는 운영 관측은 없다. 그 분기는 기존 테스트가 고정하고, 플래그는 끄지 않았다. §14.40이 완료 수를 붙잡아 둔 증거는 attempt가 닫히는 다음 호출이었고, 그 증거는 이 세 건이다. 활성화 한 단위만 센다. 완료 수는 **47 / 약 50, 약 94%(추정)**다. 직전은 46, 약 92%(추정)였다. 검증·독립 검토·병합·배포는 별도다. §14.26과 §14.32의 보류는 그대로다.
+
+## 14.42 Auto 동점 배분 (2026-09-28, 기본 꺼짐)
+
+소유자가 D-3를 켰다. 배분은 `allocateWithinTie`이고, 범위는 어휘순 동점 가운데 이번 턴의 청구 크레딧이 정렬상 첫 후보와 같은 모델뿐이다. 내부 원가 5% 동점은 그 필터를 통과하지 못한다. seed는 대화 id이고 기록의 seed 단위는 `session`이다. 대화 id가 없으면 seed를 넘기지 않아 정렬상 첫 후보가 답한다. request seed는 없다. softmax는 호출하지 않는다.
+
+Auto로 라우팅된 턴만 이 함수를 탄다. 사용자가 고른 모델은 그대로다. 답한 모델은 기존 Auto 배지로 보인다. 사용자 문구에는 배분, 확률, 버킷, 코호트를 넣지 않는다.
+
+flag는 `feature.autoExplorationEnabled`이고 저장된 값이 정확히 `true`일 때만 켜진다. `AUTO_EXPLORATION_KILL_SWITCH`가 비어 있지 않으면 저장값과 관계없이 꺼진다. 둘 다 서버가 판정한다. 꺼지면 다음 턴의 해시는 돌지 않고, 대화의 `selectionMode`와 과거 `RoutingRun`은 고치지 않는다. 해시를 쓴 턴이 기억으로 남기는 모델은 해시 결과가 아니라 그때의 결정적 선택이다. 그래서 flag를 끄면 다음 완료 턴은 정렬상 첫 후보(또는 그 결정적 경로가 이미 잡고 있던 sticky)로 돌아간다.
+
+라우팅된 턴의 `RoutingRun.allocationMode`는 `deterministic` 또는 `explore_bounded`다. `explore_bounded`의 `allocationSeedGrain`은 `session`이다. 수동 턴과 shadow run은 두 칸 모두 null이다. null을 `deterministic`으로 읽지 않는다.
+
+staging에서 확인할 것은 둘이다. 같은 대화의 여러 턴이 같은 모델에 머무는지, 크레딧 가격이 다른 후보가 배분되지 않는지. 그 확인 전에 production flag를 켜지 않는다. 이 절은 완료 수를 올리지 않는다. 완료 수는 **47 / 약 50, 약 94%(추정)** 그대로다.
+
+## 14.43 스트림이 생기기 전에 실패한 attempt (2026-09-28)
+
+§14.40이 닫지 않은 경로다. `streamPinnedInference`가 스트림 객체를 돌려주기 전에 throw하면 `onError`는 실행되지 않는다. 그 attempt는 `recordNotDispatched`로 `not_dispatched`가 된다. `pending`으로 남지 않는다. 예외는 다시 던져서, 호출이 시작된 뒤의 hold는 기존과 같이 `unknown`으로 예약을 유지한다. `started: false`로 돌아오면 예약이 풀리므로 그 반환은 쓰지 않는다.
+
+9월 24일 `pending` 행은 소급하지 않는다. 수정 전 정산 19 micro-USD도 고치지 않는다. 이 코드를 넣는 시점에는 플래그를 끄지 않았다. 그 뒤의 끄기는 §14.44다. §14.26과 §14.32의 보류는 그대로다. 이 절은 새 단위가 아니다. 완료 수는 **47 / 약 50, 약 94%(추정)** 그대로다.
+
+## 14.44 플래그를 끈 뒤 (2026-09-28)
+
+소유자가 기존 경로로 돌아가는 운영 관측을 위해 플래그를 끄라고 했다. production의 채팅 서비스에서 `PINNED_DEPLOYMENT_EXECUTION`은 `off`다. 그 값으로 시작한 배포가 살아 있고, 직전 배포는 빠지는 중이다. 플래그가 꺼진 뒤 그 계정의 채팅 요청은 아직 없다. 요청을 보내지 않았다. 완료 수는 **47 / 약 50, 약 94%(추정)** 그대로다.
 
 ## 15. 되돌릴 수 없는 것
 

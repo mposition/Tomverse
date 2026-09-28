@@ -1,8 +1,9 @@
 /**
  * How a candidate was picked, and what the pick was seeded on.
  *
- * Dark. Both columns exist on `RoutingRun`, nothing writes them, and
- * `npm run check:dark-tables` holds that.
+ * `RoutingRun` stores both columns. Auto's product path is the writer, and
+ * only for a turn it actually routed. `npm run check:dark-tables` names that
+ * writer. A manual turn and a shadow run leave both null.
  *
  * ## Why this is not `RoutingRun.mode`
  *

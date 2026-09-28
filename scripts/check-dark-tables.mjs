@@ -58,38 +58,50 @@ const LIMITED_DARK_WRITERS = {
 
 
 /**
- * Columns on a table that is *not* dark, which nothing may read or write yet.
+ * Columns on a table that is *not* dark, which a request must not use unless
+ * this list names the file.
  *
  * Three tables here are live and written on ordinary requests -- `RoutingRun`
  * every shadow run, `ProviderProbeResult` every probe cycle, `RoutingAttempt`
  * whenever instrumentation is on -- and some of their columns are not. The
  * table rule cannot cover those, so they are named.
  *
- * Each entry carries the files that may name it. `allocationMode` and
- * `allocationSeedGrain` are distinctive enough that any occurrence is a use;
- * `providerEndpointId` and `modelDeploymentId` are ordinary foreign key names
- * that three dark tables already spell in their own vocabulary modules, which
- * is why the exemption is per column and per file rather than one list. A file
- * not named here that writes one of these is what this stops.
+ * `allocationMode` and `allocationSeedGrain` are written by the Auto
+ * exploration path listed in their exempt arrays. Every other dark column
+ * here is still unread. `providerEndpointId` and `modelDeploymentId` are
+ * ordinary foreign key names that three dark tables already spell in their
+ * own vocabulary modules, which is why the exemption is per column and per
+ * file rather than one list. A file not named here that spells one of these
+ * is what this stops.
  *
  * What a name scan cannot see, and this does not claim to: a Prisma read with
- * no `select` returns every scalar, so `scripts/verify-fallback-drill.mjs` and
- * the `create` in `lib/routingDispatchInstrumentation.ts` both receive columns
- * without naming them. Neither reads the values and every value is null, so
- * nothing is decided on them -- but this guards against a use being written,
- * not against a row reaching a caller. An identifier built by concatenation is
- * invisible to it for the same reason.
+ * no `select` returns every scalar, so a caller can receive a dark column
+ * without naming it. This guards against a use being written, not against a
+ * row reaching a caller. An identifier built by concatenation is invisible
+ * to it for the same reason.
  */
 const DARK_COLUMNS = [
     {
         column: "allocationMode",
         on: "RoutingRun",
-        exempt: ["lib/routingAllocation.ts"],
+        exempt: [
+            "lib/routingAllocation.ts",
+            "lib/autoExploration.ts",
+            "lib/autoModelSelection.ts",
+            "lib/routerDecision.ts",
+            "lib/routingDispatchInstrumentation.ts",
+        ],
     },
     {
         column: "allocationSeedGrain",
         on: "RoutingRun",
-        exempt: ["lib/routingAllocation.ts"],
+        exempt: [
+            "lib/routingAllocation.ts",
+            "lib/autoExploration.ts",
+            "lib/autoModelSelection.ts",
+            "lib/routerDecision.ts",
+            "lib/routingDispatchInstrumentation.ts",
+        ],
     },
     // The versions frozen when a request starts. The module names them
     // because it is the value those columns will store. It does not write

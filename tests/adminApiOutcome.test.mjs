@@ -196,11 +196,16 @@ test("the retention panel offers the sign-in its 428 notice asks for", () => {
 
 test("the settings write is audited under a name that covers what it writes", () => {
     const route = readFileSync("app/api/admin/app-settings/route.ts", "utf8");
-    // One handler writes eight settings in one transaction. Naming the
-    // completion after one of them misled an auditor twice on 2026-08-23:
-    // past the feature-flag change they were looking for, and into reading a
-    // guest-default change that had not happened.
-    assert.match(route, /action: "app_settings\.update_started"/);
-    assert.match(route, /action: "app_settings\.update_completed"/);
-    assert.doesNotMatch(route, /action: "app_settings\.guest_default_model\.updated"/);
+    // A combined write keeps the broad action. Naming one handler after only
+    // the guest default misled an auditor twice on 2026-08-23: past the
+    // feature-flag change they were looking for, and into reading a
+    // guest-default change that had not happened. A lead-only or flags-only
+    // write names only that write, so the broad summary is not the lie either.
+    assert.match(route, /startedAction: "app_settings\.update_started"/);
+    assert.match(route, /completedAction: "app_settings\.update_completed"/);
+    assert.match(route, /startedAction: "app_settings\.guest_default_model\.update_started"/);
+    assert.match(route, /completedAction: "app_settings\.guest_default_model\.update_completed"/);
+    assert.match(route, /startedAction: "app_settings\.feature_flags\.update_started"/);
+    assert.match(route, /completedAction: "app_settings\.feature_flags\.update_completed"/);
+    assert.doesNotMatch(route, /app_settings\.guest_default_model\.updated/);
 });

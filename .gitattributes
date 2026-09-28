@@ -81,3 +81,9 @@ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 # review bytes without changing the rest of lib/, tests/, or nested docs.
 /lib/promptRefinerShadowAdmissionCore.ts text eol=lf
 /tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf
+
+# The approved consent copy and the test that holds it to the record must be
+# byte-identical on every platform: the test reads the document, and a CRLF
+# checkout used to fail three of its comparisons on Windows.
+docs/policy/email-consent-copy-draft.md text eol=lf
+tests/emailConsentCopy.test.mjs text eol=lf

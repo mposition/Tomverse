@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { updateModelRegistrySchema, registryInputToData, validateProviderConfiguration } from "@/lib/modelRegistryAdmin";
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 
 type ModelRouteContext = { params: Promise<{ modelId: string }> };
 
@@ -49,12 +50,9 @@ export async function PATCH(
         { status: 409 }
       );
     }
-    const guestDefault = await prisma.appSetting.findUnique({
-      where: { key: "guestDefaultModelId" },
-      select: { value: true },
-    });
+    const guestLead = await readGuestLeadFacts();
     if (
-      guestDefault?.value === modelId &&
+      guestLead.effective === modelId &&
       (body.status !== "enabled" ||
         body.minimumPlan !== "Guest" ||
         body.usageClass !== "standard")
@@ -153,11 +151,8 @@ export async function DELETE(
         { status: 409 }
       );
     }
-    const guestDefault = await prisma.appSetting.findUnique({
-      where: { key: "guestDefaultModelId" },
-      select: { value: true },
-    });
-    if (guestDefault?.value === modelId) {
+    const guestLead = await readGuestLeadFacts();
+    if (guestLead.effective === modelId) {
       return NextResponse.json(
         { error: "Change the Guest default model in Platform Settings before removing this model." },
         { status: 409 }

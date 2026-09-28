@@ -1,13 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
-import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import {
+  assessFallbackTransition,
+  describeGuestDefault,
+  fallbackTransitionRequestText,
+} from "@/lib/defaultModelConsole";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -38,6 +43,7 @@ type AdminAppSettingsResponse = {
   memoryExtractionEnabled?: boolean;
   memoryInjectionEnabled?: boolean;
   memoryApprovedPairCount?: number;
+  guestLead?: { stored: string | null; effective: string | null };
   error?: string;
 };
 
@@ -104,6 +110,8 @@ type Props = {
    * switches whose position explains nothing.
    */
   memoryApprovedPairCount: number;
+  /** Raw AppSetting value. Null when the row has never been saved. */
+  storedGuestDefaultModelId?: string | null;
 };
 
 export function PlatformSettingsPanel({
@@ -118,6 +126,7 @@ export function PlatformSettingsPanel({
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
+  storedGuestDefaultModelId = null,
 }: Props) {
   const m = useAdminMessages(adminPlatformSettingsMessages);
   const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
@@ -136,6 +145,29 @@ export function PlatformSettingsPanel({
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );
+  const [storedGuestLead, setStoredGuestLead] = useState<string | null>(
+    storedGuestDefaultModelId
+  );
+  const [leadError, setLeadError] = useState<string | null>(null);
+  const [leadSaving, setLeadSaving] = useState(false);
+  const [candidateId, setCandidateId] = useState("");
+  const [registryLoaded, setRegistryLoaded] = useState(false);
+  const [registryModels, setRegistryModels] = useState<
+    Array<{
+      id: string;
+      name: string;
+      provider: string;
+      enabled: boolean;
+      publiclyListed: boolean;
+      catalogDeleted: boolean;
+      status: string;
+      minimumPlan: string;
+      usageClass: string;
+      creditWeight: number;
+      hasPricingProfile?: boolean;
+      inCodeCatalog?: boolean;
+    }>
+  >([]);
   const [aiChatEnabled, setAiChatEnabled] = useState(settings.aiChatEnabled);
   const [attachmentsEnabled, setAttachmentsEnabled] = useState(settings.attachmentsEnabled);
   const [publicSharingEnabled, setPublicSharingEnabled] = useState(settings.publicSharingEnabled);
@@ -245,7 +277,15 @@ export function PlatformSettingsPanel({
   const selectedModel =
     guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
 
-  const applySettings = (
+  const touchSyncedAt = () => setLastSyncedAt(new Date().toLocaleTimeString());
+
+  const applyLeadSettings = (nextSettings: PublicAppSettings) => {
+    setGuestDefaultModelId(nextSettings.guestDefaultModelId);
+    setLeadError(null);
+    touchSyncedAt();
+  };
+
+  const applyOperationalSettings = (
     nextSettings: PublicAppSettings,
     nextImageGenerationEnabled?: boolean,
     nextExternalImportEnabled?: boolean,
@@ -254,7 +294,6 @@ export function PlatformSettingsPanel({
     nextAssistantKnowledgeEnabled?: boolean,
     nextChatStarterEnabled?: boolean
   ) => {
-    setGuestDefaultModelId(nextSettings.guestDefaultModelId);
     setAiChatEnabled(nextSettings.aiChatEnabled);
     setAttachmentsEnabled(nextSettings.attachmentsEnabled);
     setPublicSharingEnabled(nextSettings.publicSharingEnabled);
@@ -276,7 +315,28 @@ export function PlatformSettingsPanel({
     if (typeof nextChatStarterEnabled === "boolean") {
       setChatStarterEnabled(nextChatStarterEnabled);
     }
-    setLastSyncedAt(new Date().toLocaleTimeString());
+    touchSyncedAt();
+  };
+
+  const applySettings = (
+    nextSettings: PublicAppSettings,
+    nextImageGenerationEnabled?: boolean,
+    nextExternalImportEnabled?: boolean,
+    nextExternalContinuationEnabled?: boolean,
+    nextAssistantProfilesEnabled?: boolean,
+    nextAssistantKnowledgeEnabled?: boolean,
+    nextChatStarterEnabled?: boolean
+  ) => {
+    applyLeadSettings(nextSettings);
+    applyOperationalSettings(
+      nextSettings,
+      nextImageGenerationEnabled,
+      nextExternalImportEnabled,
+      nextExternalContinuationEnabled,
+      nextAssistantProfilesEnabled,
+      nextAssistantKnowledgeEnabled,
+      nextChatStarterEnabled
+    );
   };
 
   /**
@@ -325,6 +385,7 @@ export function PlatformSettingsPanel({
         data.chatStarterEnabled
       );
       applyMemoryStatus(data);
+      if (data.guestLead) setStoredGuestLead(data.guestLead.stored);
       dispatchAppToast(m.toast.reloaded, "success");
     } catch {
       dispatchAppToast(m.toast.reloadFailed, "error");
@@ -341,7 +402,6 @@ export function PlatformSettingsPanel({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          guestDefaultModelId,
           aiChatEnabled,
           attachmentsEnabled,
           publicSharingEnabled,
@@ -383,7 +443,7 @@ export function PlatformSettingsPanel({
         );
         return;
       }
-      applySettings(
+      applyOperationalSettings(
         data.settings,
         data.imageGenerationEnabled,
         data.externalConversationImportEnabled,
@@ -401,6 +461,88 @@ export function PlatformSettingsPanel({
       setIsSaving(false);
     }
   };
+
+  const saveLead = async () => {
+    if (isLoading || isSaving || leadSaving || reauthenticationRequired) return;
+    setLeadSaving(true);
+    setLeadError(null);
+    try {
+      const response = await fetch("/api/admin/app-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestDefaultModelId }),
+      });
+      const data = (await response.json().catch(() => null)) as AdminAppSettingsResponse | null;
+      if (response.status === 428) {
+        setReauthenticationRequired(true);
+        dispatchAppToast(m.toast.saveNeedsSignIn, "error");
+        return;
+      }
+      if (!response.ok || !data?.settings) {
+        setLeadError(data?.error || m.toast.leadNotSaved);
+        dispatchAppToast(m.toast.leadNotSaved, "error");
+        return;
+      }
+      applyLeadSettings(data.settings);
+      setStoredGuestLead(data.guestLead?.stored ?? data.settings.guestDefaultModelId);
+      dispatchAppToast(m.toast.leadSaved, "success");
+    } catch {
+      setLeadError(m.toast.sendFailed);
+      dispatchAppToast(m.toast.sendFailed, "error");
+    } finally {
+      setLeadSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/admin/models", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { models?: typeof registryModels }) => {
+        if (!cancelled && Array.isArray(data?.models)) setRegistryModels(data.models);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setRegistryLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const guestEligibility = createGuestEligibilityCheck((id) =>
+    models.find((model) => model.id === id)
+  );
+  const guestDescription = describeGuestDefault({
+    storedLead: storedGuestLead,
+    isEligible: guestEligibility,
+  });
+  const leadInList = guestModels.some((model) => model.id === guestDefaultModelId);
+  const labelFor = (id: string) =>
+    registryModels.find((model) => model.id === id)?.name ||
+    models.find((model) => model.id === id)?.name ||
+    id;
+  const fallbackRow =
+    registryModels.find((model) => model.id === APP_DEFAULTS.defaultModelId) ||
+    models.find((model) => model.id === APP_DEFAULTS.defaultModelId);
+  const candidate = registryModels.find((model) => model.id === candidateId) ?? null;
+  const transitionChecks = candidate
+    ? assessFallbackTransition({
+        candidate,
+        inCodeCatalog: Boolean(candidate.inCodeCatalog),
+        hasPricingProfile: Boolean(candidate.hasPricingProfile),
+        fallbackCreditWeight: fallbackRow?.creditWeight ?? 1,
+      })
+    : [];
+  const outsideTrio = registryModels.filter(
+    (model) =>
+      model.enabled &&
+      model.publiclyListed &&
+      !model.catalogDeleted &&
+      model.minimumPlan === "Guest" &&
+      model.usageClass === "standard" &&
+      !(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(model.id)
+  );
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
@@ -702,39 +844,174 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                {m.guestDefault.eyebrow}
-              </p>
-              <h3 className="mt-2 text-xl font-black text-white">
-                {m.guestDefault.title}
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                {m.guestDefault.description}
-              </p>
+        <div id="default-models" className="grid gap-5 xl:col-span-2">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
+              {m.decisions.eyebrow}
+            </p>
+            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.title}</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{m.decisions.subtitle}</p>
+          </div>
 
-              <label className="mt-5 block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  {m.guestDefault.leadingEngine}
-                </span>
-                <select
-                  value={guestDefaultModelId}
-                  onChange={(event) => setGuestDefaultModelId(event.target.value)}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                >
-                  {guestModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name} - {model.provider}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5" data-testid="admin-fallback-card">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">{m.decisions.fallbackBadge}</p>
+            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.fallbackTitle}</h3>
+            <p className="mt-3 font-mono text-sm font-bold text-white">
+              {m.decisions.fallbackCurrent(
+                fallbackRow?.name || APP_DEFAULTS.defaultModelId,
+                APP_DEFAULTS.defaultModelId,
+                fallbackRow?.provider || "openai"
+              )}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">{m.decisions.fallbackApplies}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.fallbackDoesNot}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">{m.decisions.fallbackProtection}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.fallbackHow}</p>
+            <div className="mt-5 rounded-xl border border-zinc-800 p-4">
+              <p className="text-sm font-bold text-white">{m.decisions.checkTitle}</p>
+              {registryLoaded && registryModels.filter((model) => model.id !== APP_DEFAULTS.defaultModelId && !model.catalogDeleted).length === 0 ? (
+                <p className="mt-2 text-sm text-zinc-400">{m.decisions.checkEmpty}</p>
+              ) : (
+                <>
+                  <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                    {m.decisions.checkCandidate}
+                    <select
+                      value={candidateId}
+                      onChange={(event) => setCandidateId(event.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold normal-case tracking-normal text-white"
+                      data-testid="admin-fallback-candidate"
+                    >
+                      <option value="">{m.decisions.checkCandidate}</option>
+                      {registryModels
+                        .filter((model) => model.id !== APP_DEFAULTS.defaultModelId && !model.catalogDeleted)
+                        .map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.name} ({model.id})
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {candidate ? (
+                    <ul className="mt-3 grid gap-1 text-sm text-zinc-300">
+                      {transitionChecks.map((check) => (
+                        <li key={check.id}>
+                          {check.pass ? m.decisions.pass : m.decisions.fail} · {m.decisions.checks[check.id]}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={!candidate}
+                    data-testid="admin-fallback-copy"
+                    onClick={() => {
+                      if (!candidate) return;
+                      const text = fallbackTransitionRequestText({
+                        candidateId: candidate.id,
+                        checks: transitionChecks,
+                      });
+                      void navigator.clipboard?.writeText(text).then(
+                        () => dispatchAppToast(m.toast.copyDoesNotApply, "success"),
+                        () => dispatchAppToast(m.toast.copyFailed, "error")
+                      );
+                    }}
+                    className="mt-3 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
+                  >
+                    {m.decisions.checkCopy}
+                  </button>
+                </>
+              )}
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
+            <div className="flex items-start gap-4">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
+                <Bot className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
+                  {m.guestDefault.eyebrow}
+                </p>
+                <h3 className="mt-2 text-xl font-black text-white">
+                  {m.guestDefault.title}
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+                  {m.guestDefault.description}
+                </p>
+                <p className="mt-3 text-sm text-zinc-300">{m.guestDefault.trioFixed(GUEST_BRAND_TRIO_MODEL_IDS.join(", "))}</p>
+                <p className="mt-1 text-sm text-zinc-300">{m.guestDefault.visibleOrder(guestDescription.visibleIds.map(labelFor).join(", "))}</p>
+                {guestDescription.storedNotApplied && storedGuestLead && guestDescription.effectiveLeadId ? (
+                  <p className="mt-2 text-sm font-bold text-amber-200">
+                    {m.guestDefault.storedNotApplied(storedGuestLead, guestDescription.effectiveLeadId)}
+                  </p>
+                ) : null}
+                {guestDescription.ineligibleTrioIds.map((id, index) => {
+                  const substituteId = guestDescription.substituteIds[index];
+                  if (!substituteId) return null;
+                  return (
+                    <p key={id} className="mt-2 text-sm text-amber-200">
+                      {m.guestDefault.substituted(labelFor(id), labelFor(substituteId))}{" "}
+                      <Link href={`/admin/models?q=${encodeURIComponent(id)}`} className="font-bold text-white underline">
+                        {labelFor(id)}
+                      </Link>
+                    </p>
+                  );
+                })}
+                {outsideTrio.map((model) => (
+                  <p key={model.id} className="mt-2 text-sm text-zinc-400">
+                    {m.guestDefault.outsideTrio(model.name, model.id)}
+                  </p>
+                ))}
+
+                <label className="mt-5 block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                    {m.guestDefault.leadingEngine}
+                  </span>
+                  <select
+                    value={leadInList ? guestDefaultModelId : ""}
+                    disabled={guestModels.length === 0 || leadSaving}
+                    onChange={(event) => {
+                      setLeadError(null);
+                      setGuestDefaultModelId(event.target.value);
+                    }}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
+                  >
+                    {guestModels.length === 0 || !leadInList ? (
+                      <option value="">{m.guestDefault.noEligible}</option>
+                    ) : null}
+                    {guestModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {model.provider}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {leadError ? (
+                  <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lead-error">
+                    {leadError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void saveLead()}
+                  disabled={leadSaving || guestModels.length === 0 || !leadInList}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-4 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
+                >
+                  {leadSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {m.guestDefault.saveLead}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5" data-testid="admin-account-default-card">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">{m.decisions.accountBadge}</p>
+            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.accountTitle}</h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.accountBody}</p>
+            <Link href="/admin/analytics" className="mt-3 inline-block text-sm font-bold text-white underline">
+              {m.decisions.accountLink}
+            </Link>
           </div>
         </div>
 

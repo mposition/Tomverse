@@ -1,15 +1,14 @@
 // Where each provider takes personal data, and whether we can say so.
 //
-// A report, not a gate. Every active provider is `unproven` today, so a gate
-// would refuse the whole catalogue on its first run and be switched off the
-// same afternoon -- the position `report:model-credit-weights` is in, and for
-// the same reason: the difference between what is recorded and what is true is
-// a thing to look at before it is a thing to enforce.
+// A report, not a gate. Every enrolled row is proven today. The report stays
+// a report: a provider added later without a reviewed row is an enrolment
+// miss the test already names, and refusing live traffic for it would be a
+// separate decision. The position is the one `report:model-credit-weights`
+// holds, and for the same reason: the difference between what is recorded
+// and what is true is a thing to look at before it is a thing to enforce.
 //
-// It becomes a gate when the owner's contract review has supplied destinations
-// to hold. Until then the number worth watching is how many rows a notice
-// could print -- the only rows a residency approval may be made on. Serving a
-// constrained request is decided by that approval, not here. Today it is zero.
+// The number worth watching is how many rows a notice could print. Serving a
+// constrained request is decided by an approval in force, not here.
 //
 // Exits non-zero on two conditions, both claims rather than gaps: a row that
 // calls itself proven without what a notice would print, and a row of any

@@ -140,6 +140,14 @@ const READ_ONLY_KEYS = {
       "VOICE_INPUT_KILL_SWITCH is an environment variable, so it also works " +
       "when the database is the thing that is unwell.",
   },
+  AUTO_EXPLORATION_FLAG_KEY: {
+    reason:
+      "Turning this on changes which model answers a tied Auto turn. Staging " +
+      "has to show that one conversation stays on one model and that a " +
+      "different credit price stays out of the spread before the row is " +
+      "written. There is no admin toggle. Stopping is " +
+      "AUTO_EXPLORATION_KILL_SWITCH, which needs no database write.",
+  },
   PROMPT_REFINER_FLAG_KEY: {
     reason:
       "Prompt Refiner activation requires an approved paid adapter, fixed " +

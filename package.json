@@ -111,6 +111,7 @@
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "maintenance:provider-model-docs": "node --conditions=react-server --import tsx scripts/run-provider-model-doc-evidence.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
+    "maintenance:marketing-publisher": "node scripts/run-marketing-publisher.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
     "maintenance:pinned-deployment-execution": "node --conditions=react-server --import tsx scripts/run-pinned-deployment-execution.mjs",
     "generate:marketing-admission-code": "node scripts/generate-marketing-admission-code-manifest.mjs",
@@ -152,6 +153,7 @@
     "check:voice-provider-budget-env": "node --import tsx scripts/check-voice-provider-budget-env.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
     "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
+    "check:consent-copy-immutability": "node scripts/check-consent-copy-immutability.mjs",
     "check:staging-verification-records": "node scripts/check-staging-verification-records.mjs",
     "new:staging-verification-record": "node scripts/new-staging-verification-record.mjs",
     "make:assistant-package-staging-fixtures": "node --import tsx scripts/make-assistant-package-staging-fixtures.mjs",
@@ -171,6 +173,7 @@
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
     "report:existing-account-jurisdiction": "node --conditions=react-server --import tsx scripts/report-existing-account-jurisdiction.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
+    "report:engineering-agent-tiers": "node --conditions=react-server --import tsx scripts/report-engineering-agent-tiers.mjs",
     "score:voice-mix-eval": "node --import tsx scripts/score-voice-mix-eval.mjs",
     "report:prompt-cache-usage": "node --import tsx scripts/report-prompt-cache-usage.mjs",
     "report:continuation-seed": "node --import tsx scripts/report-continuation-seed.mjs",
@@ -312,16 +315,16 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^22.20.3",
+    "@types/node": "^22.20.4",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "^6",
-    "vite": "^8.3.0"
+    "vite": "^8.3.1"
   },
   "overrides": {
     "@eslint/config-array": {

@@ -104,20 +104,63 @@ export const adminModelRegistryMessages = defineAdminMessages({
       draftFailed:
         "Could not load the draft for the chosen provider, model and ID. Check the provider's values and enter them yourself.",
       draftReloading: "Loading the draft again for the chosen provider, model and ID.",
-      profileProposalTitle: "lib/modelPricing.ts profile proposal — review, then register it in a PR",
+      profileProposalTitle:
+        "Saving this form adds the model. The two rates do not fit in the price boxes, so those boxes stay empty and the save is refused until a pricing profile exists. Copy only moves the profile draft.",
+      tieredSaveRefused:
+        "These columns cannot hold two rates, so they stay empty and this save is refused until a pricing profile exists.",
+      tieredPriceLead: (threshold: string) =>
+        `Two published rates. The first row applies at or under ${threshold} input tokens, and the second row above that. These price boxes stay empty.`,
+      inheritedPriceLead:
+        "A pricing profile already covers this model. Leave the price boxes empty so that profile applies. A number saved here replaces it.",
+      priceOverrideSummary: "Replace the published rates with one number",
+      tieredOverrideWarning:
+        "The number you save here is charged for every prompt, including prompts above the threshold.",
+      inheritedOverrideWarning:
+        "The number you save here replaces the pricing profile, including any later change to that profile.",
+      bandShort: "At or under the threshold",
+      bandLong: "Above the threshold",
+      bandInput: "Input / 1M",
+      bandCached: "Cached input / 1M",
+      bandCacheWrite: "Cache write / 1M",
+      bandOutput: "Output / 1M",
       copyProposal: "Copy",
       proposalCopied: "Copied the profile proposal.",
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
       replaceTitle: "Replace an existing model",
       replaceHelp:
-        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The form opens the new model as coming soon and unlisted; set its runtime status and public listing before saving if it should be offered.",
+        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The form opens the new model as coming soon and unlisted; set its runtime status and public listing before saving if it should be offered. The application fallback and the guest leading model cannot be replaced here.",
       replaceLabel: "Model to replace",
       replaceNone: "Do not replace a model",
+      replaceFallback: " · application fallback · cannot replace",
+      replaceGuestLead: " · guest lead · change the lead in Platform settings first",
+      fallbackGuidance: (name: string, id: string) =>
+        `${name} (${id}) is the application fallback for new accounts, so it cannot be replaced here. Save the new model with “Do not replace a model”. Moving the default is a separate decision.`,
+      guestLeadWarning: (name: string) =>
+        `${name} is the guest leading model. Change that lead in Platform settings before replacing it.`,
+      trioWarning: (name: string, substitute: string) =>
+        `Turning off ${name} shows ${substitute} to guests in its place. Changing the guest trio is a code change.`,
+      successorStatus: (status: string, listing: string) =>
+        `New model: ${status} · ${listing}`,
+      unlisted: "unlisted",
+      fallbackProtected: (id: string) =>
+        `Not saved. ${id} is the application fallback, so this save cannot turn it off. What you entered is still here. Save with “Do not replace a model”, or read the transition under Platform settings, Default models.`,
+      guestLeadProtected: (id: string) =>
+        `Not saved. ${id} is the guest leading model. What you entered is still here. Choose “Do not replace a model”, or change the lead in Platform settings first.`,
+      openDefaultModels: "Platform settings · Default models",
+      roleFallback: "App fallback",
+      roleGuestLead: "Guest lead",
+      roleGuestTrio: "Guest trio",
+      fallbackLocked:
+        "This row is the application fallback. Runtime status, minimum plan, usage class, and removal stay as they are. Moving the fallback is a reviewed code change, described on Platform settings.",
       replaceRequired: "Choose the model this adoption replaces, or save without replacing one.",
       saveRefused: "Not saved.",
       reasonTooShort: "Write an adoption reason of at least 4 characters. That sentence is what the approval record keeps.",
       creditsBelowFloor: (credits: number, usageClass: string) =>
         `This price needs at least ${credits} credits (${usageClass}). The weight on this form is lower.`,
+      flashLiteStandardException:
+        "Save gemini-flash-lite-latest or gemini-3.5-flash-lite at the published Standard rates (US$0.30 in, cache multiplier 0.1, US$2.50 out, 65,536 output tokens) for 1 standard credit. This exception is only those two ids, and it ends after 2026-12-27 UTC.",
+      flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
+        `The 1-credit exception for Gemini 3.5 Flash-Lite ended after 2026-12-27 UTC. This price needs at least ${credits} credits (${usageClass}).`,
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -310,20 +353,63 @@ export const adminModelRegistryMessages = defineAdminMessages({
       draftFailed:
         "선택한 공급자·모델·ID의 초안을 불러오지 못했습니다. 공급자가 제공한 값을 직접 확인해 입력하세요.",
       draftReloading: "선택한 공급자·모델·ID에 대한 초안을 다시 불러오는 중입니다.",
-      profileProposalTitle: "lib/modelPricing.ts profile 제안 — 검토 후 PR로 등록",
+      profileProposalTitle:
+        "모델은 이 화면의 저장으로 추가됩니다. 두 구간은 가격 칸에 들어가지 않아 칸은 비워 두고, 가격 profile이 없으면 저장은 거절됩니다. 복사는 그 profile 초안만 옮깁니다.",
+      tieredSaveRefused:
+        "두 구간은 이 칸에 들어가지 않습니다. 칸은 비워 두고, 가격 profile이 없으면 저장은 거절됩니다.",
+      tieredPriceLead: (threshold: string) =>
+        `공개된 가격이 두 구간입니다. 입력 토큰 ${threshold} 이하는 첫 행, 그 위는 둘째 행입니다. 가격 칸은 비워 둡니다.`,
+      inheritedPriceLead:
+        "이 모델은 가격 profile이 있습니다. 가격 칸을 비우면 그 profile이 적용됩니다. 숫자를 저장하면 profile을 대체합니다.",
+      priceOverrideSummary: "공개 가격을 숫자 하나로 덮어쓰기",
+      tieredOverrideWarning:
+        "여기에 저장한 숫자는 임계값을 넘는 요청까지 모두 그 가격으로 청구됩니다.",
+      inheritedOverrideWarning:
+        "여기에 저장한 숫자는 가격 profile을 대체하고, 이후 profile이 바뀌어도 따라가지 않습니다.",
+      bandShort: "임계값 이하",
+      bandLong: "임계값 초과",
+      bandInput: "입력 / 1M",
+      bandCached: "캐시 입력 / 1M",
+      bandCacheWrite: "캐시 쓰기 / 1M",
+      bandOutput: "출력 / 1M",
       copyProposal: "복사",
       proposalCopied: "Profile 제안을 복사했습니다.",
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       replaceTitle: "기존 모델 대체",
       replaceHelp:
-        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 출시 예정·비공개로 열리며, 제공하려면 저장 전에 런타임 상태와 공개 목록을 바꾸세요.",
+        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 출시 예정·비공개로 열리며, 제공하려면 저장 전에 런타임 상태와 공개 목록을 바꾸세요. 앱 fallback과 게스트 선두 모델은 여기서 대체할 수 없습니다.",
       replaceLabel: "대체할 모델",
       replaceNone: "대체하지 않음",
+      replaceFallback: " · 앱 fallback · 대체 불가",
+      replaceGuestLead: " · 게스트 선두 · 먼저 플랫폼 설정에서 선두 변경",
+      fallbackGuidance: (name: string, id: string) =>
+        `${name} (${id})는 신규 계정 기본 모델(앱 fallback)이라 여기서 대체할 수 없습니다. 새 모델은 “대체하지 않음”으로 저장하세요. 기본 모델을 옮기는 일은 모델 채택과 별개의 결정입니다.`,
+      guestLeadWarning: (name: string) =>
+        `${name}은 게스트 선두 모델입니다. 대체하기 전에 플랫폼 설정에서 선두를 바꾸세요.`,
+      trioWarning: (name: string, substitute: string) =>
+        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 게스트 3종 변경은 코드 변경입니다.`,
+      successorStatus: (status: string, listing: string) =>
+        `새 모델: ${status} · ${listing}`,
+      unlisted: "비공개",
+      fallbackProtected: (id: string) =>
+        `저장하지 않았습니다. ${id}는 앱 fallback이라 이 저장에서 끌 수 없습니다. 입력한 내용은 그대로 있습니다. “대체하지 않음”으로 바꿔 저장하거나, 기본 모델 전환 절차는 플랫폼 설정 · 기본 모델에서 확인하세요.`,
+      guestLeadProtected: (id: string) =>
+        `저장하지 않았습니다. ${id}는 게스트 선두 모델입니다. 입력한 내용은 그대로 있습니다. “대체하지 않음”을 고르거나, 먼저 플랫폼 설정에서 선두를 바꾸세요.`,
+      openDefaultModels: "플랫폼 설정 · 기본 모델",
+      roleFallback: "앱 fallback",
+      roleGuestLead: "게스트 선두",
+      roleGuestTrio: "게스트 3종",
+      fallbackLocked:
+        "이 행은 앱 fallback입니다. 런타임 상태, 최소 플랜, 사용 등급, 제거는 그대로 둡니다. fallback을 옮기는 일은 검토를 거치는 코드 변경이며, 절차는 플랫폼 설정에 있습니다.",
       replaceRequired: "대체할 모델을 고르거나, 대체 없이 저장하세요.",
       saveRefused: "저장하지 않았습니다.",
       reasonTooShort: "채택 사유를 4자 이상 적어야 저장됩니다. 이 문장이 승인 기록에 남습니다.",
       creditsBelowFloor: (credits: number, usageClass: string) =>
         `이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다. 폼의 가중치가 그보다 낮습니다.`,
+      flashLiteStandardException:
+        "gemini-flash-lite-latest 또는 gemini-3.5-flash-lite를 공개된 Standard 가격(입력 US$0.30, 캐시 입력 배수 0.1, 출력 US$2.50, 출력 상한 65,536)으로 standard 1크레딧에 저장합니다. 이 예외는 이 두 ID뿐이며, 2026-12-27(UTC)이 지나면 끝납니다.",
+      flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
+        `Gemini 3.5 Flash-Lite의 1크레딧 예외는 2026-12-27(UTC)에 끝났습니다. 이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다.`,
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",
