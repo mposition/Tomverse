@@ -42,6 +42,8 @@ type World = {
   startThrows: Error | null;
   heartbeatThrows: Error | null;
   heartbeat: { beat: true } | { beat: false; reason: "not_running" | "past_deadline" };
+  /** What the database says the time is, when a test needs it to differ. */
+  databaseNow: Date | null;
   closed: Closed;
   closeThrows: Error | null;
   closeCalls: { status: string; error?: string }[];
@@ -54,6 +56,7 @@ const world: World = {
   startThrows: null,
   heartbeatThrows: null,
   heartbeat: { beat: true },
+  databaseNow: null,
   closed: { status: "succeeded" },
   closeThrows: null,
   closeCalls: [],
@@ -66,6 +69,7 @@ const resetWorld = () => {
   world.startThrows = null;
   world.heartbeatThrows = null;
   world.heartbeat = { beat: true };
+  world.databaseNow = null;
   world.closed = { status: "succeeded" };
   world.closeThrows = null;
   world.closeCalls = [];
@@ -82,6 +86,12 @@ const loadRoute = () => {
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
     mock.module(mod("lib/marketingPublisherRun.ts"), {
       namedExports: {
+        // The route reads the database clock to judge the deadline window, so the
+        // window and the trigger measure lateness with the same clock. The fake
+        // answers with a controllable instant; `databaseNow` lets a test make the
+        // database disagree with this process, which is the skew the real fix is
+        // about.
+        marketingPublisherDatabaseNow: async () => world.databaseNow ?? new Date(),
         startMarketingPublisherRun: async () => {
           if (world.startThrows) throw world.startThrows;
           return world.start;
@@ -331,4 +341,64 @@ test("a close that also fails after a refused heartbeat still answers", async ()
   assert.equal(status, 500);
   assert.equal(body.code, "heartbeat_past_deadline");
   assert.equal(body.status, "not_running");
+});
+
+test("the deadline window is judged on the database's clock, not this process's", async () => {
+  resetWorld();
+  // The skew independent review named: the service and the route agree with each
+  // other and are both ahead of PostgreSQL. A deadline four minutes out by their
+  // reckoning is further out by the database's, so for that difference the
+  // supervisor has already killed the worker while the database still thinks the
+  // run is punctual -- and a close asking for `succeeded` is not refused. Reading
+  // the deciding clock makes the window mean what it says.
+  //
+  // Here the database is an hour behind, so a deadline four minutes ahead of
+  // *this* process is over an hour ahead of the database: beyond one cron period,
+  // and refused.
+  world.databaseNow = new Date(Date.now() - 60 * 60_000);
+
+  const { status, body } = await post();
+
+  assert.equal(status, 400);
+  assert.equal(body.code, "deadline_too_far");
+  assert.deepEqual(world.closeCalls, [], "no row is opened for a deadline we refuse");
+});
+
+test("a database clock that cannot be read is not guessed at", async () => {
+  resetWorld();
+  // Failing closed: a window this route cannot measure is one it must not accept,
+  // because the trigger will measure it with the clock we could not read.
+  const { POST } = await loadRoute();
+  world.databaseNow = null;
+  const previous = world.startThrows;
+  world.startThrows = previous;
+  // Make the clock read itself fail by pointing the fake at a getter that throws.
+  Object.defineProperty(world, "databaseNow", {
+    configurable: true,
+    get() {
+      throw new Error("no connection");
+    },
+  });
+  const response = await POST(
+    new Request("https://example.test/api/internal/marketing-publisher", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        runId: randomUUID(),
+        deadline: new Date(Date.now() + 4 * 60_000).toISOString(),
+      }),
+    }),
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 503);
+  assert.equal(body.code, "database_clock_unavailable");
+  // Restore an ordinary property so later tests are unaffected.
+  Object.defineProperty(world, "databaseNow", {
+    configurable: true,
+    writable: true,
+    value: null,
+  });
 });

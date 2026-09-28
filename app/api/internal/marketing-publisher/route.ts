@@ -11,6 +11,7 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationA
 import { resolveMarketingPublishAdapter } from "@/lib/marketingPublishAdapter";
 import {
   finishMarketingPublisherRun,
+  marketingPublisherDatabaseNow,
   heartbeatMarketingPublisherRun,
   startMarketingPublisherRun,
 } from "@/lib/marketingPublisherRun";
@@ -72,8 +73,22 @@ export async function POST(request: Request) {
   const runId = parsed.data.runId;
   const deadlineAt = new Date(parsed.data.deadline);
 
+  // **The clock that decides lateness is the one that judges the window.**
+  // Reading it costs one query and removes a class of reasoning: with the
+  // process clock here and the database clock in the trigger, skew made the
+  // four-minute bound mean four minutes plus the skew.
+  let databaseNow: Date;
+  try {
+    databaseNow = await marketingPublisherDatabaseNow(prisma);
+  } catch (error) {
+    console.error("Marketing publisher could not read the database clock:", error);
+    return NextResponse.json(
+      { runId, code: "database_clock_unavailable" },
+      { status: 503 },
+    );
+  }
   const problem = marketingPublisherDeadlineProblem(
-    new Date(),
+    databaseNow,
     deadlineAt,
     MARKETING_PUBLISHER_TIMING,
   );

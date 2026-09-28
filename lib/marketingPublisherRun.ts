@@ -101,6 +101,32 @@ export type MarketingPublisherRunStartResult =
  * without doing the work twice. The same id with a different deadline, or for a
  * run that has closed, is refused: it is either a bug or a replay.
  */
+/**
+ * The database clock, for a caller that has to compare against it.
+ *
+ * The route judged its deadline window with the process clock while the trigger
+ * judges lateness with this one. If the service and the route are both ahead of
+ * PostgreSQL by some delta, a deadline four minutes out by their reckoning is
+ * delta plus four minutes out by the database s -- so for that delta the
+ * supervisor has already killed the worker while the database still considers the
+ * run punctual, and a close asking for `succeeded` is not refused. The four
+ * minutes then means whatever the skew makes it mean.
+ *
+ * One read, and the window becomes a statement about the clock that decides.
+ */
+export async function marketingPublisherDatabaseNow(
+  client: PrismaClient,
+): Promise<Date> {
+  const rows = await client.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = rows[0]?.now;
+  if (!now) {
+    throw new Error("The database clock did not return a timestamp");
+  }
+  return now;
+}
+
 export async function startMarketingPublisherRun(
   client: PrismaClient,
   input: MarketingPublisherRunStart,

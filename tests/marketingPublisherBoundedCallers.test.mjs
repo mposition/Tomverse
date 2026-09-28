@@ -260,18 +260,34 @@ const imports = (tree) => {
 /**
  * Why this module can obtain a Prisma client, or null when it cannot.
  *
- * Transitive over first-party imports, and memoised. A cycle is treated as
- * client-free on the second visit: whatever a cycle can reach, some file in it
- * reaches directly, and that file answers for it.
+ * Transitive over imports and re-exports, and memoised.
+ *
+ * **A cycle used to produce a cached lie.** The second visit returned "no route"
+ * and the comment claimed that whatever a cycle can reach, some file in it
+ * reaches directly, so that file answers for it. The code did not do that: the
+ * cycle's own `null` was cached for the file whose traversal had not finished.
+ * With `a` importing `b` then `c`, `b` importing only `a`, and `c` importing the
+ * client, walking `a` fixed `b` at "no route" -- and then `a` itself resolved as
+ * reaching the client through `c`. Anything importing `b` was allowed, and `b`
+ * can call through `a`. Review pointed out that this is **ordinary import
+ * order**, not one of the adversarial shapes the header sets aside.
+ *
+ * So a traversal that met a cycle now answers `unknown`, `unknown` propagates,
+ * and it is never cached. Unknown is then treated as reaching a client, for the
+ * same reason an unresolvable edge is: a route this check cannot rule out is not
+ * a route it may allow.
  */
+const CYCLE = Symbol("cycle");
+
 const clientReach = (() => {
   const cache = new Map();
   const visiting = new Set();
-  return function reach(path) {
+  const walk = (path) => {
     if (cache.has(path)) return cache.get(path);
-    if (visiting.has(path)) return null;
+    if (visiting.has(path)) return CYCLE;
     visiting.add(path);
     let answer = null;
+    let sawCycle = false;
     const file = repoPath(path);
     const source = readFileSync(path, "utf8");
     const tree = parse(path, source);
@@ -284,7 +300,11 @@ const clientReach = (() => {
     if (!answer) {
       eachNode(tree, (node) => {
         if (answer) return;
-        if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "PrismaClient") {
+        if (
+          ts.isNewExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          node.expression.text === "PrismaClient"
+        ) {
           answer = `${file} constructs a PrismaClient`;
         }
         if (ts.isCallExpression(node)) {
@@ -294,7 +314,7 @@ const clientReach = (() => {
             (ts.isIdentifier(callee) && callee.text === "require");
           const [first] = node.arguments;
           if (dynamic && first && ts.isStringLiteral(first) && isPrismaModule(first.text)) {
-            answer = `${file} loads a Prisma client with ${callee.kind === ts.SyntaxKind.ImportKeyword ? "import()" : "require()"}`;
+            answer = `${file} loads a Prisma client dynamically`;
           }
         }
       });
@@ -304,13 +324,16 @@ const clientReach = (() => {
         if (entry.typeOnly || !isFirstParty(entry.specifier)) continue;
         const target = resolveSpecifier(path, entry.specifier);
         // An edge this resolver cannot follow is not evidence of anything, and
-        // treating it as client-free is one of the holes review named. It is
-        // reported rather than skipped.
+        // treating it as client-free is one of the holes review named.
         if (!target) {
           answer = `${file} imports "${entry.specifier}", which this check cannot resolve`;
           break;
         }
-        const deeper = reach(target);
+        const deeper = walk(target);
+        if (deeper === CYCLE) {
+          sawCycle = true;
+          continue;
+        }
         if (deeper) {
           answer = `${file} imports "${entry.specifier}", and ${deeper}`;
           break;
@@ -318,8 +341,23 @@ const clientReach = (() => {
       }
     }
     visiting.delete(path);
-    cache.set(path, answer);
-    return answer;
+    if (answer) {
+      cache.set(path, answer);
+      return answer;
+    }
+    if (sawCycle) {
+      // Not cached: this answer is only as good as a traversal that did not
+      // finish, and the next caller may reach this file without the cycle.
+      return CYCLE;
+    }
+    cache.set(path, null);
+    return null;
+  };
+  return (path) => {
+    const answer = walk(path);
+    return answer === CYCLE
+      ? `${repoPath(path)} sits in an import cycle this check cannot resolve`
+      : answer;
   };
 })();
 
@@ -419,58 +457,107 @@ const boundNames = (name) => {
   return names;
 };
 
-/** The names a single node declares in its own scope. */
-const declaredBy = (node) => {
-  if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
-    return boundNames(node.name);
+/**
+ * The names a node introduces for everything inside it.
+ *
+ * "Inside it" is the whole point, and the first version of this got it wrong in
+ * the direction that hides a client. It walked up the ancestors and, at each
+ * level, asked what any *direct child* declared -- so for a use inside `try`,
+ * the sibling `catch (prisma)` counted as the declaration of `prisma`, and the
+ * module client disappeared from the free names:
+ *
+ *     try {
+ *       await prisma.marketingPost.findMany();   // module client
+ *     } catch (prisma) {                          // a sibling, not a scope
+ *       return tx;
+ *     }
+ *
+ * That passed. Independent review predicted the shape when asked whether the fix
+ * could hide a client rather than reveal one, and a planted file confirmed it.
+ * A binding scopes over a use only if the binder is an *ancestor* of the use, so
+ * that is what this asks.
+ */
+const introducedBy = (node) => {
+  if (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node)
+  ) {
+    return node.parameters.flatMap((parameter) => boundNames(parameter.name));
   }
-  if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
-    return [node.name.text];
-  }
+  // A catch variable scopes over its own block, and this is reached only when
+  // the use is inside that block -- because it is reached by walking upwards.
   if (ts.isCatchClause(node) && node.variableDeclaration) {
     return boundNames(node.variableDeclaration.name);
   }
-  if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
-    return node.parameters.flatMap((parameter) => boundNames(parameter.name));
+  if (ts.isClassDeclaration(node) && node.name) return [node.name.text];
+  if (
+    ts.isForStatement(node) ||
+    ts.isForOfStatement(node) ||
+    ts.isForInStatement(node)
+  ) {
+    const initializer = node.initializer;
+    if (initializer && ts.isVariableDeclarationList(initializer)) {
+      return initializer.declarations.flatMap((declaration) => boundNames(declaration.name));
+    }
   }
   return [];
 };
 
 /**
- * Whether `name` is declared somewhere that encloses this use.
+ * The names one statement of a block declares, for a use elsewhere in the block.
  *
- * **Scope matters, and the first version ignored it.** It collected every name
- * declared anywhere inside the callback into one set, so a nested function whose
- * own parameter happened to be called `prisma` erased the *outer* client:
- *
- *     runBoundedMarketingTransaction(prisma, async (tx) => {
- *       await prisma.marketingPost.findMany();   // outer client, on another connection
- *       const hide = (prisma) => prisma;          // shadows the name, nothing more
- *       return hide(tx);
- *     });
- *
- * That passed, and the `findMany` ran outside the transaction. Independent
- * review found it; a planted file confirmed it. Walking up from the use is the
- * fix, and it is what scoping means.
+ * A declaration whose *initialiser* contains the use does not declare it for
+ * itself: `const prisma = prisma.x` reads the outer one on its right-hand side.
+ * Excluding the whole statement instead was too broad -- it also excluded the
+ * declaration when the use *was* its own name, so every local in the callback
+ * came back as a free name.
  */
+const statementDeclares = (statement, node) => {
+  if (ts.isVariableStatement(statement)) {
+    return statement.declarationList.declarations
+      .filter(
+        (declaration) =>
+          !(declaration.initializer && contains(declaration.initializer, node)),
+      )
+      .flatMap((declaration) => boundNames(declaration.name));
+  }
+  if (
+    (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+    statement.name
+  ) {
+    return [statement.name.text];
+  }
+  return [];
+};
+
+const contains = (outer, node) => {
+  let current = node;
+  while (current) {
+    if (current === outer) return true;
+    current = current.parent;
+  }
+  return false;
+};
+
+/** Whether `name` is bound by something that encloses this use. */
 const declaredAbove = (node, name, stopAt) => {
   let current = node.parent;
   while (current) {
-    for (const child of [current, ...(current.statements ?? [])]) {
-      if (declaredBy(child).includes(name)) return true;
-    }
-    let found = false;
-    ts.forEachChild(current, (child) => {
-      if (found) return;
-      if (declaredBy(child).includes(name)) found = true;
-      // A declaration list holds the declarations one level down.
-      if (ts.isVariableStatement(child)) {
-        for (const declaration of child.declarationList.declarations) {
-          if (declaredBy(declaration).includes(name)) found = true;
-        }
+    if (introducedBy(current).includes(name)) return true;
+    if (
+      ts.isBlock(current) ||
+      ts.isSourceFile(current) ||
+      ts.isModuleBlock(current) ||
+      ts.isCaseClause(current) ||
+      ts.isDefaultClause(current)
+    ) {
+      for (const statement of current.statements) {
+        if (statementDeclares(statement, node).includes(name)) return true;
       }
-    });
-    if (found) return true;
+    }
     if (current === stopAt) return false;
     current = current.parent;
   }
