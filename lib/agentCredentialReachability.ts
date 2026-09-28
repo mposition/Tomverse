@@ -89,9 +89,20 @@ export type CredentialAnalysis =
  */
 const compileFilter = (pattern: string): RegExp | "unknown" => {
   if (/[?+[\]]/.test(pattern)) return "unknown";
+  // `**` means something definite only as a whole path segment; glued to
+  // other characters its meaning is not modelled here.
+  if (/[^/]\*\*|\*\*[^/]/.test(pattern.replace(/^\*\*$/, ""))) return "unknown";
   let source = "";
   for (let i = 0; i < pattern.length; i += 1) {
-    if (pattern.startsWith("**", i)) {
+    if (pattern.startsWith("**/", i)) {
+      // Zero or more directories, so `**/a.ts` matches a root `a.ts`.
+      source += "(?:.*/)?";
+      i += 2;
+    } else if (pattern.startsWith("/**", i) && i + 3 === pattern.length) {
+      // Everything below the directory.
+      source += "/.*";
+      i += 2;
+    } else if (pattern.startsWith("**", i)) {
       source += ".*";
       i += 1;
     } else if (pattern[i] === "*") source += "[^/]*";
@@ -395,8 +406,9 @@ export const analyseCredentialReachability = (input: {
       // callee is still read for what the rule set needs from it -- whether it
       // restores a cache, and whether it can be read at all.
       const local = LOCAL_CALLEE.exec(job.uses);
-      // A remote callee's content is in no pinned blob, so no exclusion covers it.
-      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: null };
+      // A remote or computed callee cannot be read: whether it restores a cache
+      // or calls further is unknown, so the analysis fails (policy §5).
+      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: true, problem: "callee_unreadable" };
       const callee = parsed.get(local[1]);
       if (callee === undefined || depth > 8) return own(true, false, "callee_unreadable");
       let cache = false;
@@ -410,8 +422,10 @@ export const analyseCredentialReachability = (input: {
       // by an exclusion of its own; otherwise a changed callee would ride on
       // the caller's review.
       const reach = calleesOf(local[1], new Set());
-      const calleesPinned =
-        reach !== null && [...reach].every((path) => validExclusions.some((exclusion) => exclusion.workflowPath === path));
+      if (reach === null) return own(true, true, "callee_unreadable");
+      const calleesPinned = [...reach].every((path) =>
+        validExclusions.some((exclusion) => exclusion.workflowPath === path),
+      );
       return calleesPinned
         ? own(true, cache)
         : { credential: true, credentialIgnoringExclusions: true, restoresCache: cache, problem: null };
@@ -522,12 +536,18 @@ export const analyseCredentialReachability = (input: {
   let grew = true;
   while (grew) {
     grew = false;
-    // `workflow_run.workflows` matches a workflow's name or its file name, so
-    // a reached workflow answers to both.
+    // `workflow_run.workflows` matches a workflow's name, its file name, or --
+    // for a workflow with no name, which GitHub shows by path -- its path. A
+    // reached workflow answers to all three. One whose name is computed or not
+    // a string could answer to anything, and so could an upstream entry that
+    // is an expression: both chain.
+    let reachedNameUnknown = false;
     for (const path of reached) {
       const name = parsed.get(path)?.name;
-      if (typeof name === "string") reachedNames.add(name);
+      if (typeof name === "string" && !name.includes("${{")) reachedNames.add(name);
+      else if (name !== undefined) reachedNameUnknown = true;
       reachedNames.add(path.slice(path.lastIndexOf("/") + 1));
+      reachedNames.add(path);
     }
     for (const [path, workflow] of parsed) {
       if (reached.has(path)) continue;
@@ -536,7 +556,10 @@ export const analyseCredentialReachability = (input: {
       if (run === undefined) continue;
       const upstream = stringList(run.workflows);
       const chained =
-        upstream === null || upstream.length === 0 || upstream.some((name) => reachedNames.has(name));
+        reachedNameUnknown ||
+        upstream === null ||
+        upstream.length === 0 ||
+        upstream.some((name) => name.includes("${{") || reachedNames.has(name));
       if (!chained) continue;
       reached.add(path);
       grew = true;
