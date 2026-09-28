@@ -406,6 +406,7 @@ export const rankCandidates = (
     signals: RouterTieBreakSignals
 ): {
     ranked: ScoredCandidate[];
+    tiedWithTopModelIds: string[];
     decidedBy: (
         left: ScoredCandidate,
         right: ScoredCandidate
