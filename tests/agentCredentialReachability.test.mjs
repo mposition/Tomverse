@@ -396,6 +396,99 @@ test("an exclusion narrows only while its blob matches, and a stale one is repor
   assert.equal(stale.voidExclusions.length, 1);
 });
 
+test("a callee pin covers every job of every reached workflow", () => {
+  const caller = `
+name: caller
+on:
+  pull_request:
+    branches: [develop]
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: ./.github/workflows/callee.yml
+`;
+  const callee = `
+on:
+  workflow_call: {}
+permissions:
+  contents: read
+jobs:
+  harmless:
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps: [{ run: echo }]
+`;
+  const pin = (path, jobId) => ({ workflowPath: `.github/workflows/${path}.yml`, jobId, blobSha: "a".repeat(40), reason: "reviewed", reviewedBy: "owner" });
+  const pair = [wf("caller", caller), wf("callee", callee)];
+  assert.equal(
+    analyse(pair, { exclusions: [pin("caller", "call"), pin("callee", "harmless")] }).forbidsAll,
+    true,
+    "a callee job left out of the pin runs with the call",
+  );
+  assert.equal(
+    analyse(pair, { exclusions: [pin("caller", "call"), pin("callee", "harmless"), pin("callee", "deploy")] }).forbidsAll,
+    false,
+  );
+});
+
+test("a cache restore that cannot be ruled out counts as one", () => {
+  const nightly = (step) => `
+name: nightly
+on:
+  schedule:
+    - cron: '0 0 * * *'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+${step}`;
+  const restores = (step) =>
+    analyse([wf("nightly", nightly(step))]).reasons.some((reason) => reason.reason === "credential_job_restores_cache");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+`), true, "setup-go caches by default");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+`), true);
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+        with:
+          cache: false
+`), false, "switched off explicitly");
+  assert.equal(restores(`      - uses: \${{ vars.ACTION }}
+`), true, "an action named by expression");
+  assert.equal(restores(`      - uses: ./.github/actions/cache
+`), true, "an action kept in this repository");
+  assert.equal(restores(`      - uses: Actions/Cache@v4
+        with: { path: x, key: y }
+`), true, "owner and repo are case-insensitive");
+  assert.equal(restores(`      - run: echo
+`), false);
+});
+
+test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
+  const credentialed = READ_ONLY_PR.replace("  contents: read", "  contents: write");
+  const withIgnore = (patterns) =>
+    credentialed.replace("    branches: [develop]", `    branches: [develop]
+    paths-ignore: [${patterns}]`);
+  const forbidden = (patterns, changed) => [...credentialForbiddenPaths(analyse([wf("ci", withIgnore(patterns))]), changed)];
+  assert.deepEqual(forbidden("'**', '!lib/a.ts'", ["lib/a.ts", "lib/b.ts"]), ["lib/a.ts"]);
+  assert.deepEqual(forbidden("'**', '!lib/[ab].ts'", ["lib/a.ts"]), ["lib/a.ts"], "an unknown negation is not trusted to keep a file ignored");
+  assert.deepEqual(forbidden("'docs/**'", ["docs/a.md", "lib/a.ts"]), ["lib/a.ts"]);
+
+  const push = (ignored) =>
+    credentialed.replace(`  pull_request:
+    branches: [develop]`, `  push:
+    branches-ignore: [${ignored}]`);
+  assert.equal(analyse([wf("ci", push("'agent/**'"))]).forbidsAll, false);
+  assert.equal(analyse([wf("ci", push("'agent/**', '!agent/engineering/1'"))]).forbidsAll, true, "a negation puts an agent branch back");
+});
+
 test("anything unreadable fails the whole analysis", () => {
   assert.equal(analyse([wf("bad", "on: [\n")]).status, "failed");
   assert.equal(analyse([wf("bad", "name: x\n")]).status, "failed");
@@ -435,7 +528,7 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
  * When this fails, a workflow change moved the credential posture. Run the
  * analysis, read what changed with the owner, and only then update the digest.
  */
-const POSTURE_DIGEST = "ddbb7fee2d32";
+const POSTURE_DIGEST = "bf75543a1333";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
