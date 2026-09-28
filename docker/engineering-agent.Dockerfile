@@ -2,7 +2,7 @@
 #
 # One minimal image for both services -- the runner and the publisher -- which
 # differ only by start command and by the variables Railway gives each. It
-# holds Node, git and the two services' import closure: the four scripts and
+# holds Node, git and the two services' import closure: the five scripts and
 # the three dependency-free core modules they import. No package manager
 # install, no installed packages, no application code, nothing a clone could run.
 # tests/engineeringAgentServices.test.mjs holds the COPY list to the closure.
@@ -26,6 +26,7 @@ COPY scripts/engineering-agent-runner.mjs scripts/engineering-agent-runner.mjs
 COPY scripts/engineering-agent-runner-core.mjs scripts/engineering-agent-runner-core.mjs
 COPY scripts/engineering-agent-publisher.mjs scripts/engineering-agent-publisher.mjs
 COPY scripts/engineering-agent-publisher-core.mjs scripts/engineering-agent-publisher-core.mjs
+COPY scripts/engineering-agent-supervisor.mjs scripts/engineering-agent-supervisor.mjs
 
 # The core modules are TypeScript loaded with --experimental-strip-types; the
 # package type makes them ES modules without a reparse.

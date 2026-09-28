@@ -49,6 +49,7 @@ import {
 } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
+  currentEngineeringAgentHalt,
   endEngineeringAgentRun,
   engineeringAgentHalted,
   openEngineeringAgentWorkItem,
@@ -324,7 +325,9 @@ export async function heartbeatEngineeringAgentWorker(input: {
     dispatchReady,
   });
   if (!heartbeat.accepted) return { accepted: false as const, reason: heartbeat.reason ?? "runtime_lease_lost" };
-  return { accepted: true as const, leaseExpiresAt: heartbeat.leaseExpiresAt, dispatchReady };
+  // The halt, apart from dispatchReady: a service sends no success signal
+  // while anything halts, and does after a quiet round that is only off (§12).
+  return { accepted: true as const, leaseExpiresAt: heartbeat.leaseExpiresAt, dispatchReady, halt: currentEngineeringAgentHalt(halt) };
 }
 
 /**
@@ -470,7 +473,7 @@ export async function finishEngineeringAgentRun(input: {
 }) {
   requireOpen();
   const settlement = amuxSettlementForRunOutcome(input.outcome);
-  return settleAmuxExecution(
+  const settled = await settleAmuxExecution(
     {
       attemptId: input.attemptId,
       worker: ENGINEERING_AGENT_AMUX_WORKER,
@@ -490,6 +493,9 @@ export async function finishEngineeringAgentRun(input: {
       markCommitted: input.markCommitted,
     }),
   );
+  // The halt as the app now reads it, the run's own included: the runner's
+  // dead-man signal follows this, not what it reported (§12).
+  return { ...settled, halt: currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)) };
 }
 
 /**

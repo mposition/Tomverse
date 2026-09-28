@@ -20,6 +20,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   ENGINEERING_AGENT_COMMIT_IDENTITY,
+  HALT_VALUES,
   expectedCommitObject,
   prBodyCarriesMarker,
   prBodyMarker,
@@ -103,14 +104,19 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
 export async function runPublisherCycle(ports) {
   const claimed = await ports.app("publish/claim", { requestKey: requestKey() });
   if (claimed.status === 409 && typeof claimed.json?.refused === "string") {
-    // A switch that is off or a halt: nothing to do this round.
+    // A switch that is off -- the mode, the freeze, the kill switch -- is a
+    // quiet round the monitor still hears. A halt does not refuse the claim:
+    // it arrives as `halt` beside the work (lookups continue while halted).
     return { finishedNormally: true, halt: "none", reason: claimed.json.refused };
   }
   if (claimed.status !== 200 || claimed.json === null || !("work" in claimed.json)) {
-    return { finishedNormally: false, halt: "none", reason: "claim_unknown" };
+    return { finishedNormally: false, halt: "unknown", reason: "claim_unknown" };
   }
   const work = claimed.json.work;
-  if (work === null) return { finishedNormally: true, halt: "none", reason: "nothing_to_publish" };
+  // The halt the app reads beside the claim: while anything halts, a round is
+  // not a healthy one whatever it did (§12). Unknown is never taken as none.
+  const halt = typeof claimed.json.halt === "string" && HALT_VALUES.includes(claimed.json.halt) ? claimed.json.halt : "unknown";
+  if (work === null) return { finishedNormally: true, halt, reason: "nothing_to_publish" };
 
   const report = async (outcome, extra = {}) => {
     const answer = await ports.app("publish/result", {
@@ -124,12 +130,12 @@ export async function runPublisherCycle(ports) {
     // An unknown answer is not retried (§10): the status route is the way to ask.
     return {
       finishedNormally: answer.status === 200,
-      halt: "none",
+      halt,
       reason: answer.status === 200 ? outcome : "result_unknown",
     };
   };
   // No result: the claim's lease passes and the next round looks (§10).
-  const leave = (reason) => ({ finishedNormally: false, halt: "none", reason });
+  const leave = (reason) => ({ finishedNormally: false, halt, reason });
 
   let token = null;
   let workspace = null;

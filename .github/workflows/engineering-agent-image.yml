@@ -21,6 +21,7 @@ on:
       - scripts/engineering-agent-runner-core.mjs
       - scripts/engineering-agent-publisher.mjs
       - scripts/engineering-agent-publisher-core.mjs
+      - scripts/engineering-agent-supervisor.mjs
       - .github/workflows/engineering-agent-image.yml
 
 permissions:

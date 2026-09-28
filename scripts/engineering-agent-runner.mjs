@@ -6,7 +6,8 @@
 // read-only GitHub token and its dead-man monitor URL -- and nothing else: no
 // database, no GitHub write, no AMUX secret. It clones the public repository
 // without credentials, never installs or runs anything from the clone, and is
-// force-stopped by its own watchdog at the hard deadline.
+// force-stopped at the hard deadline by its supervisor, which kills the whole
+// process group (./engineering-agent-supervisor.mjs).
 //
 // Imports: node builtins and the dependency-free core only.
 
@@ -18,12 +19,14 @@ import { join } from "node:path";
 import { shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
 import { runModelSession } from "../lib/engineeringAgentModelCall.ts";
 import { runRunnerCycle } from "./engineering-agent-runner-core.mjs";
+import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
-/** The hard deadline of one cycle (§12); the watchdog ends the process there. */
+/** The hard deadline of one cycle (§12); the supervisor kills the process group there. */
 export const RUNNER_HARD_DEADLINE_MS = 20 * 60 * 1000;
 const APP_TIMEOUT_MS = 25_000;
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse.git";
 const DEVELOP_HEAD_URL = "https://api.github.com/repos/mposition/Tomverse/commits/develop";
+const API_REPO = "https://api.github.com/repos/mposition/Tomverse";
 
 /** Exactly the variables this service reads; the IaC declaration lists the same. */
 export const RUNNER_VARIABLES = [
@@ -103,11 +106,18 @@ async function cloneAt(baseSha) {
 }
 
 async function main() {
-  // The watchdog: a cycle that outlives its deadline is killed, not trusted.
-  const watchdog = setTimeout(() => {
-    console.error(JSON.stringify({ event: "engineering_runner_deadline" }));
-    process.exit(70);
-  }, RUNNER_HARD_DEADLINE_MS);
+  // The supervisor: a cycle that outlives its deadline is killed with its
+  // whole process group, not trusted.
+  if (!isSupervisedWorker()) {
+    const deadMan = required("ENGINEERING_AGENT_RUNNER_DEADMAN_URL");
+    process.exit(
+      await superviseCycle({
+        deadlineMs: RUNNER_HARD_DEADLINE_MS,
+        failUrl: `${deadMan.replace(/\/+$/, "")}/fail`,
+        event: "engineering_runner_deadline",
+      }),
+    );
+  }
 
   const appUrl = required("ENGINEERING_AGENT_APP_URL").replace(/\/+$/, "");
   const secret = required("ENGINEERING_AGENT_RUNNER_SECRET");
@@ -132,10 +142,37 @@ async function main() {
     return { status: response.status, json };
   };
 
+  // GitHub, read-only; a list that is not the whole list is refused, not read as whole.
+  const githubList = async (path) => {
+    const response = await fetch(`${API_REPO}${path}`, {
+      redirect: "error",
+      signal: AbortSignal.timeout(APP_TIMEOUT_MS),
+      headers: {
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+        ...(readToken ? { authorization: `Bearer ${readToken}` } : {}),
+      },
+    });
+    const link = response.headers.get("link");
+    const body = await response.json().catch(() => null);
+    if (!response.ok || (link !== null && /rel="?next"?/.test(link)) || !Array.isArray(body)) {
+      throw new Error("namespace_unreadable");
+    }
+    return body;
+  };
+
   let result;
   try {
     result = await runRunnerCycle({
       app,
+      namespace: async () => {
+        const refs = await githubList("/git/matching-refs/heads/agent/engineering/?per_page=100");
+        const pulls = await githubList("/pulls?state=open&per_page=100");
+        return {
+          refs: refs.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
+          pulls: pulls.map((pull) => ({ number: pull.number, headRef: pull.head?.ref ?? "", body: pull.body ?? "" })),
+        };
+      },
       developHead: async () => {
         const response = await fetch(DEVELOP_HEAD_URL, {
           redirect: "error",
@@ -184,8 +221,9 @@ async function main() {
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
-  console.log(JSON.stringify({ event: "engineering_runner_cycle", finishedNormally: result.finishedNormally, reason: result.reason }));
-  clearTimeout(watchdog);
+  console.log(
+    JSON.stringify({ event: "engineering_runner_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason }),
+  );
   process.exit(result.finishedNormally ? 0 : 1);
 }
 

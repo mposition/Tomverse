@@ -6,6 +6,8 @@ import { readLimitedJson } from "@/lib/apiSecurity";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
   claimNextEngineeringAgentPublishWork,
+  currentEngineeringAgentHalt,
+  readEngineeringAgentHaltState,
 } from "@/lib/engineeringAgentStore";
 import {
   engineeringAgentErrorResponse,
@@ -14,6 +16,7 @@ import {
   isEngineeringAgentRouteAuthorized,
   runIdempotentEngineeringAgentRequest,
 } from "@/lib/engineeringAgentRouteAuth";
+import { prisma } from "@/lib/prisma";
 
 // The publisher's claim (docs/policy/engineering-agent.md §11): the next
 // lookup or, while publishing is allowed, the next queued publish item with a
@@ -41,7 +44,10 @@ export async function POST(request: Request) {
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
     if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state, resultRef: outcome.resultRef }, 200);
-    return engineeringAgentJson({ work: outcome.value }, 200);
+    // The halt beside the work, so a quiet round while halted is not reported
+    // as a healthy one (§12). Lookups continue while halted.
+    const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
+    return engineeringAgentJson({ work: outcome.value, halt }, 200);
   } catch (error) {
     return engineeringAgentErrorResponse("publish_claim", error);
   }

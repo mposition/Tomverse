@@ -6,9 +6,13 @@ import test from "node:test";
 
 import {
   RUNNER_SYSTEM_PROMPT,
+  haltOf,
+  observeUnbound,
   outcomeForSession,
   runRunnerCycle,
 } from "../scripts/engineering-agent-runner-core.mjs";
+import { superviseCycle, SUPERVISED_ENV } from "../scripts/engineering-agent-supervisor.mjs";
+import { prBodyMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
 
 // The runner service's cycle (docs/policy/engineering-agent.md §2.1, §6-§8,
 // §10-§12) against fake ports: what it asks the app, in what order, and how
@@ -20,9 +24,11 @@ const fakeApp = (overrides = {}) => {
   const calls = [];
   const answers = {
     "worker/register": { status: 200, json: { registered: true, generation: 3 } },
+    "observe/known": { status: 200, json: { runIds: [], prNumbers: [] } },
+    "observe/halt": { status: 200, json: { recorded: true } },
     "worker/heartbeat": (body) => ({
       status: 200,
-      json: { accepted: true, dispatchReady: body.dispatchReady, leaseExpiresAt: "x" },
+      json: { accepted: true, dispatchReady: body.dispatchReady, leaseExpiresAt: "x", halt: "none" },
     }),
     "run/start": { status: 200, json: { started: true, runId: "123456789012", taskId: "t", attemptId: "att", taskRevision: 2 } },
     "delivery/pull": {
@@ -42,7 +48,7 @@ const fakeApp = (overrides = {}) => {
     "delivery/ack": { status: 200, json: { acknowledged: true } },
     "run/heartbeat": { status: 200, json: { renewed: true } },
     "run/draft": { status: 200, json: { workItemId: "w" } },
-    "run/finish": { status: 200, json: { settled: true, taskRevision: 3 } },
+    "run/finish": { status: 200, json: { settled: true, taskRevision: 3, halt: "none" } },
     ...overrides,
   };
   const app = async (path, body) => {
@@ -61,8 +67,9 @@ const fakeClone = (applies = true) => ({
   dispose: async () => undefined,
 });
 
-const ports = (app, model, clone = fakeClone()) => ({
+const ports = (app, model, clone = fakeClone(), namespace = { refs: [], pulls: [] }) => ({
   app,
+  namespace: async () => namespace,
   developHead: async () => SHA,
   clone: async () => clone,
   model,
@@ -79,7 +86,7 @@ test("a full cycle drafts a T2 patch and ends the run as a T2 draft", async () =
   assert.deepEqual(result, { finishedNormally: true, halt: "none", reason: "t2_draft" });
   assert.deepEqual(
     calls.map((call) => call.path),
-    ["worker/register", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
+    ["worker/register", "observe/known", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
   );
   const start = calls.find((call) => call.path === "run/start").body;
   assert.equal(start.baseSha, SHA);
@@ -99,10 +106,11 @@ test("nothing to do is a normal cycle: closed adapter, not dispatch-ready, nothi
   assert.deepEqual(closed.calls.map((call) => call.path), ["worker/register"]);
 
   const notReady = fakeApp({
-    "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false } }),
+    "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false, halt: "none" } }),
   });
   const quiet = await runRunnerCycle(ports(notReady.app, okModel));
   assert.equal(quiet.finishedNormally, true);
+  assert.equal(shouldSendSuccessHeartbeat(quiet), true, "off, frozen or a full queue is still a live round");
   assert.equal(notReady.calls.some((call) => call.path === "run/start"), false, "a worker the app will not dispatch starts nothing");
 
   const nothing = fakeApp({ "run/start": { status: 409, json: { started: false, reason: "nothing_assigned" } } });
@@ -156,7 +164,7 @@ test("a lost lease ends the cycle without claiming an ending it cannot record", 
     },
   });
   const result = await cycle;
-  assert.deepEqual(result, { finishedNormally: false, halt: "none", reason: "run_lease_lost" });
+  assert.deepEqual(result, { finishedNormally: false, halt: "unknown", reason: "run_lease_lost" });
   assert.equal(calls.some((call) => call.path === "run/finish"), false);
 });
 
@@ -190,4 +198,108 @@ test("the runner imports node builtins and the dependency-free core, and nothing
   };
   visit("scripts/engineering-agent-runner.mjs");
   assert.ok(seen.has("lib/engineeringAgentModelCall.ts"));
+});
+
+test("while anything halts, no round sends a success signal (§12, §13-17)", async () => {
+  const halted = fakeApp({
+    "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false, halt: "circuit_open" } }),
+  });
+  const quiet = await runRunnerCycle(ports(halted.app, okModel));
+  assert.equal(quiet.halt, "circuit_open");
+  assert.equal(shouldSendSuccessHeartbeat(quiet), false);
+
+  const endsHalted = fakeApp({ "run/finish": { status: 200, json: { settled: true, taskRevision: 3, halt: "state_mismatch" } } });
+  const ended = await runRunnerCycle(ports(endsHalted.app, okModel));
+  assert.equal(ended.finishedNormally, true);
+  assert.equal(shouldSendSuccessHeartbeat(ended), false, "a run that ends into a halt is not a healthy round");
+
+  const silent = fakeApp({ "worker/heartbeat": () => ({ status: 200, json: { accepted: true, dispatchReady: false } }) });
+  const unknown = await runRunnerCycle(ports(silent.app, okModel));
+  assert.equal(unknown.halt, "unknown", "an app that names no halt is not taken to have none");
+  assert.equal(shouldSendSuccessHeartbeat(unknown), false);
+  assert.equal(haltOf({ halt: "made_up" }), "unknown");
+});
+
+test("an unbound branch or pull request under the agent's namespace is recorded and halts the round", async () => {
+  const known = { runIds: ["111"], prNumbers: [7] };
+  const ours = { number: 7, headRef: "agent/engineering/111", body: prBodyMarker("111") };
+  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/111" }], pulls: [ours], known }), "none");
+  assert.equal(
+    observeUnbound({ refs: [], pulls: [{ number: 8, headRef: "agent/engineering/111", body: prBodyMarker("111") }], known }),
+    "none",
+    "a pull request of a run whose write was allowed, before its result is bound",
+  );
+  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 9, headRef: "agent/engineering/222", body: "" }], known }), "unbound_app_pr");
+  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 9, headRef: "feature/x", body: "<!-- engineering-agent run=5 -->" }], known }), "unbound_app_pr");
+  assert.equal(observeUnbound({ refs: [], pulls: [{ number: 10, headRef: "feature/x", body: "hello" }], known }), "none");
+  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222" }], pulls: [], known }), "unbound_app_ref");
+  assert.equal(observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/not-a-run" }], pulls: [], known }), "unbound_app_ref");
+
+  const { app, calls } = fakeApp();
+  const result = await runRunnerCycle(
+    ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/999", sha: "a".repeat(40) }], pulls: [] }),
+  );
+  assert.deepEqual(result, { finishedNormally: true, halt: "unbound_app_ref", reason: "observed_unbound" });
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
+  assert.equal(calls.some((call) => call.path === "run/start"), false, "nothing starts after an unbound observation");
+  assert.equal(shouldSendSuccessHeartbeat(result), false);
+
+  const unreadable = fakeApp({ "observe/known": { status: 500, json: null } });
+  assert.equal((await runRunnerCycle(ports(unreadable.app, okModel))).finishedNormally, false);
+});
+
+test("the supervisor runs the cycle in its own process group and kills the group at the deadline", async () => {
+  const listeners = {};
+  const spawned = [];
+  const killed = [];
+  const fetched = [];
+  let fire = null;
+  const child = { pid: 4242, on: (name, fn) => void (listeners[name] = fn) };
+  const done = superviseCycle({
+    deadlineMs: 1000,
+    failUrl: "https://deadman.example/fail",
+    event: "test_deadline",
+    spawnImpl: (command, args, options) => {
+      spawned.push({ command, args, options });
+      return child;
+    },
+    kill: (pid, signal) => killed.push([pid, signal]),
+    fetchImpl: async (url) => void fetched.push(url),
+    setTimer: (fn) => {
+      fire = fn;
+      return 1;
+    },
+    clearTimer: () => undefined,
+    execPath: "/usr/bin/node",
+    execArgv: ["--experimental-strip-types"],
+    argv: ["/usr/bin/node", "scripts/engineering-agent-runner.mjs"],
+    env: { A: "1" },
+  });
+  assert.equal(spawned[0].options.detached, true, "a process group of its own");
+  assert.equal(spawned[0].options.env[SUPERVISED_ENV], "1");
+  assert.deepEqual(spawned[0].args, ["--experimental-strip-types", "scripts/engineering-agent-runner.mjs"]);
+  await fire();
+  assert.equal(await done, 70);
+  assert.deepEqual(killed, [[-4242, "SIGKILL"]], "the whole group, by negative pid");
+  assert.deepEqual(fetched, ["https://deadman.example/fail"], "the failure signal, never the success one");
+  listeners.exit?.(137);
+  assert.equal(killed.length, 1, "an exit after the deadline changes nothing");
+
+  const normal = [];
+  const exits = {};
+  const finished = superviseCycle({
+    deadlineMs: 1000,
+    failUrl: null,
+    event: "test",
+    spawnImpl: () => ({ pid: 7, on: (name, fn) => void (exits[name] = fn) }),
+    kill: (pid, signal) => normal.push([pid, signal]),
+    setTimer: () => 1,
+    clearTimer: () => undefined,
+    argv: ["node", "x.mjs"],
+    execArgv: [],
+    env: {},
+  });
+  exits.exit(0);
+  assert.equal(await finished, 0);
+  assert.deepEqual(normal, [[-7, "SIGKILL"]], "anything the worker left behind ends with it");
 });

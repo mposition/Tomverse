@@ -12,6 +12,10 @@ import {
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
   acknowledgeEngineeringAgentHalt,
+  currentEngineeringAgentHalt,
+  recordEngineeringAgentObservedHalt,
+  readEngineeringAgentKnownPublishes,
+  readEngineeringAgentHaltState,
   claimEngineeringAgentWorkItem,
   claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
@@ -896,5 +900,41 @@ test("the armed gate opens on the services' own finishes and a person's monitor 
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
     await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
+  }
+});
+
+test("an unbound branch the runner observed halts like a recorded halt, until a person acknowledges it", async () => {
+  const ackKey = "engineeringAgent.haltAcknowledgedAt";
+  const observedKey = "engineeringAgent.observedHalt";
+  const previous = await prisma.appSetting.findUnique({ where: { key: observedKey } });
+  await prisma.appSetting.upsert({
+    where: { key: ackKey },
+    create: { key: ackKey, value: new Date().toISOString() },
+    update: { value: new Date().toISOString() },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_ref" }));
+    const held = await readEngineeringAgentHaltState(prisma);
+    assert.equal(held.unacknowledgedHalt, "unbound_app_ref");
+    assert.equal(currentEngineeringAgentHalt(held), "unbound_app_ref");
+    const entry = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "engineering_agent.halt_observed", targetId: observedKey },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal(systemActorOf(entry), "engineering-agent-runner");
+    await assert.rejects(
+      inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "circuit_open" as never })),
+      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halt_not_observable",
+      "a service cannot assert a circuit",
+    );
+    await inTx((tx) => acknowledgeEngineeringAgentHalt(tx, { session: owner }));
+    assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "acknowledged, it no longer holds");
+    const known = await readEngineeringAgentKnownPublishes(prisma);
+    assert.ok(Array.isArray(known.runIds) && Array.isArray(known.prNumbers));
+    assert.ok(known.runIds.every((id) => /^[0-9]{1,12}$/.test(id)), "identifiers only");
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: observedKey } });
+    if (previous) await prisma.appSetting.create({ data: { key: observedKey, value: previous.value } });
   }
 });

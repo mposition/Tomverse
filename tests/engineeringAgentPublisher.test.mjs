@@ -17,7 +17,7 @@ import {
   appJwt,
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
-import { prBodyCarriesMarker } from "../lib/engineeringAgentCore.ts";
+import { prBodyCarriesMarker, shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
 
 // The publisher service's cycle (docs/policy/engineering-agent.md §7-2,
 // §8-§10) against fake ports: what it asks the app and GitHub, in what order,
@@ -50,14 +50,14 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
+const fakeWorld = ({ work, halt = "none", lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
   const calls = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
   const openPulls = pulls ?? [];
   const app = async (path, body) => {
     calls.push({ path, body });
-    if (path === "publish/claim") return { status: 200, json: { work } };
+    if (path === "publish/claim") return { status: 200, json: { work, halt } };
     if (path === "publish/last-look") return { status: 200, json: lastLook };
     if (path === "publish/result") return { status: 200, json: { state: "done" } };
     return { status: 404, json: null };
@@ -265,4 +265,18 @@ test("the publisher imports node builtins and the dependency-free core, and noth
   };
   visit("scripts/engineering-agent-publisher.mjs");
   assert.ok(seen.has("lib/engineeringAgentCore.ts"));
+});
+
+test("a round while anything halts is never reported as healthy, whatever it did", async () => {
+  const quiet = fakeWorld({ work: null, halt: "unbound_app_ref" });
+  const nothing = await runPublisherCycle(quiet.ports);
+  assert.equal(nothing.halt, "unbound_app_ref");
+  assert.equal(shouldSendSuccessHeartbeat(nothing), false);
+  const lookup = fakeWorld({ work: { mode: "lookup", workItemId: "w", runId: RUN, branch: BRANCH, fencingToken: "1", consumed: null }, halt: "circuit_open" });
+  const looked = await runPublisherCycle(lookup.ports);
+  assert.equal(result(lookup.calls).outcome, "lookup_no_prior_write", "lookups continue while halted");
+  assert.equal(shouldSendSuccessHeartbeat(looked), false);
+  const silent = fakeWorld({ work: null, halt: undefined });
+  silent.ports.app = async () => ({ status: 200, json: { work: null } });
+  assert.equal((await runPublisherCycle(silent.ports)).halt, "unknown", "no halt named is not none");
 });

@@ -9,7 +9,8 @@
 // revoked when the cycle ends. A token that would carry `workflows` is
 // refused before use. The clone is fetched without credentials; the token is
 // handed to git only for the push, in the environment, never in a URL or an
-// argument. Nothing from the clone is installed or executed.
+// argument. Nothing from the clone is installed or executed. At the hard
+// deadline the supervisor kills the whole process group.
 //
 // Imports: node builtins and the dependency-free core only.
 
@@ -21,6 +22,7 @@ import { join } from "node:path";
 
 import { shouldSendSuccessHeartbeat } from "../lib/engineeringAgentCore.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
+import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
 /** The hard deadline of one cycle, inside the claim's ten-minute lease (§12). */
 export const PUBLISHER_HARD_DEADLINE_MS = 8 * 60 * 1000;
@@ -274,11 +276,18 @@ async function mintToken({ appId, installationId, privateKey }) {
 }
 
 async function main() {
-  // The watchdog: a cycle that outlives its deadline is killed, not trusted.
-  const watchdog = setTimeout(() => {
-    console.error(JSON.stringify({ event: "engineering_publisher_deadline" }));
-    process.exit(70);
-  }, PUBLISHER_HARD_DEADLINE_MS);
+  // The supervisor: a cycle that outlives its deadline is killed with its
+  // whole process group -- git included -- not trusted.
+  if (!isSupervisedWorker()) {
+    const deadMan = required("ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL");
+    process.exit(
+      await superviseCycle({
+        deadlineMs: PUBLISHER_HARD_DEADLINE_MS,
+        failUrl: `${deadMan.replace(/\/+$/, "")}/fail`,
+        event: "engineering_publisher_deadline",
+      }),
+    );
+  }
 
   const appUrl = required("ENGINEERING_AGENT_APP_URL").replace(/\/+$/, "");
   const secret = required("ENGINEERING_AGENT_PUBLISHER_SECRET");
@@ -325,8 +334,9 @@ async function main() {
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
-  console.log(JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, reason: result.reason }));
-  clearTimeout(watchdog);
+  console.log(
+    JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason }),
+  );
   process.exit(result.finishedNormally ? 0 : 1);
 }
 

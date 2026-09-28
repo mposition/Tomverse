@@ -24,7 +24,14 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     reject: "Reject",
     acknowledge: "Acknowledge",
     mismatchNote:
-      "A state mismatch is resolved by the observer's actions, which a later stage adds. It halts the agent until then.",
+      "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
+    mismatchClose: "Close the run (nothing was written)",
+    mismatchLeaveOpen: "Leave open",
+    mismatchModeOff: "Turn the agent off",
+    mismatchEscalate: "Escalate as an incident",
+    confirmMismatchClose:
+      "End this run as abandoned? This is allowed only when no publish of the run was ever allowed to write to GitHub.",
+    confirmMismatchEscalate: "Escalate this mismatch as an incident? The agent's mode is set to off.",
     status: "Status",
     outcome: "Outcome",
     halt: "Halt",
@@ -92,7 +99,14 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     reject: "거절",
     acknowledge: "확인",
     mismatchNote:
-      "상태 불일치는 이후 단계에서 추가되는 관측 조치로 해소합니다. 그때까지 에이전트는 정지 상태입니다.",
+      "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
+    mismatchClose: "run 종료(쓰기 없음 확인됨)",
+    mismatchLeaveOpen: "열어 두기",
+    mismatchModeOff: "에이전트 끄기",
+    mismatchEscalate: "사고로 격상",
+    confirmMismatchClose:
+      "이 run을 중단(abandoned)으로 종료할까요? 이 run의 게시가 GitHub에 쓰도록 허용된 적이 한 번도 없을 때만 가능합니다.",
+    confirmMismatchEscalate: "이 불일치를 사고로 격상할까요? 에이전트 모드가 off로 바뀝니다.",
     status: "상태",
     outcome: "결과",
     halt: "정지",

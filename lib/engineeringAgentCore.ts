@@ -541,6 +541,16 @@ export const ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent
 export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
 export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
 export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
+/**
+ * The latest unbound pull request or ref the runner observed outside a run,
+ * as `{"halt":"unbound_app_pr","at":"<ISO instant>"}`. It halts like a halt a
+ * run recorded, until a person acknowledges it (§12).
+ */
+export const ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY = "engineeringAgent.observedHalt";
+
+/** The halts an observation outside a run may record: what only GitHub shows. */
+export const OBSERVABLE_HALTS = ["unbound_app_pr", "unbound_app_ref"] as const;
+export type ObservableHalt = (typeof OBSERVABLE_HALTS)[number];
 
 const SETTING_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
@@ -697,6 +707,19 @@ export type HaltReading = {
  * `none`: without it the unbound checks cannot run, and a check that cannot
  * run is not a check that passed.
  */
+/** The policy's priority among halts, highest first (the order decideHalt tests them in). */
+export const HALT_PRIORITY: readonly HaltValue[] = [
+  "config_missing",
+  "circuit_open",
+  "unbound_app_pr",
+  "unbound_app_ref",
+  "state_mismatch",
+  "none",
+];
+
+export const higherHalt = (a: HaltValue, b: HaltValue): HaltValue =>
+  HALT_PRIORITY.indexOf(a) <= HALT_PRIORITY.indexOf(b) ? a : b;
+
 export const decideHalt = (reading: HaltReading): HaltValue => {
   if (!reading.appIdentityConfigured) return "config_missing";
   if (reading.circuitLatched) return "circuit_open";

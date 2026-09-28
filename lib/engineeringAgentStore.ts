@@ -47,6 +47,7 @@ import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemAct
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
 import { REGISTRATION_CAPS } from "@/lib/engineeringAgentRegistrationGuard";
+import { decideMismatchAction, type MismatchAction } from "@/lib/engineeringAgentStateMismatch";
 import {
   ENGINEERING_AGENT_VERIFIER_VERSION,
   capabilityCommitObject,
@@ -58,6 +59,10 @@ import {
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
+  ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
+  OBSERVABLE_HALTS,
+  higherHalt,
+  type ObservableHalt,
   ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY,
   ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY,
   HALT_VALUES,
@@ -122,9 +127,20 @@ export type EngineeringAgentTransaction = Prisma.TransactionClient & {
 export async function runEngineeringAgentTransaction<T>(
   client: PrismaClient,
   run: (tx: EngineeringAgentTransaction) => Promise<T>,
-  options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
+  options?: {
+    maxWait?: number;
+    timeout?: number;
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+    /**
+     * AMUX row locks the work needs, taken first: every AMUX row lock comes
+     * before the audit chain (§11). Only lockEngineeringAgentMismatchAmuxRows
+     * is passed here.
+     */
+    beforeAuditLock?: (tx: Prisma.TransactionClient) => Promise<void>;
+  },
 ): Promise<T> {
   return client.$transaction(async (tx) => {
+    await options?.beforeAuditLock?.(tx);
     await takeAuditChainLock(tx);
     return run(tx as unknown as EngineeringAgentTransaction);
   }, options);
@@ -185,6 +201,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   bindingReplaced: "engineering_agent.binding_replaced",
   bindingMoved: "engineering_agent.binding_moved",
   bindingObserved: "engineering_agent.binding_observed",
+  mismatchActed: "engineering_agent.mismatch_acted",
   reviewerRemoved: "engineering_agent.reviewer_removed",
   switchChanged: "engineering_agent.switch_changed",
   registrationRecorded: "engineering_agent.registration_recorded",
@@ -192,6 +209,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   haltAcknowledged: "engineering_agent.halt_acknowledged",
   monitorsConfirmed: "engineering_agent.monitors_confirmed",
   serviceFinished: "engineering_agent.service_finished",
+  haltObserved: "engineering_agent.halt_observed",
 } as const);
 
 const humanActorId = (session: Session): string =>
@@ -317,11 +335,74 @@ export async function readEngineeringAgentHaltState(
   const recorded = runs.filter(
     (run) => run.halt !== "none" && (acknowledgedAt === null || run.endedAt.getTime() > acknowledgedAt.getTime()),
   );
+  const fromRuns = recorded.length === 0 ? null : recorded[recorded.length - 1].halt;
+  // An observation outside a run halts the same way, until acknowledged.
+  const observedSetting = await db.appSetting.findUnique({
+    where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY },
+    select: { value: true },
+  });
+  const observed = parseObservedHalt(observedSetting?.value);
+  const observedHalt =
+    observed !== null && (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime())
+      ? observed.halt
+      : null;
   return {
     openStateMismatches,
     orphanedRuns: orphaned,
-    unacknowledgedHalt: recorded.length === 0 ? null : recorded[recorded.length - 1].halt,
+    unacknowledgedHalt:
+      fromRuns === null ? observedHalt : observedHalt === null ? fromRuns : higherHalt(fromRuns, observedHalt),
     circuitLatched: isCircuitLatched({ runs, acknowledgedAt }),
+  };
+}
+
+const parseObservedHalt = (value: string | undefined): { halt: HaltValue; at: Date } | null => {
+  if (value === undefined) return null;
+  try {
+    const parsed = JSON.parse(value) as { halt?: unknown; at?: unknown };
+    const at = typeof parsed.at === "string" ? parseSettingInstant(parsed.at) : null;
+    if (at === null || !(OBSERVABLE_HALTS as readonly unknown[]).includes(parsed.halt)) return null;
+    return { halt: parsed.halt as HaltValue, at };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The one halt value a service is told, so it can decide its dead-man signal
+ * (§12: no success signal while halted): what a person must acknowledge
+ * first, then a latched circuit, then an open mismatch or orphaned run.
+ */
+export const currentEngineeringAgentHalt = (state: EngineeringAgentHaltState): HaltValue => {
+  if (state.unacknowledgedHalt !== null) {
+    return state.circuitLatched ? higherHalt(state.unacknowledgedHalt, "circuit_open") : state.unacknowledgedHalt;
+  }
+  if (state.circuitLatched) return "circuit_open";
+  if (state.openStateMismatches > 0 || state.orphanedRuns > 0) return "state_mismatch";
+  return "none";
+};
+
+/**
+ * What the agent itself may have put on GitHub (§12): every run whose publish
+ * item consumed a capability -- a write was allowed, whatever became of it --
+ * and every pull request number the app bound. Identifiers only. A branch or
+ * pull request under the agent's namespace outside this is unbound.
+ */
+export async function readEngineeringAgentKnownPublishes(
+  db: PrismaClient | Prisma.TransactionClient,
+): Promise<{ runIds: string[]; prNumbers: number[] }> {
+  const [capabilities, bindings] = await Promise.all([
+    db.engineeringAgentCapability.findMany({
+      where: { consumedAt: { not: null } },
+      select: { workItem: { select: { runId: true } } },
+    }),
+    db.engineeringAgentBinding.findMany({ select: { runId: true, prNumber: true } }),
+  ]);
+  const runIds = new Set<string>();
+  for (const row of capabilities) if (row.workItem.runId !== null) runIds.add(row.workItem.runId);
+  for (const row of bindings) runIds.add(row.runId);
+  return {
+    runIds: [...runIds].sort(),
+    prNumbers: [...new Set(bindings.map((row) => row.prNumber))].sort((a, b) => a - b),
   };
 }
 
@@ -1201,6 +1282,150 @@ export async function acknowledgeEngineeringAgentDecision(
   return { auditLogId };
 }
 
+/* ------------------------------------------------------------------------- */
+/* State mismatches (§11)                                                     */
+/* ------------------------------------------------------------------------- */
+
+/** The actions the console offers. `retry_lookup` is the publisher's next round, not a button. */
+export const ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS = [
+  "close_domain_after_verified_no_write",
+  "leave_open",
+  "mode_off",
+  "escalate_incident",
+] as const satisfies readonly MismatchAction[];
+
+/** The run a mismatch item concerns: its own, or its publish item's. */
+async function mismatchRunId(
+  db: Pick<Prisma.TransactionClient, "engineeringAgentWorkItem">,
+  item: { causeKey: string; runId: string | null },
+): Promise<string | null> {
+  if (item.causeKey.startsWith("run_attempt:")) return item.runId;
+  if (item.causeKey.startsWith("review_pr:")) {
+    const publish = await db.engineeringAgentWorkItem.findUnique({
+      where: { id: item.causeKey.slice("review_pr:".length) },
+      select: { runId: true },
+    });
+    return publish?.runId ?? null;
+  }
+  return null;
+}
+
+/**
+ * The AMUX rows a mismatch concerns -- its run's attempt, then its card, in
+ * AMUX's own order -- locked before the audit chain (§11). Passed to
+ * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing.
+ */
+export async function lockEngineeringAgentMismatchAmuxRows(
+  tx: Prisma.TransactionClient,
+  workItemId: string,
+): Promise<void> {
+  const item = await tx.engineeringAgentWorkItem.findUnique({
+    where: { id: workItemId },
+    select: { causeKey: true, runId: true },
+  });
+  if (!item) return;
+  const runId = await mismatchRunId(tx, item);
+  if (runId === null) return;
+  const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId }, select: { amuxAttemptId: true, cardId: true } });
+  if (!run) return;
+  await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${run.cardId} FOR UPDATE`;
+}
+
+/**
+ * A person's action on a state mismatch (§11). The item and both sides are
+ * read again under their locks; the pure table decides whether the action may
+ * run and whether it closes the item. Neither side is corrected to match the
+ * other: closing the domain side ends the run as abandoned only when nothing
+ * of it was ever allowed to write to GitHub, and escalation turns the agent off
+ * and leaves the rest to the incident.
+ */
+export async function resolveEngineeringAgentStateMismatch(
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request; workItemId: string; action: MismatchAction },
+): Promise<{ auditLogId: string; resolved: boolean }> {
+  humanActorId(input.session);
+  if (!(ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS as readonly string[]).includes(input.action)) {
+    refuse("mismatch_action_not_offered");
+  }
+  const locked = await lockWorkItem(tx, input.workItemId);
+  if (locked.kind !== "state_mismatch" || locked.state !== "open") refuse("mismatch_not_open");
+  const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: locked.id },
+    select: { causeKey: true, runId: true },
+  });
+  const kind: "A" | "C" = item.causeKey.startsWith("run_attempt:")
+    ? "A"
+    : item.causeKey.startsWith("review_pr:")
+      ? "C"
+      : refuse("mismatch_cause_unknown");
+  const runId = (await mismatchRunId(tx, item)) ?? refuse("mismatch_without_run");
+  const run = await tx.engineeringAgentRun.findUniqueOrThrow({
+    where: { id: runId },
+    select: { id: true, status: true, amuxAttemptId: true },
+  });
+  // The same locks the transaction took first; held already, so no wait.
+  const attempts = await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
+    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE
+  `;
+  const attemptEnded = attempts[0]?.endedAt != null;
+  const runItems = await tx.engineeringAgentWorkItem.findMany({
+    where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
+    select: { id: true, kind: true, state: true },
+  });
+  const publishItem =
+    kind === "C" ? runItems.find((candidate) => candidate.id === item.causeKey.slice("review_pr:".length)) ?? null : null;
+  const consumed = await tx.engineeringAgentCapability.count({
+    where: { consumedAt: { not: null }, workItem: { runId: run.id } },
+  });
+  const verdict = decideMismatchAction({
+    kind,
+    action: input.action,
+    // Detection's reading: A is an ended attempt under an active run; C is a
+    // published item whose run has ended.
+    reReadMatchesDetection:
+      kind === "A" ? attemptEnded && run.status === "active" : publishItem?.state === "published" && run.status !== "active",
+    runActive: run.status === "active",
+    runTerminal: run.status !== "active",
+    workItemState: kind === "A" ? (runItems.find((candidate) => candidate.kind === "publish")?.state ?? null) : (publishItem?.state ?? null),
+    workItemTerminal: publishItem?.state === "published",
+    lookupVerifiedNoWrite: consumed === 0,
+    // One item per cause (its key is unique), so a cause cannot recur here.
+    recurrences: 0,
+  });
+  if (!verdict.allowed) return refuse(verdict.reason);
+
+  if (input.action === "close_domain_after_verified_no_write") {
+    // Nothing of the run may still be waiting to be written or decided.
+    if (runItems.some((candidate) => candidate.state === "queued" || candidate.state === "claimed" || candidate.state === "open")) {
+      refuse("run_has_open_work");
+    }
+    await lockEngineeringAgentHalt(tx);
+    const moved = await tx.engineeringAgentRun.updateMany({
+      where: { id: run.id, status: "active" },
+      data: { status: "abandoned", outcome: "abandoned", halt: "none" },
+    });
+    if (moved.count !== 1) refuse("run_not_active");
+  }
+  if (input.action === "mode_off" || input.action === "escalate_incident") {
+    await setEngineeringAgentSwitch(tx, { session: input.session, request: input.request, name: "mode", value: "off" });
+  }
+  if (verdict.resolves) {
+    await tx.engineeringAgentWorkItem.update({ where: { id: locked.id }, data: { state: "resolved" } });
+  }
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.mismatchActed,
+    targetType: "engineering_agent_work_item",
+    targetId: locked.id,
+    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.mismatchActed} ${locked.id}`,
+    metadata: { kind, action: input.action, resolved: verdict.resolves, runId: run.id },
+    tx,
+  });
+  return { auditLogId, resolved: verdict.resolves };
+}
+
 /** The modes a person may set from the console. */
 export const ENGINEERING_AGENT_CONSOLE_MODES = ["off", "shadow"] as const;
 
@@ -1357,6 +1582,36 @@ export async function recordEngineeringAgentServiceFinish(
     { service: input.service },
   );
   return { finishedAt };
+}
+
+/**
+ * The runner saw a branch or pull request under the agent's namespace that
+ * nothing the agent did accounts for (§12). Recorded with the database's
+ * clock; it halts until a person acknowledges it, and is never refused by a
+ * switch -- it is a reading, not an action.
+ */
+export async function recordEngineeringAgentObservedHalt(
+  tx: EngineeringAgentTransaction,
+  input: { halt: ObservableHalt },
+): Promise<{ observedAt: Date }> {
+  if (!(OBSERVABLE_HALTS as readonly string[]).includes(input.halt)) refuse("halt_not_observable");
+  await lockEngineeringAgentHalt(tx);
+  const observedAt = await databaseNow(tx);
+  const value = JSON.stringify({ halt: input.halt, at: observedAt.toISOString() });
+  await tx.appSetting.upsert({
+    where: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY },
+    update: { value },
+    create: { key: ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY, value },
+  });
+  await systemAudit(
+    tx,
+    "engineering-agent-runner",
+    ENGINEERING_AGENT_AUDIT_ACTIONS.haltObserved,
+    "app_setting",
+    ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY,
+    { halt: input.halt },
+  );
+  return { observedAt };
 }
 
 /* ------------------------------------------------------------------------- */

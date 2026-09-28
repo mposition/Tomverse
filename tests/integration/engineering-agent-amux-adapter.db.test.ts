@@ -31,10 +31,16 @@ import {
   engineeringRunHeartbeatAttachment,
   engineeringRunStartAttachment,
 } from "@/lib/engineeringAgentAmuxAdapter";
+import type { Session } from "next-auth";
+
 import {
   EngineeringAgentStoreRefusedError,
   claimEngineeringAgentWorkItem,
+  currentEngineeringAgentHalt,
   endEngineeringAgentRun,
+  lockEngineeringAgentMismatchAmuxRows,
+  readEngineeringAgentHaltState,
+  resolveEngineeringAgentStateMismatch,
   engineeringAgentTransactionInAmux,
   issueEngineeringAgentCapability,
   moveEngineeringAgentBinding,
@@ -732,10 +738,38 @@ test("an active run whose attempt ended halts runs before anyone reports it", as
   );
   assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
   const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
-  await runEngineeringAgentTransaction(prisma, (tx) =>
-    endEngineeringAgentRun(tx, { runId, amuxAttemptId: started.attemptId, outcome: "abandoned", halt: "none" }),
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+
+  // A person's action: AMUX's rows locked first, both sides read again.
+  const person = {
+    user: { id: `eng-agent-owner-${randomUUID()}`, email: "owner@example.test" },
+    expires: new Date(Date.now() + 3_600_000).toISOString(),
+  } as Session;
+  const act = (action: "leave_open" | "close_domain_after_verified_no_write") =>
+    runEngineeringAgentTransaction(
+      prisma,
+      (tx) => resolveEngineeringAgentStateMismatch(tx, { session: person, workItemId: mismatch.id, action }),
+      { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+    );
+  const left = await act("leave_open");
+  assert.equal(left.resolved, false, "leaving it open resolves nothing");
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "open");
+
+  // Nothing of the run was ever allowed to write, so the domain side may close.
+  const closed = await act("close_domain_after_verified_no_write");
+  assert.equal(closed.resolved, true);
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "resolved");
+  const run = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.deepEqual([run.status, run.outcome], ["abandoned", "abandoned"]);
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "engineering_agent.mismatch_acted", targetId: mismatch.id },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal(audit.actorUserId, person.user!.id, "a person's action, audited as that person");
+  await assert.rejects(
+    act("close_domain_after_verified_no_write"),
+    (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "mismatch_not_open",
   );
-  await prisma.engineeringAgentWorkItem.update({ where: { id: mismatch.id }, data: { state: "resolved" } });
 });
 
 test("a registration records the generation it created with its request", async () => {

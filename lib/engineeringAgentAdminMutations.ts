@@ -13,6 +13,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
+import type { Prisma } from "@prisma/client";
 import type { z } from "zod";
 
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
@@ -32,6 +33,8 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
   bucket: string;
   schema: z.ZodType<TBody>;
   run: (tx: EngineeringAgentTransaction, context: { body: TBody; session: Session }) => Promise<TResult>;
+  /** AMUX row locks taken before the audit chain, in AMUX's order (§11). */
+  beforeAuditLock?: (tx: Prisma.TransactionClient, body: TBody) => Promise<void>;
 }): Promise<Response> {
   try {
     const session = await getServerSession(authOptions);
@@ -51,7 +54,11 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
     const result = await runEngineeringAgentTransaction(
       prisma,
       (tx) => spec.run(tx, { body, session }),
-      { maxWait: 5_000, timeout: 20_000 },
+      {
+        maxWait: 5_000,
+        timeout: 20_000,
+        beforeAuditLock: spec.beforeAuditLock ? (tx) => spec.beforeAuditLock!(tx, body) : undefined,
+      },
     );
     return NextResponse.json({ ok: true, result });
   } catch (error) {

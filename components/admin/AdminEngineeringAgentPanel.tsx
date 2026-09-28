@@ -187,6 +187,41 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                     {button(`${item.id}:rejected`, m.reject, () => decide(item, "rejected"), "danger")}
                   </div>
                 ) : null}
+                {initial.canWrite && item.kind === "state_mismatch" ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {button(`${item.id}:close`, m.mismatchClose, () => {
+                      if (!window.confirm(m.confirmMismatchClose)) return;
+                      void post(`${item.id}:close`, "/api/admin/engineering-agent/mismatches", {
+                        workItemId: item.id,
+                        action: "close_domain_after_verified_no_write",
+                      });
+                    })}
+                    {button(`${item.id}:leave`, m.mismatchLeaveOpen, () =>
+                      void post(`${item.id}:leave`, "/api/admin/engineering-agent/mismatches", {
+                        workItemId: item.id,
+                        action: "leave_open",
+                      }),
+                    )}
+                    {button(`${item.id}:off`, m.mismatchModeOff, () =>
+                      void post(`${item.id}:off`, "/api/admin/engineering-agent/mismatches", {
+                        workItemId: item.id,
+                        action: "mode_off",
+                      }),
+                    )}
+                    {button(
+                      `${item.id}:escalate`,
+                      m.mismatchEscalate,
+                      () => {
+                        if (!window.confirm(m.confirmMismatchEscalate)) return;
+                        void post(`${item.id}:escalate`, "/api/admin/engineering-agent/mismatches", {
+                          workItemId: item.id,
+                          action: "escalate_incident",
+                        });
+                      },
+                      "danger",
+                    )}
+                  </div>
+                ) : null}
                 {initial.canWrite && item.kind === "decision" ? (
                   <div className="mt-3">
                     {button(`${item.id}:ack`, m.acknowledge, () =>
