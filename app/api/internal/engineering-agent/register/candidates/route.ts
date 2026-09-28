@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { isAmuxAgentIntakeOpen } from "@/lib/amux/agentIntake";
-import { readEngineeringAgentRegistrationCandidates } from "@/lib/engineeringAgentRegistration";
+import { readEngineeringAgentRegistrationOffer } from "@/lib/engineeringAgentRegistration";
 import {
   engineeringAgentErrorResponse,
   engineeringAgentJson,
@@ -16,7 +16,8 @@ import { prisma } from "@/lib/prisma";
 
 // The items a registration round may analyse (docs/policy/engineering-agent.md
 // §2.2 step 1): the app pins the source and reads it itself, and returns only
-// what the deterministic pre-filter leaves. Read-only; nothing is recorded.
+// what the deterministic pre-filter leaves, each item cut to the round's
+// limits (§6) with the digest of its original. Read-only; nothing is recorded.
 
 const requestSchema = z
   .object({
@@ -32,21 +33,8 @@ export async function POST(request: Request) {
     if (!(await readEngineeringAgentSwitches(prisma)).registrationAllowed) {
       return engineeringAgentJson({ refused: "registration_switched_off" }, 409);
     }
-    const { eligible, excluded } = await readEngineeringAgentRegistrationCandidates({ source: body.source });
-    return engineeringAgentJson(
-      {
-        source: body.source,
-        eligible: eligible.map((item) => ({
-          key: item.key,
-          digest: item.digest,
-          priority: item.priority,
-          pinnedCommit: item.pinnedCommit,
-          text: item.text,
-        })),
-        excluded,
-      },
-      200,
-    );
+    const { eligible, excluded } = await readEngineeringAgentRegistrationOffer({ source: body.source });
+    return engineeringAgentJson({ source: body.source, eligible, excluded }, 200);
   } catch (error) {
     return engineeringAgentErrorResponse("register_candidates", error);
   }

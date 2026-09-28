@@ -807,14 +807,17 @@ test("an agent registration writes its card and its record in one transaction, o
     guardResult: "allowed",
     roundId,
   });
+  const written: Array<Awaited<ReturnType<typeof recordEngineeringAgentRegistration>>> = [];
   const attach = (id: string) => ({
-    prismaCalls: 16,
+    prismaCalls: 19,
     work: async (lent: Parameters<typeof engineeringAgentTransactionInAmux>[0], fact: { cardId: string }) => {
-      await recordEngineeringAgentRegistration(engineeringAgentTransactionInAmux(lent), {
-        ...record(id),
-        result: "registered",
-        amuxCardId: fact.cardId,
-      });
+      written.push(
+        await recordEngineeringAgentRegistration(engineeringAgentTransactionInAmux(lent), {
+          ...record(id),
+          result: "registered",
+          amuxCardId: fact.cardId,
+        }),
+      );
     },
   });
   try {
@@ -844,15 +847,30 @@ test("an agent registration writes its card and its record in one transaction, o
     );
     assert.equal(audit.actorUserId, null);
 
-    // The same item again: its record cannot be written twice, so nothing is.
+    // The same item again: the same card, and the item's row found rather
+    // than a unique violation -- a definite answer, with nothing written.
     const secondId = randomUUID();
-    await assert.rejects(
-      withAmuxRouteBudget(
-        () => registerAmuxAgentIntakeCard({ card, actor: "engineering-agent-registrar" }, attach(secondId)),
-        ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
-      ),
+    const second = await withAmuxRouteBudget(
+      () => registerAmuxAgentIntakeCard({ card, actor: "engineering-agent-registrar" }, attach(secondId)),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
     );
+    assert.deepEqual(second, { registered: true, cardId, created: false });
+    assert.deepEqual(written.at(-1), {
+      recorded: false,
+      existing: { id: firstId, result: "registered", amuxCardId: cardId },
+    });
     assert.equal(await prisma.engineeringAgentRegistration.count({ where: { id: secondId } }), 0);
+
+    // A refusal of the item at the digest it already has an answer for adds nothing either.
+    const refusedAgain = await runEngineeringAgentTransaction(prisma, (tx) =>
+      recordEngineeringAgentRegistration(tx, {
+        ...record(randomUUID()),
+        guardResult: "title_invalid",
+        result: "registration_refused",
+        amuxCardId: null,
+      }),
+    );
+    assert.equal(refusedAgain.recorded, false);
 
     // The same identity with another digest is a conflict and writes nothing.
     const conflict = await withAmuxRouteBudget(
@@ -874,11 +892,11 @@ test("an agent registration writes its card and its record in one transaction, o
         found: "partial",
       }),
     );
-    assert.ok(readBack.decisionItemId);
+    assert.ok(readBack.recorded && readBack.decisionItemId);
     const partial = await prisma.engineeringAgentRegistration.findUniqueOrThrow({ where: { id: partialId } });
     assert.equal(partial.result, "partial");
     // The fixture plays the person: the decision closes, the registration resolves.
-    await prisma.engineeringAgentWorkItem.update({ where: { id: readBack.decisionItemId! }, data: { state: "acknowledged" } });
+    await prisma.engineeringAgentWorkItem.update({ where: { id: readBack.decisionItemId }, data: { state: "acknowledged" } });
     await prisma.engineeringAgentRegistration.update({ where: { id: partialId }, data: { result: "absent" } });
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: registrationKey } });

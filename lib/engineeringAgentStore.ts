@@ -46,6 +46,7 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
+import { REGISTRATION_CAPS } from "@/lib/engineeringAgentRegistrationGuard";
 import {
   ENGINEERING_AGENT_VERIFIER_VERSION,
   capabilityCommitObject,
@@ -1486,6 +1487,64 @@ export type RegistrationRecordInput = {
   amuxCardId: string | null;
 };
 
+/** The cap counts, as the registration trigger counts them (§2.2). */
+export async function readEngineeringAgentRegistrationCounts(
+  db: Pick<EngineeringAgentTransaction, "$queryRaw">,
+  roundId: string,
+): Promise<{ thisRound: number; todayUtc: number; unpromoted: number }> {
+  const rows = await db.$queryRaw<Array<{ thisRound: bigint; todayUtc: bigint; unpromoted: bigint }>>`
+    SELECT
+      (SELECT count(*) FROM "EngineeringAgentRegistration" r
+        WHERE r."roundId" = ${roundId} AND r."result" NOT IN ('registration_refused', 'absent')) AS "thisRound",
+      (SELECT count(*) FROM "EngineeringAgentRegistration" r
+        WHERE r."createdAt" >= date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC')
+          AND r."result" NOT IN ('registration_refused', 'absent')) AS "todayUtc",
+      (SELECT count(*) FROM "EngineeringAgentRegistration" r
+        LEFT JOIN "AmuxWorkItem" c ON c."id" = r."amuxCardId"
+        WHERE r."result" IN ('pending', 'partial')
+           OR (r."result" = 'registered' AND c."status" = 'backlog' AND c."archivedAt" IS NULL)) AS "unpromoted"
+  `;
+  const row = rows[0];
+  return { thisRound: Number(row.thisRound), todayUtc: Number(row.todayUtc), unpromoted: Number(row.unpromoted) };
+}
+
+/** A registration a proposal cannot add to: the row its item already has at this digest. */
+export type ExistingRegistration = { id: string; result: string; amuxCardId: string | null };
+
+/**
+ * The registration lock -- the one the insert trigger counts the caps under --
+ * then the item's row at this digest, then the caps. Under the lock the
+ * answer is the one the insert would meet, so an item already recorded is
+ * found, not a unique violation, and a full cap is the refusal it names, not
+ * a trigger's exception. The trigger still counts: this only makes the
+ * refusal definite and named.
+ */
+async function lockRegistrationItem(
+  tx: EngineeringAgentTransaction,
+  input: { source: string; itemKey: string; itemDigest: string; roundId: string },
+): Promise<ExistingRegistration | null> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('engineering-agent:registration'))`;
+  const existing = await tx.engineeringAgentRegistration.findUnique({
+    where: {
+      source_itemKey_itemDigest: { source: input.source, itemKey: input.itemKey, itemDigest: input.itemDigest },
+    },
+    select: { id: true, result: true, amuxCardId: true },
+  });
+  if (existing !== null) return existing;
+  const counts = await readEngineeringAgentRegistrationCounts(tx, input.roundId);
+  if (counts.thisRound >= REGISTRATION_CAPS.perRound) refuse("round_cap_reached");
+  if (counts.todayUtc >= REGISTRATION_CAPS.perUtcDay) refuse("daily_cap_reached");
+  if (counts.unpromoted >= REGISTRATION_CAPS.unpromoted) refuse("unpromoted_cap_reached");
+  return null;
+}
+
+/** The refusals `lockRegistrationItem` names for a full cap. */
+export const ENGINEERING_AGENT_REGISTRATION_CAP_REFUSALS: ReadonlySet<string> = new Set([
+  "round_cap_reached",
+  "daily_cap_reached",
+  "unpromoted_cap_reached",
+]);
+
 /**
  * Records a registration proposal and what became of it, once (§2.2, §11):
  * the source, the pinned revision, the digests and the guard's result, never
@@ -1493,15 +1552,21 @@ export type RegistrationRecordInput = {
  * the caps there -- and moves to its result in the same transaction. A
  * registered row is written in the AMUX agent intake's transaction, beside
  * its card. Registration stops while anything halts (§12).
+ *
+ * An item that already has a row at this digest is not written again: the
+ * row is returned, and the caller decides whether it is this proposal's own
+ * earlier answer or a refusal. A full cap is refused by name.
  */
 export async function recordEngineeringAgentRegistration(
   tx: EngineeringAgentTransaction,
   input: RegistrationRecordInput,
-): Promise<{ registrationId: string }> {
+): Promise<{ recorded: true; registrationId: string } | { recorded: false; existing: ExistingRegistration }> {
   await requireSwitch(tx, "registrationAllowed");
   await lockEngineeringAgentHalt(tx);
   if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
   if ((input.result === "registered") !== (input.amuxCardId !== null)) refuse("registration_card_mismatch");
+  const existing = await lockRegistrationItem(tx, input);
+  if (existing !== null) return { recorded: false, existing };
   await tx.engineeringAgentRegistration.create({
     data: {
       id: input.id,
@@ -1533,7 +1598,7 @@ export async function recordEngineeringAgentRegistration(
       amuxCardId: input.amuxCardId,
     },
   );
-  return { registrationId: input.id };
+  return { recorded: true, registrationId: input.id };
 }
 
 /**
@@ -1545,7 +1610,12 @@ export async function recordEngineeringAgentRegistration(
 export async function recordEngineeringAgentRegistrationReadBack(
   tx: EngineeringAgentTransaction,
   input: Omit<RegistrationRecordInput, "result" | "amuxCardId"> & { found: "absent" | "partial" },
-): Promise<{ registrationId: string; decisionItemId: string | null }> {
+): Promise<
+  { recorded: true; registrationId: string; decisionItemId: string | null } | { recorded: false; existing: ExistingRegistration }
+> {
+  await lockEngineeringAgentHalt(tx);
+  const existing = await lockRegistrationItem(tx, input);
+  if (existing !== null) return { recorded: false, existing };
   await tx.engineeringAgentRegistration.create({
     data: {
       id: input.id,
@@ -1582,7 +1652,7 @@ export async function recordEngineeringAgentRegistrationReadBack(
     input.id,
     { source: input.source, itemDigest: input.itemDigest, result: input.found, decisionItemId },
   );
-  return { registrationId: input.id, decisionItemId };
+  return { recorded: true, registrationId: input.id, decisionItemId };
 }
 
 /**

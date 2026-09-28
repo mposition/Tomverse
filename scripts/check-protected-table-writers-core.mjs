@@ -376,6 +376,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentRegistration",
+    tableMentions: 3,
+    writeVerbs: 11,
+    reason:
+      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the eleven write verbs are the advisory-lock SELECTs and the module's prose.",
+  },
+  {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
     tableMentions: 2,

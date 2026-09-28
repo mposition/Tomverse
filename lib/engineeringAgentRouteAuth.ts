@@ -199,13 +199,18 @@ export async function runAttachedIdempotentEngineeringAgentRequest<T>(input: {
     runEngineeringAgentTransaction(prisma, (tx) =>
       moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "aborted" }),
     ).catch(() => undefined);
-  let committed = false;
   try {
     const value = await input.work(async (tx, resultRef) => {
       await moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "committed", resultRef });
-      committed = true;
     });
-    if (!committed) {
+    // Whether the request committed is the row's to say, not the callback's:
+    // work may mark it in a transaction that then rolled back and answer
+    // anyway (a refusal found after it, a read-back in a transaction of its own).
+    const stored = await prisma.engineeringAgentRequest.findUnique({
+      where: { key: input.requestKey },
+      select: { state: true },
+    });
+    if (stored?.state !== "committed") {
       await abort();
       return { kind: "not_committed", value };
     }

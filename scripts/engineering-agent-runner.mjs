@@ -1,5 +1,5 @@
-// The engineering agent runner service's entry point (docs/policy/engineering-
-// agent.md §8, §12). Railway runs it on a schedule, in its own image, with
+// The engineering agent runner service's entry point
+// (docs/policy/engineering-agent.md §8, §12). Railway runs it on a schedule, in its own image, with
 // `node --experimental-strip-types scripts/engineering-agent-runner.mjs`.
 //
 // It holds the runner's route secret, the agent's own model key, an optional

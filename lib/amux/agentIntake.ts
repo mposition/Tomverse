@@ -85,7 +85,12 @@ const VERSION = /^[!-~]{1,128}$/;
  * Writes the card, or finds the one this source identity already made. The
  * same identity with the same digest is the same card (`created: false`); a
  * different digest is a conflict and writes nothing. The attached work -- the
- * agent's registration record -- runs in the same transaction either way.
+ * agent's registration record -- runs in the same transaction either way, and
+ * decides for itself what an existing card means for it.
+ *
+ * Two proposals of one identity are serialized on that identity before the
+ * card is looked up, so the second finds the first's card instead of meeting
+ * the unique index -- a definite answer, never an error that reads as unknown.
  */
 export async function registerAmuxAgentIntakeCard(
   input: { card: AmuxAgentIntakeCard; actor: SystemAuditActor },
@@ -107,6 +112,7 @@ export async function registerAmuxAgentIntakeCard(
   return withAmuxDbBoundary(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.agentIntake, attachment),
     async (tx, context) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`amux-agent-intake:${card.sourceSystem}:${card.sourceKey}`}))`;
       const existing = await tx.amuxWorkItem.findUnique({
         where: { sourceSystem_sourceKey: { sourceSystem: card.sourceSystem, sourceKey: card.sourceKey } },
         select: { id: true, sourceDigest: true },
