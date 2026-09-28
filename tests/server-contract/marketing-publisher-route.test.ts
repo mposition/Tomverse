@@ -261,6 +261,22 @@ test("a start that failed for a reason that is not an answer is 503", async () =
   assert.equal(body.code, "run_start_failed");
   // No row exists, so there is nothing to close.
   assert.deepEqual(world.closeCalls, []);
+  // **And it is reported.** This is the one failure with nothing else watching
+  // it: every other way a run goes wrong leaves a row, and a row is what the
+  // silence monitor reads. A run that could not create one leaves no row, so no
+  // silence incident, and no delayed-job warning either, because
+  // `marketing_publisher` stays in `PENDING_SCHEDULED_JOB_KEYS` until an
+  // operator has applied the catalogue and a first run has been recorded.
+  //
+  // Asserted because it was not: independent review pointed out that deleting
+  // the incident call left this test green, which would have returned the
+  // failure to being silent.
+  const incident = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_RUN_START_FAILED",
+  );
+  assert.ok(incident, "a run that could not open its row must be reported");
+  assert.equal((incident?.error as Error)?.message, "could not connect");
+  assert.equal(incident?.context?.component, "marketing-publisher");
 });
 
 test("a duplicate id while the first still runs is answered, not run twice", async () => {

@@ -17,48 +17,63 @@ import ts from "typescript";
  * back, or after the run's deadline has passed and the run has been recorded
  * failed. No proxy can catch that, because it does not go through the proxy.
  *
- * ## Two wrong versions, and why the third is shaped differently
+ * ## What is checked
  *
- * The first version searched the text for `runBoundedMarketingTransaction(` and
- * then for `prisma.` in the argument it found. The second parsed the file and
- * banned identifiers: the imported client under any name, the call's own first
- * argument, locals copied from either.
+ * Per call:
  *
- * Both were **denylists**, and independent review broke both -- the first with
- * an aliased import and `const db = prisma`, the second with `box.db`,
- * `this.prisma`, a namespace-called wrapper, a default parameter, `globalThis`,
- * an outside helper, `await import()`, and a `new PrismaClient()` built from a
- * dynamic import. Each round closed three shapes and five more appeared, which
- * is what a denylist over an unbounded space does.
+ * 1. The wrapper is called directly, never through a second name. A call reached
+ *    through an alias, an element access or a renamed re-export is not recognised
+ *    as a call site at all, so none of the rules below would run on its body.
+ *    This rule existed, was dropped in the rewrite on the assumption that the
+ *    allowlist made it redundant, and had to be put back.
+ * 2. The work argument is written inline.
+ * 3. Inside that body, every free name is on an allowlist: the callback's own
+ *    parameters and locals, a short list of globals, or an import from a module
+ *    this check could find no route to a client from. Free is resolved with
+ *    scope, so a nested function whose parameter happens to share a name does not
+ *    shadow away the outer client.
+ * 4. The body loads no module at runtime.
  *
- * The question a denylist was trying to answer is "can this expression reach a
- * client", which is unbounded. The question this version asks is **"can this
- * module obtain a client at all"**, which is a decidable fact about a file's
- * import declarations. So:
+ * A module's routes to a client are followed through imports *and* re-exports,
+ * transitively, and an edge that cannot be resolved is reported rather than
+ * assumed harmless.
  *
- * 1. The work is an inline function. A function passed by name keeps its body
- *    somewhere this file does not read.
- * 2. Inside the body, every free name must be on an **allowlist**: the
- *    callback's own parameters, anything declared inside the body, a standard
- *    global, or an import binding of this file whose module is *client-free*.
- *    Anything else is refused, including `this` and `globalThis`. `box.db`,
- *    `this.prisma` and a module-scope alias are all refused by the same rule,
- *    without the rule having heard of them -- they are simply not on the list.
- * 3. A module is client-free when it binds no Prisma client, constructs none,
- *    and loads none dynamically; and when every first-party module it imports is
- *    client-free too. The walk is transitive, so a helper that imports a helper
- *    that imports the client is refused at the top.
+ * ## What this is not
  *
- * What this gives up is convenience: the work may not reach for a module-scope
- * constant of the calling file, and must import it from a client-free module
- * instead. That is the price of the rule being an allowlist, and it is cheap --
- * the intended shape is a route that holds the client and one line of callback
- * forwarding `tx` into a module that cannot hold one.
+ * **It is not a proof, and must not be described as one.** Four rounds of
+ * independent review broke three successive designs of this file. The fourth
+ * round named holes that no amount of pattern-adding closes:
+ *
+ *   - `Object.constructor` is `Function`, so a global on the allowlist can
+ *     evaluate `import("@prisma/client")` and build a second client. Any
+ *     allowlist of globals useful enough to write code against contains
+ *     something like this.
+ *   - `createRequire` from `node:module` loads a module without being spelled
+ *     `require`.
+ *   - `import { PrismaClient } from "../node_modules/@prisma/client"` reaches the
+ *     generated client by a path not recognised as a Prisma module.
+ *
+ * The first three are deliberate circumvention rather than plausible accident.
+ * Chasing them would be a fifth design, and the reason not to is that the
+ * property this file gropes at -- "no other database connection is reachable from
+ * this closure" -- is not decidable by reading source. `Function` settles that.
+ *
+ * **What actually bounds the transaction is `transaction_timeout`**, set inside it
+ * and enforced by PostgreSQL. The plan says so in as many words: the
+ * twelve-statement figure is "an application figure, not a database bound", and
+ * `transaction_timeout` is "the bound that holds". The one invariant the plan
+ * calls mandatory -- a late run is never recorded as a success -- is the
+ * migration's trigger, and depends on none of this.
+ *
+ * So what this file is, is a lint for the mistakes somebody makes by accident:
+ * using the module client in the callback, passing the work by name, aliasing the
+ * wrapper, shadowing a name, routing through a facade. Every one of those has
+ * been a real defect here, found by review rather than by this check. That is
+ * worth having, under an accurate description of what it does.
  *
  * `include` is a separate matter and is not checked. One Prisma call can send
  * more than one SQL statement, so twelve is a count of application calls rather
- * than of SQL -- which is why the plan calls the derived maximum an application
- * figure and names `transaction_timeout` as the bound that holds.
+ * than of SQL.
  */
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -151,6 +166,50 @@ const resolveSpecifier = (fromFile, specifier) => {
   return null;
 };
 
+/**
+ * Every module edge out of a file: imports, and re-exports.
+ *
+ * Re-exports were missing, and that was the laundering path this check claimed to
+ * have closed. `export { prisma } from "@/lib/prisma"` and
+ * `export * from "@/lib/prisma"` are `ExportDeclaration`s with a module
+ * specifier and no import clause, so a facade built out of one looked to have no
+ * edges at all -- hence no way to reach a client -- and anything importing that
+ * facade was allowed.
+ */
+const moduleEdges = (tree) => {
+  const found = [];
+  eachNode(tree, (node) => {
+    if (!ts.isExportDeclaration(node) || !node.moduleSpecifier) return;
+    const specifier = ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : "";
+    const clientLocals = new Set();
+    if (isPrismaModule(specifier)) {
+      const clause = node.exportClause;
+      if (!clause) {
+        // `export * from` re-exports whatever the target has, the client
+        // included.
+        clientLocals.add("*");
+      } else if (ts.isNamedExports(clause)) {
+        for (const element of clause.elements) {
+          const exported = (element.propertyName ?? element.name).text;
+          if (exported === "prisma" || exported === "PrismaClient") {
+            clientLocals.add(element.name.text);
+          }
+        }
+      } else if (ts.isNamespaceExport(clause)) {
+        clientLocals.add(clause.name.text);
+      }
+    }
+    found.push({
+      specifier,
+      locals: new Set(),
+      clientLocals,
+      prisma: clientLocals.size > 0,
+      typeOnly: Boolean(node.isTypeOnly),
+    });
+  });
+  return found;
+};
+
 /** Every import declaration of a file, as `{specifier, locals, prisma}`. */
 const imports = (tree) => {
   const found = [];
@@ -216,9 +275,9 @@ const clientReach = (() => {
     const file = repoPath(path);
     const source = readFileSync(path, "utf8");
     const tree = parse(path, source);
-    for (const entry of imports(tree)) {
+    for (const entry of [...imports(tree), ...moduleEdges(tree)]) {
       if (entry.prisma && !entry.typeOnly) {
-        answer = `${file} imports a Prisma client from "${entry.specifier}"`;
+        answer = `${file} takes a Prisma client from "${entry.specifier}"`;
         break;
       }
     }
@@ -241,10 +300,16 @@ const clientReach = (() => {
       });
     }
     if (!answer) {
-      for (const entry of imports(tree)) {
+      for (const entry of [...imports(tree), ...moduleEdges(tree)]) {
         if (entry.typeOnly || !isFirstParty(entry.specifier)) continue;
         const target = resolveSpecifier(path, entry.specifier);
-        if (!target) continue;
+        // An edge this resolver cannot follow is not evidence of anything, and
+        // treating it as client-free is one of the holes review named. It is
+        // reported rather than skipped.
+        if (!target) {
+          answer = `${file} imports "${entry.specifier}", which this check cannot resolve`;
+          break;
+        }
         const deeper = reach(target);
         if (deeper) {
           answer = `${file} imports "${entry.specifier}", and ${deeper}`;
@@ -333,32 +398,83 @@ const unwrap = (node) => {
   return current;
 };
 
-/** Every name a body declares or receives, including in nested scopes. */
-const declaredNames = (work) => {
-  const names = new Set();
-  const add = (name) => {
-    if (!name) return;
-    if (ts.isIdentifier(name)) {
-      names.add(name.text);
+/**
+ * The names a binding introduces, flattened out of any destructuring pattern.
+ */
+const boundNames = (name) => {
+  const names = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (ts.isIdentifier(node)) {
+      names.push(node.text);
       return;
     }
-    if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-      for (const element of name.elements) {
-        if (ts.isBindingElement(element)) add(element.name);
+    if (ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+      for (const element of node.elements) {
+        if (ts.isBindingElement(element)) walk(element.name);
       }
     }
   };
-  for (const parameter of work.parameters) add(parameter.name);
-  eachNode(work, (node) => {
-    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
-      add(node.name);
-    }
-    if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
-      add(node.name);
-    }
-    if (ts.isCatchClause(node) && node.variableDeclaration) add(node.variableDeclaration.name);
-  });
+  walk(name);
   return names;
+};
+
+/** The names a single node declares in its own scope. */
+const declaredBy = (node) => {
+  if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
+    return boundNames(node.name);
+  }
+  if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
+    return [node.name.text];
+  }
+  if (ts.isCatchClause(node) && node.variableDeclaration) {
+    return boundNames(node.variableDeclaration.name);
+  }
+  if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+    return node.parameters.flatMap((parameter) => boundNames(parameter.name));
+  }
+  return [];
+};
+
+/**
+ * Whether `name` is declared somewhere that encloses this use.
+ *
+ * **Scope matters, and the first version ignored it.** It collected every name
+ * declared anywhere inside the callback into one set, so a nested function whose
+ * own parameter happened to be called `prisma` erased the *outer* client:
+ *
+ *     runBoundedMarketingTransaction(prisma, async (tx) => {
+ *       await prisma.marketingPost.findMany();   // outer client, on another connection
+ *       const hide = (prisma) => prisma;          // shadows the name, nothing more
+ *       return hide(tx);
+ *     });
+ *
+ * That passed, and the `findMany` ran outside the transaction. Independent
+ * review found it; a planted file confirmed it. Walking up from the use is the
+ * fix, and it is what scoping means.
+ */
+const declaredAbove = (node, name, stopAt) => {
+  let current = node.parent;
+  while (current) {
+    for (const child of [current, ...(current.statements ?? [])]) {
+      if (declaredBy(child).includes(name)) return true;
+    }
+    let found = false;
+    ts.forEachChild(current, (child) => {
+      if (found) return;
+      if (declaredBy(child).includes(name)) found = true;
+      // A declaration list holds the declarations one level down.
+      if (ts.isVariableStatement(child)) {
+        for (const declaration of child.declarationList.declarations) {
+          if (declaredBy(declaration).includes(name)) found = true;
+        }
+      }
+    });
+    if (found) return true;
+    if (current === stopAt) return false;
+    current = current.parent;
+  }
+  return false;
 };
 
 /**
@@ -370,7 +486,6 @@ const declaredNames = (work) => {
  * it, and the first version of this walked only `work.body`.
  */
 const freeNames = (tree, work) => {
-  const declared = declaredNames(work);
   const used = [];
   const visit = (node) => {
     if (node.kind === ts.SyntaxKind.ThisKeyword) {
@@ -385,7 +500,7 @@ const freeNames = (tree, work) => {
     if (ts.isMethodDeclaration(parent) && parent.name === node) return;
     if (ts.isPropertyDeclaration(parent) && parent.name === node) return;
     if (ts.isBindingElement(parent) && parent.propertyName === node) return;
-    if (declared.has(node.text)) return;
+    if (declaredAbove(node, node.text, work)) return;
     used.push({ name: node.text, line: lineOf(tree, node) });
   };
   eachNode(work.body ?? work, visit);
@@ -441,6 +556,58 @@ const clientFreeImports = (path, tree) => {
   }
   return allowed;
 };
+
+test("the wrapper is only ever called directly, never through another name", () => {
+  // **This rule existed and I deleted it.** The previous version of this file
+  // had it; rewriting the check around an allowlist, I assumed the new shape made
+  // it unnecessary and dropped it. It does not: a call reached through another
+  // name is not recognised as a call site at all, so *no* rule runs on its body.
+  //
+  //     const run = runBoundedMarketingTransaction;
+  //     run(prisma, async (tx) => { await prisma.marketingPost.findMany(); });
+  //
+  // passed with zero findings. So did a re-export under a new name, and an
+  // element access. Refusing every reference that is not itself a call is the
+  // cheap way to keep the call-site list complete.
+  const problems = [];
+  for (const path of sourceFiles()) {
+    const file = repoPath(path);
+    if (file === DEFINITION) continue;
+    const source = readFileSync(path, "utf8");
+    if (!source.includes(WRAPPER)) continue;
+    const tree = parse(path, source);
+    eachNode(tree, (node) => {
+      if (!ts.isIdentifier(node) || node.text !== WRAPPER) return;
+      const parent = node.parent;
+      // Naming it in an import or an export list is how a caller reaches it.
+      if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return;
+      // A direct call, or a namespace property that is itself being called.
+      if (ts.isCallExpression(parent) && parent.expression === node) return;
+      if (
+        ts.isPropertyAccessExpression(parent) &&
+        parent.name === node &&
+        ts.isCallExpression(parent.parent) &&
+        parent.parent.expression === parent
+      ) {
+        return;
+      }
+      problems.push(
+        `${file}:${lineOf(tree, node)}: ${WRAPPER} is referred to without being called. Call it directly -- a name that stands for it is a call this file's other rules never find, so none of them run on its body.`,
+      );
+    });
+    // An element access spells the name as a string rather than an identifier.
+    eachNode(tree, (node) => {
+      if (!ts.isElementAccessExpression(node)) return;
+      const argument = node.argumentExpression;
+      if (argument && ts.isStringLiteral(argument) && argument.text === WRAPPER) {
+        problems.push(
+          `${file}:${lineOf(tree, node)}: ${WRAPPER} is reached by element access. Call it directly.`,
+        );
+      }
+    });
+  }
+  assert.deepEqual(problems, []);
+});
 
 test("the work is an inline function, not a name", () => {
   for (const site of callSites()) {
