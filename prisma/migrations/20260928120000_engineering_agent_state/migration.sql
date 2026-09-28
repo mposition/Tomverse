@@ -16,11 +16,17 @@
 -- database must enforce is that a late run is not recorded as a success
 -- (§11, "본 앱의 시간 상한"): a success transition out of a lease is refused
 -- once that lease has passed.
+--
+-- Every trigger function pins search_path to pg_catalog, pg_temp and reads
+-- its sibling tables through TG_TABLE_SCHEMA, so a session's temporary table
+-- of the same name cannot stand in for the real one.
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- EngineeringAgentRun: one AMUX execution attempt, 1:1.
+-- EngineeringAgentRun: one AMUX execution attempt, 1:1. A run records the
+-- mode it started under; the first T1 window's shorter PR limit is read from
+-- the earliest run that started under `t1` (§12).
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE "EngineeringAgentRun" (
@@ -32,6 +38,7 @@ CREATE TABLE "EngineeringAgentRun" (
     "status" TEXT NOT NULL DEFAULT 'active',
     "outcome" TEXT,
     "halt" TEXT NOT NULL DEFAULT 'none',
+    "modeAtStart" TEXT NOT NULL DEFAULT 'off',
     "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "leaseExpiresAt" TIMESTAMP(3) NOT NULL,
     "endedAt" TIMESTAMP(3),
@@ -51,6 +58,8 @@ ALTER TABLE "EngineeringAgentRun"
             't1_queued', 't2_draft', 'no_change', 'agent_failed', 'schema_invalid',
             'scope_violation', 'secret_detected', 'abandoned'
         )),
+    ADD CONSTRAINT "EngineeringAgentRun_modeAtStart_check"
+        CHECK ("modeAtStart" IN ('off', 'shadow', 't1')),
     ADD CONSTRAINT "EngineeringAgentRun_halt_check"
         CHECK ("halt" IN (
             'none', 'config_missing', 'circuit_open', 'unbound_app_pr', 'unbound_app_ref', 'state_mismatch'
@@ -67,6 +76,8 @@ ALTER TABLE "EngineeringAgentRun"
 CREATE INDEX "EngineeringAgentRun_status_leaseExpiresAt_idx"
     ON "EngineeringAgentRun"("status", "leaseExpiresAt");
 CREATE INDEX "EngineeringAgentRun_endedAt_idx" ON "EngineeringAgentRun"("endedAt");
+CREATE INDEX "EngineeringAgentRun_modeAtStart_startedAt_idx"
+    ON "EngineeringAgentRun"("modeAtStart", "startedAt");
 
 ALTER TABLE "EngineeringAgentRun"
     ADD CONSTRAINT "EngineeringAgentRun_amuxAttemptId_fkey"
@@ -77,16 +88,34 @@ ALTER TABLE "EngineeringAgentRun"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_run_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
     -- limit: OWNER_QUEUE_LIMITS.pr
     pr_limit CONSTANT INTEGER := 2;
+    -- limit: OWNER_QUEUE_LIMITS.prDuringFirstT1Days
+    first_t1_pr_limit CONSTANT INTEGER := 1;
+    -- limit: FIRST_T1_WINDOW_DAYS
+    first_t1_days CONSTANT INTEGER := 14;
     -- limit: OWNER_QUEUE_LIMITS.decision
     decision_limit CONSTANT INTEGER := 3;
+    -- setting: ENGINEERING_AGENT_MODE_SETTING_KEY
+    mode_key CONSTANT TEXT := 'feature.engineeringAgentMode';
+    effective_pr_limit INTEGER;
+    attempt_matches BOOLEAN;
+    mode_value TEXT;
+    t1_started TIMESTAMP(3);
     open_prs INTEGER;
     pending_decisions INTEGER;
 BEGIN
+    -- Ended runs are the circuit's input (§12): none is ever removed.
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'EngineeringAgentRun is kept' USING ERRCODE = 'check_violation';
+    END IF;
+
     IF TG_OP = 'INSERT' THEN
         IF NEW."status" <> 'active' THEN
             RAISE EXCEPTION 'EngineeringAgentRun starts active' USING ERRCODE = 'check_violation';
@@ -95,35 +124,58 @@ BEGIN
             RAISE EXCEPTION 'EngineeringAgentRun lease is already over' USING ERRCODE = 'check_violation';
         END IF;
         -- The run is the attempt's, on the attempt's own card.
-        IF NOT EXISTS (
-            SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."id" = NEW."amuxAttemptId" AND a."taskId" = NEW."cardId"
-        ) THEN
+        EXECUTE pg_catalog.format(
+            'SELECT EXISTS (SELECT 1 FROM %I."AmuxExecutionAttempt" a WHERE a."id" = $1 AND a."taskId" = $2)',
+            TG_TABLE_SCHEMA
+        ) INTO attempt_matches USING NEW."amuxAttemptId", NEW."cardId";
+        IF NOT attempt_matches THEN
             RAISE EXCEPTION 'EngineeringAgentRun must bind an attempt to that attempt''s card'
                 USING ERRCODE = 'check_violation';
         END IF;
         -- The owner queues (policy §12): a new run is a new claim, and none is
-        -- taken while either queue is full. The count is serialised so two
-        -- starts cannot both see the last free place. The shorter limit of
-        -- the first T1 window depends on the mode's history and is the store's.
-        PERFORM pg_advisory_xact_lock(hashtext('engineering-agent:owner-queue'));
-        SELECT count(*) INTO open_prs FROM "EngineeringAgentBinding"
-            WHERE "state" IN ('open', 'closed') AND "supersededAt" IS NULL;
-        SELECT (SELECT count(*) FROM "EngineeringAgentWorkItem"
-                    WHERE "kind" IN ('t2_draft', 'decision', 'state_mismatch') AND "state" = 'open')
-             + (SELECT count(*) FROM "EngineeringAgentRegistration" WHERE "result" = 'partial')
-            INTO pending_decisions;
-        IF open_prs >= pr_limit OR pending_decisions >= decision_limit THEN
+        -- taken while either queue is full. Runs are counted one at a time.
+        PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('engineering-agent:owner-queue'));
+
+        -- Every run records the mode it started under, read here and not
+        -- taken from the caller; an unset or unknown value is `off`, as in
+        -- lib/engineeringAgentCore.ts. The first T1 window starts with the
+        -- first run that saw `t1`, which is never earlier than the mode
+        -- change itself, so the window read here is never shorter than the
+        -- policy's. Runs are never deleted, so that start never moves.
+        EXECUTE pg_catalog.format(
+            'SELECT s."value" FROM %I."AppSetting" s WHERE s."key" = $1',
+            TG_TABLE_SCHEMA
+        ) INTO mode_value USING mode_key;
+        NEW."modeAtStart" := CASE WHEN mode_value IN ('shadow', 't1') THEN mode_value ELSE 'off' END;
+        EXECUTE pg_catalog.format(
+            'SELECT min(r."startedAt") FROM %I."EngineeringAgentRun" r WHERE r."modeAtStart" = $1',
+            TG_TABLE_SCHEMA
+        ) INTO t1_started USING 't1';
+        IF t1_started IS NULL AND NEW."modeAtStart" = 't1' THEN
+            t1_started := now_utc;
+        END IF;
+        effective_pr_limit := CASE
+            WHEN t1_started IS NOT NULL AND now_utc < t1_started + first_t1_days * INTERVAL '1 day'
+                THEN first_t1_pr_limit
+            ELSE pr_limit
+        END;
+
+        EXECUTE pg_catalog.format(
+            'SELECT count(*) FROM %I."EngineeringAgentBinding" b WHERE b."state" = ANY ($1) AND b."supersededAt" IS NULL',
+            TG_TABLE_SCHEMA
+        ) INTO open_prs USING ARRAY['open', 'closed'];
+        -- Every decision the owner owes is an open work item: T2 drafts,
+        -- mismatches, and decision items -- including the one each unknown
+        -- write outcome and each partial registration must open (below).
+        EXECUTE pg_catalog.format(
+            'SELECT count(*) FROM %I."EngineeringAgentWorkItem" w WHERE w."kind" = ANY ($1) AND w."state" = $2',
+            TG_TABLE_SCHEMA
+        ) INTO pending_decisions USING ARRAY['t2_draft', 'decision', 'state_mismatch'], 'open';
+        IF open_prs >= effective_pr_limit OR pending_decisions >= decision_limit THEN
             RAISE EXCEPTION 'EngineeringAgentRun refused: the owner queue is full' USING ERRCODE = 'check_violation';
         END IF;
         NEW."startedAt" := now_utc;
         RETURN NEW;
-    END IF;
-
-    IF TG_OP = 'DELETE' THEN
-        IF OLD."status" = 'active' THEN
-            RAISE EXCEPTION 'an active EngineeringAgentRun cannot be deleted' USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN OLD;
     END IF;
 
     IF OLD."status" <> 'active' THEN
@@ -135,6 +187,7 @@ BEGIN
         OR NEW."cardId" IS DISTINCT FROM OLD."cardId"
         OR NEW."cardKind" IS DISTINCT FROM OLD."cardKind"
         OR NEW."baseSha" IS DISTINCT FROM OLD."baseSha"
+        OR NEW."modeAtStart" IS DISTINCT FROM OLD."modeAtStart"
         OR NEW."startedAt" IS DISTINCT FROM OLD."startedAt" THEN
         RAISE EXCEPTION 'EngineeringAgentRun % cannot change what it is bound to', OLD."id"
             USING ERRCODE = 'check_violation';
@@ -169,7 +222,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_run_guard_insert"
     BEFORE INSERT ON "EngineeringAgentRun"
@@ -209,6 +262,7 @@ CREATE TABLE "EngineeringAgentWorkItem" (
 
 ALTER TABLE "EngineeringAgentWorkItem"
     ADD CONSTRAINT "EngineeringAgentWorkItem_causeKey_key" UNIQUE ("causeKey"),
+    ADD CONSTRAINT "EngineeringAgentWorkItem_id_check" CHECK ("id" ~ '^[A-Za-z0-9_-]{1,64}$'),
     ADD CONSTRAINT "EngineeringAgentWorkItem_kind_check"
         CHECK ("kind" IN ('t2_draft', 'publish', 'expire_close', 'prune', 'decision', 'state_mismatch')),
     ADD CONSTRAINT "EngineeringAgentWorkItem_state_check"
@@ -264,10 +318,15 @@ ALTER TABLE "EngineeringAgentWorkItem"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_work_item_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
     terminal BOOLEAN;
+    consumed_token BIGINT;
+    decided BOOLEAN;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NOT (
@@ -414,37 +473,47 @@ BEGIN
                 RAISE EXCEPTION 'EngineeringAgentWorkItem % lease has passed; only a lookup follows', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
-            -- A publish is the consumption of this claim's capability: no
-            -- consumption, no publish; and once consumed, the claim cannot be
-            -- handed back to the queue as if nothing had been reserved.
+            -- A publish is the consumption of the item's one capability.
+            -- A write claim publishes on its own consumption; a lookup claim
+            -- publishes only on finding what an earlier write claim consumed.
+            -- A consumed capability stays consumed (§10), so an item whose
+            -- capability was consumed -- by any claim -- never returns to
+            -- the queue; a new attempt is a new item with a new capability.
             IF OLD."kind" = 'publish' AND OLD."state" = 'claimed' AND NEW."state" IN ('published', 'queued') THEN
-                PERFORM 1 FROM "EngineeringAgentCapability" c
-                    WHERE c."workItemId" = OLD."id" AND c."consumedAt" IS NOT NULL
-                      AND c."claimFencingToken" = OLD."fencingToken"
-                    FOR UPDATE;
-                IF NEW."state" = 'published' AND NOT FOUND THEN
-                    RAISE EXCEPTION 'EngineeringAgentWorkItem % publishes only on a consumed capability', OLD."id"
+                EXECUTE pg_catalog.format(
+                    'SELECT c."claimFencingToken" FROM %I."EngineeringAgentCapability" c'
+                    ' WHERE c."workItemId" = $1 AND c."consumedAt" IS NOT NULL FOR UPDATE',
+                    TG_TABLE_SCHEMA
+                ) INTO consumed_token USING OLD."id";
+                IF NEW."state" = 'queued' AND consumed_token IS NOT NULL THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % consumed its capability and cannot be requeued', OLD."id"
                         USING ERRCODE = 'check_violation';
                 END IF;
-                IF NEW."state" = 'queued' AND FOUND THEN
-                    RAISE EXCEPTION 'EngineeringAgentWorkItem % consumed its capability and cannot be requeued', OLD."id"
+                IF NEW."state" = 'published' AND (
+                    consumed_token IS NULL
+                    OR (OLD."claimMode" = 'write' AND consumed_token <> OLD."fencingToken")
+                    OR (OLD."claimMode" = 'lookup' AND consumed_token >= OLD."fencingToken")
+                ) THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % publishes only on a consumed capability', OLD."id"
                         USING ERRCODE = 'check_violation';
                 END IF;
             END IF;
             -- A T2 decision is written first, in the same transaction, and must
             -- agree; a draft with a decision never merely expires.
-            IF OLD."kind" = 't2_draft' AND NEW."state" IN ('approved', 'rejected') AND NOT EXISTS (
-                SELECT 1 FROM "EngineeringAgentApproval" a
-                WHERE a."workItemId" = OLD."id" AND a."decision" = NEW."state"
-            ) THEN
-                RAISE EXCEPTION 'EngineeringAgentWorkItem % has no matching decision', OLD."id"
-                    USING ERRCODE = 'check_violation';
-            END IF;
-            IF OLD."kind" = 't2_draft' AND NEW."state" = 'expired' AND EXISTS (
-                SELECT 1 FROM "EngineeringAgentApproval" a WHERE a."workItemId" = OLD."id"
-            ) THEN
-                RAISE EXCEPTION 'EngineeringAgentWorkItem % was decided and does not expire', OLD."id"
-                    USING ERRCODE = 'check_violation';
+            IF OLD."kind" = 't2_draft' THEN
+                EXECUTE pg_catalog.format(
+                    'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentApproval" a'
+                    ' WHERE a."workItemId" = $1 AND ($2 = ''expired'' OR a."decision" = $2))',
+                    TG_TABLE_SCHEMA
+                ) INTO decided USING OLD."id", NEW."state";
+                IF NEW."state" IN ('approved', 'rejected') AND NOT decided THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % has no matching decision', OLD."id"
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW."state" = 'expired' AND decided THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % was decided and does not expire', OLD."id"
+                        USING ERRCODE = 'check_violation';
+                END IF;
             END IF;
             NEW."claimMode" := NULL;
             NEW."leaseExpiresAt" := NULL;
@@ -462,7 +531,7 @@ BEGIN
     NEW."updatedAt" := now_utc;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_work_item_guard_insert"
     BEFORE INSERT ON "EngineeringAgentWorkItem"
@@ -473,6 +542,39 @@ CREATE TRIGGER "engineering_agent_work_item_guard_update"
 CREATE TRIGGER "engineering_agent_work_item_guard_delete"
     BEFORE DELETE ON "EngineeringAgentWorkItem"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_work_item_guard"();
+
+-- An unknown write outcome is handed to a person in the same transaction
+-- (§10): by commit, a decision item for exactly this entry -- the item and
+-- the claim that ended there -- is open, and it counts in the owner queue.
+CREATE OR REPLACE FUNCTION "engineering_agent_unknown_outcome_opens_decision"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    -- cause: UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX
+    cause_prefix CONSTANT TEXT := 'unknown:';
+    decision_open BOOLEAN;
+BEGIN
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentWorkItem" w'
+        ' WHERE w."causeKey" = $1 AND w."kind" = $2 AND w."state" = $3)',
+        TG_TABLE_SCHEMA
+    ) INTO decision_open USING cause_prefix || NEW."id" || ':' || NEW."fencingToken", 'decision', 'open';
+    IF NOT decision_open THEN
+        RAISE EXCEPTION 'EngineeringAgentWorkItem % entered outcome_unknown without an open decision item', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_unknown_outcome_opens_decision"
+    AFTER UPDATE ON "EngineeringAgentWorkItem"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    WHEN (NEW."state" = 'outcome_unknown' AND OLD."state" IS DISTINCT FROM 'outcome_unknown')
+    EXECUTE FUNCTION "engineering_agent_unknown_outcome_opens_decision"();
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentApproval: a T2 decision, and nothing else (§7). Written
@@ -508,16 +610,22 @@ ALTER TABLE "EngineeringAgentApproval"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_approval_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     item RECORD;
 BEGIN
     IF TG_OP <> 'INSERT' THEN
         RAISE EXCEPTION 'EngineeringAgentApproval is written once and kept' USING ERRCODE = 'check_violation';
     END IF;
-    SELECT "kind", "state", "patchDigest", "baseSha" INTO item
-    FROM "EngineeringAgentWorkItem" WHERE "id" = NEW."workItemId" FOR UPDATE;
-    IF NOT FOUND OR item."kind" <> 't2_draft' OR item."state" <> 'open' THEN
+    EXECUTE pg_catalog.format(
+        'SELECT w."kind", w."state", w."patchDigest", w."baseSha" FROM %I."EngineeringAgentWorkItem" w'
+        ' WHERE w."id" = $1 FOR UPDATE',
+        TG_TABLE_SCHEMA
+    ) INTO item USING NEW."workItemId";
+    IF item."kind" IS NULL OR item."kind" <> 't2_draft' OR item."state" <> 'open' THEN
         RAISE EXCEPTION 'EngineeringAgentApproval decides only an open T2 draft' USING ERRCODE = 'check_violation';
     END IF;
     -- The decision binds to what the owner saw: the draft's digest and base.
@@ -527,7 +635,7 @@ BEGIN
     NEW."decidedAt" := clock_timestamp() AT TIME ZONE 'UTC';
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_approval_guard_insert"
     BEFORE INSERT ON "EngineeringAgentApproval"
@@ -539,17 +647,24 @@ CREATE TRIGGER "engineering_agent_approval_guard_change"
 -- By the end of the transaction that writes a decision, the draft is closed
 -- as decided; a decision never sits beside an open or expired draft.
 CREATE OR REPLACE FUNCTION "engineering_agent_approval_closes_draft"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    closed_as_decided BOOLEAN;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM "EngineeringAgentWorkItem" w WHERE w."id" = NEW."workItemId" AND w."state" = NEW."decision"
-    ) THEN
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentWorkItem" w WHERE w."id" = $1 AND w."state" = $2)',
+        TG_TABLE_SCHEMA
+    ) INTO closed_as_decided USING NEW."workItemId", NEW."decision";
+    IF NOT closed_as_decided THEN
         RAISE EXCEPTION 'EngineeringAgentApproval % must close its draft as decided in the same transaction', NEW."id"
             USING ERRCODE = 'check_violation';
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE CONSTRAINT TRIGGER "engineering_agent_approval_closes_draft"
     AFTER INSERT ON "EngineeringAgentApproval"
@@ -600,7 +715,10 @@ ALTER TABLE "EngineeringAgentCapability"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_capability_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
     item RECORD;
@@ -609,16 +727,19 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentCapability is kept' USING ERRCODE = 'check_violation';
     END IF;
     IF TG_OP = 'INSERT' THEN
-        SELECT "kind", "state", "patchDigest", "baseSha", "expectedTreeId" INTO item
-        FROM "EngineeringAgentWorkItem" WHERE "id" = NEW."workItemId" FOR UPDATE;
-        IF NOT FOUND OR item."kind" <> 'publish' OR item."state" <> 'queued'
+        EXECUTE pg_catalog.format(
+            'SELECT w."kind", w."state", w."patchDigest", w."baseSha", w."expectedTreeId"'
+            ' FROM %I."EngineeringAgentWorkItem" w WHERE w."id" = $1 FOR UPDATE',
+            TG_TABLE_SCHEMA
+        ) INTO item USING NEW."workItemId";
+        IF item."kind" IS NULL OR item."kind" <> 'publish' OR item."state" <> 'queued'
             OR item."patchDigest" IS DISTINCT FROM NEW."patchDigest"
             OR item."baseSha" IS DISTINCT FROM NEW."baseSha"
             OR item."expectedTreeId" IS DISTINCT FROM NEW."expectedTreeId" THEN
             RAISE EXCEPTION 'EngineeringAgentCapability must match a queued publish item'
                 USING ERRCODE = 'check_violation';
         END IF;
-        IF NEW."consumedAt" IS NOT NULL OR NEW."expiresAt" <= now_utc THEN
+        IF NEW."consumedAt" IS NOT NULL OR NEW."claimFencingToken" IS NOT NULL OR NEW."expiresAt" <= now_utc THEN
             RAISE EXCEPTION 'EngineeringAgentCapability is issued unconsumed and unexpired'
                 USING ERRCODE = 'check_violation';
         END IF;
@@ -645,23 +766,28 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
     -- The only change is consumption: once, before expiry, by the claim that
-    -- holds the publish item's current fencing token.
-    IF NEW."consumedAt" IS NULL THEN
+    -- holds the publish item's current fencing token while its lease lives.
+    IF NEW."consumedAt" IS NULL AND NEW."claimFencingToken" IS NULL THEN
         RETURN NEW;
     END IF;
     IF OLD."expiresAt" <= now_utc THEN
         RAISE EXCEPTION 'EngineeringAgentCapability % has expired', OLD."id" USING ERRCODE = 'check_violation';
     END IF;
-    SELECT "state", "claimMode", "fencingToken" INTO item
-    FROM "EngineeringAgentWorkItem" WHERE "id" = OLD."workItemId" FOR UPDATE;
-    IF item."state" <> 'claimed' OR item."claimMode" <> 'write' OR item."fencingToken" <> NEW."claimFencingToken" THEN
-        RAISE EXCEPTION 'EngineeringAgentCapability % is consumed only by the current write claim', OLD."id"
+    EXECUTE pg_catalog.format(
+        'SELECT w."state", w."claimMode", w."fencingToken", w."leaseExpiresAt"'
+        ' FROM %I."EngineeringAgentWorkItem" w WHERE w."id" = $1 FOR UPDATE',
+        TG_TABLE_SCHEMA
+    ) INTO item USING OLD."workItemId";
+    IF item."state" IS DISTINCT FROM 'claimed' OR item."claimMode" IS DISTINCT FROM 'write'
+        OR item."fencingToken" IS DISTINCT FROM NEW."claimFencingToken"
+        OR item."leaseExpiresAt" <= now_utc THEN
+        RAISE EXCEPTION 'EngineeringAgentCapability % is consumed only by the current, live write claim', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
     NEW."consumedAt" := now_utc;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_capability_guard_insert"
     BEFORE INSERT ON "EngineeringAgentCapability"
@@ -672,7 +798,7 @@ CREATE TRIGGER "engineering_agent_capability_guard_change"
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentBinding: a published pull request, as the app bound it.
--- The snapshot never changes; a replacement is a new row, and at most one
+-- The snapshot never changes; a replacement is a new row, and exactly one
 -- row per pull request is current.
 -- ---------------------------------------------------------------------------
 
@@ -705,7 +831,14 @@ ALTER TABLE "EngineeringAgentBinding"
         CHECK ("ref" ~ '^agent/engineering/[0-9]{1,12}$' AND "ref" = 'agent/engineering/' || "runId"),
     ADD CONSTRAINT "EngineeringAgentBinding_prNumber_check" CHECK ("prNumber" > 0),
     ADD CONSTRAINT "EngineeringAgentBinding_reviewerLogin_check"
-        CHECK ("reviewerLogin" IS NULL OR "reviewerLogin" ~ '^[A-Za-z0-9-]{1,39}$');
+        CHECK ("reviewerLogin" IS NULL OR "reviewerLogin" ~ '^[A-Za-z0-9-]{1,39}$'),
+    -- The reviewer is a pair: both present, or both removed by retention
+    -- with the record of when it was taken kept.
+    ADD CONSTRAINT "EngineeringAgentBinding_reviewer_pair_check"
+        CHECK (
+            ("reviewerGithubId" IS NULL) = ("reviewerLogin" IS NULL)
+            AND ("reviewerGithubId" IS NULL OR "reviewerRecordedAt" IS NOT NULL)
+        );
 
 CREATE UNIQUE INDEX "EngineeringAgentBinding_current_prNumber_key"
     ON "EngineeringAgentBinding"("prNumber") WHERE "supersededAt" IS NULL;
@@ -718,7 +851,10 @@ ALTER TABLE "EngineeringAgentBinding"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_binding_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
 BEGIN
@@ -750,8 +886,13 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentBinding % snapshot is immutable; bind a new row instead', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
+    -- Superseding is written once, at the database's time, and a
+    -- replacement must be current by commit (below).
     IF OLD."supersededAt" IS NOT NULL AND NEW."supersededAt" IS DISTINCT FROM OLD."supersededAt" THEN
         RAISE EXCEPTION 'EngineeringAgentBinding % was superseded', OLD."id" USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD."supersededAt" IS NULL AND NEW."supersededAt" IS NOT NULL THEN
+        NEW."supersededAt" := now_utc;
     END IF;
     IF NEW."state" IS DISTINCT FROM OLD."state" AND (OLD."state", NEW."state") NOT IN (
         -- transitions: EngineeringAgentBinding binding
@@ -768,10 +909,14 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentBinding % observations are recorded once', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
-    -- A reviewer is recorded once. Retention may remove the identity; nothing
-    -- may put one back or put another in its place.
+    -- A reviewer is recorded once, as a pair. Retention may remove the pair;
+    -- nothing may remove half of it, put one back or put another in its place.
     IF NEW."reviewerRecordedAt" IS DISTINCT FROM OLD."reviewerRecordedAt" THEN
         RAISE EXCEPTION 'EngineeringAgentBinding reviewerRecordedAt is written by the database'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF (NEW."reviewerGithubId" IS NULL) <> (NEW."reviewerLogin" IS NULL) THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding % reviewer is recorded and removed whole', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
     IF (NEW."reviewerGithubId" IS NOT NULL AND NEW."reviewerGithubId" IS DISTINCT FROM OLD."reviewerGithubId")
@@ -780,16 +925,12 @@ BEGIN
             RAISE EXCEPTION 'EngineeringAgentBinding % reviewer was recorded once', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;
-        IF NEW."reviewerGithubId" IS NULL OR NEW."reviewerLogin" IS NULL THEN
-            RAISE EXCEPTION 'EngineeringAgentBinding % reviewer is recorded whole', OLD."id"
-                USING ERRCODE = 'check_violation';
-        END IF;
         NEW."reviewerRecordedAt" := now_utc;
     END IF;
     NEW."updatedAt" := now_utc;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_binding_guard_insert"
     BEFORE INSERT ON "EngineeringAgentBinding"
@@ -797,6 +938,36 @@ CREATE TRIGGER "engineering_agent_binding_guard_insert"
 CREATE TRIGGER "engineering_agent_binding_guard_change"
     BEFORE UPDATE OR DELETE ON "EngineeringAgentBinding"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_binding_guard"();
+
+-- A superseded binding leaves a current one for the same pull request by
+-- commit, so an open PR never drops out of the owner queue's count.
+CREATE OR REPLACE FUNCTION "engineering_agent_binding_superseded_has_replacement"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    replaced BOOLEAN;
+BEGIN
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentBinding" b'
+        ' WHERE b."prNumber" = $1 AND b."supersededAt" IS NULL AND b."id" <> $2)',
+        TG_TABLE_SCHEMA
+    ) INTO replaced USING NEW."prNumber", NEW."id";
+    IF NOT replaced THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding % was superseded without a current replacement', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_binding_superseded_has_replacement"
+    AFTER UPDATE ON "EngineeringAgentBinding"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    WHEN (OLD."supersededAt" IS NULL AND NEW."supersededAt" IS NOT NULL)
+    EXECUTE FUNCTION "engineering_agent_binding_superseded_has_replacement"();
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentRegistration: a registration proposal's source, digests,
@@ -817,6 +988,7 @@ CREATE TABLE "EngineeringAgentRegistration" (
     "amuxCardId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "decidedAt" TIMESTAMP(3),
+    "resolvedAt" TIMESTAMP(3),
 
     CONSTRAINT "EngineeringAgentRegistration_pkey" PRIMARY KEY ("id")
 );
@@ -824,6 +996,7 @@ CREATE TABLE "EngineeringAgentRegistration" (
 ALTER TABLE "EngineeringAgentRegistration"
     ADD CONSTRAINT "EngineeringAgentRegistration_source_itemKey_itemDigest_key"
         UNIQUE ("source", "itemKey", "itemDigest"),
+    ADD CONSTRAINT "EngineeringAgentRegistration_id_check" CHECK ("id" ~ '^[A-Za-z0-9_-]{1,64}$'),
     ADD CONSTRAINT "EngineeringAgentRegistration_source_check" CHECK ("source" IN ('S1', 'S2', 'S3')),
     ADD CONSTRAINT "EngineeringAgentRegistration_hash_check"
         CHECK (
@@ -835,9 +1008,7 @@ ALTER TABLE "EngineeringAgentRegistration"
     ADD CONSTRAINT "EngineeringAgentRegistration_result_check"
         CHECK ("result" IN ('pending', 'registered', 'registration_refused', 'absent', 'partial')),
     ADD CONSTRAINT "EngineeringAgentRegistration_card_check"
-        CHECK (("result" = 'registered') = ("amuxCardId" IS NOT NULL));
-
-ALTER TABLE "EngineeringAgentRegistration"
+        CHECK (("result" = 'registered') = ("amuxCardId" IS NOT NULL)),
     ADD CONSTRAINT "EngineeringAgentRegistration_roundId_check" CHECK ("roundId" ~ '^[A-Za-z0-9_-]{8,64}$');
 
 CREATE INDEX "EngineeringAgentRegistration_roundId_idx" ON "EngineeringAgentRegistration"("roundId");
@@ -850,43 +1021,59 @@ ALTER TABLE "EngineeringAgentRegistration"
         ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_registration_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
+    now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
     -- limit: REGISTRATION_CAPS.perRound
     round_limit CONSTANT INTEGER := 3;
     -- limit: REGISTRATION_CAPS.perUtcDay
     day_limit CONSTANT INTEGER := 10;
     -- limit: REGISTRATION_CAPS.unpromoted
     unpromoted_limit CONSTANT INTEGER := 20;
+    counted INTEGER;
 BEGIN
     IF TG_OP = 'INSERT' THEN
-        IF NEW."result" <> 'pending' OR NEW."decidedAt" IS NOT NULL THEN
+        IF NEW."result" <> 'pending' OR NEW."decidedAt" IS NOT NULL OR NEW."resolvedAt" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentRegistration starts pending' USING ERRCODE = 'check_violation';
         END IF;
         -- The caps (policy §2.2), counted here and not only by the guard.
         -- A proposal that did not become a card -- refused, or confirmed
         -- absent -- does not count; one whose card is unknown does.
-        PERFORM pg_advisory_xact_lock(hashtext('engineering-agent:registration'));
-        IF (SELECT count(*) FROM "EngineeringAgentRegistration"
-                WHERE "roundId" = NEW."roundId" AND "result" NOT IN ('registration_refused', 'absent')) >= round_limit THEN
+        PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('engineering-agent:registration'));
+        EXECUTE pg_catalog.format(
+            'SELECT count(*) FROM %I."EngineeringAgentRegistration" r'
+            ' WHERE r."roundId" = $1 AND r."result" <> ALL ($2)',
+            TG_TABLE_SCHEMA
+        ) INTO counted USING NEW."roundId", ARRAY['registration_refused', 'absent'];
+        IF counted >= round_limit THEN
             RAISE EXCEPTION 'EngineeringAgentRegistration refused: the round cap is reached' USING ERRCODE = 'check_violation';
         END IF;
-        IF (SELECT count(*) FROM "EngineeringAgentRegistration"
-                WHERE "createdAt" >= date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC')
-                  AND "result" NOT IN ('registration_refused', 'absent')) >= day_limit THEN
+        EXECUTE pg_catalog.format(
+            'SELECT count(*) FROM %I."EngineeringAgentRegistration" r'
+            ' WHERE r."createdAt" >= $1 AND r."result" <> ALL ($2)',
+            TG_TABLE_SCHEMA
+        ) INTO counted USING pg_catalog.date_trunc('day', now_utc), ARRAY['registration_refused', 'absent'];
+        IF counted >= day_limit THEN
             RAISE EXCEPTION 'EngineeringAgentRegistration refused: the UTC day cap is reached' USING ERRCODE = 'check_violation';
         END IF;
-        IF (SELECT count(*) FROM "EngineeringAgentRegistration" r
-                LEFT JOIN "AmuxWorkItem" c ON c."id" = r."amuxCardId"
-                WHERE r."result" IN ('pending', 'partial')
-                   OR (r."result" = 'registered' AND c."status" = 'backlog' AND c."archivedAt" IS NULL)) >= unpromoted_limit THEN
+        EXECUTE pg_catalog.format(
+            'SELECT count(*) FROM %1$I."EngineeringAgentRegistration" r'
+            ' LEFT JOIN %1$I."AmuxWorkItem" c ON c."id" = r."amuxCardId"'
+            ' WHERE r."result" = ANY ($1)'
+            '    OR (r."result" = $2 AND c."status" = $3 AND c."archivedAt" IS NULL)',
+            TG_TABLE_SCHEMA
+        ) INTO counted USING ARRAY['pending', 'partial'], 'registered', 'backlog';
+        IF counted >= unpromoted_limit THEN
             RAISE EXCEPTION 'EngineeringAgentRegistration refused: too many registered cards wait for promotion'
                 USING ERRCODE = 'check_violation';
         END IF;
-        NEW."createdAt" := clock_timestamp() AT TIME ZONE 'UTC';
+        NEW."createdAt" := now_utc;
         RETURN NEW;
     END IF;
-    IF TG_OP = 'DELETE' OR OLD."result" <> 'pending' THEN
+    IF TG_OP = 'DELETE' OR OLD."result" NOT IN ('pending', 'partial') THEN
         RAISE EXCEPTION 'EngineeringAgentRegistration result is written once and kept'
             USING ERRCODE = 'check_violation';
     END IF;
@@ -897,6 +1084,7 @@ BEGIN
         OR NEW."itemDigest" IS DISTINCT FROM OLD."itemDigest"
         OR NEW."proposalDigest" IS DISTINCT FROM OLD."proposalDigest"
         OR NEW."guardResult" IS DISTINCT FROM OLD."guardResult"
+        OR NEW."roundId" IS DISTINCT FROM OLD."roundId"
         OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
         RAISE EXCEPTION 'EngineeringAgentRegistration % cannot change what was proposed', OLD."id"
             USING ERRCODE = 'check_violation';
@@ -906,16 +1094,26 @@ BEGIN
         ('pending', 'registered'),
         ('pending', 'registration_refused'),
         ('pending', 'absent'),
-        ('pending', 'partial')
+        ('pending', 'partial'),
+        ('partial', 'registered'),
+        ('partial', 'absent')
         -- end transitions
     ) THEN
         RAISE EXCEPTION 'EngineeringAgentRegistration % cannot go from % to %', OLD."id", OLD."result", NEW."result"
             USING ERRCODE = 'check_violation';
     END IF;
-    NEW."decidedAt" := clock_timestamp() AT TIME ZONE 'UTC';
+    -- The first answer is kept as decided; a partial one's later resolution
+    -- is recorded beside it, not over it.
+    IF OLD."result" = 'pending' THEN
+        NEW."decidedAt" := now_utc;
+        NEW."resolvedAt" := NULL;
+    ELSE
+        NEW."decidedAt" := OLD."decidedAt";
+        NEW."resolvedAt" := now_utc;
+    END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_registration_guard_insert"
     BEFORE INSERT ON "EngineeringAgentRegistration"
@@ -923,6 +1121,43 @@ CREATE TRIGGER "engineering_agent_registration_guard_insert"
 CREATE TRIGGER "engineering_agent_registration_guard_change"
     BEFORE UPDATE OR DELETE ON "EngineeringAgentRegistration"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_registration_guard"();
+
+-- A partial registration is an owner decision (§12, "등록 결과 불명"): it
+-- opens a decision item in the same transaction, and that item -- which
+-- expires or is acknowledged -- is what the owner queue counts. It is
+-- resolved only after that item has closed, so a person has seen it first.
+CREATE OR REPLACE FUNCTION "engineering_agent_partial_registration_decision"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    -- cause: PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX
+    cause_prefix CONSTANT TEXT := 'registration:';
+    decision_state TEXT;
+BEGIN
+    EXECUTE pg_catalog.format(
+        'SELECT w."state" FROM %I."EngineeringAgentWorkItem" w WHERE w."causeKey" = $1 AND w."kind" = $2',
+        TG_TABLE_SCHEMA
+    ) INTO decision_state USING cause_prefix || NEW."id", 'decision';
+    IF NEW."result" = 'partial' AND decision_state IS DISTINCT FROM 'open' THEN
+        RAISE EXCEPTION 'EngineeringAgentRegistration % became partial without an open decision item', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW."result" <> 'partial' AND (decision_state IS NULL OR decision_state = 'open') THEN
+        RAISE EXCEPTION 'EngineeringAgentRegistration % is resolved only after its decision item closes', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_partial_registration_decision"
+    AFTER UPDATE ON "EngineeringAgentRegistration"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    WHEN (NEW."result" = 'partial' OR OLD."result" = 'partial')
+    EXECUTE FUNCTION "engineering_agent_partial_registration_decision"();
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentRequest: internal request idempotency (§10). `in_progress`
@@ -951,7 +1186,10 @@ ALTER TABLE "EngineeringAgentRequest"
 CREATE INDEX "EngineeringAgentRequest_state_createdAt_idx" ON "EngineeringAgentRequest"("state", "createdAt");
 
 CREATE OR REPLACE FUNCTION "engineering_agent_request_guard"()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
 BEGIN
@@ -988,7 +1226,7 @@ BEGIN
     NEW."updatedAt" := now_utc;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER "engineering_agent_request_guard_insert"
     BEFORE INSERT ON "EngineeringAgentRequest"

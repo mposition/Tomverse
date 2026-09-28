@@ -7890,6 +7890,8 @@ model EngineeringAgentRun {
   status         String    @default("active")
   outcome        String?
   halt           String    @default("none")
+  /// The mode the run started under, read by the insert trigger from AppSetting.
+  modeAtStart    String    @default("off")
   startedAt      DateTime  @default(now())
   leaseExpiresAt DateTime
   endedAt        DateTime?
@@ -7901,6 +7903,7 @@ model EngineeringAgentRun {
 
   @@index([status, leaseExpiresAt])
   @@index([endedAt])
+  @@index([modeAtStart, startedAt])
 }
 
 model EngineeringAgentWorkItem {
@@ -8005,6 +8008,7 @@ model EngineeringAgentRegistration {
   amuxCardId     String?
   createdAt      DateTime  @default(now())
   decidedAt      DateTime?
+  resolvedAt     DateTime?
 
   amuxCard AmuxWorkItem? @relation("EngineeringAgentRegistrationCard", fields: [amuxCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 

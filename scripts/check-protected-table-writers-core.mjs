@@ -634,31 +634,31 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
-    writeVerbs: 70,
+    writeVerbs: 72,
     reason:
       "The engineering agent state migration adds a restrictive foreign key from the T2 decision table to AdminAuditLog. It never writes AdminAuditLog; its write verbs create and constrain the seven engineering tables and their triggers.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRun",
-    tableMentions: 22,
-    writeVerbs: 70,
+    tableMentions: 24,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentWorkItem",
-    tableMentions: 37,
-    writeVerbs: 70,
+    tableMentions: 41,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentWorkItem and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentApproval",
-    tableMentions: 12,
-    writeVerbs: 70,
+    tableMentions: 11,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentApproval and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
@@ -666,23 +666,23 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentCapability",
     tableMentions: 13,
-    writeVerbs: 70,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentCapability and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentBinding",
-    tableMentions: 19,
-    writeVerbs: 70,
+    tableMentions: 22,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentBinding and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRegistration",
-    tableMentions: 20,
-    writeVerbs: 70,
+    tableMentions: 21,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentRegistration and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
@@ -690,7 +690,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRequest",
     tableMentions: 10,
-    writeVerbs: 70,
+    writeVerbs: 72,
     reason:
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
@@ -698,6 +698,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    count: 17,
+    reason:
+      "The engineering agent triggers read their sibling tables, AMUX and AppSetting's mode row, all with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path, where a temporary table of the same name answers for the real one, and a hard-coded public. is wrong under ?schema=. Every function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
   {
     path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
     count: 3,

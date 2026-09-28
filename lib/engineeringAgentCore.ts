@@ -96,7 +96,9 @@ export const writeItemTerminalStates = <K extends WriteItemKind>(kind: K) => {
  *   consume no capability.
  * - A lease expiry sends `claimed` to `needs_lookup`, never back to `queued`.
  * - `claimed -> queued` is a write claim's refusal before any GitHub write, or
- *   a lookup that proved no earlier write happened.
+ *   a lookup that proved no earlier write happened. A publish item whose one
+ *   capability was consumed never takes it: a consumed capability stays
+ *   consumed (§10), so that item ends refused and a new attempt is a new item.
  * - Only an unclaimed publish item expires by TTL; the maintenance kinds are
  *   created when they are due and are not left waiting.
  */
@@ -228,6 +230,11 @@ export type WriteTransitionContext =
       claimMode: WriteClaimMode;
       fencingMatches: boolean;
       outcome: WriteResultOutcome;
+      /**
+       * Whether the item's capability has been consumed, by this claim or an
+       * earlier one. Only a publish item has one; for the others it is false.
+       */
+      capabilityConsumed: boolean;
     };
 
 export type TransitionVerdict = { allowed: true } | { allowed: false; reason: string };
@@ -235,6 +242,22 @@ export type TransitionVerdict = { allowed: true } | { allowed: false; reason: st
 const refuse = (reason: string): TransitionVerdict => ({ allowed: false, reason });
 
 const resultTarget = (
+  kind: WriteItemKind,
+  mode: WriteClaimMode,
+  outcome: WriteResultOutcome,
+  capabilityConsumed: boolean,
+): string | null => {
+  const target = unconditionalResultTarget(kind, mode, outcome);
+  if (kind !== "publish" || target === null) return target;
+  const terminals = WRITE_ITEM_TERMINALS.publish;
+  // Nothing is published without the capability being consumed, and a
+  // consumed capability is never handed back to the queue.
+  if (target === terminals.success && !capabilityConsumed) return null;
+  if (target === "queued" && capabilityConsumed) return terminals.refused;
+  return target;
+};
+
+const unconditionalResultTarget = (
   kind: WriteItemKind,
   mode: WriteClaimMode,
   outcome: WriteResultOutcome,
@@ -331,7 +354,15 @@ export const decideWriteItemTransition = <K extends WriteItemKind>(
     case "result": {
       if (from !== "claimed") return refuse("result_only_from_claimed");
       if (!context.fencingMatches) return refuse("stale_fencing_token");
-      const expected = resultTarget(kind, context.claimMode, context.outcome);
+      if (kind !== "publish" && context.capabilityConsumed) {
+        return refuse("only_a_publish_item_has_a_capability");
+      }
+      const expected = resultTarget(
+        kind,
+        context.claimMode,
+        context.outcome,
+        context.capabilityConsumed,
+      );
       if (expected === null) return refuse("outcome_not_valid_for_claim_mode");
       return expected === to ? { allowed: true } : refuse("outcome_does_not_lead_to_target");
     }
@@ -344,6 +375,23 @@ export const decideWriteItemTransition = <K extends WriteItemKind>(
  * lookup that settles the result closes the decision with it.
  */
 export const opensDecisionOnEntry = (to: string) => to === "outcome_unknown";
+
+/**
+ * The cause key of the decision item an entry into `outcome_unknown` opens:
+ * one per item and claim, so a later entry opens its own. The migration builds
+ * the same key in a deferred trigger and refuses the commit without it.
+ */
+export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
+export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
+  `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
+
+/**
+ * The cause key of the decision item a partial registration opens (§12,
+ * "등록 결과 불명"). The owner queue counts that item, not the registration.
+ */
+export const PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX = "registration:";
+export const partialRegistrationDecisionCauseKey = (registrationId: string) =>
+  `${PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX}${registrationId}`;
 
 /**
  * A branch left behind by a PR creation that GitHub rejected is only ever
@@ -430,12 +478,19 @@ export type RegistrationResult = (typeof REGISTRATION_RESULTS)[number];
  * A registration result is written once. `pending` only exists between the
  * guard passing and the AMUX writer answering; an unclear answer is resolved
  * by AMUX's read-back into `absent` or `partial`, never by a retry.
+ *
+ * `partial` opens an owner decision item in the same transaction. It is
+ * resolved -- to the card that turned out to exist, or to its confirmed
+ * absence -- only after that item has been acknowledged or has expired, and
+ * the resolution is recorded beside the first answer, not over it.
  */
 export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[] = [
   ["pending", "registered"],
   ["pending", "registration_refused"],
   ["pending", "absent"],
   ["pending", "partial"],
+  ["partial", "registered"],
+  ["partial", "absent"],
 ] as const;
 
 /* ------------------------------------------------------------------------- */
@@ -530,9 +585,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type QueueReading = {
   /** Bindings with an open PR or a remaining branch. */
   openPrBindings: number;
-  /** Undecided decision items: T2 drafts, mismatches, repeated failures, observation failures, partial registrations. */
+  /**
+   * Open decision work items: T2 drafts, mismatches, and the decision items
+   * opened for repeated failures, observation failures, unknown write
+   * outcomes and partial registrations.
+   */
   pendingDecisions: number;
-  /** When mode first became `t1`, or null if it never has. */
+  /**
+   * When the first run that started under mode `t1` started (the earliest
+   * EngineeringAgentRun whose `modeAtStart` is `t1`), or null if none has.
+   * That is never earlier than the mode change, so the window it opens is
+   * never shorter than the policy's.
+   */
   t1StartedAt: Date | null;
   now: Date;
 };

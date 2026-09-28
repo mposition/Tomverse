@@ -862,6 +862,13 @@ const REGISTRY = {
     reason:
       "Why the agent stopped taking work, if it did. none is the ordinary value.",
   },
+  EngineeringAgentRun_modeAtStart_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_MODES",
+    reason:
+      "The mode a run started under. The insert trigger reads it from AppSetting and writes it itself; anything unknown is off, as parseEngineeringAgentMode reads it.",
+  },
   EngineeringAgentWorkItem_kind_check: {
     owner: "list",
     module: "lib/engineeringAgentCore.ts",

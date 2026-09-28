@@ -5,9 +5,13 @@ import test from "node:test";
 import {
   BINDING_STATES,
   BINDING_TRANSITIONS,
+  ENGINEERING_AGENT_MODE_SETTING_KEY,
+  ENGINEERING_AGENT_MODES,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
+  FIRST_T1_WINDOW_DAYS,
   HALT_VALUES,
   OWNER_QUEUE_LIMITS,
+  PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX,
   REGISTRATION_RESULTS,
   REGISTRATION_TRANSITIONS,
   REQUEST_STATES,
@@ -15,6 +19,7 @@ import {
   RUN_OUTCOMES,
   RUN_STATUSES,
   RUN_TRANSITIONS,
+  UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
   workItemInitialState,
   workItemStates,
   workItemTransitions,
@@ -76,6 +81,12 @@ test("every state and value list in a CHECK is exactly the core list", () => {
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_status_check"))), sorted(RUN_STATUSES));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_outcome_check"))), sorted(RUN_OUTCOMES));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_halt_check"))), sorted(HALT_VALUES));
+  assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_modeAtStart_check"))), sorted(ENGINEERING_AGENT_MODES));
+  // The trigger reads the mode as the core does: anything but a known on-mode is off.
+  const reading = /NEW\."modeAtStart" := CASE WHEN mode_value IN \(([^)]*)\) THEN mode_value ELSE '([a-z0-9]+)' END;/.exec(sql);
+  assert.ok(reading, "the run trigger records the mode it read");
+  assert.deepEqual(sorted(quoted(reading[1])), sorted(ENGINEERING_AGENT_MODES.filter((mode) => mode !== "off")));
+  assert.equal(reading[2], "off");
   assert.deepEqual(sorted(quoted(check("EngineeringAgentBinding_state_check"))), sorted(BINDING_STATES));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRegistration_result_check"))), sorted(REGISTRATION_RESULTS));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRequest_state_check"))), sorted(REQUEST_STATES));
@@ -108,21 +119,50 @@ test("a work item is created in its kind's initial state and nowhere else", () =
 
 test("every cap the database counts is the number the code holds", () => {
   const limits = new Map(
-    [...sql.matchAll(/-- limit: ([A-Z_]+)\.(\w+)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
-      `${m[1]}.${m[2]}`,
-      Number(m[3]),
+    [...sql.matchAll(/-- limit: ([A-Z_0-9]+(?:\.\w+)?)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
+      m[1],
+      Number(m[2]),
     ]),
   );
   assert.deepEqual(
     Object.fromEntries(limits),
     {
       "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
+      "OWNER_QUEUE_LIMITS.prDuringFirstT1Days": OWNER_QUEUE_LIMITS.prDuringFirstT1Days,
+      FIRST_T1_WINDOW_DAYS,
       "OWNER_QUEUE_LIMITS.decision": OWNER_QUEUE_LIMITS.decision,
       "REGISTRATION_CAPS.perRound": REGISTRATION_CAPS.perRound,
       "REGISTRATION_CAPS.perUtcDay": REGISTRATION_CAPS.perUtcDay,
       "REGISTRATION_CAPS.unpromoted": REGISTRATION_CAPS.unpromoted,
     },
   );
+});
+
+test("every string the database matches on is the string the code holds", () => {
+  const strings = new Map(
+    [...sql.matchAll(/-- (?:setting|cause): ([A-Z_0-9]+)\n\s*\w+ CONSTANT TEXT := '([^']*)';/g)].map((m) => [
+      m[1],
+      m[2],
+    ]),
+  );
+  assert.deepEqual(Object.fromEntries(strings), {
+    ENGINEERING_AGENT_MODE_SETTING_KEY,
+    UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
+    PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX,
+  });
+});
+
+test("every trigger function pins search_path and reads its siblings through the trigger's schema", () => {
+  const functions = [...sql.matchAll(/CREATE OR REPLACE FUNCTION "(\w+)"\(\)\n([\s\S]*?)\nAS \$\$\n([\s\S]*?)\n\$\$;/g)];
+  const created = [...sql.matchAll(/CREATE OR REPLACE FUNCTION "(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(functions.map((m) => m[1]), created, "every function has a header and a body");
+  for (const [, name, header, body] of functions) {
+    assert.match(header, /^RETURNS TRIGGER\nLANGUAGE plpgsql\nSET search_path = pg_catalog, pg_temp$/, name);
+    // A table named in a body is named inside a format() string, after %I.
+    for (const match of body.matchAll(/(%(?:1\$)?I\.)?"((?:EngineeringAgent|Amux|AppSetting|AdminAuditLog)\w*)"/g)) {
+      assert.ok(match[1], `${name} names "${match[2]}" without the trigger's schema`);
+    }
+  }
 });
 
 test("time the triggers write or compare is the database clock in UTC, never the caller's", () => {
@@ -133,6 +173,6 @@ test("time the triggers write or compare is the database clock in UTC, never the
 });
 
 test("the migration writes no row and holds no user content column", () => {
-  assert.doesNotMatch(sql, /^\s*INSERT INTO/im);
+  assert.doesNotMatch(sql, /INSERT INTO/i);
   assert.doesNotMatch(sql, /"(?:title|body|message|content|prompt|email)"\s+TEXT/i);
 });
