@@ -84,14 +84,43 @@ const isSeparatorRow = (cells: string[]) =>
 const plain = (cell: string) => cell.replace(/\*\*/g, "").replace(/`/g, "").trim();
 
 /**
- * Items of the shared backlog: the rows of every markdown table whose header
- * has an `ID` column. An item named in more than one row is ambiguous and is
- * never offered -- which row would the card be about?
+ * The ID-table shapes the shared backlog uses, each with the column that
+ * carries an item's status and priority. The list is closed: a table with an
+ * `ID` column in any other shape is not read, and every key it names is
+ * treated as ambiguous so it is never offered -- a column this does not know
+ * might be the one that says "done". A shape with no status column at all is
+ * known but unreadable for status, so its items are held back the same way.
+ */
+export const BACKLOG_TABLE_SCHEMAS: ReadonlyArray<{
+  header: readonly string[];
+  statusColumn: string | null;
+}> = [
+  { header: ["ID", "작업", "우선순위·상태", "다음 완료 단위"], statusColumn: "우선순위·상태" },
+  { header: ["ID", "작업", "우선순위·상태", "원인과 다음 완료 단위"], statusColumn: "우선순위·상태" },
+  { header: ["ID", "우선순위·상태", "다음 완료 단위·착수 조건"], statusColumn: "우선순위·상태" },
+  { header: ["ID", "상태·분류", "다음 완료 단위"], statusColumn: "상태·분류" },
+  { header: ["순서", "ID", "작업", "우선순위·다음 완료 단위"], statusColumn: "우선순위·다음 완료 단위" },
+  { header: ["이번 제안 내 순서", "ID", "작업", "우선순위·다음 완료 단위"], statusColumn: "우선순위·다음 완료 단위" },
+  { header: ["제안 내 배치", "ID", "작업", "우선순위·다음 완료 단위"], statusColumn: "우선순위·다음 완료 단위" },
+  { header: ["투자 순위", "ID", "작업", "다음 완료 목표"], statusColumn: null },
+];
+
+const schemaFor = (header: readonly string[]) =>
+  BACKLOG_TABLE_SCHEMAS.find(
+    (schema) =>
+      schema.header.length === header.length && schema.header.every((cell, i) => cell === header[i]),
+  );
+
+/**
+ * Items of the shared backlog: the rows of its ID tables. An item named in more
+ * than one row, in a table of unknown shape, or in a table without a status
+ * column is ambiguous and never offered -- which row, and what status, would
+ * the card be about?
  */
 export const parseBacklogItems = (
   markdown: string,
 ): { items: RegistrationItem[]; ambiguousKeys: string[] } => {
-  const rows = new Map<string, Array<{ row: string; status: string }>>();
+  const rows = new Map<string, Array<{ row: string; status: string | null }>>();
   const lines = markdown.split(/\r?\n/);
   for (let i = 0; i + 1 < lines.length; i += 1) {
     if (!lines[i].trim().startsWith("|")) continue;
@@ -99,12 +128,15 @@ export const parseBacklogItems = (
     if (!isSeparatorRow(splitRow(lines[i + 1]))) continue;
     const idColumn = header.indexOf("ID");
     if (idColumn === -1) continue;
-    const statusColumn = header.findIndex((cell) => cell.includes("상태"));
+    const schema = schemaFor(header);
+    const statusColumn =
+      schema === undefined || schema.statusColumn === null ? -1 : header.indexOf(schema.statusColumn);
     for (let j = i + 2; j < lines.length && lines[j].trim().startsWith("|"); j += 1) {
       const cells = splitRow(lines[j]);
       const key = plain(cells[idColumn] ?? "").split(/\s+/)[0] ?? "";
       if (!ITEM_KEY.test(key)) continue;
-      const status = statusColumn === -1 ? "" : (cells[statusColumn] ?? "");
+      // `null` status: this row cannot say whether the item is done.
+      const status = statusColumn === -1 ? null : (cells[statusColumn] ?? null);
       const list = rows.get(key) ?? [];
       list.push({ row: lines[j].trim(), status });
       rows.set(key, list);
@@ -114,11 +146,12 @@ export const parseBacklogItems = (
   const items: RegistrationItem[] = [];
   const ambiguousKeys: string[] = [];
   for (const [key, found] of rows) {
-    if (found.length !== 1) {
+    if (found.length !== 1 || found[0].status === null) {
       ambiguousKeys.push(key);
       continue;
     }
-    const [{ row, status }] = found;
+    const [{ row, status: knownStatus }] = found;
+    const status = knownStatus as string;
     const priority = PRIORITY.exec(status);
     items.push({
       source: "S1",
@@ -178,7 +211,8 @@ export const dependabotFailureItem = (input: {
  * operator-only, or waiting on a decision or approval. Erring towards
  * excluding is cheap -- an item left out is still in the backlog for a person.
  */
-const EXCLUDED_STATUS = /완료|보류|운영자\s*전용|대기|미승인|\bblocked\b|\bon hold\b|\bdone\b/i;
+const EXCLUDED_STATUS =
+  /완료(?!\s*(?:단위|조건|목표|기준))|보류|중지|중단|폐기|운영자\s*전용|대기|미승인|결정\s*필요|확정\s*필요|승인\s*(?:후|필요)|조건부|\bblocked\b|\bon hold\b|\bdone\b|\bpaused\b/i;
 
 export type PrefilterReason =
   | "status_excluded"

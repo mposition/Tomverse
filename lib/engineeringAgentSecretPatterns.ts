@@ -36,14 +36,31 @@ export const ENGINEERING_AGENT_SECRET_RULES = [
     pattern: /\bauthorization\s*[:=]\s*["']?bearer\s+[A-Za-z0-9._~+/-]{16,}/i,
   },
   { id: "json-web-token", pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/ },
+  { id: "xai-key", pattern: /\bxai-[A-Za-z0-9]{20,}\b/ },
+  { id: "huggingface-token", pattern: /\bhf_[A-Za-z0-9]{30,}\b/ },
   {
     /**
-     * An assignment whose name says credential and whose value is not
-     * obviously a placeholder.
+     * An assignment whose name ends in a credential word -- with any provider
+     * prefix, so `R2_SECRET_ACCESS_KEY` and `CLOUDFLARE_API_TOKEN` count as much
+     * as `api_key` -- and whose value looks opaque: sixteen or more token
+     * characters mixing letters and digits. A plain word like a test password
+     * does not; a placeholder, an expression or an environment read does not.
      */
     id: "credential-assignment",
     pattern:
-      /\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|private[_-]?key)\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|placeholder|redacted)[A-Za-z0-9._~+/=-]{12,}/i,
+      /\b[A-Za-z0-9_]*(?:api[_-]?key|secret(?:[_-]?access)?(?:[_-]?key)?|access[_-]?key|token|password|passwd|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])(?=[A-Za-z0-9._~+/=-]*[0-9])(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{16,}/i,
+  },
+  {
+    /**
+     * An upper-case environment-style name ending in `_KEY`, `_SECRET`,
+     * `_TOKEN` or `_PASSWORD` with an opaque value -- `FAL_KEY`,
+     * `OAUTH_TOKEN_ENCRYPTION_KEY`. Case-sensitive on purpose: a camelCase
+     * `objectKey` holding a storage path is ordinary data, and matching it would
+     * teach people to ignore this check.
+     */
+    id: "env-credential-assignment",
+    pattern:
+      /\b[A-Z][A-Z0-9_]*_(?:KEY|SECRET|TOKEN|PASSWORD)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])(?=[A-Za-z0-9._~+/=-]*[0-9])(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{16,}/,
   },
 ] as const;
 

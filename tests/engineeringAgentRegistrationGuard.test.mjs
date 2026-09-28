@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  BACKLOG_TABLE_SCHEMAS,
   REGISTRATION_CAPS,
   REGISTRATION_SOURCES,
   ciFailureItem,
@@ -16,13 +19,21 @@ import { detectSecrets, detectSecretsInFields } from "../lib/engineeringAgentSec
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
-/** Shaped like the shared backlog: several tables, only some with an ID column. */
+/**
+ * Shaped like the shared backlog: every ID-table shape it uses, a table with
+ * no ID column, a table shape nobody listed, and the investment table that has
+ * no status column.
+ */
 const BACKLOG = [
   "# Backlog",
   "",
   "| 순서 | 작업 | 범위 |",
   "| --- | --- | --- |",
   "| **1** | **CACHE-01 — 보고서** | 집계 |",
+  "",
+  "| 투자 순위 | ID | 작업 | 다음 완료 목표 |",
+  "| --- | --- | --- | --- |",
+  "| 1 | CHAT-01 | Chat 완성 | 단일 답변 화면 |",
   "",
   "### B. 병행 개선 과제",
   "",
@@ -32,26 +43,57 @@ const BACKLOG = [
   "| CONT-TITLE-01 | 대화명 안정화 | 완료 / 병합 | 재착수 후보에서 제외 |",
   "| CREDIT-UX-01 | 비용 정보 공개 | CHAT-01 하위 병행 P2 / UI·정책 결정 대기 | 축약 |",
   "| TASK-ORCH-01 (IDEA-A1) | 지속 실행 | 후속 P2 / 범위 미정 | 기반 |",
-  "| HELP-NAV-01 | 도움말 | 착수 가능 | MVP |",
   "| threshold note | 설명 | 착수 가능 | 행 |",
   "",
-  "| 투자 순위 | ID | 작업 |",
+  "| 순서 | ID | 작업 | 우선순위·다음 완료 단위 |",
+  "| --- | --- | --- | --- |",
+  "| **1** | **SEO-I18N-01** | 지역 중립 metadata | P1 — **완료** (2026-09-17) |",
+  "| **2** | **AEO-04** | sitemap 변경일 | P1 — 다음 완료 단위: 페이지별 변경일 |",
+  "",
+  "| ID | 우선순위·상태 | 다음 완료 단위·착수 조건 |",
   "| --- | --- | --- |",
-  "| 1 | CHAT-01 | Chat 완성 |",
-  "| 2 | HELP-NAV-01 | 중복 |",
+  "| SEC-OPS-01 | P2 / 기존 주간 자동화 일시중지 | 재개 조건 |",
+  "| MOBILE-KB-INSET-01 | CHAT-01 하위 **P2** / 수정 미착수 | 재현 |",
+  "",
+  "| 새 형식 | ID | 무엇 |",
+  "| --- | --- | --- |",
+  "| x | NEW-SHAPE-01 | 읽을 수 없는 형식 |",
+  "",
+  "| ID | 작업 | 우선순위·상태 | 다음 완료 단위 |",
+  "| --- | --- | --- | --- |",
+  "| HELP-NAV-01 | 도움말 | P2 / 착수 가능 | MVP |",
+  "| HELP-NAV-01 | 도움말(중복) | P2 / 착수 가능 | MVP |",
 ].join("\n");
 
-test("the backlog parser reads only ID tables and marks an item named twice as ambiguous", () => {
+test("the backlog parser reads the known ID-table shapes and holds back anything it cannot read", () => {
   const { items, ambiguousKeys } = parseBacklogItems(BACKLOG);
   assert.deepEqual(
     items.map((item) => item.key).sort(),
-    ["CACHE-01", "CHAT-01", "CONT-TITLE-01", "CREDIT-UX-01", "TASK-ORCH-01"],
+    [
+      "AEO-04",
+      "CACHE-01",
+      "CONT-TITLE-01",
+      "CREDIT-UX-01",
+      "MOBILE-KB-INSET-01",
+      "SEC-OPS-01",
+      "SEO-I18N-01",
+      "TASK-ORCH-01",
+    ],
   );
-  assert.deepEqual(ambiguousKeys, ["HELP-NAV-01"]);
+  // Named twice; in a shape nobody listed; in a table with no status column.
+  assert.deepEqual(ambiguousKeys, ["CHAT-01", "HELP-NAV-01", "NEW-SHAPE-01"]);
   const cache = items.find((item) => item.key === "CACHE-01");
   assert.equal(cache.priority, "p1");
   assert.equal(cache.digest, sha256("| CACHE-01 | 캐시 계측 | 병행 P1 / 구현 미착수 | 읽기 전용 보고서 |"));
-  assert.equal(items.find((item) => item.key === "CHAT-01").priority, null);
+  assert.equal(items.find((item) => item.key === "AEO-04").priority, "p1");
+  assert.equal(items.find((item) => item.key === "MOBILE-KB-INSET-01").priority, "p2");
+});
+
+test("every listed schema names a status column that is in its own header", () => {
+  for (const schema of BACKLOG_TABLE_SCHEMAS) {
+    assert.ok(schema.header.includes("ID"));
+    if (schema.statusColumn !== null) assert.ok(schema.header.includes(schema.statusColumn));
+  }
 });
 
 test("the digest moves with the item's text and with nothing else", () => {
@@ -73,22 +115,44 @@ const prefilter = (overrides = {}) => {
   });
 };
 
-test("done, waiting and existing items are never offered", () => {
+test("done, paused, waiting and existing items are never offered; a 'completion unit' phrase is not 'done'", () => {
   const { eligible, excluded } = prefilter({
-    existingSourceIdentities: new Set([registrationSourceIdentity("S1", "CHAT-01")]),
+    existingSourceIdentities: new Set([registrationSourceIdentity("S1", "MOBILE-KB-INSET-01")]),
     pendingSourceIdentities: new Set([registrationSourceIdentity("S1", "TASK-ORCH-01")]),
   });
-  assert.deepEqual(eligible.map((item) => item.key), ["CACHE-01"]);
+  assert.deepEqual(eligible.map((item) => item.key).sort(), ["AEO-04", "CACHE-01"]);
   assert.deepEqual(
     excluded.sort((a, b) => a.key.localeCompare(b.key)),
     [
-      { key: "CHAT-01", reason: "existing_card" },
+      { key: "CHAT-01", reason: "ambiguous" },
       { key: "CONT-TITLE-01", reason: "status_excluded" },
       { key: "CREDIT-UX-01", reason: "status_excluded" },
       { key: "HELP-NAV-01", reason: "ambiguous" },
+      { key: "MOBILE-KB-INSET-01", reason: "existing_card" },
+      { key: "NEW-SHAPE-01", reason: "ambiguous" },
+      { key: "SEC-OPS-01", reason: "status_excluded" },
+      { key: "SEO-I18N-01", reason: "status_excluded" },
       { key: "TASK-ORCH-01", reason: "already_proposed" },
     ],
   );
+});
+
+test("decision-pending wording keeps an item out", () => {
+  for (const status of ["P2 / 결정 필요", "P2 / 정책 확정 필요", "조건부 P2", "P3 / 승인 후 착수", "P1 / 운영자 전용"]) {
+    const markdown = [
+      "| ID | 작업 | 우선순위·상태 | 다음 완료 단위 |",
+      "| --- | --- | --- | --- |",
+      `| WAIT-01 | 작업 | ${status} | 단위 |`,
+    ].join("\n");
+    const { items, ambiguousKeys } = parseBacklogItems(markdown);
+    const result = prefilterItems({
+      items,
+      ambiguousKeys,
+      existingSourceIdentities: new Set(),
+      pendingSourceIdentities: new Set(),
+    });
+    assert.deepEqual(result.eligible, [], status);
+  }
 });
 
 const eligible = () => prefilter().eligible;
@@ -210,7 +274,9 @@ test("each secret rule fires on its shape and reports only its id", () => {
     "connection-string-with-password": "postgresql://user:hunter22@db.example:5432/app",
     "authorization-bearer": "Authorization: Bearer abcdefghijklmnopqrstu",
     "json-web-token": "eyJhbGciOiJI.eyJzdWIiOiIx.SflKxwRJSMeK",
-    "credential-assignment": 'password = "correcthorsebattery"',
+    "xai-key": `xai-${"g".repeat(30)}`,
+    "huggingface-token": `hf_${"h".repeat(34)}`,
+    "credential-assignment": 'R2_SECRET_ACCESS_KEY="Q7xk9Pz2Lm4Rt8Vw3Ny6"',
   };
   for (const [id, sample] of Object.entries(samples)) {
     const found = detectSecrets(`before ${sample} after`);
@@ -219,13 +285,43 @@ test("each secret rule fires on its shape and reports only its id", () => {
   }
 });
 
-test("placeholders and ordinary code are not secrets", () => {
+test("every secret-named variable this repository reads is caught when an opaque value is assigned", () => {
+  // Names only; the value is synthetic and never printed.
+  const opaque = "Q7xk9Pz2Lm4Rt8Vw3Ny6Hc5";
+  const root = new URL("..", import.meta.url);
+  const files = execFileSync("git", ["ls-files", "-z", "lib", "scripts", "app"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split("\0")
+    .filter((path) => /\.(?:ts|tsx|mjs|js)$/.test(path));
+  const names = new Set();
+  for (const path of files) {
+    for (const match of readFileSync(new URL(path, root), "utf8").matchAll(/process\.env\.([A-Z][A-Z0-9_]+)/g)) {
+      if (/(?:KEY|SECRET|TOKEN|PASSWORD)$/.test(match[1])) names.add(match[1]);
+    }
+  }
+  assert.ok(names.size >= 10, `only ${names.size} secret-named variables found`);
+  const missed = [...names].filter(
+    (name) =>
+      detectSecrets(`${name}=${opaque}`).length === 0 ||
+      detectSecrets(`"${name}": "${opaque}"`).length === 0,
+  );
+  assert.deepEqual(missed, [], "these names escaped the assignment rule");
+});
+
+test("placeholders, plain passwords in tests and ordinary code are not secrets", () => {
   for (const text of [
     "API_KEY=your-key-here",
     "password: process.env.DB_PASSWORD",
     "const token = await getToken();",
     "postgresql://localhost:5432/app",
     "ask-anthropic-docs",
+    'password = "correcthorsebattery"',
+    "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    "R2_SECRET_ACCESS_KEY=example-value-1234567890",
+    'const password = "test-password-123456";',
   ]) {
     assert.deepEqual(detectSecrets(text), [], text);
   }
