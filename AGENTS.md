@@ -1133,6 +1133,10 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
 - **P1e(tree 목록 검증)**: `lib/engineeringAgentTreeVerify.ts`,
   `tests/engineeringAgentTreeVerify.test.mjs`. **patch를 적용하는 코드를 여기에 넣지
   않습니다** — 본 앱은 tree 목록의 hash를 다시 계산하고 비교할 뿐입니다.
+- **P1f(capability와 불일치)**: `lib/engineeringAgentCapability.ts`,
+  `lib/engineeringAgentStateMismatch.ts`, `tests/engineeringAgentCapability.test.mjs`.
+  교차 잠금 순서는 `CROSS_LOCK_ORDER` 하나이며 AMUX가 자기 순서를 바꾸면 함께
+  바뀌어야 합니다.
 
 # AI Review (교차검토) 품질과 M5
 
