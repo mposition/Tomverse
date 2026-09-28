@@ -261,23 +261,49 @@ export async function releaseNotesSendAuthorization(
     )
   );
 
-  // The latest consent record for this purpose and this mailbox, whatever it
-  // says. Not "the latest grant": a grant followed by a withdrawal is a
-  // withdrawal, and a query that asked only for grants would find the older row
-  // and call it consent.
+  // Two rows, both required, because they answer different halves of one
+  // question. The consent record says an act of consent happened and names the
+  // evidence; the preference row says the person's answer is still yes *and*
+  // that it was confirmed.
   //
-  // `express` names the ids it rests on because
-  // `ReleaseNotesConsentInput` refuses a consent that cannot say what it rests
-  // on -- an assertion, not a convention, and the reason this reads the row
-  // rather than a boolean.
+  // `confirmedAt` is not decoration. It is the double opt-in rule
+  // (docs/policy/email-double-opt-in.md section 3 rule 5), and it is what
+  // handles the rows switched on before the confirmation step existed: those
+  // have `enabled: true`, no `confirmedAt`, and a `granted` consent record from
+  // that era. Reading the consent record alone would have called them consent
+  // and sent to every one of them -- which is the exact population the generic
+  // gate refuses without a migration having to touch them.
+  //
+  // An account with no preference row at all is not consent either, and that is
+  // the population section 5.6 reaches with a sealed `risk_accepted` approval
+  // rather than by inventing a consent for them.
   const consent = await read("the consent record", async () => {
-    const latest = await prisma.consentRecord.findFirst({
-      where: { emailAddress: input.normalizedAddress, purpose: input.purpose },
-      orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-      select: { id: true, action: true },
-    });
-    const express =
+    const [latest, preference] = await Promise.all([
+      prisma.consentRecord.findFirst({
+        where: { emailAddress: input.normalizedAddress, purpose: input.purpose },
+        orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+        select: { id: true, action: true },
+      }),
+      input.userId === null
+        ? Promise.resolve(null)
+        : prisma.emailPreference.findUnique({
+            where: {
+              userId_purpose: { userId: input.userId, purpose: input.purpose },
+            },
+            select: { enabled: true, confirmedAt: true },
+          }),
+    ]);
+    const confirmed =
+      preference !== null && preference.enabled && preference.confirmedAt !== null;
+    // Not "the latest grant": a grant followed by a withdrawal is a withdrawal,
+    // and a query that asked only for grants would find the older row and call
+    // it consent.
+    const granted =
       latest !== null && (latest.action === "granted" || latest.action === "reconfirmed");
+    const express = confirmed && granted;
+    // `ReleaseNotesConsentInput` refuses a consent that cannot say what it rests
+    // on -- an assertion, not a convention, and the reason this reads the row
+    // rather than a boolean.
     return { express, evidenceIds: express && latest ? [latest.id] : [] };
   });
 
