@@ -1,15 +1,16 @@
 /**
  * Development runner that pulls Tomverse work on the operator workstation.
  *
- * The code latch ships false. A true latch is a later policy version. This
- * process hosts BoardDriver and the local-session adapter together. It never
- * starts a Codex or Claude process, and it never posts to `/api/board`.
- * `process_main` does not construct a client or open a socket.
+ * Policy version 14 turns the code latch on. The runner still does not open a
+ * socket unless `TOMVERSE_AMUX_WSL_BRIDGE` is exactly `1`. This process hosts
+ * BoardDriver and the local-session adapter together. It never starts a Codex
+ * or Claude process, and it never posts to `/api/board`.
  */
 
 use std::collections::{BTreeMap, HashSet};
+use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use uuid::Uuid;
 
 use crate::board_driver::{
@@ -17,7 +18,11 @@ use crate::board_driver::{
 };
 use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask};
 
-pub const WSL_BRIDGE_CODE_LATCH: bool = false;
+pub const WSL_BRIDGE_CODE_LATCH: bool = true;
+
+pub const WSL_BRIDGE_ENV_NAME: &str = "TOMVERSE_AMUX_WSL_BRIDGE";
+
+pub const WSL_BRIDGE_LOCAL_URL_ENV: &str = "TOMVERSE_AMUX_WSL_LOCAL_URL";
 
 const CONTROL_PLANE_MARKERS: &[&str] = &[
     "TOMVERSE_AMUX_SYNC_SECRET",
@@ -146,6 +151,35 @@ impl LocalExchange {
             sends: Vec::new(),
             paths: Vec::new(),
         }
+    }
+}
+
+#[allow(async_fn_in_trait)]
+pub trait AttemptPrompts {
+    async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>>;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait LocalAmux {
+    async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
+    async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
+}
+
+impl AttemptPrompts for BTreeMap<String, String> {
+    async fn prompt_for(&mut self, _worker: &str, attempt_id: &str) -> Result<Option<String>> {
+        Ok(self.get(attempt_id).cloned())
+    }
+}
+
+impl LocalAmux for LocalExchange {
+    async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
+        self.paths.push(path.to_owned());
+        self.sends.push(body.clone());
+        Ok(self.reply.clone())
+    }
+
+    async fn read_back(&mut self, _session_name: &str, _attempt_id: &str) -> Result<ReadBack> {
+        Ok(self.read_back)
     }
 }
 
@@ -331,13 +365,46 @@ pub fn accept_late_result(
     live_generation == Some(generation) && lease_expires_at > now
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivationGate {
+    LatchOff,
+    EnvOff,
+    Runner,
+}
+
 /**
  * The binary entry. A false latch returns before any client exists. A true
- * latch still refuses: wiring this function to `bridge_tick` is the next
- * policy version, and this build has no activation runner.
+ * latch still returns before any client exists unless the environment value
+ * is exactly `1`. This function does not read the process environment.
  */
-pub fn process_main(latch: bool) -> i32 {
-    if latch { 1 } else { 0 }
+pub fn activation_gate(latch: bool, env_value: Option<&str>) -> ActivationGate {
+    if !latch {
+        return ActivationGate::LatchOff;
+    }
+    if env_value.map(str::trim) != Some("1") {
+        return ActivationGate::EnvOff;
+    }
+    ActivationGate::Runner
+}
+
+pub fn local_amux_url_allowed(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return false;
+    }
+    if !(url.path().is_empty() || url.path() == "/") {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
+    loopback && matches!(url.scheme(), "http" | "https")
 }
 
 struct SingleOwnedTask<'a, C> {
@@ -370,6 +437,22 @@ pub async fn bridge_tick<C>(
 ) -> Result<Vec<BridgeTickResult>>
 where
     C: BoardControlPlane,
+{
+    let mut prompts = input.prompts.clone();
+    bridge_tick_sourced(input, control, sessions, &mut prompts, local).await
+}
+
+pub async fn bridge_tick_sourced<C, P, L>(
+    input: &BridgeTickInput<'_>,
+    control: C,
+    sessions: ExistingSessionAdapter,
+    prompts: &mut P,
+    local: &mut L,
+) -> Result<Vec<BridgeTickResult>>
+where
+    C: BoardControlPlane,
+    P: AttemptPrompts,
+    L: LocalAmux,
 {
     /*
      * Assignment gates run before any execution start. A lookup failure from
@@ -428,20 +511,20 @@ where
                     attempt_id,
                     ..
                 } => {
-                    let prompt = input
-                        .prompts
-                        .get(&attempt_id)
-                        .map(String::as_str)
-                        .unwrap_or("");
+                    let prompt = prompts
+                        .prompt_for(&worker, &attempt_id)
+                        .await?
+                        .unwrap_or_default();
                     let presence = snapshot.presence(&worker);
                     dispatch_started(
                         input,
                         presence.map(|_| worker.as_str()),
                         presence.is_some_and(|session| session.running),
                         &attempt_id,
-                        prompt,
+                        &prompt,
                         local,
                     )
+                    .await
                 }
                 DriveOutcome::StartFailed { .. }
                 | DriveOutcome::StartReportedNotRunning { .. }
@@ -463,14 +546,17 @@ where
     Ok(results)
 }
 
-fn dispatch_started(
+async fn dispatch_started<L>(
     input: &BridgeTickInput<'_>,
     session_name: Option<&str>,
     session_running: bool,
     attempt_id: &str,
     prompt: &str,
-    local: &mut LocalExchange,
-) -> BridgeTickResult {
+    local: &mut L,
+) -> BridgeTickResult
+where
+    L: LocalAmux,
+{
     let plan = plan_local_dispatch(
         input.latch,
         input.env_value,
@@ -494,11 +580,23 @@ fn dispatch_started(
         };
     }
 
-    local.paths.push(path);
-    local.sends.push(body.clone());
-    let mut interpretation = interpret_send_response(&local.reply);
+    let session_for_lookup = session_name.unwrap_or("");
+    let reply = local
+        .send(&path, &body)
+        .await
+        .unwrap_or(SendReply {
+            transport_unknown: true,
+            status: 0,
+            ok: false,
+            id: None,
+            no_board_refused: None,
+        });
+    let mut interpretation = interpret_send_response(&reply);
     if interpretation == SendInterpretation::Unknown {
-        let found = local.read_back;
+        let found = local
+            .read_back(session_for_lookup, attempt_id)
+            .await
+            .unwrap_or(ReadBack::LookupFailed);
         let (send_again, halt) = decide_after_read_back(found);
         if halt {
             return BridgeTickResult::Halted {
@@ -510,8 +608,17 @@ fn dispatch_started(
                 attempt_id: attempt_id.to_owned(),
             };
         }
-        local.sends.push(body);
-        interpretation = interpret_send_response(&local.reply);
+        let reply = local
+            .send(&path, &body)
+            .await
+            .unwrap_or(SendReply {
+                transport_unknown: true,
+                status: 0,
+                ok: false,
+                id: None,
+                no_board_refused: None,
+            });
+        interpretation = interpret_send_response(&reply);
         if interpretation == SendInterpretation::Unknown {
             return BridgeTickResult::Halted {
                 attempt_id: attempt_id.to_owned(),
@@ -552,6 +659,351 @@ fn dispatch_started(
         attempt_id: attempt_id.to_owned(),
         to_status,
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionObservation {
+    pub name: String,
+    pub running: bool,
+    pub at_boundary: bool,
+}
+
+pub fn parse_session_roster(body: &str) -> Result<Vec<SessionObservation>> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(body).context("invalid local session list")?;
+    let mut sessions = Vec::new();
+    for row in rows {
+        let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if !valid_session_name(name) {
+            continue;
+        }
+        let archived = row.get("archived").and_then(|value| value.as_bool()).unwrap_or(false);
+        let running = row.get("running").and_then(|value| value.as_bool()).unwrap_or(false);
+        let lifecycle = row.get("lifecycle").and_then(|value| value.as_str()).unwrap_or("");
+        let status = row.get("status").and_then(|value| value.as_str()).unwrap_or("");
+        let agents_working = row
+            .get("agents_working")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        sessions.push(SessionObservation {
+            name: name.to_owned(),
+            running: running && !archived && lifecycle == "active",
+            at_boundary: (status == "waiting" || status == "idle") && !agents_working,
+        });
+    }
+    Ok(sessions)
+}
+
+pub fn interpret_http_send(status: u16, body: &serde_json::Value) -> SendReply {
+    let id = match body.get("id") {
+        Some(serde_json::Value::String(value)) if !value.is_empty() => Some(value.clone()),
+        Some(serde_json::Value::Number(value)) => Some(value.to_string()),
+        _ => None,
+    };
+    let no_board_refused = body
+        .get("no_board_refused")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    SendReply {
+        transport_unknown: false,
+        status,
+        ok: body.get("ok").and_then(|value| value.as_bool()).unwrap_or(false),
+        id,
+        no_board_refused,
+    }
+}
+
+pub fn interpret_read_back_body(status: u16, body: &serde_json::Value) -> ReadBack {
+    if !(200..300).contains(&status) {
+        return ReadBack::LookupFailed;
+    }
+    if body.get("stranded") == Some(&serde_json::Value::Bool(true))
+        || body.get("delivered") == Some(&serde_json::Value::String("unknown".into()))
+    {
+        return ReadBack::LookupFailed;
+    }
+    match body.get("accepted").and_then(|value| value.as_bool()) {
+        Some(true) => ReadBack::Found,
+        Some(false) => ReadBack::Missing,
+        None => ReadBack::LookupFailed,
+    }
+}
+
+struct HttpLocal {
+    client: reqwest::Client,
+    base: String,
+}
+
+impl LocalAmux for HttpLocal {
+    async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
+        if !path.starts_with("/api/sessions/") || !path.ends_with("/send") || path.contains("/api/board") {
+            bail!("wsl bridge refused a non-session send");
+        }
+        let response = self
+            .client
+            .post(format!("{}{path}", self.base))
+            .json(&serde_json::json!({
+                "text": body.text,
+                "no_board": true,
+                "msg_id": body.msg_id,
+            }))
+            .send()
+            .await
+            .context("local session send failed")?;
+        let status = response.status().as_u16();
+        let parsed = response.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+        if parsed.is_null() {
+            return Ok(SendReply {
+                transport_unknown: true,
+                status,
+                ok: false,
+                id: None,
+                no_board_refused: None,
+            });
+        }
+        Ok(interpret_http_send(status, &parsed))
+    }
+
+    async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack> {
+        if !valid_session_name(session_name) || !valid_attempt_id(attempt_id) {
+            bail!("wsl bridge refused an invalid read-back");
+        }
+        let response = self
+            .client
+            .get(format!(
+                "{}/api/sessions/{}/send?msg_id={attempt_id}",
+                self.base,
+                encode_session_name(session_name)
+            ))
+            .send()
+            .await
+            .context("local session read-back failed")?;
+        let status = response.status().as_u16();
+        let parsed = response.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+        if parsed.is_null() {
+            return Ok(ReadBack::LookupFailed);
+        }
+        Ok(interpret_read_back_body(status, &parsed))
+    }
+}
+
+struct DeliveryPrompts<'a> {
+    api: &'a crate::tomverse_api::TomverseApi,
+    sessions: &'a ExistingSessionAdapter,
+    deliveries: Vec<crate::tomverse_api::PulledDelivery>,
+}
+
+impl AttemptPrompts for DeliveryPrompts<'_> {
+    async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>> {
+        let Some(session) = self.sessions.presence(worker) else {
+            return Ok(None);
+        };
+        let pulled = self
+            .api
+            .delivery_pull(worker, &session.instance_id, session.generation)
+            .await
+            .context("delivery pull failed")?;
+        let Some(delivery) = pulled.delivery else {
+            return Ok(None);
+        };
+        if delivery.attempt_id != attempt_id {
+            return Ok(None);
+        }
+        let ack = self
+            .api
+            .delivery_ack(&delivery, &session.instance_id, session.generation)
+            .await
+            .context("delivery ack failed")?;
+        if !ack.acknowledged {
+            return Ok(None);
+        }
+        let prompt = delivery.prompt.clone();
+        self.deliveries.push(delivery);
+        Ok(Some(prompt))
+    }
+}
+
+pub async fn run_from_env() -> i32 {
+    let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
+        eprintln!("amux wsl bridge local url is unset");
+        return 1;
+    };
+    if !local_amux_url_allowed(&local_url) {
+        eprintln!("amux wsl bridge local url is not loopback");
+        return 1;
+    }
+    let client = match local_client(&local_url) {
+        Ok(client) => client,
+        Err(_) => {
+            eprintln!("amux wsl bridge local client failed");
+            return 1;
+        }
+    };
+    let base = local_url.trim_end_matches('/').to_owned();
+    let roster = match fetch_roster(&client, &base).await {
+        Ok(roster) => roster,
+        Err(_) => {
+            eprintln!("amux wsl bridge local amux is unreachable");
+            return 1;
+        }
+    };
+    let running: Vec<_> = roster.into_iter().filter(|row| row.running).collect();
+    if running.is_empty() {
+        println!("amux wsl bridge found no running session");
+        return 0;
+    }
+
+    let api = match crate::tomverse_api::TomverseApi::from_env() {
+        Ok(api) => api,
+        Err(_) => {
+            eprintln!("amux wsl bridge control plane is unavailable");
+            return 1;
+        }
+    };
+    let mut registered = BTreeMap::new();
+    for row in &running {
+        let instance_id = Uuid::new_v4().to_string();
+        let Ok(response) = api.worker_register(&row.name, &instance_id).await else {
+            continue;
+        };
+        if !response.registered {
+            continue;
+        }
+        let Some(generation) = response.generation else {
+            continue;
+        };
+        registered.insert(
+            row.name.clone(),
+            SessionPresence {
+                running: true,
+                at_boundary: row.at_boundary,
+                instance_id,
+                generation,
+            },
+        );
+    }
+    if registered.is_empty() {
+        eprintln!("amux wsl bridge could not register a running session");
+        return 1;
+    }
+
+    let sessions = ExistingSessionAdapter::new(registered);
+    let mut local = HttpLocal { client, base };
+    let mut reserved = Vec::new();
+    let mut pending = Vec::new();
+    let mut halted = false;
+    let empty_prompts = BTreeMap::new();
+
+    loop {
+        if !halted {
+            let mut prompts = DeliveryPrompts {
+                api: &api,
+                sessions: &sessions,
+                deliveries: Vec::new(),
+            };
+            let input = BridgeTickInput {
+                latch: true,
+                env_value: Some("1"),
+                halt: BridgeHalt::Running,
+                local_reachable: true,
+                prompts: &empty_prompts,
+                reserved_attempt_ids: &reserved,
+                generation: 0,
+                live_generation: None,
+                lease_expires_at: 0,
+                now: 0,
+                worker_outcome: None,
+            };
+            let mut accepted = Vec::new();
+            match bridge_tick_sourced(
+                &input,
+                api.clone(),
+                sessions.clone(),
+                &mut prompts,
+                &mut local,
+            )
+            .await
+            {
+                Ok(results) => {
+                    for result in &results {
+                        if matches!(result, BridgeTickResult::Halted { .. }) {
+                            halted = true;
+                        }
+                        if let BridgeTickResult::Pending { attempt_id } = result {
+                            if let Some(delivery) = prompts
+                                .deliveries
+                                .iter()
+                                .find(|delivery| delivery.attempt_id == *attempt_id)
+                            {
+                                accepted.push((attempt_id.clone(), delivery.clone()));
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    halted = true;
+                }
+            }
+            drop(input);
+            for (attempt_id, delivery) in accepted {
+                reserved.push(attempt_id);
+                pending.push(delivery);
+            }
+        }
+
+        let mut still_pending = Vec::new();
+        for delivery in &pending {
+            let Some(session) = sessions.presence(&delivery.worker) else {
+                halted = true;
+                continue;
+            };
+            match api
+                .execution_heartbeat(delivery, &session.instance_id, session.generation)
+                .await
+            {
+                Ok(response) if response.accepted => still_pending.push(delivery.clone()),
+                _ => halted = true,
+            }
+        }
+        pending = still_pending;
+        if halted && pending.is_empty() {
+            return 0;
+        }
+
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if result.is_ok() {
+                    return 0;
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+        }
+    }
+}
+
+fn local_client(local_url: &str) -> Result<reqwest::Client> {
+    let url = reqwest::Url::parse(local_url).context("invalid local AMUX url")?;
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+    if url.scheme() == "https" {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder.build().context("local AMUX client failed")
+}
+
+async fn fetch_roster(client: &reqwest::Client, base: &str) -> Result<Vec<SessionObservation>> {
+    let body = client
+        .get(format!("{base}/api/sessions"))
+        .send()
+        .await
+        .context("local session list failed")?
+        .error_for_status()
+        .context("local session list was refused")?
+        .text()
+        .await
+        .context("local session list was unreadable")?;
+    parse_session_roster(&body)
 }
 
 fn valid_attempt_id(value: &str) -> bool {
@@ -681,10 +1133,54 @@ mod tests {
     }
 
     #[test]
-    fn process_main_stays_off_without_a_client() {
-        assert!(!WSL_BRIDGE_CODE_LATCH);
-        assert_eq!(process_main(false), 0);
-        assert_eq!(process_main(true), 1);
+    fn activation_gate_stays_closed_without_the_exact_env() {
+        assert!(WSL_BRIDGE_CODE_LATCH);
+        assert_eq!(activation_gate(false, Some("1")), ActivationGate::LatchOff);
+        assert_eq!(activation_gate(true, None), ActivationGate::EnvOff);
+        assert_eq!(activation_gate(true, Some("enabled")), ActivationGate::EnvOff);
+        assert_eq!(activation_gate(true, Some("1")), ActivationGate::Runner);
+        assert!(!local_amux_url_allowed("https://example.com"));
+        assert!(!local_amux_url_allowed("https://127.0.0.1:8824/api/board"));
+        assert!(local_amux_url_allowed("https://127.0.0.1:8824"));
+        assert!(local_amux_url_allowed("http://localhost:8824"));
+    }
+
+    #[test]
+    fn session_roster_uses_running_state_and_ignores_preview_text() {
+        let roster = parse_session_roster(
+            r#"[{"name":"claude-impl","running":true,"lifecycle":"active","status":"waiting","agents_working":false,"preview":"secret text"},{"name":"stopped","running":false,"lifecycle":"active","status":"idle"}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            roster,
+            vec![
+                SessionObservation {
+                    name: "claude-impl".into(),
+                    running: true,
+                    at_boundary: true,
+                },
+                SessionObservation {
+                    name: "stopped".into(),
+                    running: false,
+                    at_boundary: true,
+                },
+            ]
+        );
+        assert_eq!(
+            interpret_read_back_body(200, &serde_json::json!({"ok": true, "accepted": true, "id": "1"})),
+            ReadBack::Found
+        );
+        assert_eq!(
+            interpret_read_back_body(202, &serde_json::json!({"ok": true, "accepted": false})),
+            ReadBack::Missing
+        );
+        assert_eq!(
+            interpret_read_back_body(
+                200,
+                &serde_json::json!({"accepted": false, "stranded": true, "delivered": "unknown"})
+            ),
+            ReadBack::LookupFailed
+        );
     }
 
     #[tokio::test]

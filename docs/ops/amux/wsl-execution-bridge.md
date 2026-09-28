@@ -1,8 +1,8 @@
 # WSL execution bridge
 
-상태: 코드 래치 `WSL_BRIDGE_CODE_LATCH`는 false다. 이 문서는 연결 계약이다. 활성화 승인 없이 runner를 켜지 않는다.
+상태: 코드 래치 `WSL_BRIDGE_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이 아니면 runner는 소켓을 열지 않는다. 이 문서는 그 변수를 설정하지 않는다.
 
-정책: `docs/policy/development-agent-orchestration.md` 버전 13.
+정책: `docs/policy/development-agent-orchestration.md` 버전 14.
 
 ## 방향
 
@@ -30,12 +30,12 @@ Bridge 프로세스는 Tomverse 내부 API를 부르는 인증을 가질 수 있
 
 로컬 AMUX에 닿지 않거나 WSL이 멈추면 새 배정을 하지 않는다. generation이 바뀌었거나 execution lease가 지난 결과는 거절한다.
 
-## 활성화 전
+## 활성화
+
+버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수가 `bridge_tick`을 호출한다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
+
+이 버전은 두 환경 변수를 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다.
 
 ## 검증
 
-이 개발 범위의 확인은 합성 테스트와 독립 검토다. 배포된 staging에서 runner를 실행하지 않았다. 래치가 false이고, 활성화는 다음 정책 버전이다.
-
-독립 검토는 Codex `gpt-5.6-sol`이다. 대상은 `fff30f8dd`이고 판정은 pass다. 그 커밋 이후의 이 문단은 검증 기록이며 래치와 전송 규칙을 바꾸지 않는다.
-
-`scripts/amux-wsl-bridge.mjs`와 `tomverse-wsl-bridge` 바이너리는 래치가 false인 동안 소켓을 열지 않고 끝난다. 바이너리의 본체는 `bridge_tick`이며, BoardDriver와 이미 실행 중인 세션 어댑터를 한 프로세스에서 호출한다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 래치가 true여도 이 빌드의 `process_main`은 활성화 runner가 없어 클라이언트를 만들지 않는다. 래치를 켜고 `bridge_tick`을 그 runner에 연결하는 변경은 이 정책의 다음 버전이다.
+래치가 꺼져 있던 `fff30f8dd`의 독립 검토는 Codex `gpt-5.6-sol` pass다. 버전 14의 래치 변경은 그 판정 대상이 아니다. 배포된 staging에서 runner를 실행하지 않았다.

@@ -6,7 +6,7 @@
  * not a second board: this planner never targets `/api/board`.
  */
 
-export const WSL_BRIDGE_CODE_LATCH = false;
+export const WSL_BRIDGE_CODE_LATCH = true;
 
 export const WSL_BRIDGE_ENV_NAME = "TOMVERSE_AMUX_WSL_BRIDGE";
 

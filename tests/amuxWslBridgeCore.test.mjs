@@ -46,11 +46,13 @@ const ready = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the shipped latch is off and the planner refuses to send", () => {
-  assert.equal(WSL_BRIDGE_CODE_LATCH, false);
-  const plan = planLocalDispatch(ready({ latch: WSL_BRIDGE_CODE_LATCH }));
-  assert.equal(plan.action, "refuse");
-  assert.equal(plan.reason, "bridge_latch_off");
+test("the code latch is on and a missing env does not send", () => {
+  assert.equal(WSL_BRIDGE_CODE_LATCH, true);
+  const closed = planLocalDispatch(ready({ latch: WSL_BRIDGE_CODE_LATCH, envValue: undefined }));
+  assert.equal(closed.action, "refuse");
+  assert.equal(closed.reason, "bridge_disabled");
+  const off = planLocalDispatch(ready({ latch: false }));
+  assert.equal(off.reason, "bridge_latch_off");
 });
 
 test("an admitted send targets the existing session and does not open a board", () => {
@@ -220,7 +222,7 @@ test("send success stays pending until a fenced worker result arrives", async ()
   assert.equal(late.disposition, "result_rejected");
 });
 
-test("the rust bridge process keeps the same latch off and does not construct a client", () => {
+test("the rust bridge opens a client only after the exact env gate", () => {
   const bridge = readFileSync(
     new URL("../apps/tomverse-orchestrator/src/wsl_bridge.rs", import.meta.url),
     "utf8",
@@ -229,9 +231,13 @@ test("the rust bridge process keeps the same latch off and does not construct a 
     new URL("../apps/tomverse-orchestrator/src/bin/tomverse-wsl-bridge.rs", import.meta.url),
     "utf8",
   );
-  assert.match(bridge, /pub const WSL_BRIDGE_CODE_LATCH: bool = false;/);
+  assert.match(bridge, /pub const WSL_BRIDGE_CODE_LATCH: bool = true;/);
   assert.match(bridge, /wsl bridge does not start workers/);
-  assert.equal(bridge.includes("TomverseApi::from_env"), false);
-  assert.equal(binary.includes("from_env"), false);
-  assert.match(binary, /WSL_BRIDGE_CODE_LATCH/);
+  const gate = bridge.slice(bridge.indexOf("pub fn activation_gate"), bridge.indexOf("pub fn local_amux_url_allowed"));
+  assert.equal(gate.includes("from_env"), false);
+  const runner = bridge.slice(bridge.indexOf("pub async fn run_from_env"));
+  assert.match(runner, /TomverseApi::from_env/);
+  assert.match(binary, /ActivationGate::EnvOff/);
+  assert.match(binary, /run_from_env/);
+  assert.equal(binary.includes("TomverseApi::from_env"), false);
 });

@@ -1,13 +1,20 @@
-import { WSL_BRIDGE_CODE_LATCH } from "../lib/amux/wslBridgeCore.ts";
+import { WSL_BRIDGE_CODE_LATCH, WSL_BRIDGE_ENV_NAME } from "../lib/amux/wslBridgeCore.ts";
 
 /*
- * Development runner entry. The latch is the policy gate. While it is false
- * this process does not read a secret, open a socket, or talk to local AMUX.
+ * Development runner entry. The Rust binary is the process that can open a
+ * socket. This script never does. The code latch is on, and the environment
+ * value must still be exactly "1" before that binary enters the runner.
  */
 if (!WSL_BRIDGE_CODE_LATCH) {
   process.stdout.write("amux wsl bridge latch is off\n");
   process.exit(0);
 }
 
-process.stderr.write("amux wsl bridge latch is on without an activation runner\n");
-process.exit(1);
+const envValue = (process.env[WSL_BRIDGE_ENV_NAME] ?? "").trim();
+if (envValue !== "1") {
+  process.stdout.write("amux wsl bridge env is off\n");
+  process.exit(0);
+}
+
+process.stdout.write("amux wsl bridge runner is tomverse-wsl-bridge\n");
+process.exit(0);

@@ -40,7 +40,7 @@ tomverse-orchestrator ---> worker protocol ---> configured providers
 - Tomverse가 task state와 approval의 최종 authority다.
 - Core는 결정 규칙을 제공하지만 DB를 직접 변경하지 않는다.
 - Orchestrator는 selection과 execution을 분리한다.
-- 개발용 WSL runner는 버전 13의 예외이며 코드 래치는 꺼져 있다. 그 runner가 Tomverse에서 작업을 가져오고, 서버는 워크스테이션으로 접속하지 않는다. 계약은 `wsl-execution-bridge.md`다.
+- 개발용 WSL runner는 버전 13의 예외이고, 버전 14가 코드 래치를 켰다. 환경 변수가 정확히 `1`이 아니면 runner는 열리지 않는다. 그 runner가 Tomverse에서 작업을 가져오고, 서버는 워크스테이션으로 접속하지 않는다. 계약은 `wsl-execution-bridge.md`다.
 - Worker는 Tomverse DB를 직접 수정하지 않고 internal API를 사용한다.
 - External/high-risk action은 approval과 audit 경계를 우회하지 않는다.
 
