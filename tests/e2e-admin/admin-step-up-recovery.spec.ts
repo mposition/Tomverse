@@ -119,7 +119,7 @@ test.describe("high-risk step-up recovery", () => {
     // access. Widening the recovery must not have turned a 428 into a lockout.
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
     await page.goto("/admin/platform");
-    await expect(page.getByLabel("Leading engine")).toHaveValue(
+    await expect(page.getByLabel("Leading model")).toHaveValue(
       FIXTURE_APP_SETTINGS.guestDefaultModelId
     );
     await expect(page.getByTestId("admin-platform-save")).toBeEnabled();

@@ -222,17 +222,17 @@ test.describe("platform operations", () => {
   test("a platform setting is saved and read back", async ({ page }) => {
     await page.goto("/admin/platform");
 
-    const guestModel = page.getByLabel("Leading engine");
+    const guestModel = page.getByLabel("Leading model");
     await expect(guestModel).toHaveValue(
       FIXTURE_APP_SETTINGS.guestDefaultModelId
     );
     await guestModel.selectOption(
       FIXTURE_APP_SETTINGS.alternateGuestDefaultModelId
     );
-    await page.getByRole("button", { name: "Save platform settings" }).click();
+    await page.getByRole("button", { name: "Save leading model" }).click();
 
     await expect(
-      page.getByText("Platform settings saved and are live.")
+      page.getByText("Leading model saved and is live.")
     ).toBeVisible();
     const stored = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
       where: { key: "guestDefaultModelId" },
@@ -242,7 +242,7 @@ test.describe("platform operations", () => {
     );
 
     await page.reload();
-    await expect(page.getByLabel("Leading engine")).toHaveValue(
+    await expect(page.getByLabel("Leading model")).toHaveValue(
       FIXTURE_APP_SETTINGS.alternateGuestDefaultModelId
     );
   });
