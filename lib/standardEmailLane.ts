@@ -1172,10 +1172,13 @@ const runDecisionTransaction = async (
 };
 
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
-  // For a release note, every read the send decision rests on is a verdict read:
-  // one that fails is retried rather than ending the row (section 7.6, invariant
-  // 11). The ones below come before `decideReleaseNotesSend()` but decide the
-  // same send, so they are treated the same way. Other mail is unchanged.
+  // For a release note, every database call between the claim and the provider
+  // is retried when it fails, rather than ending the row (section 7.6, invariant
+  // 11): the reads before `decideReleaseNotesSend()` decide the same send, and
+  // the ones after it -- the canary, the pinned profile, the campaign, the
+  // quiet-hours hold -- stand between an allowed, sealed decision and the retry
+  // that would carry it out under the same key. A connection that drops there
+  // is not a message that cannot be rendered. Other mail is unchanged.
   const gateRead = <T>(label: string, read: () => Promise<T>): Promise<T> =>
     releaseNotesFlagApplies(delivery.templateVersion.purpose) ? verdictRead(label, read) : read();
   // Filled for marketing only; re-checked immediately before the provider call.
@@ -1419,7 +1422,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       },
       select: { profileKey: true, quietHours: true },
     }));
-    const held = await holdForQuietHours(delivery, quietHourWindows, now);
+    const held = await gateRead("the quiet-hours hold", () =>
+      holdForQuietHours(delivery, quietHourWindows, now)
+    );
     if (held) return { outcome: "pending" as const, classification: definition.classification };
   }
 
@@ -1506,14 +1511,17 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // before the send: a canary for a version that then failed to send is
   // harmless, a sent message whose version has no canary is not checkable.
   const unsubscribeKeyVersion = link.keyring?.activeVersion ?? null;
-  if (link.keyring) await ensureUnsubscribeKeyCanary(link.keyring);
+  if (link.keyring) {
+    const keyring = link.keyring;
+    await gateRead("the unsubscribe key canary", () => ensureUnsubscribeKeyCanary(keyring));
+  }
 
   // The subject prefix and the jurisdiction footer, from the profile this row
   // was pinned to at enqueue (EM-04). Read from the pinned policy version and
   // not the active one: a message enqueued under one set of labelling rules
   // must not be sent under another, or the delivery row records the first while
   // the recipient receives the second.
-  const profile = await prisma.jurisdictionProfile.findUnique({
+  const profile = await gateRead("the pinned jurisdiction profile", () => prisma.jurisdictionProfile.findUnique({
     where: {
       profileKey_policyVersionId: {
         profileKey: delivery.jurisdictionProfileKey,
@@ -1526,7 +1534,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       footerBlocks: true,
       unsubscribeSlaBusinessDays: true,
     },
-  });
+  }));
 
   const composed = composeJurisdictionalMessage({
     classification: definition.classification,
@@ -1607,10 +1615,13 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // rendered, is not sent. Cancellation also skips unsent rows itself; this
   // closes the window between a claim and that update.
   if (delivery.event.referenceType === "EmailCampaign" && delivery.event.referenceId) {
-    const campaign = await prisma.emailCampaign.findUnique({
-      where: { id: delivery.event.referenceId },
-      select: { status: true },
-    });
+    const campaignId = delivery.event.referenceId;
+    const campaign = await gateRead("the campaign", () =>
+      prisma.emailCampaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true },
+      })
+    );
     if (campaign?.status === "cancelled") {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
@@ -1631,10 +1642,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // check into the past.
   if (
     quietHourWindows.length > 0 &&
-    (await holdForQuietHours(
-      delivery,
-      quietHourWindows,
-      new Date(Math.max(now.getTime(), Date.now()))
+    (await gateRead("the quiet-hours hold", () =>
+      holdForQuietHours(delivery, quietHourWindows, new Date(Math.max(now.getTime(), Date.now())))
     ))
   ) {
     return { outcome: "pending" as const, classification: definition.classification };
