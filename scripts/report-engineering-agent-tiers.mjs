@@ -10,8 +10,11 @@
  * The corpus is the last N pull requests merged into develop (first-parent
  * merge commits). Each is judged against its own base -- the merge's first
  * parent -- with every analysis the app runs: ownership manifest, credential
- * reachability, control-plane slice, and the tier rules. Tree listing
- * verification is skipped: these changes are real commits, not submissions.
+ * reachability, control-plane slice, the tier rules, and the parts of tree
+ * listing verification that judge content rather than integrity -- its size
+ * limits and what it does not support (the same function the app calls).
+ * Re-hashing the listing is skipped: these are real Git objects, not a
+ * drafting service's claims.
  *
  * Output is counts only. Paths are not printed, because the reasons a real
  * change is forbidden can name a reachability path the policy keeps out of
@@ -28,7 +31,7 @@ import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { analyseCredentialReachability, credentialForbiddenPaths } from "../lib/agentCredentialReachability.ts";
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
-import { decodeText, diffLines } from "../lib/engineeringAgentTreeVerify.ts";
+import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -62,8 +65,8 @@ const readBlobs = (oids) => {
   return blobs;
 };
 
-const treeListing = (commit) =>
-  git(["ls-tree", "-r", "-z", commit])
+const treeListing = (commit, withTrees = false) =>
+  git(["ls-tree", "-r", ...(withTrees ? ["-t"] : []), "-z", commit])
     .toString("utf8")
     .split("\0")
     .filter(Boolean)
@@ -80,13 +83,22 @@ const commits = git(["rev-list", "--first-parent", "--merges", `--max-count=${li
   .split("\n")
   .filter(Boolean);
 
-const tally = { total: 0, t1: 0, t2: 0, withinSizeLimits: 0, t1WithinSize: 0, t1IfCredentialResolved: 0 };
+const tally = {
+  total: 0,
+  t1: 0,
+  t2: 0,
+  listingRefused: 0,
+  withinSizeLimits: 0,
+  t1WithinSize: 0,
+  t1IfCredentialResolved: 0,
+};
 const reasons = new Map();
 const count = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
 
 for (const commit of commits) {
   const base = git(["rev-parse", `${commit}^1`]).toString("utf8").trim();
-  const listing = treeListing(base).filter((entry) => entry.type === "blob");
+  const baseEntries = treeListing(base, true);
+  const listing = baseEntries.filter((entry) => entry.type === "blob");
   const wanted = listing.filter((entry) => TEXT_FOR_ANALYSIS.test(entry.path));
   const blobs = readBlobs(wanted.map((entry) => entry.oid));
   const text = (oid) => {
@@ -154,18 +166,56 @@ for (const commit of commits) {
           forbiddenPaths: credentialForbiddenPaths(credential, changes.map((c) => c.path)),
         }
       : { status: "failed" };
-  const verdict = decideTier(input(credentialView));
+  // The app refuses a listing past its limits outright, before any tier.
+  const baseBlobOids = new Set(listing.map((entry) => entry.oid));
+  const introduced = diffs.filter((d) => !zero.test(d.newOid) && d.newMode !== "160000" && !baseBlobOids.has(d.newOid));
+  const refused =
+    baseEntries.length > TREE_LIMITS.maxEntries ||
+    introduced.length > TREE_LIMITS.maxChangedBlobs ||
+    introduced.some((d) => (newBlobs.get(d.newOid)?.length ?? 0) > TREE_LIMITS.maxChangedBlobBytes);
+
+  // What tree verification does not support sends the patch to T2, as in the app.
+  const rootAttributes = listing.find((entry) => entry.path === ".gitattributes");
+  const attributesText = rootAttributes === undefined ? null : decodeText(readBlobs([rootAttributes.oid]).get(rootAttributes.oid));
+  const leafPaths = (entries) => entries.filter((entry) => entry.type !== "tree").map((entry) => entry.path);
+  const unsupported = unsupportedTreeChanges({
+    baseTruncated: false,
+    basePaths: leafPaths(baseEntries),
+    resultPaths: leafPaths(treeListing(commit, true)),
+    // Undecodable attributes are as unsupported as an unknown attribute line.
+    baseGitattributes: rootAttributes !== undefined && attributesText === null ? "[unreadable]" : attributesText,
+    changes: changes.map((c) => ({
+      path: c.path,
+      oldType: c.oldMode === null ? null : c.oldMode === "160000" ? "commit" : "blob",
+      newType: c.newType,
+    })),
+  });
+  const policyVerdict = decideTier(input(credentialView));
+  const verdict =
+    unsupported.length === 0
+      ? policyVerdict
+      : {
+          tier: "T2",
+          findings: [
+            ...policyVerdict.findings,
+            ...[...new Set(unsupported.map((u) => u.reason))].map((reason) => ({ reason: `tree_${reason}` })),
+          ],
+        };
   const resolved = decideTier(input({ status: "analysed", forbidsAll: false, forbiddenPaths: new Set() }));
 
   const withinSize =
     changes.length <= 5 && changes.reduce((sum, c) => sum + c.addedLines + c.removedLines, 0) <= 300;
   tally.total += 1;
+  if (refused) {
+    tally.listingRefused += 1;
+    continue;
+  }
   tally[verdict.tier === "T1" ? "t1" : "t2"] += 1;
   if (withinSize) {
     tally.withinSizeLimits += 1;
     if (verdict.tier === "T1") tally.t1WithinSize += 1;
   }
-  if (resolved.tier === "T1") tally.t1IfCredentialResolved += 1;
+  if (resolved.tier === "T1" && unsupported.length === 0) tally.t1IfCredentialResolved += 1;
   for (const reason of new Set(verdict.findings.map((finding) => finding.reason))) count(reasons, reason);
 }
 
@@ -174,6 +224,7 @@ const summary = {
   pullRequests: tally.total,
   t1: tally.t1,
   t2: tally.t2,
+  listingRefused: tally.listingRefused,
   withinSizeLimits: tally.withinSizeLimits,
   t1WithinSizeLimits: tally.t1WithinSize,
   t1IfCredentialReachabilityResolved: tally.t1IfCredentialResolved,
@@ -183,7 +234,7 @@ const summary = {
 if (asJson) console.log(JSON.stringify(summary, null, 2));
 else {
   console.log(`Engineering agent tier ratio over the last ${summary.pullRequests} merges into ${ref}`);
-  console.log(`  T1 ${summary.t1} / T2 ${summary.t2}`);
+  console.log(`  T1 ${summary.t1} / T2 ${summary.t2} / refused before any tier ${summary.listingRefused}`);
   console.log(`  within the size limits: ${summary.withinSizeLimits} (T1 among them: ${summary.t1WithinSizeLimits})`);
   console.log(`  T1 if credential reachability were resolved: ${summary.t1IfCredentialReachabilityResolved}`);
   console.log("  pull requests per reason (a PR counts once per reason):");

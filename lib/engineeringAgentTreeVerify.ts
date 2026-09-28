@@ -389,25 +389,13 @@ export const verifyResultListing = (input: VerificationInput): VerificationResul
   }
   if (problems.length > 0) return { ok: false, reason: "schema_invalid", problems };
 
-  const unsupported: Array<{ reason: UnsupportedReason; path: string | null }> = [];
-  if (input.baseTruncated) unsupported.push({ reason: "base_listing_truncated", path: null });
-  for (const listing of [baseLeaves, resultLeaves]) {
-    for (const path of listing.keys()) {
-      if (path.endsWith("/.gitattributes")) {
-        unsupported.push({ reason: "nested_gitattributes", path });
-      }
-    }
-  }
-  const attributes = attributedPathMatcher(input.baseGitattributes ?? "");
-  if (!attributes.supported) unsupported.push({ reason: "gitattributes_unsupported", path: null });
-  for (const change of changes) {
-    if (attributes.supported && attributes.matches(change.path)) {
-      unsupported.push({ reason: "gitattributes_applies", path: change.path });
-    }
-    if (change.oldType === "commit" || change.newType === "commit") {
-      unsupported.push({ reason: "gitlink_changed", path: change.path });
-    }
-  }
+  const unsupported = unsupportedTreeChanges({
+    baseTruncated: input.baseTruncated,
+    basePaths: baseLeaves.keys(),
+    resultPaths: resultLeaves.keys(),
+    baseGitattributes: input.baseGitattributes,
+    changes,
+  });
 
   const verifiedBlobs = new Map([...needed].map((oid) => [oid, input.changedBlobs.get(oid) as Uint8Array]));
   return {
@@ -417,6 +405,40 @@ export const verifyResultListing = (input: VerificationInput): VerificationResul
     unsupported,
     verifiedBlobs,
   };
+};
+
+/**
+ * What the policy does not support in a consistent pair of trees; anything
+ * here sends the whole patch to T2. The app's verification and the tier report
+ * over real commits both call this, so the two cannot disagree.
+ */
+export const unsupportedTreeChanges = (input: {
+  baseTruncated: boolean;
+  basePaths: Iterable<string>;
+  resultPaths: Iterable<string>;
+  baseGitattributes: string | null;
+  changes: ReadonlyArray<Pick<ChangedPath, "path" | "oldType" | "newType">>;
+}): Array<{ reason: UnsupportedReason; path: string | null }> => {
+  const unsupported: Array<{ reason: UnsupportedReason; path: string | null }> = [];
+  if (input.baseTruncated) unsupported.push({ reason: "base_listing_truncated", path: null });
+  for (const paths of [input.basePaths, input.resultPaths]) {
+    for (const path of paths) {
+      if (path.endsWith("/.gitattributes")) {
+        unsupported.push({ reason: "nested_gitattributes", path });
+      }
+    }
+  }
+  const attributes = attributedPathMatcher(input.baseGitattributes ?? "");
+  if (!attributes.supported) unsupported.push({ reason: "gitattributes_unsupported", path: null });
+  for (const change of input.changes) {
+    if (attributes.supported && attributes.matches(change.path)) {
+      unsupported.push({ reason: "gitattributes_applies", path: change.path });
+    }
+    if (change.oldType === "commit" || change.newType === "commit") {
+      unsupported.push({ reason: "gitlink_changed", path: change.path });
+    }
+  }
+  return unsupported;
 };
 
 const label =
