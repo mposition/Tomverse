@@ -74,7 +74,7 @@ export async function listAmuxCardsForAdmin(): Promise<{
         prisma.$queryRaw<Array<{ taskId: string; outcome: string | null; toStatus: string | null }>>`
           SELECT DISTINCT ON ("taskId") "taskId", "outcome", "toStatus"
           FROM "AmuxExecutionAttempt"
-          WHERE "taskId" = ANY(${ids})
+          WHERE "taskId" = ANY(${ids}::text[])
           ORDER BY "taskId", "startedAt" DESC
         `,
       ]);

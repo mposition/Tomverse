@@ -28,6 +28,8 @@ test("the card list reads identifiers and state only", async () => {
   // One set query per page for the latest attempt and one for the counts.
   assert.doesNotMatch(loader, /executionAttempts: \{/);
   assert.match(loader, /SELECT DISTINCT ON \("taskId"\)/);
+  // The pg adapter sends parameters untyped; an uncast array is refused.
+  assert.match(loader, /ANY\(\$\{ids\}::text\[\]\)/);
   assert.match(loader, /groupBy\(\{\s*by: \["taskId"\]/);
 });
 
