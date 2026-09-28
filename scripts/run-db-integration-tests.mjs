@@ -296,6 +296,10 @@ run(
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // The recipient-authority rules: a version that is no longer a draft
+    // cannot have its rules changed, and one (ruleKey, ruleVersion) names one
+    // content -- both enforced by trigger, because a waiver is scoped to it.
+    "tests/integration/release-notes-country-rule.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",

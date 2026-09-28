@@ -9,6 +9,12 @@ import {
   jurisdictionCountryMapSeed,
   jurisdictionSeedProblems,
 } from "@/lib/emailJurisdictionSeed";
+import {
+  releaseNotesCountryRuleSeed,
+  releaseNotesRuleKey,
+  releaseNotesRuleSeedProblems,
+} from "@/lib/releaseNotesCountryRuleCore";
+import { releaseNotesRuleVersionConflicts } from "@/lib/releaseNotesCountryRules";
 
 /**
  * Policy versions: creating a draft, reading one, and activating one.
@@ -149,7 +155,7 @@ export async function ensureJurisdictionPolicyDraft(input?: {
   version?: string;
   changeSummary?: string;
 }) {
-  const problems = jurisdictionSeedProblems();
+  const problems = [...jurisdictionSeedProblems(), ...releaseNotesRuleSeedProblems()];
   if (problems.length > 0) {
     throw new JurisdictionPolicyError(
       "JURISDICTION_SEED_INVALID",
@@ -195,6 +201,49 @@ export async function ensureJurisdictionPolicyDraft(input?: {
         policyVersionId: policyVersion.id,
         countryCode: row.countryCode,
         profileKey: row.profileKey,
+      })),
+    });
+    // The recipient authority per country (docs/policy/email-notifications.md
+    // section 5.1.1). Written with the draft, like the profiles, so a version
+    // is activated with the rules it was reviewed with; the table refuses a
+    // write to any version that is no longer a draft.
+    //
+    // The content goes in `ReleaseNotesRuleVersion`, once per (key, version),
+    // where it can never change -- an obligation waiver is scoped to that pair.
+    // `skipDuplicates` because a later policy version carrying the same rule
+    // version must find the row already there and leave it alone; the row's own
+    // trigger refuses an edit, so a seed that disagreed with a stored rule
+    // version would be a silent no-op here. That is what
+    // `releaseNotesRuleVersionConflicts()` is checked for below.
+    const rules = releaseNotesCountryRuleSeed();
+    await tx.releaseNotesRuleVersion.createMany({
+      data: rules.map((rule) => ({
+        ruleKey: releaseNotesRuleKey(rule.countryCode),
+        ruleVersion: rule.ruleVersion,
+        countryCode: rule.countryCode,
+        basis: rule.basis,
+        status: rule.status,
+        releaseConditions: [...rule.releaseConditions],
+        activationGates: [...rule.activationGates],
+      })),
+      skipDuplicates: true,
+    });
+    const conflicts = await releaseNotesRuleVersionConflicts(tx, rules);
+    if (conflicts.length > 0) {
+      throw new JurisdictionPolicyError(
+        "RELEASE_NOTES_RULE_VERSION_CONFLICT",
+        `The seed disagrees with a stored rule version: ${conflicts.join("; ")}. ` +
+          "A different content is a new rule version.",
+        500
+      );
+    }
+    await tx.releaseNotesCountryRule.createMany({
+      data: rules.map((rule) => ({
+        policyVersionId: policyVersion.id,
+        countryCode: rule.countryCode,
+        ruleKey: releaseNotesRuleKey(rule.countryCode),
+        ruleVersion: rule.ruleVersion,
+        notes: rule.notes,
       })),
     });
     return tx.emailPolicyVersion.findUniqueOrThrow({
