@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxBoardImportMessages } from "@/lib/adminMessages/amuxBoardImport";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-import");
 
@@ -54,7 +55,7 @@ export function AmuxBoardImportPanel() {
   const send = async (action: string, body: string) => {
     setPending(true);
     try {
-      const response = await fetch(`/api/admin/amux/board-import?action=${action}`, {
+      const response = await adminFetch(`/api/admin/amux/board-import?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body,

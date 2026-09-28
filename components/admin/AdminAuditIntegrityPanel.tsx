@@ -6,6 +6,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
 import { adminAuditIntegrityMessages } from "@/lib/adminMessages/auditIntegrity";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Integrity = {
   configured: boolean;
@@ -31,6 +32,19 @@ type Integrity = {
   unverifiedIds: string[];
   /** Failing entries beyond the ones listed. */
   unverifiedIdsTruncated: number;
+  /**
+   * True when the walk hit its deadline before reaching the newest entry.
+   *
+   * Distinct from `valid: false`, and rendered differently: a broken chain is
+   * a finding, an incomplete walk is the absence of one. Linkage is verified
+   * from genesis forward, so a truncated walk leaves the *newest* entries
+   * unchecked -- which is why it cannot be reported as sound, and equally why
+   * it must not be reported as tampering.
+   */
+  truncated: boolean;
+  /** The last entry the walk reached, so a repeat reading has a landmark. */
+  lastCheckedId: string | null;
+  lastCheckedAt: string | null;
   message: string;
 };
 
@@ -163,11 +177,21 @@ export function AdminAuditIntegrityPanel() {
     setEntry(null);
     setDiagnosis(null);
     try {
-      const response = await fetch("/api/admin/audit-integrity", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/audit-integrity", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { integrity?: Integrity; error?: string } | null;
       if (!response.ok || !data?.integrity) throw new Error(data?.error || m.toast.verificationFailed);
       setIntegrity(data.integrity);
-      dispatchAppToast(data.integrity.message, data.integrity.valid ? "success" : "error");
+      dispatchAppToast(
+        data.integrity.message,
+        // Three outcomes, not two: an incomplete walk is neither a pass nor a
+        // finding, and calling it either would be a claim about entries the
+        // walk never read.
+        data.integrity.truncated
+          ? "info"
+          : data.integrity.valid
+            ? "success"
+            : "error"
+      );
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : m.toast.verificationFailed, "error");
     } finally { setLoading(false); }
@@ -182,7 +206,7 @@ export function AdminAuditIntegrityPanel() {
   const diagnose = async (auditId: string) => {
     setDiagnosing(auditId);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/audit/${encodeURIComponent(auditId)}/diagnose`,
         { cache: "no-store" }
       );
@@ -206,7 +230,7 @@ export function AdminAuditIntegrityPanel() {
   const loadEntry = async (auditId: string) => {
     setEntryLoading(true);
     try {
-      const response = await fetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
+      const response = await adminFetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { audit?: AuditEntry; error?: string } | null;
       if (!response.ok || !data?.audit) throw new Error(data?.error || m.toast.entryNotFound);
       setEntry(data.audit);
@@ -228,10 +252,25 @@ export function AdminAuditIntegrityPanel() {
       {integrity ? (
         <div
           data-testid="admin-audit-integrity-result"
-          className={`mt-4 rounded-2xl border p-3 ${integrity.valid ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : "border-red-500/30 bg-red-500/10 text-red-100"}`}
+          // Three outcomes on one element, so the state is an attribute rather
+          // than a second test id: pass, finding, or a walk that did not finish.
+          data-outcome={
+            integrity.truncated
+              ? "truncated"
+              : integrity.valid
+                ? "valid"
+                : "invalid"
+          }
+          className={`mt-4 rounded-2xl border p-3 ${
+            integrity.truncated
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+              : integrity.valid
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                : "border-red-500/30 bg-red-500/10 text-red-100"
+          }`}
         >
           <div className="flex items-start gap-3">
-            {integrity.valid ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />}
+            {integrity.valid && !integrity.truncated ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />}
             <div className="min-w-0">
               <p className="font-black">{integrity.message}</p>
               <p className="mt-1 text-xs opacity-80">

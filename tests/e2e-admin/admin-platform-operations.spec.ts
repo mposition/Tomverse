@@ -116,6 +116,63 @@ test.describe("platform operations", () => {
     ).toBeVisible();
   });
 
+  test("a save built on a row that has since moved is refused rather than applied", async ({
+    page,
+  }) => {
+    // The write this guards against is not a second operator -- in a one-person
+    // organisation there rarely is one. It is catalogue reconciliation, which
+    // writes `maxOutputTokens` and `creditWeight` onto existing rows. The PATCH
+    // handler writes the whole submitted body, so a save from a form loaded
+    // before that ran puts the old numbers back, and AGENTS.md records what one
+    // of those costs: `claude-sonnet-5` served with a 4,096 output cap against
+    // a profile of 128,000.
+    await page.goto("/admin/models");
+    await page
+      .getByPlaceholder("Search name, model ID, API ID, provider, or purpose")
+      .fill(FIXTURE_MODEL.enabled.id);
+
+    const row = page
+      .locator("article")
+      .filter({ hasText: FIXTURE_MODEL.enabled.id });
+    await expect(row).toHaveCount(1);
+    await row.getByRole("button", { name: /^Edit / }).click();
+    const dialog = page.getByRole("dialog", { name: /^Edit / });
+    await expect(dialog).toBeVisible();
+
+    // Something else writes the row while the form is open, exactly as
+    // reconciliation would.
+    await adminFixtureDatabase().modelRegistryEntry.update({
+      where: { id: FIXTURE_MODEL.enabled.id },
+      data: { maxOutputTokens: 128_000 },
+    });
+
+    await dialog.getByLabel("Runtime status").selectOption("limited");
+    await dialog.getByRole("button", { name: "Save model" }).click();
+
+    await expect(
+      page.getByTestId("admin-api-error").getByText(/changed after the form was loaded/i)
+    ).toBeVisible();
+
+    // And the other writer's value is still there: the refusal is the point,
+    // not the message.
+    expect(
+      (
+        await adminFixtureDatabase().modelRegistryEntry.findUniqueOrThrow({
+          where: { id: FIXTURE_MODEL.enabled.id },
+          select: { maxOutputTokens: true, status: true },
+        })
+      ).maxOutputTokens
+    ).toBe(128_000);
+    expect(
+      (
+        await adminFixtureDatabase().modelRegistryEntry.findUniqueOrThrow({
+          where: { id: FIXTURE_MODEL.enabled.id },
+          select: { status: true },
+        })
+      ).status
+    ).not.toBe("limited");
+  });
+
   test("restricting the guest default model is refused with the cross-surface reason", async ({
     page,
   }) => {
@@ -136,10 +193,19 @@ test.describe("platform operations", () => {
 
     // The registry route refuses to restrict whatever Platform Settings points
     // the guest experience at, and names the surface to change first.
+    //
+    // Scoped to the notice rather than to the page. The refusal is announced
+    // twice on purpose -- a toast that fades and a notice that does not, the
+    // same split `PlatformSettingsPanel` already makes for its step-up alert --
+    // so an unscoped `getByText` matches both and fails on strict mode. The
+    // notice is the half worth asserting: it is what is still on screen when
+    // the operator looks back at the dialog they have to fix.
     await expect(
-      page.getByText(
-        "Change the Guest default model in Platform Settings before disabling or restricting this model."
-      )
+      page
+        .getByTestId("admin-api-error")
+        .getByText(
+          "Change the Guest default model in Platform Settings before disabling or restricting this model."
+        )
     ).toBeVisible();
     // The dialog stays open on a rejected save, and nothing is written.
     await expect(dialog).toBeVisible();

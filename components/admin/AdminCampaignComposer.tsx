@@ -11,6 +11,7 @@ import {
   type AssistantKnowledgeCampaignLanguage,
   type ProductAnnouncementContent,
 } from "@/lib/productAnnouncementEmail";
+import { adminFetch } from "@/lib/adminFetch";
 
 const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
 
@@ -86,7 +87,7 @@ export function AdminCampaignComposer({
   };
 
   const request = async (path: string) => {
-    const response = await fetch(path, {
+    const response = await adminFetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

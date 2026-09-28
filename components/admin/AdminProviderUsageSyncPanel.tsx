@@ -5,6 +5,7 @@ import { RefreshCw } from "lucide-react";
 import { adminIntlLocale, type AdminMessageShape } from "@/lib/adminLocale";
 import { adminProviderUsageSyncMessages } from "@/lib/adminMessages/providerUsageSync";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type UsageSyncMessages = AdminMessageShape<
   (typeof adminProviderUsageSyncMessages)["en"]
@@ -156,7 +157,7 @@ export function AdminProviderUsageSyncPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetch("/api/admin/provider-usage/sync", {
+      const result = await adminFetch("/api/admin/provider-usage/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date }),

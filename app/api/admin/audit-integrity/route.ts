@@ -1,4 +1,8 @@
 export const dynamic = "force-dynamic";
+// The walk reads every hash-chained entry in order, in batches, with its own
+// 60-second deadline. This is the platform ceiling above that, so the runtime
+// does not cut the request off before the check can report how far it got.
+export const maxDuration = 120;
 
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";

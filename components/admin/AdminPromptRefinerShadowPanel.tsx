@@ -36,6 +36,7 @@ import {
   type PromptRefinerRunPreview,
   type PromptRefinerStagePreview,
 } from "@/lib/promptRefinerShadowOperatorCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Busy = "stage" | "run" | "execution" | "refresh" | null;
 type FailureBody = { error?: string; code?: string };
@@ -112,7 +113,7 @@ export function AdminPromptRefinerShadowPanel() {
   const readStage = useCallback(async () => {
     setError(null);
     setReauthenticationRequired(false);
-    const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
+    const response = await adminFetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
       cache: "no-store",
     });
     const body = await responseJson(response);
@@ -133,7 +134,7 @@ export function AdminPromptRefinerShadowPanel() {
     async (knownStage: PromptRefinerStagePreview) => {
       setError(null);
       setReauthenticationRequired(false);
-      const response = await fetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
+      const response = await adminFetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
         cache: "no-store",
       });
       const body = await responseJson(response);
@@ -156,7 +157,7 @@ export function AdminPromptRefinerShadowPanel() {
     async (knownRun: PromptRefinerRunPreview) => {
       setError(null);
       setReauthenticationRequired(false);
-      const response = await fetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
+      const response = await adminFetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
         cache: "no-store",
       });
       const body = await responseJson(response);
@@ -202,7 +203,7 @@ export function AdminPromptRefinerShadowPanel() {
           setError(m.stageActivationFlagsDisabled);
           return;
         }
-        const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
+        const response = await adminFetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(promptRefinerStageApprovalBody(stage)),
@@ -247,7 +248,7 @@ export function AdminPromptRefinerShadowPanel() {
     setError(null);
     try {
       if (run.status === "ready_for_explicit_cost_approval") {
-        const response = await fetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
+        const response = await adminFetch(PROMPT_REFINER_SHADOW_RUN_PATH, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(promptRefinerRunApprovalBody(run)),
@@ -295,7 +296,7 @@ export function AdminPromptRefinerShadowPanel() {
     setExecutionPostLocked(true);
     let parsed: PromptRefinerExecutionResult | null = null;
     try {
-      const response = await fetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
+      const response = await adminFetch(PROMPT_REFINER_SHADOW_EXECUTION_PATH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(promptRefinerExecutionBody(execution)),

@@ -5,6 +5,7 @@ import { ChevronRight, Loader2, Plus, RefreshCw, Save } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminPrivacyRequestsMessages } from "@/lib/adminMessages/privacyRequests";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type PrivacyRow = {
   id: string; userId: string | null; email: string; requestType: string; status: string;
@@ -30,7 +31,7 @@ function PrivacyCard({ row, onSaved }: { row: PrivacyRow; onSaved: (row: Privacy
   const save = async () => {
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/privacy-requests", {
+      const response = await adminFetch("/api/admin/privacy-requests", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: row.id, status, dueAt: new Date(dueAt).toISOString(), legalHold, legalHoldReason: legalHoldReason.trim() || null, note: note.trim() || null }),
@@ -88,7 +89,7 @@ export function AdminPrivacyRequestsPanel() {
     try {
       const params = new URLSearchParams({ take: "30" });
       if (cursor) params.set("cursor", cursor);
-      const response = await fetch(`/api/admin/privacy-requests?${params}`, { cache: "no-store" });
+      const response = await adminFetch(`/api/admin/privacy-requests?${params}`, { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { requests?: PrivacyRow[]; nextCursor?: string | null; error?: string } | null;
       if (!response.ok || !data?.requests) throw new Error(data?.error || toastRef.current.loadFailed);
       setRows((current) => append ? [...current, ...data.requests!] : data.requests!);
@@ -101,7 +102,7 @@ export function AdminPrivacyRequestsPanel() {
   const create = async () => {
     setCreating(true);
     try {
-      const response = await fetch("/api/admin/privacy-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, requestType, dueAt: new Date(Date.now() + 30 * 86_400_000).toISOString(), note: null }) });
+      const response = await adminFetch("/api/admin/privacy-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, requestType, dueAt: new Date(Date.now() + 30 * 86_400_000).toISOString(), note: null }) });
       const data = (await response.json().catch(() => null)) as { request?: PrivacyRow; error?: string } | null;
       if (!response.ok || !data?.request) throw new Error(data?.error || m.toast.createFailed);
       setRows((current) => [data.request!, ...current]); setEmail(""); dispatchAppToast(m.toast.added, "success");

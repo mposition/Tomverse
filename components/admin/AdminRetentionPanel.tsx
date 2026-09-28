@@ -13,6 +13,7 @@ import { soleApproverUnavailableSentence } from "@/lib/adminSoleApproverCore";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminRetentionMessages } from "@/lib/adminMessages/retention";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type RetentionItem = {
   key: string;
@@ -91,7 +92,7 @@ export function AdminRetentionPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/retention");
+      const response = await adminFetch("/api/admin/retention");
       const payload = (await response.json().catch(() => null)) as
         | RetentionResponse
         | { error?: string }
@@ -118,7 +119,7 @@ export function AdminRetentionPanel() {
     if (running) return;
     setRunning(mode);
     try {
-      const response = await fetch("/api/admin/maintenance/cleanup", {
+      const response = await adminFetch("/api/admin/maintenance/cleanup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

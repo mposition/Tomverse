@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardRecommendationMessages } from "@/lib/adminMessages/amuxBoardRecommendation";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
@@ -28,7 +29,7 @@ export function AmuxBoardRecommendationPanel() {
   const send = async (action: string) => {
     setPending(true);
     try {
-      const response = await fetch(`/api/admin/amux/board-recommendation?action=${action}`, {
+      const response = await adminFetch(`/api/admin/amux/board-recommendation?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: requestText,
@@ -81,6 +82,14 @@ export function AmuxBoardRecommendationPanel() {
           onClick={() => send("decide")}
         >
           {messages.decide}
+        </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          disabled={pending || requestText.trim().length === 0}
+          onClick={() => send("capacity")}
+        >
+          {messages.capacity}
         </button>
       </div>
       {refusedForStepUp ? (
