@@ -11,6 +11,7 @@ import {
   pullAmuxWorkDelivery,
 } from "@/lib/amux/delivery";
 import {
+  amuxAgentUsageWindow,
   heartbeatAmuxExecution,
   reclaimExpiredAmuxExecutions,
   settleAmuxExecution,
@@ -882,4 +883,57 @@ test("an agent registration writes its card and its record in one transaction, o
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: registrationKey } });
   }
+});
+
+test("a settlement records the agent's own spend under the agent scope, apart from the attempt's cost", async () => {
+  const fixture = await readyWorkerWithCard();
+  const runId = nextRunId();
+  const started = await startWithRun(fixture, runId);
+  const settled = await withAmuxRouteBudget(
+    () =>
+      settleAmuxExecution(
+        {
+          attemptId: started.attemptId,
+          worker: fixture.worker,
+          instanceId: fixture.instanceId,
+          generation: fixture.generation,
+          taskRevision: started.taskRevision,
+          outcome: "succeeded",
+          toStatus: "review",
+          actualCostMicrousd: null,
+          agentUsage: { agentId: "engineering-agent", amountMicrousd: BigInt(12_345) },
+        },
+        engineeringRunEndAttachment({ runId, outcome: "t2_draft", halt: "none" }),
+      ),
+    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+  );
+  assert.equal(settled.settled, true);
+  const rows = await prisma.amuxCostLedgerEntry.findMany({ where: { attemptId: started.attemptId } });
+  assert.equal(rows.length, 1, "no reservation or settlement delta rides along");
+  const [row] = rows;
+  assert.equal(row.scope, "agent");
+  assert.equal(row.kind, "agent_usage");
+  assert.equal(row.resourceKey, "engineering-agent");
+  assert.equal(row.amountMicrousd, BigInt(12_345));
+  const window = amuxAgentUsageWindow(row.createdAt);
+  assert.equal(row.budgetWindowStartsAt.getTime(), window.startsAt.getTime(), "charged to its UTC month");
+  const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  assert.equal(attempt.settledCostMicrousd, null, "the attempt's own cost is untouched");
+
+  // The database keeps the agent scope and the agent kind together.
+  await assert.rejects(
+    prisma.amuxCostLedgerEntry.create({
+      data: {
+        scope: "project",
+        resourceKey: "engineering-agent",
+        budgetWindowStartsAt: window.startsAt,
+        budgetWindowEndsAt: window.endsAt,
+        taskId: fixture.taskId,
+        attemptId: started.attemptId,
+        kind: "agent_usage",
+        amountMicrousd: BigInt(1),
+      },
+    }),
+    /AmuxCostLedgerEntry_agent_scope_check/,
+  );
 });

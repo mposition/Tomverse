@@ -671,12 +671,12 @@ const REGISTRY = {
   AmuxCostLedgerEntry_scope_check: {
     owner: "database",
     reason:
-      "Each append-only cost entry charges exactly one configured project or team resource, using the same durable scope vocabulary as policy rows.",
+      "Each append-only cost entry charges exactly one configured project or team resource, using the same durable scope vocabulary as policy rows, or an approved adapter agent's own scope, which no admission sum reads.",
   },
   AmuxCostLedgerEntry_kind_check: {
     owner: "database",
     reason:
-      "Cost evidence records the conservative execution reservation and an optional provider-confirmed settlement delta as separate append-only facts.",
+      "Cost evidence records the conservative execution reservation, an optional provider-confirmed settlement delta and an adapter agent's own model spend as separate append-only facts.",
   },
   AmuxQuotaObservation_source_check: {
     owner: "type_only",

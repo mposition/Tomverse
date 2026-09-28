@@ -38,6 +38,20 @@ export type AmuxExecutionOutcome = "succeeded" | "failed" | "blocked";
 
 export type AmuxExecutionToStatus = "todo" | "review" | "done" | "blocked";
 
+/**
+ * The agents whose own model spend a settlement may record, under the
+ * ledger's `agent` scope (orchestration policy, Authority, version 12). It is
+ * never part of the attempt's reservation, its settlement delta or admission.
+ */
+export const AMUX_AGENT_USAGE_AGENTS = ["engineering-agent"] as const;
+export type AmuxAgentUsage = { agentId: (typeof AMUX_AGENT_USAGE_AGENTS)[number]; amountMicrousd: bigint };
+
+/** The UTC calendar month an agent usage row is charged to. */
+export const amuxAgentUsageWindow = (at: Date): { startsAt: Date; endsAt: Date } => ({
+  startsAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1)),
+  endsAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)),
+});
+
 /** What an attachment to execution start sees: the attempt that now exists. */
 export type AmuxExecutionStartedFact = {
   attemptId: string;
@@ -806,6 +820,8 @@ export async function settleAmuxExecution(
     toStatus: AmuxExecutionToStatus;
     reason?: string | null;
     actualCostMicrousd?: bigint | null;
+    /** An adapter agent's own model spend for this attempt; recorded apart from its cost. */
+    agentUsage?: AmuxAgentUsage | null;
     now?: Date;
   },
   attachment?: AmuxAttachment<AmuxExecutionSettledFact>,
@@ -820,6 +836,15 @@ export async function settleAmuxExecution(
   }
   if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
     return { settled: false, reason: "fenced_out" };
+  }
+  if (
+    input.agentUsage != null &&
+    (!(AMUX_AGENT_USAGE_AGENTS as readonly string[]).includes(input.agentUsage.agentId) ||
+      typeof input.agentUsage.amountMicrousd !== "bigint" ||
+      input.agentUsage.amountMicrousd < BigInt(0) ||
+      input.agentUsage.amountMicrousd > BigInt(Number.MAX_SAFE_INTEGER))
+  ) {
+    throw new Error("Invalid AMUX agent usage");
   }
 
   return withAmuxDbBoundary(
@@ -1003,6 +1028,23 @@ export async function settleAmuxExecution(
         }
       }
 
+      if (input.agentUsage != null) {
+        // Its own scope and kind: no admission sum, reservation or delta reads it.
+        const window = amuxAgentUsageWindow(now);
+        await tx.amuxCostLedgerEntry.create({
+          data: {
+            scope: "agent",
+            resourceKey: input.agentUsage.agentId,
+            budgetWindowStartsAt: window.startsAt,
+            budgetWindowEndsAt: window.endsAt,
+            taskId: attempt.taskId,
+            attemptId: input.attemptId,
+            kind: "agent_usage",
+            amountMicrousd: input.agentUsage.amountMicrousd,
+          },
+        });
+      }
+
       if (effectiveToStatus === "review" && task.requiresHumanReview) {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
@@ -1043,6 +1085,7 @@ export async function settleAmuxExecution(
             input.toStatus === "done" && effectiveToStatus === "review",
           reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
           settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
+          agent_usage_microusd: input.agentUsage?.amountMicrousd.toString() ?? null,
           attempt_number: attempt.attemptNumber,
           exhausted_limit: budgetDestination.exhausted_limit,
           max_attempts: budgetDestination.max_attempts,

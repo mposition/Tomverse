@@ -143,7 +143,8 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
 // request's move -- twelve.
 const RUN_START_PRISMA_CALLS = 24;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
-const RUN_END_PRISMA_CALLS = 12;
+// Twelve, and one for the agent usage row the settlement writes beside it.
+const RUN_END_PRISMA_CALLS = 13;
 // A registration: the request's move, and one to spare.
 const WORKER_REGISTER_PRISMA_CALLS = 2;
 // A publish result: the writer's audit-chain lock, the settlement (item
@@ -463,6 +464,8 @@ export async function finishEngineeringAgentRun(input: {
   taskRevision: number;
   outcome: RunOutcome;
   halt: RunnerReportableHalt;
+  /** The run's own model spend as the provider reported it, or null when unknown -- never a guessed zero. */
+  usageMicrousd: bigint | null;
   markCommitted?: MarkCommitted;
 }) {
   requireOpen();
@@ -477,6 +480,8 @@ export async function finishEngineeringAgentRun(input: {
       outcome: settlement.outcome,
       toStatus: settlement.toStatus,
       actualCostMicrousd: null,
+      // The agent's spend goes to the ledger's agent scope, not the attempt's cost.
+      agentUsage: input.usageMicrousd === null ? null : { agentId: "engineering-agent", amountMicrousd: input.usageMicrousd },
     },
     engineeringRunEndAttachment({
       runId: input.runId,

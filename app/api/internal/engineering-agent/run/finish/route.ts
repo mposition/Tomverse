@@ -41,6 +41,9 @@ const requestSchema = z
     outcome: z.enum(RUNNER_OUTCOMES),
     // What only the runner can see; the app adds the circuit and mismatches.
     halt: z.enum(RUNNER_REPORTABLE_HALTS),
+    // The run's model spend in micro-USD as the provider reported it; null when
+    // it is not known, which records nothing rather than a zero.
+    usageMicrousd: z.string().regex(/^(0|[1-9][0-9]{0,14})$/).nullable(),
   })
   .strict();
 
@@ -63,6 +66,7 @@ export async function POST(request: Request) {
               taskRevision: body.taskRevision,
               outcome: body.outcome,
               halt: body.halt,
+              usageMicrousd: body.usageMicrousd === null ? null : BigInt(body.usageMicrousd),
               markCommitted,
             }),
           ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
