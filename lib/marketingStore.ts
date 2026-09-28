@@ -65,6 +65,7 @@ import {
   type MarketingGraduationSnapshot,
   type MarketingHistoryEntry,
   type MarketingLocale,
+  type MarketingRemovalEvidence,
   type MarketingPausableMode,
   type MarketingPauseReasonCode,
   type MarketingPostKind,
@@ -76,6 +77,8 @@ import {
   type MarketingVerificationMethod,
   MARKETING_CHANNEL_CAPS,
   MARKETING_PAUSE_REASON_CODES,
+  MARKETING_REMOVAL_EVIDENCE,
+  MARKETING_VERIFICATION_METHODS,
   MARKETING_NO_AUTONOMY_CHANNELS,
   MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
@@ -4441,6 +4444,18 @@ async function recordMarketingPostOutcome(
     readonly requestKey: string;
     readonly expectedHistoryVersion: number;
     readonly outcome: MarketingOutcome;
+    /**
+     * Which action this was, when it was not the dispatch's own answer.
+     *
+     * A poll that finds the object the dispatch never heard about records the
+     * same fact arriving late, so it must write the same fields -- and sharing
+     * this function is what makes "the same exact published fields" true by
+     * construction rather than by two lists agreeing on the day they were
+     * written. What differs is how we learned it, which is the action and the
+     * sentence.
+     */
+    readonly action?: string;
+    readonly summary?: string;
   },
 ): Promise<
   | { readonly recorded: true; readonly paused: boolean }
@@ -4619,15 +4634,16 @@ async function recordMarketingPostOutcome(
   await writeSystemAuditLog({
     tx: database,
     systemActor: "marketing-publisher",
-    action: OUTCOME_ACTION[outcome.kind],
+    action: rawInput.action ?? OUTCOME_ACTION[outcome.kind],
     targetType: "MarketingPost",
     targetId: id,
     summary:
-      outcome.kind === "published"
+      rawInput.summary ??
+      (outcome.kind === "published"
         ? "The platform confirmed the post."
         : outcome.kind === "failed"
           ? "The platform confirmed the post was not made, and said why."
-          : "A request left and nothing proves what became of it.",
+          : "A request left and nothing proves what became of it."),
     metadata: {
       channelId: post.channelId,
       attempt,
@@ -4706,6 +4722,201 @@ export async function recordMarketingPostOutcomeUnknown(
     expectedHistoryVersion: input.expectedHistoryVersion,
     outcome: { kind: "outcome_unknown", errorCode: input.errorCode },
   });
+}
+
+/**
+ * What a later lookup found, for a post this system has already dispatched.
+ *
+ * Three questions, and polling answers each one differently:
+ *
+ * - a `publishing` row whose object the platform *does* have: the dispatch's
+ *   answer never arrived, and the lookup is that answer. Recorded with exactly
+ *   the fields and the attempt entry a direct success writes, because it is the
+ *   same fact arriving late. Its own audit action, because how we learned it is
+ *   part of the record.
+ * - a `published` row whose object is live and matches: verified.
+ * - a `published` or `verified` row whose object the platform has taken down:
+ *   removed by the platform, which is not a failure of ours and not a deletion.
+ *
+ * **Polling never resolves an `outcome_unknown`.** That is the plan's sentence
+ * and it is load-bearing: an unknown outcome means something may exist that this
+ * system cannot see, and a lookup that fails to find it has not established that
+ * it does not exist. Only a person moves a row out of `outcome_unknown`, through
+ * the S2b1 action that exists for it.
+ */
+export async function recordMarketingPostPolledPublished(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: {
+      kind: "published",
+      externalPostId: input.externalPostId,
+      externalUrl: input.externalUrl,
+    },
+    // The same write, a different account of how it was learned. Sharing the
+    // writer is what makes "the same exact published fields" true by
+    // construction rather than by two lists agreeing today.
+    action: MARKETING_S2D2_ACTIONS.pollPublished,
+    summary: "A lookup found the post the platform never confirmed to us.",
+  });
+}
+
+/** Why a poll changed nothing. Closed, because each one means something else. */
+export type MarketingPollRefusal =
+  | "post_not_found"
+  | "post_not_published"
+  | "post_not_live"
+  | "poll_conflict";
+
+/**
+ * The platform's live object matches what we published.
+ *
+ * `published -> verified`, and **history does not move**: verification is not an
+ * attempt, and appending to history here would make the array say a fourth thing
+ * happened to the post when nothing was sent.
+ */
+export async function recordMarketingPostPollVerified(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly expectedHistoryVersion: number;
+    readonly verificationMethod: MarketingVerificationMethod;
+  },
+): Promise<
+  | { readonly recorded: true }
+  | { readonly recorded: false; readonly reason: MarketingPollRefusal }
+> {
+  const id = String(rawInput.id);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const verificationMethod = rawInput.verificationMethod;
+  if (!(MARKETING_VERIFICATION_METHODS as readonly string[]).includes(verificationMethod)) {
+    throw new MarketingStoreRefusedError(
+      "verification_method_unknown",
+      "A verification says how it was made, from a closed list",
+    );
+  }
+
+  await requireSerializableTransaction(database, "poll");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  const rows = await database.$queryRaw<
+    Array<{ id: string; channelId: string; status: string; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT "id", "channelId", "status", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "published") {
+    return { recorded: false, reason: "post_not_published" };
+  }
+
+  const recorded = await database.marketingPost.updateMany({
+    where: { id, status: "published", historyVersion: expectedHistoryVersion },
+    data: {
+      status: "verified",
+      // The database's clock, as every instant this module writes is.
+      verifiedPublicAt: now,
+      verificationMethod,
+    },
+  });
+  if (recorded.count !== 1) return { recorded: false, reason: "poll_conflict" };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.pollVerified,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "A lookup confirmed the published post is live and matches.",
+    metadata: { channelId: post.channelId, verificationMethod },
+  });
+
+  return { recorded: true };
+}
+
+/**
+ * The platform has taken the object down.
+ *
+ * `published` or `verified` -> `removed_by_platform`, history unchanged. The
+ * evidence goes in the **audit entry**, not the row: the row records the state,
+ * and why we believe it is a fact about one observation rather than a property of
+ * the post.
+ *
+ * This is not `deleted`. A deletion is something this system did, with a
+ * `deletedAt` and a `deletionMethod`; a removal is something the platform did,
+ * and conflating them would let a retention sweep treat a platform takedown as
+ * evidence that we had already retracted the post.
+ */
+export async function recordMarketingPostPollRemovedByPlatform(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly expectedHistoryVersion: number;
+    readonly evidence: MarketingRemovalEvidence;
+  },
+): Promise<
+  | { readonly recorded: true; readonly from: "published" | "verified" }
+  | { readonly recorded: false; readonly reason: MarketingPollRefusal }
+> {
+  const id = String(rawInput.id);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const evidence = rawInput.evidence;
+  if (!(MARKETING_REMOVAL_EVIDENCE as readonly string[]).includes(evidence)) {
+    throw new MarketingStoreRefusedError(
+      "removal_evidence_unknown",
+      "A platform removal says what was observed, from a closed list",
+    );
+  }
+
+  await requireSerializableTransaction(database, "poll");
+  await takeAuditChainLock(database);
+
+  const rows = await database.$queryRaw<
+    Array<{ id: string; channelId: string; status: string; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT "id", "channelId", "status", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "published" && post.status !== "verified") {
+    return { recorded: false, reason: "post_not_live" };
+  }
+  const from = post.status;
+
+  const recorded = await database.marketingPost.updateMany({
+    where: { id, status: from, historyVersion: expectedHistoryVersion },
+    data: { status: "removed_by_platform" },
+  });
+  if (recorded.count !== 1) return { recorded: false, reason: "poll_conflict" };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.pollRemovedByPlatform,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "A lookup found the platform had taken the post down.",
+    metadata: { channelId: post.channelId, evidence, fromStatus: from },
+  });
+
+  return { recorded: true, from };
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */

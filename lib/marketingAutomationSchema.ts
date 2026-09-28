@@ -118,6 +118,23 @@ export const MARKETING_SAFETY_PAUSE_REASON_CODES = ["outcome_unknown"] as const;
 export type MarketingSafetyPauseReasonCode =
   (typeof MARKETING_SAFETY_PAUSE_REASON_CODES)[number];
 
+/**
+ * What a lookup saw, when it found a published object gone.
+ *
+ * Closed, and recorded in the audit entry rather than on the row, because it is a
+ * fact about one observation rather than a property of the post. The two members
+ * are the two things a status query can actually report: the object is not there,
+ * or the platform says it was removed. "Not there" is deliberately not collapsed
+ * into "removed" -- a lookup that cannot find something has not established that
+ * the platform took it down, and an operator reading the record later needs to
+ * know which of the two was observed.
+ */
+export const MARKETING_REMOVAL_EVIDENCE = [
+  "status_query_not_found",
+  "status_query_reports_removed",
+] as const;
+export type MarketingRemovalEvidence = (typeof MARKETING_REMOVAL_EVIDENCE)[number];
+
 /** What a draft row is for. */
 export const MARKETING_POST_KINDS = [
   "social",
