@@ -16,9 +16,13 @@ type RecommendationBody = {
   refusal?: string | null;
   applyPermitted?: boolean;
   includedCount?: number;
+  included?: Array<{ cardId: string; scoreTotal: number; expectedRevision: number; sourceDigest: string | null }>;
+  excluded?: Array<{ cardId: string; scoreTotal: number; exclusionCode: string | null }>;
   error?: string;
   code?: string;
 };
+
+const cellClass = "border-b border-zinc-200 px-2 py-1 align-top dark:border-zinc-700";
 
 export function AmuxBoardRecommendationPanel() {
   const messages = useAdminMessages(adminAmuxBoardRecommendationMessages);
@@ -106,6 +110,55 @@ export function AmuxBoardRecommendationPanel() {
           {typeof result.applyPermitted === "boolean" ? (
             <p>{messages.applyPermitted(result.applyPermitted ? "true" : "false")}</p>
           ) : null}
+          {result.snapshotId ? <p className="font-mono text-xs">{messages.snapshot(result.snapshotId)}</p> : null}
+        </div>
+      ) : null}
+      {result?.included && result.included.length > 0 ? (
+        <div className="overflow-x-auto" data-testid="amux-recommendation-included">
+          <table className="w-full text-left text-sm text-zinc-800 dark:text-zinc-100">
+            <caption className="py-1 text-left font-medium">{messages.includedHeading}</caption>
+            <thead>
+              <tr>
+                <th scope="col" className={cellClass}>{messages.columnCard}</th>
+                <th scope="col" className={cellClass}>{messages.columnScore}</th>
+                <th scope="col" className={cellClass}>{messages.columnRevision}</th>
+                <th scope="col" className={cellClass}>{messages.columnSourceDigest}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.included.map((row) => (
+                <tr key={row.cardId}>
+                  <td className={`${cellClass} font-mono text-xs`}>{row.cardId}</td>
+                  <td className={cellClass}>{row.scoreTotal}</td>
+                  <td className={cellClass}>{row.expectedRevision}</td>
+                  <td className={`${cellClass} break-all font-mono text-xs`}>{row.sourceDigest ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {result?.excluded && result.excluded.length > 0 ? (
+        <div className="overflow-x-auto" data-testid="amux-recommendation-excluded">
+          <table className="w-full text-left text-sm text-zinc-800 dark:text-zinc-100">
+            <caption className="py-1 text-left font-medium">{messages.excludedHeading}</caption>
+            <thead>
+              <tr>
+                <th scope="col" className={cellClass}>{messages.columnCard}</th>
+                <th scope="col" className={cellClass}>{messages.columnScore}</th>
+                <th scope="col" className={cellClass}>{messages.columnExclusion}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.excluded.map((row) => (
+                <tr key={row.cardId}>
+                  <td className={`${cellClass} font-mono text-xs`}>{row.cardId}</td>
+                  <td className={cellClass}>{row.scoreTotal}</td>
+                  <td className={cellClass}>{row.exclusionCode ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
     </section>

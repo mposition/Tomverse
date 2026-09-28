@@ -113,6 +113,14 @@ pub struct ClaimResponse {
 /// The recovery route has a twelve-second server budget. Keep the caller
 /// above it so a client timeout cannot manufacture an ambiguous retry.
 const TOMVERSE_INTERNAL_RECOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Every other internal call. Before this the client had no deadline, so one
+/// request the server never answered stalled the scheduler tick or the WSL
+/// bridge loop indefinitely. It is longer than the server route budget
+/// (15 seconds), so a normal slow answer still arrives. A timeout on a
+/// mutating call is an unknown outcome: the callers already treat any error as
+/// a failed tick (scheduler) or a halt (bridge) and never retry it blindly.
+const TOMVERSE_INTERNAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl TomverseApi {
     pub fn from_env() -> Result<Self> {
@@ -127,7 +135,11 @@ impl TomverseApi {
         }
 
         Ok(Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(TOMVERSE_INTERNAL_REQUEST_TIMEOUT)
+                .connect_timeout(TOMVERSE_INTERNAL_CONNECT_TIMEOUT)
+                .build()
+                .context("Tomverse internal client failed")?,
             base_url: base_url.trim_end_matches('/').to_owned(),
             secret,
         })
@@ -641,5 +653,28 @@ impl TomverseApi {
             .json()
             .await
             .context("invalid Tomverse AMUX execution-recover response")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_deadline_outlasts_the_server_route_budget() {
+        // The app's AMUX route budget is 15 seconds; a shorter client deadline
+        // would turn every normal slow answer into an unknown outcome.
+        assert!(TOMVERSE_INTERNAL_REQUEST_TIMEOUT > Duration::from_secs(15));
+        assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_REQUEST_TIMEOUT);
+        assert!(TOMVERSE_INTERNAL_RECOVERY_TIMEOUT <= TOMVERSE_INTERNAL_REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn from_env_builds_a_client_with_a_deadline() {
+        let source = include_str!("tomverse_api.rs");
+        let from_env = &source[source.find("pub fn from_env").unwrap()..];
+        let body = &from_env[..from_env.find("pub async fn queue").unwrap()];
+        assert!(body.contains(".timeout(TOMVERSE_INTERNAL_REQUEST_TIMEOUT)"));
+        assert!(!body.contains("Client::new()"));
     }
 }
