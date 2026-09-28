@@ -83,6 +83,14 @@ export function AmuxBoardRecommendationPanel() {
         >
           {messages.decide}
         </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          disabled={pending || requestText.trim().length === 0}
+          onClick={() => send("capacity")}
+        >
+          {messages.capacity}
+        </button>
       </div>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>

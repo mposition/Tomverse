@@ -4,11 +4,12 @@ export const adminAmuxBoardRecommendationMessages = defineAdminMessages({
   en: {
     title: "AMUX recommendation pool",
     description:
-      "Preview reads the backlog and writes nothing. Prepare stores a snapshot only when the server says this pool is permitted. A decision approves one included card, or holds or rejects one row. This screen cannot turn the switch on or start a worker.",
+      "Preview reads the backlog and writes nothing. Prepare stores a snapshot only when the server says this pool is permitted. A decision approves one included card, or holds or rejects one row. Capacity records the single queue row from the limit in the request. This screen does not choose a limit, turn the switch on, or start a worker.",
     requestLabel: "Recommendation request",
     preview: "Preview",
     prepare: "Prepare",
     decide: "Decide",
+    capacity: "Set capacity",
     renewSignIn: "Renew administrator sign-in",
     error: (code: string) => `Error: ${code}`,
     status: (status: string) => `Status: ${status}`,
@@ -19,11 +20,12 @@ export const adminAmuxBoardRecommendationMessages = defineAdminMessages({
   ko: {
     title: "AMUX 추천 풀",
     description:
-      "미리보기는 backlog를 읽고 아무것도 쓰지 않습니다. 준비는 서버가 이 풀을 허용했다고 보고할 때만 snapshot을 저장합니다. 결정은 포함된 카드 하나를 승인하거나, 한 행을 보류하거나 거절합니다. 이 화면은 스위치를 켜거나 워커를 시작하지 않습니다.",
+      "미리보기는 backlog를 읽고 아무것도 쓰지 않습니다. 준비는 서버가 이 풀을 허용했다고 보고할 때만 snapshot을 저장합니다. 결정은 포함된 카드 하나를 승인하거나, 한 행을 보류하거나 거절합니다. 용량은 요청에 적힌 한도로 queue 행 하나만 기록합니다. 이 화면은 한도를 고르거나, 스위치를 켜거나, 워커를 시작하지 않습니다.",
     requestLabel: "추천 요청",
     preview: "미리보기",
     prepare: "준비",
     decide: "결정",
+    capacity: "용량 기록",
     renewSignIn: "관리자 로그인을 갱신",
     error: (code: string) => `오류: ${code}`,
     status: (status: string) => `상태: ${status}`,
