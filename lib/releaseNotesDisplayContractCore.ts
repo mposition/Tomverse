@@ -45,6 +45,19 @@ import { createHash } from "node:crypto";
 /** What one country's duties require a message to show. */
 export type CountryDisplayRequirement = {
   countryCode: string;
+  /**
+   * The jurisdiction profile the requirement was read from, which is the profile
+   * the message has to be rendered with.
+   *
+   * In the contract because the send renders from the profile the *row* pins,
+   * and the hash is the only thing compared at send. Without it a recipient who
+   * moved from one country to another between enqueue and send got a replacement
+   * that carried the new country's hash and the old country's profile: the next
+   * drain found the hashes equal, recorded the new contract as satisfied, and
+   * printed the old footer. With it, equal hashes mean the pinned profile is the
+   * one the contract was composed from.
+   */
+  profileKey: string;
   ruleKey: string;
   ruleVersion: number;
   /** The subject token this country requires at the front, or null. */
@@ -80,6 +93,8 @@ export type DisplayCompositionRefusal = {
 
 /** The composed contract, in the shape that is hashed. */
 export type DisplayContract = {
+  /** The profiles the requirements were read from, sorted. See `profileKey`. */
+  profileKeys: string[];
   /** Every candidate's rule version, sorted, so a rule change moves the hash. */
   ruleVersions: Array<{ ruleKey: string; ruleVersion: number }>;
   /** Per display duty, what state settled it and under whose approval. */
@@ -132,6 +147,9 @@ export const composeDisplayContract = (input: {
 
   return {
     contract: {
+      profileKeys: [
+        ...new Set(input.requirements.map((requirement) => requirement.profileKey)),
+      ].sort(byString),
       ruleVersions: input.requirements
         .map(({ ruleKey, ruleVersion }) => ({ ruleKey, ruleVersion }))
         .sort((a, b) => byString(a.ruleKey, b.ruleKey) || a.ruleVersion - b.ruleVersion),

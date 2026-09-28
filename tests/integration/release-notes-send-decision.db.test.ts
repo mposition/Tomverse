@@ -4,7 +4,10 @@ import { after, before, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import { ensureJurisdictionPolicyDraft } from "@/lib/emailJurisdictionPolicy";
-import { evidenceOf, recordSendDecision } from "@/lib/releaseNotesSendDecision";
+import type { Prisma } from "@prisma/client";
+
+import { evidenceOf, recordProviderSubmission, recordSendDecision } from "@/lib/releaseNotesSendDecision";
+import { skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
 import {
   releaseNotesSendVerdict,
   type SendVerdict,
@@ -322,4 +325,199 @@ test("a preview has no delivery, so two of them are two rows", async () => {
   // A refused verdict with no express consent cites nothing, and citing nothing
   // is not the same as citing something that does not exist.
   assert.deepEqual(stored.evidence, []);
+});
+
+// The replacement a moved display contract produces.
+//
+// Two defects an independent review found lived here and no test saw either.
+// The replacement carried no `renderDataSnapshot`, so it could never render and
+// the drain closed it as a permanent `failed`; and it copied the predecessor's
+// pinned profile while carrying the new contract's hash, so the next drain found
+// the hashes equal and printed the old country's footer under the new country's
+// contract. Both are about what the database row holds, so both are asserted on
+// the row.
+
+const HASH_A = "a".repeat(64);
+const HASH_B = "b".repeat(64);
+
+const claimedDelivery = async (emailAddress: string) => {
+  const created = await seedDelivery(emailAddress);
+  return prisma.emailDelivery.update({
+    where: { id: created.id },
+    data: {
+      displayContractHash: HASH_A,
+      renderDataSnapshot: { v: 1, sealed: "opaque-ciphertext" },
+    },
+    select: {
+      id: true,
+      eventId: true,
+      recipientKey: true,
+      userId: true,
+      emailAddress: true,
+      language: true,
+      lane: true,
+      generation: true,
+      rootDeliveryId: true,
+      attempts: true,
+      renderDataSnapshot: true,
+    },
+  });
+};
+
+test("a replacement carries the message and the new contract's own profile", async () => {
+  const user = await account();
+  const predecessor = await claimedDelivery(user.email!);
+
+  const result = await prisma.$transaction((tx) =>
+    skipAndReenqueue(tx, {
+      delivery: {
+        ...predecessor,
+        renderDataSnapshot: predecessor.renderDataSnapshot as Prisma.InputJsonValue,
+      },
+      current: {
+        templateVersionId,
+        policyVersionId,
+        // The recipient moved from Australia to Korea between enqueue and send.
+        jurisdictionCountry: "KR",
+        jurisdictionProfileKey: "KR",
+        displayContractHash: HASH_B,
+      },
+    })
+  );
+  assert.equal(result.reenqueued, true);
+  if (!result.reenqueued) return;
+
+  const [before, replacement] = await Promise.all([
+    prisma.emailDelivery.findUniqueOrThrow({
+      where: { id: predecessor.id },
+      select: { status: true, skipReason: true },
+    }),
+    prisma.emailDelivery.findUniqueOrThrow({
+      where: { id: result.deliveryId },
+      select: {
+        generation: true,
+        supersedesDeliveryId: true,
+        rootDeliveryId: true,
+        jurisdictionCountry: true,
+        jurisdictionProfileKey: true,
+        displayContractHash: true,
+        renderDataSnapshot: true,
+        status: true,
+      },
+    }),
+  ]);
+
+  assert.deepEqual(before, { status: "skipped", skipReason: "display_contract_changed" });
+  assert.equal(replacement.status, "pending");
+  assert.equal(replacement.generation, predecessor.generation + 1);
+  assert.equal(replacement.supersedesDeliveryId, predecessor.id);
+  assert.equal(replacement.rootDeliveryId, predecessor.rootDeliveryId);
+  // The pin and the hash describe the same profile: the new one.
+  assert.equal(replacement.jurisdictionCountry, "KR");
+  assert.equal(replacement.jurisdictionProfileKey, "KR");
+  assert.equal(replacement.displayContractHash, HASH_B);
+  // And the message is still there to render.
+  assert.deepEqual(replacement.renderDataSnapshot, predecessor.renderDataSnapshot);
+});
+
+test("a second replacement of one predecessor is refused, not written", async () => {
+  const user = await account();
+  const predecessor = await claimedDelivery(user.email!);
+  const input = {
+    delivery: {
+      ...predecessor,
+      renderDataSnapshot: predecessor.renderDataSnapshot as Prisma.InputJsonValue,
+    },
+    current: {
+      templateVersionId,
+      policyVersionId,
+      jurisdictionCountry: "AU",
+      jurisdictionProfileKey: "AU",
+      displayContractHash: HASH_B,
+    },
+  };
+
+  const first = await prisma.$transaction((tx) => skipAndReenqueue(tx, input));
+  const second = await prisma.$transaction((tx) => skipAndReenqueue(tx, input));
+
+  assert.equal(first.reenqueued, true);
+  assert.deepEqual(second, { reenqueued: false, reason: "not_pending" });
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { supersedesDeliveryId: predecessor.id } }),
+    1
+  );
+});
+
+test("a sent message's verdict records the submission, once", async () => {
+  // Without this the ledger could not tell a submitted message from one whose
+  // verdict committed just before the process died.
+  const user = await account();
+  const record = await consent(user.id, user.email!);
+  const delivery = await seedDelivery(user.email!);
+  // Evaluated and checked in the past, so the seal -- taken now -- follows both,
+  // which is the order the drain produces and the submission CHECK requires.
+  const earlier = new Date(Date.now() - 60_000);
+  const verdict = verdictFor([record.id], { now: earlier });
+  await prisma.$transaction((tx) =>
+    recordSendDecision(tx, {
+      deliveryId: delivery.id,
+      userId: user.id,
+      phase: "send",
+      purpose: "product_news",
+      classification: "marketing",
+      emailAddress: user.email!,
+      addressNormalizationVersion: "v1",
+      verdict,
+      countryCandidates: verdict.countries,
+      suppressionCheckedAt: earlier,
+      providerSubmittedAt: null,
+      evidence: evidenceOf(verdict),
+    })
+  );
+
+  const at = new Date(Date.now() + 1_000);
+  assert.equal(await recordProviderSubmission(prisma, { deliveryId: delivery.id, at }), true);
+  // The second call finds nothing to write rather than tripping the ledger's
+  // transition trigger.
+  assert.equal(
+    await recordProviderSubmission(prisma, { deliveryId: delivery.id, at: new Date(at.getTime() + 1_000) }),
+    false
+  );
+
+  const row = await prisma.emailPermissionDecision.findFirstOrThrow({
+    where: { deliveryId: delivery.id, phase: "send" },
+    select: { providerSubmittedAt: true },
+  });
+  assert.equal(row.providerSubmittedAt?.getTime(), at.getTime());
+});
+
+test("a refused verdict takes no submission", async () => {
+  const user = await account();
+  const delivery = await seedDelivery(user.email!);
+  const earlier = new Date(Date.now() - 60_000);
+  const verdict = verdictFor([], {
+    now: earlier,
+    recipient: { suppressed: true, objected: false, consent: { express: false, evidenceIds: [] } },
+  });
+  assert.equal(verdict.allowed, false);
+  await prisma.$transaction((tx) =>
+    recordSendDecision(tx, {
+      deliveryId: delivery.id,
+      userId: user.id,
+      phase: "send",
+      purpose: "product_news",
+      classification: "marketing",
+      emailAddress: user.email!,
+      addressNormalizationVersion: "v1",
+      verdict,
+      countryCandidates: verdict.countries,
+      suppressionCheckedAt: earlier,
+      providerSubmittedAt: null,
+      evidence: evidenceOf(verdict),
+    })
+  );
+  assert.equal(
+    await recordProviderSubmission(prisma, { deliveryId: delivery.id, at: new Date() }),
+    false
+  );
 });

@@ -58,6 +58,7 @@ const rule = (countryCode) => ({
 });
 
 const profile = (overrides = {}) => ({
+  profileKey: "P",
   subjectPrefix: null,
   footerBlocks: ["business_name", "postal_address"],
   unsubscribeSlaBusinessDays: 10,

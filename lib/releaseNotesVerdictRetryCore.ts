@@ -68,6 +68,26 @@ export class VerdictUnavailableError extends Error {
   }
 }
 
+/**
+ * Runs one read a verdict depends on, turning any failure into the one error the
+ * drain retries.
+ *
+ * One implementation, used by the authorization and by the lane, because the
+ * rule is the same wherever the read happens: a read the verdict rests on that
+ * cannot answer is not a refusal. An unwrapped read beside the authorization is
+ * how two of them reached the drain's ordinary catch and a permanent `failed`.
+ */
+export const verdictRead = async <T>(what: string, load: () => Promise<T>): Promise<T> => {
+  try {
+    return await load();
+  } catch (error) {
+    if (error instanceof VerdictUnavailableError) throw error;
+    throw new VerdictUnavailableError(`${what} could not be read, so nothing was decided`, {
+      cause: error,
+    });
+  }
+};
+
 export const verdictRetry = (input: {
   attemptsMade: number;
   classification: RetryClassification;

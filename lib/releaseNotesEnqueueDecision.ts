@@ -57,6 +57,15 @@ export type EnqueueDecision = {
   suppressionCheckedAt: Date;
   /** The contract to pin on the row, or null where none could be composed. */
   displayContractHash: string | null;
+  /**
+   * The country and profile that contract was composed from, which the row must
+   * pin in place of whatever it would otherwise have resolved.
+   *
+   * The hash names this profile. A row pinning a different one would render a
+   * footer the contract does not describe while the send compared equal hashes
+   * and recorded the contract as met.
+   */
+  displayProfile: { countryCode: string; profileKey: string } | null;
 };
 
 export async function releaseNotesEnqueueDecision(input: {
@@ -89,7 +98,7 @@ export async function releaseNotesEnqueueDecision(input: {
     now,
   });
 
-  const verdict = await releaseNotesSendAuthorization({
+  const { verdict, displayProfile } = await releaseNotesSendAuthorization({
     userId: input.userId,
     purpose: input.purpose,
     deliveryAddressDigest: consentAddressDigest(normalizedAddress),
@@ -114,6 +123,7 @@ export async function releaseNotesEnqueueDecision(input: {
     normalizedAddress,
     suppressionCheckedAt: now,
     displayContractHash: verdict.displayContract.requiredDisplayContractHash,
+    displayProfile,
   };
 }
 

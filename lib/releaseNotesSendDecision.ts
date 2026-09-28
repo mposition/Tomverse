@@ -177,3 +177,35 @@ export const evidenceOf = (verdict: SendVerdict): DecisionEvidence[] =>
       consentRecordId,
     }))
   );
+
+/**
+ * Records that the provider accepted a message this send-phase verdict allowed.
+ *
+ * The one write a sealed decision still takes (the ledger's transition trigger
+ * allows exactly this, once, on an allowed send-phase row). Without it every
+ * submitted message and every message whose verdict committed just before the
+ * process died looked the same in the ledger -- sealed, allowed, and never sent
+ * as far as the ledger could say.
+ *
+ * `updateMany` with the whole condition in the `where`, so a second call finds
+ * nothing and reports `false` rather than tripping the trigger. `at` must be
+ * taken after the provider answered: the row's `sealedAt` is later than the
+ * drain's claim time, and a submission recorded at the claim time would fail
+ * the CHECK that submission follows the seal.
+ */
+export async function recordProviderSubmission(
+  db: Pick<Prisma.TransactionClient, "emailPermissionDecision">,
+  input: { deliveryId: string; at: Date }
+): Promise<boolean> {
+  const result = await db.emailPermissionDecision.updateMany({
+    where: {
+      deliveryId: input.deliveryId,
+      phase: "send",
+      allowed: true,
+      sealedAt: { not: null },
+      providerSubmittedAt: null,
+    },
+    data: { providerSubmittedAt: input.at },
+  });
+  return result.count === 1;
+}

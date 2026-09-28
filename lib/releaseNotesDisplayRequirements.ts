@@ -90,6 +90,8 @@ export type RuleForRequirements = {
 
 /** A jurisdiction profile as the requirement assembler reads it. */
 export type ProfileForRequirements = {
+  /** The profile row the values came from, which is what a send must render with. */
+  profileKey: string;
   subjectPrefix: string | null;
   footerBlocks: readonly string[];
   unsubscribeSlaBusinessDays: number;
@@ -165,6 +167,7 @@ export const displayRequirementsFor = (input: {
 
     requirements.push({
       countryCode,
+      profileKey: profile.profileKey,
       ruleKey: rule.ruleKey,
       ruleVersion: rule.ruleVersion,
       subjectPrefix: labelWaived ? null : profile.subjectPrefix,
@@ -238,6 +241,7 @@ export async function profilesForCountries(input: {
     const profile = byKey.get(row.profileKey);
     if (!profile) continue;
     result[row.countryCode] = {
+      profileKey: profile.profileKey,
       subjectPrefix: profile.subjectPrefix,
       // Stored as JSON, so a row written by hand can hold anything. A shape this
       // build cannot read is no footer blocks rather than a crash: the composed

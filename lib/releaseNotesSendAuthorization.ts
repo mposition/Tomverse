@@ -7,7 +7,7 @@ import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
-import { VerdictUnavailableError } from "@/lib/releaseNotesVerdictRetryCore";
+import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
 import {
   composeDisplayContract,
   displayContractHash,
@@ -94,17 +94,23 @@ export type SendAuthorizationInput = {
   now: Date;
 };
 
-/** Anything that throws while reading becomes the one error the drain retries. */
-const read = async <T>(what: string, load: () => Promise<T>): Promise<T> => {
-  try {
-    return await load();
-  } catch (error) {
-    throw new VerdictUnavailableError(
-      `${what} could not be read, so nothing was decided`,
-      { cause: error }
-    );
-  }
+/**
+ * The verdict, and the profile its display contract was composed from.
+ *
+ * The profile is returned because a caller that writes a delivery row -- the
+ * enqueue paths, and the replacement a moved contract produces -- has to pin
+ * exactly this profile. The send renders from the row's pinned profile and the
+ * contract hash names this one; pinning anything else is how a replacement came
+ * to carry one country's hash and another country's footer. Null where no
+ * contract was composed, which the verdict refuses anyway.
+ */
+export type AuthorizedSend = {
+  verdict: SendVerdict;
+  displayProfile: { countryCode: string; profileKey: string } | null;
 };
+
+/** Anything that throws while reading becomes the one error the drain retries. */
+const read = verdictRead;
 
 /**
  * The candidate countries: one, or none.
@@ -158,7 +164,7 @@ export const candidateCountries = (jurisdiction: {
 
 export async function releaseNotesSendAuthorization(
   input: SendAuthorizationInput
-): Promise<SendVerdict> {
+): Promise<AuthorizedSend> {
   // Not a database failure when there is genuinely no active version, and
   // raised as unavailable anyway: a message waiting while an operator activates
   // the next version should wait, not be refused permanently by a rule set
@@ -445,7 +451,7 @@ export async function releaseNotesSendAuthorization(
           };
         });
 
-  return releaseNotesSendVerdict({
+  const verdict = releaseNotesSendVerdict({
     purpose: input.purpose,
     policyVersionId,
     countries,
@@ -467,4 +473,16 @@ export async function releaseNotesSendAuthorization(
     phase: input.phase,
     now: input.now,
   });
+
+  // One requirement at most, because `candidateCountries()` yields one country
+  // at most. Named only where the contract was actually composed: a profile
+  // returned beside a null hash would be a pin for a contract that does not
+  // exist.
+  const [only] = requirements;
+  const displayProfile =
+    requiredDisplayContractHash !== null && requirements.length === 1 && only
+      ? { countryCode: only.countryCode, profileKey: only.profileKey }
+      : null;
+
+  return { verdict, displayProfile };
 }

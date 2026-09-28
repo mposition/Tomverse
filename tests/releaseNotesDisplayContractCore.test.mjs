@@ -21,6 +21,7 @@ import {
 
 const requirement = (overrides = {}) => ({
   countryCode: "KR",
+  profileKey: "KR",
   ruleKey: "release-notes:KR",
   ruleVersion: 1,
   subjectPrefix: null,
@@ -157,6 +158,9 @@ test("every part of the contract moves the hash", () => {
     "footer blocks": { footerBlocks: ["legal_name"] },
     "unsubscribe deadline": { unsubscribeSlaBusinessDays: 10 },
     "unsubscribe languages": { unsubscribeLanguages: ["ko"] },
+    // The profile the message renders from. Without this a recipient who moved
+    // country kept the old footer under the new country's hash.
+    "the profile": { profileKey: "AU" },
     "a duty's state": {
       displayObligations: [
         { obligationKey: "body_disclosures", state: "deferred", waiverApprovalId: null },

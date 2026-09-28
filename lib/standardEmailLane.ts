@@ -70,6 +70,7 @@ import {
 } from "@/lib/standardEmailRetryCore";
 import {
   VerdictUnavailableError,
+  verdictRead,
   verdictRetry,
 } from "@/lib/releaseNotesVerdictRetryCore";
 import { releaseNotesSendAuthorization } from "@/lib/releaseNotesSendAuthorization";
@@ -77,7 +78,11 @@ import {
   recordEnqueueDecision,
   releaseNotesEnqueueDecision,
 } from "@/lib/releaseNotesEnqueueDecision";
-import { evidenceOf, recordSendDecision } from "@/lib/releaseNotesSendDecision";
+import {
+  evidenceOf,
+  recordProviderSubmission,
+  recordSendDecision,
+} from "@/lib/releaseNotesSendDecision";
 import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
 import { subjectLabelWaived } from "@/lib/releaseNotesDisplayRequirements";
@@ -232,8 +237,13 @@ export async function createStandardDeliveryRows(
       // change what this row renders. `ZZ` when nothing resolves is the honest
       // answer rather than a guess -- it carries the business identity footer
       // and no advertising rule, which is right for the mail that sends on it.
-      jurisdictionCountry: input.jurisdictionCountry,
-      jurisdictionProfileKey: input.jurisdictionProfileKey,
+      // For a release-notes message, the country and profile its display
+      // contract was composed from -- the hash names that profile, and the send
+      // renders from whatever this row pins, so the two must be the same row.
+      jurisdictionCountry:
+        releaseNotes?.displayProfile?.countryCode ?? input.jurisdictionCountry,
+      jurisdictionProfileKey:
+        releaseNotes?.displayProfile?.profileKey ?? input.jurisdictionProfileKey,
       policyVersionId: input.policyVersionId,
       templateVersionId: input.templateVersionId,
       idempotencyKey,
@@ -498,6 +508,49 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   }) as Promise<ClaimedDelivery | null>;
 };
 
+/**
+ * Writes `providerSubmittedAt` on the send-phase verdict of a message that went.
+ *
+ * After the delivery is marked `sent`, and in its own statement, deliberately.
+ * The delivery row is what stops a second send; the ledger column is the record
+ * of the first. Putting both in one transaction would let a failure of the
+ * record roll back the fact that the message went, and the next drain would send
+ * it again -- trading a gap in a record for a duplicate in somebody's inbox.
+ *
+ * So a failure here is reported and not thrown. What it leaves is a sealed,
+ * allowed verdict with no submission time beside a delivery that says `sent`,
+ * which is readable; the other order is not.
+ */
+const recordReleaseNotesSubmission = async (deliveryId: string) => {
+  try {
+    const recorded = await recordProviderSubmission(prisma, {
+      deliveryId,
+      at: new Date(),
+    });
+    if (recorded) return;
+    // Sent with no allowed, sealed send-phase verdict to record it on. The gate
+    // runs before every release-notes send, so this is a defect in the gate's
+    // wiring rather than a race, and it is the one thing the ledger exists to
+    // make impossible to miss.
+    await reportOperationalIncident({
+      code: "EMAIL_SEND_WITHOUT_VERDICT",
+      title: "A release-notes message was sent with no send verdict to record it on",
+      severity: "error",
+      error: `Delivery ${deliveryId} was accepted by the provider and has no allowed send-phase decision.`,
+      context: { component: "standard-email-lane", deliveryId },
+    });
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "EMAIL_SUBMISSION_NOT_RECORDED",
+      title: "A sent release-notes message has no submission time in the ledger",
+      severity: "warning",
+      error: `Delivery ${deliveryId}: ${error instanceof Error ? error.message : String(error)}`,
+      cooldownMs: 15 * 60 * 1_000,
+      context: { component: "standard-email-lane", deliveryId },
+    });
+  }
+};
+
 const recordOutcome = async (
   delivery: ClaimedDelivery,
   outcome: ProviderSendOutcome,
@@ -534,6 +587,9 @@ const recordOutcome = async (
         sentDomain: sentDomainOf(context.sentFrom),
       },
     });
+    if (releaseNotesFlagApplies(delivery.templateVersion.purpose)) {
+      await recordReleaseNotesSubmission(delivery.id);
+    }
     return "sent" as const;
   }
 
@@ -725,11 +781,20 @@ const decideReleaseNotesSend = async (
   // alongside the one this row was addressed to. A member whose account address
   // has moved since the approval was sealed is not the person that approval
   // named (section 5.6).
+  //
+  // Both this read and the template resolution below go through
+  // `verdictRead()`, like every read inside the authorization. They are inputs
+  // to the verdict -- the address to the cohort comparison, the template id to
+  // the hash -- and a connection reset on either one otherwise reached the
+  // drain's ordinary catch and closed the row as a permanent `failed`, which is
+  // the outcome invariant 11 exists to prevent.
   const account = delivery.userId
-    ? await prisma.user.findUnique({
-        where: { id: delivery.userId },
-        select: { email: true },
-      })
+    ? await verdictRead("the account address", () =>
+        prisma.user.findUnique({
+          where: { id: delivery.userId as string },
+          select: { email: true },
+        })
+      )
     : null;
 
   // The template version *now*, which is what a replacement would render with
@@ -743,12 +808,14 @@ const decideReleaseNotesSend = async (
   // unable to reach a queued message *and* unable to move the hash that would
   // have re-enqueued it, which is a template correction that silently applies
   // to nothing already owed.
-  const current = await ensureTemplateVersion({
-    templateKey: delivery.templateVersion.template.key,
-    language: delivery.language,
-  });
+  const current = await verdictRead("the current template version", () =>
+    ensureTemplateVersion({
+      templateKey: delivery.templateVersion.template.key,
+      language: delivery.language,
+    })
+  );
 
-  const verdict = await releaseNotesSendAuthorization({
+  const { verdict, displayProfile } = await releaseNotesSendAuthorization({
     userId: delivery.userId,
     purpose,
     deliveryAddressDigest: consentAddressDigest(normalizedAddress),
@@ -798,7 +865,10 @@ const decideReleaseNotesSend = async (
       // `display_unsatisfiable`, which is a different blocker. Read rather than
       // assumed, because the replacement's idempotency key is built from it and
       // a null there would be a key that means nothing.
-      if (required !== null) {
+      // `displayProfile` is non-null exactly when `required` is: both come from
+      // one composed contract. Checked together so a replacement can never be
+      // written with one and not the other.
+      if (required !== null && displayProfile !== null) {
         const replaced = await skipAndReenqueue(tx, {
           delivery: {
             id: delivery.id,
@@ -820,8 +890,14 @@ const decideReleaseNotesSend = async (
           current: {
             templateVersionId: current.templateVersionId,
             policyVersionId: delivery.policyVersionId,
-            jurisdictionCountry: delivery.jurisdictionCountry,
-            jurisdictionProfileKey: delivery.jurisdictionProfileKey,
+            // The profile the new contract was composed from, not the one the
+            // predecessor pinned. The hash names this profile and the next drain
+            // renders from whatever the row pins, so copying the old pin gave a
+            // recipient who moved from Australia to Korea the Korean hash and
+            // the Australian footer -- equal hashes, `satisfied: true`, and no
+            // telephone number.
+            jurisdictionCountry: displayProfile.countryCode,
+            jurisdictionProfileKey: displayProfile.profileKey,
             displayContractHash: required,
           },
         });
@@ -904,7 +980,20 @@ const runDecisionTransaction = async (
   try {
     return await prisma.$transaction(body);
   } catch (error) {
-    if (!(error instanceof ReenqueueRaceError)) throw error;
+    // Anything else that fails in here -- the snapshot insert, the seal, the
+    // skip -- rolled the whole transaction back, so nothing about this message
+    // was decided and retrying it is safe. It goes to the drain as the one error
+    // that releases the claim, rather than to the ordinary catch that would
+    // close a message the law allows as a permanent `failed` (invariant 11). A
+    // defect that fails every time still ends: the retry curve runs out and the
+    // row is abandoned with an incident, which is visible in a way a silent
+    // `failed` is not.
+    if (!(error instanceof ReenqueueRaceError)) {
+      throw new VerdictUnavailableError(
+        "the send decision could not be recorded, so nothing was decided",
+        { cause: error }
+      );
+    }
     await reportOperationalIncident({
       code: "EMAIL_DELIVERY_CLAIM_RACE",
       title: "Two workers held one queued email",
@@ -1107,23 +1196,28 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // to do, and "(광고)" versus "<ADV>" is not a difference anything can split.
   //
   // Release-notes purposes reach the same refusal through their own verdict,
-  // which is why they are exempt here rather than asked twice: section 5.3 has
-  // the candidate-country rule and `country_undetermined` is one of its
-  // blockers, so an exemption changes which words the row is skipped under and
-  // nothing about whether it goes. What it does change is the record -- the
-  // verdict leaves a send snapshot saying what was known about this person's
-  // country, and this gate leaves a skip reason and nothing else.
-  if (
-    definition.classification === "marketing" &&
-    !releaseNotesFlagApplies(definition.purpose)
-  ) {
+  // so the refusal below is not asked of them twice. That is only true because
+  // `candidateCountries()` applies this gate's own rule -- a high-confidence
+  // country that is not `ZZ`, or none -- and `tests/releaseNotesCandidateCountries
+  // .test.mjs` holds the two to agreement. The first version of the exemption
+  // said the same thing while the verdict accepted a conflict and a
+  // low-confidence guess, which changed what went out rather than which word it
+  // was recorded under. What the exemption changes is the record: the verdict
+  // leaves a send snapshot saying what was known about this person's country,
+  // and this gate leaves a skip reason and nothing else.
+  if (definition.classification === "marketing") {
     const resolved = delivery.userId
       ? await jurisdictionForUser({ userId: delivery.userId })
       : null;
     const verdict = resolved
       ? marketingJurisdictionVerdict(resolved)
       : ({ allowed: false, skipReason: "jurisdiction_unconfirmed" } as const);
-    if (!verdict.allowed) {
+    // Only the refusal is exempt, not the block. The quiet-hours hold below is
+    // a timing rule, not a permission, and a release-notes message owes it as
+    // much as any other marketing: the policy makes adding a night-time window a
+    // seed and a policy version, and a purpose that skipped this block would be
+    // the one purpose that seed never reached.
+    if (!verdict.allowed && !releaseNotesFlagApplies(definition.purpose)) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {

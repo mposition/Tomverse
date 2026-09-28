@@ -554,8 +554,13 @@ export async function expandEmailEvent(input: {
               lane: "standard",
               emailAddress: candidate.email,
               language,
-              jurisdictionCountry: resolved?.countryCode ?? "ZZ",
-              jurisdictionProfileKey: resolved?.profileKey ?? "ZZ",
+              // The contract's own profile for a release-notes row, for the same
+              // reason as the single-message path: the hash names it and the send
+              // renders from the pin.
+              jurisdictionCountry:
+                releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
+              jurisdictionProfileKey:
+                releaseNotes?.displayProfile?.profileKey ?? resolved?.profileKey ?? "ZZ",
               policyVersionId,
               templateVersionId: template.templateVersionId,
               ...(releaseNotes
