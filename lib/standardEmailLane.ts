@@ -73,9 +73,14 @@ import {
   verdictRetry,
 } from "@/lib/releaseNotesVerdictRetryCore";
 import { releaseNotesSendAuthorization } from "@/lib/releaseNotesSendAuthorization";
+import {
+  recordEnqueueDecision,
+  releaseNotesEnqueueDecision,
+} from "@/lib/releaseNotesEnqueueDecision";
 import { evidenceOf, recordSendDecision } from "@/lib/releaseNotesSendDecision";
 import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
+import { subjectLabelWaived } from "@/lib/releaseNotesDisplayRequirements";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { consentAddressDigest } from "@/lib/emailConsentToken";
 
@@ -241,88 +246,18 @@ export async function createStandardDeliveryRows(
   });
 
   if (releaseNotes) {
-    await recordSendDecision(tx, {
+    await recordEnqueueDecision(tx, {
+      decision: releaseNotes,
       deliveryId: delivery.id,
       userId: input.userId ?? null,
-      phase: "enqueue",
       purpose: definition.purpose as string,
       classification: definition.classification,
-      emailAddress: releaseNotes.normalizedAddress,
-      addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
-      verdict: releaseNotes.verdict,
-      countryCandidates: Object.keys(releaseNotes.verdict.obligations).sort(),
-      suppressionCheckedAt: releaseNotes.suppressionCheckedAt,
-      providerSubmittedAt: null,
-      evidence: evidenceOf(releaseNotes.verdict),
     });
   }
 
   return { eventId: event.id, deliveryId: delivery.id, idempotencyKey };
 }
 
-/**
- * The enqueue-phase verdict, taken before the row exists.
- *
- * Split out because it has to run before `emailDelivery.create()` -- the hash it
- * produces is a column of that row -- and be recorded after it, once there is a
- * delivery id to bind the snapshot to. Inlining it would put twenty lines
- * between the event and the delivery of the same message.
- */
-const releaseNotesEnqueueDecision = async (input: {
-  userId: string | null;
-  purpose: string;
-  classification: EmailClassification;
-  emailAddress: string;
-  policyVersionId: string;
-  templateVersionId: string;
-}) => {
-  const now = new Date();
-  const normalizedAddress = normalizeSuppressionAddress(input.emailAddress);
-  const account = input.userId
-    ? await prisma.user.findUnique({
-        where: { id: input.userId },
-        select: { email: true },
-      })
-    : null;
-
-  // Asked here, unlike at send, because nothing above has asked: the enqueue
-  // path has no suppression gate, and a snapshot that reported `suppressed:
-  // false` because nobody looked would be a record of a check that did not
-  // happen.
-  const suppression = await suppressionCheck({
-    emailAddress: input.emailAddress,
-    classification: input.classification,
-    purpose: input.purpose,
-    now,
-  });
-
-  const verdict = await releaseNotesSendAuthorization({
-    userId: input.userId,
-    purpose: input.purpose,
-    deliveryAddressDigest: consentAddressDigest(normalizedAddress),
-    currentAddressDigest: account?.email
-      ? consentAddressDigest(normalizeSuppressionAddress(account.email))
-      : null,
-    pinnedPolicyVersionId: input.policyVersionId,
-    // Nothing to compare against yet: this call is what produces the pin. The
-    // pure verdict skips the comparison at this phase for that reason, and
-    // passing the value it is about to produce would make every first enqueue
-    // report its own contract as unchanged, which says nothing.
-    pinnedDisplayContractHash: null,
-    templateVersionId: input.templateVersionId,
-    suppressed: !suppression.allowed,
-    normalizedAddress,
-    phase: "enqueue",
-    now,
-  });
-
-  return {
-    verdict,
-    normalizedAddress,
-    suppressionCheckedAt: now,
-    displayContractHash: verdict.displayContract.requiredDisplayContractHash,
-  };
-};
 
 /**
  * Enqueues a message, resolving the template and policy versions first.
@@ -755,16 +690,35 @@ const redactSecrets = (
  * with them for the same reason: a decision record that survived a rollback of
  * the thing it decided would describe a message that never stopped.
  */
+/**
+ * Another worker finished this row between our claim and our transaction.
+ *
+ * Only reachable through an expired claim -- `claimDueDelivery()` takes rows
+ * with `FOR UPDATE SKIP LOCKED` and a conditional update, so two workers hold
+ * one row only when the first one's claim went stale and the second took it.
+ * That worker has already given the row a terminal state, and this one must not
+ * write over it: the decision that ended the message is theirs.
+ *
+ * Thrown so the transaction rolls back, which is the point -- the verdict
+ * snapshot inside it describes a send that did not happen.
+ */
+class ReenqueueRaceError extends Error {
+  constructor(readonly reason: "already_superseded" | "not_pending") {
+    super(`the delivery was ${reason} when the replacement was written`);
+    this.name = "ReenqueueRaceError";
+  }
+}
+
 const decideReleaseNotesSend = async (
   delivery: ClaimedDelivery,
   definition: { purpose: string | null; classification: EmailClassification },
   now: Date
-): Promise<{ outcome: "suppressed"; classification: EmailClassification } | null> => {
+): Promise<ReleaseNotesSendOutcome> => {
   const purpose = definition.purpose;
   // Unreachable through `releaseNotesFlagApplies()`, which answers false for a
   // null purpose. Narrowed rather than asserted, so a future caller that asked
   // without the flag check gets a refusal instead of a thrown lane.
-  if (purpose === null) return null;
+  if (purpose === null) return { finished: null, suppressSubjectPrefix: false };
 
   const normalizedAddress = normalizeSuppressionAddress(delivery.emailAddress);
   // The account's address as it is now, which the cohort comparison needs
@@ -778,6 +732,22 @@ const decideReleaseNotesSend = async (
       })
     : null;
 
+  // The template version *now*, which is what a replacement would render with
+  // and therefore what the required contract has to be computed against
+  // (section 7.6 puts the id inside the hash). Resolved before the transaction
+  // because it may insert, and a caller's transaction should not be widened by
+  // our bookkeeping -- the same reason `createStandardDeliveryRows()` has it
+  // resolved before it starts.
+  //
+  // Using the pinned id here instead would have made a new template version
+  // unable to reach a queued message *and* unable to move the hash that would
+  // have re-enqueued it, which is a template correction that silently applies
+  // to nothing already owed.
+  const current = await ensureTemplateVersion({
+    templateKey: delivery.templateVersion.template.key,
+    language: delivery.language,
+  });
+
   const verdict = await releaseNotesSendAuthorization({
     userId: delivery.userId,
     purpose,
@@ -789,7 +759,7 @@ const decideReleaseNotesSend = async (
     // a queued message under the version that message carries (EM-04).
     pinnedPolicyVersionId: delivery.policyVersionId,
     pinnedDisplayContractHash: delivery.displayContractHash,
-    templateVersionId: delivery.templateVersion.id,
+    templateVersionId: current.templateVersionId,
     // Already asked, a few gates above, and the row would have ended there.
     suppressed: false,
     normalizedAddress,
@@ -799,7 +769,7 @@ const decideReleaseNotesSend = async (
 
   const skipReason = releaseNotesSkipReason(verdict);
 
-  const finished = await prisma.$transaction(async (tx) => {
+  const finished = await runDecisionTransaction(delivery, async (tx) => {
     await recordSendDecision(tx, {
       deliveryId: delivery.id,
       userId: delivery.userId,
@@ -829,7 +799,7 @@ const decideReleaseNotesSend = async (
       // assumed, because the replacement's idempotency key is built from it and
       // a null there would be a key that means nothing.
       if (required !== null) {
-        await skipAndReenqueue(tx, {
+        const replaced = await skipAndReenqueue(tx, {
           delivery: {
             id: delivery.id,
             eventId: delivery.eventId,
@@ -841,15 +811,29 @@ const decideReleaseNotesSend = async (
             generation: delivery.generation,
             rootDeliveryId: delivery.rootDeliveryId,
             attempts: delivery.attempts,
+            // The message itself. Left out, the replacement cannot render at
+            // all, `decryptSnapshot()` throws, and the drain's ordinary catch
+            // closes it as a permanent `failed` -- so the one path that exists
+            // to keep a message alive would have been the one that lost it.
+            renderDataSnapshot: delivery.renderDataSnapshot as Prisma.InputJsonValue,
           },
           current: {
-            templateVersionId: delivery.templateVersion.id,
+            templateVersionId: current.templateVersionId,
             policyVersionId: delivery.policyVersionId,
             jurisdictionCountry: delivery.jurisdictionCountry,
             jurisdictionProfileKey: delivery.jurisdictionProfileKey,
             displayContractHash: required,
           },
         });
+        // A report, not a throw, and therefore something to act on. `not_pending`
+        // means another worker finished this row between the claim and here, and
+        // `already_superseded` means it produced the replacement. Either way this
+        // row is somebody else's now: rolling back leaves it exactly as that
+        // worker left it, whereas committing would write a second verdict over
+        // the decision that actually ended it.
+        if (!replaced.reenqueued) {
+          throw new ReenqueueRaceError(replaced.reason);
+        }
         return true;
       }
     }
@@ -867,14 +851,83 @@ const decideReleaseNotesSend = async (
     return true;
   });
 
-  return finished
-    ? { outcome: "suppressed" as const, classification: definition.classification }
-    : null;
+  if (finished === "raced") {
+    // Nothing is written, including no claim release: the row already has the
+    // state the other worker gave it, and clearing `claimedAt` on a terminal row
+    // would only invite a third pass. Reported as `pending` because this pass
+    // did not finish it and will not claim it did -- the next pass finds nothing
+    // due and the count corrects itself.
+    return {
+      finished: { outcome: "pending" as const, classification: definition.classification },
+    };
+  }
+  if (finished) {
+    return {
+      finished: { outcome: "suppressed" as const, classification: definition.classification },
+    };
+  }
+
+  // Allowed, and carrying the one thing the composition cannot work out for
+  // itself. Section 7.7 records an exemption rather than seeding it away, so the
+  // profile still holds the prefix and only the duty state says whether to print
+  // it -- a composition reading the profile alone would put the label on a
+  // message the approval exempted.
+  return {
+    finished: null,
+    suppressSubjectPrefix: subjectLabelWaived(verdict.obligations),
+  };
+};
+
+/**
+ * What the release-notes gate hands back.
+ *
+ * Two shapes rather than a nullable outcome, because an allowed send is not an
+ * absence of a decision: it carries the subject-label exemption the composition
+ * needs, and a `null` would have left the caller to work that out from rows it
+ * has not read.
+ */
+type ReleaseNotesSendOutcome =
+  | { finished: { outcome: "suppressed" | "pending"; classification: EmailClassification } }
+  | { finished: null; suppressSubjectPrefix: boolean };
+
+/**
+ * The decision transaction, with the one race it can lose turned into a value.
+ *
+ * Separate from the body so the rollback and the reporting are in one place: a
+ * `catch` inside the transaction callback would swallow the error *and* commit
+ * the snapshot the rollback exists to discard.
+ */
+const runDecisionTransaction = async (
+  delivery: ClaimedDelivery,
+  body: (tx: Prisma.TransactionClient) => Promise<boolean>
+): Promise<boolean | "raced"> => {
+  try {
+    return await prisma.$transaction(body);
+  } catch (error) {
+    if (!(error instanceof ReenqueueRaceError)) throw error;
+    await reportOperationalIncident({
+      code: "EMAIL_DELIVERY_CLAIM_RACE",
+      title: "Two workers held one queued email",
+      severity: "warning",
+      error: `Delivery ${delivery.id}: ${error.message}`,
+      cooldownMs: 15 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        reason: error.reason,
+      },
+    });
+    return "raced";
+  }
 };
 
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // Filled for marketing only; re-checked immediately before the provider call.
   let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
+  // Set by the release-notes verdict, which is the only thing that reads the
+  // duty state the exemption lives in. False for every other message: a
+  // classification with no subject-label duty has nothing to be exempt from.
+  let suppressSubjectPrefix = false;
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
 
   // The version this row was pinned to must still describe the message the code
@@ -951,7 +1004,18 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // lazily on a settings read -- so every account that never opened the
   // preference centre was one marketing template away from being sent
   // advertising it had never agreed to.
-  {
+  //
+  // Not asked for a release-notes purpose, and that exemption is what section
+  // 7.6 means by one verdict: for those, the verdict *is* the consent decision.
+  // It reads the same preference and the same consent record, and it is the only
+  // thing that knows about the sealed `risk_accepted` approval section 5.6 uses
+  // to reach the accounts that existed before any of this did. Those accounts
+  // have no preference row, so this gate refused them as `no_consent` before the
+  // verdict ever ran: the override was loaded, judged, recorded as applied in
+  // the enqueue snapshot, and then never consulted at send. A population the
+  // design names explicitly could not have been sent to at all, and the record
+  // would have said they had refused.
+  if (!releaseNotesFlagApplies(definition.purpose)) {
     const stored =
       definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)
         ? await prisma.emailPreference.findUnique({
@@ -1041,7 +1105,18 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // An inferred country is refused as firmly as an absent one: sending
   // advertising under a guessed set of labelling rules is what §6.3 declines
   // to do, and "(광고)" versus "<ADV>" is not a difference anything can split.
-  if (definition.classification === "marketing") {
+  //
+  // Release-notes purposes reach the same refusal through their own verdict,
+  // which is why they are exempt here rather than asked twice: section 5.3 has
+  // the candidate-country rule and `country_undetermined` is one of its
+  // blockers, so an exemption changes which words the row is skipped under and
+  // nothing about whether it goes. What it does change is the record -- the
+  // verdict leaves a send snapshot saying what was known about this person's
+  // country, and this gate leaves a skip reason and nothing else.
+  if (
+    definition.classification === "marketing" &&
+    !releaseNotesFlagApplies(definition.purpose)
+  ) {
     const resolved = delivery.userId
       ? await jurisdictionForUser({ userId: delivery.userId })
       : null;
@@ -1094,8 +1169,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // answer is not a refusal, and the drain's default -- permanent `failed` --
   // would retire a message the law allows over a connection reset.
   if (releaseNotesFlagApplies(definition.purpose)) {
-    const outcome = await decideReleaseNotesSend(delivery, definition, now);
-    if (outcome) return outcome;
+    const decided = await decideReleaseNotesSend(delivery, definition, now);
+    if (decided.finished) return decided.finished;
+    suppressSubjectPrefix = decided.suppressSubjectPrefix;
   }
 
   const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
@@ -1206,6 +1282,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     language: delivery.language,
     unsubscribeUrl: unsubscribeLink,
     rendered: templateRendered,
+    suppressSubjectPrefix,
   });
 
   if (composed.ok === false) {

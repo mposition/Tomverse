@@ -250,3 +250,46 @@ export const obligationPartitionProblems = (countryCode: string): string[] => {
   }
   return problems;
 };
+
+/**
+ * The duty that puts a label at the front of the subject, per country.
+ *
+ * Named separately from `DISPLAY_OBLIGATIONS` because the composition needs to
+ * ask one question the contract does not answer: whether *this* duty is waived,
+ * and therefore whether the profile's `subjectPrefix` should be printed at all.
+ *
+ * Section 7.7 is explicit that an exemption is recorded rather than seeded away:
+ * the profile keeps its value and the send omits the label because a waiver
+ * says so. A build that cleared the profile instead would have no way to tell
+ * an exemption from a country whose rule never asked for one, and reinstating
+ * the label would mean editing a seed rather than withdrawing an approval.
+ */
+export const SUBJECT_LABEL_OBLIGATIONS: Record<string, string> = {
+  KR: "advertising_subject_label",
+  SG: "adv_subject_label",
+};
+
+/**
+ * Whether every candidate country that asks for a subject label has waived it.
+ *
+ * Every, not any. Two candidates and one waiver is still a subject that has to
+ * carry the other country's label, and a message that dropped it because one
+ * approval existed would be unlabelled advertising in the country that did not
+ * approve anything.
+ *
+ * False where no country asks for one: there is nothing to waive, and reporting
+ * a waiver would put an exemption in the record for a duty nobody has.
+ */
+export const subjectLabelWaived = (
+  obligations: Readonly<Record<string, { obligations: ReadonlyArray<{ obligationKey: string; state: string | null }> }>>
+): boolean => {
+  const asking = Object.entries(obligations).filter(([countryCode]) =>
+    Boolean(SUBJECT_LABEL_OBLIGATIONS[countryCode])
+  );
+  if (asking.length === 0) return false;
+  return asking.every(([countryCode, verdict]) => {
+    const key = SUBJECT_LABEL_OBLIGATIONS[countryCode];
+    const duty = verdict.obligations.find((entry) => entry.obligationKey === key);
+    return duty !== undefined && duty.state === "waived";
+  });
+};

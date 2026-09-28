@@ -41,6 +41,10 @@ import {
   type CampaignExcludedReason,
 } from "@/lib/emailCampaignRecipientCore";
 import { audienceExclusion } from "@/lib/modelRetirementAudienceCore";
+import {
+  recordEnqueueDecision,
+  releaseNotesEnqueueDecision,
+} from "@/lib/releaseNotesEnqueueDecision";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
 import { deliveryContentForLanguage } from "@/lib/emailCampaignContentCore";
 
@@ -522,6 +526,24 @@ export async function expandEmailEvent(input: {
         // what a row already written renders under.
         const resolved = await jurisdictionForUser({ userId: candidate.id });
 
+        // The section 7.6 pin, per recipient, exactly as the single-message
+        // enqueue path does it. A fanned-out row without one is not a row with a
+        // missing column: at send, a pin that cannot be confirmed is the same
+        // refusal as one that no longer matches, so every message in the
+        // campaign would be skipped as `display_contract_changed` on its first
+        // drain. The audience would receive nothing and the record would say
+        // their duties had moved.
+        const releaseNotes = releaseNotesFlagApplies(definition.purpose)
+          ? await releaseNotesEnqueueDecision({
+              userId: candidate.id,
+              purpose: definition.purpose as string,
+              classification: definition.classification,
+              emailAddress: candidate.email,
+              policyVersionId,
+              templateVersionId: template.templateVersionId,
+            })
+          : null;
+
         const written = await prisma.emailDelivery.createManyAndReturn({
           select: { id: true },
           data: [
@@ -536,6 +558,9 @@ export async function expandEmailEvent(input: {
               jurisdictionProfileKey: resolved?.profileKey ?? "ZZ",
               policyVersionId,
               templateVersionId: template.templateVersionId,
+              ...(releaseNotes
+                ? { displayContractHash: releaseNotes.displayContractHash }
+                : {}),
               idempotencyKey: `${event.id}:${recipientKeyFor(candidate.id)}`,
               // A dry run writes the same rows and marks them, so it answers
               // the question a dry run is asked. `dry_run` is already in the
@@ -558,6 +583,23 @@ export async function expandEmailEvent(input: {
         if (written.length === 1) {
           result.expanded += 1;
           expandedSoFar += 1;
+          // Only for a row this pass wrote. A resumed pass re-covering ground
+          // finds `skipDuplicates` swallowed the insert, and the snapshot that
+          // belongs to that row was written when it was; a second one would be
+          // refused by the `(deliveryId, phase)` unique anyway, but asking is
+          // how the record stays a record of what happened rather than of when
+          // somebody re-ran something.
+          if (releaseNotes) {
+            await prisma.$transaction((tx) =>
+              recordEnqueueDecision(tx, {
+                decision: releaseNotes,
+                deliveryId: written[0].id,
+                userId: candidate.id,
+                purpose: definition.purpose as string,
+                classification: definition.classification,
+              })
+            );
+          }
         } else {
           result.alreadyPresent += 1;
         }

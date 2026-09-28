@@ -81,9 +81,33 @@ export async function skipAndReenqueue(
       generation: number;
       rootDeliveryId: string;
       attempts: number;
+      /**
+       * The encrypted payload the predecessor renders from, copied onto the
+       * replacement.
+       *
+       * Copied rather than rebuilt, and not omitted. A replacement with no
+       * snapshot cannot render at all: `decryptSnapshot()` throws, that throw is
+       * not a `VerdictUnavailableError`, and the drain's ordinary catch closes
+       * the row as a permanent `failed` without a retry. The message the display
+       * contract moved under would simply never arrive, and the record would
+       * say a duty had changed rather than that a column was left out.
+       *
+       * Rebuilding is not available here in any case: the caller holds the
+       * ciphertext, and the plaintext belongs to whoever enqueued the message.
+       */
+      renderDataSnapshot: Prisma.InputJsonValue;
     };
     /** The current values the replacement is rendered under. */
     current: {
+      /**
+       * The template version *now*, not the one the predecessor carried.
+       *
+       * Section 7.6: the replacement renders with the current template and the
+       * current contract. Passing the predecessor's would make a new template
+       * version unable to reach a queued message, and -- because the id is
+       * inside the hash -- unable to move the hash that would have re-enqueued
+       * it either. The caller resolves it with `ensureTemplateVersion()`.
+       */
       templateVersionId: string;
       policyVersionId: string;
       /** Non-null: a message with no resolved country is refused rather than re-rendered. */
@@ -139,6 +163,7 @@ export async function skipAndReenqueue(
       jurisdictionProfileKey: input.current.jurisdictionProfileKey,
       displayContractHash: input.current.displayContractHash,
       idempotencyKey,
+      renderDataSnapshot: input.delivery.renderDataSnapshot,
     },
     select: { id: true },
   });

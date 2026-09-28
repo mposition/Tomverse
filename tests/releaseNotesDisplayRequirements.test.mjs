@@ -17,8 +17,10 @@ import {
   DISPLAY_OBLIGATIONS,
   NON_DISPLAY_OBLIGATIONS,
   UNSUBSCRIBE_NOTICE_LANGUAGES,
+  SUBJECT_LABEL_OBLIGATIONS,
   displayRequirementsFor,
   obligationPartitionProblems,
+  subjectLabelWaived,
 } from "../lib/releaseNotesDisplayRequirements.ts";
 
 test("every declared duty is classified exactly once", () => {
@@ -230,4 +232,71 @@ test("candidates are composed in one order whatever order they arrive in", () =>
     forwards.requirements.map((entry) => entry.countryCode),
     ["KR", "US"]
   );
+});
+
+const dutyVerdict = (entries) => ({ obligations: entries });
+
+test("a subject label is dropped only when every asking country waived it", () => {
+  // Every, not any. Two candidates and one waiver is still a subject that has to
+  // carry the other country's label, and dropping it because one approval exists
+  // is unlabelled advertising in the country that approved nothing.
+  assert.equal(
+    subjectLabelWaived({
+      KR: dutyVerdict([{ obligationKey: "advertising_subject_label", state: "waived" }]),
+    }),
+    true
+  );
+  assert.equal(
+    subjectLabelWaived({
+      KR: dutyVerdict([{ obligationKey: "advertising_subject_label", state: "waived" }]),
+      SG: dutyVerdict([{ obligationKey: "adv_subject_label", state: "implemented" }]),
+    }),
+    false
+  );
+  assert.equal(
+    subjectLabelWaived({
+      KR: dutyVerdict([{ obligationKey: "advertising_subject_label", state: "waived" }]),
+      SG: dutyVerdict([{ obligationKey: "adv_subject_label", state: "waived" }]),
+    }),
+    true
+  );
+});
+
+test("a country with no subject label duty does not make one waived", () => {
+  // Nothing to waive, and reporting a waiver would put an exemption in the
+  // record for a duty nobody has.
+  assert.equal(
+    subjectLabelWaived({
+      US: dutyVerdict([{ obligationKey: "postal_address", state: "implemented" }]),
+    }),
+    false
+  );
+  assert.equal(subjectLabelWaived({}), false);
+});
+
+test("an unsettled or missing subject label duty is not a waiver", () => {
+  // `deferred` and `implemented` both mean the label is printed; an absent row
+  // blocks the send entirely. None of the three is an exemption.
+  for (const state of ["implemented", "deferred", null]) {
+    assert.equal(
+      subjectLabelWaived({
+        KR: dutyVerdict([{ obligationKey: "advertising_subject_label", state }]),
+      }),
+      false,
+      String(state)
+    );
+  }
+  assert.equal(
+    subjectLabelWaived({ KR: dutyVerdict([{ obligationKey: "body_disclosures", state: "waived" }]) }),
+    false
+  );
+});
+
+test("every subject label duty is a duty its country declares", () => {
+  for (const [countryCode, key] of Object.entries(SUBJECT_LABEL_OBLIGATIONS)) {
+    assert.ok(
+      (DISPLAY_OBLIGATIONS[countryCode] ?? []).includes(key),
+      `${countryCode}/${key} is a subject label and not a display duty`
+    );
+  }
 });
