@@ -523,7 +523,7 @@ const REGISTRY = {
     module: "lib/amux/recommendationPoolCore.ts",
     list: "RECOMMENDATION_CAPACITY_IDS",
     reason:
-      "The recommendation ceiling is one row, id queue. Version 7 inserts no row. A missing row means capacity is unconfigured.",
+      "The recommendation ceiling is one row, id queue. Version 11 writes that row only from an owner request that names the limit. A missing, inactive, or null-limit row means capacity is unconfigured.",
   },
   AmuxRecommendationSnapshot_status_check: {
     owner: "list",
