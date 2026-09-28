@@ -42,16 +42,18 @@ test("confirmed-native models report the right tool provider and force/cost flag
 });
 
 test("every active Google model searches through the application-managed backend", () => {
-  // The four active Google models plus the stable id whose upstream apiModel is
-  // gemini-3.5-flash-lite. Listed by hand rather than derived from the
-  // catalogue, because the point of the test is that this exact set is what the
-  // register says -- a derivation would pass by agreeing with itself.
+  // The active Google models, the stable id whose upstream apiModel is
+  // gemini-3.5-flash-lite, and the unversioned flash-lite alias. Listed by
+  // hand rather than derived from the catalogue, because the point of the
+  // test is that this exact set is what the register says -- a derivation
+  // would pass by agreeing with itself.
   const googleModelIds = [
     "gemini-3-7-flash",
     "gemini-3-6-flash",
     "gemini-3-5-flash",
     "gemini-3-1-pro",
     "gemini-2-5-flash",
+    "gemini-flash-lite-latest",
   ];
   const expected = getWebSearchCapability("gemini-3-7-flash");
   assert.equal(expected.support, "app-managed");

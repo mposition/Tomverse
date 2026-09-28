@@ -250,12 +250,23 @@ const compilerOptions = parsedConfig.options;
 // remains 228 and the position-free inventory remains 9aa7ec49..., so the
 // digest below is a repin of source positions and not a review of new
 // computed access.
+//
+// 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
+// gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
+// Standard profile. Both files are in this closure. Neither addition is a
+// computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
+//
+// On the combined successor and guest-trio tree, the existing canonical
+// builder still reports 228 accesses, the same position-free digest, and
+// the exact ordered 190-file closure. This pin combines source positions
+// from both changes; it does not admit a new computed access.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "147797081ec13411a4bae6cb4298e7bd",
-  "fca0394bcf109ecdb02e731b962aba59",
+  "bd9cbacae4545ff373f25e27921fe4b5",
+  "e0bbf9685dc274c82fccc32f06e30942",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

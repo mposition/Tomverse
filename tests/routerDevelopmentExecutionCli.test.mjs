@@ -62,9 +62,9 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   assert.equal(report.legacyImportWithoutJournal.disposition, "hold");
   assert.deepEqual({ passed: report.score.summary.passed, incorrect: report.score.summary.incorrect, blank: report.score.summary.blank,
     invalidJson: report.score.summary.invalidJson, failed: report.score.summary.failed }, { passed: 4, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
-  assert.equal(report.score.summary.catalogueRows, 1008);
+  assert.equal(report.score.summary.catalogueRows, 1032);
   assert.equal(report.score.summary.refused, 648);
-  assert.equal(report.score.summary.notRun, 352);
+  assert.equal(report.score.summary.notRun, 376);
   assert.equal(report.score.summary.correctnessRate, null);
   assert.equal(report.score.reportedMetrics.latencyMs.total, null);
   assert.equal(report.score.reportedMetrics.providerCostUsd.total, null);

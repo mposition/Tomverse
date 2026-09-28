@@ -315,7 +315,7 @@ export const FIXTURE_RETENTION_RUN = {
  * registry route refuses to restrict whichever model this points at.
  */
 export const FIXTURE_APP_SETTINGS = {
-  guestDefaultModelId: "gemini-2-5-flash",
+  guestDefaultModelId: "gemini-flash-lite-latest",
   alternateGuestDefaultModelId: "claude-haiku-4-5",
 } as const;
 

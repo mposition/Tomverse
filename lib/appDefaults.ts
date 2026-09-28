@@ -25,7 +25,12 @@ const GUEST_DEFAULT_MODEL_ID = "gpt-5-6-luna";
 // The OpenAI slot moved from gpt-5-4-mini to gpt-5-6-luna with the default
 // switch. Both are Guest-tier Standard models at 1 credit, so the trio still
 // costs a guest exactly 3 credits per comparison.
-export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
+//
+// The Gemini slot moved from gemini-2-5-flash to gemini-flash-lite-latest on
+// 2026-09-28. The old id stays in the catalogue; this only changes which
+// Google model a new guest comparison opens with. The lead stays
+// gpt-5-6-luna unless an administrator reorders the trio.
+export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
 
 // Backstops used only if one of the brand trio above is itself disabled or
 // ineligible, so the guest default still comes out to 3 distinct models

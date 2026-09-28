@@ -64,6 +64,13 @@ Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
 제품 결정이고, 크레딧 추정·picker·cost hydration·E2E 기대치가 **한 변경으로**
 함께 움직여야 합니다. admin 설정이 옆에서 할 수 있는 일이 아닙니다.
 
+2026-09-28에 Tommy가 Gemini 자리를 `gemini-2-5-flash`에서
+`gemini-flash-lite-latest`로 옮겼습니다. 선두는 `gpt-5-6-luna`입니다. 옛 id는
+카탈로그에 남으며, 이 변경은 그 모델의 은퇴가 아닙니다. 컴파일된 가격은 공개된
+Standard 요율(입력 US$0.30, 캐시 입력 배수 0.1, 출력 US$2.50, 출력 상한
+65,536, 예약 4,096)입니다. 레지스트리 가격 컬럼이 비어 있지 않으면 그 값이
+이 profile을 덮습니다.
+
 ### `npm run check:default-models`
 
 읽기 전용 감사입니다. 아무것도 쓰지 않습니다 — AppSetting을 건드리지 않고,
