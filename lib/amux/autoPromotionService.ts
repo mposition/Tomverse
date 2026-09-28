@@ -56,6 +56,8 @@ import {
   parseAutoConsumeRequest,
   parseAutoGrantRequest,
   parseAutoResumeRequest,
+  AUTO_TICK_GRANT_ATTEMPTS,
+  autoTickCardSpecificRefusal,
 } from "@/lib/amux/autoPromotionCore";
 import { writeAutoPromoterAudit } from "@/lib/amux/autoPromotionSystemAudit";
 import {
@@ -743,6 +745,8 @@ export async function commitSystemAutoPromotion(input: {
   consumptionId: string;
   snapshotId: string;
   onGrantPicked?: (grantId: string) => void;
+  /** Grants this tick already found refused for a card-specific reason. */
+  skipGrantIds?: readonly string[];
 }): Promise<
   | { promoted: true; consumptionId: string; grantId: string; snapshotId: string }
   | { promoted: false; reason: "no_grant" }
@@ -756,6 +760,9 @@ export async function commitSystemAutoPromotion(input: {
         itemBindingsDigest: { not: null },
         consumptions: { none: {} },
         unknowns: { none: {} },
+        ...(input.skipGrantIds && input.skipGrantIds.length > 0
+          ? { id: { notIn: [...input.skipGrantIds] } }
+          : {}),
       },
       orderBy: [{ grantedAt: "asc" }, { id: "asc" }],
       select: GRANT_SELECT,
@@ -826,26 +833,43 @@ export async function runAutoPromotionTick(): Promise<AutoTickResult> {
     const reason = error.code === "outcome_unknown" ? "expiry_outcome_unknown" : error.code;
     return { promoted: false, reason, expired: 0 };
   }
-  const consumptionId = randomUUID();
-  const snapshotId = randomUUID();
-  let pickedGrantId: string | null = null;
-  try {
-    const result = await commitSystemAutoPromotion({
-      consumptionId,
-      snapshotId,
-      onGrantPicked: (grantId) => {
-        pickedGrantId = grantId;
-      },
-    });
-    if (!result.promoted) return { promoted: false, reason: result.reason, expired };
-    return { promoted: true, consumption_id: result.consumptionId, expired };
-  } catch (error) {
-    if (!(error instanceof BoardImportError)) throw error;
-    if (error.code === "outcome_unknown") {
-      await recordAutoOutcomeUnknownSafely({ actor: AUTO_SYSTEM_ACTOR, consumptionId, grantId: pickedGrantId });
+  // A grant refused for a reason that belongs to its own card (the card
+  // moved, a dependency is open, it fell out of the ranking cut) must not
+  // hold every later grant until it expires. Those are skipped for this tick
+  // and the next grant is tried, each in its own transaction; any other
+  // refusal, a lost outcome, or a promotion ends the tick. At most one card
+  // moves per tick.
+  const skipGrantIds: string[] = [];
+  let lastReason: string | undefined;
+  for (let attempt = 0; attempt < AUTO_TICK_GRANT_ATTEMPTS; attempt += 1) {
+    const consumptionId = randomUUID();
+    const snapshotId = randomUUID();
+    let pickedGrantId: string | null = null;
+    try {
+      const result = await commitSystemAutoPromotion({
+        consumptionId,
+        snapshotId,
+        skipGrantIds,
+        onGrantPicked: (grantId) => {
+          pickedGrantId = grantId;
+        },
+      });
+      if (!result.promoted) return { promoted: false, reason: lastReason ?? result.reason, expired };
+      return { promoted: true, consumption_id: result.consumptionId, expired };
+    } catch (error) {
+      if (!(error instanceof BoardImportError)) throw error;
+      if (error.code === "outcome_unknown") {
+        await recordAutoOutcomeUnknownSafely({ actor: AUTO_SYSTEM_ACTOR, consumptionId, grantId: pickedGrantId });
+        return { promoted: false, reason: error.code, expired };
+      }
+      if (pickedGrantId === null || !autoTickCardSpecificRefusal(error.code)) {
+        return { promoted: false, reason: error.code, expired };
+      }
+      skipGrantIds.push(pickedGrantId);
+      lastReason = error.code;
     }
-    return { promoted: false, reason: error.code, expired };
   }
+  return { promoted: false, reason: lastReason, expired };
 }
 
 export async function tickAutoPromotion(): Promise<AutoTickResult> {
@@ -942,31 +966,43 @@ const evaluateAutoHaltLocked = async (
     if (!row.workItem.owner) continue;
     ownerCounts.set(row.workItem.owner, (ownerCounts.get(row.workItem.owner) ?? 0) + 1);
   }
+  // Policy version 15. The automatic path writes todo only in the consume
+  // transaction, together with a consumed row. A card it touched that is
+  // todo or doing without one is the violation. A card a person promoted
+  // while a stale grant was still active never had an automatic consumption
+  // and is not counted.
   const unapprovedTodo = await tx.amuxWorkItem.count({
     where: {
       archivedAt: null,
       status: { in: ["todo", "doing"] },
-      autoGrants: { some: {} },
-      autoConsumptions: { none: { status: "consumed" } },
+      autoConsumptions: { some: {}, none: { status: "consumed" } },
     },
   });
-  const consumedIds = consumed.map((row) => row.workItemId);
-  const attempts = consumedIds.length === 0
-    ? 0
-    : await tx.amuxExecutionAttempt.count({ where: { taskId: { in: consumedIds } } });
-  const deliveries = consumedIds.length === 0
-    ? 0
-    : await tx.amuxWorkDelivery.count({ where: { taskId: { in: consumedIds } } });
-  const routes = consumedIds.length === 0
-    ? 0
-    : await tx.amuxRouteDecision.count({ where: { taskId: { in: consumedIds } } });
+  // Only rows the consume itself could have written count. Their createdAt
+  // is the consume transaction's start (now()), so a claim, execution start
+  // or delivery that runs later on a promoted card (policy version 15
+  // execution) is not a lifecycle write by this path.
+  const lifecycleCounts = await tx.$queryRaw<Array<{ writes: bigint }>>`
+    SELECT
+      (SELECT count(*) FROM "AmuxExecutionAttempt" a
+         JOIN "AmuxRecommendationAutoConsumption" c ON c."workItemId" = a."taskId"
+         WHERE c."status" = 'consumed' AND a."createdAt" <= c."createdAt")
+    + (SELECT count(*) FROM "AmuxWorkDelivery" d
+         JOIN "AmuxRecommendationAutoConsumption" c ON c."workItemId" = d."taskId"
+         WHERE c."status" = 'consumed' AND d."createdAt" <= c."createdAt")
+    + (SELECT count(*) FROM "AmuxRouteDecision" r
+         JOIN "AmuxRecommendationAutoConsumption" c ON c."workItemId" = r."taskId"
+         WHERE c."status" = 'consumed' AND r."createdAt" <= c."createdAt")
+      AS "writes"
+  `;
+  const lifecycleWrites = Number(lifecycleCounts[0]?.writes ?? BigInt(0));
   const readback = autoReadbackCritical({
     activeCount: activeCards.length,
     ownerCounts: [...ownerCounts.values()],
     costCents24h: sum(inWindow(AUTO_COST_24H_MS)),
     costCents30d: sum(inWindow(AUTO_COST_30D_MS)),
     unapprovedTodo,
-    lifecycleWrites: attempts + deliveries + routes,
+    lifecycleWrites,
   });
   const unknowns = await tx.amuxRecommendationAutoUnknown.findMany({
     where: { recordedAt: { gte: new Date(now.getTime() - AUTO_UNKNOWN_BURST_MS) } },

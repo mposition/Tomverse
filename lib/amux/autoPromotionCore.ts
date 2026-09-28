@@ -511,6 +511,36 @@ export const autoUnknownEvents = (input: {
  * step) are 409; a missing audit key is 503; an unbound audit or an
  * unexpected failure is 500.
  */
+/** Grants one tick may try before it stops; still at most one card moves. */
+export const AUTO_TICK_GRANT_ATTEMPTS = 10;
+
+/**
+ * Refusals that belong to the picked grant's own card, so the tick tries the
+ * next grant instead of refusing every tick until this grant expires. A
+ * refusal about the whole path (halt, graduation, missing capacity row, the
+ * global automatic cap, incident, audit keys) ends the tick. `capacity_full`
+ * and `cost_exceeded` are per card here: the first comes from this card's
+ * place in the ranking cut, the second from this grant's bound amount, and a
+ * later grant can still pass; if the queue is truly full every candidate is
+ * refused and the tick ends at the attempt bound.
+ */
+const AUTO_TICK_CARD_SPECIFIC_REFUSALS = new Set([
+  "not_backlog",
+  "conflict",
+  "dependency_open",
+  "not_included",
+  "lifecycle_present",
+  "brief_digest_changed",
+  "review_waiting",
+  "grant_binding_invalid",
+  "grant_missing",
+  "capacity_full",
+  "cost_exceeded",
+]);
+
+export const autoTickCardSpecificRefusal = (code: string): boolean =>
+  AUTO_TICK_CARD_SPECIFIC_REFUSALS.has(code);
+
 export const autoTickHttpStatus = (reason: string | null | undefined): number => {
   if (!reason) return 200;
   if (reason === "apply_disabled" || reason === "outcome_unknown" || reason === "expiry_outcome_unknown") {

@@ -610,6 +610,61 @@ test("a second tick with no bound grant promotes nothing, and a legacy grant is 
   assert.equal((await prisma.amuxWorkItem.findUnique({ where: { id: cardD.id }, select: { status: true } }))?.status, "backlog");
 });
 
+test("a grant refused for its own card does not hold the next grant, and later execution is not a lifecycle write", async () => {
+  // E is granted first, then its card moves, so its bound revision no longer
+  // matches: a refusal that belongs to E alone.
+  const cardE = await seedCard("J");
+  const grantE = await grantFor(itemFor(cardE), 50);
+  await prisma.amuxWorkItem.update({ where: { id: cardE.id }, data: { revision: { increment: 1 } } });
+  const cardF = await seedCard("K");
+  const grantF = await grantFor(itemFor(cardF), 60);
+  let attemptId: string | null = null;
+  try {
+    const result = await runAutoPromotionTick();
+    assert.equal(result.promoted, true, result.reason);
+    const consumption = await prisma.amuxRecommendationAutoConsumption.findUnique({
+      where: { id: result.consumption_id ?? "" },
+      select: { grantId: true, workItemId: true },
+    });
+    assert.equal(consumption?.grantId, grantF);
+    assert.equal(consumption?.workItemId, cardF.id);
+    assert.equal((await prisma.amuxRecommendationAutoGrant.findUnique({ where: { id: grantE } }))?.status, "active");
+
+    // A later claim and execution start on the promoted card (policy version
+    // 15) writes an attempt after the consume; it is not a violation.
+    attemptId = randomUUID();
+    const later = new Date();
+    await prisma.amuxExecutionAttempt.create({
+      data: {
+        id: attemptId,
+        taskId: cardF.id,
+        worker: "auto-lifecycle-worker",
+        workerInstanceId: randomUUID(),
+        workerGeneration: 1,
+        taskRevision: cardF.revision + 1,
+        attemptNumber: 1,
+        heartbeatAt: later,
+        leaseExpiresAt: null,
+        startedAt: later,
+        endedAt: later,
+        outcome: "failed",
+        toStatus: "todo",
+        endedBy: "auto-lifecycle-worker",
+        reason: "execution_failed",
+      },
+    });
+    const readback = await commitAutoHaltFromReadback({ actor: AUTO_SYSTEM_ACTOR, haltId: randomUUID() });
+    assert.equal(readback.halted, false);
+  } finally {
+    if (attemptId) await prisma.amuxExecutionAttempt.deleteMany({ where: { id: attemptId } });
+    // Leave no active grant behind for the ticks that follow.
+    await prisma.amuxRecommendationAutoGrant.updateMany({
+      where: { id: grantE, status: "active" },
+      data: { status: "expired" },
+    });
+  }
+});
+
 test("two lost outcomes within 15 minutes open a halt, and a halted tick refuses", async () => {
   // First: the consume had committed, so the read-back finds the row.
   const first = await recordAutoOutcomeUnknown({

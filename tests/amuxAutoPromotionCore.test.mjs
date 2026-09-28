@@ -466,3 +466,25 @@ test("the screen is owner-only, unlisted, and offers the step-up link", () => {
     false,
   );
 });
+
+test("a tick skips a grant refused for its own card and stops on a refusal about the whole path", async () => {
+  const { AUTO_TICK_GRANT_ATTEMPTS, autoTickCardSpecificRefusal } = await import("../lib/amux/autoPromotionCore.ts");
+  for (const code of ["not_backlog", "conflict", "dependency_open", "not_included", "capacity_full", "cost_exceeded"]) {
+    assert.equal(autoTickCardSpecificRefusal(code), true, code);
+  }
+  for (const code of ["auto_halted", "graduation_unmet", "capacity_unconfigured", "auto_wip_full", "incident_blocked", "outcome_unknown", "audit_key_missing"]) {
+    assert.equal(autoTickCardSpecificRefusal(code), false, code);
+  }
+  assert.ok(AUTO_TICK_GRANT_ATTEMPTS >= 2 && AUTO_TICK_GRANT_ATTEMPTS <= 20);
+});
+
+test("the halt read-back counts only lifecycle rows the consume itself could write", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const service = await readFile(new URL("../lib/amux/autoPromotionService.ts", import.meta.url), "utf8");
+  for (const table of ["AmuxExecutionAttempt", "AmuxWorkDelivery", "AmuxRouteDecision"]) {
+    assert.ok(service.includes(`FROM "${table}" `), table);
+  }
+  assert.equal((service.match(/"createdAt" <= c\."createdAt"/g) ?? []).length, 3);
+  assert.match(service, /autoConsumptions: \{ some: \{\}, none: \{ status: "consumed" \} \}/);
+  assert.doesNotMatch(service, /autoGrants: \{ some: \{\} \},\s*autoConsumptions/);
+});
