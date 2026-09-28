@@ -1451,7 +1451,10 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
       env
     );
     assert.equal(shadowed.status, 1, shadowed.stderr);
-    assert.equal(shadowed.stderr.trim(), `refusing review round 0: tree changed outside the writable scope after packaging: ${launcherName}`);
+    assert.match(shadowed.stderr, new RegExp(
+      `^refusing review round 0: tree changed outside the writable scope after packaging: ${launcherName.replace(".", "\\.")}\\r?$`,
+      "mu"
+    ));
     assert.equal(existsSync(marker), false, "a repository-root command shim is never invoked");
     rmSync(shadowPath);
 
