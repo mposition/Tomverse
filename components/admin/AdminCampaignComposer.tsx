@@ -5,7 +5,15 @@ import { useRouter } from "next/navigation";
 import { Eye, Loader2, Send } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import {
+  useAdminLocale,
+  useAdminMessages,
+} from "@/components/admin/AdminLocaleProvider";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 import {
   type AssistantKnowledgeCampaignLanguage,
@@ -38,6 +46,8 @@ export function AdminCampaignComposer({
 }) {
   const router = useRouter();
   const m = useAdminMessages(adminEmailCampaignsMessages).composer;
+  const { locale: apiLocale } = useAdminLocale();
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [content, setContent] = useState(() =>
     structuredClone(starterContent)
   );
@@ -87,6 +97,7 @@ export function AdminCampaignComposer({
   };
 
   const request = async (path: string) => {
+    setApiFailure(null);
     const response = await adminFetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -114,13 +125,19 @@ export function AdminCampaignComposer({
       unknown
     > | null;
     if (!response.ok) {
-      throw new Error(
-        typeof payload?.error === "string"
-          ? payload.error
-          : path.endsWith("/preview")
-            ? m.previewFailed
-            : m.createFailed
-      );
+      // 409 and 428 are answers, not faults: the shared notice names them and,
+      // for a stale sign-in, links back into step-up for this screen.
+      const outcome = describeAdminApiFailure({
+        status: response.status,
+        error: typeof payload?.error === "string" ? payload.error : null,
+        code: typeof payload?.code === "string" ? payload.code : null,
+        approvalId:
+          typeof payload?.approvalId === "string" ? payload.approvalId : null,
+        fallback: path.endsWith("/preview") ? m.previewFailed : m.createFailed,
+        locale: apiLocale,
+      });
+      setApiFailure(outcome);
+      throw new Error(outcome.message);
     }
     return payload;
   };
@@ -191,6 +208,7 @@ export function AdminCampaignComposer({
           {m.disabled}
         </p>
       ) : null}
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
         <div className="min-w-0">

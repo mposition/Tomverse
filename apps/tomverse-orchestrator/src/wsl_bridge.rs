@@ -1206,14 +1206,8 @@ mod tests {
     fn task() -> OwnedTodoTask {
         OwnedTodoTask {
             id: "TASK-1".into(),
-            title: "Fix the window".into(),
-            description: Some("description".into()),
-            kind: "bug".into(),
-            priority: "p2".into(),
             owner: "claude-impl".into(),
             revision: 2,
-            claimed_at: None,
-            created_at: "2026-09-28T00:00:00Z".into(),
         }
     }
 

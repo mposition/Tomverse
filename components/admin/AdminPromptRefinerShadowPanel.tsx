@@ -38,6 +38,12 @@ import {
 } from "@/lib/promptRefinerShadowOperatorCore";
 import { adminFetch } from "@/lib/adminFetch";
 
+// The execute route may run for its full maxDuration (300 s). The console's
+// default 15 s deadline would report every normal run as an unknown outcome,
+// so this one call outlasts the route; a real timeout still stays unknown and
+// keeps the POST locked.
+const EXECUTION_POST_TIMEOUT_MS = 330_000;
+
 type Busy = "stage" | "run" | "execution" | "refresh" | null;
 type FailureBody = { error?: string; code?: string };
 
@@ -300,6 +306,7 @@ export function AdminPromptRefinerShadowPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(promptRefinerExecutionBody(execution)),
+        timeoutMs: EXECUTION_POST_TIMEOUT_MS,
       });
       const body = await responseJson(response);
       if (!response.ok) {
