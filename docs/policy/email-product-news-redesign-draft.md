@@ -1484,7 +1484,7 @@ EEA·영국을 여는 선행 게이트입니다.
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8, **webhook·suppression 절 동기화(이메일 알림 9.6, 10.2, 12.3, 12.4, 13.2, 13.3, 13.5, 13.7, 14.4 — 중복 webhook은 processed·abandoned만 즉시 200이고 미처리는 7.4의 claim·lease 전이, 사건·delivery·entry 단일 transaction과 이유 병합은 7.4의 원인 모델로, entry 단위 이중 승인·감사는 해제 행위 × 원인 행렬과 원자적 해제 감사로, 보존 설명에 원인 장부)** | — | 문서 |
 | S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·보존 readiness | **닫힘** | **완료** — #1492 병합. Codex 코드 검토 3회. 보존 기간은 계약대로 1년 |
 | S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, 원인별 멱등 insert·활성 원인 효과 합성·A/B/C 권위 전환과 D cleanup, 총잠금 순서, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v24 — 19회차 조건부 승인) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
-| S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
+| S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | ~~R5~~ 해소(2026-09-23) | 해시할 문안이 먼저. 초안: [email-consent-copy-draft.md](email-consent-copy-draft.md) |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
 | S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | 둘로 나눕니다. **S5a** — rule 테이블(draft에서만 쓰기, 한 `(ruleKey, ruleVersion)`은 한 내용), 수신자·호주 발신자 authority 판정, seed(정본 5.1.1). 선행 결정 없음. **S5b** — 호주 관계 lifecycle(4.4). R4 대기. S5b 전까지 호주 `inferred_consent`는 판정에서 쓰지 않습니다 |
@@ -1528,7 +1528,7 @@ EEA·영국을 여는 선행 게이트입니다.
 | R2 | marketing 스트림 발송의 평판 영향 | 발송 도메인 |
 | R3 | 싱가포르 "수신거부 요청을 보낼 이메일 주소"를 현재 footer가 충족하는가 | **SG 활성화 전 필수** |
 | R4 | 호주 관계의 유지·휴면 기준값 | 4.4에서 정하고 문서에 적음 |
-| R5 | 동의의 유효 기간 — ACMA는 숫자를 주지 않고 **약관에 적으면 그 기간이 기준** | 문서 문구 |
+| ~~R5~~ | **해소됨(소유자 결정 2026-09-23)** — 동의는 **철회 시까지** 유효하며 만료 기간을 두지 않습니다. 이 결정은 `/terms`에 적히는 순간 ACMA 기준이 됩니다. 한국의 2년 고지는 유효기간이 아니라 주기적 확인 의무이므로 그대로 유지됩니다. 문안: [email-consent-copy-draft.md](email-consent-copy-draft.md) §1·§5 | — |
 
 **한국 의무** — 14일 통지는 구현, 2년 고지는 기한 전 구현으로 연기, `(광고)`는
 면제입니다(7.7). 연기와 면제는 7.8의 기록으로 남습니다.

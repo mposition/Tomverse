@@ -1,8 +1,10 @@
+import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 // UX-020. Korean is a primary locale and is complete; this check is what keeps
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
+    emailConsent: consentCopyForLanguage("ko"),
     skipLink: {
         toMainContent: "본문으로 건너뛰기",
     },

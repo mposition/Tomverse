@@ -1,6 +1,8 @@
+import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const es = {
+    emailConsent: consentCopyForLanguage("es"),
     skipLink: {
         toMainContent: "Saltar al contenido principal",
     },
