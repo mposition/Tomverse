@@ -5,19 +5,31 @@
  *
  * docs/policy/engineering-agent.md §7-2 and §11 are the contract.
  *
+ * - The capability binds everything the published commit may be: the base,
+ *   the patch digest, the tree id the app judged, the verifier and policy
+ *   versions, and the commit fields (identity, date, run, card). Nothing about
+ *   the commit is left to the publisher.
  * - Consuming it is an irrevocable, single publish reservation, made in the
- *   same transaction as the work item's `queued -> claimed`. Expiry means
- *   something only before consumption.
- * - The last look before the push can only refuse. Nothing here, and nothing
- *   the publisher reports, grants anything.
- * - The expected tree id binds the capability to the exact tree the app
- *   judged; the publisher may push only a tree with that id.
+ *   same transaction as the work item's `queued -> claimed`, and it binds the
+ *   claim's fencing token and work item. Expiry means something only before
+ *   consumption.
+ * - The branch may be created only where no branch exists (expected old OID:
+ *   absent). That prevents a name collision; it is not evidence of freshness.
+ * - The last look before the push can only refuse.
  * - A mismatch observed after the push is an incident, not a block: the push
  *   already happened.
  *
  * Pure and dependency-free. Randomness (the fencing token) and the clock come
  * from the caller -- in practice from the database.
  */
+
+import {
+  type CommitIdentity,
+  commitObjectMatches,
+  engineeringBranchName,
+  expectedCommitObject,
+  isRunId,
+} from "./engineeringAgentCore.ts";
 
 /** Bumped whenever the tree verification or the tier rules change meaning. */
 export const ENGINEERING_AGENT_VERIFIER_VERSION = 1;
@@ -28,6 +40,16 @@ export const CAPABILITY_TTL_MS = 10 * 60 * 1000;
 const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const FENCING = /^[0-9a-f]{32,64}$/;
+const DATE = /^[0-9]{1,12} [+-][0-9]{4}$/;
+
+/** The commit fields the published commit must carry, fixed at issue. */
+export type CommitFields = {
+  identity: CommitIdentity;
+  /** The base commit's committer timestamp and zone. */
+  baseCommitterDate: string;
+  runId: string;
+  cardRef: string;
+};
 
 export type Capability = {
   baseSha: string;
@@ -37,11 +59,21 @@ export type Capability = {
   expectedTreeId: string;
   verifierVersion: number;
   policyVersion: number;
+  commit: CommitFields;
+  /** The branch the publisher may create, derived from the run id. */
+  branch: string;
   issuedAt: Date;
   expiresAt: Date;
 };
 
-export type IssueInput = Omit<Capability, "issuedAt" | "expiresAt"> & { now: Date };
+/** A consumed capability: immutable, and bound to the claim that consumed it. */
+export type ConsumedCapability = Capability & {
+  consumedAt: Date;
+  claimFencingToken: string;
+  workItemId: string;
+};
+
+export type IssueInput = Omit<Capability, "issuedAt" | "expiresAt" | "branch"> & { now: Date };
 
 export const issueCapability = (input: IssueInput): Capability => {
   if (!SHA1.test(input.baseSha)) throw new Error("ENGINEERING_AGENT_BASE_INVALID");
@@ -53,19 +85,38 @@ export const issueCapability = (input: IssueInput): Capability => {
   if (!Number.isSafeInteger(input.policyVersion) || input.policyVersion < 1) {
     throw new Error("ENGINEERING_AGENT_POLICY_VERSION_INVALID");
   }
+  if (!isRunId(input.commit.runId)) throw new Error("ENGINEERING_AGENT_RUN_ID_INVALID");
+  if (!DATE.test(input.commit.baseCommitterDate)) throw new Error("ENGINEERING_AGENT_DATE_INVALID");
+  // Validates the identity and card reference the same way the publisher's
+  // comparison will: a capability that cannot describe a commit is not issued.
+  expectedCommitObject({
+    tree: input.expectedTreeId,
+    baseSha: input.baseSha,
+    ...input.commit,
+  });
   return {
     baseSha: input.baseSha,
     patchDigest: input.patchDigest,
     expectedTreeId: input.expectedTreeId,
     verifierVersion: input.verifierVersion,
     policyVersion: input.policyVersion,
+    commit: { ...input.commit, identity: { ...input.commit.identity } },
+    branch: engineeringBranchName(input.commit.runId),
     issuedAt: input.now,
     expiresAt: new Date(input.now.getTime() + CAPABILITY_TTL_MS),
   };
 };
 
+/** The exact commit object the publisher must produce and push. */
+export const capabilityCommitObject = (capability: Capability) =>
+  expectedCommitObject({
+    tree: capability.expectedTreeId,
+    baseSha: capability.baseSha,
+    ...capability.commit,
+  });
+
 export type ConsumeVerdict =
-  | { allowed: true }
+  | { allowed: true; consumed: ConsumedCapability }
   | {
       allowed: false;
       reason:
@@ -73,22 +124,24 @@ export type ConsumeVerdict =
         | "expired"
         | "verifier_changed"
         | "policy_changed"
-        | "fencing_invalid";
+        | "fencing_invalid"
+        | "work_item_invalid";
     };
 
 /**
- * Whether a write claim may consume this capability now. The caller performs
- * the consumption as one conditional update in the claim transaction; this is
- * the condition that update encodes, kept here so the trigger and the tests
- * share it.
+ * Consumes the capability for one write claim. The caller writes the returned
+ * record with one conditional update in the claim transaction (`consumedAt IS
+ * NULL`); the record is immutable afterwards, and nothing here or anywhere
+ * else turns it back into an unconsumed capability.
  */
-export const decideConsumption = (input: {
+export const consumeCapability = (input: {
   capability: Capability;
   consumedAt: Date | null;
   now: Date;
   currentVerifierVersion: number;
   currentPolicyVersion: number;
-  newFencingToken: string;
+  claimFencingToken: string;
+  workItemId: string;
 }): ConsumeVerdict => {
   if (input.consumedAt !== null) return { allowed: false, reason: "already_consumed" };
   if (input.now.getTime() >= input.capability.expiresAt.getTime()) {
@@ -100,8 +153,20 @@ export const decideConsumption = (input: {
   if (input.capability.policyVersion !== input.currentPolicyVersion) {
     return { allowed: false, reason: "policy_changed" };
   }
-  if (!FENCING.test(input.newFencingToken)) return { allowed: false, reason: "fencing_invalid" };
-  return { allowed: true };
+  if (!FENCING.test(input.claimFencingToken)) return { allowed: false, reason: "fencing_invalid" };
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(input.workItemId)) {
+    return { allowed: false, reason: "work_item_invalid" };
+  }
+  return {
+    allowed: true,
+    consumed: {
+      ...input.capability,
+      commit: { ...input.capability.commit, identity: { ...input.capability.commit.identity } },
+      consumedAt: input.now,
+      claimFencingToken: input.claimFencingToken,
+      workItemId: input.workItemId,
+    },
+  };
 };
 
 export type LastLookReading = {
@@ -114,8 +179,8 @@ export type LastLookReading = {
   currentFencingToken: string | null;
   /** The token the publisher presents. */
   presentedFencingToken: string;
-  /** The work item that consumed the capability, if any. */
-  consumedByWorkItemId: string | null;
+  /** The consumed capability for this work item, if any. */
+  consumed: ConsumedCapability | null;
   workItemId: string;
 };
 
@@ -130,7 +195,7 @@ export type LastLookVerdict =
         | "amux_incident"
         | "halted"
         | "stale_fencing_token"
-        | "capability_not_consumed_by_this_item";
+        | "capability_not_consumed_by_this_claim";
     };
 
 /**
@@ -152,30 +217,51 @@ export const decideLastLook = (reading: LastLookReading): LastLookVerdict => {
   ) {
     return { verdict: "refuse", reason: "stale_fencing_token" };
   }
-  if (reading.consumedByWorkItemId !== reading.workItemId) {
-    return { verdict: "refuse", reason: "capability_not_consumed_by_this_item" };
+  if (
+    reading.consumed === null ||
+    reading.consumed.workItemId !== reading.workItemId ||
+    reading.consumed.claimFencingToken !== reading.presentedFencingToken
+  ) {
+    return { verdict: "refuse", reason: "capability_not_consumed_by_this_claim" };
   }
   return { verdict: "no_objection" };
 };
 
 /**
  * The publisher's own gate before the first public write: the tree its real
- * application produced must be the tree the app judged.
+ * application produced, and the commit object it built, must be exactly what
+ * the capability describes.
  */
-export const publisherTreeMatches = (capability: Capability, publisherTreeId: string) =>
-  SHA1.test(publisherTreeId) && publisherTreeId === capability.expectedTreeId;
+export const publisherCommitMatches = (
+  capability: Capability,
+  built: { treeId: string; catFileOutput: string },
+) =>
+  SHA1.test(built.treeId) &&
+  built.treeId === capability.expectedTreeId &&
+  commitObjectMatches(built.catFileOutput, {
+    tree: capability.expectedTreeId,
+    baseSha: capability.baseSha,
+    ...capability.commit,
+  });
 
 /**
- * After the push, what GitHub reports is compared with what was allowed. A
- * difference is not something this can undo -- the branch is already public --
- * so the answer is an incident, never a block.
+ * The push is conditioned on the branch not existing. Any existing ref -- ours
+ * from an earlier attempt or anyone else's -- means stop and look (policy §10),
+ * never overwrite.
+ */
+export const mayCreateBranch = (remoteOidForBranch: string | null) => remoteOidForBranch === null;
+
+/**
+ * After the push, what GitHub reports is compared with what was allowed: the
+ * branch, and the whole commit object. A difference is not something this can
+ * undo -- the branch is already public -- so the answer is an incident, never
+ * a block.
  */
 export const postPushObservation = (
   capability: Capability,
-  observed: { treeId: string; parents: readonly string[] },
+  observed: { branch: string; catFileOutput: string },
 ): "consistent" | "incident" =>
-  observed.treeId === capability.expectedTreeId &&
-  observed.parents.length === 1 &&
-  observed.parents[0] === capability.baseSha
+  observed.branch === capability.branch &&
+  observed.catFileOutput === capabilityCommitObject(capability)
     ? "consistent"
     : "incident";

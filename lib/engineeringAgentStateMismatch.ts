@@ -10,7 +10,25 @@
  * Pure and dependency-free.
  */
 
-import { AMUX_SETTLEMENT_FOR_OUTCOME, type RunOutcome } from "./engineeringAgentCore.ts";
+import {
+  AMUX_SETTLEMENT_FOR_OUTCOME,
+  RUN_OUTCOMES,
+  type RunOutcome,
+} from "./engineeringAgentCore.ts";
+
+type Settlement = "review" | "retry" | "blocked" | "recovered";
+
+/**
+ * The AMUX settlement a domain outcome should have produced. An abandoned run
+ * is AMUX's to recover. An outcome this does not know -- a new enum value, an
+ * unvalidated string -- maps to nothing, and the caller treats that as
+ * unmapped rather than guessing a settlement that would make it look settled.
+ */
+export const expectedSettlement = (outcome: string): Settlement | null => {
+  if (!(RUN_OUTCOMES as readonly string[]).includes(outcome)) return null;
+  if (outcome === "abandoned") return "recovered";
+  return AMUX_SETTLEMENT_FOR_OUTCOME[outcome as RunOutcome];
+};
 
 /* ------------------------------------------------------------------------- */
 /* Lock order                                                                 */
@@ -86,7 +104,8 @@ export const classifyState = (input: {
     return input.domainTerminalSinceLastRound ? { kind: "B" } : { kind: "consistent" };
   }
   if (amux.state === "terminal" && domain.state === "terminal") {
-    const expected = AMUX_SETTLEMENT_FOR_OUTCOME[domain.outcome] ?? "recovered";
+    const expected = expectedSettlement(domain.outcome);
+    if (expected === null) return { kind: "unmapped" };
     return expected === amux.settlement ? { kind: "consistent" } : { kind: "C" };
   }
   if (amux.state === "absent" && domain.state === "in_progress") return { kind: "D" };
@@ -129,6 +148,8 @@ export type ActionInput = {
   runActive: boolean;
   runTerminal: boolean;
   workItemState: string | null;
+  /** The work item is in a terminal state of its kind's table. */
+  workItemTerminal: boolean;
   /** A lookup confirmed that nothing was written to GitHub. */
   lookupVerifiedNoWrite: boolean;
   recurrences: number;
@@ -161,7 +182,9 @@ export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
     }
     case "B":
     case "C":
-      if (!input.runTerminal) return deny("precondition_not_met");
+      // Both the run and the work item must be terminal: B and C describe
+      // disagreements about something already finished.
+      if (!input.runTerminal || !input.workItemTerminal) return deny("precondition_not_met");
       break;
     case "D":
       if (!input.runActive && input.workItemState !== "claimed") return deny("precondition_not_met");
@@ -187,9 +210,10 @@ export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
  * it, different ones turn it into C. Nothing closes C except escalation.
  */
 export const resolveBOnAmuxTerminal = (input: {
-  amuxSettlement: "review" | "retry" | "blocked" | "recovered";
-  domainOutcome: RunOutcome;
-}): "resolved" | "C" =>
-  (AMUX_SETTLEMENT_FOR_OUTCOME[input.domainOutcome] ?? "recovered") === input.amuxSettlement
-    ? "resolved"
-    : "C";
+  amuxSettlement: Settlement;
+  domainOutcome: string;
+}): "resolved" | "C" | "unmapped" => {
+  const expected = expectedSettlement(input.domainOutcome);
+  if (expected === null) return "unmapped";
+  return expected === input.amuxSettlement ? "resolved" : "C";
+};
