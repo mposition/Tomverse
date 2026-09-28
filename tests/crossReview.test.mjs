@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -1339,11 +1339,28 @@ test("the transient gitleaks review output is never indexed", () => {
   assert.deepEqual(forbidden, [], `transient local review evidence must never be indexed: ${forbidden.join(", ")}`);
 });
 
-const runScript = (cwd, args, env = {}) => {
+const fixtureCodexEnvironment = (cwd) => {
+  const fromTemporaryRoot = relative(tmpdir(), cwd);
+  assert.ok(fromTemporaryRoot !== "" && !fromTemporaryRoot.startsWith(`..${sep}`) && fromTemporaryRoot !== ".." && !isAbsolute(fromTemporaryRoot));
+  const bin = join(tmpdir(), fromTemporaryRoot.split(sep)[0], "fixture-cli-bin");
+  mkdirSync(bin, { recursive: true });
+  const posix = join(bin, "codex");
+  writeFileSync(posix, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fixture-codex 1.0; exit 0; fi\nexit 2\n');
+  chmodSync(posix, 0o755);
+  writeFileSync(join(bin, "codex.cmd"), '@echo off\r\nif "%1"=="--version" ( echo fixture-codex 1.0 & exit /b 0 )\r\nexit /b 2\r\n');
+  const pathKey = Object.keys(process.env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  return {
+    [pathKey]: `${bin}${process.platform === "win32" ? ";" : ":"}${process.env[pathKey] ?? ""}`,
+    CROSS_REVIEW_TEST_CLI_SHIM: "1",
+  };
+};
+
+const runScript = (cwd, args, env = null) => {
+  const fixtureEnv = env ?? fixtureCodexEnvironment(cwd);
   const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(repoRoot, "scripts", "cross-review.mjs"), ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...env, TSX_TSCONFIG_PATH: join(repoRoot, "tsconfig.json") },
+    env: { ...process.env, ...fixtureEnv, TSX_TSCONFIG_PATH: join(repoRoot, "tsconfig.json") },
     windowsHide: true,
   });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
@@ -1382,10 +1399,14 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
         `  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(verdict) })); process.exit(0);\n` +
         `}\nprocess.exit(2);\n`
     );
-    writeFileSync(join(bin, "claude"), `#!/bin/sh\nexec node "$(dirname "$0")/fake-claude.mjs" "$@"\n`);
+    const fakePosixContents = `#!/bin/sh\nexec node "$(dirname "$0")/fake-claude.mjs" "$@"\n`;
+    writeFileSync(join(bin, "claude"), fakePosixContents);
     chmodSync(join(bin, "claude"), 0o755);
     const fakeCmdContents = `@echo off\r\nnode "%~dp0fake-claude.mjs" %*\r\n`;
     writeFileSync(join(bin, "claude.cmd"), fakeCmdContents);
+    const launcherName = process.platform === "win32" ? "claude.cmd" : "claude";
+    const launcherContents = process.platform === "win32" ? fakeCmdContents : fakePosixContents;
+    const launcherPath = join(bin, launcherName);
     const pathKey = Object.keys(process.env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
     const env = {
       [pathKey]: `${bin}${process.platform === "win32" ? ";" : ":"}${process.env[pathKey] ?? ""}`,
@@ -1412,22 +1433,26 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
     assert.equal(pkg.reviewerContract.toolVersion, "fake-claude 1.0");
     assert.deepEqual(pkg.reviewerContract.claudeAuth, { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "max" });
     assert.equal(pkg.reviewerContract.command[0], pkg.reviewerContract.executable.path);
-    assert.equal(pkg.reviewerContract.executable.path, join(bin, "claude.cmd"));
-    assert.equal(pkg.reviewerContract.executable.digest, digest(readFileSync(join(bin, "claude.cmd"))));
+    assert.equal(pkg.reviewerContract.executable.path, launcherPath);
+    assert.equal(pkg.reviewerContract.executable.digest, digest(readFileSync(launcherPath)));
 
     const marker = join(work, "repo-shadow-invoked.txt");
-    writeFileSync(join(repo, "claude.cmd"), `@echo off\r\necho invoked>"${marker}"\r\nexit /b 0\r\n`);
+    const shadowPath = join(repo, launcherName);
+    writeFileSync(shadowPath, process.platform === "win32"
+      ? `@echo off\r\necho invoked>"${marker}"\r\nexit /b 0\r\n`
+      : `#!/bin/sh\necho invoked > "${marker}"\n`);
+    if (process.platform !== "win32") chmodSync(shadowPath, 0o755);
     const shadowed = runScript(
       repo,
       ["--mode=review", `--task=${taskFile}`, "--out=artifacts/first-party", "--reviewer=claude", "--skip-preflight"],
       env
     );
     assert.equal(shadowed.status, 1, shadowed.stderr);
-    assert.match(shadowed.stderr, /tree changed outside the writable scope after packaging: claude\.cmd/u);
+    assert.match(shadowed.stderr, /tree changed outside the writable scope after packaging: claude(?:\.cmd)?/u);
     assert.equal(existsSync(marker), false, "a repository-root command shim is never invoked");
-    rmSync(join(repo, "claude.cmd"));
+    rmSync(shadowPath);
 
-    writeFileSync(join(bin, "claude.cmd"), `${fakeCmdContents}\r\nrem replaced after package\r\n`);
+    writeFileSync(launcherPath, `${launcherContents}${process.platform === "win32" ? "\r\nrem" : "\n#"} replaced after package\n`);
     const replaced = runScript(
       repo,
       ["--mode=review", `--task=${taskFile}`, "--out=artifacts/first-party", "--reviewer=claude", "--skip-preflight"],
@@ -1435,7 +1460,7 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
     );
     assert.equal(replaced.status, 1, replaced.stderr);
     assert.match(replaced.stderr, /review executable does not match the packaged reviewer contract/u);
-    writeFileSync(join(bin, "claude.cmd"), fakeCmdContents);
+    writeFileSync(launcherPath, launcherContents);
 
     const mutated = runScript(
       repo,
