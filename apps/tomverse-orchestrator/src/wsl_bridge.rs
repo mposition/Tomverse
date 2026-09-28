@@ -34,6 +34,33 @@ pub const WSL_BRIDGE_ENV_NAME: &str = "TOMVERSE_AMUX_WSL_BRIDGE";
 
 pub const WSL_BRIDGE_LOCAL_URL_ENV: &str = "TOMVERSE_AMUX_WSL_LOCAL_URL";
 
+/// Optional comma-separated session names. When set, only those running
+/// sessions register as runtimes, so a pilot can hold the runner to one
+/// worker and therefore one attempt at a time. It only narrows; unset keeps
+/// every running session.
+pub const WSL_BRIDGE_SESSIONS_ENV: &str = "TOMVERSE_AMUX_WSL_SESSIONS";
+
+/// `None` means no restriction. A value that names no valid session is an
+/// empty allowlist: nothing registers, and the runner exits as it does with
+/// no running session.
+pub fn session_allowlist(value: Option<&str>) -> Option<Vec<String>> {
+    let value = value?;
+    Some(
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|name| valid_session_name(name))
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+pub fn session_allowed(allowlist: &Option<Vec<String>>, name: &str) -> bool {
+    allowlist
+        .as_ref()
+        .is_none_or(|names| names.iter().any(|allowed| allowed == name))
+}
+
 /// Exit status of a runner that stopped taking assignments.
 ///
 /// A halt is never resumed by the runner itself: the reason is an unknown
@@ -1019,7 +1046,11 @@ pub async fn run_from_env() -> i32 {
             return 1;
         }
     };
-    let running: Vec<_> = roster.into_iter().filter(|row| row.running).collect();
+    let allowlist = session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref());
+    let running: Vec<_> = roster
+        .into_iter()
+        .filter(|row| row.running && session_allowed(&allowlist, &row.name))
+        .collect();
     if running.is_empty() {
         println!("amux wsl bridge found no running session");
         return 0;
@@ -2018,5 +2049,17 @@ mod tests {
         let helpers = &source[source.find("async fn fetch_board_list").unwrap()..];
         let helpers = &helpers[..helpers.find("async fn fetch_roster").unwrap()];
         assert!(!helpers.contains(".post(") && !helpers.contains(".patch(") && !helpers.contains(".delete("));
+    }
+
+    #[test]
+    fn the_session_allowlist_only_narrows() {
+        let unset = session_allowlist(None);
+        assert!(session_allowed(&unset, "claude-impl"));
+        let one = session_allowlist(Some(" claude-impl , "));
+        assert!(session_allowed(&one, "claude-impl"));
+        assert!(!session_allowed(&one, "codex-impl"));
+        let invalid = session_allowlist(Some("a/b"));
+        assert!(!session_allowed(&invalid, "a/b"));
+        assert!(!session_allowed(&invalid, "claude-impl"));
     }
 }

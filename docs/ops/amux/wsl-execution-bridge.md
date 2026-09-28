@@ -56,7 +56,7 @@ release 빌드:
 cargo build --release --locked --bin tomverse-wsl-bridge
 ```
 
-환경 파일은 `~/.config/tomverse-wsl-bridge.env`에 두고 권한은 `600`이다. 넣는 이름은 `TOMVERSE_AMUX_WSL_BRIDGE`, `TOMVERSE_AMUX_WSL_LOCAL_URL`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_SYNC_SECRET`이다. 값은 이 문서와 대화에 적지 않는다.
+환경 파일은 `~/.config/tomverse-wsl-bridge.env`에 두고 권한은 `600`이다. 넣는 이름은 `TOMVERSE_AMUX_WSL_BRIDGE`, `TOMVERSE_AMUX_WSL_LOCAL_URL`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_SYNC_SECRET`이다. 선택으로 `TOMVERSE_AMUX_WSL_SESSIONS`에 쉼표로 세션 이름을 적으면 그 세션만 등록한다. 범위를 좁히기만 하며, 한 세션만 두면 한 번에 한 attempt만 돈다. 값은 이 문서와 대화에 적지 않는다.
 
 systemd user unit `~/.config/systemd/user/tomverse-wsl-bridge.service`의 핵심은 셋이다. `After=amux-server.service`로 로컬 AMUX 뒤에 시작하고, `Restart=on-failure`와 `RestartSec=60`으로 시작 실패만 다시 시도하며, `RestartPreventExitStatus=3`으로 halt는 다시 시작하지 않는다.
 
