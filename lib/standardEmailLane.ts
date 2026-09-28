@@ -32,10 +32,8 @@ import {
   ensureUnsubscribeKeyCanary,
 } from "@/lib/emailUnsubscribeKeyRetention";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
-import {
-  isEmailMarketingEnabled,
-  isEmailReleaseNotesEnabled,
-} from "@/lib/appSettings";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
 import {
   ENQUEUE_REFUSAL_MESSAGE,
   marketingFlagApplies,
@@ -339,7 +337,7 @@ export async function enqueueStandardEmail(
   // Checked here *and* at send. A row written while it was on must not go out
   // after somebody turns it off, and a flag read only at enqueue cannot say so.
   if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
-    if (!(await isEmailReleaseNotesEnabled())) {
+    if (!(await isEmailReleaseNotesLive())) {
       return {
         refused: "release_notes_disabled",
         message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,

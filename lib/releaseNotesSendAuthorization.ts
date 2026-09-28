@@ -1,7 +1,8 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSettings";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
 import {
   FOOTER_DISCLOSURE_COUNTRIES,
   footerBlocksRequired,
@@ -484,7 +485,9 @@ export async function releaseNotesSendAuthorization(
 
   const flags = await read("the feature flags", async () => ({
     marketingEnabled: await isEmailMarketingEnabled(),
-    releaseNotesEnabled: await isEmailReleaseNotesEnabled(),
+    // Live, not merely switched on: the flag may not run ahead of the
+    // published amendment (S10, lib/emailPolicyPublication.ts).
+    releaseNotesEnabled: await isEmailReleaseNotesLive(),
   }));
 
   // The override, and only where one could apply: a sealed `risk_accepted`

@@ -129,7 +129,7 @@ export const ENQUEUE_REFUSAL_MESSAGE: Record<EnqueueRefusal, string> = {
   marketing_disabled:
     "Marketing sending is switched off. Nothing was queued: a message written now would sit in the outbox waiting for a decision that has not been made.",
   release_notes_disabled:
-    "Release notes are switched off. Nothing was queued: the switch is the last step of the activation order, after the policy version is active and readiness is confirmed.",
+    "Release notes are not live. Nothing was queued: either the switch is off, or it is on and the policy amendment it depends on is not yet published -- the switch is the last step of the activation order and does nothing until the documents and the change notice are done (lib/emailPolicyPublication.ts lists what is missing).",
 };
 
 /**

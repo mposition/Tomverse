@@ -1515,6 +1515,36 @@ EEA·영국을 여는 선행 게이트입니다.
    시간 예산, 운영자 발송 module 분리와 정적 검사, `login_method_linked`·
    `login_method_unlinked` template과 standard lane 이동. S1b-1의 잠금 API 위에 섭니다.
 
+**S10에서 코드가 한 것과 사람이 할 것** — S10은 문안을 쓰는 단계가 아니라, 문안이
+게시되기 전에는 release notes가 **켜진 것으로 읽히지 않게** 하는 단계입니다.
+
+- **게이트는 flag를 읽는 쪽에 있습니다**(`lib/emailPolicyPublication.ts`의
+  `isEmailReleaseNotesLive()`). flag에는 이 앱 안에 쓰는 경로가 없어서(운영자가
+  `AppSetting` 행을 설정) 쓰기 시점 거부는 아무것도 막지 못하고, 모든 정책 draft가
+  release notes 국가 rule을 담으므로 policy version 활성화를 막으면 release notes와
+  무관한 정책 변경까지 막힙니다. 그래서 enqueue 두 경로와 발송 판정이 모두 이
+  함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
+- **게시 여부는 기록된 digest의 비교입니다.** `/privacy`의 개정 전 digest를
+  `DIGEST_BEFORE_AMENDMENT`에 고정했고, 현재 렌더되는 digest는
+  `lib/sitemapContentDates.ts`가 들고 있으며 `tests/sitemapLastModified.test.mjs`가
+  실제 페이지와 대조합니다. 둘이 같으면 아직 개정되지 않은 것입니다.
+- **`/terms`는 지금 판정할 수 없습니다.** 그 페이지의 "Last updated" 줄은 본문이 세
+  번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
+  `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
+  `document_state_unrecorded`로 보고합니다.
+- **변경 고지는 서비스·법적 통지(§3.1의 5번 유형)여야 합니다.** marketing 분류나
+  purpose가 붙은 template이면 거부합니다 — 이미 수신을 거부한 사람이 개정의 가장 큰
+  당사자인데, 그들만 고지를 받지 못하게 되기 때문입니다. 고지 기간은
+  `CHANGE_NOTICE_PERIOD_DAYS`(30일)입니다.
+
+**남은 것은 전부 소유자 결정입니다.** (1) `/privacy`·`/terms`·가입 화면·로그인 화면의
+개정 문안(7개 언어) 승인, (2) `/terms`의 기록된 상태 — `SITEMAP_CONTENT_EVIDENCE`
+항목과 개정 전 digest, (3) 변경 고지 template의 문안과 시행일. 문안이 승인되면
+template key를 `CHANGE_NOTICE_TEMPLATE_KEY`에 적고, 개정된 페이지의 digest와 날짜를
+`SITEMAP_CONTENT_EVIDENCE`에 갱신하면 게이트가 스스로 열립니다.
+`tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
+있음을 고정하므로, 그때 함께 고칩니다.
+
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.
 

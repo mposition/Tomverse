@@ -3,10 +3,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
-import {
-  isEmailMarketingEnabled,
-  isEmailReleaseNotesEnabled,
-} from "@/lib/appSettings";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
 import {
   marketingFlagApplies,
   releaseNotesFlagApplies,
@@ -386,7 +384,7 @@ export async function expandEmailEvent(input: {
   // mid-expansion and a partial audience already queued.
   if (
     releaseNotesFlagApplies(definitionForFlag.purpose) &&
-    !(await isEmailReleaseNotesEnabled())
+    !(await isEmailReleaseNotesLive())
   ) {
     return { refused: "release_notes_disabled" };
   }
