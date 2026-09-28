@@ -1089,10 +1089,16 @@ export const estimateCampaignAudience = async (input: {
       excluded: {
         no_email: active - activeWithEmail,
         account_inactive: consented - active,
-        suppressed: verdict.refusedBy.consent_withdrawn ?? 0,
+        // The verdict's suppression blocker covers every live cause, so the
+        // column reads as it always has. It and `no_email` are counted in their
+        // own columns above and left out of the spread below: listing them
+        // twice put the same people in the excluded total twice.
+        suppressed: verdict.refusedBy.suppressed ?? 0,
         plan_incompatible: 0,
         ...Object.fromEntries(
-          Object.entries(verdict.refusedBy).map(([reason, count]) => [`verdict_${reason}`, count])
+          Object.entries(verdict.refusedBy)
+            .filter(([reason]) => reason !== "suppressed" && reason !== "no_email")
+            .map(([reason, count]) => [`verdict_${reason}`, count])
         ),
       },
       noticeAudience: verdict.allowedWhenLive,

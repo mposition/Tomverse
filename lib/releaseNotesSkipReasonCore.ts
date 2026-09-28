@@ -40,6 +40,7 @@ export const RELEASE_NOTES_SKIP_REASONS = [
   "display_unsatisfiable",
   "jurisdiction_unconfirmed",
   "marketing_disabled",
+  "marketing_country_not_allowed",
 ] as const;
 
 export type ReleaseNotesSkipReason = (typeof RELEASE_NOTES_SKIP_REASONS)[number];
@@ -110,14 +111,53 @@ export const unmappedBlockers = (): string[] =>
  * reason and got one would be able to skip a message the verdict allowed.
  */
 export const releaseNotesSkipReason = (
-  verdict: Pick<SendVerdict, "allowed" | "blockers">
+  verdict: Pick<SendVerdict, "allowed" | "blockers"> & {
+    authorities?: SendVerdict["authorities"];
+  }
 ): ReleaseNotesSkipReason | null => {
   if (verdict.allowed) return null;
   const present = new Set<string>(verdict.blockers);
+  // The person's own acts first, as the table orders them.
+  for (const blocker of ["objected", "suppressed"] as const) {
+    if (present.has(blocker)) return BLOCKER_SKIP_REASON[blocker];
+  }
+  // Then the destination. A country whose rule is closed, or that has no rule,
+  // refuses the send whatever the person said, and no override lifts it; the
+  // word for that is the one the ordinary marketing gate already uses. Recording
+  // it as `no_consent` told an operator the person had not agreed when the
+  // actual answer was that we do not send there.
+  const refusals = new Set(
+    (verdict.authorities ?? [])
+      .filter((entry) => entry.verdict === "deny")
+      .map((entry) => entry.reason)
+  );
+  if (refusals.has("country_closed") || refusals.has("no_country_rule")) {
+    return "marketing_country_not_allowed";
+  }
   for (const blocker of REPORTING_ORDER) {
     if (present.has(blocker)) return BLOCKER_SKIP_REASON[blocker];
   }
+  if (refusals.has("country_undetermined")) return "jurisdiction_unconfirmed";
   // Refused with nothing in the list: the legal refusal itself. See the module
   // comment.
   return NO_BASIS_SKIP_REASON;
 };
+
+/**
+ * What refused a candidate, for an approval screen's estimate
+ * (`ReleaseNotesAudiencePreview.refusedBy`).
+ *
+ * The verdict's own name for the refusal, not the skip reason: the skip-reason
+ * vocabulary files every suppression cause under `consent_withdrawn`, which is
+ * the right word for only one of them.
+ */
+export const releaseNotesRefusalKey = (verdict: {
+  blockers: readonly string[];
+  authorities?: readonly { verdict: string; reason: string | null }[];
+}): string =>
+  // The switch last: a person with no basis to be sent to is refused for that
+  // whether or not the switch is on, and filing them under the switch would make
+  // switching it on look like it sends to them.
+  verdict.blockers.find((blocker) => blocker !== "feature_disabled") ??
+  verdict.authorities?.find((entry) => entry.verdict === "deny" && entry.reason !== null)?.reason ??
+  (verdict.blockers.includes("feature_disabled") ? "feature_disabled" : "no_basis");

@@ -26,6 +26,7 @@ import {
 } from "@/lib/emailJurisdictionPolicy";
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
+import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import {
   drainStandardEmailDeliveries,
   enqueueStandardEmail,
@@ -140,8 +141,47 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+// Every marketing template carries `product_updates`, which is the release-notes
+// product, so every send in this suite goes through the section 7.6 verdict.
+// That verdict needs Korea's six duties settled, and the seed settles three: the
+// other three are waiting on owner decisions and approvals that do not exist
+// yet. For the cases here to be about what they name -- a label, a window, a
+// footer -- the remaining three are settled on the draft, before activation, the
+// only time a draft's duty rows may be written. `advertising_subject_label` is
+// `implemented` rather than waived, which is why the label is still printed.
+const KOREAN_DUTIES_THE_SEED_LEAVES_OPEN = [
+  ["bilingual_unsubscribe_notice", "emailUnsubscribeKeyring"],
+  ["consent_result_notice_14_days", "emailUnsubscribeKeyring"],
+  ["advertising_subject_label", "emailSubjectLabels"],
+] as const;
+
 const activatePolicy = async () => {
   const draft = await ensureJurisdictionPolicyDraft();
+  const korea = await prisma.releaseNotesCountryRule.findFirst({
+    where: { policyVersionId: draft.version.id, countryCode: "KR" },
+    select: { id: true },
+  });
+  if (korea) {
+    const present = new Set(
+      (
+        await prisma.releaseNotesRuleObligation.findMany({
+          where: { countryRuleId: korea.id },
+          select: { obligationKey: true },
+        })
+      ).map((row) => row.obligationKey)
+    );
+    await prisma.releaseNotesRuleObligation.createMany({
+      data: KOREAN_DUTIES_THE_SEED_LEAVES_OPEN.filter(([key]) => !present.has(key)).map(
+        ([obligationKey, readinessCheck]) => ({
+          countryRuleId: korea.id,
+          obligationKey,
+          state: "implemented",
+          readinessCheck,
+          notes: "Test fixture: settled so the case is about one thing.",
+        })
+      ),
+    });
+  }
   await activatePolicyVersion({
     versionId: draft.version.id,
     actorId: randomUUID(),
@@ -182,6 +222,24 @@ const subscriber = async (options?: {
         confirmedAt: options?.confirmed === false ? null : new Date(),
       },
     });
+    // The act of consent the verdict cites. The preference row says the answer
+    // is still yes; the consent record is the evidence, and the Australian
+    // sender authority has nothing to rest on without it.
+    if (options?.confirmed !== false) {
+      await prisma.consentRecord.create({
+        data: {
+          userId: user.id,
+          emailAddress: user.email!,
+          purpose: "product_updates",
+          action: "granted",
+          occurredAt: new Date(Date.now() - 60_000),
+          jurisdiction: options?.country ?? "US",
+          jurisdictionSource: "self_declared",
+          policyVersionId: await ensureBootstrapPolicyVersion(),
+          capturedVia: "signup_form",
+        },
+      });
+    }
   }
   return user;
 };
@@ -549,6 +607,73 @@ test("a consent campaign reaches the provider with its authored content", async 
     select: { status: true },
   });
   assert.equal(delivery.status, "sent");
+});
+
+test("a sealed allowed send is never replaced under a new key", async () => {
+  // The first attempt seals an allowed decision and then reaches the provider.
+  // Whether the provider accepted it is not always known -- a process that dies
+  // between the acceptance and `sent` leaves exactly this row -- so a retry
+  // whose verdict now disagrees must not produce a replacement: that carries a
+  // new idempotency key, and the provider would deliver it as a second message.
+  // A 500 stands in for the unknown outcome; the contract moving in between is
+  // the case the review found.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  let calls = 0;
+  mock.method(globalThis, "fetch", async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: "upstream" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  const first = new Date();
+  await drainStandardEmailDeliveries({ limit: 1, now: first });
+  assert.equal(calls, 1);
+  const retrying = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, nextAttemptAt: true },
+  });
+  assert.equal(retrying.status, "pending");
+  const sealed = await prisma.emailPermissionDecision.findFirstOrThrow({
+    where: { deliveryId: rows.deliveryId, phase: "send" },
+    select: { allowed: true },
+  });
+  assert.equal(sealed.allowed, true);
+
+  // The contract moves: the pin no longer matches what the duties require.
+  await prisma.emailDelivery.update({
+    where: { id: rows.deliveryId },
+    data: { displayContractHash: "f".repeat(64) },
+  });
+
+  const incidents: string[] = [];
+  const stop = observeOperationalIncidents((incident) => incidents.push(incident.code));
+  try {
+    await drainStandardEmailDeliveries({
+      limit: 1,
+      now: new Date(retrying.nextAttemptAt!.getTime() + 1_000),
+    });
+  } finally {
+    stop();
+  }
+
+  assert.equal(calls, 1, "the retry reached the provider");
+  const after = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, lastErrorKind: true },
+  });
+  assert.deepEqual(after, { status: "failed", lastErrorKind: "outcome_unknown" });
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { supersedesDeliveryId: rows.deliveryId } }),
+    0,
+    "a replacement was enqueued under a new key"
+  );
+  assert.ok(incidents.includes("EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN"));
 });
 
 test("a Korean subscriber's subject carries the advertising label", async () => {

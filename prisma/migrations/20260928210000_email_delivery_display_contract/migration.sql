@@ -60,9 +60,11 @@ ALTER TABLE "EmailDelivery" ADD CONSTRAINT "EmailDelivery_skip_reason_check"
         'jurisdiction_profile_missing', 'jurisdiction_footer_incomplete',
         'credential_expired', 'dry_run', 'marketing_halted',
         'marketing_disabled', 'marketing_country_not_allowed',
+        -- Kept from 20260915150000: this constraint replaces the list, so a
+        -- reason missing here is a reason the table stops accepting.
+        'campaign_cancelled',
         'display_contract_changed', 'display_unsatisfiable',
-        'obligation_undecided', 'permission_revoked', 'consent_withdrawn',
-        'verdict_basis_changed'
+        'obligation_undecided', 'permission_revoked', 'consent_withdrawn'
     ));
 
 -- A replacement exists because its predecessor's contract moved, and the
@@ -99,19 +101,17 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Two reasons a message is still owed but cannot go out as this row: its
-    -- display contract moved, or its sealed send decision allowed it on a basis
-    -- the verdict no longer rests on. The second exists because the ledger holds
-    -- one send decision per delivery; a replacement is how a new basis gets its
-    -- own decision rather than sending under a record that says something else.
+    -- One reason a message is still owed but cannot go out as this row: its
+    -- display contract moved. A sealed allowed decision is never replaced -- that
+    -- attempt may already have reached the provider, and a replacement carries a
+    -- new idempotency key (see decideReleaseNotesSend()).
     IF predecessor."status" <> 'skipped'
-        OR predecessor."skipReason" IS NULL
-        OR predecessor."skipReason" NOT IN ('display_contract_changed', 'verdict_basis_changed')
+        OR predecessor."skipReason" IS DISTINCT FROM 'display_contract_changed'
     THEN
         RAISE EXCEPTION
-            'EmailDelivery % is %/% and only a delivery skipped as display_contract_changed or verdict_basis_changed has a replacement.',
+            'EmailDelivery % is %/% and only a delivery skipped as display_contract_changed has a replacement.',
             NEW."supersedesDeliveryId", predecessor."status",
-            pg_catalog.coalesce(predecessor."skipReason", 'null')
+            COALESCE(predecessor."skipReason", 'null')
             USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;

@@ -156,11 +156,18 @@ const read = verdictRead;
  */
 export const candidateCountries = (jurisdiction: {
   countryCode: string;
+  profileKey: string;
   confidence: string;
   conflicts: string[];
 }): string[] => {
   if (jurisdiction.confidence !== "high") return [];
   if (jurisdiction.countryCode === "ZZ") return [];
+  // A country with no profile of its own resolves to `profileKey: "ZZ"` while
+  // keeping its country code -- Japan today. The marketing gate refuses that as
+  // unconfirmed (`profileKey === "ZZ"`), and so does this: the previous version
+  // read only the country code, made Japan a candidate, and left the rule
+  // table's missing row as the only thing between release notes and Japan.
+  if (jurisdiction.profileKey === "ZZ") return [];
   return [jurisdiction.countryCode];
 };
 
@@ -343,7 +350,19 @@ export async function releaseNotesSendAuthorization(
   const consent = await read("the consent record", async () => {
     const [latest, preference] = await Promise.all([
       prisma.consentRecord.findFirst({
-        where: { emailAddress: input.normalizedAddress, purpose: input.purpose },
+        // The account's own records, where there is an account. An address
+        // outlives the accounts that held it: a grant left by a previous holder
+        // -- deleted, so its `userId` is now NULL, or dated after this account's
+        // confirmation by a skewed clock -- is not this person's act of consent,
+        // and citing it either sent on a dead account's evidence or tripped the
+        // ledger's identity trigger and was reported as the database failing.
+        // A grant this person made before the account existed is lost to this
+        // filter, and that refuses rather than sends.
+        where: {
+          emailAddress: input.normalizedAddress,
+          purpose: input.purpose,
+          ...(input.userId === null ? {} : { userId: input.userId }),
+        },
         orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
         select: { id: true, action: true, occurredAt: true },
       }),

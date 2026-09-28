@@ -251,7 +251,9 @@ test("the consent a verdict cited cannot be deleted from under it", async () => 
     (error: unknown) => {
       assert.match(
         error instanceof Error ? error.message : String(error),
-        /[Ff]oreign key|constraint/
+        // Either guard is the answer: the table is append-only, which fires
+        // first, and the evidence row's foreign key behind it.
+        /[Ff]oreign key|constraint|append-only/
       );
       return true;
     }
@@ -300,31 +302,19 @@ test("one phase of one delivery is recorded once, and a differing retry reports 
   assert.equal(await prisma.emailPermissionDecision.count(), 2);
 });
 
-test("a preview has no delivery, so two of them are two rows", async () => {
-  // Section 7.6 asks the same verdict to answer for an audience estimate, which
-  // writes no delivery at all. Nothing to be unique on, and nothing that should
-  // be: two estimates are two facts.
+test("a verdict with no delivery is not recorded -- a preview writes nothing", async () => {
+  // The ledger takes a decision for a delivery (email_permission_decision_needs_delivery):
+  // a verdict about no particular message would let the (deliveryId, phase)
+  // unique stop constraining. So the audience preview takes the verdict and
+  // writes nothing, and this pins that the ledger refuses the alternative.
   const user = await account();
   const verdict = verdictFor([], {
     recipient: { suppressed: true, objected: false, consent: { express: false, evidenceIds: [] } },
   });
-  const at = { deliveryId: null, userId: user.id, emailAddress: user.email!, phase: "enqueue" as const };
-  const a = await write(verdict, at);
-  const b = await write(verdict, at);
-  assert.equal(a.recorded, true);
-  assert.equal(b.recorded, true);
-  assert.notEqual(a.decisionId, b.decisionId);
-
-  const stored = await prisma.emailPermissionDecision.findUniqueOrThrow({
-    where: { id: a.decisionId },
-    select: { allowed: true, blockers: true, deliveryId: true, evidence: { select: { id: true } } },
-  });
-  assert.equal(stored.allowed, false);
-  assert.deepEqual(stored.blockers, ["suppressed"]);
-  assert.equal(stored.deliveryId, null);
-  // A refused verdict with no express consent cites nothing, and citing nothing
-  // is not the same as citing something that does not exist.
-  assert.deepEqual(stored.evidence, []);
+  await assert.rejects(
+    write(verdict, { deliveryId: null, userId: user.id, emailAddress: user.email!, phase: "enqueue" }),
+    /taken for a delivery and must name one/
+  );
 });
 
 // The replacement a moved display contract produces.
@@ -523,36 +513,6 @@ test("a refused verdict takes no submission", async () => {
   );
 });
 
-test("a sealed decision whose basis moved is replaced, not failed", async () => {
-  // The ledger holds one send decision per delivery. When an allowed retry rests
-  // on a different basis, the message is still owed, so it is replaced -- and
-  // the trigger accepts that reason, not only a moved display contract.
-  const user = await account();
-  const predecessor = await claimedDelivery(user.email!);
-  const result = await prisma.$transaction((tx) =>
-    skipAndReenqueue(tx, {
-      reason: "verdict_basis_changed",
-      delivery: {
-        ...predecessor,
-        renderDataSnapshot: predecessor.renderDataSnapshot as Prisma.InputJsonValue,
-      },
-      current: {
-        templateVersionId,
-        policyVersionId,
-        jurisdictionCountry: "AU",
-        jurisdictionProfileKey: "AU",
-        displayContractHash: HASH_A,
-      },
-    })
-  );
-  assert.equal(result.reenqueued, true);
-  const before = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: predecessor.id },
-    select: { skipReason: true },
-  });
-  assert.equal(before.skipReason, "verdict_basis_changed");
-});
-
 test("any other skip reason still cannot have a replacement", async () => {
   const user = await account();
   const predecessor = await claimedDelivery(user.email!);
@@ -579,6 +539,6 @@ test("any other skip reason still cannot have a replacement", async () => {
         idempotencyKey: randomUUID(),
       },
     }),
-    /only a delivery skipped as display_contract_changed or verdict_basis_changed/
+    /only a delivery skipped as display_contract_changed has a replacement/
   );
 });

@@ -18,16 +18,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { marketingJurisdictionVerdict } from "../lib/emailJurisdictionCore.ts";
+import { marketingJurisdictionVerdict, profileForCountry } from "../lib/emailJurisdictionCore.ts";
 import { candidateCountries } from "../lib/releaseNotesSendAuthorization.ts";
 
-const resolved = (overrides) => ({
+// The profile is the resolver's, not the fixture's: a case that pairs a country
+// with a profile the resolver never produces tests an input that cannot occur.
+// The previous version gave Japan `profileKey: "JP"`; the resolver says `ZZ`.
+const resolved = (overrides = {}) => ({
   countryCode: "KR",
-  profileKey: "KR",
   confidence: "high",
   source: "billing",
   conflicts: [],
   ...overrides,
+  profileKey: overrides.profileKey ?? profileForCountry(overrides.countryCode ?? "KR"),
 });
 
 test("a high-confidence country is the one candidate", () => {
@@ -58,6 +61,14 @@ test("a low-confidence inference is no candidate", () => {
   assert.deepEqual(candidateCountries(resolved({ confidence: "none" })), []);
 });
 
+test("a country with no profile of its own is no candidate", () => {
+  // What the resolver actually returns for a Japanese billing country.
+  const japan = resolved({ countryCode: "JP" });
+  assert.equal(japan.profileKey, "ZZ");
+  assert.deepEqual(candidateCountries(japan), []);
+  assert.equal(marketingJurisdictionVerdict(japan).allowed, false);
+});
+
 test("ZZ is no candidate even at high confidence", () => {
   assert.deepEqual(candidateCountries(resolved({ countryCode: "ZZ", profileKey: "ZZ" })), []);
 });
@@ -76,12 +87,16 @@ test("the two gates agree on every case", () => {
   // -- rather than by having no candidate.
   const cases = [
     resolved(),
-    resolved({ countryCode: "US", profileKey: "US" }),
+    resolved({ countryCode: "US" }),
     resolved({ confidence: "low" }),
     resolved({ confidence: "unknown" }),
     resolved({ countryCode: "ZZ", profileKey: "ZZ", confidence: "conflict", conflicts: ["KR", "US"] }),
     resolved({ countryCode: "ZZ", profileKey: "ZZ", confidence: "unknown" }),
-    resolved({ countryCode: "JP", profileKey: "JP" }),
+    resolved({ countryCode: "JP" }),
+    resolved({ countryCode: "AU" }),
+    resolved({ countryCode: "SG" }),
+    resolved({ countryCode: "GB" }),
+    resolved({ countryCode: "DE" }),
   ];
   for (const jurisdiction of cases) {
     const marketing = marketingJurisdictionVerdict(jurisdiction);

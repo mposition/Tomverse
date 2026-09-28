@@ -91,6 +91,14 @@ const READ_ONLY_KEYS = {
       "on later is then a settings change against a path that has already " +
       "been reviewed and tested.",
   },
+  EMAIL_RELEASE_NOTES_FLAG_KEY: {
+    reason:
+      "The last step of the release-notes activation order " +
+      "(docs/policy/email-product-news-redesign-draft.md section 12): documents " +
+      "in force, policy version active, readiness confirmed, then this. Each of " +
+      "those is somebody else's decision recorded somewhere else, and a toggle " +
+      "would let one click stand in for all of them. An operator writes the row.",
+  },
   EMAIL_CAMPAIGNS_FLAG_KEY: {
     reason:
       "Same §15.2 table, different condition: the approval process has to be " +

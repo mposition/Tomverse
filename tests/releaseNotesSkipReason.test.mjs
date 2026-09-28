@@ -17,6 +17,7 @@ import {
   RELEASE_NOTES_SKIP_REASONS,
   releaseNotesSkipReason,
   unmappedBlockers,
+  releaseNotesRefusalKey,
 } from "../lib/releaseNotesSkipReasonCore.ts";
 
 test("every blocker has a skip reason", () => {
@@ -135,3 +136,62 @@ function readMigration() {
   assert.ok(end > start, "the skip reason CHECK constraint does not close");
   return sql.slice(start, end);
 }
+
+test("a refusal about the destination is recorded as one", () => {
+  // A closed country, or one with no rule, refuses whatever the person said.
+  // Recording it as no_consent told an operator the person had not agreed.
+  const denied = (reason) => [
+    { authority: "recipient", country: "NL", verdict: "deny", reason },
+  ];
+  assert.equal(
+    releaseNotesSkipReason({ allowed: false, blockers: [], authorities: denied("country_closed") }),
+    "marketing_country_not_allowed"
+  );
+  assert.equal(
+    releaseNotesSkipReason({ allowed: false, blockers: [], authorities: denied("no_country_rule") }),
+    "marketing_country_not_allowed"
+  );
+  // Even where an override was tried and refused for it.
+  assert.equal(
+    releaseNotesSkipReason({
+      allowed: false,
+      blockers: ["approval_member_mismatch"],
+      authorities: denied("country_closed"),
+    }),
+    "marketing_country_not_allowed"
+  );
+  // The person's own act still comes first.
+  assert.equal(
+    releaseNotesSkipReason({
+      allowed: false,
+      blockers: ["objected"],
+      authorities: denied("country_closed"),
+    }),
+    "permission_revoked"
+  );
+  // And a basis refusal is still no_consent.
+  assert.equal(
+    releaseNotesSkipReason({ allowed: false, blockers: [], authorities: denied("no_express_consent") }),
+    "no_consent"
+  );
+});
+
+test("an estimate names what refused, and files the switch last", () => {
+  // A suppression is a suppression, whatever its cause; the skip reason would
+  // have called it a withdrawn consent.
+  assert.equal(releaseNotesRefusalKey({ blockers: ["suppressed"] }), "suppressed");
+  // A person with no basis is refused for that, switch or no switch.
+  assert.equal(
+    releaseNotesRefusalKey({
+      blockers: ["feature_disabled"],
+      authorities: [{ verdict: "deny", reason: "no_express_consent" }],
+    }),
+    "no_express_consent"
+  );
+  assert.equal(
+    releaseNotesRefusalKey({ blockers: ["feature_disabled", "display_unsatisfiable"] }),
+    "display_unsatisfiable"
+  );
+  assert.equal(releaseNotesRefusalKey({ blockers: ["feature_disabled"] }), "feature_disabled");
+  assert.equal(releaseNotesRefusalKey({ blockers: [] }), "no_basis");
+});

@@ -7,7 +7,7 @@ import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { isLanguage } from "@/lib/language";
 import { releaseNotesEnqueueDecision } from "@/lib/releaseNotesEnqueueDecision";
-import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
+import { releaseNotesRefusalKey } from "@/lib/releaseNotesSkipReasonCore";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
 
 /**
@@ -119,7 +119,17 @@ export type ReleaseNotesAudiencePreview = {
   awaitingSwitch: number;
   /** Whether marketing as a whole was on when this was taken. */
   marketingOn: boolean;
-  /** Refused candidates, by the word the drain would record. Excludes `awaitingSwitch`. */
+  /**
+   * Refused candidates, by what refused them. Excludes `awaitingSwitch`.
+   *
+   * Keyed by the verdict's own name for the refusal -- its first blocker, or
+   * the authority's denial reason when there is none -- rather than by the skip
+   * reason the drain would record. The skip-reason vocabulary is narrower: it
+   * files every suppression cause (an unsubscribe, a hard bounce, a privacy
+   * request, an operator's stop) under `consent_withdrawn`, which is the right
+   * word for none of the causes but the first. An approval screen is where that
+   * distinction is read.
+   */
   refusedBy: Record<string, number>;
 };
 
@@ -219,7 +229,7 @@ export async function releaseNotesAudiencePreview(input: {
       continue;
     }
 
-    const reason = releaseNotesSkipReason(verdict) ?? "unknown";
+    const reason = releaseNotesRefusalKey(verdict);
     preview.refusedBy[reason] = (preview.refusedBy[reason] ?? 0) + 1;
   }
   return preview;

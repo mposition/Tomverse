@@ -838,6 +838,22 @@ const decideReleaseNotesSend = async (
 
   const skipReason = releaseNotesSkipReason(verdict);
 
+  // A replacement is a delivery like any other, so it gets the first of section
+  // 7.6's two snapshots too. Taken before the transaction because the
+  // authorization reads outside it, and only on the path that can use it.
+  const replacementEnqueue =
+    reenqueueIsRight(verdict.blockers) && displayProfile !== null
+      ? await releaseNotesEnqueueDecision({
+          userId: delivery.userId,
+          purpose,
+          classification: definition.classification,
+          emailAddress: delivery.emailAddress,
+          policyVersionId: delivery.policyVersionId,
+          templateVersionId: current.templateVersionId,
+        })
+      : null;
+
+  let outcomeUnknown = false;
   const finished = await runDecisionTransaction(delivery, async (tx) => {
     const recorded = await recordSendDecision(tx, {
       deliveryId: delivery.id,
@@ -858,82 +874,57 @@ const decideReleaseNotesSend = async (
       evidence: evidenceOf(verdict),
     });
 
-    // A retry of a delivery whose send verdict is already sealed: an earlier
-    // attempt committed its decision and stopped before the provider call. The
-    // ledger holds one send decision per delivery, so this attempt may act only
-    // on a verdict that agrees with it -- on whether it goes *and* on what it
-    // rests on. Where they disagree it throws, the transaction rolls back, and
-    // the drain retries on the verdict-unavailable curve: if the difference was
-    // transient the next attempt agrees and proceeds, and if it is not the row
-    // is abandoned with an incident, which is a person looking at it rather than
-    // a message sent under a decision the ledger does not hold.
+    // An earlier attempt sealed an *allowed* send decision, which it does
+    // immediately before the provider call -- so it got that far, and whether the
+    // provider accepted the message is not known. It may have: a process that
+    // dies after the provider's acceptance and before `sent` is written leaves
+    // exactly this row. The ledger holds one send decision per delivery.
     //
-    // Three cases, not one. A disagreement that *allows* on a different basis is
-    // the one that must not send: it throws. A disagreement that *refuses* is the
-    // world having moved -- a country closed, the switch turned off -- and the
-    // safe answer is not to send, which the skip below does; the ledger then
-    // holds an allowed decision with no provider submission beside a skipped
-    // delivery, which reads as exactly what happened. And a disagreement whose
-    // only blocker is a moved display contract still goes to the re-enqueue, so
-    // a template corrected while the message waited on a provider back-off still
-    // reaches it -- the replacement is a new delivery with its own decisions.
+    // Where the verdict taken now agrees, sending again is safe: the idempotency
+    // key is the same, so a provider that already accepted it drops the second.
+    // Where it disagrees, neither obvious move is:
     //
-    // The allowing disagreement is a replacement, not a failure. It used to throw,
-    // which the drain treated as a database that could not answer: it retried on
-    // that curve and abandoned the message with the incident pointing at
-    // Postgres, while the message was sendable the whole time. A replacement is a
-    // new delivery, so the new basis gets a send decision of its own and the
-    // ledger holds both honestly.
-    const basisMoved = !recorded.recorded && recorded.differs && verdict.allowed;
-    if (basisMoved) {
-      const required = verdict.displayContract.requiredDisplayContractHash;
-      if (required === null || displayProfile === null) {
-        // Allowed with no composed contract cannot happen -- an uncomposable
-        // contract is a blocker. Refused loudly rather than guessed at.
-        throw new Error(
-          `the sealed send decision ${recorded.decisionId} disagrees and no contract was composed`
-        );
-      }
-      const replaced = await skipAndReenqueue(tx, {
-        reason: "verdict_basis_changed",
-        delivery: {
-          id: delivery.id,
-          eventId: delivery.eventId,
-          recipientKey: delivery.recipientKey,
-          userId: delivery.userId,
-          emailAddress: delivery.emailAddress,
-          language: delivery.language,
-          lane: delivery.lane,
-          generation: delivery.generation,
-          rootDeliveryId: delivery.rootDeliveryId,
+    // - sending on the new basis would be a message under a decision the ledger
+    //   does not hold;
+    // - replacing it (a moved contract, or a moved basis) would send under a new
+    //   idempotency key -- a second message to somebody who may already have the
+    //   first.
+    //
+    // The foundation's rule for an unknown outcome is stop and hand it to a
+    // person, so that is what happens: the row fails as `outcome_unknown` and an
+    // incident names it. A disagreement that refuses on other grounds is the one
+    // exception, because not sending is safe whatever happened before: that row
+    // is skipped below like any other refusal.
+    const earlierAllowed = !recorded.recorded && recorded.existingAllowed;
+    if (
+      earlierAllowed &&
+      recorded.differs &&
+      (verdict.allowed || reenqueueIsRight(verdict.blockers))
+    ) {
+      await tx.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "failed",
+          lastErrorKind: "outcome_unknown",
           attempts: delivery.attempts,
-          renderDataSnapshot: delivery.renderDataSnapshot as Prisma.InputJsonValue,
-        },
-        current: {
-          templateVersionId: current.templateVersionId,
-          policyVersionId: delivery.policyVersionId,
-          jurisdictionCountry: displayProfile.countryCode,
-          jurisdictionProfileKey: displayProfile.profileKey,
-          displayContractHash: required,
+          nextAttemptAt: null,
+          claimedAt: null,
         },
       });
-      if (!replaced.reenqueued) throw new ReenqueueRaceError(replaced.reason);
+      outcomeUnknown = true;
       return true;
     }
 
     if (verdict.allowed) return false;
 
-    // The contract moved and nothing else did: the message is still owed, so it
-    // is re-rendered under the current template and the current contract rather
-    // than ended. Any second blocker and this is an ending -- the replacement
-    // would be refused for that second reason, and it would be a second row
-    // addressed to somebody who asked for nothing.
+    // The contract moved and nothing else did, on a delivery nothing has tried to
+    // send: the message is still owed, so it is re-rendered under the current
+    // template and the current contract rather than ended. Any second blocker and
+    // this is an ending -- the replacement would be refused for that second
+    // reason, and it would be a second row addressed to somebody who asked for
+    // nothing.
     if (reenqueueIsRight(verdict.blockers)) {
       const required = verdict.displayContract.requiredDisplayContractHash;
-      // `reenqueueIsRight()` already implies this: an uncomposable contract is
-      // `display_unsatisfiable`, which is a different blocker. Read rather than
-      // assumed, because the replacement's idempotency key is built from it and
-      // a null there would be a key that means nothing.
       // `displayProfile` is non-null exactly when `required` is: both come from
       // one composed contract. Checked together so a replacement can never be
       // written with one and not the other.
@@ -979,6 +970,22 @@ const decideReleaseNotesSend = async (
         if (!replaced.reenqueued) {
           throw new ReenqueueRaceError(replaced.reason);
         }
+        // The replacement's own enqueue snapshot. It must describe the contract
+        // the replacement pins; a read that moved between the two verdicts
+        // rolls the whole thing back and the drain retries.
+        if (
+          replacementEnqueue === null ||
+          replacementEnqueue.displayContractHash !== required
+        ) {
+          throw new Error("the replacement's enqueue verdict names a different contract");
+        }
+        await recordEnqueueDecision(tx, {
+          decision: replacementEnqueue,
+          deliveryId: replaced.deliveryId,
+          userId: delivery.userId,
+          purpose,
+          classification: definition.classification,
+        });
         return true;
       }
     }
@@ -995,6 +1002,21 @@ const decideReleaseNotesSend = async (
     });
     return true;
   });
+
+  if (outcomeUnknown && finished !== "raced") {
+    await reportOperationalIncident({
+      code: "EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN",
+      title: "A release note may already have been sent, and its verdict has changed",
+      severity: "error",
+      error:
+        `Delivery ${delivery.id}: an earlier attempt sealed an allowed decision and did not record its outcome; ` +
+        "the verdict taken now disagrees. Check the provider log for this idempotency key before resending.",
+      context: { component: "standard-email-lane", deliveryId: delivery.id },
+    });
+    return {
+      finished: { outcome: "failed" as const, classification: definition.classification },
+    };
+  }
 
   if (finished === "raced") {
     // Nothing is written, including no claim release: the row already has the
@@ -1032,7 +1054,12 @@ const decideReleaseNotesSend = async (
  * has not read.
  */
 type ReleaseNotesSendOutcome =
-  | { finished: { outcome: "suppressed" | "pending"; classification: EmailClassification } }
+  | {
+      finished: {
+        outcome: "suppressed" | "pending" | "failed";
+        classification: EmailClassification;
+      };
+    }
   | { finished: null; suppressSubjectPrefix: boolean };
 
 /**
