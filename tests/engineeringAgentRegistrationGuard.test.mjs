@@ -260,11 +260,11 @@ test("CI and dependabot failures become items only when they failed", () => {
 
 test("each secret rule fires on its shape and reports only its id", () => {
   const samples = {
-    "aws-access-key-id": "AKIAABCDEFGHIJKLMNOP",
+    "aws-access-key-id": `AKIA${"F".repeat(16)}`,
     "github-token": `ghp_${"A".repeat(36)}`,
     "github-fine-grained-token": `github_pat_${"A".repeat(50)}`,
     "npm-token": `npm_${"a".repeat(36)}`,
-    "slack-token": "xoxb-1234567890-abcdef",
+    "slack-token": `xoxb-${"0".repeat(12)}`,
     "google-api-key": `AIza${"B".repeat(35)}`,
     "stripe-key": `sk_live_${"c".repeat(20)}`,
     "stripe-webhook-secret": `whsec_${"d".repeat(20)}`,

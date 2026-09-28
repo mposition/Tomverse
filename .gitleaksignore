@@ -319,3 +319,17 @@ ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-
 # point the commit will not be in develop history at all.
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:271
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
+
+# Synthetic secret-rule fixtures, not credentials.
+#
+# Commit d5b80fb introduced tests/engineeringAgentRegistrationGuard.test.mjs
+# with two credential-SHAPED literals exercising the engineering agent's
+# secret rules (lib/engineeringAgentSecretPatterns.ts): an AWS access key id
+# shape and a Slack token shape, both invented for the test. A later commit
+# builds them from repeated filler characters so the file no longer carries
+# the shapes, but the introducing commit is immutable history and stays
+# pinned here. The values are deliberately not quoted.
+#
+# Scope: exactly these two findings in that one commit — nothing wider.
+d5b80fb68da111ac90315310a10c1922264a01dc:tests/engineeringAgentRegistrationGuard.test.mjs:aws-access-token:199
+d5b80fb68da111ac90315310a10c1922264a01dc:tests/engineeringAgentRegistrationGuard.test.mjs:generic-api-key:203
