@@ -674,6 +674,38 @@ CREATE CONSTRAINT TRIGGER "engineering_agent_unknown_outcome_opens_decision"
     WHEN (NEW."state" = 'outcome_unknown' AND OLD."state" IS DISTINCT FROM 'outcome_unknown')
     EXECUTE FUNCTION "engineering_agent_unknown_outcome_opens_decision"();
 
+-- A publish item leaves the owner queue's count only for the binding that
+-- takes its place: by commit, its run has a current binding that is still
+-- counted. Without this, a publish recorded with no binding frees a place in
+-- the pull request queue for a pull request that exists.
+CREATE OR REPLACE FUNCTION "engineering_agent_published_is_bound"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    bound BOOLEAN;
+BEGIN
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentBinding" b'
+        ' WHERE b."runId" = $1 AND b."currentPrNumber" IS NOT NULL AND b."state" = ANY ($2))',
+        TG_TABLE_SCHEMA
+    ) INTO bound USING NEW."runId", ARRAY['open', 'closed'];
+    IF NOT bound THEN
+        RAISE EXCEPTION 'EngineeringAgentWorkItem % was published without its binding', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_published_is_bound"
+    AFTER UPDATE ON "EngineeringAgentWorkItem"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW
+    WHEN (NEW."kind" = 'publish' AND NEW."state" = 'published' AND OLD."state" IS DISTINCT FROM 'published')
+    EXECUTE FUNCTION "engineering_agent_published_is_bound"();
+
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentApproval: a T2 decision, and nothing else (§7). Written
 -- once, before the draft closes, and never changed or removed.
@@ -835,14 +867,16 @@ BEGIN
     END IF;
     IF TG_OP = 'INSERT' THEN
         EXECUTE pg_catalog.format(
-            'SELECT w."kind", w."state", w."patchDigest", w."baseSha", w."expectedTreeId"'
+            'SELECT w."kind", w."state", w."patchDigest", w."baseSha", w."expectedTreeId", w."runId"'
             ' FROM %I."EngineeringAgentWorkItem" w WHERE w."id" = $1 FOR UPDATE',
             TG_TABLE_SCHEMA
         ) INTO item USING NEW."workItemId";
+        -- The branch a capability allows is its run's, and no other.
         IF item."kind" IS NULL OR item."kind" <> 'publish' OR item."state" <> 'queued'
             OR item."patchDigest" IS DISTINCT FROM NEW."patchDigest"
             OR item."baseSha" IS DISTINCT FROM NEW."baseSha"
-            OR item."expectedTreeId" IS DISTINCT FROM NEW."expectedTreeId" THEN
+            OR item."expectedTreeId" IS DISTINCT FROM NEW."expectedTreeId"
+            OR NEW."branch" IS DISTINCT FROM 'agent/engineering/' || item."runId" THEN
             RAISE EXCEPTION 'EngineeringAgentCapability must match a queued publish item'
                 USING ERRCODE = 'check_violation';
         END IF;

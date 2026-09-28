@@ -193,8 +193,12 @@ const retirePublish = async (id: string) => {
   await setState(id, "publish_failed");
 };
 
-const issueCapability = (workItemId: string, options: { expectedTreeId?: string; expiresInSeconds?: number } = {}) =>
-  prisma.engineeringAgentCapability.create({
+const issueCapability = async (
+  workItemId: string,
+  options: { expectedTreeId?: string; expiresInSeconds?: number; branch?: string } = {},
+) => {
+  const item = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId }, select: { runId: true } });
+  return prisma.engineeringAgentCapability.create({
     data: {
       id: randomUUID(),
       workItemId,
@@ -203,11 +207,13 @@ const issueCapability = (workItemId: string, options: { expectedTreeId?: string;
       expectedTreeId: options.expectedTreeId ?? sha1("tree"),
       verifierVersion: 1,
       policyVersion: 1,
-      branch: "agent/engineering/42",
+      // A capability allows its run's branch and no other.
+      branch: options.branch ?? `agent/engineering/${item.runId}`,
       commitDigest: sha256("commit"),
       expiresAt: inSeconds(options.expiresInSeconds ?? 600),
     },
   });
+};
 
 const consume = (id: string, fencingToken: number) =>
   prisma.engineeringAgentCapability.update({
@@ -215,18 +221,27 @@ const consume = (id: string, fencingToken: number) =>
     data: { consumedAt: new Date("2000-01-01T00:00:00.000Z"), claimFencingToken: BigInt(fencingToken) },
   });
 
+/** Publishes a claimed item and binds its pull request in one transaction, as the publisher's result does. */
+const publishAndBind = async (itemId: string, runId: string, prNumber = prNumberSeed()) => {
+  const [, binding] = await prisma.$transaction([
+    setState(itemId, "published"),
+    prisma.engineeringAgentBinding.create({ data: bindingFor(runId, prNumber) }),
+  ]);
+  return binding;
+};
+
 /**
- * An active t1 run whose one publish item has been published, ready to be
- * bound. The caller binds and then ends the run.
+ * An active t1 run whose one publish item has been published and bound. The
+ * caller retires the binding and ends the run.
  */
-const publishedRun = async () => {
+const publishedRun = async (prNumber = prNumberSeed()) => {
   const run = await newRun();
   const item = await prisma.engineeringAgentWorkItem.create({ data: productData("publish", run.id) });
   const capability = await issueCapability(item.id);
   await claim(item.id, 1, "write");
   await consume(capability.id, 1);
-  await setState(item.id, "published");
-  return run;
+  const binding = await publishAndBind(item.id, run.id, prNumber);
+  return { run, binding, prNumber };
 };
 
 const snapshot = (overrides: Record<string, unknown> = {}) => ({
@@ -438,7 +453,9 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
   await claim(item.id, 2, "write");
   await refused(consume(capability.id, 2), "a spent capability is never consumed again");
   await consume(second.id, 2);
-  await setState(item.id, "published");
+  // Published only with its binding: otherwise the queue would lose count of a real pull request.
+  await refused(setState(item.id, "published"), "a publish is committed with its binding");
+  await retireBinding((await publishAndBind(item.id, item.runId!)).id);
 
   // A lookup after an unknown outcome settles a publish an earlier write
   // claim consumed for.
@@ -448,7 +465,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
   await consume(lookedCapability.id, 1);
   await setState(looked.id, "needs_lookup");
   await claim(looked.id, 2, "lookup");
-  await setState(looked.id, "published");
+  await retireBinding((await publishAndBind(looked.id, looked.runId!)).id);
 
   const unconsumed = await newProduct("publish");
   await issueCapability(unconsumed.id);
@@ -483,6 +500,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
 
   const mismatched = await newProduct("publish");
   await refused(issueCapability(mismatched.id, { expectedTreeId: sha1("other tree") }), "a capability matches its item");
+  await refused(issueCapability(mismatched.id, { branch: "agent/engineering/42" }), "a capability allows only its run's branch");
   await retirePublish(mismatched.id);
 
   const run = await newRun();
@@ -569,9 +587,7 @@ test("a binding records its run's published item, keeps its snapshot, and record
   );
   await endRun(bare.id);
 
-  const run = await publishedRun();
-  const prNumber = prNumberSeed();
-  const binding = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) });
+  const { run, binding, prNumber } = await publishedRun();
   assert.equal(binding.currentPrNumber, prNumber, "the database marks the row current");
   await refused(prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) }), "one current binding per pull request");
   await refused(
@@ -628,15 +644,19 @@ test("a binding records its run's published item, keeps its snapshot, and record
 });
 
 test("a binding's JSON holds digests, enums and review ids, never free text or a person", async () => {
-  const run = await publishedRun();
-  const create = (data: Record<string, unknown>) =>
-    prisma.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumberSeed()), ...data } });
-  await refused(create({ snapshot: snapshot({ note: "free text" }) }), "a snapshot has an exact key set");
-  await refused(create({ snapshot: snapshot({ baseSha: "main" }) }), "a snapshot's base is a commit id");
-  await refused(create({ snapshot: snapshot({ invalidatedReviewIds: ["mposition"] }) }), "invalidated reviews are ids");
-  await refused(create({ snapshot: snapshot({ invalidatedReviewIds: [1.5] }) }), "a review id is a whole number");
+  const { run, binding, prNumber } = await publishedRun();
+  const replaceWith = (data: Record<string, unknown>) =>
+    prisma.$transaction([
+      prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data: { supersededAt: new Date() } }),
+      prisma.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumber), ...data } }),
+    ]);
+  const snapshotRefused = (promise: Promise<unknown>, label: string) =>
+    assert.rejects(promise, /EngineeringAgentBinding_snapshot_check/, label);
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ note: "free text" }) }), "a snapshot has an exact key set");
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ baseSha: "main" }) }), "a snapshot's base is a commit id");
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: ["mposition"] }) }), "invalidated reviews are ids");
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: [1.5] }) }), "a review id is a whole number");
 
-  const binding = await create({});
   const observe = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data });
   await refused(observe({ approvalObservation: { ...approvedObservation, reviewerLogin: "mposition" } }), "no person in an observation");
@@ -683,9 +703,7 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
 });
 
 test("a binding is superseded only by a replacement that is current and still counted", async () => {
-  const run = await publishedRun();
-  const prNumber = prNumberSeed();
-  const first = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) });
+  const { run, binding: first, prNumber } = await publishedRun();
   const supersede = (id: string) =>
     prisma.engineeringAgentBinding.update({
       where: { id },
@@ -872,9 +890,8 @@ test("no run starts while the owner queue is full, counting what running work ma
 });
 
 test("inside the first T1 window one open pull request fills the queue", async () => {
-  const run = await publishedRun();
+  const { run, binding } = await publishedRun();
   assert.equal(run.modeAtStart, "t1");
-  const binding = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumberSeed()) });
   await endRun(run.id);
   await refused(newRun(), "one open pull request fills the first T1 window");
   await retireBinding(binding.id);

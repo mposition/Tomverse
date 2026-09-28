@@ -192,8 +192,33 @@ test("a run starts and ends with its audit entries, under the runner", async () 
   }
 });
 
-/** Opens a run's publish item and carries it to `published`, as the publisher would. */
-const publishFor = async (run: { runId: string; cardId: string }) => {
+const bindingInput = (runId: string, prNumber = 100_000 + Math.floor(Math.random() * 800_000)) => ({
+  runId,
+  prNumber,
+  headSha: sha1("head"),
+  verifiedHeadSha: sha1("head"),
+  snapshot: { baseSha: sha1("base"), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] as number[] },
+});
+
+/**
+ * Settles a write claim as confirmed and binds the pull request in the same
+ * transaction: a publish item leaves the queue's count only for its binding.
+ */
+const settleAndBind = async (workItemId: string, fencingToken: bigint, runId: string, prNumber?: number) =>
+  inTx(async (tx) => {
+    const settled = await settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken, outcome: "confirmed" });
+    assert.equal(settled.state, "published");
+    return recordEngineeringAgentBinding(tx, bindingInput(runId, prNumber));
+  });
+
+/** Closes and prunes a binding, so the pull request queue has room again. */
+const retireBinding = async (bindingId: string) => {
+  await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId, to: "closed" }));
+  await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId, to: "pruned" }));
+};
+
+/** Opens a run's publish item, publishes it and binds the pull request, as the publisher would. */
+const publishFor = async (run: { runId: string; cardId: string }, prNumber: number) => {
   const { workItemId } = await inTx((tx) =>
     openEngineeringAgentWorkItem(tx, {
       kind: "publish",
@@ -212,7 +237,7 @@ const publishFor = async (run: { runId: string; cardId: string }) => {
     }),
   );
   const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
-  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "confirmed" }));
+  return settleAndBind(workItemId, claim.fencingToken, run.runId, prNumber);
 };
 
 const commitFields = (runId: string, cardRef: string) => ({
@@ -266,10 +291,13 @@ test("a publish consumes its one capability on the write claim, and settles wher
     ),
     "result_leads_nowhere",
   );
-  const settled = await inTx((tx) =>
-    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "confirmed" }),
+  // A publish committed without its binding would free a place in the pull
+  // request queue for a pull request that exists; the database refuses it.
+  await assert.rejects(
+    inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "confirmed" })),
+    /published without its binding/,
   );
-  assert.deepEqual(settled, { state: "published", decisionItemId: null });
+  const bound = await settleAndBind(workItemId, claim.fencingToken, run.runId);
 
   const actions = (await auditFor(workItemId)).map((entry) => [entry.action, systemActorOf(entry)]);
   assert.deepEqual(actions, [
@@ -279,6 +307,7 @@ test("a publish consumes its one capability on the write claim, and settles wher
     [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering-agent-publisher"],
   ]);
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await retireBinding(bound.bindingId);
 });
 
 test("an unknown outcome opens its decision item, and a person acknowledges it", async () => {
@@ -393,18 +422,9 @@ test("a T2 draft is stored only when clean, and decided with its audit entry in 
 
 test("a binding records its observations once, its reviewer as a pair, and a re-bind supersedes it", async () => {
   const run = await startRun();
-  await publishFor(run);
-  const prNumber = 100_000 + Math.floor(Math.random() * 900_000);
+  const prNumber = 100_000 + Math.floor(Math.random() * 800_000);
   const snapshot = { baseSha: sha1("base"), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] };
-  const { bindingId } = await inTx((tx) =>
-    recordEngineeringAgentBinding(tx, {
-      runId: run.runId,
-      prNumber,
-      headSha: sha1("head"),
-      verifiedHeadSha: sha1("head"),
-      snapshot,
-    }),
-  );
+  const { bindingId } = await publishFor(run, prNumber);
   await refusedWith(
     inTx((tx) =>
       recordEngineeringAgentBinding(tx, {
@@ -540,11 +560,9 @@ test("work proven unwritten returns to the queue, and its next claim runs on a n
   assert.notEqual(second.capabilityId, first.capabilityId);
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   assert.equal(again.fencingToken, BigInt(2));
-  const settled = await inTx((tx) =>
-    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: again.fencingToken, outcome: "confirmed" }),
-  );
-  assert.equal(settled.state, "published");
+  const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await retireBinding(bound.bindingId);
 });
 
 test("the switches refuse claims, capabilities and publishes, but never the record of what happened", async () => {
@@ -636,5 +654,6 @@ test("the publisher claims its next work, and the last look can only refuse", as
     await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
     if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
   }
-  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "confirmed" }));
+  const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
 });
