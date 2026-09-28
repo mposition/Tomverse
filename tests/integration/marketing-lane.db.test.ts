@@ -785,7 +785,7 @@ test("another row's incomplete footer does not hold a US message whose own is co
   await prisma.emailDelivery.create({
     data: {
       eventId: own.eventId,
-      recipientKey: `stale:${randomUUID()}`,
+      recipientKey: `addr:stale-${randomUUID()}`,
       emailAddress: `stale-${randomUUID().slice(0, 8)}@example.test`,
       language: "en",
       lane: "standard",
