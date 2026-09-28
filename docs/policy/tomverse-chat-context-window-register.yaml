@@ -376,6 +376,25 @@ models:
     catalogueDeclaredTokens: 1048576
     notes: ""
 
+  - modelId: "gemini-flash-lite-latest"
+    apiModel: "gemini-flash-lite-latest"
+    provider: google
+    status: unverified
+    contextWindowTokens: null
+    contextWindowIncludesOutput: null
+    maxInputTokens: null
+    maxOutputTokens: null
+    aliasOrLatest: true
+    sourceUrl: null
+    sourceTitle: null
+    verifiedAt: null
+    verifiedBy: null
+    catalogueDeclaredTokens: 1048576
+    notes: >-
+      Unversioned Google alias added to the guest trio on 2026-09-28.
+      The catalogue declares 1,048,576 tokens. That declaration is not
+      evidence, and the alias can move, so this row stays unverified.
+
   - modelId: "grok-4-5"
     apiModel: "grok-4.5"
     provider: xai
