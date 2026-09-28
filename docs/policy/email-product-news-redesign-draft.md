@@ -1524,10 +1524,13 @@ EEA·영국을 여는 선행 게이트입니다.
   release notes 국가 rule을 담으므로 policy version 활성화를 막으면 release notes와
   무관한 정책 변경까지 막힙니다. 그래서 enqueue 두 경로와 발송 판정이 모두 이
   함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
-- **게시 여부는 기록된 digest의 비교입니다.** `/privacy`의 개정 전 digest를
-  `DIGEST_BEFORE_AMENDMENT`에 고정했고, 현재 렌더되는 digest는
-  `lib/sitemapContentDates.ts`가 들고 있으며 `tests/sitemapLastModified.test.mjs`가
-  실제 페이지와 대조합니다. 둘이 같으면 아직 개정되지 않은 것입니다.
+- **게시 여부는 "개정을 담은 승인된 버전인가"입니다.** 문서마다 개정을 담았다고
+  승인된 버전의 digest 목록(`APPROVED_AMENDED_DIGESTS`)을 두고, 현재 렌더되는
+  digest(`/privacy`는 `lib/sitemapContentDates.ts`, `tests/sitemapLastModified.test.mjs`가
+  실제 페이지와 대조)가 그 목록에 있어야 인정합니다. 처음에는 "개정 전 digest에서
+  바뀌었는가"로 판정했는데, 2026-09-28에 `/privacy`가 release notes와 **무관한 이유로**
+  바뀌었고 그 설계는 그것을 개정 게시로 셌을 것입니다. 개정 뒤의 모든 편집은 그
+  버전이 여전히 개정을 담는다고 승인해 목록에 넣기 전까지 게이트를 닫습니다.
 - **`/terms`는 지금 판정할 수 없습니다.** 그 페이지의 "Last updated" 줄은 본문이 세
   번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
   `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
@@ -1562,7 +1565,7 @@ EEA·영국을 여는 선행 게이트입니다.
   notes를 영구 skip하지 않습니다(불변식 11).
 
 **남은 것은 전부 소유자 결정입니다.** (1) 네 문서의 개정 문안(7개 언어) 승인,
-(2) `/terms`·가입 문안·로그인 문장의 개정 전 digest(`DIGEST_BEFORE_AMENDMENT`)와
+(2) 개정을 담은 각 문서 버전의 승인된 digest(`APPROVED_AMENDED_DIGESTS`)와
 현재 digest·시행일(페이지는 `SITEMAP_CONTENT_EVIDENCE`, 가입·로그인 문안처럼
 페이지가 아닌 것은 `AMENDED_DOCUMENT_EVIDENCE`), 그리고 그 현재 digest를 렌더된 원본에서
 다시 계산해 대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록 — 이름만 언급하는 테스트는

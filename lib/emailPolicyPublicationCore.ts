@@ -61,8 +61,19 @@
 export type AmendedDocument = {
   /** A route, or a named piece of product copy. */
   path: string;
-  /** The digest recorded before the amendment, or null where nobody recorded one. */
-  digestBeforeAmendment: string | null;
+  /**
+   * The digests of every version of this document approved as carrying the
+   * amendment. Empty where none is recorded yet.
+   *
+   * A list of approved *after* states, not one *before* state. The first
+   * versions of this gate pinned the pre-amendment digest and treated any change
+   * from it as the amendment -- and on the day this was written `/privacy` changed
+   * for an unrelated reason (the provider-transfer wording), which would have
+   * counted as the release-notes amendment being published. Only a version
+   * somebody approved as containing it counts, and a later unrelated edit closes
+   * the gate again until that version is approved too -- the safe direction.
+   */
+  approvedDigests: readonly string[];
   /** The digest of what the product renders now, or null where nothing records it. */
   publishedDigest: string | null;
   /** The effective date the document shows, as a UTC calendar day. */
@@ -202,12 +213,12 @@ export const publicationProblems = (input: {
   const dates = new Set<string>();
 
   for (const document of input.documents) {
-    if (document.digestBeforeAmendment === null || document.publishedDigest === null) {
+    if (document.approvedDigests.length === 0 || document.publishedDigest === null) {
       problems.push({
         refusal: "document_state_unrecorded",
         subject: document.path,
         detail:
-          "Nothing records what this said before the amendment and what it says now, so it cannot be shown to have changed.",
+          "No version of this is recorded as approved to carry the amendment, or nothing records what it says now.",
       });
       continue;
     }
@@ -220,11 +231,12 @@ export const publicationProblems = (input: {
       });
       continue;
     }
-    if (document.digestBeforeAmendment === document.publishedDigest) {
+    if (!document.approvedDigests.includes(document.publishedDigest)) {
       problems.push({
         refusal: "document_not_amended",
         subject: document.path,
-        detail: "It still renders exactly what it rendered before the amendment.",
+        detail:
+          "What it renders now is not a version approved as carrying the amendment -- either the amendment is not published, or the page changed since and the new version has not been approved.",
       });
     }
     const effective = utcDayStart(document.effectiveFrom);

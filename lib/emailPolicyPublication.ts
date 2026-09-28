@@ -43,14 +43,14 @@ import {
  */
 
 /**
- * What each document rendered before the amendment approval E describes.
+ * The digests of the versions of each document approved as carrying the
+ * amendment approval E describes. Empty until the approved wording is published.
  *
- * `/privacy`: the digest recorded on 2026-09-14, the state section 10 quotes when
- * it says the policy promises mail only on request.
+ * Every later edit to an amended page -- for any reason -- has to be added here
+ * before the gate counts it, because the gate cannot tell an edit that keeps the
+ * amendment from one that removes it.
  */
-export const DIGEST_BEFORE_AMENDMENT: Readonly<Record<string, string>> = {
-  "/privacy": "ac3b5f82fa492671259539bf426e52e17824f27f673dc5d3396d1fa4bc9c9233",
-};
+export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * The current state of each amended document that is not a sitemap page.
@@ -111,7 +111,7 @@ export const documentFacts = (): AmendedDocument[] =>
       )[path];
     return {
       path,
-      digestBeforeAmendment: DIGEST_BEFORE_AMENDMENT[path] ?? null,
+      approvedDigests: APPROVED_AMENDED_DIGESTS[path] ?? [],
       publishedDigest: evidence?.contentSha256 ?? null,
       effectiveFrom: evidence?.date ?? null,
       verified: Boolean(DIGEST_VERIFIED_BY[path]),
@@ -319,7 +319,31 @@ export async function emailPolicyPublicationProblems(
 const TTL_MS = 60_000;
 let cached: { published: boolean; at: number } | { error: unknown; at: number } | null = null;
 
+/**
+ * Test-only: answer the publication question without the documents.
+ *
+ * The campaign suites exercise sends of `product_updates`, which is the
+ * release-notes product, and this gate is closed until an amendment the
+ * repository does not contain yet is published -- so without a seam every one
+ * of those suites would test the refusal and nothing else. It throws unless
+ * `NODE_ENV` is `test`, which is how the DB integration runner starts
+ * (scripts/run-db-integration-tests.mjs) and never how the application does; a
+ * call in any other environment is a bug, not a configuration.
+ *
+ * `null` restores the real answer. The gate's own suites never set it.
+ */
+let publishedForTests: boolean | null = null;
+
+export function setEmailPolicyPublishedForTests(value: boolean | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setEmailPolicyPublishedForTests() is for tests only.");
+  }
+  publishedForTests = value;
+  cached = null;
+}
+
 export async function isEmailPolicyPublished(now: Date = new Date()): Promise<boolean> {
+  if (publishedForTests !== null && process.env.NODE_ENV === "test") return publishedForTests;
   if (cached) {
     const age = now.getTime() - cached.at;
     if (age >= 0 && age < TTL_MS) {

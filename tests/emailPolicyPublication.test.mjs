@@ -23,7 +23,7 @@ import {
   AMENDED_DOCUMENTS,
   CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
   CHANGE_NOTICE_TEMPLATE_KEY,
-  DIGEST_BEFORE_AMENDMENT,
+  APPROVED_AMENDED_DIGESTS,
   DIGEST_VERIFIED_BY,
   documentFacts,
   emailPolicyPublicationProblems,
@@ -34,7 +34,7 @@ const NOW = new Date("2026-12-01T00:00:00.000Z");
 
 const amended = (overrides = {}) => ({
   path: "/privacy",
-  digestBeforeAmendment: "old",
+  approvedDigests: ["new"],
   publishedDigest: "new",
   effectiveFrom: "2026-11-15",
   verified: true,
@@ -73,7 +73,7 @@ test("an account told late, or not at all, blocks", () => {
 });
 
 test("a page nobody recorded, or nobody verifies, is not shown to have changed", () => {
-  assert.deepEqual(refusals({ documents: [amended({ digestBeforeAmendment: null })] }), [
+  assert.deepEqual(refusals({ documents: [amended({ approvedDigests: [] })] }), [
     "document_state_unrecorded",
   ]);
   assert.deepEqual(refusals({ documents: [amended({ publishedDigest: null })] }), [
@@ -84,11 +84,15 @@ test("a page nobody recorded, or nobody verifies, is not shown to have changed",
   ]);
 });
 
-test("a page that still renders what it rendered before is not amended", () => {
-  assert.deepEqual(
-    refusals({ documents: [amended({ digestBeforeAmendment: "same", publishedDigest: "same" })] }),
-    ["document_not_amended"]
-  );
+test("a page counts only while it renders a version approved as carrying the amendment", () => {
+  // Not "changed since before": /privacy changed for an unrelated reason on the
+  // day this was written, and that change is not the amendment.
+  assert.deepEqual(refusals({ documents: [amended({ publishedDigest: "unrelated-edit" })] }), [
+    "document_not_amended",
+  ]);
+  // Several approved versions are fine: an edit after the amendment is added to
+  // the list once somebody has approved that it still carries it.
+  assert.deepEqual(refusals({ documents: [amended({ approvedDigests: ["v1", "new"] })] }), []);
 });
 
 test("the amendment has one effective date, that exists and has arrived", () => {
@@ -144,9 +148,9 @@ test("a notice nobody named is not a notice, and only a legal one counts", () =>
 test("every refusal the core can produce is in the closed list", () => {
   const seen = new Set();
   const cases = [
-    { documents: [amended({ digestBeforeAmendment: null })] },
+    { documents: [amended({ approvedDigests: [] })] },
     { documents: [amended({ verified: false })] },
-    { documents: [amended({ digestBeforeAmendment: "x", publishedDigest: "x" })] },
+    { documents: [amended({ publishedDigest: "x" })] },
     { documents: [amended({ effectiveFrom: null })] },
     { documents: [amended(), amended({ effectiveFrom: "2026-11-16" })] },
     { documents: [amended({ effectiveFrom: "2099-01-01" })] },
@@ -192,11 +196,11 @@ test("every verifier the gate relies on hashes the document and compares it", ()
   }
 });
 
-test("the recorded pre-amendment state of /privacy is what the site renders today", () => {
-  assert.equal(
-    DIGEST_BEFORE_AMENDMENT["/privacy"],
-    SITEMAP_CONTENT_EVIDENCE["/privacy"].contentSha256
-  );
+test("no version of any document is approved as carrying the amendment yet", () => {
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS, {});
+  // And /privacy has a verified current state, which is what an approval will
+  // be compared against.
+  assert.match(SITEMAP_CONTENT_EVIDENCE["/privacy"].contentSha256, /^[0-9a-f]{64}$/);
 });
 
 test("today, nothing is published and release notes cannot go live", async () => {
@@ -207,10 +211,25 @@ test("today, nothing is published and release notes cannot go live", async () =>
     (problem) => `${problem.subject}:${problem.refusal}`
   );
   assert.deepEqual(problems, [
-    "/privacy:document_not_amended",
+    "/privacy:document_state_unrecorded",
     "/terms:document_state_unrecorded",
     "signup consent copy:document_state_unrecorded",
     "login consent sentence:document_state_unrecorded",
     "change notice:change_notice_unidentified",
   ]);
+});
+
+test("the test seam cannot be used outside tests", async () => {
+  // The campaign suites set it; the application must never be able to. It
+  // throws unless NODE_ENV is "test", which the DB integration runner sets and
+  // the application never does.
+  const { setEmailPolicyPublishedForTests } = await import("../lib/emailPolicyPublication.ts");
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = "production";
+    assert.throws(() => setEmailPolicyPublishedForTests(true), /tests only/);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
 });
