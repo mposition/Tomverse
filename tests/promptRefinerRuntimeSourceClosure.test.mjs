@@ -97,10 +97,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
-// 2026-09-22, merging develop into S3 again: both sides moved positions in
-// this closure and neither is taken -- the value below is computed over the
-// merged tree. The position-free inventory is unchanged on both sides, so
-// this is a repin and not a review of new computed access.
+// develop's confirmatory shadow v4 added a reviewed runtime path and its own
+// schema and comment changes. Neither is taken over the other -- the value
+// below is computed over the merged tree, which is the only tree that will
+// exist. What makes that a repin rather than a review is that the
+// position-free inventory (`path + expression text` for every entry) is
+// unchanged from `origin/develop`: no computed access was added, removed or
+// altered by either side, only moved. The count is 228 and that inventory
+// hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
+// on this tree and on `origin/develop` alike.
 //
 // 2026-09-21, merging develop into S3: develop moved this closure and so did
 // S3, and neither side is taken -- the value below is computed over the merged
@@ -116,20 +121,15 @@ const compilerOptions = parsedConfig.options;
 // repin rather than a review. The value below is the same inventory with the
 // new line and column numbers.
 //
-// develop's confirmatory shadow v4 added a reviewed runtime path and its own
-// schema and comment changes. Neither is taken over the other -- the value
-// below is computed over the merged tree, which is the only tree that will
-// exist. What makes that a repin rather than a review is that the
-// position-free inventory (`path + expression text` for every entry) is
-// unchanged from `origin/develop`: no computed access was added, removed or
-// altered by either side, only moved. The count is 228 and that inventory
-// hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
-// on this tree and on `origin/develop` alike.
-//
 // 2026-09-21, S1f on top: the same watched-schema comment now also records
 // `MarketingPost.factsDigest`, which moves the positions once more in the
 // same file. The count is still 228 and the position-free inventory still
 // hashes to the value above, so this is a repin and not a review.
+//
+// 2026-09-22, merging develop into S3 again: both sides moved positions in
+// this closure and neither is taken -- the value below is computed over the
+// merged tree. The position-free inventory is unchanged on both sides, so
+// this is a repin and not a review of new computed access.
 //
 // 2026-09-22: the AMUX-only Prisma schema change repins the marketing pipeline
 // fingerprint, and its review note moves subsequent source positions in
