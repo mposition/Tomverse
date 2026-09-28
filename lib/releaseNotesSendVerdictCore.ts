@@ -135,11 +135,26 @@ export type OverrideInput = {
   approvalId: string;
   approval: ApprovalScopeInput;
   /** The cohort row for this account, or null where there is none. */
-  member: { userId: string; addressDigest: string } | null;
+  member: {
+    userId: string;
+    addressDigest: string;
+    addressNormalizationVersion: string;
+  } | null;
   userId: string | null;
   /** The address pinned on the delivery at enqueue, and the account's address now. */
   deliveryAddressDigest: string | null;
   currentAddressDigest: string | null;
+  /**
+   * The rule that produced the two digests above.
+   *
+   * Carried rather than assumed, because `cohortMismatchReason()` refuses a
+   * member whose digests were computed under a different rule. Two
+   * normalization rules produce two different digests of the same mailbox, so
+   * comparing across them answers "not this person" for the person -- or, if a
+   * later rule collapsed a distinction an earlier one kept, "this person" for
+   * somebody else.
+   */
+  addressNormalizationVersion: string;
 };
 
 export type SendVerdictInput = {
@@ -295,6 +310,7 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
         userId: input.override.userId,
         deliveryAddressDigest: input.override.deliveryAddressDigest,
         currentAddressDigest: input.override.currentAddressDigest,
+        addressNormalizationVersion: input.override.addressNormalizationVersion,
       });
     if (overrideRefusal === null) {
       overrideApplied = { approvalId: input.override.approvalId, type: "risk_accepted" };

@@ -22,6 +22,7 @@ import {
 import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { templateMetadataMismatches } from "@/lib/emailTemplateMetadataCore";
 import {
+  normalizeSuppressionAddress,
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
@@ -71,6 +72,12 @@ import {
   VerdictUnavailableError,
   verdictRetry,
 } from "@/lib/releaseNotesVerdictRetryCore";
+import { releaseNotesSendAuthorization } from "@/lib/releaseNotesSendAuthorization";
+import { evidenceOf, recordSendDecision } from "@/lib/releaseNotesSendDecision";
+import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
+import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
+import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
+import { consentAddressDigest } from "@/lib/emailConsentToken";
 
 /**
  * The standard lane: durable, at-least-once, delivered eventually.
@@ -179,8 +186,37 @@ export async function createStandardDeliveryRows(
     : `addr:${input.emailAddress}`;
   const idempotencyKey = `${event.id}:${recipientKey}`;
 
+  // The first of section 7.6's two snapshots, and the pin the second one is
+  // compared against.
+  //
+  // It does not refuse. The send does that, and it does it with the verdict
+  // taken at send time -- a row refused here would leave no record of what was
+  // true when the message was owed, which is the thing the enqueue snapshot
+  // exists to hold. What this decides is the *pin*: the contract this message is
+  // rendered to, so a duty settled or a waiver withdrawn between now and the
+  // send is a difference somebody can see rather than a silent change of
+  // message.
+  //
+  // Read outside `tx` deliberately. These are rules and profiles -- rows an
+  // operator seeds, not rows this transaction is writing -- and widening a
+  // caller's transaction to read them is what `ensureTemplateVersion()` running
+  // before it already refuses to do.
+  const releaseNotes = releaseNotesFlagApplies(definition.purpose)
+    ? await releaseNotesEnqueueDecision({
+        userId: input.userId ?? null,
+        purpose: definition.purpose as string,
+        classification: definition.classification,
+        emailAddress: input.emailAddress,
+        policyVersionId: input.policyVersionId,
+        templateVersionId: input.templateVersionId,
+      })
+    : null;
+
   const delivery = await tx.emailDelivery.create({
     data: {
+      ...(releaseNotes
+        ? { displayContractHash: releaseNotes.displayContractHash }
+        : {}),
       eventId: event.id,
       userId: input.userId ?? null,
       recipientKey,
@@ -204,8 +240,89 @@ export async function createStandardDeliveryRows(
     select: { id: true },
   });
 
+  if (releaseNotes) {
+    await recordSendDecision(tx, {
+      deliveryId: delivery.id,
+      userId: input.userId ?? null,
+      phase: "enqueue",
+      purpose: definition.purpose as string,
+      classification: definition.classification,
+      emailAddress: releaseNotes.normalizedAddress,
+      addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+      verdict: releaseNotes.verdict,
+      countryCandidates: Object.keys(releaseNotes.verdict.obligations).sort(),
+      suppressionCheckedAt: releaseNotes.suppressionCheckedAt,
+      providerSubmittedAt: null,
+      evidence: evidenceOf(releaseNotes.verdict),
+    });
+  }
+
   return { eventId: event.id, deliveryId: delivery.id, idempotencyKey };
 }
+
+/**
+ * The enqueue-phase verdict, taken before the row exists.
+ *
+ * Split out because it has to run before `emailDelivery.create()` -- the hash it
+ * produces is a column of that row -- and be recorded after it, once there is a
+ * delivery id to bind the snapshot to. Inlining it would put twenty lines
+ * between the event and the delivery of the same message.
+ */
+const releaseNotesEnqueueDecision = async (input: {
+  userId: string | null;
+  purpose: string;
+  classification: EmailClassification;
+  emailAddress: string;
+  policyVersionId: string;
+  templateVersionId: string;
+}) => {
+  const now = new Date();
+  const normalizedAddress = normalizeSuppressionAddress(input.emailAddress);
+  const account = input.userId
+    ? await prisma.user.findUnique({
+        where: { id: input.userId },
+        select: { email: true },
+      })
+    : null;
+
+  // Asked here, unlike at send, because nothing above has asked: the enqueue
+  // path has no suppression gate, and a snapshot that reported `suppressed:
+  // false` because nobody looked would be a record of a check that did not
+  // happen.
+  const suppression = await suppressionCheck({
+    emailAddress: input.emailAddress,
+    classification: input.classification,
+    purpose: input.purpose,
+    now,
+  });
+
+  const verdict = await releaseNotesSendAuthorization({
+    userId: input.userId,
+    purpose: input.purpose,
+    deliveryAddressDigest: consentAddressDigest(normalizedAddress),
+    currentAddressDigest: account?.email
+      ? consentAddressDigest(normalizeSuppressionAddress(account.email))
+      : null,
+    pinnedPolicyVersionId: input.policyVersionId,
+    // Nothing to compare against yet: this call is what produces the pin. The
+    // pure verdict skips the comparison at this phase for that reason, and
+    // passing the value it is about to produce would make every first enqueue
+    // report its own contract as unchanged, which says nothing.
+    pinnedDisplayContractHash: null,
+    templateVersionId: input.templateVersionId,
+    suppressed: !suppression.allowed,
+    normalizedAddress,
+    phase: "enqueue",
+    now,
+  });
+
+  return {
+    verdict,
+    normalizedAddress,
+    suppressionCheckedAt: now,
+    displayContractHash: verdict.displayContract.requiredDisplayContractHash,
+  };
+};
 
 /**
  * Enqueues a message, resolving the template and policy versions first.
@@ -255,40 +372,6 @@ export async function enqueueStandardEmail(
       return {
         refused: "marketing_disabled",
         message: ENQUEUE_REFUSAL_MESSAGE.marketing_disabled,
-      };
-    }
-  }
-
-  // And the product's own switch, which is not the same question. Marketing
-  // being on says this deployment may send marketing at all; this says the
-  // release-notes product may send, and it is the last step of the activation
-  // order -- document in force, policy version active, readiness confirmed, then
-  // this (draft section 12).
-  //
-  // Checked here *and* at send. A row written while it was on must not go out
-  // after somebody turns it off, and a flag read only at enqueue cannot say so.
-  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
-    if (!(await isEmailReleaseNotesEnabled())) {
-      return {
-        refused: "release_notes_disabled",
-        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
-      };
-    }
-  }
-
-  // And the product's own switch, which is not the same question. Marketing
-  // being on says this deployment may send marketing at all; this says the
-  // release-notes product may send, and it is the last step of the activation
-  // order -- document in force, policy version active, readiness confirmed, then
-  // this (draft section 12).
-  //
-  // Checked here *and* at send. A row written while it was on must not go out
-  // after somebody turns it off, and a flag read only at enqueue cannot say so.
-  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
-    if (!(await isEmailReleaseNotesEnabled())) {
-      return {
-        refused: "release_notes_disabled",
-        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
       };
     }
   }
@@ -394,6 +477,15 @@ type ClaimedDelivery = {
   renderDataSnapshot: unknown;
   policyVersionId: string;
   jurisdictionProfileKey: string;
+  jurisdictionCountry: string;
+  // The generation chain, read because a release-notes send refused for a moved
+  // display contract becomes a replacement rather than an ending (section 7.6).
+  eventId: string;
+  recipientKey: string;
+  lane: string;
+  generation: number;
+  rootDeliveryId: string;
+  displayContractHash: string | null;
   event: { referenceType: string | null; referenceId: string | null };
   templateVersion: {
     id: string;
@@ -450,6 +542,13 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       // Pinned at enqueue, read here: this is the step the pin exists for.
       policyVersionId: true,
       jurisdictionProfileKey: true,
+      jurisdictionCountry: true,
+      eventId: true,
+      recipientKey: true,
+      lane: true,
+      generation: true,
+      rootDeliveryId: true,
+      displayContractHash: true,
       event: { select: { referenceType: true, referenceId: true } },
       templateVersion: {
         select: {
@@ -638,6 +737,139 @@ const redactSecrets = (
   const scrub = (value: string) =>
     ordered.reduce((text, secret) => text.split(secret).join("{{secret}}"), value);
   return { subject: scrub(message.subject), html: scrub(message.html), text: scrub(message.text) };
+};
+
+/**
+ * The release-notes verdict at send time, and what it does to the row.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md section 7.6.
+ *
+ * Returns `null` when the send may go on, and an outcome when the row is
+ * finished here. Not a boolean: the caller has to return the same shape the
+ * other gates return, and a boolean would leave it to invent one.
+ *
+ * ## One transaction
+ *
+ * The snapshot, the skip and any replacement are written together. Section 7.6
+ * asks for the skip and the replacement to be atomic, and the snapshot belongs
+ * with them for the same reason: a decision record that survived a rollback of
+ * the thing it decided would describe a message that never stopped.
+ */
+const decideReleaseNotesSend = async (
+  delivery: ClaimedDelivery,
+  definition: { purpose: string | null; classification: EmailClassification },
+  now: Date
+): Promise<{ outcome: "suppressed"; classification: EmailClassification } | null> => {
+  const purpose = definition.purpose;
+  // Unreachable through `releaseNotesFlagApplies()`, which answers false for a
+  // null purpose. Narrowed rather than asserted, so a future caller that asked
+  // without the flag check gets a refusal instead of a thrown lane.
+  if (purpose === null) return null;
+
+  const normalizedAddress = normalizeSuppressionAddress(delivery.emailAddress);
+  // The account's address as it is now, which the cohort comparison needs
+  // alongside the one this row was addressed to. A member whose account address
+  // has moved since the approval was sealed is not the person that approval
+  // named (section 5.6).
+  const account = delivery.userId
+    ? await prisma.user.findUnique({
+        where: { id: delivery.userId },
+        select: { email: true },
+      })
+    : null;
+
+  const verdict = await releaseNotesSendAuthorization({
+    userId: delivery.userId,
+    purpose,
+    deliveryAddressDigest: consentAddressDigest(normalizedAddress),
+    currentAddressDigest: account?.email
+      ? consentAddressDigest(normalizeSuppressionAddress(account.email))
+      : null,
+    // The version this row was pinned to, not the active one: the lane composes
+    // a queued message under the version that message carries (EM-04).
+    pinnedPolicyVersionId: delivery.policyVersionId,
+    pinnedDisplayContractHash: delivery.displayContractHash,
+    templateVersionId: delivery.templateVersion.id,
+    // Already asked, a few gates above, and the row would have ended there.
+    suppressed: false,
+    normalizedAddress,
+    phase: "send",
+    now,
+  });
+
+  const skipReason = releaseNotesSkipReason(verdict);
+
+  const finished = await prisma.$transaction(async (tx) => {
+    await recordSendDecision(tx, {
+      deliveryId: delivery.id,
+      userId: delivery.userId,
+      phase: "send",
+      purpose,
+      classification: definition.classification,
+      emailAddress: normalizedAddress,
+      addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+      verdict,
+      countryCandidates: Object.keys(verdict.obligations).sort(),
+      suppressionCheckedAt: now,
+      providerSubmittedAt: null,
+      evidence: evidenceOf(verdict),
+    });
+
+    if (verdict.allowed) return false;
+
+    // The contract moved and nothing else did: the message is still owed, so it
+    // is re-rendered under the current template and the current contract rather
+    // than ended. Any second blocker and this is an ending -- the replacement
+    // would be refused for that second reason, and it would be a second row
+    // addressed to somebody who asked for nothing.
+    if (reenqueueIsRight(verdict.blockers)) {
+      const required = verdict.displayContract.requiredDisplayContractHash;
+      // `reenqueueIsRight()` already implies this: an uncomposable contract is
+      // `display_unsatisfiable`, which is a different blocker. Read rather than
+      // assumed, because the replacement's idempotency key is built from it and
+      // a null there would be a key that means nothing.
+      if (required !== null) {
+        await skipAndReenqueue(tx, {
+          delivery: {
+            id: delivery.id,
+            eventId: delivery.eventId,
+            recipientKey: delivery.recipientKey,
+            userId: delivery.userId,
+            emailAddress: delivery.emailAddress,
+            language: delivery.language,
+            lane: delivery.lane,
+            generation: delivery.generation,
+            rootDeliveryId: delivery.rootDeliveryId,
+            attempts: delivery.attempts,
+          },
+          current: {
+            templateVersionId: delivery.templateVersion.id,
+            policyVersionId: delivery.policyVersionId,
+            jurisdictionCountry: delivery.jurisdictionCountry,
+            jurisdictionProfileKey: delivery.jurisdictionProfileKey,
+            displayContractHash: required,
+          },
+        });
+        return true;
+      }
+    }
+
+    await tx.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "skipped",
+        skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return true;
+  });
+
+  return finished
+    ? { outcome: "suppressed" as const, classification: definition.classification }
+    : null;
 };
 
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
@@ -849,6 +1081,21 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     });
     const held = await holdForQuietHours(delivery, quietHourWindows, now);
     if (held) return { outcome: "pending" as const, classification: definition.classification };
+  }
+
+  // The release-notes verdict, and the second of the two snapshots section 7.6
+  // asks for. Last of the gates and before the render, because it is the one
+  // that can end in a *replacement* rather than an ending: a message whose
+  // display contract moved is re-enqueued under the current template and the
+  // current contract, and rendering the old one first would be work thrown away.
+  //
+  // The reads inside raise `VerdictUnavailableError` and nothing else, which the
+  // drain's catch releases the claim for (invariant 11). A database that cannot
+  // answer is not a refusal, and the drain's default -- permanent `failed` --
+  // would retire a message the law allows over a connection reset.
+  if (releaseNotesFlagApplies(definition.purpose)) {
+    const outcome = await decideReleaseNotesSend(delivery, definition, now);
+    if (outcome) return outcome;
   }
 
   const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());

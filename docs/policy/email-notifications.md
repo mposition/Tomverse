@@ -3945,6 +3945,7 @@ AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
+| **릴리스 노트 제품 발송** | `feature.emailReleaseNotesEnabled` | marketing 활성화와 **별개 결정**입니다 — 앞은 이 배포가 marketing을 보낼 수 있는가이고, 이것은 릴리스 노트 제품이 보낼 수 있는가입니다. 활성화 순서의 마지막 단계이며, 문서 확정 · policy version 활성화 · readiness 확인이 모두 끝난 뒤에 켭니다([설계](email-product-news-redesign-draft.md) §12). enqueue와 send **양쪽**에서 읽습니다 — 켜져 있을 때 쌓인 행이 끈 뒤에 나가면 안 되기 때문입니다 |
 | quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | ~~Q4~~ **해소 (2026-09-16)** — 시행령 제61조제2항이 전자우편을 야간 제한 대상에서 제외하므로 KR profile의 `quietHours`는 비어 있습니다. 기계는 그대로 두고, 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version입니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면

@@ -4,9 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSettings";
 import { footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { VerdictUnavailableError } from "@/lib/releaseNotesVerdictRetryCore";
+import {
+  composeDisplayContract,
+  displayContractHash,
+} from "@/lib/releaseNotesDisplayContractCore";
+import {
+  displayRequirementsFor,
+  profilesForCountries,
+} from "@/lib/releaseNotesDisplayRequirements";
 import {
   releaseNotesSendVerdict,
   type SendVerdict,
@@ -62,13 +71,25 @@ export type SendAuthorizationInput = {
   pinnedPolicyVersionId: string | null;
   /** The contract the message was rendered to, or null at enqueue. */
   pinnedDisplayContractHash: string | null;
-  /** What the current obligations require, composed by the caller (C16). */
-  requiredDisplayContractHash: string | null;
-  /** Whether this address carries a live suppression cause for this purpose. */
+  /**
+   * The template version the message is rendered by, which the contract carries.
+   *
+   * The same obligations rendered by a different template are a different
+   * message, so section 7.6 puts this inside the hash.
+   */
+  templateVersionId: string;
+  /**
+   * Whether this address carries a live suppression cause for this purpose.
+   *
+   * The one recipient fact the caller supplies, because the caller has already
+   * asked: the lane runs `suppressionCheck()` before anything else, and asking
+   * again here would be a second answer to a question already answered a few
+   * lines above. The consent and the objection are read here, where every other
+   * row the verdict rests on is read.
+   */
   suppressed: boolean;
-  /** Whether the person refused, on the signup form or the in-product notice. */
-  objected: boolean;
-  consent: { express: boolean; evidenceIds: readonly string[] };
+  /** The address as the permission ledger stores it, for the objection lookup. */
+  normalizedAddress: string;
   phase: "enqueue" | "send";
   now: Date;
 };
@@ -227,6 +248,72 @@ export async function releaseNotesSendAuthorization(
     };
   });
 
+  // By address, not by account. Consent attaches to a mailbox
+  // (docs/policy/email-notifications.md section 13.4), and an objection
+  // survives the account that made it -- so an address reused by a new account
+  // carries the refusal the previous holder made from the same mailbox.
+  const objected = await read("the objection", async () =>
+    Boolean(
+      await prisma.emailPermissionEvent.findFirst({
+        where: { emailAddress: input.normalizedAddress, kind: "objected" },
+        select: { id: true },
+      })
+    )
+  );
+
+  // The latest consent record for this purpose and this mailbox, whatever it
+  // says. Not "the latest grant": a grant followed by a withdrawal is a
+  // withdrawal, and a query that asked only for grants would find the older row
+  // and call it consent.
+  //
+  // `express` names the ids it rests on because
+  // `ReleaseNotesConsentInput` refuses a consent that cannot say what it rests
+  // on -- an assertion, not a convention, and the reason this reads the row
+  // rather than a boolean.
+  const consent = await read("the consent record", async () => {
+    const latest = await prisma.consentRecord.findFirst({
+      where: { emailAddress: input.normalizedAddress, purpose: input.purpose },
+      orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+      select: { id: true, action: true },
+    });
+    const express =
+      latest !== null && (latest.action === "granted" || latest.action === "reconfirmed");
+    return { express, evidenceIds: express && latest ? [latest.id] : [] };
+  });
+
+  // Composed here rather than by the caller, for the reason the candidate
+  // countries are derived here: this module already holds the rules and the duty
+  // rows the contract is made of, and a caller that loaded them again to compose
+  // it would be a second answer to one question. The four callers section 7.6
+  // names share a verdict only if they share what it rests on.
+  //
+  // A composition that refuses, and a candidate country whose profile this
+  // policy version has no seed for, both arrive at the pure verdict as
+  // `requiredDisplayContractHash: null` -- which is `display_unsatisfiable`, the
+  // blocker that says the duties cannot be turned into one message. That is not
+  // the same as `display_contract_changed`, and the two must not collapse: one
+  // is re-rendered, the other is not.
+  const profiles = await read("the jurisdiction profiles", () =>
+    profilesForCountries({ countries, policyVersionId })
+  );
+  const { requirements, gaps } = displayRequirementsFor({
+    countries,
+    rules,
+    obligations,
+    profiles,
+  });
+  const composed =
+    gaps.length > 0
+      ? null
+      : composeDisplayContract({
+          requirements,
+          templateVersionId: input.templateVersionId,
+        });
+  const requiredDisplayContractHash =
+    composed === null || "refusal" in composed
+      ? null
+      : displayContractHash(composed.contract);
+
   const flags = await read("the feature flags", async () => ({
     marketingEnabled: await isEmailMarketingEnabled(),
     releaseNotesEnabled: await isEmailReleaseNotesEnabled(),
@@ -253,6 +340,7 @@ export async function releaseNotesSendAuthorization(
             select: {
               userId: true,
               addressDigest: true,
+              addressNormalizationVersion: true,
               approval: {
                 select: {
                   id: true,
@@ -283,10 +371,18 @@ export async function releaseNotesSendAuthorization(
               obligationKey: member.approval.obligationKey,
               purposeKey: member.approval.purposeKey,
             },
-            member: { userId: member.userId, addressDigest: member.addressDigest },
+            member: {
+              userId: member.userId,
+              addressDigest: member.addressDigest,
+              addressNormalizationVersion: member.addressNormalizationVersion,
+            },
             userId: input.userId,
             deliveryAddressDigest: input.deliveryAddressDigest,
             currentAddressDigest: input.currentAddressDigest,
+            // The rule this build computes digests under. Compared against the
+            // member's own, which is how a cohort sealed under an older rule
+            // stops matching rather than matching wrongly.
+            addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
           };
         });
 
@@ -300,13 +396,13 @@ export async function releaseNotesSendAuthorization(
     waivers,
     recipient: {
       suppressed: input.suppressed,
-      objected: input.objected,
-      consent: { express: input.consent.express, evidenceIds: [...input.consent.evidenceIds] },
+      objected,
+      consent,
     },
     flags,
     display: {
       pinnedDisplayContractHash: input.pinnedDisplayContractHash,
-      requiredDisplayContractHash: input.requiredDisplayContractHash,
+      requiredDisplayContractHash,
     },
     override,
     phase: input.phase,
