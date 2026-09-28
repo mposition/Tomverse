@@ -243,6 +243,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-backlog-metadata": {
+    label: "AMUX backlog 메타데이터",
+    description: "owner 전용 backlog 카드 한 건의 kind, priority, 비용 추정, 꺼진 운영 적용",
+  },
   "amux-board-import": {
     label: "AMUX 카탈로그 이관",
     description: "owner 전용 카탈로그 미리보기와 승인, 꺼진 운영 적용",

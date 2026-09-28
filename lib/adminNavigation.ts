@@ -611,6 +611,16 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 
 export const ADMIN_DETAIL_ROUTES = [
   {
+    // Owner-only and unlisted like the other AMUX screens.
+    id: "amux-backlog-metadata",
+    pattern: /^\/admin\/amux-backlog-metadata$/,
+    label: "AMUX backlog metadata",
+    description: "Owner-only kind, priority and cost estimate for one backlog card, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // catalog import is owner-only and must not be advertised to roles that
     // receive a 404 from the page and the API.
