@@ -718,6 +718,16 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "AI Platform" as const,
   },
   {
+    // Owner-only like the other AMUX screens, and unlisted for the same reason.
+    id: "amux-cards",
+    pattern: /^\/admin\/amux-cards$/,
+    label: "AMUX cards",
+    description: "Owner-only read-only list of AMUX cards and their execution state",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     id: "amux-intake",
     pattern: /^\/admin\/amux-intake$/,
     label: "AMUX intake",

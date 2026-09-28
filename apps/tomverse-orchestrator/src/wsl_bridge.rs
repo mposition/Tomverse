@@ -24,6 +24,15 @@ pub const WSL_BRIDGE_ENV_NAME: &str = "TOMVERSE_AMUX_WSL_BRIDGE";
 
 pub const WSL_BRIDGE_LOCAL_URL_ENV: &str = "TOMVERSE_AMUX_WSL_LOCAL_URL";
 
+/// Exit status of a runner that stopped taking assignments.
+///
+/// A halt is never resumed by the runner itself: the reason is an unknown
+/// outcome (a lost send, a refused heartbeat, an unanswered Tomverse call),
+/// and only a person can decide that it is safe to start again. Exiting 0 made
+/// the halt look like a clean shutdown to a supervisor; a distinct non-zero
+/// status is the notice.
+pub const BRIDGE_HALT_EXIT_CODE: i32 = 3;
+
 const CONTROL_PLANE_MARKERS: &[&str] = &[
     "TOMVERSE_AMUX_SYNC_SECRET",
     "TOMVERSE_AMUX_ENABLED",
@@ -274,6 +283,29 @@ impl WorkerAdapter for ExistingSessionAdapter {
             instance_id: session.instance_id.clone(),
             generation: session.generation,
         }))
+    }
+}
+
+/**
+ * What a heartbeat outcome for a pending execution means.
+ *
+ * An explicit refusal from Tomverse fences the attempt out, so it leaves the
+ * pending set. A transport failure or timeout is an unknown outcome: the
+ * server may have renewed the lease, so the attempt stays pending and keeps
+ * its heartbeat, and the runner only stops taking new assignments.
+ */
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingHeartbeat {
+    Keep,
+    KeepAndHalt,
+    DropAndHalt,
+}
+
+pub fn plan_pending_heartbeat(accepted: Option<bool>) -> PendingHeartbeat {
+    match accepted {
+        Some(true) => PendingHeartbeat::Keep,
+        Some(false) => PendingHeartbeat::DropAndHalt,
+        None => PendingHeartbeat::KeepAndHalt,
     }
 }
 
@@ -942,6 +974,7 @@ pub async fn run_from_env() -> i32 {
     let mut reserved = Vec::new();
     let mut pending: Vec<crate::tomverse_api::PulledDelivery> = Vec::new();
     let mut halted = false;
+    let mut halt_reported = false;
     let empty_prompts = BTreeMap::new();
 
     loop {
@@ -975,7 +1008,11 @@ pub async fn run_from_env() -> i32 {
                     sessions.observe(&name, session.running, false);
                 }
                 Ok(response) if response.reason.as_deref() == Some("runtime_lease_lost") => {
+                    // Registering again would bump the generation while an
+                    // attempt this process may not know about (acked but not
+                    // pending) is still open on the server. Stop instead.
                     sessions.observe(&name, false, false);
+                    halted = true;
                 }
                 _ => {
                     sessions.observe(&name, session.running, false);
@@ -1045,17 +1082,27 @@ pub async fn run_from_env() -> i32 {
                 halted = true;
                 continue;
             };
-            match api
+            let accepted = api
                 .execution_heartbeat(delivery, &session.instance_id, session.generation)
                 .await
-            {
-                Ok(response) if response.accepted => still_pending.push(delivery.clone()),
-                _ => halted = true,
+                .ok()
+                .map(|response| response.accepted);
+            match plan_pending_heartbeat(accepted) {
+                PendingHeartbeat::Keep => still_pending.push(delivery.clone()),
+                PendingHeartbeat::KeepAndHalt => {
+                    still_pending.push(delivery.clone());
+                    halted = true;
+                }
+                PendingHeartbeat::DropAndHalt => halted = true,
             }
         }
         pending = still_pending;
+        if halted && !halt_reported {
+            eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
+            halt_reported = true;
+        }
         if halted && pending.is_empty() {
-            return 0;
+            return BRIDGE_HALT_EXIT_CODE;
         }
 
         tokio::select! {
@@ -1632,5 +1679,26 @@ mod tests {
         assert_eq!(classify_bridge_result("merged"), None);
         assert_eq!(classify_bridge_result("deploy"), None);
         assert!(payload_leaks_control_plane("PostgreSQL://secret"));
+    }
+
+    #[test]
+    fn an_unknown_heartbeat_keeps_the_attempt_and_only_a_refusal_drops_it() {
+        assert_eq!(plan_pending_heartbeat(Some(true)), PendingHeartbeat::Keep);
+        assert_eq!(plan_pending_heartbeat(None), PendingHeartbeat::KeepAndHalt);
+        assert_eq!(plan_pending_heartbeat(Some(false)), PendingHeartbeat::DropAndHalt);
+    }
+
+    #[test]
+    fn a_halt_exits_with_its_own_status() {
+        // 0 is a clean shutdown and 1 is a startup failure; a halt is neither.
+        assert!(BRIDGE_HALT_EXIT_CODE != 0 && BRIDGE_HALT_EXIT_CODE != 1);
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &run[..run.find("fn local_client").unwrap()];
+        assert!(run.contains("return BRIDGE_HALT_EXIT_CODE;"));
+        assert!(!run.contains("worker_register(&name"), "a lost lease never re-registers");
+        let lost = &run[run.find("Some(\"runtime_lease_lost\")").unwrap()..];
+        let lost = &lost[..lost.find("_ => {").unwrap()];
+        assert!(lost.contains("halted = true;"));
     }
 }

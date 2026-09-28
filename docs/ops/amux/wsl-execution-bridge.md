@@ -32,9 +32,49 @@ Bridge 프로세스는 Tomverse 내부 API를 부르는 인증을 가질 수 있
 
 로컬 AMUX에 닿지 않거나 WSL이 멈추면 새 배정을 하지 않는다. generation이 바뀌었거나 execution lease가 지난 결과는 거절한다.
 
+Tomverse 내부 호출에는 호출별 deadline이 있고 연결은 1초다. worker 등록·heartbeat·delivery·execution·recovery 같은 lifecycle 호출은 15초로 앱 route 예산 12초보다 길고, claim은 18초, queue·routing snapshot 읽기는 5초다. 쓰기 호출이 deadline을 넘으면 결과 불명이고, 재시도하지 않고 halt한다. 진행 중인 attempt의 execution heartbeat가 전송 오류나 deadline으로 끝나면 그 attempt는 pending에 남고 heartbeat를 계속한다. Tomverse가 명시적으로 거절한 heartbeat만 그 attempt를 pending에서 뺀다. 둘 다 새 배정을 멈춘다.
+
+worker heartbeat가 `runtime_lease_lost`로 거절되면 다시 등록하지 않고 halt한다. 등록은 generation을 올리는데, 서버의 등록은 열린 attempt를 확인하지 않는다. ack는 됐지만 이 프로세스의 pending에 없는 attempt가 서버에 열려 있을 수 있으므로, 사람이 attempt 상태를 확인한 뒤 다시 시작한다.
+
+## halt와 재시작
+
+halt는 runner가 스스로 풀지 않는다. 원인은 사라진 전송, 거절된 heartbeat, 응답 없는 Tomverse 호출 같은 결과 불명이고, 다시 시작해도 되는지는 사람이 판단한다. halt한 runner는 진행 중인 attempt가 남지 않으면 종료 코드 3으로 끝나고 stderr에 한 줄을 남긴다. 종료 코드 0은 정상 종료, 1은 시작 실패다.
+
+## 상시 실행
+
+실행 위치: 운영자 PC의 WSL(Ubuntu) bash, Tomverse clone 폴더의 `apps/tomverse-orchestrator`. Rust toolchain이 필요하다. 이 단계는 Tomverse 쪽 상태를 바꾸지 않는다.
+
+release 빌드:
+
+```bash
+cargo build --release --locked --bin tomverse-wsl-bridge
+```
+
+환경 파일은 `~/.config/tomverse-wsl-bridge.env`에 두고 권한은 `600`이다. 넣는 이름은 `TOMVERSE_AMUX_WSL_BRIDGE`, `TOMVERSE_AMUX_WSL_LOCAL_URL`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_SYNC_SECRET`이다. 값은 이 문서와 대화에 적지 않는다.
+
+systemd user unit `~/.config/systemd/user/tomverse-wsl-bridge.service`의 핵심은 셋이다. `After=amux-server.service`로 로컬 AMUX 뒤에 시작하고, `Restart=on-failure`와 `RestartSec=60`으로 시작 실패만 다시 시도하며, `RestartPreventExitStatus=3`으로 halt는 다시 시작하지 않는다.
+
+```ini
+[Unit]
+Description=Tomverse AMUX WSL execution bridge
+After=amux-server.service
+
+[Service]
+EnvironmentFile=%h/.config/tomverse-wsl-bridge.env
+ExecStart=%h/.local/bin/tomverse-wsl-bridge
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=default.target
+```
+
+halt 뒤에는 로그(`journalctl --user -u tomverse-wsl-bridge`)와 Tomverse의 attempt 상태를 확인한 다음 사람이 `systemctl --user restart tomverse-wsl-bridge`로 다시 시작한다.
+
 ## 활성화
 
-버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수가 `bridge_tick`을 호출한다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
+버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
 
 이 버전은 두 환경 변수를 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다.
 
