@@ -188,3 +188,31 @@ export const providerEventEffect = (input: {
       return { kind: "ignored" };
   }
 };
+
+/**
+ * How an address is reduced before it is compared or stored.
+ *
+ * Trim and lower-case, and nothing else. Not because that is the whole of
+ * RFC 5321 -- the local part is formally case-sensitive and every provider we
+ * send through ignores that -- but because this rule decides which rows match
+ * each other, and a rule that strips dots or `+tag` would merge two mailboxes
+ * that a provider treats as two.
+ *
+ * It lives here rather than in the storage module because the permission
+ * ledger needs the same answer and cannot import a `server-only` file. Two
+ * implementations of one line is how an address gets suppressed under one
+ * spelling and consented under another.
+ */
+export const normalizeEmailAddress = (value: string) =>
+  value.trim().toLowerCase();
+
+/**
+ * Which rule the line above is, written into every ledger row.
+ *
+ * Stored rather than assumed (`EmailPermissionEvent.addressNormalizationVersion`):
+ * changing the rule changes which rows a cohort matches, and a ledger that
+ * cannot say which rule produced its addresses cannot be re-derived after the
+ * rule moves. Bump it in the same change that alters the function, never
+ * after.
+ */
+export const EMAIL_ADDRESS_NORMALIZATION_VERSION = "v1";
