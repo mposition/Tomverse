@@ -15,6 +15,7 @@ import {
   isMemoryInjectionEnabled,
 } from "@/lib/appSettings";
 import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
+import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 
 export default async function AdminPlatformSettingsPage() {
   const [
@@ -29,6 +30,7 @@ export default async function AdminPlatformSettingsPage() {
     memoryExtractionEnabled,
     memoryInjectionEnabled,
     revokedPairs,
+    guestLead,
   ] = await Promise.all([
     getPublicAppSettings(),
     isImageGenerationEnabled(),
@@ -48,6 +50,7 @@ export default async function AdminPlatformSettingsPage() {
     isMemoryExtractionEnabled(),
     isMemoryInjectionEnabled(),
     getMemoryExtractionRevokedPairs(),
+    readGuestLeadFacts(),
   ]);
 
   return (
@@ -65,6 +68,7 @@ export default async function AdminPlatformSettingsPage() {
       memoryExtractionEnabled={memoryExtractionEnabled}
       memoryInjectionEnabled={memoryInjectionEnabled}
       memoryApprovedPairCount={injectableExtractionPairs(revokedPairs).length}
+      storedGuestDefaultModelId={guestLead.stored}
     />
   );
 }
