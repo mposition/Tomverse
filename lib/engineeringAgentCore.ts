@@ -884,6 +884,17 @@ export const prBodyCarriesMarker = (body: string, runId: string) =>
 
 export type CommitIdentity = { name: string; email: string };
 
+/**
+ * The one identity a published commit carries, as author and committer. The
+ * app issues capabilities with it and the publisher builds commits with it; a
+ * commit object is compared byte for byte, so a second copy of these strings
+ * anywhere is a mismatch waiting to happen.
+ */
+export const ENGINEERING_AGENT_COMMIT_IDENTITY: CommitIdentity = Object.freeze({
+  name: "Tomverse Engineering Agent",
+  email: "engineering-agent@users.noreply.github.com",
+});
+
 export type ExpectedCommit = {
   tree: string;
   baseSha: string;

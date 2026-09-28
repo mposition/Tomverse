@@ -792,6 +792,9 @@ test("a claim whose lease passed goes to a lookup, and a lost answer can be foun
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   const lookup = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   assert.ok(lookup && lookup.mode === "lookup" && lookup.workItemId === workItemId);
+  // The lookup is told what the consumed capability allowed, to compare a found commit with.
+  assert.deepEqual(lookup.consumed, { commitDigest: lookup.consumed?.commitDigest, expectedTreeId: sha1("tree") });
+  assert.match(lookup.consumed?.commitDigest ?? "", /^[0-9a-f]{64}$/);
   const requeued = await inTx((tx) =>
     settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }),
   );

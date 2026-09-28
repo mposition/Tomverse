@@ -854,6 +854,8 @@ export type EngineeringAgentPublishWork =
       branch: string;
       fencingToken: bigint;
       leaseExpiresAt: Date;
+      /** The capability a write claim consumed; null when none was, and so no write was allowed. */
+      consumed: { commitDigest: string; expectedTreeId: string } | null;
     }
   | {
       mode: "write";
@@ -941,7 +943,17 @@ export async function claimNextEngineeringAgentPublishWork(
     fencingToken: claim.fencingToken,
     leaseExpiresAt: claim.leaseExpiresAt,
   };
-  if (mode === "lookup") return { mode, ...common };
+  if (mode === "lookup") {
+    // What a lookup compares a found commit with: the capability a write
+    // claim consumed, if any did. None consumed means no write was allowed,
+    // so anything found under the branch is not this item's (§10).
+    const consumed = await tx.engineeringAgentCapability.findFirst({
+      where: { workItemId: candidate.id, consumedAt: { not: null } },
+      orderBy: { consumedAt: "desc" },
+      select: { commitDigest: true, expectedTreeId: true },
+    });
+    return { mode, ...common, consumed };
+  }
   const capability = await tx.engineeringAgentCapability.findFirstOrThrow({
     where: { workItemId: candidate.id, claimFencingToken: claim.fencingToken },
     select: { commitDigest: true, expiresAt: true },
