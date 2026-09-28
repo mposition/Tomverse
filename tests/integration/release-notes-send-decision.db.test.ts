@@ -111,7 +111,7 @@ const consent = (userId: string, emailAddress: string) =>
     data: {
       userId,
       emailAddress,
-      purpose: "product_news",
+      purpose: "product_updates",
       action: "granted",
       jurisdiction: "AU",
       jurisdictionSource: "self_declared",
@@ -124,7 +124,7 @@ const consent = (userId: string, emailAddress: string) =>
 
 const verdictFor = (evidenceIds: string[], overrides: Partial<SendVerdictInput> = {}) =>
   releaseNotesSendVerdict({
-    purpose: "product_news",
+    purpose: "product_updates",
     policyVersionId,
     countries: ["AU"],
     rules: [
@@ -162,7 +162,7 @@ const write = (
       deliveryId: input.deliveryId,
       userId: input.userId,
       phase: input.phase,
-      purpose: "product_news",
+      purpose: "product_updates",
       classification: "marketing",
       emailAddress: input.emailAddress,
       addressNormalizationVersion: "v1",
@@ -463,7 +463,7 @@ test("a sent message's verdict records the submission, once", async () => {
       deliveryId: delivery.id,
       userId: user.id,
       phase: "send",
-      purpose: "product_news",
+      purpose: "product_updates",
       classification: "marketing",
       emailAddress: user.email!,
       addressNormalizationVersion: "v1",
@@ -475,20 +475,21 @@ test("a sent message's verdict records the submission, once", async () => {
     })
   );
 
-  const at = new Date(Date.now() + 1_000);
-  assert.equal(await recordProviderSubmission(prisma, { deliveryId: delivery.id, at }), true);
+  assert.equal(await recordProviderSubmission(prisma, { deliveryId: delivery.id }), true);
   // The second call finds nothing to write rather than tripping the ledger's
   // transition trigger.
-  assert.equal(
-    await recordProviderSubmission(prisma, { deliveryId: delivery.id, at: new Date(at.getTime() + 1_000) }),
-    false
-  );
+  assert.equal(await recordProviderSubmission(prisma, { deliveryId: delivery.id }), false);
 
+  // On the database clock and never below the seal -- the CHECK compares them,
+  // and an application clock behind the seal used to be refused after the
+  // message had already gone.
   const row = await prisma.emailPermissionDecision.findFirstOrThrow({
     where: { deliveryId: delivery.id, phase: "send" },
-    select: { providerSubmittedAt: true },
+    select: { providerSubmittedAt: true, sealedAt: true, suppressionCheckedAt: true },
   });
-  assert.equal(row.providerSubmittedAt?.getTime(), at.getTime());
+  assert.ok(row.providerSubmittedAt && row.sealedAt && row.suppressionCheckedAt);
+  assert.ok(row.providerSubmittedAt.getTime() >= row.sealedAt.getTime());
+  assert.ok(row.providerSubmittedAt.getTime() >= row.suppressionCheckedAt.getTime());
 });
 
 test("a refused verdict takes no submission", async () => {
@@ -505,7 +506,7 @@ test("a refused verdict takes no submission", async () => {
       deliveryId: delivery.id,
       userId: user.id,
       phase: "send",
-      purpose: "product_news",
+      purpose: "product_updates",
       classification: "marketing",
       emailAddress: user.email!,
       addressNormalizationVersion: "v1",
@@ -517,7 +518,67 @@ test("a refused verdict takes no submission", async () => {
     })
   );
   assert.equal(
-    await recordProviderSubmission(prisma, { deliveryId: delivery.id, at: new Date() }),
+    await recordProviderSubmission(prisma, { deliveryId: delivery.id }),
     false
+  );
+});
+
+test("a sealed decision whose basis moved is replaced, not failed", async () => {
+  // The ledger holds one send decision per delivery. When an allowed retry rests
+  // on a different basis, the message is still owed, so it is replaced -- and
+  // the trigger accepts that reason, not only a moved display contract.
+  const user = await account();
+  const predecessor = await claimedDelivery(user.email!);
+  const result = await prisma.$transaction((tx) =>
+    skipAndReenqueue(tx, {
+      reason: "verdict_basis_changed",
+      delivery: {
+        ...predecessor,
+        renderDataSnapshot: predecessor.renderDataSnapshot as Prisma.InputJsonValue,
+      },
+      current: {
+        templateVersionId,
+        policyVersionId,
+        jurisdictionCountry: "AU",
+        jurisdictionProfileKey: "AU",
+        displayContractHash: HASH_A,
+      },
+    })
+  );
+  assert.equal(result.reenqueued, true);
+  const before = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: predecessor.id },
+    select: { skipReason: true },
+  });
+  assert.equal(before.skipReason, "verdict_basis_changed");
+});
+
+test("any other skip reason still cannot have a replacement", async () => {
+  const user = await account();
+  const predecessor = await claimedDelivery(user.email!);
+  await prisma.emailDelivery.update({
+    where: { id: predecessor.id },
+    data: { status: "skipped", skipReason: "permission_revoked" },
+  });
+  await assert.rejects(
+    prisma.emailDelivery.create({
+      data: {
+        eventId: predecessor.eventId,
+        recipientKey: predecessor.recipientKey,
+        emailAddress: predecessor.emailAddress,
+        language: "en",
+        lane: "standard",
+        generation: 1,
+        supersedesDeliveryId: predecessor.id,
+        rootDeliveryId: predecessor.rootDeliveryId,
+        templateVersionId,
+        policyVersionId,
+        jurisdictionCountry: "AU",
+        jurisdictionProfileKey: "AU",
+        displayContractHash: HASH_B,
+        idempotencyKey: randomUUID(),
+      },
+    }),
+    /only a delivery skipped as display_contract_changed or verdict_basis_changed/
   );
 });

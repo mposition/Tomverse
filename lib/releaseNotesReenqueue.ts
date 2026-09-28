@@ -66,9 +66,17 @@ export type ReenqueueResult =
   | { reenqueued: true; deliveryId: string; generation: number; idempotencyKey: string }
   | { reenqueued: false; reason: "already_superseded" | "not_pending" };
 
+/**
+ * Why a delivery is replaced rather than ended. The database trigger holds the
+ * same two words; see its migration.
+ */
+export type ReenqueueReason = "display_contract_changed" | "verdict_basis_changed";
+
 export async function skipAndReenqueue(
   tx: Prisma.TransactionClient,
   input: {
+    /** Defaults to a moved display contract, the original reason. */
+    reason?: ReenqueueReason;
     /** The row being skipped, read in this transaction. */
     delivery: {
       id: string;
@@ -125,7 +133,7 @@ export async function skipAndReenqueue(
     where: { id: input.delivery.id, status: "pending" },
     data: {
       status: "skipped",
-      skipReason: REENQUEUE_BLOCKER,
+      skipReason: input.reason ?? REENQUEUE_BLOCKER,
       attempts: input.delivery.attempts,
       nextAttemptAt: null,
       claimedAt: null,

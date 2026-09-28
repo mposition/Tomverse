@@ -221,18 +221,28 @@ export const evidenceOf = (verdict: SendVerdict): DecisionEvidence[] =>
  * the CHECK that submission follows the seal.
  */
 export async function recordProviderSubmission(
-  db: Pick<Prisma.TransactionClient, "emailPermissionDecision">,
-  input: { deliveryId: string; at: Date }
+  db: Pick<Prisma.TransactionClient, "$executeRaw">,
+  input: { deliveryId: string }
 ): Promise<boolean> {
-  const result = await db.emailPermissionDecision.updateMany({
-    where: {
-      deliveryId: input.deliveryId,
-      phase: "send",
-      allowed: true,
-      sealedAt: { not: null },
-      providerSubmittedAt: null,
-    },
-    data: { providerSubmittedAt: input.at },
-  });
-  return result.count === 1;
+  // On the database clock, and never below the times the CHECK compares it
+  // with. The seal is the row's own `createdAt` or the verdict's `evaluatedAt`,
+  // whichever is later, so an application clock behind either of them wrote a
+  // submission time the CHECK refused -- after the message had already gone,
+  // leaving the ledger with a sealed, allowed decision and no submission.
+  // `GREATEST` can only move the time later than the moment it records, which
+  // is the direction a lower bound may be wrong in.
+  const count = await db.$executeRaw`
+    UPDATE "EmailPermissionDecision"
+       SET "providerSubmittedAt" = GREATEST(
+             (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC'),
+             "sealedAt",
+             "suppressionCheckedAt"
+           )
+     WHERE "deliveryId" = ${input.deliveryId}
+       AND "phase" = 'send'
+       AND "allowed" = TRUE
+       AND "sealedAt" IS NOT NULL
+       AND "providerSubmittedAt" IS NULL
+  `;
+  return count === 1;
 }

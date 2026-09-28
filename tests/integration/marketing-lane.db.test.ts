@@ -11,6 +11,7 @@ import { MARKETING_HALT_SETTING_KEY } from "@/lib/marketingSendHealthCore";
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
 } from "@/lib/emailFeatureFlags";
 import {
   approveCampaign,
@@ -125,6 +126,9 @@ beforeEach(async () => {
   // suite's whole subject is the marketing path, so it has to opt in -- and
   // having to opt in is itself the evidence that the default is off.
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  // product_updates is the release-notes product now, behind its own switch
+  // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
   await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
 });
 

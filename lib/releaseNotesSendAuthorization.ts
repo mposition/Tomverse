@@ -9,6 +9,7 @@ import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedger
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
+import { earliestBiennialNoticeDueAt } from "@/lib/biennialConsentNoticeReadiness";
 import {
   composeDisplayContract,
   displayContractHash,
@@ -529,6 +530,15 @@ export async function releaseNotesSendAuthorization(
           };
         });
 
+  // Korea's two-yearly consent notice is deferred, and the deferral's stored
+  // date is a seed's guess. The measured deadline -- the earliest anchor across
+  // Korean recipients plus two years -- is the one that applies where earlier, so
+  // it is read whenever Korea is the candidate, the way `/api/ready` reads it.
+  const biennialDue = countries.includes("KR")
+    ? await read("the Korean consent-notice deadline", () => earliestBiennialNoticeDueAt(input.now))
+    : null;
+  const deadlines = biennialDue ? { KR: { biennial_consent_notice: biennialDue } } : undefined;
+
   const verdict = releaseNotesSendVerdict({
     purpose: input.purpose,
     policyVersionId,
@@ -537,6 +547,7 @@ export async function releaseNotesSendAuthorization(
     obligations,
     readiness,
     waivers,
+    deadlines,
     recipient: {
       suppressed: input.suppressed,
       objected,

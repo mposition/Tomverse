@@ -528,10 +528,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
  */
 const recordReleaseNotesSubmission = async (deliveryId: string) => {
   try {
-    const recorded = await recordProviderSubmission(prisma, {
-      deliveryId,
-      at: new Date(),
-    });
+    const recorded = await recordProviderSubmission(prisma, { deliveryId });
     if (recorded) return;
     // Sent with no allowed, sealed send-phase verdict to record it on. The gate
     // runs before every release-notes send, so this is a defect in the gate's
@@ -880,10 +877,48 @@ const decideReleaseNotesSend = async (
     // only blocker is a moved display contract still goes to the re-enqueue, so
     // a template corrected while the message waited on a provider back-off still
     // reaches it -- the replacement is a new delivery with its own decisions.
-    if (!recorded.recorded && recorded.differs && verdict.allowed) {
-      throw new Error(
-        `the sealed send decision ${recorded.decisionId} allowed this on a basis the verdict taken now does not`
-      );
+    //
+    // The allowing disagreement is a replacement, not a failure. It used to throw,
+    // which the drain treated as a database that could not answer: it retried on
+    // that curve and abandoned the message with the incident pointing at
+    // Postgres, while the message was sendable the whole time. A replacement is a
+    // new delivery, so the new basis gets a send decision of its own and the
+    // ledger holds both honestly.
+    const basisMoved = !recorded.recorded && recorded.differs && verdict.allowed;
+    if (basisMoved) {
+      const required = verdict.displayContract.requiredDisplayContractHash;
+      if (required === null || displayProfile === null) {
+        // Allowed with no composed contract cannot happen -- an uncomposable
+        // contract is a blocker. Refused loudly rather than guessed at.
+        throw new Error(
+          `the sealed send decision ${recorded.decisionId} disagrees and no contract was composed`
+        );
+      }
+      const replaced = await skipAndReenqueue(tx, {
+        reason: "verdict_basis_changed",
+        delivery: {
+          id: delivery.id,
+          eventId: delivery.eventId,
+          recipientKey: delivery.recipientKey,
+          userId: delivery.userId,
+          emailAddress: delivery.emailAddress,
+          language: delivery.language,
+          lane: delivery.lane,
+          generation: delivery.generation,
+          rootDeliveryId: delivery.rootDeliveryId,
+          attempts: delivery.attempts,
+          renderDataSnapshot: delivery.renderDataSnapshot as Prisma.InputJsonValue,
+        },
+        current: {
+          templateVersionId: current.templateVersionId,
+          policyVersionId: delivery.policyVersionId,
+          jurisdictionCountry: displayProfile.countryCode,
+          jurisdictionProfileKey: displayProfile.profileKey,
+          displayContractHash: required,
+        },
+      });
+      if (!replaced.reenqueued) throw new ReenqueueRaceError(replaced.reason);
+      return true;
     }
 
     if (verdict.allowed) return false;

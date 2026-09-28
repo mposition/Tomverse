@@ -199,6 +199,16 @@ export type SendVerdictInput = {
   /** Per readiness check name, whether it passes. */
   readiness: Readonly<Record<string, boolean>>;
   waivers: readonly WaiverApproval[];
+  /**
+   * Measured deadlines, per country and duty, where one is known.
+   *
+   * A deferral's stored `dueBy` is a seed's guess; where the server has measured
+   * the real deadline -- Korea's two-yearly consent notice, from the earliest
+   * anchor across Korean recipients (`biennialNoticeReadiness()`) -- the earlier
+   * of the two blocks. Without it the verdict let Korean sends through until the
+   * seed's date while the readiness report already said the notice was due.
+   */
+  deadlines?: Readonly<Record<string, Readonly<Record<string, Date>>>>;
   recipient: RecipientState;
   flags: SendFlags;
   display: DisplayContract;
@@ -276,6 +286,7 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
       stored: input.obligations[countryCode] ?? [],
       readiness: input.readiness,
       waivers: input.waivers,
+      ...(input.deadlines?.[countryCode] ? { deadlines: input.deadlines[countryCode] } : {}),
       now: input.now,
     });
   }

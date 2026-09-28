@@ -433,3 +433,34 @@ test("an override lifts a missing basis and nothing about the destination", () =
   });
   assert.equal(closedLater.allowed, false);
 });
+
+test("a measured deadline earlier than the seed's closes the deferral", () => {
+  // Korea's two-yearly consent notice is deferred to a seeded date. Where the
+  // server has measured an earlier real deadline, that one applies -- the verdict
+  // used to ignore it and let Korean sends through until the seed's date while
+  // the readiness report already said the notice was due.
+  const deferred = {
+    obligationKey: "biennial_consent_notice",
+    state: "deferred",
+    readinessCheck: null,
+    dueBy: new Date("2028-01-01T00:00:00.000Z"),
+    warnDaysBefore: 60,
+    waiverApprovalId: null,
+  };
+  const duties = [
+    ...koreanDuties.filter((duty) => duty.obligationKey !== "biennial_consent_notice"),
+    deferred,
+  ];
+  const base = { countries: ["KR"], rules: [rule("KR")], obligations: { KR: duties } };
+
+  const unmeasured = verdict(base);
+  assert.equal(unmeasured.obligations.KR.allSettled, true);
+
+  const measured = verdict({
+    ...base,
+    deadlines: { KR: { biennial_consent_notice: new Date(NOW.getTime() - 86_400_000) } },
+  });
+  assert.equal(measured.obligations.KR.allSettled, false);
+  assert.ok(measured.blockers.includes("obligation_undecided"));
+  assert.equal(measured.allowed, false);
+});
