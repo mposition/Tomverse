@@ -32,4 +32,4 @@ Bridge 프로세스는 Tomverse 내부 API를 부르는 인증을 가질 수 있
 
 ## 활성화 전
 
-`scripts/amux-wsl-bridge.mjs`는 래치가 false인 동안 소켓을 열지 않고 끝난다. 래치를 켜는 변경은 이 정책의 다음 버전이다.
+`scripts/amux-wsl-bridge.mjs`와 `tomverse-wsl-bridge` 바이너리는 래치가 false인 동안 소켓을 열지 않고 끝난다. 바이너리의 본체는 `bridge_tick`이며, BoardDriver와 이미 실행 중인 세션 어댑터를 한 프로세스에서 호출한다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 래치가 true여도 이 빌드의 `process_main`은 활성화 runner가 없어 클라이언트를 만들지 않는다. 래치를 켜고 `bridge_tick`을 그 runner에 연결하는 변경은 이 정책의 다음 버전이다.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { boardPromotionExecutionBriefDigest } from "../lib/amux/boardPromotionCore.ts";
@@ -217,4 +218,20 @@ test("send success stays pending until a fenced worker result arrives", async ()
     readBack: async () => false,
   });
   assert.equal(late.disposition, "result_rejected");
+});
+
+test("the rust bridge process keeps the same latch off and does not construct a client", () => {
+  const bridge = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/wsl_bridge.rs", import.meta.url),
+    "utf8",
+  );
+  const binary = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/bin/tomverse-wsl-bridge.rs", import.meta.url),
+    "utf8",
+  );
+  assert.match(bridge, /pub const WSL_BRIDGE_CODE_LATCH: bool = false;/);
+  assert.match(bridge, /wsl bridge does not start workers/);
+  assert.equal(bridge.includes("TomverseApi::from_env"), false);
+  assert.equal(binary.includes("from_env"), false);
+  assert.match(binary, /WSL_BRIDGE_CODE_LATCH/);
 });
