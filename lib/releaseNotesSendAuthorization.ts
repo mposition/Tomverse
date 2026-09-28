@@ -369,6 +369,7 @@ export async function releaseNotesSendAuthorization(
     return {
       express,
       evidenceIds: express && latest ? [latest.id] : [],
+      citedAt: express && latest ? latest.occurredAt : null,
       // The same latest row, read for the override's standing rather than for a
       // basis: a withdrawal is the person's act and no approval sits above it.
       withdrawn: latest !== null && latest.action === "withdrawn",
@@ -548,7 +549,12 @@ export async function releaseNotesSendAuthorization(
     },
     override,
     phase: input.phase,
-    now: input.now,
+    // Never earlier than the consent it cites. The ledger's evidence trigger
+    // refuses evidence that "happened after the verdict was taken", and the
+    // consent's `occurredAt` was written by whichever instance recorded it; a
+    // verdict taken on a clock a little behind that one, about a consent just
+    // given, would be refused and roll the whole decision back.
+    now: consent.citedAt !== null && consent.citedAt > input.now ? consent.citedAt : input.now,
   });
 
   // One requirement at most, because `candidateCountries()` yields one country

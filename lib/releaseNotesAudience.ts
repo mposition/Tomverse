@@ -8,6 +8,7 @@ import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { isLanguage } from "@/lib/language";
 import { releaseNotesEnqueueDecision } from "@/lib/releaseNotesEnqueueDecision";
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
 
 /**
  * Who a release-notes campaign is for, and how many of them it would reach.
@@ -114,7 +115,11 @@ export type ReleaseNotesAudiencePreview = {
    * and useless. This is the count whose only refusal is the switch itself.
    */
   allowedWhenLive: number;
-  /** Refused candidates, by the word the drain would record. */
+  /** Of `allowedWhenLive`, those held back only by the release-notes switch. */
+  awaitingSwitch: number;
+  /** Whether marketing as a whole was on when this was taken. */
+  marketingOn: boolean;
+  /** Refused candidates, by the word the drain would record. Excludes `awaitingSwitch`. */
   refusedBy: Record<string, number>;
 };
 
@@ -155,12 +160,23 @@ export async function releaseNotesAudiencePreview(input: {
     return version.templateVersionId;
   };
 
+  // `feature_disabled` covers two switches, and only one of them is the last
+  // step of the activation order. Marketing as a whole is off in production
+  // until the sending accounts are split, and while it is, switching release
+  // notes on sends nothing -- the expansion refuses with `marketing_disabled`.
+  // So "would send once live" is counted only when marketing is already on;
+  // otherwise it would be a number of messages that switching release notes on
+  // does not send.
+  const marketingOn = await isEmailMarketingEnabled();
+
   const preview: ReleaseNotesAudiencePreview = {
     candidates: candidates.length,
     withEmail: 0,
     cohortMembers: 0,
     allowed: 0,
     allowedWhenLive: 0,
+    awaitingSwitch: 0,
+    marketingOn,
     refusedBy: {},
   };
 
@@ -191,10 +207,17 @@ export async function releaseNotesAudiencePreview(input: {
       continue;
     }
     const onlyTheSwitch =
+      marketingOn &&
       verdict.blockers.length === 1 &&
       verdict.blockers[0] === "feature_disabled" &&
       (verdict.legalAllowed || verdict.overrideApplied !== null);
-    if (onlyTheSwitch) preview.allowedWhenLive += 1;
+    if (onlyTheSwitch) {
+      // Counted once. Filing them under `marketing_disabled` as well put the
+      // same person in the approved column and the excluded column.
+      preview.allowedWhenLive += 1;
+      preview.awaitingSwitch += 1;
+      continue;
+    }
 
     const reason = releaseNotesSkipReason(verdict) ?? "unknown";
     preview.refusedBy[reason] = (preview.refusedBy[reason] ?? 0) + 1;

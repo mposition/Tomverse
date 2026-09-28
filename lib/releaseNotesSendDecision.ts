@@ -141,7 +141,7 @@ export async function recordSendDecision(
       providerSubmittedAt: input.providerSubmittedAt,
       evaluatedAt: input.verdict.evaluatedAt,
     },
-    select: { id: true },
+    select: { id: true, createdAt: true },
   });
 
   // Every row the verdict cited, then the seal. Deduplicated on the pair the
@@ -170,7 +170,20 @@ export async function recordSendDecision(
   // being written.
   await tx.emailPermissionDecision.update({
     where: { id: decision.id },
-    data: { sealedAt: new Date() },
+    // The row's own clock, not the application's. `createdAt` is the
+    // transaction's start on the database clock and the CHECK is
+    // `sealedAt >= createdAt`; `new Date()` from an application clock running
+    // behind the database failed it on every decision, so nothing was ever
+    // recorded and every release note retried until abandoned. The approval
+    // seal in lib/emailSendApprovalCohort.ts met the same constraint first and
+    // uses its row's `createdAt` for the same reason. `evaluatedAt` is the other
+    // floor: submission later requires `sealedAt >= evaluatedAt`.
+    data: {
+      sealedAt:
+        decision.createdAt > input.verdict.evaluatedAt
+          ? decision.createdAt
+          : input.verdict.evaluatedAt,
+    },
   });
 
   return { recorded: true, decisionId: decision.id };

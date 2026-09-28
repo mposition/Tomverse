@@ -852,7 +852,11 @@ const decideReleaseNotesSend = async (
       addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
       verdict,
       countryCandidates: verdict.countries,
-      suppressionCheckedAt: now,
+      // Not before the verdict: submission requires `suppressionCheckedAt >=
+      // evaluatedAt`, and the verdict may be dated to the consent it cites. The
+      // suppression check the send actually rests on is taken again under the
+      // address lock immediately before the provider call, which is later still.
+      suppressionCheckedAt: verdict.evaluatedAt > now ? verdict.evaluatedAt : now,
       providerSubmittedAt: null,
       evidence: evidenceOf(verdict),
     });
@@ -866,9 +870,19 @@ const decideReleaseNotesSend = async (
     // transient the next attempt agrees and proceeds, and if it is not the row
     // is abandoned with an incident, which is a person looking at it rather than
     // a message sent under a decision the ledger does not hold.
-    if (!recorded.recorded && recorded.differs) {
+    //
+    // Three cases, not one. A disagreement that *allows* on a different basis is
+    // the one that must not send: it throws. A disagreement that *refuses* is the
+    // world having moved -- a country closed, the switch turned off -- and the
+    // safe answer is not to send, which the skip below does; the ledger then
+    // holds an allowed decision with no provider submission beside a skipped
+    // delivery, which reads as exactly what happened. And a disagreement whose
+    // only blocker is a moved display contract still goes to the re-enqueue, so
+    // a template corrected while the message waited on a provider back-off still
+    // reaches it -- the replacement is a new delivery with its own decisions.
+    if (!recorded.recorded && recorded.differs && verdict.allowed) {
       throw new Error(
-        `the sealed send decision ${recorded.decisionId} disagrees with the verdict taken now`
+        `the sealed send decision ${recorded.decisionId} allowed this on a basis the verdict taken now does not`
       );
     }
 
