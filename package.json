@@ -170,6 +170,7 @@
     "email:recover-permanent-bounces": "node --conditions=react-server --import tsx scripts/email-recover-permanent-bounces.mjs",
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
+    "report:engineering-agent-tiers": "node --conditions=react-server --import tsx scripts/report-engineering-agent-tiers.mjs",
     "score:voice-mix-eval": "node --import tsx scripts/score-voice-mix-eval.mjs",
     "report:prompt-cache-usage": "node --import tsx scripts/report-prompt-cache-usage.mjs",
     "report:continuation-seed": "node --import tsx scripts/report-continuation-seed.mjs",
