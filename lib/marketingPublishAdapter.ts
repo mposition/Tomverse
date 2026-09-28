@@ -152,7 +152,8 @@ export type MarketingPublishAdapter = {
 /** Why no adapter is available, as a closed list rather than a sentence. */
 export type MarketingAdapterUnavailableReason =
   | "no_adapter_implemented"
-  | "provider_not_recognised";
+  | "provider_not_recognised"
+  | "no_credential";
 
 export type MarketingAdapterResolution =
   | { readonly available: true; readonly adapter: MarketingPublishAdapter }
@@ -176,12 +177,21 @@ export type MarketingAdapterResolution =
  */
 export const resolveMarketingPublishAdapter = (
   provider: string,
+  build?: () => MarketingPublishAdapter | null,
 ): MarketingAdapterResolution => {
   if (provider !== "zernio") {
     return { available: false, reason: "provider_not_recognised" };
   }
-  // S2d2 replaces this line and nothing above it.
-  return { available: false, reason: "no_adapter_implemented" };
+  // **The credential still does not live here.** S2d2 replaced the line that
+  // said no adapter exists, and did not replace the rule above it: this module
+  // constructs nothing that holds a secret. What arrives is a builder, from the
+  // service that has the credential, and `no_credential` is the honest answer
+  // when a caller has none to give -- which is every caller until an operator
+  // sets `ZERNIO_API_KEY` on the app.
+  if (!build) return { available: false, reason: "no_credential" };
+  const adapter = build();
+  if (!adapter) return { available: false, reason: "no_credential" };
+  return { available: true, adapter };
 };
 
 /**
@@ -192,5 +202,7 @@ export const resolveMarketingPublishAdapter = (
  * does not prevent one; what it prevents is the dispatch that would follow, and
  * a claim taken for a dispatch that cannot happen is a slot held for nothing.
  */
-export const marketingPublishAdapterAvailable = (provider: string): boolean =>
-  resolveMarketingPublishAdapter(provider).available;
+export const marketingPublishAdapterAvailable = (
+  provider: string,
+  build?: () => MarketingPublishAdapter | null,
+): boolean => resolveMarketingPublishAdapter(provider, build).available;
