@@ -4602,6 +4602,60 @@ model ReleaseNotesRuleVersion {
   @@index([countryCode])
 }
 
+/// How one statutory duty of one country's rule is settled, in one policy
+/// version. Contract: docs/policy/email-product-news-redesign-draft.md sections
+/// 7.7 and 7.8.
+///
+/// Keyed on the **country rule**, which is what section 7.8 says and what an
+/// obligation waiver's scope requires: a waiver names a policy version, a rule
+/// key, a rule version, a country and a duty, and all five have to match. The
+/// first version keyed these on the rule version alone, which cannot express
+/// that -- two policy versions carrying the same rule version would share one
+/// duty row, so a waiver approved for one of them failed for the other, and
+/// updating the row to suit the new one broke the old.
+///
+/// Which duties exist is declared in `lib/releaseNotesObligationCore.ts`, not
+/// here: a duty with no row is unsettled and blocks its rule, which is the whole
+/// mechanism. Each state names its own evidence and only its own -- the check
+/// that confirms an `implemented` duty, the date a `deferred` one must exist
+/// by, the sealed approval that `waived` it -- and a CHECK enforces that.
+///
+/// Not append-only, unlike the rule version: a deferral becoming an
+/// implementation is the lifecycle this records. The only state that can loosen
+/// a send is `waived`, and that needs an approval nothing but a person can
+/// write.
+model ReleaseNotesRuleObligation {
+  countryRuleId String
+  countryRule   ReleaseNotesCountryRule @relation(fields: [countryRuleId], references: [id], onDelete: Cascade, map: "ReleaseNotesRuleObligation_countryRule_fkey")
+
+  obligationKey String
+
+  state String
+
+  /// Names the readiness check that confirms an `implemented` duty.
+  readinessCheck String?
+
+  /// When a `deferred` duty must exist by, and how long before that the report
+  /// starts warning.
+  dueBy          DateTime?
+  warnDaysBefore Int?
+
+  /// The approval that waived it. The type travels with the id so the foreign
+  /// key names an approval of the right kind: a `risk_accepted` override is not
+  /// a waiver of anything.
+  waiverApprovalId   String?
+  waiverApprovalType String?
+  waiverApproval     EmailSendApproval? @relation(fields: [waiverApprovalId, waiverApprovalType], references: [id, approvalType], onDelete: Restrict, map: "ReleaseNotesRuleObligation_waiver_fkey")
+
+  notes String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([countryRuleId, obligationKey])
+  @@index([waiverApprovalId])
+}
+
 /// Which rule version a policy version applies to a country. Contract:
 /// docs/policy/email-notifications.md section 5.1.1.
 ///
@@ -4625,6 +4679,8 @@ model ReleaseNotesCountryRule {
   rule        ReleaseNotesRuleVersion @relation(fields: [ruleKey, ruleVersion], references: [ruleKey, ruleVersion], onDelete: Restrict, map: "ReleaseNotesCountryRule_rule_fkey")
 
   notes String
+
+  obligations ReleaseNotesRuleObligation[]
 
   createdAt DateTime @default(now())
 
@@ -7286,6 +7342,7 @@ model EmailSendApproval {
   members     EmailSendApprovalMember[]
   revocations EmailSendApprovalRevocation[]
   decisions   EmailPermissionDecision[]
+  waivedObligations ReleaseNotesRuleObligation[]
 
   /// Carried so a verdict's override can name (id, approvalType) as a
   /// composite foreign key. Referencing the id alone would let a verdict claim

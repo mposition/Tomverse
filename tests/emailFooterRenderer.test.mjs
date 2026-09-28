@@ -21,6 +21,7 @@ const IDENTITY = {
   legalName: "Tomverse Ltd.",
   postalAddress: "1 Example Street, Seoul 00000, Republic of Korea",
   contactEmail: "support@example.test",
+  contactPhone: "+61 2 0000 0000",
   businessRegistrationNumber: "000-00-00000",
   mailOrderRegistrationNumber: "0000-Seoul-0000",
   abn: "00 000 000 000",
@@ -116,10 +117,11 @@ test("every missing value is reported at once", () => {
       legalName: "Tomverse Ltd.",
       postalAddress: null,
       contactEmail: null,
+      contactPhone: null,
     },
   });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.missing, ["postal_address", "contact_email"]);
+  assert.deepEqual(result.missing, ["postal_address", "contact_email", "contact_phone"]);
 });
 
 test("a footer that names an unsubscribe link and has no URL is refused", () => {
