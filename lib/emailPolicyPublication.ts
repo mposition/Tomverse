@@ -6,9 +6,9 @@ import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 import { emailTemplateDefinition, EMAIL_TEMPLATE_KEYS } from "@/lib/emailTemplateDefinitions";
 import {
   CHANGE_NOTICE_WINDOW_DAYS,
-  REACHED_STATUSES,
-  UNREACHED_STATUSES,
+  HANDED_OVER_STATUSES,
   effectiveDateOf,
+  noticeDeadline,
   publicationProblems,
   type AmendedDocument,
   type ChangeNoticeFacts,
@@ -30,20 +30,16 @@ import {
  * refusal at write time would guard nothing. And every email policy draft
  * carries the release-notes country rules, so refusing *policy activation* would
  * block every email policy change, including ones unrelated to release notes.
- *
- * So `isEmailReleaseNotesLive()` is the reader every caller asks, and it answers
- * yes only when the stored flag is on **and** this amendment is published. A flag
- * switched on early does nothing yet, which is the honest state.
+ * So `isEmailReleaseNotesLive()` is the reader every caller asks.
  *
  * ## Recorded digests, and only verified ones
  *
  * Nothing is hashed at runtime: a production build does not promise the source
- * files are on disk, and a second digest implementation would be a second answer
- * to a question a test already answers. Both sides are constants -- and a
- * constant counts only where a test recomputes it from what is rendered
- * (`DIGEST_VERIFIED_BY`). A digest typed into a table and checked by nothing is a
- * claim about the page, and the first version of this gate would have treated
- * one as the page itself.
+ * files are on disk. Both sides of the comparison are constants, and a current
+ * digest counts only where a test recomputes it from what is rendered and
+ * compares it with the recorded value (`DIGEST_VERIFIED_BY`;
+ * `tests/emailPolicyPublication.test.mjs` checks each named test actually hashes
+ * and compares, not merely mentions the path).
  */
 
 /**
@@ -57,9 +53,21 @@ export const DIGEST_BEFORE_AMENDMENT: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The current state of each amended document that is not a sitemap page.
+ *
+ * `SITEMAP_CONTENT_EVIDENCE` only holds URLs the sitemap lists, and its own test
+ * insists on that, so the signup consent copy and the login consent sentence --
+ * which are not pages -- could never have been recorded there. They are recorded
+ * here, when the amendment is written, beside a test that recomputes them.
+ * Checked first; a sitemap entry answers for the pages.
+ */
+export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
+  Record<string, { date: string; contentSha256: string }>
+> = {};
+
+/**
  * The test that recomputes each document's current digest from the rendered
- * source. `tests/emailPolicyPublication.test.mjs` checks each named file exists
- * and names the document, so an entry here cannot point at nothing.
+ * source and compares it with the recorded one.
  */
 export const DIGEST_VERIFIED_BY: Readonly<Record<string, string>> = {
   "/privacy": "tests/sitemapLastModified.test.mjs",
@@ -67,13 +75,8 @@ export const DIGEST_VERIFIED_BY: Readonly<Record<string, string>> = {
 
 /**
  * Section 10's table: the two pages, and the two pieces of product copy that
- * carry the same promise.
- *
- * The signup consent devices and the login consent sentence are here because
- * the first version listed only the pages, and its own opening procedure would
- * have switched release notes on with both of those still in their earlier
- * wording. Neither has a recorded state yet, so each is
- * `document_state_unrecorded` -- which is true.
+ * carry the same promise. None but `/privacy` has a recorded state yet, so each
+ * of the other three is `document_state_unrecorded` -- which is true.
  */
 export const AMENDED_DOCUMENTS = [
   "/privacy",
@@ -85,20 +88,20 @@ export const AMENDED_DOCUMENTS = [
 /**
  * The template that carries the amendment notice, once one exists.
  *
- * It must be a template made for this amendment: `CHANGE_NOTICE_WINDOW_DAYS`
- * bounds how old a delivery may be and still count, but a template already
- * sending for another reason inside that window would still be counted. Null
- * until the approved wording is written, which is `change_notice_unidentified`.
+ * It must be a `legal` template made for this amendment. Null until the approved
+ * wording is written, which is `change_notice_unidentified`.
  */
 export const CHANGE_NOTICE_TEMPLATE_KEY: string | null = null;
 
 export const documentFacts = (): AmendedDocument[] =>
   AMENDED_DOCUMENTS.map((path) => {
-    const evidence = (
-      SITEMAP_CONTENT_EVIDENCE as Readonly<
-        Record<string, { date: string; contentSha256: string } | undefined>
-      >
-    )[path];
+    const evidence =
+      AMENDED_DOCUMENT_EVIDENCE[path] ??
+      (
+        SITEMAP_CONTENT_EVIDENCE as Readonly<
+          Record<string, { date: string; contentSha256: string } | undefined>
+        >
+      )[path];
     return {
       path,
       digestBeforeAmendment: DIGEST_BEFORE_AMENDMENT[path] ?? null,
@@ -113,33 +116,37 @@ const UNIDENTIFIED: ChangeNoticeFacts = {
   classification: null,
   purpose: null,
   owed: 0,
-  reached: 0,
+  told: 0,
+  late: 0,
   unreachable: 0,
-  notAttempted: 0,
+  untold: 0,
   firstSentAt: null,
 };
 
 const DAY_MS = 86_400_000;
-const ATTEMPTED = [...REACHED_STATUSES, ...UNREACHED_STATUSES];
+
+/** A JS instant as the naive-UTC `TIMESTAMP(3)` the columns hold. */
+const utc = (value: Date) => value.toISOString();
 
 /**
- * The notice's reach, as one statement.
+ * Every owed account classified as told, late, unreachable or untold, in one
+ * statement.
  *
- * Takes the template key rather than reading `CHANGE_NOTICE_TEMPLATE_KEY` so the
- * statement can be exercised against a database before any notice exists
+ * One SELECT so the counts come from one snapshot. Every instant is converted
+ * with `AT TIME ZONE 'UTC'`, the way this repository's other raw SQL compares
+ * these naive `TIMESTAMP(3)` columns: a bare JS `Date` parameter is interpreted
+ * in the session's time zone, and the owed cut and the window would move by that
+ * offset.
+ *
+ * Takes the template key as an argument so it can be exercised against a
+ * database before any notice exists
  * (tests/integration/email-policy-publication.db.test.ts).
- *
- * One SELECT so the four counts come from one snapshot: an owed account cannot
- * be counted as not attempted by one sub-query and reached by another while a
- * wave is in flight.
  */
 export const noticeFactsFor = async (
   templateKey: string | null,
   effective: Date | null,
   now: Date
 ): Promise<ChangeNoticeFacts> => {
-  // A key no template defines is as unidentified as none at all, and asking
-  // `emailTemplateDefinition()` for it would throw.
   if (
     templateKey === null ||
     !EMAIL_TEMPLATE_KEYS.includes(templateKey as (typeof EMAIL_TEMPLATE_KEYS)[number])
@@ -147,56 +154,75 @@ export const noticeFactsFor = async (
     return UNIDENTIFIED;
   }
   const definition = emailTemplateDefinition(templateKey);
-  // Before every document shows a usable date there is no anchor; the gate is
-  // closed on those documents anyway, and counting against "now" still tells an
-  // operator how far the notice has got.
+  // Before the documents agree on a date there is no anchor; the gate is closed
+  // on the documents anyway, and counting against "now" still reports progress.
   const anchor = effective ?? now;
+  const deadline = noticeDeadline(anchor);
   const windowStart = new Date(anchor.getTime() - CHANGE_NOTICE_WINDOW_DAYS * DAY_MS);
 
   const [row] = await prisma.$queryRaw<
     {
       owed: bigint;
-      reached: bigint;
+      told: bigint;
+      late: bigint;
       unreachable: bigint;
-      notAttempted: bigint;
+      untold: bigint;
       firstSentAt: Date | null;
     }[]
   >`
-    WITH owed AS (
-      SELECT u."id"
-        FROM "User" u
-       WHERE u."email" IS NOT NULL
-         AND u."createdAt" < ${anchor}
+    WITH params AS (
+      SELECT (${utc(anchor)}::timestamptz AT TIME ZONE 'UTC')      AS "effective",
+             (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
+             (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart"
+    ),
+    owed AS (
+      SELECT u."id", u."email", u."createdAt"
+        FROM "User" u, params p
+       WHERE u."createdAt" IS NULL OR u."createdAt" < p."effective"
     ),
     notice AS (
       SELECT d."userId", d."status", d."sentAt"
         FROM "EmailDelivery" d
         JOIN "TemplateVersion" tv ON tv."id" = d."templateVersionId"
         JOIN "EmailTemplate" t ON t."id" = tv."templateId"
+        CROSS JOIN params p
        WHERE t."key" = ${templateKey}
          AND d."userId" IS NOT NULL
-         AND d."createdAt" >= ${windowStart}
+         AND d."createdAt" >= p."windowStart"
+    ),
+    handed AS (
+      SELECT n."userId", n."sentAt"
+        FROM notice n, params p
+       WHERE n."status" = ANY(${[...HANDED_OVER_STATUSES]}::text[])
+         AND n."sentAt" IS NOT NULL
+         AND n."sentAt" < p."effective"
+    ),
+    classified AS (
+      SELECT CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM handed h, params p
+                  WHERE h."userId" = o."id"
+                    AND (h."sentAt" < p."deadline"
+                         OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."deadline"))
+               ) THEN 'told'
+               WHEN EXISTS (SELECT 1 FROM handed h WHERE h."userId" = o."id") THEN 'late'
+               WHEN o."email" IS NULL
+                 OR EXISTS (
+                   SELECT 1 FROM notice n
+                    WHERE n."userId" = o."id" AND n."status" = 'suppressed'
+                 ) THEN 'unreachable'
+               ELSE 'untold'
+             END AS "state"
+        FROM owed o
     )
     SELECT
-      (SELECT COUNT(*) FROM owed) AS "owed",
-      (SELECT COUNT(*) FROM owed o WHERE EXISTS (
-         SELECT 1 FROM notice n
-          WHERE n."userId" = o."id" AND n."status" = ANY(${[...REACHED_STATUSES]}::text[])
-      )) AS "reached",
-      (SELECT COUNT(*) FROM owed o
-        WHERE NOT EXISTS (
-          SELECT 1 FROM notice n
-           WHERE n."userId" = o."id" AND n."status" = ANY(${[...REACHED_STATUSES]}::text[]))
-          AND EXISTS (
-          SELECT 1 FROM notice n
-           WHERE n."userId" = o."id" AND n."status" = ANY(${[...UNREACHED_STATUSES]}::text[]))
-      ) AS "unreachable",
-      (SELECT COUNT(*) FROM owed o WHERE NOT EXISTS (
-         SELECT 1 FROM notice n
-          WHERE n."userId" = o."id" AND n."status" = ANY(${ATTEMPTED}::text[])
-      )) AS "notAttempted",
-      (SELECT MIN(n."sentAt") FROM notice n
-        WHERE n."status" = ANY(${[...REACHED_STATUSES]}::text[])) AS "firstSentAt"
+      COUNT(*)                                        AS "owed",
+      COUNT(*) FILTER (WHERE "state" = 'told')        AS "told",
+      COUNT(*) FILTER (WHERE "state" = 'late')        AS "late",
+      COUNT(*) FILTER (WHERE "state" = 'unreachable') AS "unreachable",
+      COUNT(*) FILTER (WHERE "state" = 'untold')      AS "untold",
+      (SELECT MIN("sentAt") FROM handed)              AS "firstSentAt"
+      FROM classified
   `;
 
   return {
@@ -204,9 +230,10 @@ export const noticeFactsFor = async (
     classification: definition.classification,
     purpose: definition.purpose ?? null,
     owed: Number(row?.owed ?? 0),
-    reached: Number(row?.reached ?? 0),
+    told: Number(row?.told ?? 0),
+    late: Number(row?.late ?? 0),
     unreachable: Number(row?.unreachable ?? 0),
-    notAttempted: Number(row?.notAttempted ?? 0),
+    untold: Number(row?.untold ?? 0),
     firstSentAt: row?.firstSentAt ?? null,
   };
 };
@@ -224,34 +251,44 @@ export async function emailPolicyPublicationProblems(
 }
 
 /**
- * The answer, remembered briefly.
+ * The answer, remembered for a minute, whichever it was.
  *
- * Asked once per recipient by the verdict, so an uncached answer would be a
- * statement over the user and delivery tables for every message in a fan-out.
- * A pass is remembered for five minutes and a failure for one -- not a pass for
- * the life of the process, as the first version had it: nothing should make a
- * pass revert, but "nothing should" is not a reason to stop looking.
+ * Asked once per recipient by the verdict. A pass is remembered no longer than a
+ * failure: an account that gains an address after the notice went out is owed a
+ * notice it has not had, and the gate should close within a minute of that
+ * rather than five.
+ *
+ * A query that throws is remembered too -- as the error, rethrown, not as
+ * "unpublished". The callers are send gates inside the verdict, whose `read()`
+ * turns a throw into the retryable `VerdictUnavailableError` (invariant 11).
+ * Answering "unpublished" instead would make every release note claimed during a
+ * database hiccup a permanent `feature_disabled` skip. Remembering the error
+ * stops a timing-out statement being re-run for every claimed message.
  */
-const PASS_TTL_MS = 5 * 60_000;
-const FAILURE_TTL_MS = 60_000;
-let cached: { published: boolean; at: number } | null = null;
+const TTL_MS = 60_000;
+let cached: { published: boolean; at: number } | { error: unknown; at: number } | null = null;
 
 export async function isEmailPolicyPublished(now: Date = new Date()): Promise<boolean> {
   if (cached) {
-    const ttl = cached.published ? PASS_TTL_MS : FAILURE_TTL_MS;
     const age = now.getTime() - cached.at;
-    if (age >= 0 && age < ttl) return cached.published;
+    if (age >= 0 && age < TTL_MS) {
+      if ("error" in cached) throw cached.error;
+      return cached.published;
+    }
   }
-  const published = (await emailPolicyPublicationProblems(now)).length === 0;
-  cached = { published, at: now.getTime() };
-  return published;
+  try {
+    const published = (await emailPolicyPublicationProblems(now)).length === 0;
+    cached = { published, at: now.getTime() };
+    return published;
+  } catch (error) {
+    cached = { error, at: now.getTime() };
+    throw error;
+  }
 }
 
 /**
  * Whether release notes may be sent at all: the operator's switch, and the
- * amendment the switch may not run ahead of.
- *
- * The one reader for every caller -- both enqueue paths and the send verdict.
+ * amendment the switch may not run ahead of. The one reader for every caller.
  */
 export async function isEmailReleaseNotesLive(): Promise<boolean> {
   if (!(await isEmailReleaseNotesEnabled())) return false;

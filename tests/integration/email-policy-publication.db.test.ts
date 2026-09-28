@@ -117,90 +117,136 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("a notice the webhook moved on to delivered still counts as reached", async () => {
-  const first = await account(daysBefore(90));
-  const second = await account(daysBefore(90));
-  await delivery(first.id, "sent", daysBefore(40));
-  await delivery(second.id, "delivered", daysBefore(35));
+const facts = () =>
+  noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
 
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.owed, 2);
-  assert.equal(facts.reached, 2);
-  assert.equal(facts.notAttempted, 0);
-  assert.equal(facts.firstSentAt?.getTime(), daysBefore(40).getTime());
-  assert.equal(facts.classification, "legal");
+test("a notice the webhook moved on is still a notice the provider accepted", async () => {
+  // `sent` is not where a successful message ends. The first version counted
+  // only `sent`, so a campaign the webhook had moved to `delivered` read as never
+  // sent.
+  for (const status of ["sent", "delivered", "bounced", "complained"]) {
+    const user = await account(daysBefore(90));
+    await delivery(user.id, status, daysBefore(40), daysBefore(40));
+  }
+  const result = await facts();
+  assert.equal(result.owed, 4);
+  assert.equal(result.told, 4);
+  assert.equal(result.untold, 0);
+  assert.equal(result.firstSentAt?.getTime(), daysBefore(40).getTime());
+  assert.equal(result.classification, "legal");
 });
 
-test("an unreachable mailbox is attempted, reported, and not blocking", async () => {
-  const bounced = await account(daysBefore(90));
-  await delivery(bounced.id, "bounced", daysBefore(40), daysBefore(40));
+test("a row the lane wrote without calling the provider is not a notice", async () => {
+  // `failed` and `abandoned` are our failures: the notice was never handed over,
+  // so those accounts are untold. `suppressed` is the lane refusing the address,
+  // which is a fact about the mailbox: unreachable, reported, not blocking.
+  const failed = await account(daysBefore(90));
+  await delivery(failed.id, "failed", daysBefore(40), null);
+  const abandoned = await account(daysBefore(90));
+  await delivery(abandoned.id, "abandoned", daysBefore(40), null);
   const suppressed = await account(daysBefore(90));
   await delivery(suppressed.id, "suppressed", daysBefore(40), null);
 
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.owed, 2);
-  assert.equal(facts.reached, 0);
-  assert.equal(facts.unreachable, 2);
-  assert.equal(facts.notAttempted, 0);
+  const result = await facts();
+  assert.equal(result.told, 0);
+  assert.equal(result.untold, 2);
+  assert.equal(result.unreachable, 1);
 });
 
-test("one account's extra deliveries do not stand in for another's missing one", async () => {
-  // The size comparison this replaced: two deliveries, two owed, one untold.
-  const told = await account(daysBefore(90));
-  const untold = await account(daysBefore(90));
-  await delivery(told.id, "sent", daysBefore(40));
-  await delivery(told.id, "delivered", daysBefore(39));
-
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.owed, 2);
-  assert.equal(facts.reached, 1);
-  assert.equal(facts.notAttempted, 1);
-  assert.ok(untold.id);
-});
-
-test("an account that joins during the notice period is owed a notice too", async () => {
-  // Anchored on the effective date, not on the first send: someone who signed up
-  // after the first wave went out and before the amendment took effect has not
-  // been told, and a later wave has to reach them.
+test("each account is told in time on its own, not by the earliest send", async () => {
+  // The second version measured the period from one `MIN(sentAt)`, so one early
+  // send made every later one count.
   const early = await account(daysBefore(90));
-  await delivery(early.id, "sent", daysBefore(40));
-  await account(daysBefore(10));
+  await delivery(early.id, "sent", daysBefore(40), daysBefore(40));
+  const lateComer = await account(daysBefore(90));
+  await delivery(lateComer.id, "sent", daysBefore(5), daysBefore(5));
 
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.owed, 2);
-  assert.equal(facts.notAttempted, 1);
+  const result = await facts();
+  assert.equal(result.told, 1);
+  assert.equal(result.late, 1);
+});
 
-  // An account created on or after the effective date is not owed one.
+test("the notice period is counted in calendar days", async () => {
+  // Effective 15 November: any time on 16 October is thirty days. Measured to the
+  // millisecond from midnight, 00:00:01 on 16 October was late for ever.
+  const onTheDay = await account(daysBefore(90));
+  await delivery(
+    onTheDay.id,
+    "sent",
+    daysBefore(30),
+    new Date(daysBefore(30).getTime() + 23 * 3_600_000)
+  );
+  const dayAfter = await account(daysBefore(90));
+  await delivery(dayAfter.id, "sent", daysBefore(29), daysBefore(29));
+
+  const result = await facts();
+  assert.equal(result.told, 1);
+  assert.equal(result.late, 1);
+});
+
+test("an account that joined during the notice period is told if told before it applies", async () => {
+  // Thirty days were never available to it, so it has until the effective date.
+  const joinedLate = await account(daysBefore(10));
+  await delivery(joinedLate.id, "sent", daysBefore(5), daysBefore(5));
+  const joinedLateUntold = await account(daysBefore(10));
+
+  const result = await facts();
+  assert.equal(result.owed, 2);
+  assert.equal(result.told, 1);
+  assert.equal(result.untold, 1);
+  assert.ok(joinedLateUntold.id);
+});
+
+test("a notice after the effective date is no notice", async () => {
+  const user = await account(daysBefore(90));
+  await delivery(user.id, "sent", EFFECTIVE, new Date(EFFECTIVE.getTime() + 3_600_000));
+  const result = await facts();
+  assert.equal(result.told, 0);
+  assert.equal(result.late, 0);
+  assert.equal(result.untold, 1);
+});
+
+test("an account whose age is unknown is owed, and one created after is not", async () => {
+  await prisma.user.create({ data: { email: "unknown-age@example.test", createdAt: null } });
   await account(EFFECTIVE);
-  const later = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(later.owed, 2);
+  const result = await facts();
+  assert.equal(result.owed, 1);
+  assert.equal(result.untold, 1);
+});
+
+test("an account with no address is unreachable, not untold", async () => {
+  await account(daysBefore(90), null);
+  const result = await facts();
+  assert.equal(result.owed, 1);
+  assert.equal(result.unreachable, 1);
+  assert.equal(result.untold, 0);
 });
 
 test("a delivery older than the notice window is not this notice", async () => {
-  // A key pointed at a template that has been sending for a year must not supply
-  // last year's deliveries as the amendment notice.
   const old = await account(daysBefore(400));
-  await delivery(old.id, "sent", daysBefore(200));
-
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.reached, 0);
-  assert.equal(facts.notAttempted, 1);
-  assert.equal(facts.firstSentAt, null);
+  await delivery(old.id, "sent", daysBefore(200), daysBefore(200));
+  const result = await facts();
+  assert.equal(result.told, 0);
+  assert.equal(result.untold, 1);
+  assert.equal(result.firstSentAt, null);
 });
 
-test("pending and skipped deliveries are not attempts", async () => {
-  // In flight, or a dry run, or cancelled: none of them told anybody anything.
+test("pending and skipped deliveries tell nobody", async () => {
   const pending = await account(daysBefore(90));
   await delivery(pending.id, "pending", daysBefore(40), null);
   const skipped = await account(daysBefore(90));
   await delivery(skipped.id, "skipped", daysBefore(40), null);
-
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.notAttempted, 2);
+  const result = await facts();
+  assert.equal(result.untold, 2);
 });
 
-test("an account without an address is not owed a mail it cannot receive", async () => {
-  await account(daysBefore(90), null);
-  const facts = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
-  assert.equal(facts.owed, 0);
+test("one account's extra deliveries do not stand in for another's missing one", async () => {
+  const told = await account(daysBefore(90));
+  await delivery(told.id, "sent", daysBefore(40), daysBefore(40));
+  await delivery(told.id, "delivered", daysBefore(39), daysBefore(39));
+  await account(daysBefore(90));
+  const result = await facts();
+  assert.equal(result.owed, 2);
+  assert.equal(result.told, 1);
+  assert.equal(result.untold, 1);
 });

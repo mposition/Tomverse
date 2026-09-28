@@ -1542,21 +1542,27 @@ EEA·영국을 여는 선행 게이트입니다.
   끌 수 있고, `transactional`을 가리키면 로그인 코드·영수증이 고지로 세어집니다.
   고지 기간은 `CHANGE_NOTICE_PERIOD_DAYS`(30일), 이 고지로 인정하는 발송의 범위는
   시행일 전 `CHANGE_NOTICE_WINDOW_DAYS`(120일)입니다.
-- **"모두에게 갔는가"는 집합 질문입니다.** 시행일 전에 생긴 주소 있는 계정 중 고지
-  **시도가 하나도 없는** 계정 수를 SQL 한 문장으로 셉니다. 시도는 도달(`sent`·
-  `delivered`)과 미도달(`bounced`·`complained`·`suppressed`·`failed`·`abandoned`)
-  모두이고, **죽은 메일함은 보고만 하고 막지 않습니다** — §3.1이 요구하는 것은
-  발송과 미도달 추적이지, 주소 하나가 이후 제품 전체를 막는 것이 아닙니다. 첫
-  버전은 `sent`만 셌고(webhook이 `delivered`로 옮기면 영구히 닫힘) 두 집합의 크기를
-  비교했습니다(한 계정의 추가 발송이 다른 계정의 누락을 메움).
-- **대상은 시행일 기준입니다.** 고지 기간 중 가입한 계정도 고지를 받아야 하며,
-  운영자가 후속 wave를 보냅니다.
+- **"제때 고지받았는가"는 계정마다 판정합니다.** 시행일 전에 생긴 계정(생성 시각을
+  모르는 계정 포함)마다 SQL 한 문장으로 넷 중 하나로 분류합니다 — **told**(고지가
+  기한 전에 제공자에게 넘어감: `sent`·`delivered`·`bounced`·`complained`),
+  **late**(넘어갔지만 기한 후, 차단), **unreachable**(주소가 없거나 lane이 suppression으로
+  거부, 보고만), **untold**(그 밖 전부 — `failed`·`abandoned`는 우리 실패이므로 차단).
+  기한은 **달력일로 시행일 30일 전 그날까지**이고, 고지 기간 중 가입한 계정은
+  시행일 전까지입니다. 모든 시각은 `AT TIME ZONE 'UTC'`로 비교합니다.
+  이전 두 버전은 `sent`만 셌거나, 크기를 비교했거나, 가장 이른 한 통의 시각으로
+  기간을 쟀거나, 제공자에 넘기지도 않은 행을 시도로 셌습니다.
+- **개정은 시행일 하나입니다.** 문서마다 날짜가 다르면 `effective_dates_differ`.
+- **통과·실패 모두 1분만 기억하고, 조회 오류는 "미게시"가 아니라 오류로 다시
+  던집니다** — 판정의 `read()`가 재시도로 바꾸므로, 순간적인 DB 오류가 release
+  notes를 영구 skip하지 않습니다(불변식 11).
 
 **남은 것은 전부 소유자 결정입니다.** (1) 네 문서의 개정 문안(7개 언어) 승인,
-(2) `/terms`·가입 문안·로그인 문장의 개정 전 digest와, 현재 digest를 렌더된 원본과
-대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록), (3) `legal` 분류의 변경 고지 template —
-이 개정 전용으로 새로 만든 것 — 과 시행일. 문안이 승인되면 template key를
-`CHANGE_NOTICE_TEMPLATE_KEY`에 적고 개정된 문서의 digest와 날짜를 갱신하면 게이트가
+(2) `/terms`·가입 문안·로그인 문장의 개정 전 digest(`DIGEST_BEFORE_AMENDMENT`)와
+현재 digest·시행일(페이지는 `SITEMAP_CONTENT_EVIDENCE`, 가입·로그인 문안처럼
+페이지가 아닌 것은 `AMENDED_DOCUMENT_EVIDENCE`), 그리고 그 현재 digest를 렌더된 원본에서
+다시 계산해 대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록 — 이름만 언급하는 테스트는
+검사가 거부합니다), (3) `legal` 분류의 변경 고지 template — 이 개정 전용으로 새로 만든
+것 — 과 시행일. 이 셋을 갖추고 고지를 대상 전원에게 기한 안에 넘기면 게이트가
 스스로 열립니다.
 `tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
 있음을 고정하므로, 그때 함께 고칩니다.

@@ -12,33 +12,39 @@
  * Section 10 lists four documents and a procedure. A checklist in a runbook is a
  * list somebody ticks; this is the list the release-notes switch is read
  * through. The failure it prevents is silent: release notes could start going
- * out while the pages still promised marketing mail only on request, and nothing
- * about the send path would look wrong.
+ * out while the pages still promised marketing mail only on request.
  *
- * ## "Told" is a set question, answered in SQL
+ * ## "Told in time" is decided per account
  *
- * The first version compared two sizes -- accounts owed the notice against
- * accounts with a `sent` delivery -- and was wrong in both directions. `sent` is
- * not where a successful message ends: the delivery webhook moves it on to
- * `delivered`, so thirty days after a campaign that reached everyone the count
- * was zero and the gate stayed shut for ever. And a size comparison lets one
- * account's extra delivery stand in for another account's missing one.
+ * Two earlier versions answered it in aggregate and were wrong both times. The
+ * first counted `sent` rows and compared sizes; the second asked "any attempt
+ * per account" but measured the notice period from the single earliest send,
+ * counted rows the lane refused before any provider call as attempts, and
+ * compared naive timestamps against a session-dependent clock.
  *
- * So the question is asked the way it is meant: **how many owed accounts have
- * no attempt at all**. An attempt is any terminal outcome -- reached (`sent`,
- * `delivered`) or not (`bounced`, `complained`, `suppressed`, `failed`,
- * `abandoned`). A dead mailbox is reported, not blocking: section 3.1's fifth
- * type asks that a legal notice be sent and its non-delivery tracked, not that
- * one unreachable address hold every later product hostage.
+ * Now each owed account is classified on its own, in one statement:
+ *
+ * - **told** -- a notice was handed to the provider (`sent`, `delivered`,
+ *   `bounced`, `complained`: every state that exists only after the provider
+ *   accepted the message) before the account's deadline. The deadline is the
+ *   end of the day thirty days before the effective date for an account that
+ *   existed then; an account that joined inside the notice period has until the
+ *   effective date, because thirty days were never available to it.
+ * - **late** -- handed over, but only after its deadline. Blocking: a notice
+ *   that arrives with less notice than owed is not the notice.
+ * - **unreachable** -- never handed over, and the system cannot hand it over:
+ *   the account has no address, or the lane refused the notice for a suppression
+ *   on the address. Reported, not blocking -- section 3.1's fifth type asks that
+ *   a legal notice be sent and non-delivery tracked, and a gate waiting on mail
+ *   the lane will never send never opens.
+ * - **untold** -- everything else, including a notice that `failed` or was
+ *   `abandoned`: those are our failures, not facts about the mailbox. Blocking.
  *
  * ## Who is owed
  *
- * Every account with an address that existed **before the effective date**. An
- * account that signs up during the notice period signed up under whatever the
- * pages said that day, which is not something this gate can see, so it is owed a
- * notice like everybody else -- the operator sends a later wave. Anchoring the
- * population at the first send instead, as the first version did, let those
- * accounts reach the effective date without ever being told.
+ * Every account created before the effective date, and every account whose
+ * creation time is unknown (`User.createdAt` is nullable, and an account whose
+ * age nobody recorded is not one this gate may assume joined late).
  *
  * ## What this does not decide
  *
@@ -60,9 +66,7 @@ export type AmendedDocument = {
   /**
    * Whether a test recomputes `publishedDigest` from what is actually rendered.
    *
-   * A digest typed into a table by hand is a claim about the page, not evidence
-   * of it: the gate would treat whatever was typed as what the page shows. Only
-   * a digest some test checks against the rendered source counts.
+   * A digest typed into a table is a claim about the page, not evidence of it.
    */
   verified: boolean;
 };
@@ -75,13 +79,15 @@ export type ChangeNoticeFacts = {
   purpose: string | null;
   /** Accounts owed the notice. */
   owed: number;
-  /** Owed accounts with a delivery that reached them. */
-  reached: number;
-  /** Owed accounts attempted and not reached -- reported, not blocking. */
+  /** Handed to the provider before their deadline. */
+  told: number;
+  /** Handed over, but after their deadline. Blocking. */
+  late: number;
+  /** Not handed over, and the system cannot hand it over. Reported. */
   unreachable: number;
-  /** Owed accounts with no attempt at all. This is what blocks. */
-  notAttempted: number;
-  /** The earliest successful notice inside the notice window, or null. */
+  /** Not handed over for any other reason. Blocking. */
+  untold: number;
+  /** The earliest hand-over, for the report. */
   firstSentAt: Date | null;
 };
 
@@ -94,13 +100,15 @@ export const PUBLICATION_REFUSALS = [
   "document_not_amended",
   /** It shows no effective date. */
   "effective_date_missing",
+  /** The documents show different effective dates. */
+  "effective_dates_differ",
   /** The effective date has not arrived. */
   "effective_date_not_reached",
-  /** The notice went out too close to the effective date. */
+  /** Some owed accounts were told with less notice than owed. */
   "notice_period_too_short",
-  /** No notice has reached anybody inside the notice window. */
+  /** Nobody has been told. */
   "change_notice_not_sent",
-  /** Some owed accounts have no attempt at all. */
+  /** Some owed accounts were not told at all. */
   "change_notice_incomplete",
   /** The notice is not a legal notice, so an unsubscribed person may not get it. */
   "change_notice_not_legal",
@@ -117,55 +125,69 @@ export type PublicationProblem = {
   detail: string;
 };
 
-/** How long before the effective date the first notice has to have gone. */
+/** Calendar days of notice owed before the effective date. */
 export const CHANGE_NOTICE_PERIOD_DAYS = 30;
 
 /**
  * How far before the effective date a delivery can be and still be this notice.
  *
- * A bound, because the notice is identified by its template. A key pointed by
- * mistake at a template that has been sending for a year would otherwise supply
- * a `firstSentAt` from last year and a delivery to nearly everyone -- a notice
- * condition that is true with no notice ever sent.
+ * The notice is identified by its template, and a key pointed by mistake at a
+ * template that has been sending for a year would otherwise supply last year's
+ * deliveries as the amendment notice.
  */
 export const CHANGE_NOTICE_WINDOW_DAYS = 120;
 
-/** Delivery states that mean an attempt was made and finished. */
-export const REACHED_STATUSES = ["sent", "delivered"] as const;
-export const UNREACHED_STATUSES = [
-  "bounced",
-  "complained",
-  "suppressed",
-  "failed",
-  "abandoned",
-] as const;
+/**
+ * States that exist only after the provider accepted the message.
+ *
+ * `suppressed`, `failed` and `abandoned` are not here: the lane writes each of
+ * them without a provider ever seeing the message. The second version of this
+ * gate counted them as attempts, which let rows the lane refused stand in for a
+ * notice nobody sent.
+ */
+export const HANDED_OVER_STATUSES = ["sent", "delivered", "bounced", "complained"] as const;
 
 const DAY_MS = 86_400_000;
 
-/** A UTC calendar day, or null where the string is not one. */
+/** A UTC calendar day, or null where the string is not one that exists. */
 export const utcDayStart = (value: string | null): Date | null => {
   if (value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return null;
-  // `2026-02-31` parses and rolls over; a date the page shows must be one that
-  // exists.
+  // `2026-02-31` parses and rolls over; a date the page shows must exist.
   return parsed.toISOString().slice(0, 10) === value ? parsed : null;
 };
 
 /**
- * The effective date the notice population is anchored on: the latest any
- * document shows, because an account is owed a notice about every document that
- * changes after it joined. Null while any document shows no usable date.
+ * The single effective date every document shows, or null.
+ *
+ * One amendment, one date. Documents with different dates would need different
+ * notice periods measured against different populations, and the second
+ * version's attempt to serve several dates from one window left the earlier
+ * document with no notice that could ever satisfy it.
  */
 export const effectiveDateOf = (documents: readonly AmendedDocument[]): Date | null => {
-  let latest: Date | null = null;
+  let date: Date | null = null;
   for (const document of documents) {
     const day = utcDayStart(document.effectiveFrom);
     if (day === null) return null;
-    if (latest === null || day > latest) latest = day;
+    if (date !== null && day.getTime() !== date.getTime()) return null;
+    date = day;
   }
-  return latest;
+  return date;
 };
+
+/**
+ * The first instant an account that existed thirty days out is no longer told
+ * in time: the start of the 29th day before the effective date.
+ *
+ * Calendar days, not milliseconds. With a 15 November effective date, a notice
+ * any time on 16 October gives thirty days; the second version measured to the
+ * millisecond from midnight, so a notice at 00:00:01 on 16 October was late and
+ * stayed late for ever, since a recorded send time is never rewritten.
+ */
+export const noticeDeadline = (effective: Date): Date =>
+  new Date(effective.getTime() - (CHANGE_NOTICE_PERIOD_DAYS - 1) * DAY_MS);
 
 /** Every reason this amendment does not count as published. All of them. */
 export const publicationProblems = (input: {
@@ -174,6 +196,7 @@ export const publicationProblems = (input: {
   now: Date;
 }): PublicationProblem[] => {
   const problems: PublicationProblem[] = [];
+  const dates = new Set<string>();
 
   for (const document of input.documents) {
     if (document.digestBeforeAmendment === null || document.publishedDigest === null) {
@@ -210,6 +233,7 @@ export const publicationProblems = (input: {
       });
       continue;
     }
+    dates.add(document.effectiveFrom as string);
     if (effective.getTime() > input.now.getTime()) {
       problems.push({
         refusal: "effective_date_not_reached",
@@ -217,16 +241,13 @@ export const publicationProblems = (input: {
         detail: `The amendment takes effect on ${document.effectiveFrom}, which has not arrived.`,
       });
     }
-    if (input.notice.firstSentAt !== null) {
-      const gapDays = (effective.getTime() - input.notice.firstSentAt.getTime()) / DAY_MS;
-      if (gapDays < CHANGE_NOTICE_PERIOD_DAYS) {
-        problems.push({
-          refusal: "notice_period_too_short",
-          subject: document.path,
-          detail: `The first notice went out ${Math.floor(gapDays)} day(s) before the effective date; ${CHANGE_NOTICE_PERIOD_DAYS} are owed.`,
-        });
-      }
-    }
+  }
+  if (dates.size > 1) {
+    problems.push({
+      refusal: "effective_dates_differ",
+      subject: "documents",
+      detail: `The documents show ${[...dates].sort().join(", ")}; one amendment has one effective date.`,
+    });
   }
 
   const notice = input.notice;
@@ -242,9 +263,8 @@ export const publicationProblems = (input: {
   // Section 3.1's fifth type: owed to everybody, including people who turned
   // everything switchable off. Of the classifications a template may register,
   // only `legal` is both purpose-free and unsubscribe-free; `service` requires a
-  // purpose, which a person can turn off, and `transactional` is the class of
-  // login codes and receipts -- a key pointing at one of those would count mail
-  // that says nothing about the amendment.
+  // purpose, and a `transactional` key could point at login codes and count
+  // them as the notice.
   if (notice.classification !== "legal" || notice.purpose !== null) {
     problems.push({
       refusal: "change_notice_not_legal",
@@ -255,22 +275,27 @@ export const publicationProblems = (input: {
     });
   }
 
-  if (notice.firstSentAt === null || notice.reached === 0) {
+  if (notice.told === 0 && notice.late === 0) {
     problems.push({
       refusal: "change_notice_not_sent",
       subject: notice.templateKey,
-      detail: `No amendment notice has reached anybody within ${CHANGE_NOTICE_WINDOW_DAYS} days before the effective date.`,
+      detail: "No amendment notice has been handed to the provider for anybody.",
     });
     return problems;
   }
-
-  if (notice.notAttempted > 0) {
+  if (notice.late > 0) {
+    problems.push({
+      refusal: "notice_period_too_short",
+      subject: notice.templateKey,
+      detail: `${notice.late} account(s) were told with less than ${CHANGE_NOTICE_PERIOD_DAYS} days' notice.`,
+    });
+  }
+  if (notice.untold > 0) {
     problems.push({
       refusal: "change_notice_incomplete",
       subject: notice.templateKey,
-      detail: `${notice.notAttempted} of ${notice.owed} account(s) owed the notice have no attempt at all.`,
+      detail: `${notice.untold} of ${notice.owed} account(s) owed the notice were not told.`,
     });
   }
-
   return problems;
 };
