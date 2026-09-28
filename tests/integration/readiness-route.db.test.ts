@@ -289,6 +289,31 @@ mock.module(mod("lib/emailSubjectLabelReadiness.ts"), {
     },
 });
 
+let footerDisclosures: { ready: boolean } | null = { ready: true };
+mock.module(mod("lib/emailFooterDisclosureReadiness.ts"), {
+    namedExports: {
+        footerDisclosureReadiness: async () => {
+            if (footerDisclosures === null) throw new Error("footer disclosure check exploded");
+            return {
+                ready: footerDisclosures.ready,
+                required: true,
+                disclosuresPresent: footerDisclosures.ready,
+                policyVersionIds: ["policy-1"],
+                problems: footerDisclosures.ready
+                    ? []
+                    : [
+                          {
+                              severity: "error",
+                              code: "EMAIL_FOOTER_DISCLOSURE_MISSING",
+                              message: "KR/KR@policy-1 (contact_phone)",
+                              countryCodes: ["KR"],
+                          },
+                      ],
+            };
+        },
+    },
+});
+
 let biennialNotice: { healthy: boolean } | null = { healthy: true };
 mock.module(mod("lib/biennialConsentNoticeReadiness.ts"), {
     namedExports: {
@@ -391,6 +416,7 @@ beforeEach(() => {
     searchBudget = { ready: true };
     keyRetention = { ready: true };
     subjectLabels = { ready: true };
+    footerDisclosures = { ready: true };
     biennialNotice = { healthy: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
@@ -422,6 +448,7 @@ type ReadinessBody = {
         emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
         emailSubjectLabels: boolean;
+        emailFooterDisclosures: boolean;
         emailBiennialConsentNotice: boolean;
         searchProviderBudget: boolean;
         amuxReviewApproval: boolean;
@@ -459,6 +486,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailConsentKeyring: true,
         emailBusinessIdentity: true,
         emailSubjectLabels: true,
+        emailFooterDisclosures: true,
         emailBiennialConsentNotice: true,
         searchProviderBudget: true,
         amuxReviewApproval: true,
@@ -606,6 +634,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 subjectLabels = { ready: false };
             },
         },
+        {
+            // The footer blocks a statute names, missing from the rows that
+            // send. Gates for the same reason: sending without them is the
+            // offence, and no later deploy takes that back.
+            name: "emailFooterDisclosures",
+            arrange: () => {
+                footerDisclosures = { ready: false };
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -621,6 +658,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         searchBudget = { ready: true };
         keyRetention = { ready: true };
         subjectLabels = { ready: true };
+        footerDisclosures = { ready: true };
         biennialNotice = { healthy: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
