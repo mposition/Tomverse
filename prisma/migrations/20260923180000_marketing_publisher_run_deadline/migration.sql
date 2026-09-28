@@ -31,6 +31,10 @@
 --   TMDL2  a run asked to start after its own deadline
 --   TMDL3  a run asked to record a sign of life after its own deadline
 --
+-- A marketing publisher row with no deadline is refused outright, because
+-- scoping the rest of this trigger to rows that have one made the absence a way
+-- around all of it.
+--
 -- The rest are `check_violation`: they mean the caller is wrong, and nothing
 -- is expected to catch them.
 
@@ -60,6 +64,26 @@ BEGIN
     IF TG_OP = 'UPDATE'
         AND NEW."deadlineAt" IS DISTINCT FROM OLD."deadlineAt" THEN
         RAISE EXCEPTION 'ScheduledJobRun % deadline belongs to the insert that opened it', OLD."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- **A publisher run must carry a deadline.**
+    --
+    -- Scoping this trigger to rows that have one is what keeps it away from every
+    -- other scheduled job, and it was also the way out of it. `startScheduledJob`
+    -- accepts this job key -- it is a `RecordableScheduledJobKey` -- and writes no
+    -- deadline, so a row created that way returned at the next line and
+    -- `completeScheduledJob` could record `succeeded` an hour late. The one
+    -- invariant the plan calls mandatory was bypassable through the canonical
+    -- writer.
+    --
+    -- Nothing legitimate needs that row: the publisher opens its runs through
+    -- `startMarketingPublisherRun`, which always supplies a deadline. So the
+    -- absence is refused here, at the only place that can refuse it.
+    IF TG_OP = 'INSERT'
+        AND NEW."jobKey" = 'marketing_publisher'
+        AND NEW."deadlineAt" IS NULL THEN
+        RAISE EXCEPTION 'ScheduledJobRun % for the marketing publisher must carry a deadline', NEW."id"
             USING ERRCODE = 'check_violation';
     END IF;
 

@@ -270,13 +270,17 @@ test("a close that closed nothing is not reported as a success", async () => {
     { status: "succeeded" as const, processedCount: 0, result: {} },
     { status: "failed" as const, error: "test" },
   ]) {
-    const client = {
+    const { client, armed } = boundClient({
       scheduledJobRun: { updateMany: async () => ({ count: 0 }) },
-    } as unknown as PrismaClient;
+    });
     assert.deepEqual(
       await finishMarketingPublisherRun(client, "run-1", outcome),
       { status: "not_running" },
     );
+    // The close is bounded like every other write the run makes. Round six
+    // wrapped three of them and left this one bare, and this fake -- without a
+    // `$transaction` -- was what made the omission look correct.
+    assert.deepEqual(armed, [String(MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS)]);
   }
 });
 
@@ -285,7 +289,7 @@ test("a late success is recognised by its SQLSTATE, whatever the message says", 
   // message must not turn a recognised late run into an unexplained failure.
   const writes: Record<string, unknown>[] = [];
   let calls = 0;
-  const client = {
+  const { client } = boundClient({
     scheduledJobRun: {
       updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         calls += 1;
@@ -296,7 +300,7 @@ test("a late success is recognised by its SQLSTATE, whatever the message says", 
         return { count: 1 };
       },
     },
-  } as unknown as PrismaClient;
+  });
   assert.deepEqual(
     await finishMarketingPublisherRun(client, "run-1", {
       status: "succeeded",
@@ -310,13 +314,13 @@ test("a late success is recognised by its SQLSTATE, whatever the message says", 
 });
 
 test("any other refusal on close is not mistaken for a late run", async () => {
-  const client = {
+  const { client } = boundClient({
     scheduledJobRun: {
       updateMany: async () => {
         throw raised("23514", "something else entirely");
       },
     },
-  } as unknown as PrismaClient;
+  });
   await assert.rejects(
     finishMarketingPublisherRun(client, "run-1", {
       status: "succeeded",

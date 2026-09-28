@@ -94,9 +94,25 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     // Its own failure is its own: a query that could not be read here must not
     // fail the infrastructure check that has already run, and "could not
     // check" is recorded as `null` rather than as zero silent runs.
+    // **"Could not check" is itself an operational condition, and it has to
+    // page.** Recording null and moving on left the monitor finishing
+    // `succeeded` with `alerts: 0`, so a query that fails every run disabled the
+    // stale-run watch permanently and nothing said so -- a test even pinned that
+    // as "pages nothing". This watch is the only thing that notices a dead
+    // worker's row, so a watch that has stopped working reports on its own behalf.
     const silentPublisherRuns = await reportSilentMarketingPublisherRuns(now).catch(
-      (error: unknown) => {
+      async (error: unknown) => {
         console.error("Marketing publisher silence check failed:", error);
+        await reportOperationalIncident({
+          code: "MARKETING_PUBLISHER_SILENCE_CHECK_FAILED",
+          title: "The marketing publisher silence check could not run",
+          error,
+          severity: "error",
+          cooldownMs: 30 * 60 * 1_000,
+          context: { component: "marketing-publisher" },
+        }).catch((reportError: unknown) => {
+          console.error("Silence-check incident could not be reported:", reportError);
+        });
         return null;
       },
     );
@@ -105,7 +121,9 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     // number disagree with the thing it counts -- and the row and the API
     // response are where an operator looks to see whether the monitor did
     // anything.
-    const publisherAlerts = silentPublisherRuns === null || silentPublisherRuns === 0 ? 0 : 1;
+    // A failed check now reports an alert of its own, so null counts as one too:
+    // the number has to agree with what was actually sent.
+    const publisherAlerts = silentPublisherRuns === 0 ? 0 : 1;
     const alerts = plan.incidents.length + publisherAlerts;
     await completeScheduledJob({
       runId: run?.id,

@@ -361,6 +361,29 @@ const clientReach = (() => {
   };
 })();
 
+const WRAPPER_MODULE =
+  /(^|[./@~])lib[/]marketingPublisherRun([.](?:ts|tsx|js|mjs|cjs))?$/;
+
+/**
+ * Whether a specifier names the wrapper module, or one that re-exports it.
+ *
+ * One level, and that is enough because a module re-exporting the wrapper is
+ * itself refused by a test below -- so a chain of facades cannot exist to be
+ * followed. Checking only the specifier was the hole: the facade's own import of
+ * the wrapper is invisible from the file doing the importing.
+ */
+const reachesWrapperModule = (fromFile, specifier) => {
+  if (WRAPPER_MODULE.test(specifier)) return true;
+  if (!isFirstParty(specifier)) return false;
+  const target = resolveSpecifier(fromFile, specifier);
+  if (!target) return false;
+  const tree = parse(target);
+  for (const entry of [...imports(tree), ...moduleEdges(tree)]) {
+    if (WRAPPER_MODULE.test(entry.specifier)) return true;
+  }
+  return false;
+};
+
 /** Every call to the wrapper, by named or namespace import, across the tree. */
 const callSites = () => {
   const sites = [];
@@ -375,10 +398,13 @@ const callSites = () => {
     for (const entry of imports(tree)) {
       if (entry.typeOnly) continue;
       if (!ts.isStringLiteral) continue;
-      const wrapperModule = /(^|[./@~])lib\/marketingPublisherRun(\.(?:ts|tsx|js|mjs|cjs))?$/.test(entry.specifier);
-      if (!wrapperModule) continue;
-      const declaration = imports(tree).find((candidate) => candidate === entry);
-      void declaration;
+      // The wrapper module itself, or one that re-exports it. Only the first was
+      // checked, so a facade of `export * from "@/lib/marketingPublisherRun"`
+      // imported as `import * as publisher from "@/lib/facade"` bound no
+      // namespace -- and `publisher.runBoundedMarketingTransaction(...)` was then
+      // waved through by the direct-property-call exemption with every body rule
+      // skipped.
+      if (!reachesWrapperModule(path, entry.specifier)) continue;
       for (const local of entry.locals) {
         // A namespace or default binding is reached as `ns.runBounded…`; a named
         // binding is the call itself, under whatever it was renamed to.
@@ -734,6 +760,32 @@ test("the wrapper is only ever called directly, never through another name", () 
     });
   }
   assert.deepEqual(problems, []);
+});
+
+test("no module re-exports the bounded transaction", () => {
+  // A second route to the wrapper is a second place callers can come from, and
+  // this file finds callers by the module they import. Refusing the re-export is
+  // what makes the one-level lookup in `reachesWrapperModule` exhaustive rather
+  // than a guess about how deep a chain of facades might go.
+  const offenders = [];
+  for (const path of sourceFiles()) {
+    const file = repoPath(path);
+    if (file === DEFINITION) continue;
+    const source = readFileSync(path, "utf8");
+    if (!source.includes("marketingPublisherRun")) continue;
+    const tree = parse(path, source);
+    eachNode(tree, (node) => {
+      if (!ts.isExportDeclaration(node) || !node.moduleSpecifier) return;
+      const specifier = ts.isStringLiteral(node.moduleSpecifier)
+        ? node.moduleSpecifier.text
+        : "";
+      if (!WRAPPER_MODULE.test(specifier)) return;
+      offenders.push(
+        `${file}:${lineOf(tree, node)}: re-exports "${specifier}". Import it where it is called -- a second route to the wrapper is a second place callers can come from, and these checks find callers by the module they import.`,
+      );
+    });
+  }
+  assert.deepEqual(offenders, []);
 });
 
 test("the work is an inline function, not a name", () => {

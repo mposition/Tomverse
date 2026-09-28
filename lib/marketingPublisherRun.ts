@@ -210,10 +210,12 @@ export async function startMarketingPublisherRun(
     }
   }
 
-  const existing = await client.scheduledJobRun.findUnique({
-    where: { id: input.runId },
-    select: { jobKey: true, status: true, deadlineAt: true },
-  });
+  const existing = await withStatementBound(client, (tx) =>
+    tx.scheduledJobRun.findUnique({
+      where: { id: input.runId },
+      select: { jobKey: true, status: true, deadlineAt: true },
+    }),
+  );
   if (
     !existing ||
     existing.jobKey !== MARKETING_PUBLISHER_JOB_KEY ||
@@ -361,16 +363,23 @@ export async function finishMarketingPublisherRun(
   // the run was already closed -- by a concurrent request, or by an earlier
   // attempt at this one -- or never existed, and reporting "succeeded" for it
   // would have the route say something the row does not.
+  // Bounded like the others. Round six wrapped the clock read, the start and the
+  // heartbeat and left this one bare -- and the fake in the unit tests did not
+  // supply `$transaction`, so the omission was pinned as correct behaviour rather
+  // than caught. That is the thirteenth time in this feature that a fake agreeing
+  // with the code has hidden something.
   const close = async (data: Prisma.ScheduledJobRunUpdateManyMutationInput) =>
     (
-      await client.scheduledJobRun.updateMany({
-        where: {
-          id: runId,
-          jobKey: MARKETING_PUBLISHER_JOB_KEY,
-          status: "running",
-        },
-        data,
-      })
+      await withStatementBound(client, (tx) =>
+        tx.scheduledJobRun.updateMany({
+          where: {
+            id: runId,
+            jobKey: MARKETING_PUBLISHER_JOB_KEY,
+            status: "running",
+          },
+          data,
+        }),
+      )
     ).count === 1;
 
   if (outcome.status === "succeeded") {

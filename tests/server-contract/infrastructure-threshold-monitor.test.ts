@@ -324,7 +324,7 @@ test("a silent marketing publisher run pages, and is counted as an alert", async
   );
 });
 
-test("a silence check that cannot read records null, not zero, and pages nothing", async () => {
+test("a silence check that cannot read records null and pages on its own behalf", async () => {
   resetWorld();
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
@@ -334,16 +334,30 @@ test("a silence check that cannot read records null, not zero, and pages nothing
 
   const result = await monitorInfrastructureThresholdsIfDue();
 
-  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  // One alert, which is the one it just sent. The count has to agree with what
+  // was actually reported.
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
   assert.equal(
     (world.completedResults.at(-1) as { silentPublisherRuns: number | null })
       .silentPublisherRuns,
     null,
   );
+  // Not a silent-run incident: nothing was found silent, because nothing could
+  // be read.
   assert.equal(
     world.incidents.some((entry) => entry.code === "MARKETING_PUBLISHER_RUN_SILENT"),
     false,
   );
+  // **But it pages.** This test used to assert that it pages *nothing*, which
+  // pinned the defect: a query failing every run disabled the stale-run watch
+  // permanently while the monitor finished `succeeded` with `alerts: 0`. The
+  // watch is the only thing that notices a dead worker's row, so a watch that
+  // has stopped working has to say so.
+  const failure = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_SILENCE_CHECK_FAILED",
+  );
+  assert.ok(failure, "a silence check that cannot run must reach the operational queue");
+  assert.equal((failure?.error as Error)?.message, "query failed");
   // The infrastructure check itself still ran and still succeeded.
   assert.equal(world.failedRuns, 0);
 });
