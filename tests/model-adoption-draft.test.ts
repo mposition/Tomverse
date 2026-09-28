@@ -8,6 +8,7 @@ import {
   adoptionSaleProposal,
   adoptionSaveBlock,
   blankTokenFieldValues,
+  adoptionPriceView,
   buildAdoptionDraft,
   requestOutputCapFromProvider,
   suggestReasoning,
@@ -1188,8 +1189,47 @@ test("GPT-6 Astra: a tiered price is named and proposed as a profile, never pref
   const unknowns = draft.unknowns.join("\n");
   assert.match(unknowns, /장문 구간 가격이 있어 채우지 않았습니다/);
   assert.match(unknowns, /272,000 입력 토큰 초과 시 입력 2배, 출력 1\.5배/);
+  assert.equal(draft.priceView.shape, "tiered");
+  if (draft.priceView.shape === "tiered") {
+    assert.equal(draft.priceView.thresholdTokens, 272_000);
+    assert.equal(draft.priceView.short.inputUsdPerMillionTokens, 10);
+    assert.equal(draft.priceView.short.outputUsdPerMillionTokens, 50);
+    assert.equal(draft.priceView.short.cachedInputUsdPerMillionTokens, 1);
+    assert.equal(draft.priceView.short.cacheWriteUsdPerMillionTokens, 12.5);
+    assert.equal(draft.priceView.long.inputUsdPerMillionTokens, 20);
+    assert.equal(draft.priceView.long.cachedInputUsdPerMillionTokens, 2);
+    assert.equal(draft.priceView.long.cacheWriteUsdPerMillionTokens, 25);
+    assert.equal(draft.priceView.long.outputUsdPerMillionTokens, 75);
+  }
   assert.ok(draft.pricingProfileProposal);
   assert.match(draft.pricingProfileProposal, /modelId: "gpt-6-astra"/);
+});
+
+test("a tiered page with a price problem is not shown as two published rates", () => {
+  const view = adoptionPriceView({
+    hasPricingProfile: false,
+    problems: ["long_context_cache_unstated"],
+    doc: {
+      displayName: null,
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: 128_000,
+      imageInput: true,
+      inputUsdPerMillionTokens: 10,
+      cachedInputUsdPerMillionTokens: 1,
+      cacheWriteUsdPerMillionTokens: 12.5,
+      outputUsdPerMillionTokens: 50,
+      longContext: {
+        kind: "tiered",
+        thresholdTokens: 272_000,
+        inputMultiplier: 2,
+        outputMultiplier: 1.5,
+        cacheTakesInputMultiplier: false,
+      },
+      promotional: null,
+    },
+  });
+  assert.equal(view.shape, "withheld");
 });
 
 test("Claude Fable 5.1: a flat documented price is prefilled with where it came from", () => {
@@ -1207,6 +1247,7 @@ test("Claude Fable 5.1: a flat documented price is prefilled with where it came 
   assert.equal(draft.fields.outputUsdPerMillionTokens, 50);
   assert.equal(draft.fields.cachedInputPriceMultiplier, 0.025);
   assert.equal(draft.sources.inputUsdPerMillionTokens, "provider_docs");
+  assert.equal(draft.priceView.shape, "flat");
   assert.match(draft.notes.join("\n"), /US\$10 \/ US\$50, 캐시 입력 배수 0\.025/);
   // Saying out loud that it is an override and still owes a pricing check.
   assert.match(draft.notes.join("\n"), /관리자 override/);
@@ -1225,6 +1266,7 @@ test("documentation never prices a model a profile already covers", () => {
   });
   assert.equal(draft.fields.inputUsdPerMillionTokens, null);
   assert.equal(draft.pricingProfileProposal, null);
+  assert.equal(draft.priceView.shape, "inherited");
 });
 
 test("where the API and the page disagree, the API is kept and the difference named", () => {

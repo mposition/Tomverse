@@ -102,7 +102,25 @@ export const adminModelRegistryMessages = defineAdminMessages({
       draftFailed:
         "Could not load the draft for the chosen provider, model and ID. Check the provider's values and enter them yourself.",
       draftReloading: "Loading the draft again for the chosen provider, model and ID.",
-      profileProposalTitle: "lib/modelPricing.ts profile proposal — review, then register it in a PR",
+      profileProposalTitle:
+        "Saving this form adds the model. The two rates do not fit in the price boxes, so those boxes stay empty and the save is refused until a pricing profile exists. Copy only moves the profile draft.",
+      tieredSaveRefused:
+        "These columns cannot hold two rates, so they stay empty and this save is refused until a pricing profile exists.",
+      tieredPriceLead: (threshold: string) =>
+        `Two published rates. The first row applies at or under ${threshold} input tokens, and the second row above that. These price boxes stay empty.`,
+      inheritedPriceLead:
+        "A pricing profile already covers this model. Leave the price boxes empty so that profile applies. A number saved here replaces it.",
+      priceOverrideSummary: "Replace the published rates with one number",
+      tieredOverrideWarning:
+        "The number you save here is charged for every prompt, including prompts above the threshold.",
+      inheritedOverrideWarning:
+        "The number you save here replaces the pricing profile, including any later change to that profile.",
+      bandShort: "At or under the threshold",
+      bandLong: "Above the threshold",
+      bandInput: "Input / 1M",
+      bandCached: "Cached input / 1M",
+      bandCacheWrite: "Cache write / 1M",
+      bandOutput: "Output / 1M",
       copyProposal: "Copy",
       proposalCopied: "Copied the profile proposal.",
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
@@ -329,7 +347,25 @@ export const adminModelRegistryMessages = defineAdminMessages({
       draftFailed:
         "선택한 공급자·모델·ID의 초안을 불러오지 못했습니다. 공급자가 제공한 값을 직접 확인해 입력하세요.",
       draftReloading: "선택한 공급자·모델·ID에 대한 초안을 다시 불러오는 중입니다.",
-      profileProposalTitle: "lib/modelPricing.ts profile 제안 — 검토 후 PR로 등록",
+      profileProposalTitle:
+        "모델은 이 화면의 저장으로 추가됩니다. 두 구간은 가격 칸에 들어가지 않아 칸은 비워 두고, 가격 profile이 없으면 저장은 거절됩니다. 복사는 그 profile 초안만 옮깁니다.",
+      tieredSaveRefused:
+        "두 구간은 이 칸에 들어가지 않습니다. 칸은 비워 두고, 가격 profile이 없으면 저장은 거절됩니다.",
+      tieredPriceLead: (threshold: string) =>
+        `공개된 가격이 두 구간입니다. 입력 토큰 ${threshold} 이하는 첫 행, 그 위는 둘째 행입니다. 가격 칸은 비워 둡니다.`,
+      inheritedPriceLead:
+        "이 모델은 가격 profile이 있습니다. 가격 칸을 비우면 그 profile이 적용됩니다. 숫자를 저장하면 profile을 대체합니다.",
+      priceOverrideSummary: "공개 가격을 숫자 하나로 덮어쓰기",
+      tieredOverrideWarning:
+        "여기에 저장한 숫자는 임계값을 넘는 요청까지 모두 그 가격으로 청구됩니다.",
+      inheritedOverrideWarning:
+        "여기에 저장한 숫자는 가격 profile을 대체하고, 이후 profile이 바뀌어도 따라가지 않습니다.",
+      bandShort: "임계값 이하",
+      bandLong: "임계값 초과",
+      bandInput: "입력 / 1M",
+      bandCached: "캐시 입력 / 1M",
+      bandCacheWrite: "캐시 쓰기 / 1M",
+      bandOutput: "출력 / 1M",
       copyProposal: "복사",
       proposalCopied: "Profile 제안을 복사했습니다.",
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",

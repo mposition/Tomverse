@@ -29,7 +29,8 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
 import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
@@ -233,6 +234,79 @@ const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
   return `${base}-${suffix}`;
 };
 
+function priceViewHidesInputs(view: AdoptionPriceView | null | undefined) {
+  return view?.shape === "tiered" || view?.shape === "inherited" || view?.shape === "withheld";
+}
+
+const EMPTY_PRICE_COLUMNS = {
+  inputUsdPerMillionTokens: null,
+  outputUsdPerMillionTokens: null,
+  cachedInputPriceMultiplier: null,
+} as const;
+
+function formatUsdPerMillion(value: number) {
+  return `US$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
+function PriceBandTable({
+  view,
+  labels,
+}: {
+  view: Extract<AdoptionPriceView, { shape: "tiered" }>;
+  labels: {
+    short: string;
+    long: string;
+    input: string;
+    cached: string;
+    cacheWrite: string;
+    output: string;
+  };
+}) {
+  const cell = (value: number | null) => (value === null ? "-" : formatUsdPerMillion(value));
+  return (
+    <table data-testid="adopt-price-bands" className="mt-2 w-full border-collapse text-left text-xs text-zinc-300">
+      <thead>
+        <tr className="text-[11px] uppercase tracking-wide text-zinc-500">
+          <th className="py-1 pr-3 font-bold" />
+          <th className="py-1 pr-3 font-bold">{labels.input}</th>
+          <th className="py-1 pr-3 font-bold">{labels.cached}</th>
+          <th className="py-1 pr-3 font-bold">{labels.cacheWrite}</th>
+          <th className="py-1 font-bold">{labels.output}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(
+          [
+            [labels.short, view.short],
+            [labels.long, view.long],
+          ] as const
+        ).map(([label, band]) => (
+          <tr key={label} className="border-t border-zinc-800 font-mono">
+            <th className="py-1.5 pr-3 text-left font-sans text-[11px] font-bold text-zinc-400">{label}</th>
+            <td className="py-1.5 pr-3">{cell(band.inputUsdPerMillionTokens)}</td>
+            <td className="py-1.5 pr-3">{cell(band.cachedInputUsdPerMillionTokens)}</td>
+            <td className="py-1.5 pr-3">{cell(band.cacheWriteUsdPerMillionTokens)}</td>
+            <td className="py-1.5">{cell(band.outputUsdPerMillionTokens)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DraftHints({ lines }: { lines: readonly string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <span className="text-[11px] font-normal normal-case tracking-normal text-zinc-400">
+      {lines.map((line) => (
+        <span key={line} className="mt-1 block leading-relaxed">
+          {line}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function AdminModelRegistryPanel() {
   const m = useAdminMessages(adminModelRegistryMessages);
   const { locale } = useAdminLocale();
@@ -348,6 +422,8 @@ export function AdminModelRegistryPanel() {
   // a model whose price the override columns cannot hold. Shown to copy into a
   // pull request; nothing in this panel applies it.
   const [pricingProfileProposal, setPricingProfileProposal] = useState<string | null>(null);
+  const [priceView, setPriceView] = useState<AdoptionPriceView | null>(null);
+  const [priceOverrideOpen, setPriceOverrideOpen] = useState(false);
   // The last id a profile lookup settled for, success or failure. Until the id
   // in the form has settled, nothing about its profile is known: the save
   // waits, and the blank fields make no claim.
@@ -423,6 +499,7 @@ export function AdminModelRegistryPanel() {
           notes?: string[];
           suggestions?: { reasoning?: string | null; price?: boolean };
           pricingProfileProposal?: string | null;
+          priceView?: AdoptionPriceView | null;
           effectiveTokenLimits?: typeof effectiveTokenLimits;
           worstCaseInputTokens?: number;
           profilePrice?: {
@@ -437,7 +514,17 @@ export function AdminModelRegistryPanel() {
           throw new Error(data?.error || m.toast.adoptionDraftFailed);
         }
         if (cancelled) return;
-        setForm({ ...emptyForm(), ...data.fields });
+        const hidePriceInputs = priceViewHidesInputs(data.priceView);
+        if (hidePriceInputs) {
+          touchedDraftFieldsRef.current.delete("inputUsdPerMillionTokens");
+          touchedDraftFieldsRef.current.delete("outputUsdPerMillionTokens");
+          touchedDraftFieldsRef.current.delete("cachedInputPriceMultiplier");
+        }
+        setForm({
+          ...emptyForm(),
+          ...data.fields,
+          ...(hidePriceInputs ? EMPTY_PRICE_COLUMNS : {}),
+        });
         setAdoptUnknowns(data.unknowns || []);
         setAdoptNotes(data.notes || []);
         setProfileLookupFailedForKey(null);
@@ -449,6 +536,12 @@ export function AdminModelRegistryPanel() {
         setAdoptPriceSuggested(Boolean(data.suggestions?.price));
         setAdoptPriceConfirmed(false);
         setPricingProfileProposal(data.pricingProfileProposal ?? null);
+        setPriceView(data.priceView ?? null);
+        setPriceOverrideOpen(false);
+        if (hidePriceInputs) {
+          setAdoptPriceSuggested(false);
+          setAdoptPriceConfirmed(false);
+        }
         setAdoptReasoningConfirmed(false);
         setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
         touchedDraftFieldsRef.current = new Set();
@@ -592,6 +685,7 @@ export function AdminModelRegistryPanel() {
       const settleFailed = () => {
         setProfileLookupFailedForKey(lookupKey);
         setLookupSettledForKey(lookupKey);
+        setPriceView(null);
       };
       void (async () => {
         try {
@@ -622,6 +716,7 @@ export function AdminModelRegistryPanel() {
             fields?: Partial<FormState>;
             effectiveTokenLimits?: typeof effectiveTokenLimits;
             pricingProfileProposal?: string | null;
+            priceView?: AdoptionPriceView | null;
             suggestions?: { reasoning?: string | null; price?: boolean };
           } | null;
           if (cancelled) return;
@@ -635,10 +730,21 @@ export function AdminModelRegistryPanel() {
           setProfilePrice(data.profilePrice ?? null);
           setProfileLookupFailedForKey(null);
           setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
+          const hidePriceInputs = priceViewHidesInputs(data.priceView);
+          if (hidePriceInputs) {
+            touchedDraftFieldsRef.current.delete("inputUsdPerMillionTokens");
+            touchedDraftFieldsRef.current.delete("outputUsdPerMillionTokens");
+            touchedDraftFieldsRef.current.delete("cachedInputPriceMultiplier");
+            setAdoptPriceSuggested(false);
+            setAdoptPriceConfirmed(false);
+            setPriceOverrideOpen(false);
+          }
           // Only an untouched prefill follows the key. A number the operator
-          // typed is theirs and stays.
-          if (data.fields) {
-            const fields = data.fields;
+          // typed is theirs and stays, unless this draft hides the price
+          // boxes: a number left in a closed override would replace the
+          // profile or both bands on save.
+          if (data.fields || hidePriceInputs) {
+            const fields = data.fields ?? {};
             const untouched = DRAFT_FOLLOWED_FIELDS.filter(
               (field) => !touchedDraftFieldsRef.current.has(field)
             );
@@ -649,6 +755,7 @@ export function AdminModelRegistryPanel() {
               ...Object.fromEntries(
                 untouched.map((field) => [field, fields[field] ?? DRAFT_FIELD_BLANK[field]])
               ),
+              ...(hidePriceInputs ? EMPTY_PRICE_COLUMNS : {}),
             }));
             if (!touchedDraftFieldsRef.current.has("reasoning")) {
               setAdoptReasoningSuggested(Boolean(data.suggestions?.reasoning));
@@ -660,6 +767,7 @@ export function AdminModelRegistryPanel() {
             // documentation is exactly the order in which an unchecked price
             // would otherwise reach the save.
             const priceFilledFromDocs =
+              !hidePriceInputs &&
               Boolean(data.suggestions?.price) &&
               PRICE_FIELDS.some(
                 (field) =>
@@ -675,6 +783,7 @@ export function AdminModelRegistryPanel() {
             }
           }
           setPricingProfileProposal(data.pricingProfileProposal ?? null);
+          setPriceView(data.priceView ?? null);
           setGuidanceKey(lookupKey);
           setLookupSettledForKey(lookupKey);
           if (data.unknowns) setAdoptUnknowns(data.unknowns);
@@ -711,6 +820,25 @@ export function AdminModelRegistryPanel() {
   // Not current without a key: an emptied id is not the id the guidance was
   // written for, and showing it would put the previous proposal back on screen.
   const guidanceIsCurrent = !adoptWorkItemId || (lookupKey !== null && guidanceKey === lookupKey);
+  const adoptionGuidance = useMemo(
+    () =>
+      partitionAdoptionGuidance(
+        guidanceIsCurrent ? [...adoptUnknowns, ...adoptNotes] : []
+      ),
+    [guidanceIsCurrent, adoptUnknowns, adoptNotes]
+  );
+  const shownPriceView = guidanceIsCurrent ? priceView : null;
+  const priceFieldHints = priceHintsForView(
+    adoptionGuidance.byField.price,
+    shownPriceView?.shape ?? null
+  );
+  const priceBoxesAreOverride =
+    shownPriceView?.shape === "tiered" ||
+    shownPriceView?.shape === "inherited" ||
+    shownPriceView?.shape === "withheld";
+  const tieredColumnsStayEmpty =
+    shownPriceView?.shape === "tiered" || shownPriceView?.shape === "withheld";
+  const priceFloorText = tieredColumnsStayEmpty ? m.adopt.tieredSaveRefused : m.floor.pricesUnknown;
   const blankTokens = adoptWorkItemId
     ? blankTokenFieldValues({
         // Unknown while the lookup is pending or has failed: whether a blank
@@ -792,7 +920,7 @@ export function AdminModelRegistryPanel() {
                     : adoptBlock === "output_cap_unknown"
                       ? m.floor.outputCapUnknown
                       : adoptBlock === "prices_unknown"
-                        ? m.floor.pricesUnknown
+                        ? priceFloorText
                         : adoptBlock === "credits_below_floor" && isCreditFloor(creditFloor)
                           ? m.adopt.creditsBelowFloor(creditFloor.credits, creditFloor.usageClass)
                           : null;
@@ -977,6 +1105,7 @@ export function AdminModelRegistryPanel() {
       const replaced = Boolean(data.retired);
       setAdoptWorkItemId(null);
       setAdoptUnknowns([]);
+      setPriceView(null);
       setAdoptReason("");
       setAdoptReplacesModelId("");
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
@@ -1239,63 +1368,33 @@ export function AdminModelRegistryPanel() {
                   </p>
                 ) : null}
               </div>
-              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); setAdoptReplacesModelId(""); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); setPriceView(null); setAdoptReplacesModelId(""); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="grid gap-6 p-5">
               {adoptWorkItemId ? (
                 <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
-                    {m.adopt.unknownsTitle}
-                  </p>
-                  <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
-                    {guidanceIsCurrent ? (
-                      adoptUnknowns.map((item) => <li key={item}>· {item}</li>)
-                    ) : !lookupKey ? (
-                      <li>· {m.adopt.draftNeedsId}</li>
-                    ) : profileLookupFailed ? (
-                      <li>· {m.adopt.draftFailed}</li>
-                    ) : (
-                      <li>· {m.adopt.draftReloading}</li>
-                    )}
-                  </ul>
-                  {guidanceIsCurrent && adoptNotes.length ? (
+                  {guidanceIsCurrent && adoptionGuidance.blockers.length ? (
                     <>
-                      <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                        {m.adopt.notesTitle}
+                      <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
+                        {m.adopt.unknownsTitle}
                       </p>
-                      <ul className="mt-2 grid gap-1 text-xs text-zinc-400">
-                        {adoptNotes.map((item) => (
+                      <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
+                        {adoptionGuidance.blockers.map((item) => (
                           <li key={item}>· {item}</li>
                         ))}
                       </ul>
                     </>
-                  ) : null}
-                  {guidanceIsCurrent && pricingProfileProposal ? (
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                          {m.adopt.profileProposalTitle}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard
-                              ?.writeText(pricingProfileProposal)
-                              .then(
-                                () => dispatchAppToast(m.adopt.proposalCopied, "success"),
-                                () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
-                              );
-                          }}
-                          className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
-                        >
-                          {m.adopt.copyProposal}
-                        </button>
-                      </div>
-                      <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
-                        {pricingProfileProposal}
-                      </pre>
-                    </div>
+                  ) : !guidanceIsCurrent ? (
+                    <ul className="grid gap-1 text-xs text-zinc-300">
+                      {!lookupKey ? (
+                        <li>· {m.adopt.draftNeedsId}</li>
+                      ) : profileLookupFailed ? (
+                        <li>· {m.adopt.draftFailed}</li>
+                      ) : (
+                        <li>· {m.adopt.draftReloading}</li>
+                      )}
+                    </ul>
                   ) : null}
                   {profileLookupFailed ? (
                     <p className="mt-3 text-xs text-amber-200">
@@ -1418,14 +1517,14 @@ export function AdminModelRegistryPanel() {
                     <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                       {creditFloor.reason === "output_cap_unknown"
                         ? m.floor.outputCapUnknown
-                        : m.floor.pricesUnknown}
+                        : priceFloorText}
                     </p>
                   )}
                 </div>
               ) : null}
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-2">
                 <legend className="px-2 text-sm font-bold text-white">{m.identity.legend}</legend>
-                <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
+                <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.registryId} /> : null}</label>
                 <label className={labelClass}>{m.identity.displayName}<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
                 <label className={labelClass}>{m.identity.provider}<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>{m.identity.apiModel}<input value={form.apiModel} onChange={(e) => { if (adoptWorkItemId && e.target.value.trim() !== form.apiModel.trim()) startNewPair(); setField("apiModel", e.target.value); }} className={inputClass} placeholder={m.identity.apiModelPlaceholder} /></label>
@@ -1441,7 +1540,7 @@ export function AdminModelRegistryPanel() {
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.catalogue.legend}</legend>
-                <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
+                <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select>{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.minimumPlan} /> : null}</label>
                 <label className={labelClass}>{m.catalogue.usageClass}<select value={saleProposal?.usageClass ?? form.usageClass} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => { const usageClass = e.target.value as ModelUsageClass; if (saleProposal) { setForm((current) => ({ ...current, usageClass, creditWeight: saleProposal.creditWeight })); } else { setField("usageClass", usageClass); } setAdoptClassChosen(true); }} className={inputClass}>{ADOPTION_USAGE_CLASSES.map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{saleProposal ? m.adopt.classSuggested : m.adopt.classRequired}{saleProposal ? <button type="button" onClick={(event) => { event.preventDefault(); setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: saleProposal.creditWeight })); setAdoptClassChosen(true); }} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button> : null}</span> : null}</label>
                 <label className={labelClass}>{m.catalogue.creditWeight}<input type="number" min={1} max={1000} value={saleProposal?.creditWeight ?? form.creditWeight} onChange={(e) => { const credits = Number(e.target.value); if (saleProposal) { setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: credits })); } else { setField("creditWeight", credits); } if (adoptWorkItemId) setAdoptClassChosen(true); }} className={inputClass} /></label>
                 <label className={labelClass}>{m.catalogue.runtimeStatus}<select value={form.status} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">{m.catalogue.status.enabled}</option><option value="limited">{m.catalogue.status.limited}</option><option value="disabled">{m.catalogue.status.disabled}</option><option value="coming-soon">{m.catalogue.status.comingSoon}</option></select></label>
@@ -1455,27 +1554,99 @@ export function AdminModelRegistryPanel() {
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.capabilities.legend}</legend>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
-                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button></span> : null}</label>
-                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
+                  {adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.supportsImage} /> : null}
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
+                  {adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.supportsNativePdf} /> : null}
+                </div>
+                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button></span> : null}{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.reasoning} /> : null}</label>
+                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.contextWindowTokens} /> : null}</label>
                 <label className={labelClass}>{m.capabilities.maxImages}<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>{m.capabilities.maxBase64ImageBytes}<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">
                 <legend className="px-2 text-sm font-bold text-white">{m.tokens.legend}</legend>
-                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
-                <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} /></label>
-                <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
-                {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
-                  <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
-                    {m.adopt.priceFromDocs}
-                    <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
+                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.maxOutputTokens} /> : null}</label>
+                <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.reservationOutputTokens} /> : null}</label>
+                {shownPriceView?.shape === "tiered" ? (
+                  <div className="md:col-span-3">
+                    <p className="text-xs leading-relaxed text-zinc-300">
+                      {m.adopt.tieredPriceLead(shownPriceView.thresholdTokens.toLocaleString(adminIntlLocale(locale)))}
+                    </p>
+                    <PriceBandTable
+                      view={shownPriceView}
+                      labels={{
+                        short: m.adopt.bandShort,
+                        long: m.adopt.bandLong,
+                        input: m.adopt.bandInput,
+                        cached: m.adopt.bandCached,
+                        cacheWrite: m.adopt.bandCacheWrite,
+                        output: m.adopt.bandOutput,
+                      }}
+                    />
                   </div>
                 ) : null}
-                <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
-                <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                {shownPriceView?.shape === "inherited" ? (
+                  <p className="md:col-span-3 text-xs leading-relaxed text-zinc-300">{m.adopt.inheritedPriceLead}</p>
+                ) : null}
+                {shownPriceView?.shape === "tiered" && pricingProfileProposal ? (
+                  <div className="md:col-span-3 flex items-start justify-between gap-3">
+                    <p className="text-xs leading-relaxed text-zinc-400">{m.adopt.profileProposalTitle}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard
+                          ?.writeText(pricingProfileProposal)
+                          .then(
+                            () => dispatchAppToast(m.adopt.proposalCopied, "success"),
+                            () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
+                          );
+                      }}
+                      className="shrink-0 rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
+                    >
+                      {m.adopt.copyProposal}
+                    </button>
+                  </div>
+                ) : null}
+                {adoptWorkItemId && priceFieldHints.length ? (
+                  <div className="md:col-span-3">
+                    <DraftHints lines={priceFieldHints} />
+                  </div>
+                ) : null}
+                {priceBoxesAreOverride ? (
+                  <details
+                    data-testid="adopt-price-override"
+                    className="md:col-span-3"
+                    open={priceOverrideOpen}
+                    onToggle={(event) => setPriceOverrideOpen(event.currentTarget.open)}
+                  >
+                    <summary className="cursor-pointer text-xs font-bold text-zinc-300">{m.adopt.priceOverrideSummary}</summary>
+                    <p className="mt-2 text-xs leading-relaxed text-amber-200">
+                      {shownPriceView?.shape === "inherited" ? m.adopt.inheritedOverrideWarning : m.adopt.tieredOverrideWarning}
+                    </p>
+                    <div className="mt-3 grid gap-4 md:grid-cols-3">
+                      <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                      <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                      <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    </div>
+                  </details>
+                ) : (
+                  <>
+                    <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
+                      <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+                        {m.adopt.priceFromDocs}
+                        <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
+                      </div>
+                    ) : null}
+                    <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                  </>
+                )}
               </fieldset>
 
               {validation ? (
