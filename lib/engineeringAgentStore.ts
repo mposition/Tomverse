@@ -330,7 +330,7 @@ export async function endEngineeringAgentRun(
 /** The largest patch body the table holds (the migration's CHECK). */
 export const ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES = 65_536;
 
-const CAUSE_KEY = /^[a-z_]{1,20}:[!-~]{1,200}$/;
+const CAUSE_KEY = /^[a-z0-9_]{1,20}:[!-~]{1,200}$/;
 const REASON = /^[a-z_]{1,64}$/;
 
 export type OpenWorkItemInput =

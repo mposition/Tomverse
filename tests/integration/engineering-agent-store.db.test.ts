@@ -35,8 +35,10 @@ import { prisma } from "@/lib/prisma";
 // database's own rules still hold behind the store. A missing
 // TEST_DATABASE_URL means this file was not executed, not that it passed.
 //
-// Runs before engineering-agent-schema.db.test.ts, whose last test opens the
-// first T1 window for good; everything this file opens it also closes.
+// It does not depend on file order: engineering-agent-schema.db.test.ts may
+// run first and leave the first T1 window open (one pull request at a time),
+// so every test here closes what it opens -- runs ended, publish items
+// settled, bindings pruned, decisions acknowledged -- before the next starts.
 
 const requireDedicatedDatabase = () => {
   const testRaw = process.env.TEST_DATABASE_URL?.trim();

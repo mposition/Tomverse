@@ -218,8 +218,8 @@ run(
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
     // Engineering agent store: every change commits with its audit entry
-    // under the right actor, and results go where the core says. Before the
-    // schema file, whose last test opens the first T1 window for good.
+    // under the right actor, and results go where the core says. It closes
+    // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a

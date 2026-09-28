@@ -340,7 +340,7 @@ ALTER TABLE "EngineeringAgentWorkItem"
             OR ("kind" = 'decision' AND "state" IN ('open', 'acknowledged', 'expired'))
             OR ("kind" = 'state_mismatch' AND "state" IN ('open', 'resolved'))
         ),
-    ADD CONSTRAINT "EngineeringAgentWorkItem_causeKey_check" CHECK ("causeKey" ~ '^[a-z_]{1,20}:[!-~]{1,200}$'),
+    ADD CONSTRAINT "EngineeringAgentWorkItem_causeKey_check" CHECK ("causeKey" ~ '^[a-z0-9_]{1,20}:[!-~]{1,200}$'),
     ADD CONSTRAINT "EngineeringAgentWorkItem_patchBody_check"
         CHECK ("patchBody" IS NULL OR octet_length("patchBody") <= 65536),
     ADD CONSTRAINT "EngineeringAgentWorkItem_patchDigest_check"

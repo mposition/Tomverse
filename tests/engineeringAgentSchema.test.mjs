@@ -107,6 +107,17 @@ test("every state and value list in a CHECK is exactly the core list", () => {
   }
 });
 
+test("every work item kind can name the cause key it is created under", () => {
+  const rule = /"EngineeringAgentWorkItem_causeKey_check" CHECK \("causeKey" ~ '([^']+)'\)/.exec(sql);
+  assert.ok(rule, "the cause key rule");
+  const pattern = new RegExp(rule[1]);
+  for (const kind of ENGINEERING_AGENT_WORK_ITEM_KINDS) {
+    assert.match(`${kind}:00000000-0000-0000-0000-000000000000`, pattern, kind);
+  }
+  assert.match(`${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}x:1`, pattern);
+  assert.match(`${PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX}x`, pattern);
+});
+
 test("a work item is created in its kind's initial state and nowhere else", () => {
   const insert = /IF TG_OP = 'INSERT' THEN\n\s*IF NOT \(([\s\S]*?)\) THEN\n\s*RAISE EXCEPTION 'EngineeringAgentWorkItem starts/.exec(sql);
   assert.ok(insert, "the work item insert rule");
