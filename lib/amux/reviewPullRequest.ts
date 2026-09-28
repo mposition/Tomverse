@@ -21,6 +21,7 @@ export type AmuxReviewPullRequestFact = {
 
 export type AmuxReviewPullRequestRefusal =
   | "task_not_in_review"
+  | "review_not_required"
   | "not_the_workers_review"
   | "review_pr_conflict";
 
@@ -30,6 +31,7 @@ type TaskRow = {
   owner: string | null;
   revision: number;
   archivedAt: Date | null;
+  requiresHumanReview: boolean;
   reviewPrNumber: number | null;
 };
 
@@ -66,7 +68,7 @@ export async function recordAmuxReviewPullRequest(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.reviewPullRequest, attachment),
     async (tx, context) => {
       const tasks = await tx.$queryRaw<TaskRow[]>`
-        SELECT "id", "status", "owner", "revision", "archivedAt", "reviewPrNumber"
+        SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewPrNumber"
         FROM "AmuxWorkItem"
         WHERE "id" = ${input.taskId}
         FOR UPDATE
@@ -77,6 +79,11 @@ export async function recordAmuxReviewPullRequest(
       }
       if (task.revision >= AMUX_MAX_EXPECTED_REVISION) {
         return { recorded: false as const, reason: "task_not_in_review" as const };
+      }
+      // A review pull request belongs to a card a person reviews (the card's
+      // CHECK says so too); on any other card there is nothing to attach it to.
+      if (!task.requiresHumanReview) {
+        return { recorded: false as const, reason: "review_not_required" as const };
       }
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "worker", "outcome", "toStatus", "endedAt"
