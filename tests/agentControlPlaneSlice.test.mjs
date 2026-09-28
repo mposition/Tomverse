@@ -129,27 +129,15 @@ test("every product file the deployed image contains is in the slice", () => {
   ]);
 });
 
-test("a prefix leaves the slice only when the deploy leaves it out of the image too", () => {
-  const root = new URL("..", import.meta.url);
-  const tracked = new Set(
-    execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
-      .split("\0")
-      .filter(Boolean),
-  );
-  const ignored = tracked.has(".dockerignore") ? readFileSync(new URL(".dockerignore", root), "utf8").split(/\r?\n/) : [];
-  // Railpack hands .dockerignore to BuildKit, negations included; with no file it builds from every file.
-  const patterns = ignored.map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
-  const bare = (line) => line.replace(/^!/, "").replace(/^\/|\/$/g, "");
-  for (const prefix of DEPLOY_EXCLUDED_PREFIXES) {
-    assert.ok(
-      patterns.some((line) => !line.startsWith("!") && bare(line) === prefix),
-      `${prefix} is excluded from the slice but not from the image`,
-    );
-    assert.ok(
-      !patterns.some((line) => line.startsWith("!") && (bare(line) === prefix || bare(line).startsWith(`${prefix}/`))),
-      `a negation puts part of ${prefix} back into the image`,
-    );
-  }
+/**
+ * Nothing may leave the slice yet. Railpack merges .dockerignore with the
+ * exclusions in railpack.json, applies glob and negation patterns and lets the
+ * last match win, and no test here reproduces that. A prefix can be added only
+ * together with a check that reads what the image actually contains -- the
+ * generated build plan or the image inventory -- and replaces this test.
+ */
+test("no prefix leaves the slice until the image contents are verified", () => {
+  assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
 });
 
 test("a new barrel and a new caller added together are both in the slice", () => {

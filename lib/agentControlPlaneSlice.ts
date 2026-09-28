@@ -460,9 +460,10 @@ const RUNTIME_DIRECTORY = /^(?:app|components|lib|locales|packages|types|hooks|p
 /**
  * Path prefixes the deployed application does not contain. Empty: the image is
  * built from the whole tree (Railpack's node provider, no ignore file), so
- * every tracked file is present at runtime. A prefix may be added only in the
- * same reviewed change that removes it from the image, because the point of
- * this list is that a file absent from the image cannot be read by it.
+ * every tracked file is present at runtime. A file absent from the image
+ * cannot be read by it, which is the only reason a prefix could be listed
+ * here -- and only with a check of what the image really contains, which does
+ * not exist yet, so a test keeps the list empty.
  */
 export const DEPLOY_EXCLUDED_PREFIXES: readonly string[] = [];
 
