@@ -2899,6 +2899,72 @@ test("a heartbeat before the deadline still moves to the database's clock", asyn
   assert.ok(Math.abs(after.heartbeatAt.getTime() - Date.now()) < 60_000);
 });
 
+/**
+ * Insert publisher rows that are already stale, which the trigger exists to make
+ * impossible.
+ *
+ * Two of its rules stand in the way, and both are correct: a marketing publisher
+ * row must carry a deadline, and an insert with one has its `startedAt` stamped
+ * from the database clock. Together they mean a run cannot be *born* stale --
+ * which is the point, because staleness is something that happens to a live run
+ * by the passage of time, and the silence query's job is to find runs that got
+ * there honestly.
+ *
+ * A test cannot wait sixteen minutes, so it disables the trigger for exactly
+ * these inserts and turns it straight back on. What is being exercised is the
+ * query, not the trigger; the trigger has its own cases above.
+ */
+const insertStalePublisherRuns = async (
+  rows: Array<{ id: string; startedAt: Date; heartbeatAt: Date | null }>,
+) => {
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    for (const row of rows) {
+      await prisma.scheduledJobRun.create({
+        data: {
+          id: row.id,
+          jobKey: "marketing_publisher",
+          status: "running",
+          startedAt: row.startedAt,
+          heartbeatAt: row.heartbeatAt,
+          // Carried because the rule requires it of every publisher row; the
+          // silence query does not read it.
+          deadlineAt: new Date(row.startedAt.getTime() + 4 * 60_000),
+        },
+      });
+    }
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+};
+
+test("a publisher run cannot be created without a deadline", async () => {
+  // The rule the two fixtures above have to work around, asserted directly so the
+  // workaround cannot quietly become the only thing that knows about it.
+  //
+  // Scoping the trigger to rows carrying a deadline is what keeps it away from
+  // every other scheduled job, and it was also the way out of it:
+  // `startScheduledJob` accepts this job key and writes no deadline, so the row
+  // returned at the trigger's early exit and `completeScheduledJob` could record
+  // `succeeded` an hour late.
+  await assert.rejects(
+    prisma.scheduledJobRun.create({
+      data: { id: runUuid(), jobKey: "marketing_publisher", status: "running" },
+    }),
+    /must carry a deadline/,
+  );
+  // Every other job is untouched: this is the scoping, still doing its job.
+  const other = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: other, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await prisma.scheduledJobRun.delete({ where: { id: other } });
+});
+
 test("the silence query compares and orders by the last sign of life", async () => {
   // Codex's scenario, round 3, and the reason this is asked of PostgreSQL rather
   // than of a fake: fifty rows that never beat and started just past the
@@ -2908,41 +2974,28 @@ test("the silence query compares and orders by the last sign of life", async () 
   // put the fifty sixteen-minute rows ahead of the ten-hour one and the page cut
   // it off; nulls last would drop them instead.
   const now = new Date();
-  const runIds = [];
-  for (let index = 0; index < 50; index += 1) {
-    const runId = runUuid();
-    runIds.push(runId);
-    await prisma.scheduledJobRun.create({
-      data: {
-        id: runId,
-        jobKey: "marketing_publisher",
-        status: "running",
-        startedAt: new Date(now.getTime() - 16 * 60_000),
-      },
-    });
-  }
+  const runIds = Array.from({ length: 50 }, () => runUuid());
   const stale = runUuid();
-  await prisma.scheduledJobRun.create({
-    data: {
+  const alive = runUuid();
+  await insertStalePublisherRuns([
+    ...runIds.map((id) => ({
+      id,
+      startedAt: new Date(now.getTime() - 16 * 60_000),
+      heartbeatAt: null,
+    })),
+    {
       id: stale,
-      jobKey: "marketing_publisher",
-      status: "running",
       startedAt: new Date(now.getTime() - 11 * 60 * 60_000),
       heartbeatAt: new Date(now.getTime() - 10 * 60 * 60_000),
     },
-  });
-  // Alive: beat a moment ago, however long ago it started. It must not be
-  // counted, which the `startedAt`-only predicate got wrong.
-  const alive = runUuid();
-  await prisma.scheduledJobRun.create({
-    data: {
+    // Alive: beat a moment ago, however long ago it started. It must not be
+    // counted, which the `startedAt`-only predicate got wrong.
+    {
       id: alive,
-      jobKey: "marketing_publisher",
-      status: "running",
       startedAt: new Date(now.getTime() - 6 * 60 * 60_000),
       heartbeatAt: new Date(now.getTime() - 1_000),
     },
-  });
+  ]);
   // A different job's row, however silent, is not this alert's.
   await prisma.scheduledJobRun.create({
     data: {
@@ -2984,14 +3037,9 @@ test("a run exactly at the silence threshold is not yet silent", async () => {
   // alert fires a threshold early.
   const now = new Date();
   const runId = runUuid();
-  await prisma.scheduledJobRun.create({
-    data: {
-      id: runId,
-      jobKey: "marketing_publisher",
-      status: "running",
-      startedAt: new Date(now.getTime() - 15 * 60_000),
-    },
-  });
+  await insertStalePublisherRuns([
+    { id: runId, startedAt: new Date(now.getTime() - 15 * 60_000), heartbeatAt: null },
+  ]);
   const { total } = await findSilentMarketingPublisherRuns(prisma, now);
   assert.equal(total, 0);
   assert.deepEqual(
