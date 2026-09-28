@@ -3111,6 +3111,8 @@ test("a review settlement records the named PR on the card in the same transacti
     assert.equal(task.reviewPrNumber, 1733);
     // AmuxWorkItem_review_pr_check requires the flag with a stored PR.
     assert.equal(task.requiresHumanReview, true);
+    // AmuxWorkItem_human_review_shape_check pairs the flag with a specialty.
+    assert.equal(task.reviewSpecialty, "code-review");
     assert.equal(escalations.length, 1);
   } finally {
     await cleanup();
@@ -3121,7 +3123,7 @@ test("a review settlement that names no PR clears a PR left by an earlier attemp
   const { result, task, cleanup } = await runPromotedCardToSettle("amux-review-pr-cleared", async (input) => {
     await prisma.amuxWorkItem.update({
       where: { id: (await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).taskId },
-      data: { requiresHumanReview: true, reviewPrNumber: 1600 },
+      data: { requiresHumanReview: true, reviewSpecialty: "code-review", reviewPrNumber: 1600 },
     });
     return settleAmuxExecution({ ...input, outcome: "succeeded", toStatus: "review", reviewPrNumber: null });
   });

@@ -12,6 +12,13 @@ export const amuxHumanReviewRequired = (task: {
 export const AMUX_REVIEW_PR_NUMBER_MAX = 2_147_483_647;
 
 /**
+ * The review specialty a card gets when a settlement first records its PR and
+ * it had none (AmuxWorkItem_human_review_shape_check pairs the flag with a
+ * specialty). It matches the planning key pattern.
+ */
+export const AMUX_DEFAULT_REVIEW_SPECIALTY = "code-review";
+
+/**
  * Reason codes the WSL runner sends with a settlement (policy version 15).
  * Only these are stored; any other text a caller sends is ignored.
  */

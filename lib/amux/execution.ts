@@ -16,6 +16,7 @@ import {
 } from "@/lib/amux/executionBudgetCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import {
+  AMUX_DEFAULT_REVIEW_SPECIALTY,
   amuxBridgeSettleReason,
   amuxHumanReviewRequired,
   amuxReviewPrNumberAccepted,
@@ -849,6 +850,14 @@ export async function settleAmuxExecution(input: {
         effectiveToStatus === "review" && input.reviewPrNumber !== undefined;
       const recordedReviewPrNumber = replacesReviewPr ? (input.reviewPrNumber ?? null) : null;
       const bridgeReason = amuxBridgeSettleReason(input.reason);
+      // AmuxWorkItem_review_pr_check needs requiresHumanReview with a stored
+      // PR, and AmuxWorkItem_human_review_shape_check needs a specialty with
+      // that flag. A promoted card has neither, so recording its first PR
+      // sets both; an existing specialty is kept.
+      const marksHumanReview = replacesReviewPr && recordedReviewPrNumber !== null;
+      const reviewSpecialty = marksHumanReview
+        ? (task.reviewSpecialty ?? AMUX_DEFAULT_REVIEW_SPECIALTY)
+        : task.reviewSpecialty;
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: {
@@ -865,12 +874,7 @@ export async function settleAmuxExecution(input: {
                 owner: null,
                 claimedAt: null,
                 ...(replacesReviewPr ? { reviewPrNumber: recordedReviewPrNumber } : {}),
-                // AmuxWorkItem_review_pr_check: a stored PR requires the
-                // human-review flag. A promoted card carries only a brief, and
-                // policy version 15 already requires its review.
-                ...(replacesReviewPr && recordedReviewPrNumber !== null
-                  ? { requiresHumanReview: true }
-                  : {}),
+                ...(marksHumanReview ? { requiresHumanReview: true, reviewSpecialty } : {}),
                 revision: {
                   increment: 1,
                 },
@@ -964,7 +968,7 @@ export async function settleAmuxExecution(input: {
       if (effectiveToStatus === "review") {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
-          specialty: task.reviewSpecialty,
+          specialty: reviewSpecialty,
           reason: "human_review_required",
           openedBy: input.worker,
         });
