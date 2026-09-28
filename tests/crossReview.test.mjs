@@ -1341,7 +1341,10 @@ test("the transient gitleaks review output is never indexed", () => {
 
 const fixtureCodexEnvironment = (cwd) => {
   const fromTemporaryRoot = relative(tmpdir(), cwd);
-  assert.ok(fromTemporaryRoot !== "" && !fromTemporaryRoot.startsWith(`..${sep}`) && fromTemporaryRoot !== ".." && !isAbsolute(fromTemporaryRoot));
+  assert.ok(
+    fromTemporaryRoot !== "" && !fromTemporaryRoot.startsWith(`..${sep}`) && fromTemporaryRoot !== ".." && !isAbsolute(fromTemporaryRoot),
+    `fixture CLI bin requires a cwd under ${tmpdir()}: ${cwd}`
+  );
   const bin = join(tmpdir(), fromTemporaryRoot.split(sep)[0], "fixture-cli-bin");
   mkdirSync(bin, { recursive: true });
   const posix = join(bin, "codex");
@@ -1448,7 +1451,7 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
       env
     );
     assert.equal(shadowed.status, 1, shadowed.stderr);
-    assert.match(shadowed.stderr, /tree changed outside the writable scope after packaging: claude(?:\.cmd)?/u);
+    assert.equal(shadowed.stderr.trim(), `refusing review round 0: tree changed outside the writable scope after packaging: ${launcherName}`);
     assert.equal(existsSync(marker), false, "a repository-root command shim is never invoked");
     rmSync(shadowPath);
 
