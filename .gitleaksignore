@@ -267,6 +267,24 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/package-round0.json:generic-api-key:94
 cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records/review-prompt.md:generic-api-key:168
 
+# Provider doc fixture copied a public quick-start, not a credential.
+#
+# Commits 302185ba (develop PR) and ae2fffc5 (main cherry-pick) copied Zhipu's
+# published GLM-5.3 page, whose cURL sample says `Authorization: Bearer
+# your-api-key`. That placeholder never authorised anything. gitleaks reads
+# the curl header as curl-auth-header, which is the correct behaviour for a
+# scanner, so the follow-up commit writes `$ZHIPU_API_KEY` instead — the same
+# shape the Groq fixture already uses — rather than teaching the scanner to
+# ignore every bearer sample.
+#
+# The introducing commits are immutable history and stay pinned here.
+#
+# Scope: exactly these four findings in those two commits — nothing wider.
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+302185ba401bc4fb353574aa2fbf66c83f24c8cf:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:131
+ae2fffc59e663f2c4dd81dbde8a93025263effb1:tests/fixtures/providerModelDocs/zhipu-model-glm-5.3-2026-09-21.md:curl-auth-header:158
+
 # Commit 9662e94b (S2a, 2026-09-21) added two marketing E2E fixture constants
 # that assigned a hyphenated token to a property whose name ends in "Key" --
 # MarketingPost's idempotency identifier, which is a business key a draft is
@@ -301,3 +319,38 @@ cb53fd03182073ae25b62085c8db8d9fcd6378e2:docs/ops/cross-review/packages/prompt-r
 # point the commit will not be in develop history at all.
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:271
 f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
+
+# Commit 82caecfd (Prompt Refiner stage successor review records, 2026-09-28)
+# preserves the exact cross-review package and the verification commands it
+# reviewed. These findings are the repository's documented DB-integration test
+# environment placeholders repeated by immutable package/exchange records; they
+# are not provider credentials or deployable secrets. Changing those records
+# would invalidate their recorded digests, so the history scan is pinned to
+# these 24 exact commit/path/rule/line fingerprints and nothing broader.
+# These fingerprints also bind to that commit identity: preserve it with
+# merge commits only. Squash or rebase would mint new commits and invalidate
+# the exact exceptions rather than carrying this evidence forward.
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:117
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:261
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.json:generic-api-key:347
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:117
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:261
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:280
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:283
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:351
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:370
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.round1.failed-attempt1.json:generic-api-key:373
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.failed-attempt1.json:generic-api-key:115
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/exchange.failed-attempt1.json:generic-api-key:203
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/review-prompt.failed-attempt1.md:generic-api-key:2171
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round0.json:generic-api-key:94
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round0.json:generic-api-key:148
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round0.failed-attempt1.json:generic-api-key:90
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round0.failed-attempt1.json:generic-api-key:144
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round1.failed-attempt1.json:generic-api-key:98
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round1.failed-attempt1.json:generic-api-key:152
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/review-prompt.md:generic-api-key:2578
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/review-prompt.round1.failed-attempt1.md:generic-api-key:2578
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/review-prompt.round1.failed-attempt1.md:generic-api-key:2598
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round1.json:generic-api-key:98
+82caecfd8a3dbb4815fd9c232f2b42b2dafcf646:docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1/package-round1.json:generic-api-key:152

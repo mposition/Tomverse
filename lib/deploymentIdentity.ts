@@ -50,6 +50,35 @@ export type DeploymentQualityGateStatus =
     (typeof DEPLOYMENT_QUALITY_GATE_STATUSES)[number];
 
 /**
+ * How tightly a deployment is pinned to the revision it names.
+ *
+ * `strong` is an immutable revision: a different artifact is a different
+ * deployment, and the drift flag cannot widen it. `weak` records a preferred
+ * revision and may move when drift is explicitly allowed. `alias_only` pins
+ * a name rather than an artifact, and likewise moves only when drift is
+ * allowed. The default on the row is `strong`.
+ */
+export const VERSION_PIN_STRENGTHS = ["strong", "weak", "alias_only"] as const;
+
+export type VersionPinStrength = (typeof VERSION_PIN_STRENGTHS)[number];
+
+/**
+ * Whether this placement may be served as a different revision than the one
+ * it names.
+ *
+ * One function. A `strong` pin answers no even when the flag is set, so the
+ * flag cannot silently loosen the default. `weak` and `alias_only` answer
+ * yes only when the flag is set. Anything else answers no.
+ */
+export const versionMayDrift = (input: {
+    versionPinStrength: string | null | undefined;
+    allowVersionDrift: boolean | null | undefined;
+}): boolean =>
+    input.allowVersionDrift === true &&
+    (input.versionPinStrength === "weak" ||
+        input.versionPinStrength === "alias_only");
+
+/**
  * Whether a deployment may be switched on.
  *
  * The database holds this as a CHECK as well, because it is the rule an

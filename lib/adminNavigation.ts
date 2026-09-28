@@ -79,19 +79,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "Everything waiting on an operator, oldest first",
     group: "Command Center",
     badge: "workQueue",
-    aliases: ["queue", "todo", "pending", "backlog", "approvals", "two-person"],
-    tabs: [
-      {
-        id: "queue",
-        label: "Queue",
-        description: "Open items ranked by priority and age",
-      },
-      {
-        id: "approvals",
-        label: "Approvals",
-        description: "Two-person approval requests",
-      },
-    ],
+    aliases: ["queue", "todo", "pending", "backlog", "approvals"],
   },
   {
     id: "analytics",
@@ -315,9 +303,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "routing",
     label: "Routing",
     href: "/admin/routing",
-    description: "Shadow Auto Router decisions against what actually ran",
+    description: "Chat shadow routing and AMUX assignment evidence",
     group: "AI Platform",
-    aliases: ["auto", "router", "shadow", "task profile", "candidates"],
+    aliases: [
+      "auto",
+      "router",
+      "shadow",
+      "amux",
+      "task profile",
+      "candidates",
+    ],
   },
   {
     id: "infrastructure",
@@ -667,6 +662,24 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    id: "amux-board-promotion",
+    pattern: /^\/admin\/amux-board-promotion$/,
+    label: "AMUX card promotion",
+    description: "Owner-only promotion of one to three backlog cards, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
+    id: "amux-board-recommendation",
+    pattern: /^\/admin\/amux-board-recommendation$/,
+    label: "AMUX recommendation pool",
+    description: "Owner-only backlog recommendation snapshot, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // those tables feed the palette for every admin role, while this one-shot
     // cost-authority surface is owner-only and should not be advertised to
@@ -679,6 +692,24 @@ export const ADMIN_DETAIL_ROUTES = [
     parentLabel: "Models",
     parentHref: "/admin/models",
     group: "AI Platform" as const,
+  },
+  {
+    id: "amux-intake",
+    pattern: /^\/admin\/amux-intake$/,
+    label: "AMUX intake",
+    description: "Owner-only preview of one explicit registration, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
+    id: "amux-reconciliation",
+    pattern: /^\/admin\/amux-reconciliation$/,
+    label: "AMUX source reconciliation",
+    description: "Owner-only preview of per-card source revisions, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
   },
   {
     id: "user-detail",
@@ -782,7 +813,7 @@ export const ADMIN_LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/admin/usage-cost": "/admin/providers?tab=usage-cost",
   "/admin/jobs": "/admin/automation?tab=jobs",
   "/admin/webhooks": "/admin/automation?tab=webhooks",
-  "/admin/approvals": "/admin/work-queue?tab=approvals",
+  "/admin/approvals": "/admin/work-queue",
 };
 
 /**

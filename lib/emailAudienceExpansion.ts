@@ -3,8 +3,14 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
-import { isEmailMarketingEnabled } from "@/lib/appSettings";
-import { marketingFlagApplies } from "@/lib/emailFeatureFlags";
+import {
+  isEmailMarketingEnabled,
+  isEmailReleaseNotesEnabled,
+} from "@/lib/appSettings";
+import {
+  marketingFlagApplies,
+  releaseNotesFlagApplies,
+} from "@/lib/emailFeatureFlags";
 import { encryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
 import {
   ensureBootstrapPolicyVersion,
@@ -372,6 +378,15 @@ export async function expandEmailEvent(input: {
   ) {
     return { refused: "marketing_disabled" };
   }
+  // The product own switch, for the same reason and in the same place: a
+  // fan-out that started and then found release notes off would leave an event
+  // mid-expansion and a partial audience already queued.
+  if (
+    releaseNotesFlagApplies(definitionForFlag.purpose) &&
+    !(await isEmailReleaseNotesEnabled())
+  ) {
+    return { refused: "release_notes_disabled" };
+  }
 
   const cap = input.recipientCap ?? spec.recipientCap;
   const deadline = Date.now() + (input.timeBudgetMs ?? 60_000);
@@ -562,9 +577,14 @@ export async function expandEmailEvent(input: {
               (
                 await prisma.emailDelivery.findUnique({
                   where: {
-                    eventId_recipientKey: {
+                    // Generation 0: the fan-out writes roots. A replacement
+                    // is written by the re-enqueue path with its own
+                    // generation, and looking one up here would find a message
+                    // this pass did not write.
+                    eventId_recipientKey_generation: {
                       eventId: event.id,
                       recipientKey: recipientKeyFor(candidate.id),
+                      generation: 0,
                     },
                   },
                   select: { id: true },

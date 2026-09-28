@@ -94,6 +94,20 @@ export const FIXTURE_FEEDBACK = {
     message: "Korean IME composition was fixed, thank you.",
     type: "praise",
   },
+  /**
+   * A report the way production actually stores a verified-trace report: in
+   * `reviewing`, with nobody having touched it (lib/feedbackTraceAutoReview.ts).
+   * The `open` row above carries a verified trace too, but no report with one
+   * arrives as `open` -- and because every fixture row was `open` or closed,
+   * nothing here could see that the badge, the overview and the work queue all
+   * counted `open` alone. This row is the 2026-09-28 report that went unseen.
+   */
+  autoReviewed: {
+    id: "e2e-feedback-auto-reviewed",
+    message: "Invalid message count after sending a long comparison.",
+    type: "bug",
+    traceId: "e2e30000-3333-4333-8333-333333333333",
+  },
 } as const;
 
 export const FIXTURE_PRIVACY_REQUEST = {

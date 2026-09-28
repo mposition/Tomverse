@@ -1,6 +1,11 @@
 # Prompt Refiner confirmatory shadow v4 계약
 
-상태: **구현 승인됨, provider 실행·제품 노출 미승인**
+상태: **historical · superseded — 구현 승인됨, provider 실행·제품 노출 미승인**
+
+이 문서는 v4 당시의 188-file 계약과 수치를 보존하는 역사 기록이다. 현행 successor는
+[`prompt-refiner-confirmatory-shadow-v5.md`](prompt-refiner-confirmatory-shadow-v5.md)의
+stage v3 / run v5 및 **189개 고정 source 파일** 계약이다. 아래 v4 수치는 현행 권한으로
+읽거나 189로 소급 변경하지 않는다.
 
 구현 승인 기록: `mposition`, 2026-09-21 (Australia/Brisbane). 이 승인은
 confirmatory shadow v4의 계약, content-free evidence 저장·재구성, 관리자 표시와

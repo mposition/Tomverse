@@ -331,17 +331,25 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
     tableMentions: 2,
-    writeVerbs: 7,
+    writeVerbs: 8,
     reason:
-      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name.",
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do.",
   },
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 7,
-    writeVerbs: 7,
+    tableMentions: 11,
+    writeVerbs: 8,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. The last two are written out separately rather than as one statement with the column interpolated, because a runtime column name is what this rule exists to refuse. None interpolates a table name and every write is a delegate call.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
+  },
+  {
+    path: "lib/amux/intakeRegistration.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The unclear-commit read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxIntakeDraft and AmuxIntakeApproval only. This file never writes AdminAuditLog.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -464,6 +472,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The execution-runner migration fails closed on existing attempts, then replaces the exact v3 binding and insert guard for tokenizer facts. Its ALTER/DROP vocabulary changes DDL only and the migration seeds no attempt.",
   },
   {
+    path: "prisma/migrations/20260921160000_amux_agent_review_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 24,
+    reason:
+      "The AMUX approval migration creates only its proposal/decision ledger and reads AdminAuditLog through a restrictive foreign key and SELECT FOR KEY SHARE. It never writes AdminAuditLog; lib/adminAudit.ts remains its sole writer. Exact counts fail closed if this SQL changes.",
+  },
+  {
     path: "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 8,
@@ -486,6 +502,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 26,
     reason:
       "The migration adds the content-free evidence column and binds terminal evidence to the existing audit transaction. It contains no attempt DML and seeds no evidence.",
+  },
+  {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The stage-successor migration reads exact human/system audit rows from replacement guards and changes DDL only. It preserves the failed v2 approval as immutable audit evidence and seeds no stage, reservation, run, attempt or audit row.",
+  },
+  {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 10,
+    writeVerbs: 22,
+    reason:
+      "The migration admits the successor v5 run contract while preserving historical v3/v4 rows. It contains no run DML and seeds no authority.",
+  },
+  {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The migration admits v5 attempt bindings while preserving historical v3/v4 attempts. It contains no attempt DML and seeds no evidence.",
   },
   {
     path: "scripts/report-unswept-tables-core.mjs",
@@ -532,15 +572,37 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Adds the immutable record of the Guard resolver's full answer digest; DDL only and no row mutation.",
   },
+  {
+    path: "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "Makes that digest NOT NULL. The table is named three times and none of them writes a row: a SELECT count(*) that refuses the migration while any row still has no digest, the ALTER TABLE that follows it, and the count in the error message. Both write verbs are that one statement's own ALTER TABLE and ALTER COLUMN -- this migration issues no UPDATE and no DELETE, because the disposition of a row with no digest is an operator's decision carried out separately.",
+  },
+  {
+    path: "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
+    table: "MarketingPost",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
-    path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
+    path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:
-      "The waiver-sealed trigger reads the approval it is about to be pointed at, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+      "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
+    count: 3,
+    reason:
+      "Three reads, all FOR SHARE, all with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The waiver-scope trigger reads the approval it is about to be pointed at and the country rule whose scope that approval has to name; the country-rule trigger reads the waived duty states hanging off a rule whose scope is being moved. The schema is each trigger own, never input, quoted with %I, and every id is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260923400000_release_notes_country_rule/migration.sql",

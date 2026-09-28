@@ -31,10 +31,14 @@ import {
   ensureUnsubscribeKeyCanary,
 } from "@/lib/emailUnsubscribeKeyRetention";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
-import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import {
+  isEmailMarketingEnabled,
+  isEmailReleaseNotesEnabled,
+} from "@/lib/appSettings";
 import {
   ENQUEUE_REFUSAL_MESSAGE,
   marketingFlagApplies,
+  releaseNotesFlagApplies,
   type EnqueueRefusal,
 } from "@/lib/emailFeatureFlags";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
@@ -251,6 +255,57 @@ export async function enqueueStandardEmail(
       return {
         refused: "marketing_disabled",
         message: ENQUEUE_REFUSAL_MESSAGE.marketing_disabled,
+      };
+    }
+  }
+
+  // And the product's own switch, which is not the same question. Marketing
+  // being on says this deployment may send marketing at all; this says the
+  // release-notes product may send, and it is the last step of the activation
+  // order -- document in force, policy version active, readiness confirmed, then
+  // this (draft section 12).
+  //
+  // Checked here *and* at send. A row written while it was on must not go out
+  // after somebody turns it off, and a flag read only at enqueue cannot say so.
+  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
+    if (!(await isEmailReleaseNotesEnabled())) {
+      return {
+        refused: "release_notes_disabled",
+        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
+      };
+    }
+  }
+
+  // And the product's own switch, which is not the same question. Marketing
+  // being on says this deployment may send marketing at all; this says the
+  // release-notes product may send, and it is the last step of the activation
+  // order -- document in force, policy version active, readiness confirmed, then
+  // this (draft section 12).
+  //
+  // Checked here *and* at send. A row written while it was on must not go out
+  // after somebody turns it off, and a flag read only at enqueue cannot say so.
+  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
+    if (!(await isEmailReleaseNotesEnabled())) {
+      return {
+        refused: "release_notes_disabled",
+        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
+      };
+    }
+  }
+
+  // And the product's own switch, which is not the same question. Marketing
+  // being on says this deployment may send marketing at all; this says the
+  // release-notes product may send, and it is the last step of the activation
+  // order -- document in force, policy version active, readiness confirmed, then
+  // this (draft section 12).
+  //
+  // Checked here *and* at send. A row written while it was on must not go out
+  // after somebody turns it off, and a flag read only at enqueue cannot say so.
+  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
+    if (!(await isEmailReleaseNotesEnabled())) {
+      return {
+        refused: "release_notes_disabled",
+        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
       };
     }
   }

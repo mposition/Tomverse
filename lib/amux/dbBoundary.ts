@@ -19,8 +19,9 @@ export const AMUX_DB_MAX_WAIT_MS = 250;
 // statement-count cap nor a whole-transaction time bound is itself required.
 export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // Single-operation future lifecycle routes have a shared DB-clock deadline.
-// The Rust client uses nine seconds for connect, route and response transport.
-export const AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 6_000;
+// The Rust client allows fifteen seconds for connect, route and response
+// transport, leaving a three-second margin around the server budget.
+export const AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000;
 
 export type AmuxDbBoundary = {
   operation: string;
@@ -36,17 +37,17 @@ export const AMUX_DB_BOUNDARIES = {
   },
   queueRead: {
     operation: "queue_read",
-    prismaCallCeiling: 3,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
   routingSnapshot: {
     operation: "routing_snapshot",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
   routingTaskRead: {
     operation: "routing_task_read",
-    prismaCallCeiling: 3,
+    prismaCallCeiling: 5,
     isolation: "read",
   },
   workerCatalogRead: {
@@ -64,7 +65,7 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
-  claim: { operation: "claim", prismaCallCeiling: 8, isolation: "mutation" },
+  claim: { operation: "claim", prismaCallCeiling: 17, isolation: "mutation" },
   claimRefusal: {
     operation: "claim_refusal",
     prismaCallCeiling: 6,
@@ -88,7 +89,7 @@ export const AMUX_DB_BOUNDARIES = {
   },
   executionStart: {
     operation: "execution_start",
-    prismaCallCeiling: 16,
+    prismaCallCeiling: 30,
     isolation: "mutation",
   },
   executionHeartbeat: {
@@ -99,7 +100,7 @@ export const AMUX_DB_BOUNDARIES = {
   },
   executionSettle: {
     operation: "execution_settle",
-    prismaCallCeiling: 12,
+    prismaCallCeiling: 26,
     isolation: "mutation",
   },
   executionRecoveryRead: {
@@ -109,7 +110,13 @@ export const AMUX_DB_BOUNDARIES = {
   },
   executionRecoveryWrite: {
     operation: "execution_recovery_write",
-    prismaCallCeiling: 14,
+    prismaCallCeiling: 21,
+    isolation: "mutation",
+  },
+  quotaObservationSweep: {
+    operation: "quota_observation_sweep",
+    // setup + one bounded CTE DELETE + commit fence
+    prismaCallCeiling: 3,
     isolation: "mutation",
   },
   ownershipRecoveryRead: {
@@ -271,9 +278,7 @@ export async function withAmuxDbBoundary<T>(
     !Number.isInteger(boundary.prismaCallCeiling) ||
     boundary.prismaCallCeiling < 2
   ) {
-    throw new Error(
-      "AMUX DB boundary needs setup and commit-fence calls",
-    );
+    throw new Error("AMUX DB boundary needs setup and commit-fence calls");
   }
 
   const routeDeadline = amuxRouteDeadline.getStore();
@@ -356,8 +361,7 @@ export async function withAmuxDbBoundary<T>(
           dbNow.getTime() + routeDeadline.maxMs,
         );
         if (
-          routeDeadline.databaseDeadlineAt.getTime() -
-            dbNow.getTime() <
+          routeDeadline.databaseDeadlineAt.getTime() - dbNow.getTime() <
           transactionBudgetMs
         ) {
           throw new AmuxDbBoundaryError(
@@ -387,9 +391,7 @@ export async function withAmuxDbBoundary<T>(
       const routeDeadlineIso = (
         routeDeadline?.databaseDeadlineAt ?? deadlineAt
       ).toISOString();
-      const leaseDeadlineIso = (
-        leaseDeadlineAt ?? deadlineAt
-      ).toISOString();
+      const leaseDeadlineIso = (leaseDeadlineAt ?? deadlineAt).toISOString();
       const fence = await tx.$queryRaw<Array<{ withinDeadline: boolean }>>`
         SELECT
           clock_timestamp() <

@@ -68,6 +68,8 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
       "The server refused the execution request. It is not a retry signal; inspect status before any new action.",
     runApprovalFlagDisabled:
       "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED is off. Enable it and redeploy before approving a new run.",
+    stageActivationFlagsDisabled:
+      "Run approval and execution flags must both be enabled before creating an immutable stage. Enable them and redeploy first.",
     executionFlagDisabled:
       "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED is off. Enable it and redeploy before executing the approved run.",
     reauthenticate: "Sign in again and return to this screen",
@@ -139,6 +141,8 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
       "서버가 실행 요청을 거부했습니다. 재시도 신호가 아니므로 새 작업 전에 상태를 확인하세요.",
     runApprovalFlagDisabled:
       "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED가 꺼져 있습니다. 새 run 승인 전에 활성화하고 다시 배포하세요.",
+    stageActivationFlagsDisabled:
+      "immutable stage를 만들기 전에 run 승인 flag와 실행 flag를 모두 활성화하고 먼저 재배포해야 합니다.",
     executionFlagDisabled:
       "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED가 꺼져 있습니다. 승인된 run 실행 전에 활성화하고 다시 배포하세요.",
     reauthenticate: "다시 로그인한 뒤 이 화면으로 돌아오기",

@@ -83,15 +83,13 @@ mock.module(moduleUrl("lib/amux/wireContract.ts"), {
 });
 
 const routesPromise = Promise.all(
-  [
-    "workers/register",
-    "workers/heartbeat",
-    "owned-queue",
-  ].map(async (path) => ({
-    path,
-    POST: (await import(moduleUrl(`app/api/internal/amux/${path}/route.ts`)))
-      .POST as (request: Request) => Promise<Response>,
-  })),
+  ["workers/register", "workers/heartbeat", "owned-queue"].map(
+    async (path) => ({
+      path,
+      POST: (await import(moduleUrl(`app/api/internal/amux/${path}/route.ts`)))
+        .POST as (request: Request) => Promise<Response>,
+    }),
+  ),
 );
 
 test("future-only routes reject unauthenticated requests without work", async () => {

@@ -8,6 +8,10 @@
  */
 
 import { modelOwner } from "@/lib/modelOwner";
+import {
+  docCollectableFields,
+  providerDocHumanUrl,
+} from "@/lib/providerModelDocSources";
 
 export const MODEL_REVIEW_PRIORITIES = [
   "recommended",
@@ -348,6 +352,308 @@ export const supersedingServedModel = (
   return best?.apiModel ?? null;
 };
 
+/**
+ * What a provider's own tier word says about the seat a model is sold for.
+ *
+ * `speed` is separate from `economy` because the two are sold differently:
+ * `turbo` and `instant` promise latency at the same size, while `air` and
+ * `mini` promise a smaller model. Both are cheaper; only one of them claims to
+ * be as capable.
+ */
+export const MODEL_TIER_KINDS = [
+  "flagship",
+  "standard",
+  "speed",
+  "economy",
+] as const;
+export type ModelTierKind = (typeof MODEL_TIER_KINDS)[number];
+
+const TIER_WORDS: ReadonlyArray<readonly [RegExp, ModelTierKind]> = [
+  // `pro` sits with the flagship words because that is how every provider in
+  // this catalogue sells it today (Gemini Pro, Qwen Pro, Sonar Pro). `plus` is
+  // deliberately not here: vendors use it for the rung below their own top.
+  [/^(?:opus|ultra|max|large|premier|titan|pro)$/, "flagship"],
+  [/^(?:plus|sonnet|standard|base)$/, "standard"],
+  [/^(?:turbo|instant|fast|rapid)$/, "speed"],
+  [
+    /^(?:air|airx|mini|nano|lite|light|small|tiny|micro|haiku|flash|flashx|flashlite|scout)$/,
+    "economy",
+  ],
+];
+
+export type ModelTierReading = {
+  kind: ModelTierKind | null;
+  /** The word the provider used, as it appeared. */
+  word: string | null;
+};
+
+/**
+ * The tier word in an id, if the id carries one.
+ *
+ * Reads every segment rather than only the last: `glm-5.3-flashx` and
+ * `gemini-3-flash-lite` hang the word after the generation, `claude-opus-5`
+ * hangs it before. Consecutive tier words are one seat: `flash-lite` is not
+ * `flash`, or the queue tells the operator the two occupy the same place.
+ * A gap breaks the run: `whisper-large-v3-turbo` is `turbo`, not `large-turbo`.
+ * Inside one run the kind is the first word. `mini-fast` stays an economy
+ * seat that is also fast; the speed word does not erase the grade.
+ * A `null` kind is not "standard" -- it is the id declining to say, and the
+ * copy reading this keeps the two apart.
+ */
+export const modelTier = (apiModel: string): ModelTierReading => {
+  const segments = modelIdentityWithoutVendor(apiModel)
+    .split(/[-_.]/)
+    .filter(Boolean);
+  const runs: { kind: ModelTierKind; word: string }[][] = [];
+  let current: { kind: ModelTierKind; word: string }[] = [];
+  for (const segment of segments) {
+    let hit: { kind: ModelTierKind; word: string } | null = null;
+    for (const [pattern, kind] of TIER_WORDS) {
+      if (pattern.test(segment)) {
+        hit = { kind, word: segment };
+        break;
+      }
+    }
+    if (hit) {
+      current.push(hit);
+    } else if (current.length > 0) {
+      runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) runs.push(current);
+  const last = runs[runs.length - 1];
+  if (!last || last.length === 0) return { kind: null, word: null };
+  return {
+    kind: last[0].kind,
+    word: last.map((hit) => hit.word).join("-"),
+  };
+};
+
+/**
+ * The line with its tier word removed: the family a vendor versions as a wave.
+ *
+ * `glm-air` and `glm-flash` are both `glm`; `claude-opus` and `claude-sonnet`
+ * are both `claude`. This is the coarser half of a pair -- `modelLine()` keeps
+ * the tier and answers "do we already serve a later one of exactly this", this
+ * drops it and answers "which generation wave is this".
+ */
+type GenerationReading = {
+  family: string;
+  version: number[] | null;
+  tier: ModelTierReading;
+  owner: ReturnType<typeof modelOwner>;
+};
+
+/**
+ * Read once per id, kept for the rest of the process.
+ *
+ * A queue read asks about one id against every other id of its wave, so the
+ * same string is parsed n times per row and n squared times per request. At
+ * the 1,000-row ceiling that measured 11 seconds; the ids are immutable and
+ * the answer never changes, so it is computed once.
+ *
+ * Bounded rather than unbounded: this is a long-lived process and the id space
+ * is provider-controlled. Clearing wholesale is fine -- a miss costs one parse.
+ */
+const GENERATION_CACHE_LIMIT = 4_096;
+const generationCache = new Map<string, GenerationReading>();
+
+export const modelGenerationFamily = (apiModel: string): GenerationReading => {
+  const cached = generationCache.get(apiModel);
+  if (cached) return cached;
+  const { line, version } = modelLine(apiModel);
+  const tier = modelTier(apiModel);
+  // Every tier word, not only the first: "gemini-3.5-flash-lite" carries two,
+  // and keeping "lite" gave it a family of its own so it was never read as a
+  // sibling of "gemini-3.5-flash".
+  const family = line
+    .split("-")
+    .filter(
+      (segment) =>
+        segment && !TIER_WORDS.some(([pattern]) => pattern.test(segment))
+    )
+    .join("-");
+  const reading: GenerationReading = {
+    family,
+    version,
+    tier,
+    owner: modelOwner(apiModel),
+  };
+  if (generationCache.size >= GENERATION_CACHE_LIMIT) generationCache.clear();
+  generationCache.set(apiModel, reading);
+  return reading;
+};
+
+export const MODEL_PORTFOLIO_RELATIONS = [
+  "newer_generation",
+  "same_generation",
+  "older_generation",
+  "family_seat_mismatch",
+  "no_shared_family",
+  "unreadable_version",
+] as const;
+export type ModelPortfolioRelationKind =
+  (typeof MODEL_PORTFOLIO_RELATIONS)[number];
+
+export type ModelPortfolioRelation = {
+  kind: ModelPortfolioRelationKind;
+  /** The served model this was measured against, when there is one. */
+  against: ServedModelPortfolioEntry | null;
+  /** The generations compared, written as the ids wrote them. */
+  candidateGeneration: string | null;
+  servedGeneration: string | null;
+  candidateTier: ModelTierReading;
+  servedTier: ModelTierReading;
+  /** True when candidate and served carry the same tier word. */
+  sameTier: boolean;
+};
+
+const formatVersion = (version: readonly number[] | null) =>
+  version && version.length ? version.join(".") : null;
+
+/**
+ * Where a candidate sits against the served models of its own maker.
+ *
+ * The queue already had `supersedingServedModel`, and it answers a narrower
+ * question: do we serve a later version of exactly this line, tier word
+ * included. That is right for closing an item and useless for the question an
+ * operator asks about a provider's release wave -- five ids arrive, four of
+ * them are tier variants around one generation number, and the facts worth
+ * saying are which generation each is and which seat it would take.
+ *
+ * Zhipu on 2026-09-21 is the measured case. With GLM 5.2 served, the queue was
+ * shown `glm-4.5-air`, `glm-5-turbo`, `ZHIPU/GLM-5.3`, `glm-5.3-flash` and
+ * `glm-5.3-flashx`, and said the same paragraph about all five: that it could
+ * not tell what any of them complements or replaces. Two are older generations
+ * of a model already served and three are the next generation of the exact
+ * family the catalogue runs -- each of which the identifier states.
+ *
+ * Naming-based, and the copy quoting it says so. A tier word is what the
+ * provider called the model, not a measurement.
+ */
+/**
+ * An id that names no tier is the base seat. A cheaper named seat cannot
+ * answer "we already serve this generation" for that base, or for a higher
+ * seat. Flash answering for an unnamed GLM, or Flash answering for Pro, is
+ * the case this blocks. The same kind with a different word is a different
+ * seat too: flash-lite does not answer for flash.
+ */
+const TIER_SEAT_RANK: Record<ModelTierKind, number> = {
+  flagship: 3,
+  standard: 2,
+  speed: 1,
+  economy: 0,
+};
+
+const tierRank = (kind: ModelTierKind | null) =>
+  kind === null ? TIER_SEAT_RANK.flagship : TIER_SEAT_RANK[kind];
+
+export const modelPortfolioRelation = (
+  candidateApiModel: string,
+  servedModels: readonly ServedModelPortfolioEntry[]
+): ModelPortfolioRelation => {
+  const candidate = modelGenerationFamily(candidateApiModel);
+  const owner = modelOwner(candidateApiModel);
+  const base = {
+    candidateGeneration: formatVersion(candidate.version),
+    candidateTier: candidate.tier,
+  };
+  const none = {
+    ...base,
+    against: null,
+    servedGeneration: null,
+    servedTier: { kind: null, word: null } as ModelTierReading,
+    sameTier: false,
+  };
+  if (!candidate.version || !candidate.family) {
+    return { ...none, kind: "unreadable_version" };
+  }
+
+  // The candidate's own tier is measured first, and only then the rest of the
+  // family. Ranking by version across tiers answered the wrong question: with
+  // Gemini 3.6 Flash and 3.1 Pro served, a Pro 3.5 candidate was measured
+  // against Flash 3.6, called an older generation, and dropped out of the
+  // default view -- while the row's own text still said it overlapped Pro 3.1.
+  const newestOf = (
+    candidates: readonly {
+      model: ServedModelPortfolioEntry;
+      version: number[];
+      tier: ModelTierReading;
+    }[]
+  ) =>
+    candidates.reduce<(typeof candidates)[number] | null>(
+      (held, entry) =>
+        held && compareModelVersions(entry.version, held.version) <= 0
+          ? held
+          : entry,
+      null
+    );
+
+  const family: {
+    model: ServedModelPortfolioEntry;
+    version: number[];
+    tier: ModelTierReading;
+  }[] = [];
+  for (const served of servedModels) {
+    const servedFamily = modelGenerationFamily(served.apiModel);
+    if (owner === "unknown" || servedFamily.owner !== owner) continue;
+    if (!servedFamily.version || servedFamily.family !== candidate.family) {
+      continue;
+    }
+    family.push({
+      model: served,
+      version: servedFamily.version,
+      tier: servedFamily.tier,
+    });
+  }
+  const sameWord = family.filter((entry) => entry.tier.word === candidate.tier.word);
+  const eligible = family.filter(
+    (entry) => tierRank(entry.tier.kind) >= tierRank(candidate.tier.kind)
+  );
+  const best = newestOf(sameWord) ?? newestOf(eligible);
+
+  const mismatch = (
+    declined: { model: ServedModelPortfolioEntry; version: number[]; tier: ModelTierReading } | null
+  ): ModelPortfolioRelation => ({
+    ...base,
+    kind: "family_seat_mismatch",
+    against: declined?.model ?? null,
+    servedGeneration: formatVersion(declined?.version ?? null),
+    servedTier: declined?.tier ?? { kind: null, word: null },
+    sameTier: false,
+  });
+
+  if (!best) {
+    if (family.length === 0) return { ...none, kind: "no_shared_family" };
+    return mismatch(newestOf(family));
+  }
+
+  const difference = compareModelVersions(candidate.version, best.version);
+  const differentWord = candidate.tier.word !== best.tier.word;
+  const servedIsHigherKind =
+    tierRank(best.tier.kind) > tierRank(candidate.tier.kind);
+  // flash-lite 3.5 must not mark flash 3 as an older generation. The same
+  // generation of those two seats is still a comparison.
+  if (difference < 0 && differentWord && !servedIsHigherKind) {
+    return mismatch(best);
+  }
+
+  return {
+    ...base,
+    kind:
+      difference > 0
+        ? "newer_generation"
+        : difference < 0
+          ? "older_generation"
+          : "same_generation",
+    against: best.model,
+    servedGeneration: formatVersion(best.version),
+    servedTier: best.tier,
+    sameTier: candidate.tier.word === best.tier.word,
+  };
+};
+
 /** The newest id per line, for collapsing one scan's own generations. */
 export const newestByModelLine = <T>(
   items: readonly T[],
@@ -392,11 +698,53 @@ const providerLabel = (providers: readonly string[]) => {
   return `${unique[0]} 외 ${unique.length - 1}곳`;
 };
 
+/**
+ * What the queue says about one candidate, in the order an operator reads it.
+ *
+ * Three parts rather than one paragraph, because the paragraph was the defect.
+ * Every row ended with the same sentence about checking official positioning,
+ * so five rows of a provider release wave looked copied -- and the one row that
+ * was the next generation of a model in the catalogue read exactly like the two
+ * that were older generations of it.
+ *
+ * `analysisKo` stays: it is what the exclusion snapshot records and what the
+ * fingerprint binds. It is these three joined, never a fourth wording.
+ */
 export type ModelTriageAssessment = {
   priority: ModelReviewPriority;
   kind: ModelReviewKind;
   product: ModelProductSurface;
+  /** One line: what this candidate is to the catalogue Tomverse runs. */
+  verdictKo: string;
+  /** Supporting facts, each checkable on its own. */
+  pointsKo: string[];
+  /** What to do next, and what would change the answer. */
+  nextStepKo: string;
   analysisKo: string;
+};
+
+const triaged = (input: {
+  priority: ModelReviewPriority;
+  kind: ModelReviewKind;
+  product: ModelProductSurface;
+  verdictKo: string;
+  pointsKo?: readonly (string | null | undefined | false)[];
+  nextStepKo: string;
+}): ModelTriageAssessment => {
+  const pointsKo = (input.pointsKo ?? []).filter(
+    (point): point is string => typeof point === "string" && point.trim() !== ""
+  );
+  return {
+    priority: input.priority,
+    kind: input.kind,
+    product: input.product,
+    verdictKo: input.verdictKo,
+    pointsKo,
+    nextStepKo: input.nextStepKo,
+    analysisKo: [input.verdictKo, ...pointsKo, input.nextStepKo]
+      .filter(Boolean)
+      .join(" "),
+  };
 };
 
 /** Facts copied from the provider catalogue response, never inferred pricing. */
@@ -456,12 +804,16 @@ const chatRole = (
   // the fact that a modern model can also think. Gemini Flash and Claude Opus
   // should not both collapse into the generic reasoning bucket merely because
   // Tomverse sends each one a reasoning effort.
-  if (/(?:^|[-_.])(?:mini|nano|flash|haiku|small|lite)(?:$|[-_.])/.test(identity)) {
-    return "economy";
-  }
-  if (/(?:^|[-_.])(?:opus|pro|max|large|ultra|premier)(?:$|[-_.])/.test(identity)) {
-    return "flagship";
-  }
+  //
+  // Read from the same table the generation comparison uses. They were two
+  // lists of the same words and they disagreed: `glm-5.3-flash` was an economy
+  // model with a role, and `glm-5.3-flashx` beside it had no role at all.
+  const tier = modelTier(apiModel).kind;
+  if (tier === "economy") return "economy";
+  if (tier === "flagship") return "flagship";
+  // `speed` deliberately falls through. Vendors disagree about what it sells:
+  // `glm-5-turbo` is a cheap tier and `gpt-4-turbo` was the flagship of its
+  // day, so the word decides the tier phrase and never the portfolio role.
   if (
     evidence?.reasoning === true ||
     (served?.reasoning && served.reasoning !== "none") ||
@@ -638,12 +990,199 @@ const capabilityDeltas = (
   return { gains, losses, tradeoffs };
 };
 
+/**
+ * The fields an operator would have to fetch before this row can be decided.
+ *
+ * Named rather than implied. "Check the official positioning and price" was
+ * the closing sentence on every row, including rows where the price was
+ * already known and the only open question was the context window.
+ */
+const MISSING_FIELD_LABELS = {
+  contextWindowTokens: "컨텍스트 창",
+  maxOutputTokens: "최대 출력",
+  prices: "입력/출력 단가",
+  modalities: "이미지 입력 지원 여부",
+} as const;
+type MissingField = keyof typeof MISSING_FIELD_LABELS;
+
+const missingEvidenceFields = (
+  evidence?: ModelCandidateEvidence | null
+): MissingField[] => {
+  const missing: MissingField[] = [];
+  if (!evidence?.contextWindowTokens) missing.push("contextWindowTokens");
+  if (!evidence?.maxOutputTokens) missing.push("maxOutputTokens");
+  if (
+    evidence?.observedInputUsdPerMillionTokens == null ||
+    evidence?.observedOutputUsdPerMillionTokens == null
+  ) {
+    missing.push("prices");
+  }
+  if (evidence?.supportsImage == null) missing.push("modalities");
+  return missing;
+};
+
+/**
+ * What the rest of this provider's release wave, sitting in the same queue,
+ * says about the row being read.
+ *
+ * A provider ships a generation as a set -- a base model, a cheap one, a fast
+ * one -- and the queue was deciding each of them as if it were alone. That is
+ * how the row that is the next generation of the served flagship ended up
+ * reading exactly like the small variant beside it. The order matters too: the
+ * base model of a wave is the decision the others depend on.
+ *
+ * Only the ids are compared, and the copy says so. Whether `flashx` is a faster
+ * SKU of `flash` or a different model is the provider's to state; naming can
+ * raise the question and must not answer it.
+ */
+/**
+ * The same-wave siblings of one id: same maker, same family, same generation.
+ *
+ * The maker is part of it. `nvidia/aurora-9-mini` and `microsoft/aurora-9`
+ * share a family name and nothing else, and without this the first would call
+ * the second "the base model of its own wave".
+ */
+const sameWaveSiblings = (apiModel: string, wave: readonly string[]) => {
+  const self = modelGenerationFamily(apiModel);
+  if (!self.version || !self.family) return [];
+  return wave
+    .filter((candidate) => candidate !== apiModel)
+    // Sorted here as well as in the query: the analysis text names these in
+    // order, and a caller that reads them from anywhere else must not be able
+    // to change what the same item says about itself.
+    .slice()
+    .sort((left, right) => left.localeCompare(right))
+    .map((candidate) => ({ apiModel: candidate, ...modelGenerationFamily(candidate) }))
+    .filter(
+      (sibling) =>
+        sibling.owner === self.owner &&
+        sibling.owner !== "unknown" &&
+        sibling.family === self.family &&
+        sibling.version &&
+        compareModelVersions(sibling.version, self.version!) === 0 &&
+        !isPreviewModel(sibling.apiModel)
+    );
+};
+
+const siblingWavePoints = (input: {
+  apiModel: string;
+  siblingApiModels: readonly string[];
+}) => {
+  const self = modelGenerationFamily(input.apiModel);
+  const siblings = sameWaveSiblings(input.apiModel, input.siblingApiModels);
+  if (siblings.length === 0) return [];
+
+  const points: string[] = [];
+  const base = siblings.find(
+    (sibling) => sibling.tier.word === null && !isPreviewModel(sibling.apiModel)
+  );
+  if (self.tier.word && base) {
+    points.push(
+      `같은 세대의 기본형 '${base.apiModel}'도 같은 대기열에 있습니다. 기본형을 먼저 결정하면 이 파생형의 자리는 그 결정에 따라 정해집니다.`
+    );
+  } else if (!self.tier.word && siblings.some((sibling) => sibling.tier.word)) {
+    points.push(
+      `같은 세대의 파생형 ${siblings
+        .filter((sibling) => sibling.tier.word)
+        .map((sibling) => `'${sibling.apiModel}'`)
+        .join("·")}도 함께 올라와 있어, 한 세대를 tier별로 몇 개까지 노출할지 같이 정해야 합니다.`
+    );
+  }
+
+  // `flash` and `flashx`: one name is the other plus a letter, and the
+  // extra letter does not cross a hyphen. `flash` / `flash-lite` is a
+  // different seat, not a one-letter speed SKU.
+  const tierWordsAreNear = (left: string, right: string) => {
+    if (left === right) return false;
+    const [shorter, longer] =
+      left.length <= right.length ? [left, right] : [right, left];
+    return (
+      longer.length === shorter.length + 1 &&
+      longer.startsWith(shorter) &&
+      longer.charAt(shorter.length) !== "-"
+    );
+  };
+  const selfWord = self.tier.word;
+  const nearName = selfWord
+    ? siblings.find(
+        (sibling) =>
+          sibling.tier.word &&
+          sibling.tier.word !== selfWord &&
+          tierWordsAreNear(selfWord, sibling.tier.word)
+      )
+    : undefined;
+  if (nearName) {
+    points.push(
+      `'${nearName.apiModel}'와 tier 표기가 한 글자 차이라, 같은 모델의 속도·가격 SKU일 수 있습니다. 두 ID가 같은 가중치인지 공급자 문서에서 확인하고, 같다면 별도 모델 대신 속도 옵션으로 묶는 편이 목록을 단순하게 만듭니다.`
+    );
+  }
+  return points;
+};
+
+/**
+ * Which of the missing values this provider's documents fill in by themselves,
+ * and which stay a person's job.
+ *
+ * Per field rather than per provider. Anthropic's pricing page carries prices
+ * and nothing about context windows, so "the next collection will fill these
+ * in" would be false for three of the four fields on every Claude candidate.
+ * The provider's own page is named either way, because the operator who has to
+ * do it by hand should not also have to find it.
+ */
+const missingEvidenceSourceKo = (
+  providers: readonly string[],
+  missing: readonly MissingField[]
+) => {
+  const collected = new Set<MissingField>();
+  for (const provider of providers) {
+    const fields = docCollectableFields(provider);
+    for (const field of missing) {
+      if (fields[field]) collected.add(field);
+    }
+  }
+  const byHand = missing.filter((field) => !collected.has(field));
+  const humanUrl =
+    providers.map((provider) => providerDocHumanUrl(provider)).find(Boolean) ??
+    null;
+  const label = (fields: readonly MissingField[]) =>
+    fields.map((field) => MISSING_FIELD_LABELS[field]).join(" · ");
+
+  if (collected.size === 0) {
+    return `이 공급자는 기계가 읽는 공식 문서를 내지 않아, 전부 사람이 확인해야 합니다${
+      humanUrl ? ` (${humanUrl})` : ""
+    }.`;
+  }
+  if (byHand.length === 0) {
+    return "이 값들은 공식 문서 자동 수집 대상이라, 다음 수집이 성공하면 스스로 채워집니다.";
+  }
+  return `이 중 ${label([...collected])}는 공식 문서 자동 수집 대상이고, ${label(
+    byHand
+  )}는 사람이 확인해야 합니다${humanUrl ? ` (${humanUrl})` : ""}.`;
+};
+
+/** What a tier word claims about the seat, in the copy's own words. */
+const tierPhrase = (tier: ModelTierReading) => {
+  switch (tier.kind) {
+    case "economy":
+      return "경량·저가 파생형";
+    case "speed":
+      return "속도 지향 파생형";
+    case "flagship":
+      return "상위 tier";
+    case "standard":
+      return "기본 tier";
+    default:
+      return null;
+  }
+};
+
 const smartChatAssessment = (input: {
   apiModel: string;
   provider: string;
   providers: readonly string[];
   candidateEvidence?: ModelCandidateEvidence | null;
   servedModels?: readonly ServedModelPortfolioEntry[];
+  siblingApiModels?: readonly string[];
   googleBraveSearchNote: string;
 }): ModelTriageAssessment => {
   const candidateRole = chatRole(input.apiModel, input.candidateEvidence);
@@ -702,86 +1241,191 @@ const smartChatAssessment = (input: {
   const overlapsRole = candidateRoleIsKnown && sameRole.length > 0;
   const facts = candidateFacts(input.candidateEvidence);
   const deltas = capabilityDeltas(input.candidateEvidence, baseline);
-  const current = owner === "unknown"
-    ? "후보 ID만으로 제작사를 식별하지 못해 현재 라인업과 안전하게 연결할 수 없습니다."
-    : ownerModels.length
-    ? `현재 Tomverse의 같은 제작사 모델은 ${ownerModels
-        .slice(0, 3)
-        .map((model) => `'${portfolioName(model)}'`)
-        .join("·")}입니다.`
-    : "현재 Tomverse에는 같은 제작사의 활성 모델이 없습니다.";
-  const evidenceLine = facts.length
-    ? ` 공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다.`
-    : " 공급자 모델 목록만으로는 컨텍스트·출력·모달리티·가격 우위를 확인할 수 없습니다.";
-  const aliasNote = providerAliasNote(input.candidateEvidence);
+  const missing = missingEvidenceFields(input.candidateEvidence);
+  const aliasNote = providerAliasNote(input.candidateEvidence).trim();
 
-  if (roleGap) {
-    return {
-      priority: "recommended",
+  // Where the candidate sits in its maker's own release wave. This is the
+  // first thing worth saying when it is readable, because it is the one fact
+  // that separates five ids arriving on the same morning.
+  const relation = modelPortfolioRelation(input.apiModel, ownerModels);
+  const against = relation.against ? portfolioName(relation.against) : null;
+  const candidateTierPhrase = tierPhrase(relation.candidateTier);
+  const waveBaseIsQueued =
+    modelGenerationFamily(input.apiModel).tier.word !== null &&
+    sameWaveSiblings(input.apiModel, input.siblingApiModels ?? []).some(
+      (sibling) => sibling.tier.word === null && !isPreviewModel(sibling.apiModel)
+    );
+
+  const lineupPoint =
+    owner === "unknown"
+      ? "후보 ID만으로 제작사를 식별하지 못해 현재 라인업과 안전하게 연결할 수 없습니다."
+      : ownerModels.length
+        ? `현재 Tomverse의 같은 제작사 모델은 ${ownerModels
+            .slice(0, 3)
+            .map((model) => `'${portfolioName(model)}'`)
+            .join("·")}입니다.`
+        : "현재 Tomverse에는 같은 제작사의 활성 모델이 없습니다.";
+  const rolePoint = roleGap
+    ? `후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로, 현재 라인업에 없는 역할을 채웁니다.`
+    : overlapsRole
+      ? `후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}이라 '${portfolioName(baseline!)}'과 역할이 겹칩니다.`
+      : candidateRoleIsKnown
+        ? `후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로 보입니다.`
+        : "공급자 근거가 후보의 제품 역할을 분류할 만큼 충분하지 않습니다.";
+  const evidencePoint = facts.length
+    ? `공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다.`
+    : `${input.provider}의 모델 목록은 이 후보의 컨텍스트·출력·모달리티·가격을 담고 있지 않습니다.`;
+  const deltaPoints = [
+    deltas.gains.length ? `확인된 이점은 ${deltas.gains.join(" · ")}입니다.` : null,
+    deltas.losses.length ? `확인된 열위는 ${deltas.losses.join(" · ")}입니다.` : null,
+    deltas.tradeoffs.length ? `가격 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.` : null,
+  ];
+  const checkList = missing.length
+    ? `확인할 값은 ${missing
+        .map((field) => MISSING_FIELD_LABELS[field])
+        .join(" · ")}입니다. ${missingEvidenceSourceKo(input.providers, missing)}`
+    : "";
+  const points = [
+    lineupPoint,
+    rolePoint,
+    evidencePoint,
+    ...deltaPoints,
+    ...siblingWavePoints({
+      apiModel: input.apiModel,
+      siblingApiModels: input.siblingApiModels ?? [],
+    }),
+    aliasNote,
+    input.googleBraveSearchNote.trim(),
+  ];
+
+  // A generation the id states outranks every other reading of it: an older
+  // generation of a served family is decided, and a newer one of the exact
+  // family in the catalogue is the upgrade an operator came here to find.
+  if (relation.kind === "older_generation" && against) {
+    const tierNote =
+      candidateTierPhrase && !relation.sameTier
+        ? `이고, ID 표기상 ${candidateTierPhrase}입니다`
+        : "입니다";
+    return triaged({
+      priority: "low",
       kind: "general_chat",
       product: "chat",
-      analysisKo:
-        `${current} 후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로 현재 라인업에 없는 역할을 채울 수 있습니다.` +
-        evidenceLine +
-        (deltas.losses.length
-          ? ` 다만 ${deltas.losses.join(" · ")}이므로 기존 모델의 단순 대체재는 아닙니다.`
-          : "") +
-        (deltas.tradeoffs.length
-          ? ` 가격 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.`
-          : "") +
-        " 역할 보완 후보로 우선 검토하되 공식 가격과 실제 지연시간을 확인한 뒤 채택해야 합니다." +
-        aliasNote +
-        input.googleBraveSearchNote,
-    };
+      verdictKo: `서비스 중인 '${against}'는 ${relation.servedGeneration} 세대인데 이 후보는 ${relation.candidateGeneration} 세대${tierNote}.`,
+      pointsKo: points,
+      nextStepKo:
+        "상위 세대를 이미 서비스하므로 편입 근거가 없습니다. 가격이나 지연시간에서 뒤집을 실측 근거가 없다면 제외가 맞습니다.",
+    });
+  }
+
+  if (relation.kind === "same_generation" && against) {
+    if (relation.sameTier) {
+      return triaged({
+        priority: "low",
+        kind: "general_chat",
+        product: "chat",
+        verdictKo: `서비스 중인 '${against}'와 세대(${relation.candidateGeneration})도 tier도 같아, 같은 자리를 놓고 겹칩니다.`,
+        pointsKo: points,
+        nextStepKo:
+          "새 모델로 추가하기보다 기존 항목의 공급자·별칭 정보로 관리하는 편이 맞습니다.",
+      });
+    }
+    return triaged({
+      priority: waveBaseIsQueued ? "review" : roleGap ? "recommended" : "review",
+      kind: "general_chat",
+      product: "chat",
+      verdictKo: `서비스 중인 '${against}'와 같은 ${relation.candidateGeneration} 세대의 ${candidateTierPhrase ?? "다른 tier"}입니다.`,
+      pointsKo: points,
+      nextStepKo:
+        (relation.candidateTier.kind === "economy" ||
+        relation.candidateTier.kind === "speed"
+          ? "저가·고속 슬롯을 만들 계획이 있을 때만 편입 가치가 있습니다. 그 결정은 품질이 아니라 가격과 지연시간으로 내려야 합니다. "
+          : "같은 세대의 상위 tier라면 품질·가격 차이가 편입 근거입니다. ") + checkList,
+    });
+  }
+
+  if (relation.kind === "family_seat_mismatch" && against) {
+    const lowerSeat =
+      tierRank(relation.servedTier.kind) < tierRank(relation.candidateTier.kind);
+    return triaged({
+      priority: waveBaseIsQueued ? "review" : roleGap ? "recommended" : "review",
+      kind: "general_chat",
+      product: "chat",
+      verdictKo: lowerSeat
+        ? `이 후보는 ${relation.candidateGeneration} 세대이지만, 서비스 중인 '${against}'(${relation.servedGeneration})는 더 낮은 자리라 세대 비교의 기준이 되지 않습니다.`
+        : `이 후보는 ${relation.candidateGeneration} 세대이지만, 서비스 중인 '${against}'(${relation.servedGeneration})는 다른 자리라 세대 비교의 기준이 되지 않습니다.`,
+      pointsKo: points,
+      nextStepKo:
+        "자리별로 따로 봐야 합니다. 공식 가격과 컨텍스트를 확인한 뒤 이 자리의 채택을 결정하면 됩니다.",
+    });
+  }
+
+  if (relation.kind === "newer_generation" && against) {
+    if (relation.sameTier) {
+      return triaged({
+        priority: "recommended",
+        kind: "general_chat",
+        product: "chat",
+        verdictKo: `서비스 중인 '${against}'(${relation.servedGeneration} 세대)의 상위 세대 ${relation.candidateGeneration}이라, 같은 자리를 대체할 후보입니다.`,
+        pointsKo: points,
+        nextStepKo: `${checkList ? `${checkList} ` : ""}공식 가격과 컨텍스트가 확인되면 교체 채택을 결정할 수 있습니다.`,
+      });
+    }
+    return triaged({
+      priority: waveBaseIsQueued ? "review" : roleGap ? "recommended" : "review",
+      kind: "general_chat",
+      product: "chat",
+      verdictKo: `서비스 중인 '${against}'(${relation.servedGeneration} 세대)보다 높은 ${relation.candidateGeneration} 세대이지만, ID 표기상 ${candidateTierPhrase ?? "다른 tier"}입니다.`,
+      pointsKo: points,
+      nextStepKo:
+        (relation.candidateTier.kind === "economy" ||
+        relation.candidateTier.kind === "speed"
+          ? `같은 세대의 기본형을 먼저 결정하고, 이 후보는 저가·고속 슬롯을 만들 때 가격으로 판단하면 됩니다. `
+          : `상위 tier이므로 기존 모델을 대체할지 병행할지부터 정해야 합니다. `) + checkList,
+    });
+  }
+
+  if (roleGap) {
+    return triaged({
+      priority: waveBaseIsQueued ? "review" : "recommended",
+      kind: "general_chat",
+      product: "chat",
+      verdictKo: `현재 라인업에 없는 ${roleLabel(candidateRole)} 역할을 채울 수 있는 후보입니다.`,
+      pointsKo: points,
+      nextStepKo: `역할 보완 후보로 우선 검토하되, ${checkList ? `${checkList} ` : ""}공식 가격과 실제 지연시간을 확인한 뒤 채택해야 합니다.`,
+    });
   }
 
   if (overlapsRole) {
-    const comparison = deltas.gains.length
-      ? ` 확인된 이점은 ${deltas.gains.join(" · ")}입니다.`
-      : " 현재 근거에서는 기존 모델보다 나은 지점이 확인되지 않습니다.";
-    return {
-      priority: deltas.gains.length > 0 ? "recommended" : facts.length ? "review" : "needs_evidence",
+    return triaged({
+      priority: deltas.gains.length
+        ? "recommended"
+        : facts.length
+          ? "review"
+          : "needs_evidence",
       kind: "general_chat",
       product: "chat",
-      analysisKo:
-        `${current} 후보도 ${roleLabel(candidateRole)}이라 '${portfolioName(baseline!)}'과 역할이 겹칩니다.` +
-        evidenceLine +
-        comparison +
-        (deltas.losses.length ? ` 확인된 열위는 ${deltas.losses.join(" · ")}입니다.` : "") +
-        (deltas.tradeoffs.length ? ` 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.` : "") +
-        " 품질은 모델 목록에서 알 수 없으므로 공식 벤치마크·가격·지연시간 중 명확한 우위가 없으면 병행 추가보다 기존 모델 유지 또는 교체 검토가 적절합니다." +
-        aliasNote +
-        input.googleBraveSearchNote,
-    };
+      verdictKo: `'${portfolioName(baseline!)}'과 같은 역할을 놓고 겹치는 후보입니다.`,
+      pointsKo: points,
+      nextStepKo:
+        "품질은 모델 목록에서 알 수 없으므로, 공식 벤치마크·가격·지연시간 중 명확한 우위가 없으면 병행 추가보다 기존 모델 유지 또는 교체 검토가 적절합니다. " +
+        checkList,
+    });
   }
 
-  return {
+  return triaged({
     priority:
-      owner === "unknown" || ownerModels.length > 0
-        ? "needs_evidence"
-        : "review",
+      owner === "unknown" || ownerModels.length > 0 ? "needs_evidence" : "review",
     kind: "general_chat",
     product: "chat",
-    analysisKo:
-      `${current} ${
-        candidateRoleIsKnown
-          ? `후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로 보입니다.`
-          : "공급자 근거가 후보의 제품 역할을 분류할 만큼 충분하지 않습니다."
-      }` +
-      evidenceLine +
-      (deltas.gains.length
-        ? ` '${portfolioName(baseline!)}' 대비 확인된 이점은 ${deltas.gains.join(" · ")}입니다.`
-        : "") +
-      (deltas.losses.length
-        ? ` '${portfolioName(baseline!)}' 대비 확인된 열위는 ${deltas.losses.join(" · ")}입니다.`
-        : "") +
-      (deltas.tradeoffs.length
-        ? ` 가격 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.`
-        : "") +
-      " 현재 정보만으로 Tomverse의 어떤 모델을 보완하거나 대체하는지 확정할 수 없으므로 공식 포지셔닝·가격과 실제 지연시간을 먼저 확인해야 합니다." +
-      aliasNote +
-      input.googleBraveSearchNote,
-  };
+    verdictKo:
+      owner === "unknown"
+        ? "제작사를 식별하지 못해 현재 라인업과 비교할 수 없는 후보입니다."
+        : ownerModels.length
+          ? "같은 제작사 모델은 있지만, 세대도 역할도 확정되지 않아 무엇을 보완·대체하는지 말할 수 없는 후보입니다."
+          : "같은 제작사의 활성 모델이 없어 공급자 다양성 관점에서만 의미가 있는 후보입니다.",
+    pointsKo: points,
+    nextStepKo: `${checkList ? `${checkList} ` : ""}공급자 공식 포지셔닝과 가격, 실제 지연시간을 먼저 확인해야 결정할 수 있습니다.`,
+  });
 };
 
 export const assessModelLifecycleItem = (input: {
@@ -801,6 +1445,11 @@ export const assessModelLifecycleItem = (input: {
   candidateEvidence?: ModelCandidateEvidence | null;
   /** Active, user-visible Tomverse models; comparison is narrowed by owner. */
   servedModels?: readonly ServedModelPortfolioEntry[];
+  /**
+   * The other candidates open in the same queue. A provider ships a generation
+   * as a set, and the row cannot be judged well without them.
+   */
+  siblingApiModels?: readonly string[];
 }): ModelTriageAssessment => {
   const provider = providerLabel(input.providers);
   const product = modelProductSurface(input.apiModel);
@@ -809,108 +1458,116 @@ export const assessModelLifecycleItem = (input: {
     : "";
 
   if (input.action === "retire") {
-    return {
+    return triaged({
       priority: "recommended",
       kind: "retirement",
       product,
-      analysisKo:
-        `${provider} 카탈로그에서 더 이상 확인되지 않은 Tomverse 제공 모델입니다. ` +
-        "대체 모델과 사용자 영향 여부를 우선 검토해야 합니다.",
-    };
+      verdictKo: `${provider} 카탈로그에서 더 이상 확인되지 않는 Tomverse 제공 모델입니다.`,
+      nextStepKo:
+        "대체 모델을 먼저 정하고, 이 모델을 기본값이나 대화에 저장해 둔 사용자가 있는지 확인해야 합니다.",
+    });
   }
   if (input.lifecycle) {
-    return {
+    return triaged({
       priority: "no_action",
       kind: product === "image_generation" ? "image_generation" : "general_chat",
       product,
-      analysisKo:
-        `${provider}가 '${input.lifecycle}' 수명주기를 명시한 모델입니다. ` +
-        "신규 편입 근거가 없으며 종료 또는 대체 정보를 확인하는 편이 적절합니다.",
-    };
+      verdictKo: `${provider}가 '${input.lifecycle}' 수명주기를 명시한 모델이라 편입 대상이 아닙니다.`,
+      nextStepKo:
+        "제외해도 됩니다. 이 라인을 계속 쓸 생각이면 공급자가 안내한 대체 모델만 확인하면 됩니다.",
+    });
   }
   if (input.availability === "stale") {
-    return {
+    return triaged({
       priority: "no_action",
       kind: product === "image_generation" ? "image_generation" : "general_chat",
       product,
-      analysisKo:
-        `${provider}의 최신 성공 모델 API 응답에서 더 이상 확인되지 않습니다. ` +
-        "현재 제공 근거가 없어 신규 편입 대상으로 권장하지 않습니다.",
-    };
+      verdictKo: `${provider}의 최신 성공 스캔 응답에 더 이상 없는 ID입니다.`,
+      nextStepKo:
+        "지금 제공되지 않으므로 편입 대상이 아닙니다. 공급자가 다시 내보내면 이 대기열에 다시 올라옵니다.",
+    });
   }
   if (product === "unsupported") {
     if (isMultiAgentModel(input.apiModel)) {
-      return {
+      return triaged({
         priority: "no_action",
         kind: "specialized_non_chat",
         product,
-        analysisKo:
-          "멀티에이전트 연구 오케스트레이션 모델입니다. 일반 Chat Completions 모델이 아니라 별도 Responses API와 연구 도구 실행 경로가 필요하므로, 현재 Tomverse 채팅 모델로 등록해도 동작하지 않습니다. " +
-          "Deep Research와의 제품 역할·비용·비동기 실행 정책을 먼저 정한 뒤 별도 통합 과제로 다뤄야 합니다.",
-      };
+        verdictKo:
+          "멀티에이전트 연구 오케스트레이션 모델이라 지금 Tomverse 채팅 모델로 등록하면 동작하지 않습니다.",
+        pointsKo: [
+          "일반 Chat Completions가 아니라 별도 Responses API와 연구 도구 실행 경로를 요구합니다.",
+        ],
+        nextStepKo:
+          "여기서는 제외하고, Deep Research와의 제품 역할·비용·비동기 실행 정책을 정한 뒤 별도 통합 과제로 다뤄야 합니다.",
+      });
     }
     if (isSearchSpecializedModel(input.apiModel)) {
-      return {
+      return triaged({
         priority: "no_action",
         kind: "specialized_non_chat",
         product,
-        analysisKo:
-          "검색 전용 모델 또는 엔드포인트로 보입니다. Tomverse의 Google 웹검색은 일반 Gemini 모델이 Brave API function tool을 호출하는 app-managed 경로이므로, " +
-          "이 ID를 직접 추가하기보다 일반 채팅 모델의 도구 호출 호환성과 웹검색 capability 등록을 검토해야 합니다.",
-      };
+        verdictKo: "검색 전용 모델 또는 엔드포인트로 보여 채팅 카탈로그에 넣을 대상이 아닙니다.",
+        pointsKo: [
+          "Tomverse의 Google 웹검색은 일반 Gemini 모델이 Brave API function tool을 호출하는 app-managed 경로입니다.",
+        ],
+        nextStepKo:
+          "이 ID를 추가하는 대신 일반 채팅 모델의 도구 호출 호환성과 웹검색 capability 등록을 검토해야 합니다.",
+      });
     }
-    return {
+    return triaged({
       priority: "no_action",
       kind: "specialized_non_chat",
       product,
-      analysisKo:
-        "음성·검색 등 현재 Tomverse의 모델 제품 범위 밖 엔드포인트용 모델로 보입니다. " +
-        "지원 제품이 확정되기 전에는 카탈로그 편입을 권장하지 않습니다.",
-    };
+      verdictKo:
+        "음성·검색 등 현재 Tomverse 제품 범위 밖 엔드포인트용 모델로 보입니다.",
+      nextStepKo:
+        "지원 제품이 정해지기 전에는 편입 대상이 아닙니다. 제품 결정이 선행 조건입니다.",
+    });
   }
   // Ahead of the product branches because it is the same answer for both, and
   // ahead of `servedByTomverse` because it is the case that check cannot see:
   // Opus 4.6 is not the family Tomverse serves, it is the generation before it.
   if (input.supersededBy) {
-    return {
+    return triaged({
       priority: "no_action",
       kind: "superseded_version",
       product,
-      analysisKo:
-        `같은 제품 라인에서 Tomverse가 이미 상위 버전 '${input.supersededBy}'을(를) 서비스하고 있습니다. ` +
-        "하위 버전을 별도로 추가할 근거가 없어 편입 후보에서 제외합니다.",
-    };
+      verdictKo: `같은 라인의 상위 버전 '${input.supersededBy}'을(를) Tomverse가 이미 서비스합니다.`,
+      nextStepKo:
+        "하위 버전을 따로 둘 근거가 없습니다. 제외해도 잃는 정보가 없습니다.",
+    });
   }
   if (product === "image_generation") {
     if (input.servedByTomverse) {
-      return {
+      return triaged({
         priority: "no_action",
         kind: "image_generation",
         product,
-        analysisKo:
-          "같은 이미지 모델 패밀리가 이미 Tomverse 이미지 생성 원장에 있습니다. " +
-          "중복 추가보다 기존 프로필의 공급자·가격·활성 상태를 갱신하는 편이 적절합니다.",
-      };
+        verdictKo: "같은 이미지 모델 패밀리가 이미 Tomverse 이미지 생성 원장에 있습니다.",
+        nextStepKo:
+          "새 모델로 추가하지 말고 기존 프로필의 공급자·가격·활성 상태를 갱신하면 됩니다.",
+      });
     }
     if (input.availability === "unknown") {
-      return {
+      return triaged({
         priority: "needs_evidence",
         kind: "image_generation",
         product,
-        analysisKo:
-          `${provider}의 최근 모델 API 확인이 실패했거나 실행 이력이 없습니다. ` +
-          "Tomverse 이미지 생성 후보로 검토하기 전에 현재 제공 여부를 다시 확인해야 합니다.",
-      };
+        verdictKo: `${provider}의 최근 스캔이 실패했거나 실행 이력이 없어 제공 여부를 모릅니다.`,
+        nextStepKo:
+          "스캔이 한 번 성공한 뒤에 판단해야 합니다. 그 전에는 이미지 후보로도 결정할 수 없습니다.",
+      });
     }
     if (isPreviewModel(input.apiModel)) {
-      return {
+      return triaged({
         priority: "no_action",
         kind: "image_generation",
         product,
-        analysisKo:
-          `${provider}에서 확인되는 미리보기·실험 단계 이미지 생성 모델입니다. ` +
-          "안정 버전만 검토하는 현재 정책에 따라 Studio 편입 후보에서 제외합니다.",
-      };
+        verdictKo: `${provider}의 미리보기·실험 단계 이미지 생성 모델입니다.`,
+        nextStepKo:
+          "안정 버전만 검토하는 정책에 따라 지금은 제외합니다. 정식 출시되면 새 후보로 올라옵니다.",
+      });
     }
     const imageOwner = modelOwner(input.apiModel);
     const imagePortfolio = (input.servedModels ?? []).filter(
@@ -921,8 +1578,8 @@ export const assessModelLifecycleItem = (input: {
         modelOwner(model.apiModel) === imageOwner
     );
     const facts = candidateFacts(input.candidateEvidence);
-    const aliasNote = providerAliasNote(input.candidateEvidence);
-    return {
+    const aliasNote = providerAliasNote(input.candidateEvidence).trim();
+    return triaged({
       priority:
         imageOwner === "unknown"
           ? "needs_evidence"
@@ -931,38 +1588,41 @@ export const assessModelLifecycleItem = (input: {
             : "review",
       kind: "image_generation",
       product,
-      analysisKo:
-        (imageOwner === "unknown"
-          ? "후보 ID만으로 이미지 모델 제작사를 식별하지 못해 Studio의 기존 모델과 안전하게 연결할 수 없습니다. "
+      verdictKo:
+        imageOwner === "unknown"
+          ? "후보 ID만으로 이미지 모델 제작사를 식별하지 못해 Studio의 기존 모델과 연결할 수 없습니다."
           : imagePortfolio.length
-          ? `Tomverse Studio가 같은 제작사의 '${portfolioName(imagePortfolio[0])}'을(를) 이미 제공합니다. `
-          : "Tomverse Studio에는 같은 제작사의 활성 이미지 생성 모델이 없어 공급자·모델 다양성을 보완할 수 있습니다. ") +
-        (facts.length
-          ? `공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다. `
-          : `${provider} 모델 목록은 해상도·편집·지연시간·이미지당 가격을 충분히 설명하지 않습니다. `) +
-        "Studio 채택 전에는 기존 모델과 동일 프롬프트 품질, 편집 지원, 지원 해상도, 실제 지연시간, 이미지당 최악 비용을 대조해야 합니다." +
+            ? `Tomverse Studio가 같은 제작사의 '${portfolioName(imagePortfolio[0])}'을(를) 이미 제공합니다.`
+            : "Tomverse Studio에 같은 제작사의 활성 이미지 모델이 없어 공급자 다양성을 보완할 수 있는 후보입니다.",
+      pointsKo: [
+        facts.length
+          ? `공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다.`
+          : `${provider} 모델 목록은 해상도·편집·지연시간·이미지당 가격을 담고 있지 않습니다.`,
         aliasNote,
-    };
+      ],
+      nextStepKo:
+        "Studio 채택 전에 기존 모델과 동일 프롬프트 품질, 편집 지원, 지원 해상도, 실제 지연시간, 이미지당 최악 비용을 대조해야 합니다.",
+    });
   }
   if (input.servedByTomverse) {
-    return {
+    return triaged({
       priority: "no_action",
       kind: "general_chat",
       product,
-      analysisKo:
-        "같은 모델 패밀리가 이미 Tomverse 카탈로그에서 제공되고 있습니다. " +
-        "별도 모델로 추가하기보다 기존 항목의 공급자·별칭 정보로 관리하는 편이 적절합니다.",
-    };
+      verdictKo: "같은 모델 패밀리가 이미 Tomverse 카탈로그에 있습니다.",
+      nextStepKo:
+        "새 모델로 추가하지 말고 기존 항목의 공급자·별칭 정보로 관리하면 됩니다.",
+    });
   }
   if (input.availability === "unknown") {
-    return {
+    return triaged({
       priority: "needs_evidence",
       kind: "general_chat",
       product,
-      analysisKo:
-        `${provider}의 최근 모델 API 확인이 실패했거나 실행 이력이 없습니다. ` +
-        "현재 제공 여부를 확인하기 전에는 편입 여부를 결정하기 어렵습니다.",
-    };
+      verdictKo: `${provider}의 최근 스캔이 실패했거나 실행 이력이 없어 제공 여부를 모릅니다.`,
+      nextStepKo:
+        "스캔이 한 번 성공한 뒤에 판단해야 합니다. 지금 채택하면 제공되지 않는 모델을 등록할 수 있습니다.",
+    });
   }
   if (isMovingModelAlias(input.apiModel)) {
     const portfolio = smartChatAssessment({
@@ -971,16 +1631,20 @@ export const assessModelLifecycleItem = (input: {
       providers: input.providers,
       candidateEvidence: input.candidateEvidence,
       servedModels: input.servedModels,
+      siblingApiModels: input.siblingApiModels,
       googleBraveSearchNote,
     });
-    return {
+    return triaged({
       priority: "review",
       kind: "moving_alias",
       product,
-      analysisKo:
-        `${provider}의 이동형 별칭이라 가리키는 버전이 바뀔 수 있습니다. ` +
-        portfolio.analysisKo,
-    };
+      verdictKo: portfolio.verdictKo,
+      pointsKo: [
+        `${provider}의 이동형 별칭이라 어느 날 가리키는 버전이 바뀔 수 있습니다.`,
+        ...portfolio.pointsKo,
+      ],
+      nextStepKo: portfolio.nextStepKo,
+    });
   }
   if (isDatedModelSnapshot(input.apiModel)) {
     const portfolio = smartChatAssessment({
@@ -989,37 +1653,41 @@ export const assessModelLifecycleItem = (input: {
       providers: input.providers,
       candidateEvidence: input.candidateEvidence,
       servedModels: input.servedModels,
+      siblingApiModels: input.siblingApiModels,
       googleBraveSearchNote,
     });
-    return {
+    return triaged({
       priority: "review",
       kind: "dated_snapshot",
       product,
-      analysisKo:
-        `${provider}의 날짜·리비전 고정 스냅샷이므로 재현성 요구가 있을 때만 기본 alias 대신 선택해야 합니다. ` +
-        portfolio.analysisKo,
-    };
+      verdictKo: portfolio.verdictKo,
+      pointsKo: [
+        `${provider}의 날짜·리비전 고정 스냅샷이라, 재현성 고정이 필요할 때만 기본 alias 대신 고를 값입니다.`,
+        ...portfolio.pointsKo,
+      ],
+      nextStepKo: portfolio.nextStepKo,
+    });
   }
   if (isPreviewModel(input.apiModel)) {
-    return {
+    return triaged({
       priority: "no_action",
       kind: "preview",
       product,
-      analysisKo:
-        `${provider}의 최신 모델 API에서 확인되지만 미리보기·실험 단계입니다. ` +
-        "안정 버전만 검토하는 현재 정책에 따라 모델 편입 후보에서 제외합니다." +
-        googleBraveSearchNote,
-    };
+      verdictKo: `${provider}에서 확인되지만 미리보기·실험 단계입니다.`,
+      pointsKo: [googleBraveSearchNote.trim()],
+      nextStepKo:
+        "안정 버전만 검토하는 정책에 따라 지금은 제외합니다. 정식 출시되면 새 후보로 다시 올라옵니다.",
+    });
   }
   if (isCodeSpecializedModel(input.apiModel)) {
-    return {
+    return triaged({
       priority: "low",
       kind: "specialized_code",
       product,
-      analysisKo:
-        `${provider}의 최신 모델 API에서 확인되는 코드 작업 특화 모델입니다. ` +
-        "Tomverse Chat의 일반 대화 수요와 별개로 코딩 제품 범위가 확정될 때 편입 가치가 있습니다.",
-    };
+      verdictKo: `${provider}의 코드 작업 특화 모델입니다.`,
+      nextStepKo:
+        "Chat의 일반 대화 수요로는 편입 근거가 약합니다. 코딩 제품 범위가 정해질 때 다시 보는 것이 맞습니다.",
+    });
   }
   return smartChatAssessment({
     apiModel: input.apiModel,
@@ -1027,6 +1695,7 @@ export const assessModelLifecycleItem = (input: {
     providers: input.providers,
     candidateEvidence: input.candidateEvidence,
     servedModels: input.servedModels,
+    siblingApiModels: input.siblingApiModels,
     googleBraveSearchNote,
   });
 };

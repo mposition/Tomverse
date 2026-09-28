@@ -114,6 +114,7 @@ export const OBLIGATION_REFUSALS = [
   "readiness_check_failing",
   "readiness_check_unknown",
   "deferral_overdue",
+  "deferral_not_watched",
   "waiver_missing",
   "waiver_not_sealed",
   "waiver_revoked",
@@ -225,15 +226,18 @@ export const obligationsVerdict = (input: {
           ? measured
           : row.dueBy;
       if (dueAt.getTime() <= input.now.getTime()) return refused("deferral_overdue");
-      const warnFrom =
-        row.warnDaysBefore === null
-          ? null
-          : dueAt.getTime() - row.warnDaysBefore * DAY_MS;
+      // A deferral without a warning window is refused rather than read as "no
+      // warning". Section 7.7 asks a deferred duty for a date and for the device
+      // that stops the date being forgotten, so a row with only the date is a
+      // duty whose deadline nobody will be told about -- and the first version
+      // settled exactly that row. The CHECK now refuses to store one; this is
+      // what a row from before it, or from a schema that moved ahead of this
+      // build, gets.
+      if (row.warnDaysBefore === null) return refused("deferral_not_watched");
       // The window counts back from whichever deadline applies, not from the
       // row's own.
-      return settled(
-        warnFrom !== null && input.now.getTime() >= warnFrom ? "deferral_due_soon" : null
-      );
+      const warnFrom = dueAt.getTime() - row.warnDaysBefore * DAY_MS;
+      return settled(input.now.getTime() >= warnFrom ? "deferral_due_soon" : null);
     }
 
     // Waived. The link is not the decision: the approval's own scope has to be
@@ -306,10 +310,10 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     countryCode: "KR",
     obligationKey: "body_disclosures",
     state: "implemented",
-    readinessCheck: "emailBusinessIdentity",
+    readinessCheck: "emailFooterDisclosures",
     dueByIso: null,
     warnDaysBefore: null,
-    notes: `${DRAFT} section 7.7: name, address, email and telephone number (시행령 별표 6). The KR profile names contact_phone and the renderer drops a footer whose named block has no value, so readiness confirming the identity values is what confirms this.`,
+    notes: `${DRAFT} section 7.7: name, address, email and telephone number (시행령 별표 6). Against emailBodyDisclosures and not emailBusinessIdentity: the latter reports a missing jurisdiction block as a warning, on purpose, because whether this deployment has Korean recipients is not a fact an environment holds -- so it stayed ready with no Korean telephone number and a review found this duty settled against it. The per-country check asks for that country's own blocks as errors, and reads the stored profile's footerBlocks as well as the environment, because the renderer prints the blocks the row names.`,
   },
   // `bilingual_unsubscribe_notice` is deliberately absent. Section 7.7 marks it
   // implemented, and this build does not do it: `renderJurisdictionFooter()`
@@ -358,10 +362,10 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     countryCode: "US",
     obligationKey: "postal_address",
     state: "implemented",
-    readinessCheck: "emailBusinessIdentity",
+    readinessCheck: "emailFooterDisclosures",
     dueByIso: null,
     warnDaysBefore: null,
-    notes: "CAN-SPAM: a valid physical postal address in every message. It is in the common footer of every profile.",
+    notes: "CAN-SPAM: a valid physical postal address in every message. Against emailFooterDisclosures rather than the general identity check, for the second half of the same review finding: a value in the environment that the stored profile's footerBlocks does not name is not in the message, and only the per-country check reads the row.",
   },
 ];
 
@@ -384,6 +388,9 @@ export const releaseNotesObligationSeedProblems = (): string[] => {
     }
     if (row.state === "deferred" && !row.dueByIso) {
       problems.push(`${key}: deferred needs a date it must exist by`);
+    }
+    if (row.state === "deferred" && row.warnDaysBefore === null) {
+      problems.push(`${key}: deferred needs the window it starts warning in`);
     }
     if (row.state !== "deferred" && (row.dueByIso || row.warnDaysBefore !== null)) {
       problems.push(`${key}: only deferred carries a deadline`);

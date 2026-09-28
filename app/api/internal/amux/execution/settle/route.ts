@@ -30,6 +30,13 @@ const requestSchema = z
     outcome: z.enum(["succeeded", "failed", "blocked"]),
     to_status: z.enum(["todo", "review", "done", "blocked"]),
     reason: z.string().trim().max(1_000).nullable().optional(),
+    cost_microusd: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -70,6 +77,10 @@ export async function POST(request: Request) {
         outcome: body.outcome,
         toStatus: body.to_status,
         reason: body.reason ?? null,
+        actualCostMicrousd:
+          body.cost_microusd === null || body.cost_microusd === undefined
+            ? null
+            : BigInt(body.cost_microusd),
       });
 
       return Response.json(outcome, {

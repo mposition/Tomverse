@@ -23,6 +23,17 @@ export type BiennialAnchor = {
   source: "consent" | "signup_date_deemed";
 };
 
+/**
+ * A deadline as it goes into a message, to the day.
+ *
+ * The `context` fields were already truncated so a count of one could not be
+ * correlated with a consent's exact moment, and a review pointed out the
+ * message itself was not -- and the message is what reaches the log, the error
+ * tracker and whatever is subscribed to it. One recipient and a full timestamp
+ * is that person's consent time.
+ */
+const onDay = (at: Date) => at.toISOString().slice(0, 10);
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -93,7 +104,7 @@ export const biennialNoticeVerdict = (input: {
           severity: "error",
           code: "EMAIL_BIENNIAL_CONSENT_NOTICE_DUE",
           message:
-            `The two-yearly consent notice fell due on ${new Date(earliest).toISOString()} ` +
+            `The two-yearly consent notice fell due on ${onDay(new Date(earliest))} ` +
             `for at least one of ${input.anchors.length} Korean recipient(s), and it does not ` +
             "exist. Korean marketing is refused until it does (제50조제8항).",
         },
@@ -110,7 +121,7 @@ export const biennialNoticeVerdict = (input: {
           severity: "warning",
           code: "EMAIL_BIENNIAL_CONSENT_NOTICE_SOON",
           message:
-            `The two-yearly consent notice falls due on ${new Date(earliest).toISOString()} ` +
+            `The two-yearly consent notice falls due on ${onDay(new Date(earliest))} ` +
             `for the earliest of ${input.anchors.length} Korean recipient(s), inside the ` +
             `${BIENNIAL_NOTICE_WARN_DAYS}-day window. It has to exist before then.`,
         },

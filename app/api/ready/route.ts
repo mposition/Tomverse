@@ -18,11 +18,13 @@ import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { biennialNoticeReadiness } from "@/lib/biennialConsentNoticeReadiness";
+import { footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
 import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { amuxReviewApprovalReadiness } from "@/lib/amux/reviewApprovalCore";
 import {
   getActiveProviders,
   getProviderBudgetReadiness,
@@ -268,6 +270,22 @@ const readinessResponse = async (head = false) => {
     : null;
   const emailSubjectLabels =
     subjectLabels === null ? !marketingSendingConfigured(process.env) : subjectLabels.ready;
+  // The footer blocks a statute names, on the rows that send. Separate from
+  // `emailBusinessIdentity` because that check reports a jurisdiction's own
+  // block as a warning -- on purpose, since whether this deployment has Korean
+  // recipients is not a fact an environment holds -- and a warning cannot answer
+  // "is this duty done". Same unknown-answer rule as above.
+  const footerDisclosures = databaseResult.ready
+    ? await withDeadline(
+        footerDisclosureReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The email footer disclosure readiness check timed out."
+      ).catch(() => null)
+    : null;
+  const emailFooterDisclosures =
+    footerDisclosures === null
+      ? !marketingSendingConfigured(process.env)
+      : footerDisclosures.ready;
   // The two-yearly Korean notice is deferred, and section 7.7 asks for the
   // device that stops it being forgotten: the deadline is a fact about rows,
   // not the constant on the duty. Same shape as above, including what an
@@ -286,6 +304,8 @@ const readinessResponse = async (head = false) => {
   // done exactly that.
   const emailBiennialConsentNotice =
     biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.healthy;
+  const amuxReviewStatus = amuxReviewApprovalReadiness(process.env);
+  const amuxReviewApproval = amuxReviewStatus.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -293,7 +313,8 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity && emailSubjectLabels;
+    emailBusinessIdentity && emailSubjectLabels && emailFooterDisclosures &&
+    amuxReviewApproval;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -542,6 +563,26 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-footer-disclosures",
+        healthy: emailFooterDisclosures,
+        code: "EMAIL_FOOTER_DISCLOSURE_MISSING",
+        title: "A statutory footer block is not on the rows that send",
+        error:
+          footerDisclosures === null
+            ? "The footer disclosure readiness check could not be answered."
+            : footerDisclosures.problems.length > 0
+              ? footerDisclosures.problems.map((problem) => problem.message).join(" | ")
+              : "Every required footer block is named and has a value.",
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          disclosuresPresent: String(footerDisclosures?.disclosuresPresent ?? "unknown"),
+          policyVersions: String(footerDisclosures?.policyVersionIds.length ?? "unknown"),
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "email-biennial-consent-notice",
         healthy: emailBiennialConsentNotice && (biennialNotice?.problems.length ?? 0) === 0,
         code: "EMAIL_BIENNIAL_CONSENT_NOTICE_DUE",
@@ -673,6 +714,23 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "amux-review-approval",
+        healthy: amuxReviewApproval,
+        code: "AMUX_REVIEW_APPROVAL_NOT_READY",
+        title: "AMUX human review approval is not configured correctly",
+        error: amuxReviewApproval
+          ? "AMUX human review approval is configured (or its flag is off)."
+          : `Missing or invalid: ${amuxReviewStatus.missing.join(", ")}`,
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          enabled: amuxReviewStatus.enabled,
+          missingVariableNames: amuxReviewStatus.missing.join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -717,7 +775,9 @@ const readinessResponse = async (head = false) => {
         emailConsentKeyring,
         emailBusinessIdentity,
         emailSubjectLabels,
+        emailFooterDisclosures,
         emailBiennialConsentNotice,
+        amuxReviewApproval,
       },
       traceId,
     },

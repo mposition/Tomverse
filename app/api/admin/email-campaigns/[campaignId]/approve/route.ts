@@ -165,11 +165,8 @@ export async function POST(req: Request, context: Context) {
       }
     }
 
-    // D5 (.github/audits/model-lifecycle-email-2026-08-22.md §21): in a
-    // one-administrator organisation the two-person rule is not strict but
-    // unsatisfiable, so no campaign could ever be approved and the fan-out
-    // could never send at all. Closed again automatically the moment a second
-    // eligible administrator exists -- condition 6 recomputes per request.
+    // The copy digest is the confirmation. A second eligible administrator
+    // does not send this request to a queue (docs/policy/admin-sole-approver.md).
     const alone = soleApproverIsAvailable("email_campaign.approve", session);
     const currentCopyDigest = await campaignDigest(campaignId);
     if (body.copyDigest && body.copyDigest !== currentCopyDigest) {

@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { readFileSync } from "node:fs";
 
 // TypeScript, and imported through the `@/` alias, for one reason: this is the
@@ -898,6 +899,42 @@ test("a serialization failure is recognised in the shape Prisma raises it", () =
   );
   assert.equal(marketingSerializationFailure(new Error("deadlock")), false);
   assert.equal(marketingSerializationFailure(null), false);
+
+  // The shape a raw statement produces, built with Prisma's own class: P2010,
+  // no `cause`, and the conflict only inside meta.driverAdapterError. This is
+  // what S2c's race test received from a real PostgreSQL, and what the version
+  // before this one did not recognise.
+  const raw = new Prisma.PrismaClientKnownRequestError(
+    "Raw query failed. Code: `40001`. Message: `could not serialize access due to concurrent update`",
+    {
+      code: "P2010",
+      clientVersion: "test",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: { kind: "TransactionWriteConflict", originalCode: "40001" },
+        },
+      },
+    },
+  );
+  assert.equal("cause" in raw, false);
+  assert.equal(
+    marketingSerializationFailure(raw),
+    true,
+    "a serialization failure from a raw statement is the same conflict",
+  );
+  // And an unrelated raw failure is not one.
+  const other = new Prisma.PrismaClientKnownRequestError("Raw query failed.", {
+    code: "P2010",
+    clientVersion: "test",
+    meta: {
+      driverAdapterError: {
+        name: "DriverAdapterError",
+        cause: { kind: "postgres", originalCode: "23505" },
+      },
+    },
+  });
+  assert.equal(marketingSerializationFailure(other), false);
   assert.ok(MARKETING_SERIALIZATION_RETRIES > 0);
   assert.ok(Number.isSafeInteger(MARKETING_SERIALIZATION_RETRIES));
 });

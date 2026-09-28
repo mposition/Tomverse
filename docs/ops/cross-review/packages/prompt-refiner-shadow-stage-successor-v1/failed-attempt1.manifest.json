@@ -1,0 +1,38 @@
+{
+  "version": "cross-review-package-failed-attempt-v1",
+  "taskId": "prompt-refiner-shadow-stage-successor-v1",
+  "round": 0,
+  "attempt": 1,
+  "archivedAt": "2026-09-28T01:22:52.0298174+10:00",
+  "reason": "The package gate recorded npm run test:unit as failed because prisma/schema.prisma changed the whole-schema marketing webhook pipeline fingerprint while MARKETING_WEBHOOK_PIPELINE_FINGERPRINT still named the prior bytes. No reviewer was invoked and no verdict exists. These exact canonical bytes were archived before the approved same-round repackage.",
+  "changeDigest": "sha256:db0a6db5feda238b4be86d953c7ab1dfc5dd14b1519b40241017b483eb1c23ef",
+  "reviewInvoked": false,
+  "verdictRecorded": false,
+  "files": [
+    {
+      "path": "package-round0.failed-attempt1.json",
+      "bytes": 134077,
+      "sha256": "c1c5e74dc58c69c5221eae0c46a152388f94aa4dae4ae0b6e93fbfcfff748db9"
+    },
+    {
+      "path": "exchange.failed-attempt1.json",
+      "bytes": 17449,
+      "sha256": "50237bbc9171c047141c28ae26189b1977cb247b91084889acbab419c65eb909"
+    },
+    {
+      "path": "change-round0.failed-attempt1.diff",
+      "bytes": 119840,
+      "sha256": "db0a6db5feda238b4be86d953c7ab1dfc5dd14b1519b40241017b483eb1c23ef"
+    },
+    {
+      "path": "change.failed-attempt1.diff",
+      "bytes": 119840,
+      "sha256": "db0a6db5feda238b4be86d953c7ab1dfc5dd14b1519b40241017b483eb1c23ef"
+    },
+    {
+      "path": "review-prompt.failed-attempt1.md",
+      "bytes": 128060,
+      "sha256": "36d60a4100f5c7937108a4a3c51179468033f447e19e0b3fe2e432bd0e8de3f5"
+    }
+  ]
+}

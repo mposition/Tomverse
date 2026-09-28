@@ -203,6 +203,20 @@ run(
     // exactly one owner and one append-only route decision, and a failed
     // decision write must roll the ownership change back.
     "tests/integration/amux-orchestration.db.test.ts",
+    // AMUX one-person review proposals and decisions must be DB-enforced,
+    // append-only, and bound to the task, escalation and audit chain.
+    "tests/integration/amux-agent-review-approval.db.test.ts",
+    // Explicit intake registration writes one backlog card, one body-free
+    // draft, one consumed approval and one audit row, and leaves execution
+    // and credit counts unchanged.
+    "tests/integration/amux-intake-registration.db.test.ts",
+    // Source reconciliation appends one consumed run and per-card revisions.
+    // Accept moves only the revision pointer. Reject leaves the pointer. The
+    // public apply function returns before the transaction while the code
+    // latch is false, so this test calls the commit function directly.
+    "tests/integration/amux-reconciliation.db.test.ts",
+    "tests/integration/amux-recommendation-pool.db.test.ts",
+    "tests/integration/amux-auto-promotion.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -248,6 +262,13 @@ run(
     // application alone protects is one a migration or an admin script can
     // rewrite -- and the row it rewrites is the proof that a send was allowed.
     "tests/integration/email-permission-ledger.db.test.ts",
+    // The ledger's first writers: the sealed cohort a risk_accepted approval
+    // covers, and the one-time in-product notice. Here rather than in a unit
+    // test because what is under test is whether the rows those writers build
+    // survive the triggers -- a sealed approval refusing to change, and an
+    // append-only table accepting a repeated render as one row rather than
+    // raising on the second.
+    "tests/integration/email-send-approval-cohort.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
@@ -287,6 +308,11 @@ run(
     // will not lose, the seal closes the set in the same transaction, and one
     // phase of one delivery is recorded once however many times it is evaluated.
     "tests/integration/release-notes-send-decision.db.test.ts",
+    // The two statutory display checks, whose question is which (policy version,
+    // profile) a message could still be composed under. Both earlier readings of
+    // that were wrong in ways only rows show: the active version alone, and a
+    // profile key assumed equal to a country code.
+    "tests/integration/email-statutory-display-readiness.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",

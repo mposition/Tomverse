@@ -55,7 +55,15 @@ export type ExpansionRefusalReason =
    * only guarded the single-message path would leave the campaign path as an
    * unguarded second route to exactly the sends it was meant to stop.
    */
-  | "marketing_disabled";
+  | "marketing_disabled"
+  /**
+   * The release-notes product is switched off, which is not the same switch.
+   *
+   * Here for the same reason `marketing_disabled` is: a fan-out writes its
+   * delivery rows directly rather than going through `enqueueStandardEmail`, so
+   * a flag guarding only the single-message path would leave this one open.
+   */
+  | "release_notes_disabled";
 
 /**
  * Whether a pass may run at all.

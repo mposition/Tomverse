@@ -242,30 +242,70 @@ export const approvalScopeRefusal = (
 };
 
 /**
- * Whether an account is inside a `risk_accepted` approval's cohort.
+ * Why an account is outside a `risk_accepted` approval's cohort, in detail.
  *
  * Three digests have to agree with the member row: the account, the address
  * pinned on the delivery at enqueue, and the account's address right now
  * (draft section 5.6). Changing the address after enqueue takes the delivery
  * out of scope even though it still carries the approved address, which is the
  * point -- the approval was for a mailbox somebody has since stopped using.
+ *
+ * The reasons are separate because the admin screen has to say which one it
+ * was. `normalization_version_changed` especially: digests taken under two
+ * different rules are not comparable, and reporting that as an address change
+ * would blame the recipient for a rule we moved.
  */
-export const cohortRefusal = (input: {
-  member: { userId: string; addressDigest: string } | null;
+export type CohortMismatchReason =
+  | "no_account"
+  | "not_a_member"
+  | "normalization_version_changed"
+  | "no_delivery_address"
+  | "account_has_no_address"
+  | "pinned_address_changed"
+  | "current_address_changed";
+
+export type CohortQuery = {
+  member: {
+    userId: string;
+    addressDigest: string;
+    addressNormalizationVersion: string;
+  } | null;
   userId: string | null;
   deliveryAddressDigest: string | null;
   currentAddressDigest: string | null;
-}): string | null => {
-  if (input.userId === null) return "approval_member_mismatch";
-  if (input.member === null) return "approval_member_mismatch";
-  if (input.member.userId !== input.userId) return "approval_member_mismatch";
-  if (input.deliveryAddressDigest === null) return "approval_member_mismatch";
-  if (input.currentAddressDigest === null) return "approval_member_mismatch";
+  /** Which rule produced the two digests above. */
+  addressNormalizationVersion: string;
+};
+
+export const cohortMismatchReason = (
+  input: CohortQuery
+): CohortMismatchReason | null => {
+  if (input.userId === null) return "no_account";
+  if (input.member === null) return "not_a_member";
+  if (input.member.userId !== input.userId) return "not_a_member";
+  if (
+    input.member.addressNormalizationVersion !==
+    input.addressNormalizationVersion
+  ) {
+    return "normalization_version_changed";
+  }
+  if (input.deliveryAddressDigest === null) return "no_delivery_address";
+  if (input.currentAddressDigest === null) return "account_has_no_address";
   if (input.member.addressDigest !== input.deliveryAddressDigest) {
-    return "approval_member_mismatch";
+    return "pinned_address_changed";
   }
   if (input.member.addressDigest !== input.currentAddressDigest) {
-    return "approval_member_mismatch";
+    return "current_address_changed";
   }
   return null;
 };
+
+/**
+ * The one blocker code a verdict stores, derived from the reason above.
+ *
+ * Derived rather than written twice. A second implementation of the same
+ * comparison is how the screen and the send come to disagree about who is in
+ * the cohort, and the screen is the only place anyone would notice.
+ */
+export const cohortRefusal = (input: CohortQuery): string | null =>
+  cohortMismatchReason(input) === null ? null : "approval_member_mismatch";

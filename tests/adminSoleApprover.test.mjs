@@ -20,7 +20,7 @@ import {
  * which left a one-person organisation unable to run
  * `retention.cleanup.execute` at all -- recorded by the `f3974ef` and
  * `4380bc1` staging rounds. These tests are mostly about the ways the
- * exception must *not* open: another action, a second administrator, someone
+ * exception must *not* open: another action, someone
  * else's preview, an old one, one that something has superseded.
  */
 
@@ -52,16 +52,13 @@ test("only the named actions can reach this path", () => {
     }
 });
 
-test("a second administrator closes the campaign path too", () => {
-    // Condition 6 is not action-specific, and it is the whole reason D5 is
-    // safe to grant: the exception exists only while it is the difference
-    // between approving and never approving at all.
+test("a second administrator does not close the campaign path", () => {
     assert.deepEqual(
         eligibility({
             action: "email_campaign.approve",
             eligibleApproverIdentities: ["ops@example.invalid", "owner@example.invalid"],
         }),
-        { allowed: false, reason: "multiple_eligible_approvers" }
+        { allowed: true, approverIdentity: "ops@example.invalid" }
     );
     assert.equal(
         eligibility({ action: "email_campaign.approve" }).allowed,
@@ -125,9 +122,7 @@ test("time can expire a retention preview and can never expire approved copy", (
     );
 });
 
-test("a second eligible administrator closes the path", () => {
-    // Condition 6. Nothing to migrate and no flag to remember to clear: the
-    // list is recomputed from configuration on every request.
+test("a second eligible administrator does not close the path", () => {
     assert.deepEqual(
         eligibility({
             eligibleApproverIdentities: [
@@ -135,7 +130,7 @@ test("a second eligible administrator closes the path", () => {
                 "owner@example.invalid",
             ],
         }),
-        { allowed: false, reason: "multiple_eligible_approvers" }
+        { allowed: true, approverIdentity: "ops@example.invalid" }
     );
 });
 
@@ -330,13 +325,10 @@ test("every reason the decision can return has a sentence", () => {
         [
             eligibility({ action: "user.delete" }),
             eligibility({ eligibleApproverIdentities: [] }),
-            eligibility({
-                eligibleApproverIdentities: ["a@example.invalid", "b@example.invalid"],
-            }),
             eligibility({ requesterIdentity: "other@example.invalid" }),
         ].map((decision) => decision.reason)
     );
-    assert.equal(reachable.size, 4);
+    assert.equal(reachable.size, 3);
     assert.deepEqual(
         Object.keys(SOLE_APPROVER_UNAVAILABLE_SENTENCES).sort(),
         [...reachable].sort()
@@ -360,10 +352,7 @@ test("an unknown reason renders nothing rather than breaking the panel", () => {
     for (const reason of [null, undefined, "", "something_added_later"]) {
         assert.equal(soleApproverUnavailableSentence(reason), null);
     }
-    assert.equal(
-        soleApproverUnavailableSentence("multiple_eligible_approvers"),
-        SOLE_APPROVER_UNAVAILABLE_SENTENCES.multiple_eligible_approvers
-    );
+    assert.equal(soleApproverUnavailableSentence("multiple_eligible_approvers"), null);
 });
 
 test("the reason travels from the route to the screen", () => {
@@ -393,9 +382,9 @@ test("the reason travels from the route to the screen", () => {
 
 /**
  * docs/policy/admin-sole-approver.md widened the exception from two named
- * actions to every two-person action, with the audit record in place of the
- * second reviewer. The tests below pin the two things that did not change:
- * condition 6 for every action, and the bound actions keeping their proof.
+ * actions to every high-risk action, with the audit record in place of a
+ * second reviewer. Since 2026-09-24 that stays true at every administrator
+ * count. The bound actions keep their proof.
  */
 
 const general = (over = {}) =>
@@ -426,7 +415,7 @@ test("the sole administrator may execute the actions the named list never reache
     }
 });
 
-test("a second eligible administrator restores two-person approval for every action", () => {
+test("a second eligible administrator does not restore two-person approval", () => {
     for (const action of ["user.plan_adjust", "user.delete", "refund.approve"]) {
         assert.deepEqual(
             general({
@@ -436,7 +425,7 @@ test("a second eligible administrator restores two-person approval for every act
                     "billing@example.invalid",
                 ],
             }),
-            { allowed: false, reason: "multiple_eligible_approvers" }
+            { allowed: true, approverIdentity: "owner@example.invalid" }
         );
     }
     assert.deepEqual(general({ eligibleApproverIdentities: [] }), {
@@ -458,7 +447,7 @@ test("the general path refuses to stand in for an action with a bound confirmati
     }
 });
 
-test("runWithAdminApproval decides the sole path after re-authentication and before any claim", () => {
+test("runWithAdminApproval executes after re-authentication and does not queue", () => {
     const source = readFileSync("lib/adminApproval.ts", "utf8");
     const body = source.slice(
         source.indexOf("export async function runWithAdminApproval")
@@ -466,15 +455,13 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
     const reauth = body.indexOf("assertRecentAdminAuthentication(input.session)");
     const decide = body.indexOf("generalSoleApprovalAvailability(");
     const run = body.indexOf("runAsSoleAdministrator(");
-    const claim = body.indexOf("claimApproval(input)");
-    assert.ok(reauth > 0 && decide > reauth && run > decide && claim > run);
+    assert.ok(reauth > 0 && decide > reauth && run > decide);
+    assert.equal(body.indexOf("claimApproval("), -1);
 
-    // Counted against the permission the action requires, the same one a
-    // reviewer would need, so "one person can approve this" means this action.
     const execution = readFileSync("lib/adminSoleApproverExecution.ts", "utf8");
     assert.match(
         execution,
-        /eligibleApproverIdentities\(\s*approvalPermissionForAction\(action\),\s*session\s*\)/
+        /eligibleApproverIdentities\(\s*approvalPermissionForAction\(input\.action\),\s*input\.session\s*\)/
     );
 
     // Open two-person requests are closed, in the same transaction as the
@@ -487,17 +474,6 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
     assert.match(execution, /status: \{ in: \["pending", "approved"\] \}/);
     assert.match(execution, /\n\s+tx,\n\s+\}\);\n\s+return \{ metadata, auditLogId \};/);
 
-    // The ordinary claim and the sole closure share one scope lock, taken
-    // before either reads, so they cannot interleave on the same change.
-    const claimBody = source.slice(
-        source.indexOf("const claimApproval"),
-        source.indexOf("export async function runWithAdminApproval")
-    );
-    assert.ok(
-        claimBody.indexOf("lockApprovalScope(tx") > 0 &&
-            claimBody.indexOf("lockApprovalScope(tx") <
-                claimBody.indexOf("tx.adminActionApproval.")
-    );
     const closure = execution.slice(
         execution.indexOf("const supersedeOpenRequestsAndRecordStart")
     );
@@ -506,5 +482,5 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
             closure.indexOf("lockApprovalScope(tx") <
                 closure.indexOf("tx.adminActionApproval.")
     );
-    assert.match(closure, /refuse\("approval_executing"\)/);
+    assert.match(closure, /refuseSoleApprover\("approval_executing"\)/);
 });
