@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -190,9 +190,103 @@ jobs:
     analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee.replace("contents: read", "contents: write"))]).forbidsAll,
     true,
   );
-  assert.equal(analyse([wf("caller", caller("./.github/workflows/callee.yml", "    secrets: inherit"))]).forbidsAll, true);
+  assert.equal(
+    analyse([wf("caller", caller("./.github/workflows/callee.yml", "    secrets: inherit")), wf("callee", callee)]).forbidsAll,
+    true,
+  );
+  assert.equal(
+    analyse([wf("caller", caller("./.github/workflows/callee.yml", "    secrets:\n      token: ${{ secrets.DEPLOY }}")), wf("callee", callee)]).forbidsAll,
+    true,
+    "a secret handed to a read-only callee is still a credential",
+  );
   assert.equal(analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))]).forbidsAll, true);
   assert.equal(analyse([wf("caller", caller("./.github/workflows/missing.yml"))]).status, "failed");
+
+  // A read-only callee that restores a cache, called with a credential: the
+  // two combine into the cache rule.
+  const cachingCallee = callee.replace("steps: [{ run: echo }]", "steps:\n      - uses: actions/cache@v4\n        with: { path: x, key: y }");
+  const nightlyCaller = caller("./.github/workflows/callee.yml", "    secrets: inherit").replace(
+    "  pull_request:\n    branches: [develop]",
+    "  schedule:\n    - cron: '0 0 * * *'",
+  );
+  const combined = analyse([wf("caller", nightlyCaller), wf("callee", cachingCallee)]);
+  assert.equal(combined.forbidsAll, true);
+  assert.ok(combined.reasons.some((r) => r.reason === "credential_job_restores_cache"));
+});
+
+test("any agent branch a filter could name is reached; only a covering ignore rules it out", () => {
+  const credentialed = READ_ONLY_PR.replace("  contents: read", "  contents: write");
+  const withPush = (filter) => credentialed.replace("  pull_request:\n    branches: [develop]", `  push:\n${filter}`);
+  for (const filter of [
+    "    branches: ['agent/engineering/42']",
+    "    branches: ['agent/engineering/123456789012']",
+    "    branches: ['agent/engineering/4*']",
+    "    branches: ['agent/**']",
+    "    branches: ['**']",
+    "    branches: ['*/engineering/*']",
+    "    branches: ['${{ vars.BRANCH }}']",
+    "    branches: ['agent/engineering/[0-9]']",
+    "    branches: ['main', 'agent/engineering/*', '!agent/engineering/1']",
+    "    branches-ignore: ['agent/engineering/1']",
+    "    branches-ignore: ['${{ vars.IGNORE }}']",
+  ]) {
+    assert.equal(analyse([wf("ci", withPush(filter))]).forbidsAll, true, filter);
+  }
+  for (const filter of [
+    "    branches: ['main', 'release/*']",
+    "    branches: ['agent/review/*']",
+    "    branches: ['agent/engineering/x']",
+    "    branches-ignore: ['agent/**']",
+    "    branches-ignore: ['agent/engineering/*']",
+    "    branches-ignore: ['**']",
+  ]) {
+    assert.equal(analyse([wf("ci", withPush(filter))]).forbidsAll, false, filter);
+  }
+});
+
+test("where a job runs can be a credential the file never names", () => {
+  const job = (extra, runsOn = "ubuntu-latest") =>
+    READ_ONLY_PR.replace("    runs-on: ubuntu-latest", `    runs-on: ${runsOn}${extra}`);
+  assert.equal(analyse([wf("ci", job(""))]).forbidsAll, false);
+  for (const [label, text] of Object.entries({
+    "runs-on expression": job("", "${{ vars.RUNNER }}"),
+    "self-hosted": job("", "self-hosted"),
+    "self-hosted list": job("", "[self-hosted, linux]"),
+    "runner group": job("", "{ group: private }"),
+    "container credentials": job("\n    container:\n      image: x\n      credentials:\n        username: u"),
+    "container expression": job("\n    container: ${{ vars.IMAGE }}"),
+    "service credentials": job("\n    services:\n      db:\n        image: x\n        credentials:\n          username: u"),
+    "defaults expression": job("\n    defaults:\n      run:\n        shell: ${{ vars.SHELL }}"),
+  })) {
+    assert.equal(analyse([wf("ci", text)]).forbidsAll, true, label);
+  }
+});
+
+test("a human exclusion never lifts the cache rule", () => {
+  const nightly = `
+name: nightly
+on:
+  schedule:
+    - cron: '0 0 * * *'
+permissions:
+  contents: write
+jobs:
+  n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with: { path: x, key: y }
+`;
+  const exclusion = {
+    workflowPath: ".github/workflows/nightly.yml",
+    jobId: "n",
+    blobSha: "a".repeat(40),
+    reason: "reviewed",
+    reviewedBy: "mposition",
+  };
+  const result = analyse([wf("nightly", nightly)], { exclusions: [exclusion] });
+  assert.equal(result.forbidsAll, true);
+  assert.equal(analyse([wf("nightly", nightly)], { exclusions: [exclusion], cacheIsolationRecorded: true }).forbidsAll, false);
 });
 
 test("a credentialed job that restores a cache forbids everything until isolation is recorded", () => {
@@ -242,24 +336,62 @@ test("anything unreadable fails the whole analysis", () => {
   );
 });
 
-// Which workflows cause the result is not asserted by name: the policy keeps
-// unresolved reachability out of public files (§16). What is pinned is the
-// shape -- readable, everything forbidden, for both kinds of reason.
-test("on this repository's own workflows the analysis reads everything and forbids everything", () => {
+/**
+ * The committed workflows, read from Git objects as the app would read them
+ * from GitHub, not from the working tree.
+ */
+const committedWorkflows = () => {
   const root = new URL("..", import.meta.url);
-  const paths = execFileSync("git", ["ls-files", ".github/workflows"], { cwd: root, encoding: "utf8" })
+  const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return git(["ls-tree", "-r", "HEAD", ".github/workflows"])
     .split("\n")
-    .filter((path) => /\.ya?ml$/.test(path));
-  const workflows = paths.map((path) => ({
-    path,
-    blobSha: execFileSync("git", ["hash-object", path], { cwd: root, encoding: "utf8" }).trim(),
-    text: readFileSync(new URL(path, root), "utf8"),
-  }));
-  const result = analyseCredentialReachability({ workflows, exclusions: [], cacheIsolationRecorded: false });
+    .filter(Boolean)
+    .map((line) => {
+      const [meta, path] = line.split("\t");
+      const blobSha = meta.split(" ")[2];
+      return { path, blobSha, text: git(["cat-file", "-p", blobSha]) };
+    })
+    .filter((file) => /\.ya?ml$/.test(file.path));
+};
+
+const anonymise = (value) => createHash("sha256").update(value).digest("hex").slice(0, 12);
+
+/**
+ * The verdict for every committed workflow, reduced to a digest that names
+ * nothing: which (anonymised) jobs hold a credential, why anything is
+ * forbidden, and which (anonymised) path rules apply. The policy keeps
+ * unresolved reachability out of public files (§16), so the pin is a hash.
+ *
+ * When this fails, a workflow change moved the credential posture. Run the
+ * analysis, read what changed with the owner, and only then update the digest.
+ */
+const POSTURE_DIGEST = "ddbb7fee2d32";
+
+test("on this repository's committed workflows the credential posture is the reviewed one", () => {
+  const result = analyseCredentialReachability({
+    workflows: committedWorkflows(),
+    exclusions: [],
+    cacheIsolationRecorded: false,
+  });
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.equal(result.forbidsAll, true);
   const reasons = new Set(result.reasons.map((r) => r.reason));
   assert.ok(reasons.has("credential_job_restores_cache"));
   assert.ok([...reasons].some((reason) => reason !== "credential_job_restores_cache"));
   assert.ok(result.pathRules.length > 0);
+
+  const summary = [
+    ...result.credentialedJobs.map((job) => `job:${anonymise(job.workflowPath)}#${anonymise(job.jobId)}`),
+    ...result.reasons.map(
+      (r) => `reason:${anonymise(r.workflowPath)}#${r.jobId === null ? "-" : anonymise(r.jobId)}:${r.reason}`,
+    ),
+    ...result.pathRules.map(
+      (rule) => `rule:${anonymise(rule.workflowPath)}:${rule.kind}:${anonymise(rule.patterns.join("\n"))}`,
+    ),
+  ].sort();
+  assert.equal(
+    anonymise(summary.join("\n")),
+    POSTURE_DIGEST,
+    "the credential posture of the committed workflows changed; review it with the owner before updating the digest",
+  );
 });

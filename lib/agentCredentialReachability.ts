@@ -27,7 +27,7 @@ export type HumanExclusion = {
 };
 
 /** The branch namespace and base the agent's writes touch. */
-const AGENT_BRANCH_SAMPLES = ["agent/engineering/0", "agent/engineering/7", "agent/engineering/123456789012"];
+const AGENT_BRANCH_PREFIX = "agent/engineering/";
 const PR_BASE = "develop";
 
 /**
@@ -70,6 +70,8 @@ export type CredentialAnalysis =
       reasons: CredentialReason[];
       pathRules: PathRule[];
       voidExclusions: HumanExclusion[];
+      /** Every job judged to hold a writable credential, for the record of what was analysed. */
+      credentialedJobs: Array<{ workflowPath: string; jobId: string }>;
     };
 
 /* ------------------------------------------------------------------------- */
@@ -250,7 +252,74 @@ const restoresCache = (job: Obj) => {
   });
 };
 
-type JobVerdict = { credential: boolean; problem: string | null };
+/* ------------------------------------------------------------------------- */
+/* The agent's branch language                                                */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Every branch the agent can push is `agent/engineering/` followed by one to
+ * twelve digits. These two answer, conservatively, whether a filter pattern
+ * could touch that language at all, and whether it certainly covers all of
+ * it. Anything uncertain answers towards "reached".
+ */
+const AGENT_RUN_BRANCH = /^agent\/engineering\/[0-9]{1,12}$/;
+
+export const agentBranchMayMatch = (pattern: string): boolean => {
+  if (pattern.includes("${{")) return true;
+  if (compileFilter(pattern) === "unknown") return true;
+  const star = pattern.indexOf("*");
+  if (star === -1) return AGENT_RUN_BRANCH.test(pattern);
+  const prefix = pattern.slice(0, star);
+  if (prefix.length <= AGENT_BRANCH_PREFIX.length) return AGENT_BRANCH_PREFIX.startsWith(prefix);
+  return (
+    prefix.startsWith(AGENT_BRANCH_PREFIX) && /^[0-9]{0,12}$/.test(prefix.slice(AGENT_BRANCH_PREFIX.length))
+  );
+};
+
+export const agentBranchesAllCovered = (pattern: string): boolean => {
+  if (pattern.includes("${{") || pattern.startsWith("!")) return false;
+  if (pattern === `${AGENT_BRANCH_PREFIX}*`) return true;
+  if (!pattern.endsWith("**")) return false;
+  const prefix = pattern.slice(0, -2);
+  return !prefix.includes("*") && AGENT_BRANCH_PREFIX.startsWith(prefix);
+};
+
+/* ------------------------------------------------------------------------- */
+/* Judging one job                                                            */
+/* ------------------------------------------------------------------------- */
+
+const HOSTED_RUNNER = /^(?:ubuntu|windows|macos)-[A-Za-z0-9.-]+$/;
+
+/**
+ * Where a job runs and in what: a self-hosted runner, a container or a service
+ * with credentials, or any of these chosen by an expression, can carry
+ * credentials the workflow file never names.
+ */
+const executionEnvironmentCredentialed = (workflow: Obj, job: Obj): boolean => {
+  const runsOn = job["runs-on"];
+  const hosted =
+    (typeof runsOn === "string" && HOSTED_RUNNER.test(runsOn)) ||
+    (Array.isArray(runsOn) && runsOn.length > 0 && runsOn.every((label) => typeof label === "string" && HOSTED_RUNNER.test(label)));
+  if (!hosted) return true;
+  for (const field of ["container", "services", "defaults"] as const) {
+    const value = job[field];
+    if (value === undefined) continue;
+    const text = JSON.stringify(value);
+    if (text.includes("${{") || /"credentials"\s*:/.test(text)) return true;
+  }
+  if (workflow.defaults !== undefined && JSON.stringify(workflow.defaults).includes("${{")) return true;
+  return false;
+};
+
+type JobVerdict = {
+  /** Holds a writable credential once valid human exclusions are applied. */
+  credential: boolean;
+  /** Holds one ignoring exclusions -- the cache rule's view, which no exclusion narrows. */
+  credentialIgnoringExclusions: boolean;
+  /** Restores an Actions cache, itself or through a local callee. */
+  restoresCache: boolean;
+  problem: string | null;
+};
 
 /* ------------------------------------------------------------------------- */
 /* The analysis                                                               */
@@ -290,35 +359,53 @@ export const analyseCredentialReachability = (input: {
     validExclusions.some((exclusion) => exclusion.workflowPath === path && exclusion.jobId === jobId);
 
   const judgeJob = (workflow: Obj, path: string, jobId: string, job: Json, depth: number): JobVerdict => {
-    if (!isObj(job)) return { credential: true, problem: "job_not_an_object" };
-    if (excluded(path, jobId)) return { credential: false, problem: null };
-    if (job.secrets === "inherit") return { credential: true, problem: null };
+    if (!isObj(job)) {
+      return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: "job_not_an_object" };
+    }
+    const own = (credential: boolean, cache: boolean, problem: string | null = null): JobVerdict => ({
+      credential: credential && !excluded(path, jobId),
+      credentialIgnoringExclusions: credential,
+      restoresCache: cache,
+      problem,
+    });
+
+    const callerPermissions = job.permissions !== undefined ? job.permissions : workflow.permissions;
     if (typeof job.uses === "string") {
       const local = /^\.\/(\.github\/workflows\/[^/@]+\.ya?ml)$/.exec(job.uses);
-      if (local === null) return { credential: true, problem: null };
+      if (local === null) return own(true, false);
       const callee = parsed.get(local[1]);
-      if (callee === undefined || depth > 8) return { credential: true, problem: "callee_unreadable" };
-      if (referencesSecret(job.secrets) || hasUnresolvedExpression(job.with)) {
-        return { credential: true, problem: null };
-      }
+      if (callee === undefined || depth > 8) return own(true, false, "callee_unreadable");
+      // What the caller hands over: inherited or named secrets, unresolved
+      // inputs, and a token whose permissions the callee can only narrow.
+      let credential =
+        job.secrets === "inherit" ||
+        referencesSecret(job.secrets) ||
+        hasUnresolvedExpression(job.with) ||
+        permissionsWrite(callerPermissions) !== "read";
+      let cache = false;
       for (const [calleeJobId, calleeJob] of Object.entries(callee.jobs as Obj)) {
         const verdict = judgeJob(callee, local[1], calleeJobId, calleeJob, depth + 1);
-        if (verdict.credential || verdict.problem) return { credential: true, problem: verdict.problem };
+        if (verdict.problem) return own(true, cache, verdict.problem);
+        credential = credential || verdict.credentialIgnoringExclusions;
+        cache = cache || verdict.restoresCache;
       }
-      return { credential: false, problem: null };
+      return own(credential, cache);
     }
-    if (job.environment !== undefined) return { credential: true, problem: null };
-    const permissions = job.permissions !== undefined ? job.permissions : workflow.permissions;
-    const access = permissionsWrite(permissions);
-    if (access !== "read") return { credential: true, problem: null };
-    if (referencesSecret(job) || referencesSecret(workflow.env) || referencesSecret(workflow.defaults)) {
-      return { credential: true, problem: null };
-    }
-    // The whole job, steps included: an expression reaching a context this
-    // cannot see into is as good as a secret for the purpose of this analysis.
-    if (hasUnresolvedExpression(job)) return { credential: true, problem: null };
-    if (hasUnresolvedExpression(workflow.env)) return { credential: true, problem: null };
-    return { credential: false, problem: null };
+
+    const cache = restoresCache(job);
+    const credential =
+      job.secrets === "inherit" ||
+      job.environment !== undefined ||
+      permissionsWrite(callerPermissions) !== "read" ||
+      executionEnvironmentCredentialed(workflow, job) ||
+      referencesSecret(job) ||
+      referencesSecret(workflow.env) ||
+      referencesSecret(workflow.defaults) ||
+      // The whole job, steps included: an expression reaching a context this
+      // cannot see into is as good as a secret for the purpose of this analysis.
+      hasUnresolvedExpression(job) ||
+      hasUnresolvedExpression(workflow.env);
+    return own(credential, cache);
   };
 
   const reasons: CredentialReason[] = [];
@@ -326,6 +413,7 @@ export const analyseCredentialReachability = (input: {
   let forbidsAll = false;
   const reachedNames = new Set<string>();
   const credentialed = new Map<string, string[]>();
+  const credentialedJobs: Array<{ workflowPath: string; jobId: string }> = [];
 
   for (const [path, workflow] of parsed) {
     const jobs: string[] = [];
@@ -334,10 +422,12 @@ export const analyseCredentialReachability = (input: {
       if (verdict.problem) problems.push({ path, problem: `${jobId}:${verdict.problem}` });
       if (verdict.credential) {
         jobs.push(jobId);
-        if (isObj(job) && restoresCache(job) && !input.cacheIsolationRecorded) {
-          forbidsAll = true;
-          reasons.push({ workflowPath: path, jobId, reason: "credential_job_restores_cache" });
-        }
+        credentialedJobs.push({ workflowPath: path, jobId });
+      }
+      // The cache rule ignores exclusions: only the recorded isolation lifts it.
+      if (verdict.credentialIgnoringExclusions && verdict.restoresCache && !input.cacheIsolationRecorded) {
+        forbidsAll = true;
+        reasons.push({ workflowPath: path, jobId, reason: "credential_job_restores_cache" });
       }
     }
     credentialed.set(path, jobs);
@@ -359,15 +449,22 @@ export const analyseCredentialReachability = (input: {
         if (branches === null || ignored === null || tags === null) {
           return { status: "failed", problems: [{ path, problem: `${event}:branch_filter_unreadable` }] };
         }
-        const candidates = event === "push" ? AGENT_BRANCH_SAMPLES : [PR_BASE];
-        const onlyTags = event === "push" && filter.branches === undefined && filter.tags !== undefined;
-        hit =
-          !onlyTags &&
-          candidates.some(
-            (branch) =>
-              (branches.length === 0 || includeListMatches(branches, branch)) &&
-              !ignoreListMatches(ignored, branch),
-          );
+        if (event === "push") {
+          const onlyTags = filter.branches === undefined && filter.tags !== undefined;
+          // Negations in an include list can only remove branches, so they are
+          // ignored here: that errs towards "reached".
+          const included =
+            branches.length === 0 ||
+            branches.some((pattern) => !pattern.startsWith("!") && agentBranchMayMatch(pattern));
+          const allIgnored = ignored.some(agentBranchesAllCovered);
+          hit = !onlyTags && included && !allIgnored;
+        } else {
+          const expression = [...branches, ...ignored].some((pattern) => pattern.includes("${{"));
+          hit =
+            expression ||
+            ((branches.length === 0 || includeListMatches(branches, PR_BASE)) &&
+              !ignoreListMatches(ignored, PR_BASE));
+        }
         if (hit) reached.add(path);
         if (hit && (credentialed.get(path) ?? []).length > 0) {
           const paths = stringList(filter.paths);
@@ -375,8 +472,10 @@ export const analyseCredentialReachability = (input: {
           if (paths === null || pathsIgnore === null || (paths.length > 0 && pathsIgnore.length > 0)) {
             return { status: "failed", problems: [{ path, problem: `${event}:path_filter_unreadable` }] };
           }
-          if (paths.length > 0) pathRules.push({ workflowPath: path, kind: "paths", patterns: paths });
-          else if (pathsIgnore.length > 0) {
+          const expression = [...paths, ...pathsIgnore].some((pattern) => pattern.includes("${{"));
+          if (!expression && paths.length > 0) {
+            pathRules.push({ workflowPath: path, kind: "paths", patterns: paths });
+          } else if (!expression && pathsIgnore.length > 0) {
             pathRules.push({ workflowPath: path, kind: "paths-ignore", patterns: pathsIgnore });
           } else {
             forbidsAll = true;
@@ -420,7 +519,7 @@ export const analyseCredentialReachability = (input: {
     }
   }
 
-  return { status: "analysed", forbidsAll, reasons, pathRules, voidExclusions };
+  return { status: "analysed", forbidsAll, reasons, pathRules, voidExclusions, credentialedJobs };
 };
 
 /**
