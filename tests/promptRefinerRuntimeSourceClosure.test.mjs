@@ -233,12 +233,19 @@ const compilerOptions = parsedConfig.options;
 // computed accesses in the admission and reservation modules. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so this
 // repin records source-position movement only.
+//
+// 2026-09-28, engineering agent state: `lib/adminAuditSystemActors.ts` gains
+// the engineering agent's system actors, and the marketing webhook
+// fingerprint note in `lib/marketingAutomationAccess.ts` records the
+// engineering tables in the watched schema. Neither adds a computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f09e1e78146afa6b436b5846a6e6592b",
-  "2ebabbc6b965b91b95c4a4cb6576b2dc",
+  "f74139417efbca3b7fca1d31341f919e",
+  "5745ce2dc9cfec30a0f99c0727bb3c5f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
