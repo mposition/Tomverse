@@ -360,7 +360,7 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
  * The verdict for every committed workflow, reduced to a digest that names
  * nothing: which (anonymised) jobs hold a credential, why anything is
  * forbidden, and which (anonymised) path rules apply. The policy keeps
- * unresolved reachability out of public files (§16), so the pin is a hash.
+ * unresolved reachability out of public files (docs/policy/engineering-agent.md §16), so the pin is a hash.
  *
  * When this fails, a workflow change moved the credential posture. Run the
  * analysis, read what changed with the owner, and only then update the digest.

@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 
 const KB = 1024;
 
-/** Proposed limits (design §4.2a); fixed by policy revision before shadow. */
+/** Proposed limits (docs/policy/engineering-agent.md §6); fixed by policy revision before shadow. */
 export const INPUT_LIMITS = {
   issueTitle: 512,
   executionBrief: { total: 16 * KB, head: 12 * KB, tail: 4 * KB },
@@ -100,7 +100,7 @@ const clean = (raw: Uint8Array): Cleaned | { ok: false; reason: "input_rejected"
 
 const isCleaned = (value: ReturnType<typeof clean>): value is Cleaned => !("ok" in value);
 
-/** Keeps the start only (design §4.2a: titles, registration items, dependabot bodies). */
+/** Keeps the start only: titles, registration items, dependabot bodies. */
 const cutHead = (input: Cleaned, total: number): PreparedText => {
   const truncated = input.bytes.length > total;
   const kept = truncated ? input.bytes.subarray(0, headBoundary(input.bytes, total)) : input.bytes;
@@ -357,7 +357,7 @@ export const DEFAULT_MODEL = "claude-opus-5";
 /**
  * Proposed session limits; fixed by policy revision before shadow.
  *
- * Design §4.2a: the input limit covers the system prompt, the external text and
+ * docs/policy/engineering-agent.md §6: the input limit covers the system prompt, the external text and
  * the tool results together, and the tool budget plus the rest must fit inside
  * it. `maxRequestBytes` is that limit, checked on every request body: a token
  * is at least one byte of the text it encodes, so the byte limit bounds the
