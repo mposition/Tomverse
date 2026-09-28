@@ -336,7 +336,7 @@ test("the request goes to the one fixed host, carries the key only in its header
   assert.equal(body.max_tokens, SESSION_LIMITS.maxOutputTokens);
 });
 
-test("the tool budget and the fixed inputs fit inside the request limit (design §4.2a)", () => {
+test("the tool budget and the fixed inputs fit inside the request limit (docs/policy/engineering-agent.md §6)", () => {
   assert.ok(SESSION_LIMITS.maxUserContentBytes >= INPUT_LIMITS.workRunTotal);
   assert.ok(SESSION_LIMITS.maxUserContentBytes >= INPUT_LIMITS.registrationRound);
   const fixed = SESSION_LIMITS.maxSystemBytes + SESSION_LIMITS.maxUserContentBytes + SESSION_LIMITS.maxToolBytes;
@@ -420,7 +420,20 @@ const FORBIDDEN_NAMES = new Set([
   "importScripts",
   "Deno",
   "Bun",
+  "console",
+  "prepareStackTrace",
+  "captureStackTrace",
+  "getPrototypeOf",
+  "setPrototypeOf",
+  "defineProperty",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
 ]);
+
+const isAssertion = (node) => ts.isAsExpression(node) || ts.isTypeAssertionExpression(node);
+const unwrapParentheses = (node) => (ts.isParenthesizedExpression(node) ? unwrapParentheses(node.expression) : node);
 
 const libDirectory = new URL("../lib/", import.meta.url);
 
@@ -449,8 +462,23 @@ const capabilityProblems = (text) => {
   const checker = program.getTypeChecker();
   const source = program.getSourceFiles().find((file) => path.resolve(file.fileName) === fileName);
 
-  const problems = [];
+  // A module the checker rejects cannot be reasoned about by its types.
+  const problems = [...program.getSyntacticDiagnostics(source), ...program.getSemanticDiagnostics(source)].map(
+    (diagnostic) => `type error ${diagnostic.code}`,
+  );
   const visit = (node) => {
+    // Types are only evidence while nothing can lie to the checker: no `any`,
+    // no assertion through `unknown` or `any`, no assertion of an assertion.
+    if (node.kind === ts.SyntaxKind.AnyKeyword) problems.push("any");
+    if (isAssertion(node)) {
+      if (node.type.kind === ts.SyntaxKind.UnknownKeyword || node.type.kind === ts.SyntaxKind.AnyKeyword) {
+        problems.push("assertion through unknown or any");
+      }
+      if (isAssertion(unwrapParentheses(node.expression))) problems.push("assertion of an assertion");
+    }
+    if (ts.isBindingElement(node) && node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
+      problems.push("destructuring by a computed key");
+    }
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       const from = node.moduleSpecifier?.text;
       if (from !== undefined && from !== "node:crypto") problems.push(`import ${from}`);
@@ -472,9 +500,14 @@ const capabilityProblems = (text) => {
         problems.push("Object other than Object.keys");
       }
     }
+    // Indexing is allowed on byte arrays by number and nowhere else: a byte
+    // array's elements are numbers, so no index reaches a function through it.
     if (ts.isElementAccessExpression(node)) {
-      const type = checker.getTypeAtLocation(node.argumentExpression);
-      if (!(type.flags & ts.TypeFlags.NumberLike)) problems.push("index by a non-number");
+      const receiver = checker.getTypeAtLocation(node.expression).getSymbol()?.getName();
+      const index = checker.getTypeAtLocation(node.argumentExpression);
+      if (receiver !== "Uint8Array" || !(index.flags & ts.TypeFlags.NumberLike)) {
+        problems.push("index other than a byte array by number");
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -508,12 +541,24 @@ test("the capability guard catches each way around it", () => {
     "a static import": 'import { spawn } from "node:child_process";\nexport const x = spawn;\n',
     "a re-export": 'export { spawn } from "node:child_process";\n',
     "import.meta": "export const x = import.meta.url;\n",
+    "a key asserted to be a number":
+      'const k = ("constr" + "uctor") as unknown as number;\nconst F = ((() => 0) as any)[k][k];\nconst p = "pro" + "cess";\nexport const x = F("return " + p)().env;\n',
+    "a receiver asserted to be a byte array":
+      'const k: number = JSON.parse("0");\nexport const x = ({ a: 1 } as unknown as Uint8Array)[k];\n',
+    "a record indexed by a string": 'const o: Record<string, () => void> = {};\nconst k = "a";\no[k]();\n',
+    "destructuring by a built key": 'const { ["cons" + "tructor"]: c } = {} as Record<string, unknown>;\nexport const x = c;\n',
+    "an explicit any": "export const x = (() => 0) as any;\n",
+    "logging": 'console.log("the key");\n',
+    "a stack trace hook": "Error.prepareStackTrace = () => 0;\n",
+    "a type error": 'export const x: number = "not a number";\n',
   };
   for (const [label, text] of Object.entries(fixtures)) {
     assert.notDeepEqual(capabilityProblems(text), [], label);
   }
   assert.deepEqual(
-    capabilityProblems("const b = new Uint8Array(2);\nexport const x = b[1] + Object.keys({}).length;\n"),
+    capabilityProblems(
+      "const b = new Uint8Array(2);\nlet i = 0;\ni += 1;\nexport const x = b[i] + b[0] + Object.keys({}).length;\n",
+    ),
     [],
   );
 });
