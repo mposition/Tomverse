@@ -16,6 +16,10 @@ import {
 } from "@/lib/amux/executionBudgetCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import {
+  amuxHumanReviewRequired,
+  amuxReviewPrNumberAccepted,
+} from "@/lib/amux/humanReviewCore";
+import {
   evaluateLockedAmuxCostAdmission,
   lockAmuxResourcePolicies,
 } from "@/lib/amux/resourcePolicy";
@@ -730,6 +734,7 @@ export async function settleAmuxExecution(input: {
   toStatus: AmuxExecutionToStatus;
   reason?: string | null;
   actualCostMicrousd?: bigint | null;
+  reviewPrNumber?: number | null;
   now?: Date;
 }): Promise<
   | { settled: true; taskRevision: number }
@@ -739,6 +744,15 @@ export async function settleAmuxExecution(input: {
     throw new Error(
       `Invalid AMUX execution settlement: ${input.outcome} -> ${input.toStatus}`,
     );
+  }
+  if (
+    !amuxReviewPrNumberAccepted({
+      outcome: input.outcome,
+      toStatus: input.toStatus,
+      reviewPrNumber: input.reviewPrNumber,
+    })
+  ) {
+    throw new Error("Invalid AMUX review PR number for this settlement");
   }
   if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
     return { settled: false as const, reason: "fenced_out" as const };
@@ -820,10 +834,15 @@ export async function settleAmuxExecution(input: {
         requested_status: input.toStatus,
         attempt_number: attempt.attemptNumber,
       });
+      // Policy version 15: a promoted card (approved brief) or one that asks
+      // for review never settles to done; it goes to human review.
+      const humanReviewRequired = amuxHumanReviewRequired(task);
       const effectiveToStatus =
-        budgetDestination.to_status === "done" && task.requiresHumanReview
+        budgetDestination.to_status === "done" && humanReviewRequired
           ? "review"
           : budgetDestination.to_status;
+      const recordedReviewPrNumber =
+        effectiveToStatus === "review" ? (input.reviewPrNumber ?? null) : null;
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: {
@@ -839,6 +858,9 @@ export async function settleAmuxExecution(input: {
                 status: effectiveToStatus,
                 owner: null,
                 claimedAt: null,
+                ...(recordedReviewPrNumber !== null
+                  ? { reviewPrNumber: recordedReviewPrNumber }
+                  : {}),
                 revision: {
                   increment: 1,
                 },
@@ -925,7 +947,7 @@ export async function settleAmuxExecution(input: {
         }
       }
 
-      if (effectiveToStatus === "review" && task.requiresHumanReview) {
+      if (effectiveToStatus === "review" && humanReviewRequired) {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
           specialty: task.reviewSpecialty,
@@ -963,6 +985,7 @@ export async function settleAmuxExecution(input: {
           to_status: effectiveToStatus,
           human_review_forced:
             input.toStatus === "done" && effectiveToStatus === "review",
+          review_pr_number: recordedReviewPrNumber,
           reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
           settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
           attempt_number: attempt.attemptNumber,

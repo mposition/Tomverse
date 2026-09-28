@@ -5,6 +5,10 @@ import { readLimitedJson } from "@/lib/apiSecurity";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { settleAmuxExecution } from "@/lib/amux/execution";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
+import {
+  AMUX_REVIEW_PR_NUMBER_MAX,
+  amuxReviewPrNumberAccepted,
+} from "@/lib/amux/humanReviewCore";
 
 const requestSchema = z
   .object({
@@ -28,8 +32,26 @@ const requestSchema = z
       .max(Number.MAX_SAFE_INTEGER)
       .nullable()
       .optional(),
+    // Policy version 15: only a succeeded attempt asking for review may name
+    // the PR a reviewer reads. The server reads it from GitHub itself.
+    review_pr_number: z
+      .number()
+      .int()
+      .min(1)
+      .max(AMUX_REVIEW_PR_NUMBER_MAX)
+      .nullable()
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (body) =>
+      amuxReviewPrNumberAccepted({
+        outcome: body.outcome,
+        toStatus: body.to_status,
+        reviewPrNumber: body.review_pr_number,
+      }),
+    { message: "review_pr_number is only accepted with succeeded -> review" },
+  );
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
@@ -71,6 +93,7 @@ export async function POST(request: Request) {
         body.cost_microusd === null || body.cost_microusd === undefined
           ? null
           : BigInt(body.cost_microusd),
+      reviewPrNumber: body.review_pr_number ?? null,
     });
 
     return Response.json(outcome, {
