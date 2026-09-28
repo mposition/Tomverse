@@ -1147,6 +1147,9 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   `tests/agentControlPlaneSlice.test.mjs`. 통제 평면이 실행하는 제품 파일과 통제 평면을
   직접 부르는 제품 파일이 slice입니다. **런타임 통제 평면 코드에 동적 로딩을 넣으면 모든
   변경이 T2가 됩니다.**
+- **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
+  `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
+  하위 프로세스·평가·worker·환경변수를 쓰지 않습니다 — 테스트가 syntax tree로 확인합니다.
 
 # AI Review (교차검토) 품질과 M5
 
