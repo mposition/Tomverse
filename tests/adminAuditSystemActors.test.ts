@@ -19,10 +19,14 @@ import {
 const ROOT = resolve(import.meta.dirname, "..");
 
 test("the system actor list is closed and changes only by review", () => {
-  assert.deepEqual([...SYSTEM_AUDIT_ACTORS], ["tomverse-amux-orchestrator"]);
+  // amux-auto-promoter: orchestration policy version 15, "자동 승격 개정".
+  assert.deepEqual([...SYSTEM_AUDIT_ACTORS], ["tomverse-amux-orchestrator", "amux-auto-promoter"]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
+  assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
   assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
+  // The column marker is not an audit actor name.
+  assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);
   assert.equal(isSystemAuditActor(undefined), false);
 });
 

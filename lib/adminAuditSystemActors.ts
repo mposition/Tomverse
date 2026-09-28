@@ -15,7 +15,14 @@
 
 export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
 
-export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR] as const;
+/**
+ * The internal auto-promotion tick (orchestration policy version 15,
+ * "자동 승격 개정"). It expires due grants and consumes a grant an owner
+ * already bound to one item and one cent amount. It records nothing else.
+ */
+export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
+
+export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR, AMUX_AUTO_PROMOTER_AUDIT_ACTOR] as const;
 
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

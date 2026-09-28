@@ -651,6 +651,16 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Command Center" as const,
   },
   {
+    // Owner-only and unlisted like the other AMUX screens.
+    id: "amux-board-auto-promotion",
+    pattern: /^\/admin\/amux-board-auto-promotion$/,
+    label: "AMUX auto-promotion",
+    description: "Owner-only auto-promotion grants, halt and resume, behind the server switch",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     // Owner-only like the other AMUX screens, and unlisted for the same reason.
     id: "amux-cards",
     pattern: /^\/admin\/amux-cards$/,

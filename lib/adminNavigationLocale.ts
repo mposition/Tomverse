@@ -259,6 +259,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "AMUX 추천 풀",
     description: "owner 전용 backlog 추천 snapshot, 꺼진 운영 적용",
   },
+  "amux-board-auto-promotion": {
+    label: "AMUX 자동 승격",
+    description: "owner 전용 자동 승격 grant, halt와 재개, 서버 스위치 뒤",
+  },
   "amux-cards": {
     label: "AMUX 카드",
     description: "owner 전용 AMUX 카드와 실행 상태 읽기 전용 목록",

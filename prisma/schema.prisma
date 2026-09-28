@@ -5473,6 +5473,8 @@ model AmuxRecommendationCapacity {
 }
 
 /// Immutable recommendation view. Preparing one does not change a card status.
+/// The auto-promotion tick writes a one-row system snapshot inside its consume
+/// transaction (actorUserId `system:amux-auto-promoter`, policyVersion 15).
 model AmuxRecommendationSnapshot {
   id                      String    @id
   status                  String
@@ -5540,8 +5542,10 @@ model AmuxRecommendationDecision {
   @@unique([snapshotId, workItemId])
 }
 
-/// One human pre-approval for a later auto-promotion. Version 8 inserts no
-/// row from the public route. A grant does not change the card.
+/// One human pre-approval for a later auto-promotion. A grant does not change
+/// the card. Since orchestration policy version 15 a grant binds one promotion
+/// item and one cent amount (1..500); the three binding columns are null
+/// together on a legacy row, which the system tick never consumes.
 model AmuxRecommendationAutoGrant {
   id                      String   @id
   workItemId              String
@@ -5551,16 +5555,41 @@ model AmuxRecommendationAutoGrant {
   requestDigest           String
   grantedAt               DateTime
   expiresAt               DateTime
+  itemBindings            Json?
+  itemBindingsDigest      String?
+  amountCents             Int?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   workItem     AmuxWorkItem                        @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   consumptions AmuxRecommendationAutoConsumption[]
+  unknowns     AmuxRecommendationAutoUnknown[]
 
   @@index([workItemId, status])
 }
 
-/// One consumed auto-promotion. Version 8's public route does not insert a row.
+/// One lost auto-promotion consume outcome, written by read-back after the
+/// caller could not tell whether the consume committed. The id is the
+/// consumption id that was attempted; `consumptionFound` is what the read-back
+/// saw. It counts toward the halt rule and keeps its grant from being consumed
+/// again. The actor is on the linked audit row, so this table stores no user id.
+model AmuxRecommendationAutoUnknown {
+  id                      String   @id
+  grantId                 String?
+  consumptionFound        Boolean
+  authorizationAuditLogId String   @unique
+  recordedAt              DateTime
+  createdAt               DateTime @default(now())
+
+  grant AmuxRecommendationAutoGrant? @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([grantId])
+  @@index([recordedAt])
+}
+
+/// One consumed auto-promotion, by the owner route or by the system tick
+/// (actorUserId `system:amux-auto-promoter`, no User foreign key). Each row has
+/// exactly one cost entry written in the same transaction.
 model AmuxRecommendationAutoConsumption {
   id                      String    @id
   grantId                 String    @unique
@@ -5582,7 +5611,8 @@ model AmuxRecommendationAutoConsumption {
   @@index([workItemId, status])
 }
 
-/// Operational USD cents for the auto-promotion path. Version 8 writes none.
+/// Operational USD cents for the auto-promotion path. Since version 15 every
+/// consumption writes one row in its own transaction, at the transaction clock.
 model AmuxRecommendationAutoCostEntry {
   id            String   @id
   consumptionId String   @unique
@@ -5593,7 +5623,9 @@ model AmuxRecommendationAutoCostEntry {
   consumption AmuxRecommendationAutoConsumption @relation(fields: [consumptionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 }
 
-/// An open halt has clearedAt null. Version 8 has no resume writer.
+/// An open halt has clearedAt null. Since version 15 the owner's resume writer
+/// sets clearedAt, and the system tick may open one (actorUserId
+/// `system:amux-auto-promoter`, no User foreign key).
 model AmuxRecommendationAutoHalt {
   id                      String    @id
   reason                  String
