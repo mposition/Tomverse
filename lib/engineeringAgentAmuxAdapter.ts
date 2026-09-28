@@ -21,6 +21,7 @@ import "server-only";
 import { randomInt } from "node:crypto";
 
 import type { AmuxAttachedTransaction, AmuxAttachment } from "@/lib/amux/dbBoundary";
+import { acknowledgeAmuxWorkDelivery, pullAmuxWorkDelivery } from "@/lib/amux/delivery";
 import {
   heartbeatAmuxExecution,
   settleAmuxExecution,
@@ -32,6 +33,13 @@ import {
   type AmuxExecutionToStatus,
 } from "@/lib/amux/execution";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
+import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { listOwnedTodos } from "@/lib/amux/store";
+import {
+  heartbeatAmuxWorkerRuntime,
+  registerAmuxWorkerRuntime,
+  type AmuxWorkerRuntimeStatus,
+} from "@/lib/amux/workerRuntime";
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
   combineRunHalt,
@@ -41,12 +49,16 @@ import {
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
+  engineeringAgentHoldsHalt,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
   readEngineeringAgentHaltState,
+  readEngineeringAgentOwnerQueues,
+  readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Version 12 of the orchestration policy ships this false. Turning it on is a
@@ -68,6 +80,15 @@ export const isEngineeringAgentAmuxAdapterOpen = (): boolean =>
     codeLatch: ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
     executionApiEnabled: isAmuxExecutionApiEnabled(),
   });
+
+/**
+ * The budget of an adapter route. An AMUX writer's transaction budget grows
+ * with its call ceiling, and an attachment widens that ceiling, so the AMUX
+ * lifecycle routes' own budget -- sized to their Rust client's timeout and to
+ * their writers alone -- cannot hold a start with its run. The runner's
+ * client waits longer than this.
+ */
+export const ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS = 20_000;
 
 /** Twelve digits, the run id's widest form, minted here and never by a service. */
 export const mintEngineeringAgentRunId = (): string => String(randomInt(100_000_000_000, 1_000_000_000_000));
@@ -105,11 +126,12 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
   return card.kind;
 };
 
-// Calls each attachment makes through the AMUX writer's bounded client: the
-// store's switch read, clock, write and audit entry (four), plus this module's
-// own reads and the request's move to `committed`. The end reads the halt
-// state (three) before the store's write and audit.
-const RUN_START_PRISMA_CALLS = 10;
+// Calls each attachment makes through the AMUX writer's bounded client. The
+// start: switch read, halt state (three), clock, the run's INSERT, its audit
+// entry (four), the card's kind and the request's move to `committed` --
+// twelve, and one to spare. The heartbeat: clock and update. The end: halt
+// state (three), update, audit entry (four) and the request's move.
+const RUN_START_PRISMA_CALLS = 13;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
 const RUN_END_PRISMA_CALLS = 9;
 
@@ -190,25 +212,111 @@ const requireOpen = () => {
 };
 
 /**
- * Starts the AMUX attempt for a card the runner owns and creates its run.
- * `started: false` is AMUX's refusal, with AMUX's reason, and no run exists.
+ * The catalogue check the AMUX worker routes make before registering or
+ * renewing a runtime, made here for the adapter's one worker.
+ */
+const workerCatalogRefusal = (): "worker_catalog_unavailable" | "worker_not_configured" | null => {
+  const catalog = getConfiguredAmuxWorkerCatalog();
+  if (!catalog) return "worker_catalog_unavailable";
+  return catalog.some((worker) => worker.worker_name === ENGINEERING_AGENT_AMUX_WORKER) ? null : "worker_not_configured";
+};
+
+/**
+ * Registers a new runtime generation for the adapter's worker, which fences
+ * out every earlier generation. The instance id is the runner process's own.
+ */
+export async function registerEngineeringAgentWorker(input: { instanceId: string }) {
+  requireOpen();
+  const refusal = workerCatalogRefusal();
+  if (refusal) return { registered: false as const, reason: refusal };
+  const runtime = await registerAmuxWorkerRuntime(ENGINEERING_AGENT_AMUX_WORKER, input.instanceId);
+  return { registered: true as const, generation: runtime.generation, leaseExpiresAt: runtime.leaseExpiresAt };
+}
+
+/**
+ * Renews the runtime's lease. The worker offers itself for dispatch only
+ * while the engineering switches would let it claim, the app holds no halt
+ * and both owner queues have room: that is how a card is skipped before it is
+ * claimed (§2.1), since a card AMUX assigns to a worker that must then refuse
+ * it spends an attempt for nothing.
+ */
+export async function heartbeatEngineeringAgentWorker(input: {
+  lease: EngineeringAgentWorkerLease;
+  status: AmuxWorkerRuntimeStatus;
+  dispatchReady: boolean;
+}) {
+  requireOpen();
+  const refusal = workerCatalogRefusal();
+  if (refusal) return { accepted: false as const, reason: refusal };
+  const switches = await readEngineeringAgentSwitches(prisma);
+  const [halt, queues] = await Promise.all([
+    readEngineeringAgentHaltState(prisma),
+    readEngineeringAgentOwnerQueues(prisma, switches.mode),
+  ]);
+  const dispatchReady =
+    input.dispatchReady && switches.claimAllowed && !engineeringAgentHoldsHalt(halt) && queues.claimAllowed;
+  const heartbeat = await heartbeatAmuxWorkerRuntime({
+    workerName: ENGINEERING_AGENT_AMUX_WORKER,
+    instanceId: input.lease.instanceId,
+    generation: input.lease.generation,
+    status: input.status,
+    dispatchReady,
+  });
+  if (!heartbeat.accepted) return { accepted: false as const, reason: heartbeat.reason ?? "runtime_lease_lost" };
+  return { accepted: true as const, leaseExpiresAt: heartbeat.leaseExpiresAt, dispatchReady };
+}
+
+/** The next durable delivery for the adapter's worker: the card's execution brief. */
+export async function pullEngineeringAgentDelivery(input: { lease: EngineeringAgentWorkerLease }) {
+  requireOpen();
+  return pullAmuxWorkDelivery({
+    worker: ENGINEERING_AGENT_AMUX_WORKER,
+    instanceId: input.lease.instanceId,
+    generation: input.lease.generation,
+  });
+}
+
+/** Acknowledges a delivery the runner received, under AMUX's receipt fence. */
+export async function acknowledgeEngineeringAgentDelivery(input: {
+  lease: EngineeringAgentWorkerLease;
+  attemptId: string;
+  receiptId: string;
+  taskRevision: number;
+}) {
+  requireOpen();
+  return acknowledgeAmuxWorkDelivery({
+    attemptId: input.attemptId,
+    receiptId: input.receiptId,
+    worker: ENGINEERING_AGENT_AMUX_WORKER,
+    instanceId: input.lease.instanceId,
+    generation: input.lease.generation,
+    taskRevision: input.taskRevision,
+  });
+}
+
+/**
+ * Starts the AMUX attempt for the card AMUX assigned to the adapter's worker
+ * -- the earliest-claimed runnable todo it owns, in AMUX's own order -- and
+ * creates its run. The runner names no card: AMUX chose it (§2.1).
+ * `started: false` is a refusal, AMUX's or `nothing_assigned`, and no run
+ * exists.
  */
 export async function startEngineeringAgentRun(input: {
   lease: EngineeringAgentWorkerLease;
-  taskId: string;
-  expectedRevision: number;
   baseSha: string;
   markCommitted?: MarkCommitted;
 }) {
   requireOpen();
+  const assigned = (await listOwnedTodos()).find((todo) => todo.owner === ENGINEERING_AGENT_AMUX_WORKER);
+  if (!assigned) return { started: false as const, reason: "nothing_assigned" as const };
   const runId = mintEngineeringAgentRunId();
   const started = await startAmuxExecution(
     {
-      taskId: input.taskId,
+      taskId: assigned.id,
       worker: ENGINEERING_AGENT_AMUX_WORKER,
       instanceId: input.lease.instanceId,
       generation: input.lease.generation,
-      expectedRevision: input.expectedRevision,
+      expectedRevision: assigned.revision,
     },
     engineeringRunStartAttachment({ runId, baseSha: input.baseSha, markCommitted: input.markCommitted }),
   );
@@ -216,6 +324,7 @@ export async function startEngineeringAgentRun(input: {
   return {
     started: true as const,
     runId,
+    taskId: assigned.id,
     attemptId: started.attemptId,
     taskRevision: started.taskRevision,
     leaseExpiresAt: started.leaseExpiresAt,

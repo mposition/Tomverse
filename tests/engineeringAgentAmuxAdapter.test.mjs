@@ -86,7 +86,7 @@ test("no engineering route takes a worker from its body, and only runner routes 
 test("the adapter reaches only the AMUX writers version 12 allows it", () => {
   const text = readFileSync("lib/engineeringAgentAmuxAdapter.ts", "utf8");
   const imported = [...text.matchAll(/from "@\/lib\/amux\/([A-Za-z]+)"/g)].map((match) => match[1]).sort();
-  assert.deepEqual([...new Set(imported)], ["dbBoundary", "execution", "executionGate"]);
+  assert.deepEqual([...new Set(imported)], ["dbBoundary", "delivery", "execution", "executionGate", "routing", "store", "workerRuntime"]);
   assert.doesNotMatch(text, /\breclaimExpiredAmux/, "recovery is the AMUX recover route's alone");
   assert.doesNotMatch(text, /toStatus:\s*"done"/);
   const costs = [...text.matchAll(/actualCostMicrousd:\s*([^,\s]+)/g)].map((match) => match[1]);

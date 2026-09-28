@@ -281,8 +281,8 @@ export type AmuxAttachment<R> = {
   ) => Promise<void>;
 };
 
-/** Enough for an adapter's own row and its audit entry, and no more. */
-export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 12;
+/** Enough for an adapter's own row, its reads and its audit entry, and no more. */
+export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 16;
 
 /** The writer's boundary, widened by exactly what its attachment declared. */
 export const amuxBoundaryWithAttachment = (

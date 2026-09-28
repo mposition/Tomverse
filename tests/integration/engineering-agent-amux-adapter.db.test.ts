@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 
-import { AMUX_ATTACHMENT_MAX_PRISMA_CALLS } from "@/lib/amux/dbBoundary";
+import {
+  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
 import {
   acknowledgeAmuxWorkDelivery,
   pullAmuxWorkDelivery,
@@ -18,6 +21,7 @@ import {
   registerAmuxWorkerRuntime,
 } from "@/lib/amux/workerRuntime";
 import {
+  ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   engineeringRunEndAttachment,
   engineeringRunHeartbeatAttachment,
   engineeringRunStartAttachment,
@@ -44,12 +48,19 @@ import { prisma } from "@/lib/prisma";
 const requireDedicatedDatabase = () => {
   const testRaw = process.env.TEST_DATABASE_URL?.trim();
   if (!testRaw || process.env.DATABASE_URL?.trim() !== testRaw) {
-    throw new Error("REFUSE: engineering agent DB tests require DATABASE_URL=TEST_DATABASE_URL");
+    throw new Error(
+      "REFUSE: engineering agent DB tests require DATABASE_URL=TEST_DATABASE_URL",
+    );
   }
   const url = new URL(testRaw);
   const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-  if (!/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName) || url.hostname.startsWith("pooled.")) {
-    throw new Error("REFUSE: engineering agent DB tests require a direct dedicated test database");
+  if (
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName) ||
+    url.hostname.startsWith("pooled.")
+  ) {
+    throw new Error(
+      "REFUSE: engineering agent DB tests require a direct dedicated test database",
+    );
   }
 };
 
@@ -61,7 +72,11 @@ const fixtureTaskIds: string[] = [];
 const fixtureWorkers: string[] = [];
 
 const setMode = (value: string) =>
-  prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value }, update: { value } });
+  prisma.appSetting.upsert({
+    where: { key: MODE_KEY },
+    create: { key: MODE_KEY, value },
+    update: { value },
+  });
 
 // Shadow is enough for a run, and it holds no pull request window open for
 // the engineering files that run after this one.
@@ -73,10 +88,15 @@ before(async () => {
 after(async () => {
   await prisma.appSetting.deleteMany({ where: { key: MODE_KEY } });
   if (fixtureTaskIds.length > 0) {
-    await prisma.amuxWorkItem.updateMany({ where: { id: { in: fixtureTaskIds } }, data: { archivedAt: new Date() } });
+    await prisma.amuxWorkItem.updateMany({
+      where: { id: { in: fixtureTaskIds } },
+      data: { archivedAt: new Date() },
+    });
   }
   if (fixtureWorkers.length > 0) {
-    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: { in: fixtureWorkers } } });
+    await prisma.amuxWorkerRuntime.deleteMany({
+      where: { workerName: { in: fixtureWorkers } },
+    });
   }
   await prisma.$disconnect();
 });
@@ -120,18 +140,25 @@ const readyWorkerWithCard = async () => {
 
 type Fixture = Awaited<ReturnType<typeof readyWorkerWithCard>>;
 
+// Inside the adapter routes' own budget, as run/start calls it: a writer's
+// transaction budget grows with the calls its attachment declares.
 const startWithRun = async (fixture: Fixture, runId: string) => {
-  const started = await startAmuxExecution(
-    {
-      taskId: fixture.taskId,
-      worker: fixture.worker,
-      instanceId: fixture.instanceId,
-      generation: fixture.generation,
-      expectedRevision: 1,
-    },
-    engineeringRunStartAttachment({ runId, baseSha: sha1(runId) }),
+  const started = await withAmuxRouteBudget(
+    () =>
+      startAmuxExecution(
+        {
+          taskId: fixture.taskId,
+          worker: fixture.worker,
+          instanceId: fixture.instanceId,
+          generation: fixture.generation,
+          expectedRevision: 1,
+        },
+        engineeringRunStartAttachment({ runId, baseSha: sha1(runId) }),
+      ),
+    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   );
-  if (!started.started) throw new Error(`execution did not start: ${started.reason}`);
+  if (!started.started)
+    throw new Error(`execution did not start: ${started.reason}`);
   return started;
 };
 
@@ -140,25 +167,42 @@ const settleWithRun = (
   started: { attemptId: string; taskRevision: number },
   runId: string,
 ) =>
-  settleAmuxExecution(
-    {
-      attemptId: started.attemptId,
-      worker: fixture.worker,
-      instanceId: fixture.instanceId,
-      generation: fixture.generation,
-      taskRevision: started.taskRevision,
-      outcome: "succeeded",
-      toStatus: "review",
-      actualCostMicrousd: null,
-    },
-    engineeringRunEndAttachment({ runId, outcome: "t2_draft", halt: "none" }),
+  withAmuxRouteBudget(
+    () =>
+      settleAmuxExecution(
+        {
+          attemptId: started.attemptId,
+          worker: fixture.worker,
+          instanceId: fixture.instanceId,
+          generation: fixture.generation,
+          taskRevision: started.taskRevision,
+          outcome: "succeeded",
+          toStatus: "review",
+          actualCostMicrousd: null,
+        },
+        engineeringRunEndAttachment({
+          runId,
+          outcome: "t2_draft",
+          halt: "none",
+        }),
+      ),
+    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   );
 
 test("an attachment declares a bounded call budget", async () => {
   await assert.rejects(() =>
     startAmuxExecution(
-      { taskId: "x", worker: "x", instanceId: randomUUID(), generation: 1, expectedRevision: 0 },
-      { prismaCalls: AMUX_ATTACHMENT_MAX_PRISMA_CALLS + 1, work: async () => undefined },
+      {
+        taskId: "x",
+        worker: "x",
+        instanceId: randomUUID(),
+        generation: 1,
+        expectedRevision: 0,
+      },
+      {
+        prismaCalls: AMUX_ATTACHMENT_MAX_PRISMA_CALLS + 1,
+        work: async () => undefined,
+      },
     ),
   );
 });
@@ -172,27 +216,55 @@ test("the run is written in the AMUX start's transaction, and a refused run roll
   await assert.rejects(
     startWithRun(fixture, refusedRunId),
     (error: unknown) =>
-      error instanceof EngineeringAgentStoreRefusedError && error.code === "switch_refused_claimAllowed",
+      error instanceof EngineeringAgentStoreRefusedError &&
+      error.code === "switch_refused_claimAllowed",
   );
-  const untouched = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+  const untouched = await prisma.amuxWorkItem.findUniqueOrThrow({
+    where: { id: fixture.taskId },
+  });
   assert.equal(untouched.status, "todo");
   assert.equal(untouched.revision, 1);
-  assert.equal(await prisma.amuxExecutionAttempt.count({ where: { taskId: fixture.taskId } }), 0);
-  assert.equal(await prisma.amuxWorkDelivery.count({ where: { taskId: fixture.taskId } }), 0);
-  assert.equal(await prisma.engineeringAgentRun.count({ where: { id: refusedRunId } }), 0);
-  const idle = await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: fixture.worker } });
-  assert.equal(idle.status, "idle", "the runtime stays idle when the start rolls back");
+  assert.equal(
+    await prisma.amuxExecutionAttempt.count({
+      where: { taskId: fixture.taskId },
+    }),
+    0,
+  );
+  assert.equal(
+    await prisma.amuxWorkDelivery.count({ where: { taskId: fixture.taskId } }),
+    0,
+  );
+  assert.equal(
+    await prisma.engineeringAgentRun.count({ where: { id: refusedRunId } }),
+    0,
+  );
+  const idle = await prisma.amuxWorkerRuntime.findUniqueOrThrow({
+    where: { workerName: fixture.worker },
+  });
+  assert.equal(
+    idle.status,
+    "idle",
+    "the runtime stays idle when the start rolls back",
+  );
 
   await setMode("shadow");
   const runId = nextRunId();
   const started = await startWithRun(fixture, runId);
-  const run = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: runId } });
+  const run = await prisma.engineeringAgentRun.findUniqueOrThrow({
+    where: { id: runId },
+  });
   assert.equal(run.amuxAttemptId, started.attemptId);
   assert.equal(run.cardId, fixture.taskId);
-  assert.equal(run.cardKind, "code", "the kind comes from the AMUX row, not the request");
+  assert.equal(
+    run.cardKind,
+    "code",
+    "the kind comes from the AMUX row, not the request",
+  );
   assert.equal(run.status, "active");
   assert.equal(run.modeAtStart, "shadow");
-  const doing = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+  const doing = await prisma.amuxWorkItem.findUniqueOrThrow({
+    where: { id: fixture.taskId },
+  });
   assert.equal(doing.status, "doing");
   const audits = await prisma.adminAuditLog.findMany({
     where: { OR: [{ targetId: fixture.taskId }, { targetId: runId }] },
@@ -200,10 +272,16 @@ test("the run is written in the AMUX start's transaction, and a refused run roll
   });
   const actions = audits.map((row) => row.action);
   assert.ok(actions.includes("amux.execution.started"));
-  assert.ok(actions.some((action) => action.startsWith("engineering_agent.run")), actions.join(","));
+  assert.ok(
+    actions.some((action) => action.startsWith("engineering_agent.run")),
+    actions.join(","),
+  );
 
   const settled = await settleWithRun(fixture, started, runId);
-  assert.deepEqual(settled, { settled: true, taskRevision: started.taskRevision + 1 });
+  assert.deepEqual(settled, {
+    settled: true,
+    taskRevision: started.taskRevision + 1,
+  });
 });
 
 test("a run's lease moves only with its own attempt's, and a run ends only with its own settlement", async () => {
@@ -214,7 +292,11 @@ test("a run's lease moves only with its own attempt's, and a run ends only with 
   const firstStarted = await startWithRun(first, firstRunId);
   const secondStarted = await startWithRun(second, secondRunId);
 
-  const heartbeat = (fixture: Fixture, started: typeof firstStarted, runId: string) =>
+  const heartbeat = (
+    fixture: Fixture,
+    started: typeof firstStarted,
+    runId: string,
+  ) =>
     heartbeatAmuxExecution(
       {
         attemptId: started.attemptId,
@@ -227,39 +309,90 @@ test("a run's lease moves only with its own attempt's, and a run ends only with 
     );
 
   // Renewing the first attempt with the second run's id renews neither.
-  const attemptBefore = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: firstStarted.attemptId } });
-  await assert.rejects(heartbeat(first, firstStarted, secondRunId), EngineeringAgentStoreRefusedError);
-  const attemptAfterRefusal = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+  const attemptBefore = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
     where: { id: firstStarted.attemptId },
   });
-  assert.deepEqual(attemptAfterRefusal.leaseExpiresAt, attemptBefore.leaseExpiresAt);
+  await assert.rejects(
+    heartbeat(first, firstStarted, secondRunId),
+    EngineeringAgentStoreRefusedError,
+  );
+  const attemptAfterRefusal =
+    await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+      where: { id: firstStarted.attemptId },
+    });
+  assert.deepEqual(
+    attemptAfterRefusal.leaseExpiresAt,
+    attemptBefore.leaseExpiresAt,
+  );
 
-  const runBefore = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: firstRunId } });
+  const runBefore = await prisma.engineeringAgentRun.findUniqueOrThrow({
+    where: { id: firstRunId },
+  });
   assert.equal(await heartbeat(first, firstStarted, firstRunId), true);
-  const runAfter = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: firstRunId } });
-  const attemptAfter = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: firstStarted.attemptId } });
-  assert.ok(runAfter.leaseExpiresAt > runBefore.leaseExpiresAt, "the run's lease moved");
-  assert.ok(attemptAfter.leaseExpiresAt! > attemptBefore.leaseExpiresAt!, "the attempt's lease moved");
+  const runAfter = await prisma.engineeringAgentRun.findUniqueOrThrow({
+    where: { id: firstRunId },
+  });
+  const attemptAfter = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+    where: { id: firstStarted.attemptId },
+  });
+  assert.ok(
+    runAfter.leaseExpiresAt > runBefore.leaseExpiresAt,
+    "the run's lease moved",
+  );
+  assert.ok(
+    attemptAfter.leaseExpiresAt! > attemptBefore.leaseExpiresAt!,
+    "the attempt's lease moved",
+  );
 
   // Settling the first attempt as the second run leaves both where they were.
-  await assert.rejects(settleWithRun(first, firstStarted, secondRunId), EngineeringAgentStoreRefusedError);
-  const stillDoing = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: first.taskId } });
+  await assert.rejects(
+    settleWithRun(first, firstStarted, secondRunId),
+    EngineeringAgentStoreRefusedError,
+  );
+  const stillDoing = await prisma.amuxWorkItem.findUniqueOrThrow({
+    where: { id: first.taskId },
+  });
   assert.equal(stillDoing.status, "doing");
   assert.equal(
-    (await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: secondRunId } })).status,
+    (
+      await prisma.engineeringAgentRun.findUniqueOrThrow({
+        where: { id: secondRunId },
+      })
+    ).status,
     "active",
   );
 
-  assert.equal((await settleWithRun(first, firstStarted, firstRunId)).settled, true);
-  assert.equal((await settleWithRun(second, secondStarted, secondRunId)).settled, true);
-  const firstRun = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: firstRunId } });
+  assert.equal(
+    (await settleWithRun(first, firstStarted, firstRunId)).settled,
+    true,
+  );
+  assert.equal(
+    (await settleWithRun(second, secondStarted, secondRunId)).settled,
+    true,
+  );
+  const firstRun = await prisma.engineeringAgentRun.findUniqueOrThrow({
+    where: { id: firstRunId },
+  });
   assert.equal(firstRun.status, "finished");
   assert.equal(firstRun.outcome, "t2_draft");
-  const reviewed = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: first.taskId } });
+  const reviewed = await prisma.amuxWorkItem.findUniqueOrThrow({
+    where: { id: first.taskId },
+  });
   assert.equal(reviewed.status, "review");
-  const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: firstStarted.attemptId } });
-  assert.equal(attempt.settledCostMicrousd, null, "no agent cost enters the attempt's settlement");
-  assert.equal(await prisma.amuxCostLedgerEntry.count({ where: { attemptId: firstStarted.attemptId } }), 0);
+  const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+    where: { id: firstStarted.attemptId },
+  });
+  assert.equal(
+    attempt.settledCostMicrousd,
+    null,
+    "no agent cost enters the attempt's settlement",
+  );
+  assert.equal(
+    await prisma.amuxCostLedgerEntry.count({
+      where: { attemptId: firstStarted.attemptId },
+    }),
+    0,
+  );
 });
 
 test("the adapter's settlement runs against delivery acknowledgement and expired recovery without a deadlock", async () => {
@@ -287,12 +420,17 @@ test("the adapter's settlement runs against delivery acknowledgement and expired
         generation: fixture.generation,
         taskRevision: started.taskRevision,
       }),
-      reclaimExpiredAmuxExecutions({ now: new Date(Date.now() + 10 * 60_000), limit: 200 }),
+      reclaimExpiredAmuxExecutions({
+        now: new Date(Date.now() + 10 * 60_000),
+        limit: 200,
+      }),
     ]);
     for (const result of results) {
       if (result.status === "rejected") {
         const code = (result.reason as { code?: unknown })?.code;
-        const message = String((result.reason as Error)?.message ?? result.reason);
+        const message = String(
+          (result.reason as Error)?.message ?? result.reason,
+        );
         assert.doesNotMatch(message, /deadlock/i, `round ${round}: ${message}`);
         assert.notEqual(code, "40P01", `round ${round}: deadlock`);
       }
@@ -300,17 +438,31 @@ test("the adapter's settlement runs against delivery acknowledgement and expired
 
     // Whatever won, the run and the attempt tell the same story, or the run is
     // still active for the person who reconciles a mismatch (§11).
-    const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
-    const run = await prisma.engineeringAgentRun.findUniqueOrThrow({ where: { id: runId } });
+    const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+      where: { id: started.attemptId },
+    });
+    const run = await prisma.engineeringAgentRun.findUniqueOrThrow({
+      where: { id: runId },
+    });
     const settle = results[0];
-    const settledByAdapter = settle.status === "fulfilled" && settle.value.settled === true;
+    const settledByAdapter =
+      settle.status === "fulfilled" && settle.value.settled === true;
     if (settledByAdapter) {
       assert.equal(attempt.endedBy, fixture.worker);
       assert.equal(run.status, "finished");
     } else {
-      assert.equal(run.status, "active", `round ${round}: a fenced-out settlement ends no run`);
+      assert.equal(
+        run.status,
+        "active",
+        `round ${round}: a fenced-out settlement ends no run`,
+      );
       await runEngineeringAgentTransaction(prisma, (tx) =>
-        endEngineeringAgentRun(tx, { runId, amuxAttemptId: started.attemptId, outcome: "abandoned", halt: "none" }),
+        endEngineeringAgentRun(tx, {
+          runId,
+          amuxAttemptId: started.attemptId,
+          outcome: "abandoned",
+          halt: "none",
+        }),
       );
     }
   }

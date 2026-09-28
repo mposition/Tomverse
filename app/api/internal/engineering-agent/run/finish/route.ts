@@ -4,8 +4,9 @@ import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX } from "@/lib/amux/claimContract";
-import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import {
+  ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   finishEngineeringAgentRun,
   isEngineeringAgentAmuxAdapterOpen,
 } from "@/lib/engineeringAgentAmuxAdapter";
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
               halt: body.halt,
               markCommitted,
             }),
-          AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+          ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
         ),
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);

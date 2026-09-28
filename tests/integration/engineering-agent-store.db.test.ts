@@ -22,6 +22,7 @@ import {
   openEngineeringAgentWorkItem,
   recordEngineeringAgentBinding,
   recordEngineeringAgentBindingObservation,
+  readEngineeringAgentOwnerQueues,
   recordEngineeringAgentRunStart,
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
@@ -660,16 +661,24 @@ test("the publisher claims its next work, and the last look can only refuse", as
 });
 
 test("a halt stops the write claim before it consumes, and a latched circuit halts the last look", async () => {
-  // Three incidents within thirty days latch the circuit, and a run that later
-  // ends with `none` does not unlatch it. (They come first: in the first T1
-  // window a queued publish leaves no room for another run.)
-  for (const halt of ["unbound_app_pr", "none", "unbound_app_pr", "none", "unbound_app_pr", "none"] as const) {
+  const ackKey = "engineeringAgent.circuitAcknowledgedAt";
+  const acknowledge = (value: string) =>
+    prisma.appSetting.upsert({ where: { key: ackKey }, create: { key: ackKey, value }, update: { value } });
+  const beforeTheIncidents = "2000-01-01T00:00:00.000Z";
+
+  // Three incident starts within thirty days latch the circuit. A run that a
+  // runner-reported halt ended does not stop the next run: only the halts
+  // the app holds do, or a halt would never clear.
+  for (const halt of ["unbound_app_pr", "none", "unbound_app_pr", "none", "unbound_app_pr"] as const) {
     const incident = await startRun();
     await inTx((tx) =>
       endEngineeringAgentRun(tx, { runId: incident.runId, amuxAttemptId: incident.amuxAttemptId, outcome: "no_change", halt }),
     );
   }
+  await refusedWith(startRun(), "halted");
 
+  // Acknowledged, the circuit lets a run start; the publish below is its work.
+  await acknowledge(new Date().toISOString());
   const run = await startRun();
   const { workItemId } = await inTx((tx) =>
     openEngineeringAgentWorkItem(tx, {
@@ -693,13 +702,12 @@ test("a halt stops the write claim before it consumes, and a latched circuit hal
   const claimNext = () => inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   const unspent = async () =>
     (await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: issued.capabilityId } })).consumedAt === null;
+
+  // With the acknowledgement before the incidents, the circuit is latched: no
+  // write claim, nothing spent, even though the latest run ended clean.
+  await acknowledge(beforeTheIncidents);
   assert.equal(await claimNext(), null, "a latched circuit claims nothing");
   assert.ok(await unspent(), "a halted claim spends nothing");
-
-  // Only the acknowledgement clears the circuit.
-  const ackKey = "engineeringAgent.circuitAcknowledgedAt";
-  const acknowledge = (value: string) =>
-    prisma.appSetting.upsert({ where: { key: ackKey }, create: { key: ackKey, value }, update: { value } });
   await acknowledge(new Date().toISOString());
 
   // An open state mismatch halts too.
@@ -733,8 +741,7 @@ test("a halt stops the write claim before it consumes, and a latched circuit hal
       },
     });
     assert.deepEqual(await look(), { verdict: "no_objection" });
-    // With the acknowledgement before the incidents, the circuit is latched again.
-    await acknowledge("2000-01-01T00:00:00.000Z");
+    await acknowledge(beforeTheIncidents);
     assert.deepEqual(await look(), { verdict: "refuse", reason: "halted" });
   } finally {
     await acknowledge(new Date().toISOString());
@@ -783,4 +790,17 @@ test("turning the mode on from off passes the armed gate; turning it off and fre
     await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
     await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
   }
+});
+
+test("the owner-queue reading agrees with the run trigger", async () => {
+  // Mode t1, and a t1 run already started in this database: the first T1
+  // window allows one pull request, and an active run counts as one.
+  assert.equal((await readEngineeringAgentOwnerQueues(prisma, "t1")).claimAllowed, true);
+  const run = await startRun();
+  const full = await readEngineeringAgentOwnerQueues(prisma, "t1");
+  assert.equal(full.claimAllowed, false, "the reading says full");
+  // The trigger refuses with its own message, not a store code.
+  await assert.rejects(startRun(), /owner queue is full/);
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
+  assert.equal((await readEngineeringAgentOwnerQueues(prisma, "t1")).claimAllowed, true);
 });

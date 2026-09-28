@@ -68,6 +68,7 @@ import {
   QUEUE_TTL_DAYS,
   WRITE_ITEM_KINDS,
   decideArmedGate,
+  decideOwnerQueues,
   decideWriteItemTransition,
   engineeringBranchName,
   isCircuitLatched,
@@ -79,6 +80,7 @@ import {
   writeItemStates,
   type EffectiveSwitches,
   type HaltValue,
+  type QueueVerdict,
   type RunOutcome,
   type WriteClaimMode,
   type WriteClaimPrecondition,
@@ -273,9 +275,59 @@ export async function readEngineeringAgentHaltState(
 
 /** Whether anything the app holds halts claims and pushes (§12). */
 export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
-  state.openStateMismatches > 0 ||
-  (state.latestEndedHalt !== null && state.latestEndedHalt !== "none") ||
-  state.circuitLatched;
+  engineeringAgentHoldsHalt(state) || (state.latestEndedHalt !== null && state.latestEndedHalt !== "none");
+
+/**
+ * The halts the app holds itself -- a latched circuit, an open state
+ * mismatch -- which only a person's Admin action clears. These stop a run
+ * from starting. A halt a run recorded is the runner's reading and clears
+ * with the next run that ends without one, so it stops the publisher (above)
+ * but not the next run: refusing that run would keep the halt forever.
+ */
+export const engineeringAgentHoldsHalt = (state: EngineeringAgentHaltState): boolean =>
+  state.openStateMismatches > 0 || state.circuitLatched;
+
+/* ------------------------------------------------------------------------- */
+/* Owner queues                                                               */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Whether the owner queues have room for another run, counted as the run
+ * trigger counts them (migration `engineering_agent_state`): an active run
+ * may still become a pull request or a decision, and a publish item not yet
+ * settled may still become a binding. The trigger stays the authority at the
+ * run's INSERT; this reading lets the worker stop offering itself for cards
+ * before AMUX assigns one it would have to refuse (§2.1).
+ */
+export async function readEngineeringAgentOwnerQueues(
+  db: PrismaClient | Prisma.TransactionClient,
+  mode: EffectiveSwitches["mode"],
+): Promise<QueueVerdict> {
+  const rows = await db.$queryRaw<
+    Array<{ openPrs: bigint; pendingDecisions: bigint; activeRuns: bigint; t1Started: Date | null; now: Date }>
+  >`
+    SELECT
+      (SELECT count(*) FROM "EngineeringAgentBinding" b
+        WHERE b."state" IN ('open', 'closed') AND b."supersededAt" IS NULL)
+      + (SELECT count(*) FROM "EngineeringAgentWorkItem" w
+        WHERE w."kind" = 'publish' AND w."state" IN ('queued', 'claimed', 'needs_lookup', 'outcome_unknown'))
+        AS "openPrs",
+      (SELECT count(*) FROM "EngineeringAgentWorkItem" w
+        WHERE w."kind" IN ('t2_draft', 'decision', 'state_mismatch') AND w."state" = 'open') AS "pendingDecisions",
+      (SELECT count(*) FROM "EngineeringAgentRun" r WHERE r."status" = 'active') AS "activeRuns",
+      (SELECT min(r."startedAt") FROM "EngineeringAgentRun" r WHERE r."modeAtStart" = 't1') AS "t1Started",
+      clock_timestamp() AT TIME ZONE 'UTC' AS "now"
+  `;
+  const row = rows[0];
+  const activeRuns = Number(row.activeRuns);
+  return decideOwnerQueues({
+    openPrBindings: Number(row.openPrs) + activeRuns,
+    pendingDecisions: Number(row.pendingDecisions) + activeRuns,
+    // The trigger opens the first T1 window with the first run under `t1`.
+    t1StartedAt: row.t1Started ?? (mode === "t1" ? row.now : null),
+    now: row.now,
+  });
+}
 
 /* ------------------------------------------------------------------------- */
 /* Internal request idempotency (§10)                                         */
@@ -358,6 +410,8 @@ export async function recordEngineeringAgentRunStart(
   if (!SHA1.test(input.baseSha)) refuse("base_sha_invalid");
   if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) refuse("lease_invalid");
   await requireSwitch(tx, "claimAllowed");
+  // A halt the app holds stops claims (§12); a run is the claim's work.
+  if (engineeringAgentHoldsHalt(await readEngineeringAgentHaltState(tx))) refuse("halted");
   const now = await databaseNow(tx);
   const run = await tx.engineeringAgentRun.create({
     data: {

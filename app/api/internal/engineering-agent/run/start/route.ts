@@ -3,9 +3,13 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX, amuxMachineIdSchema } from "@/lib/amux/claimContract";
-import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
-import { isEngineeringAgentAmuxAdapterOpen, startEngineeringAgentRun } from "@/lib/engineeringAgentAmuxAdapter";
+import { AMUX_PRISMA_INT_MAX } from "@/lib/amux/claimContract";
+import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import {
+  ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+  isEngineeringAgentAmuxAdapterOpen,
+  startEngineeringAgentRun,
+} from "@/lib/engineeringAgentAmuxAdapter";
 import {
   engineeringAgentErrorResponse,
   engineeringAgentJson,
@@ -14,18 +18,17 @@ import {
   runAttachedIdempotentEngineeringAgentRequest,
 } from "@/lib/engineeringAgentRouteAuth";
 
-// The runner starts work on a card it owns (docs/policy/engineering-agent.md
-// §8, §11): the AMUX attempt and the engineering run are created in one
-// transaction, the AMUX writer's. The worker is the adapter's constant; the
-// body carries only the worker lease it registered with.
+// The runner starts work on the card AMUX assigned to it
+// (docs/policy/engineering-agent.md §2.1, §8, §11): the AMUX attempt and the
+// engineering run are created in one transaction, the AMUX writer's. The
+// worker is the adapter's constant and the card is AMUX's choice; the body
+// carries only the worker lease and the base commit the runner will read.
 
 const requestSchema = z
   .object({
     requestKey: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),
     instanceId: z.string().uuid(),
     generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
-    taskId: amuxMachineIdSchema,
-    expectedRevision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
     baseSha: z.string().regex(/^[0-9a-f]{40}$/),
   })
   .strict();
@@ -44,12 +47,10 @@ export async function POST(request: Request) {
           () =>
             startEngineeringAgentRun({
               lease: { instanceId: body.instanceId, generation: body.generation },
-              taskId: body.taskId,
-              expectedRevision: body.expectedRevision,
               baseSha: body.baseSha,
               markCommitted,
             }),
-          AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+          ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
         ),
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
