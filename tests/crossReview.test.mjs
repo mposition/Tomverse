@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import test from "node:test";
@@ -1349,7 +1349,8 @@ const fixtureCodexEnvironment = (cwd) => {
   const fixtureRepo = execFileSync("git", ["rev-parse", "--show-toplevel"], {
     cwd, encoding: "utf8", windowsHide: true,
   }).trim();
-  const binFromRepo = relative(fixtureRepo, bin);
+  const canonicalBin = join(realpathSync(dirname(bin)), "fixture-cli-bin");
+  const binFromRepo = relative(realpathSync(fixtureRepo), canonicalBin);
   assert.ok(binFromRepo === ".." || binFromRepo.startsWith(`..${sep}`),
     `fixture CLI bin must be outside the fixture repository: ${fixtureRepo}`);
   mkdirSync(bin, { recursive: true });
@@ -1461,9 +1462,8 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
       `^refusing review round 0: tree changed outside the writable scope after packaging: ${launcherName.replace(".", "\\.")}\\r?$`,
       "mu"
     ));
-    // On Windows this also guards against cwd command lookup. POSIX resolves
-    // only PATH entries; there the rejection above verifies the scope guard,
-    // while marker absence is only a side-effect check, not lookup evidence.
+    // The rejection above verifies the scope guard before executable lookup.
+    // Marker absence is only a side-effect check on either platform.
     assert.equal(existsSync(marker), false, "a repository-root command shim is never invoked");
     rmSync(shadowPath);
 
