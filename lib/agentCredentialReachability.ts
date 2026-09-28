@@ -89,9 +89,20 @@ export type CredentialAnalysis =
  */
 const compileFilter = (pattern: string): RegExp | "unknown" => {
   if (/[?+[\]]/.test(pattern)) return "unknown";
+  // `**` means something definite only as a whole path segment; glued to
+  // other characters its meaning is not modelled here.
+  if (/[^/]\*\*|\*\*[^/]/.test(pattern.replace(/^\*\*$/, ""))) return "unknown";
   let source = "";
   for (let i = 0; i < pattern.length; i += 1) {
-    if (pattern.startsWith("**", i)) {
+    if (pattern.startsWith("**/", i)) {
+      // Zero or more directories, so `**/a.ts` matches a root `a.ts`.
+      source += "(?:.*/)?";
+      i += 2;
+    } else if (pattern.startsWith("/**", i) && i + 3 === pattern.length) {
+      // Everything below the directory.
+      source += "/.*";
+      i += 2;
+    } else if (pattern.startsWith("**", i)) {
       source += ".*";
       i += 1;
     } else if (pattern[i] === "*") source += "[^/]*";
@@ -120,12 +131,23 @@ const includeListMatches = (patterns: readonly string[], value: string) => {
 };
 
 /** An ignore list matches only on a pattern it fully understands. */
-const ignoreListMatches = (patterns: readonly string[], value: string) =>
-  patterns.some((raw) => {
-    if (raw.startsWith("!")) return false;
-    const compiled = compileFilter(raw);
-    return compiled !== "unknown" && compiled.test(value);
-  });
+const ignoreListMatches = (patterns: readonly string[], value: string) => {
+  // GitHub style: the last matching pattern decides, and a `!` pattern puts
+  // back what an earlier one ignored. A pattern this does not model is
+  // resolved towards "not ignored": an unknown ignore adds nothing, and an
+  // unknown negation may be putting the value back.
+  let ignored = false;
+  for (const raw of patterns) {
+    const negated = raw.startsWith("!");
+    const compiled = compileFilter(negated ? raw.slice(1) : raw);
+    if (compiled === "unknown") {
+      if (negated) ignored = false;
+      continue;
+    }
+    if (compiled.test(value)) ignored = !negated;
+  }
+  return ignored;
+};
 
 /* ------------------------------------------------------------------------- */
 /* Workflow reading                                                           */
@@ -243,13 +265,21 @@ const permissionsWrite = (permissions: Json | undefined): "write" | "read" | "un
 };
 
 const restoresCache = (job: Obj) => {
+  // What cannot be read counts as restoring: a `uses` that is not a plain
+  // string, is an expression, or names an action kept in this repository
+  // (its steps are not read here). A setup action restores unless its cache
+  // is switched off explicitly, because several enable it by default. GitHub
+  // resolves owner and repository names case-insensitively, and so does this.
   const steps = Array.isArray(job.steps) ? job.steps : [];
   return steps.some((step) => {
-    if (!isObj(step) || typeof step.uses !== "string") return false;
-    if (/^actions\/cache(?:\/restore)?@/.test(step.uses)) return true;
-    if (/^actions\/setup-[a-z-]+@/.test(step.uses) && isObj(step.with)) {
-      const cache = step.with.cache;
-      return cache !== undefined && cache !== false && cache !== "";
+    if (!isObj(step) || step.uses === undefined) return false;
+    if (typeof step.uses !== "string") return true;
+    const uses = step.uses.trim();
+    if (uses.includes("${{") || uses.startsWith("./")) return true;
+    if (/^actions\/cache(?:\/restore)?@/i.test(uses)) return true;
+    if (/^actions\/setup-[a-z-]+@/i.test(uses)) {
+      const cache = isObj(step.with) ? step.with.cache : undefined;
+      return cache !== false && cache !== "false";
     }
     return false;
   });
@@ -395,8 +425,9 @@ export const analyseCredentialReachability = (input: {
       // callee is still read for what the rule set needs from it -- whether it
       // restores a cache, and whether it can be read at all.
       const local = LOCAL_CALLEE.exec(job.uses);
-      // A remote callee's content is in no pinned blob, so no exclusion covers it.
-      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: null };
+      // A remote or computed callee cannot be read: whether it restores a cache
+      // or calls further is unknown, so the analysis fails (policy §5).
+      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: true, problem: "callee_unreadable" };
       const callee = parsed.get(local[1]);
       if (callee === undefined || depth > 8) return own(true, false, "callee_unreadable");
       let cache = false;
@@ -410,8 +441,13 @@ export const analyseCredentialReachability = (input: {
       // by an exclusion of its own; otherwise a changed callee would ride on
       // the caller's review.
       const reach = calleesOf(local[1], new Set());
-      const calleesPinned =
-        reach !== null && [...reach].every((path) => validExclusions.some((exclusion) => exclusion.workflowPath === path));
+      if (reach === null) return own(true, true, "callee_unreadable");
+      // Pinned means every job of every workflow the call reaches is covered
+      // by a valid exclusion at its current blob -- a callee job left out runs
+      // with the call all the same.
+      const calleesPinned = [...reach].every((path) =>
+        Object.keys((parsed.get(path)?.jobs ?? {}) as Obj).every((jobId) => excluded(path, jobId)),
+      );
       return calleesPinned
         ? own(true, cache)
         : { credential: true, credentialIgnoringExclusions: true, restoresCache: cache, problem: null };
@@ -481,7 +517,14 @@ export const analyseCredentialReachability = (input: {
           const included =
             branches.length === 0 ||
             branches.some((pattern) => !pattern.startsWith("!") && agentBranchMayMatch(pattern));
-          const allIgnored = ignored.some(agentBranchesAllCovered);
+          // Every agent branch is ignored only if an ignore pattern covers them
+          // all and no later `!` pattern could put one back.
+          let allIgnored = false;
+          for (const pattern of ignored) {
+            if (pattern.startsWith("!")) {
+              if (agentBranchMayMatch(pattern.slice(1))) allIgnored = false;
+            } else if (agentBranchesAllCovered(pattern)) allIgnored = true;
+          }
           hit = !onlyTags && included && !allIgnored;
         } else {
           const expression = [...branches, ...ignored].some((pattern) => pattern.includes("${{"));
@@ -522,12 +565,18 @@ export const analyseCredentialReachability = (input: {
   let grew = true;
   while (grew) {
     grew = false;
-    // `workflow_run.workflows` matches a workflow's name or its file name, so
-    // a reached workflow answers to both.
+    // `workflow_run.workflows` matches a workflow's name, its file name, or --
+    // for a workflow with no name, which GitHub shows by path -- its path. A
+    // reached workflow answers to all three. One whose name is computed or not
+    // a string could answer to anything, and so could an upstream entry that
+    // is an expression: both chain.
+    let reachedNameUnknown = false;
     for (const path of reached) {
       const name = parsed.get(path)?.name;
-      if (typeof name === "string") reachedNames.add(name);
+      if (typeof name === "string" && !name.includes("${{")) reachedNames.add(name);
+      else if (name !== undefined) reachedNameUnknown = true;
       reachedNames.add(path.slice(path.lastIndexOf("/") + 1));
+      reachedNames.add(path);
     }
     for (const [path, workflow] of parsed) {
       if (reached.has(path)) continue;
@@ -536,7 +585,10 @@ export const analyseCredentialReachability = (input: {
       if (run === undefined) continue;
       const upstream = stringList(run.workflows);
       const chained =
-        upstream === null || upstream.length === 0 || upstream.some((name) => reachedNames.has(name));
+        reachedNameUnknown ||
+        upstream === null ||
+        upstream.length === 0 ||
+        upstream.some((name) => name.includes("${{") || reachedNames.has(name));
       if (!chained) continue;
       reached.add(path);
       grew = true;

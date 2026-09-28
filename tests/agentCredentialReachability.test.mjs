@@ -84,6 +84,22 @@ test("a path filter narrows the result to its paths; an ignore list forbids the 
   assert.deepEqual([...credentialForbiddenPaths(ignored, ["docs/a.md", "lib/a.ts"])], ["lib/a.ts"]);
 });
 
+test("`**` spans zero or more directories, as GitHub's path filters do", () => {
+  const withPaths = (pattern) =>
+    READ_ONLY_PR.replace("    branches: [develop]", `    branches: [develop]
+    paths:
+      - '${pattern}'`).replace(
+      "  contents: read",
+      "  contents: write",
+    );
+  const forbidden = (pattern, changed) => [...credentialForbiddenPaths(analyse([wf("ci", withPaths(pattern))]), changed)];
+  assert.deepEqual(forbidden("**/a.ts", ["a.ts", "lib/deep/a.ts", "lib/b.ts"]), ["a.ts", "lib/deep/a.ts"]);
+  assert.deepEqual(forbidden("lib/**/*.ts", ["lib/a.ts", "lib/x/y/a.ts", "app/a.ts"]), ["lib/a.ts", "lib/x/y/a.ts"]);
+  assert.deepEqual(forbidden("docs/**", ["docs/a.md", "docs/x/b.md", "lib/a.ts"]), ["docs/a.md", "docs/x/b.md"]);
+  // Glued to other characters, `**` is not modelled, and an unknown include forbids.
+  assert.deepEqual(forbidden("**.ts", ["lib/a.ts", "docs/b.md"]), ["lib/a.ts", "docs/b.md"]);
+});
+
 test("patterns this does not model forbid rather than narrow", () => {
   const text = READ_ONLY_PR.replace(
     "    branches: [develop]",
@@ -162,6 +178,17 @@ jobs:
   const byFile = middle.replace("workflows: [ci]", "workflows: [ci.yml]");
   assert.equal(analyse([wf("ci", upstream.replace("name: ci", "name: CI")), wf("middle", byFile), wf("tail", tail)]).forbidsAll, true);
   assert.equal(analyse([wf("ci", upstream.replace(/^name: .*$/m, "")), wf("middle", byFile), wf("tail", tail)]).forbidsAll, true);
+  // An unnamed workflow is shown, and matched, by its path.
+  const byPath = middle.replace("workflows: [ci]", "workflows: ['.github/workflows/ci.yml']");
+  assert.equal(analyse([wf("ci", upstream.replace(/^name: .*$/m, "")), wf("middle", byPath), wf("tail", tail)]).forbidsAll, true);
+  // A computed upstream entry, or a reached workflow whose name is computed, chains.
+  const byExpression = middle.replace("workflows: [ci]", "workflows: ['${{ vars.UPSTREAM }}']");
+  assert.equal(analyse([wf("ci", upstream), wf("middle", byExpression), wf("tail", tail)]).forbidsAll, true);
+  const byOtherName = middle.replace("workflows: [ci]", "workflows: [Nightly]");
+  assert.equal(
+    analyse([wf("ci", upstream.replace("name: ci", "name: ${{ vars.N }}")), wf("middle", byOtherName), wf("tail", tail)]).forbidsAll,
+    true,
+  );
   assert.equal(
     analyse([wf("ci", upstream.replace("branches: [develop]", "branches: [main]")), wf("middle", middle), wf("tail", tail)]).forbidsAll,
     false,
@@ -213,9 +240,9 @@ jobs:
     "a callee changed since its review voids the caller's exclusion",
   );
   assert.equal(
-    analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))], { exclusions: [pin("caller")] }).forbidsAll,
-    true,
-    "no exclusion covers a remote callee",
+    analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))], { exclusions: [pin("caller")] }).status,
+    "failed",
+    "a remote callee cannot be read, so no exclusion can cover it",
   );
   assert.equal(
     analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee.replace("contents: read", "contents: write"))]).forbidsAll,
@@ -230,7 +257,19 @@ jobs:
     true,
     "a secret handed to a read-only callee is still a credential",
   );
-  assert.equal(analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))]).forbidsAll, true);
+  // A callee that cannot be read -- remote, computed, or missing -- fails the whole analysis,
+  // path filter or not: whether it restores a cache or calls further is unknown.
+  assert.equal(analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))]).status, "failed");
+  assert.equal(analyse([wf("caller", caller("${{ vars.W }}"))]).status, "failed");
+  const filtered = (uses) =>
+    caller(uses).replace("    branches: [develop]", `    branches: [develop]
+    paths: ['docs/**']`);
+  assert.equal(analyse([wf("caller", filtered("other/repo/.github/workflows/x.yml@v1"))]).status, "failed");
+  assert.equal(
+    analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee.replace("steps: [{ run: echo }]", "uses: other/repo/.github/workflows/y.yml@v1"))]).status,
+    "failed",
+    "a local callee that calls out is as unreadable as a remote one",
+  );
   assert.equal(analyse([wf("caller", caller("./.github/workflows/missing.yml"))]).status, "failed");
 
   // A read-only callee that restores a cache, called with a credential: the
@@ -357,6 +396,99 @@ test("an exclusion narrows only while its blob matches, and a stale one is repor
   assert.equal(stale.voidExclusions.length, 1);
 });
 
+test("a callee pin covers every job of every reached workflow", () => {
+  const caller = `
+name: caller
+on:
+  pull_request:
+    branches: [develop]
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: ./.github/workflows/callee.yml
+`;
+  const callee = `
+on:
+  workflow_call: {}
+permissions:
+  contents: read
+jobs:
+  harmless:
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps: [{ run: echo }]
+`;
+  const pin = (path, jobId) => ({ workflowPath: `.github/workflows/${path}.yml`, jobId, blobSha: "a".repeat(40), reason: "reviewed", reviewedBy: "owner" });
+  const pair = [wf("caller", caller), wf("callee", callee)];
+  assert.equal(
+    analyse(pair, { exclusions: [pin("caller", "call"), pin("callee", "harmless")] }).forbidsAll,
+    true,
+    "a callee job left out of the pin runs with the call",
+  );
+  assert.equal(
+    analyse(pair, { exclusions: [pin("caller", "call"), pin("callee", "harmless"), pin("callee", "deploy")] }).forbidsAll,
+    false,
+  );
+});
+
+test("a cache restore that cannot be ruled out counts as one", () => {
+  const nightly = (step) => `
+name: nightly
+on:
+  schedule:
+    - cron: '0 0 * * *'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+${step}`;
+  const restores = (step) =>
+    analyse([wf("nightly", nightly(step))]).reasons.some((reason) => reason.reason === "credential_job_restores_cache");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+`), true, "setup-go caches by default");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+`), true);
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+        with:
+          cache: false
+`), false, "switched off explicitly");
+  assert.equal(restores(`      - uses: \${{ vars.ACTION }}
+`), true, "an action named by expression");
+  assert.equal(restores(`      - uses: ./.github/actions/cache
+`), true, "an action kept in this repository");
+  assert.equal(restores(`      - uses: Actions/Cache@v4
+        with: { path: x, key: y }
+`), true, "owner and repo are case-insensitive");
+  assert.equal(restores(`      - run: echo
+`), false);
+});
+
+test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
+  const credentialed = READ_ONLY_PR.replace("  contents: read", "  contents: write");
+  const withIgnore = (patterns) =>
+    credentialed.replace("    branches: [develop]", `    branches: [develop]
+    paths-ignore: [${patterns}]`);
+  const forbidden = (patterns, changed) => [...credentialForbiddenPaths(analyse([wf("ci", withIgnore(patterns))]), changed)];
+  assert.deepEqual(forbidden("'**', '!lib/a.ts'", ["lib/a.ts", "lib/b.ts"]), ["lib/a.ts"]);
+  assert.deepEqual(forbidden("'**', '!lib/[ab].ts'", ["lib/a.ts"]), ["lib/a.ts"], "an unknown negation is not trusted to keep a file ignored");
+  assert.deepEqual(forbidden("'docs/**'", ["docs/a.md", "lib/a.ts"]), ["lib/a.ts"]);
+
+  const push = (ignored) =>
+    credentialed.replace(`  pull_request:
+    branches: [develop]`, `  push:
+    branches-ignore: [${ignored}]`);
+  assert.equal(analyse([wf("ci", push("'agent/**'"))]).forbidsAll, false);
+  assert.equal(analyse([wf("ci", push("'agent/**', '!agent/engineering/1'"))]).forbidsAll, true, "a negation puts an agent branch back");
+});
+
 test("anything unreadable fails the whole analysis", () => {
   assert.equal(analyse([wf("bad", "on: [\n")]).status, "failed");
   assert.equal(analyse([wf("bad", "name: x\n")]).status, "failed");
@@ -396,7 +528,7 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
  * When this fails, a workflow change moved the credential posture. Run the
  * analysis, read what changed with the owner, and only then update the digest.
  */
-const POSTURE_DIGEST = "ddbb7fee2d32";
+const POSTURE_DIGEST = "bf75543a1333";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
