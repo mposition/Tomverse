@@ -327,8 +327,46 @@ export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
 /** Versions that deliberately make no such promise. Empty, and stated. */
 export const MAKES_NO_SEND_PROMISE_VERSIONS: ReadonlySet<string> = new Set([]);
 
+/**
+ * What a version says about sending unasked, as three answers rather than two.
+ *
+ * A version this deployment has never seen is not the same fact as a version
+ * that deliberately makes no promise, and a review found the boolean below
+ * answering both with `false`. Section 9.1 uses that value to decide whether the
+ * `risk_accepted` override may mail somebody, so `false` means "no promise was
+ * made to this person, the override may send" -- and an unread version string
+ * would have said that about somebody nobody has read anything to.
+ *
+ * Where the unknown string comes from: a `copyHash` resolved from a row written
+ * by an older deployment, or by a branch that added a version this one does not
+ * have. Neither is hypothetical once two deployments run at once.
+ */
+export type ConsentCopyPromiseState =
+  | "promises_no_unrequested_send"
+  | "makes_no_promise"
+  | "unknown_version";
+
+export const consentCopyPromiseState = (version: string): ConsentCopyPromiseState => {
+  if (PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(version)) {
+    return "promises_no_unrequested_send";
+  }
+  if (MAKES_NO_SEND_PROMISE_VERSIONS.has(version)) return "makes_no_promise";
+  return "unknown_version";
+};
+
+/**
+ * Whether the override must be held back for somebody shown this version.
+ *
+ * True for a version that promised, **and for a version this deployment does not
+ * know**. The name says "promises", and for an unknown version that is not a
+ * claim about what was shown -- it is the only answer that fails in the
+ * direction section 9.1 cares about, because the cost of being wrong the other
+ * way is mailing somebody who was told we would not.
+ *
+ * A caller that needs to tell the three apart asks `consentCopyPromiseState()`.
+ */
 export const consentCopyPromisesNoUnrequestedSend = (version: string) =>
-  PROMISE_NO_UNREQUESTED_SEND_VERSIONS.has(version);
+  consentCopyPromiseState(version) !== "makes_no_promise";
 
 /** The version a new render uses. Older versions stay readable above. */
 export const CURRENT_CONSENT_COPY_VERSION =

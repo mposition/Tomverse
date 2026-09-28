@@ -42,6 +42,7 @@ import { sectionsOf } from "../scripts/check-consent-copy-immutability-core.mjs"
 import {
   MAKES_NO_SEND_PROMISE_VERSIONS,
   PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
+  consentCopyPromiseState,
   consentCopyPromisesNoUnrequestedSend,
 } from "../lib/emailConsentCopy.ts";
 import { consentCopyForLanguage } from "../lib/emailConsentCopyLocale.ts";
@@ -215,7 +216,16 @@ test("this wording promises something the override contradicts", () => {
   // somebody the override actually mails (S8a's `overrideWouldSend()`), and
   // once it has been shown, no override applies to them again.
   assert.equal(consentCopyPromisesNoUnrequestedSend("2026-09-23"), true);
-  assert.equal(consentCopyPromisesNoUnrequestedSend("not-a-version"), false);
+  assert.equal(consentCopyPromiseState("2026-09-23"), "promises_no_unrequested_send");
+
+  // A version this deployment has never seen is held back, not let through. A
+  // review found the boolean answering "unknown" and "deliberately makes no
+  // promise" with the same false, and section 9.1 reads that false as "the
+  // override may mail this person". The unknown string is not hypothetical: a
+  // copyHash written by an older deployment, or by a branch carrying a version
+  // this one does not have, resolves to exactly that.
+  assert.equal(consentCopyPromiseState("not-a-version"), "unknown_version");
+  assert.equal(consentCopyPromisesNoUnrequestedSend("not-a-version"), true);
 });
 
 test("dismissing and refusing are different labels in every language", () => {
