@@ -676,11 +676,11 @@ test("a sealed allowed send is never replaced under a new key", async () => {
   assert.ok(incidents.includes("EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN"));
 });
 
-test("a sealed allowed send that stopped before the provider is replaced when its contract moves", async () => {
-  // The exception to the rule above. An attempt that sealed an allowed decision
-  // and then recorded that it stopped before the provider -- the address lock
-  // was busy -- sent nothing, so a replacement is the only message, not a
-  // second one. The claim clears that record; the lane reads it first.
+test("a sealed allowed send is not replaced even when the last attempt stopped before the provider", async () => {
+  // The last attempt's record does not cover the attempts before it: one that
+  // reached the provider and died before `sent` leaves nothing, and a later lock
+  // failure writes send_not_submitted over that. A replacement would then be a
+  // second message under a second key, so the row stops for a person.
   process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
   process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
   await activatePolicy();
@@ -699,8 +699,6 @@ test("a sealed allowed send that stopped before the provider is replaced when it
     select: { status: true, nextAttemptAt: true },
   });
   assert.equal(retrying.status, "pending");
-  // What the lock-unavailable path writes, standing in for it: nothing was
-  // submitted. The contract then moves.
   await prisma.emailDelivery.update({
     where: { id: rows.deliveryId },
     data: { deferReason: "send_not_submitted", displayContractHash: "e".repeat(64) },
@@ -713,13 +711,12 @@ test("a sealed allowed send that stopped before the provider is replaced when it
 
   const after = await prisma.emailDelivery.findUniqueOrThrow({
     where: { id: rows.deliveryId },
-    select: { status: true, skipReason: true },
+    select: { status: true, lastErrorKind: true },
   });
-  assert.deepEqual(after, { status: "skipped", skipReason: "display_contract_changed" });
+  assert.deepEqual(after, { status: "failed", lastErrorKind: "outcome_unknown" });
   assert.equal(
     await prisma.emailDelivery.count({ where: { supersedesDeliveryId: rows.deliveryId } }),
-    1,
-    "the message was lost rather than replaced"
+    0
   );
 });
 

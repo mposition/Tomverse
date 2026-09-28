@@ -428,13 +428,6 @@ type ClaimedDelivery = {
   attempts: number;
   /** This worker's claim, as written by `claimDueDelivery()`. */
   claimedAt: Date | null;
-  /**
-   * Why the previous attempt put the row back, read before this claim cleared
-   * it. `send_not_submitted` and `quiet_hours` are written only on paths that
-   * stop before the provider is called, so they are the one positive record that
-   * an earlier sealed decision did not reach it.
-   */
-  previousDeferReason: string | null;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
   policyVersionId: string;
@@ -473,28 +466,23 @@ type ClaimedDelivery = {
  */
 const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   const staleBefore = new Date(now.getTime() - STANDARD_LANE_CLAIM_TTL_MS);
-  // The previous defer reason is returned from the locked read, before the
-  // UPDATE clears it: `RETURNING` alone would report the cleared value.
-  const rows = await prisma.$queryRaw<Array<{ id: string; previousDeferReason: string | null }>>`
-    WITH picked AS (
-      SELECT "id", "deferReason" FROM "EmailDelivery"
-       WHERE "lane" = 'standard'
-         AND "status" = 'pending'
-         AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
-         AND ("claimedAt" IS NULL OR "claimedAt" < ${staleBefore})
-       ORDER BY "nextAttemptAt" ASC NULLS FIRST
-       FOR UPDATE SKIP LOCKED
-       LIMIT 1
-    )
-    UPDATE "EmailDelivery" d
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    UPDATE "EmailDelivery"
        SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}, "deferReason" = NULL
-      FROM picked
-     WHERE d."id" = picked."id"
-    RETURNING d."id", picked."deferReason" AS "previousDeferReason"
+     WHERE "id" = (
+       SELECT "id" FROM "EmailDelivery"
+        WHERE "lane" = 'standard'
+          AND "status" = 'pending'
+          AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
+          AND ("claimedAt" IS NULL OR "claimedAt" < ${staleBefore})
+        ORDER BY "nextAttemptAt" ASC NULLS FIRST
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+     )
+    RETURNING "id"
   `;
   const claimedId = rows[0]?.id;
   if (!claimedId) return null;
-  const previousDeferReason = rows[0]?.previousDeferReason ?? null;
 
   return prisma.emailDelivery.findUnique({
     where: { id: claimedId },
@@ -528,7 +516,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
         },
       },
     },
-  }).then((row) => (row ? { ...row, previousDeferReason } : null)) as Promise<ClaimedDelivery | null>;
+  }) as Promise<ClaimedDelivery | null>;
 };
 
 /**
@@ -956,19 +944,20 @@ const decideReleaseNotesSend = async (
     // incident names it. A disagreement that refuses on other grounds is the one
     // exception, because not sending is safe whatever happened before: that row
     // is skipped below like any other refusal.
+    //
+    // Including a row whose last attempt stopped before the provider (the address
+    // lock was busy, or quiet hours began after the decision). That records what
+    // the last attempt did, not what every attempt since the seal did: one that
+    // reached the provider and died before `sent` leaves nothing behind, and a
+    // later lock failure writes the same word over it. A replacement there would
+    // be a second message under a second key. So this stops too, and the
+    // incident's instruction -- check the provider log for this key -- is what
+    // tells a message that never went from one that did.
     const earlierAllowed = !recorded.recorded && recorded.existingAllowed;
-    // The one exception: the previous attempt recorded that it stopped before the
-    // provider -- the address lock was busy, or quiet hours began after the
-    // decision. Then nothing went out, a replacement is the only message, and
-    // failing the row would lose it for a footer fixed overnight.
-    const provedNotSubmitted =
-      delivery.previousDeferReason === "send_not_submitted" ||
-      delivery.previousDeferReason === "quiet_hours";
     if (
       earlierAllowed &&
       recorded.differs &&
-      (verdict.allowed || reenqueueIsRight(verdict.blockers)) &&
-      !(provedNotSubmitted && reenqueueIsRight(verdict.blockers))
+      (verdict.allowed || reenqueueIsRight(verdict.blockers))
     ) {
       await tx.emailDelivery.update({
         where: { id: delivery.id },
