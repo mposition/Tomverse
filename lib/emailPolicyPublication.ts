@@ -182,6 +182,12 @@ const utc = (value: Date) => value.toISOString();
  * `privacy_request` or a purpose-scoped manual hold -- neither of which stops a
  * legal message -- excused an account the lane would in fact have mailed.
  *
+ * Every bounce is nominated, soft or hard, and not by `lastErrorKind`: a later
+ * delayed or soft-bounce event on the same row overwrites that column, so a hard
+ * bounce could read as soft and escape the check while the lane still refused
+ * the address. The check itself tells them apart -- a soft-bounce hold does not
+ * stop a legal notice, so that account comes back untold.
+ *
  * Any refused row, not the latest: a later attempt that fails before the
  * suppression check (a template mismatch, say) is not evidence the address
  * became reachable, and the live check already answers whether it did. A row
@@ -216,6 +222,14 @@ export const noticeFactsFor = async (
   // at the deadline, a day later, so somebody who signed up the afternoon the bulk
   // notice went out was held to the bulk notice's deadline.
   const periodStart = new Date(deadline.getTime() - DAY_MS);
+  // A notice that reached the mailbox before this has had its full period,
+  // measured from today as if today were the effective date: the same calendar
+  // rule, so a late account is told on exactly the day thirty days of notice
+  // have passed. The day, not the instant -- `noticeDeadline()` of a mid-day
+  // "now" would move the cutoff every minute.
+  const ownPeriodCutoff = noticeDeadline(
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  );
   const windowStart = new Date(anchor.getTime() - CHANGE_NOTICE_WINDOW_DAYS * DAY_MS);
 
   const [row] = await prisma.$queryRaw<
@@ -233,6 +247,7 @@ export const noticeFactsFor = async (
       SELECT (${utc(anchor)}::timestamptz AT TIME ZONE 'UTC')      AS "effective",
              (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
              (${utc(periodStart)}::timestamptz AT TIME ZONE 'UTC') AS "periodStart",
+             (${utc(ownPeriodCutoff)}::timestamptz AT TIME ZONE 'UTC') AS "ownPeriodCutoff",
              (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart",
              (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now"
     ),
@@ -254,10 +269,9 @@ export const noticeFactsFor = async (
     ),
     told AS (
       SELECT n."userId", n."sentAt"
-        FROM notice n, params p
+        FROM notice n
        WHERE n."status" = ANY(${[...TOLD_STATUSES]}::text[])
          AND n."sentAt" IS NOT NULL
-         AND n."sentAt" < p."effective"
     ),
     classified AS (
       SELECT CASE
@@ -265,16 +279,17 @@ export const noticeFactsFor = async (
                  SELECT 1 FROM told t, params p
                   WHERE t."userId" = o."id"
                     AND (t."sentAt" < p."deadline"
-                         OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."periodStart"))
+                         OR (o."createdAt" IS NOT NULL
+                             AND o."createdAt" >= p."periodStart"
+                             AND t."sentAt" < p."effective")
+                         OR t."sentAt" < p."ownPeriodCutoff")
                ) THEN 'told'
                WHEN EXISTS (SELECT 1 FROM told t WHERE t."userId" = o."id") THEN 'late'
                WHEN o."email" IS NULL THEN 'no_address'
                WHEN EXISTS (
                  SELECT 1 FROM notice n
                   WHERE n."userId" = o."id"
-                    AND (n."status" = 'suppressed'
-                         OR (n."status" = 'bounced'
-                             AND n."lastErrorKind" IS DISTINCT FROM 'soft_bounce'))
+                    AND n."status" IN ('suppressed', 'bounced')
                ) THEN 'refused'
                ELSE 'untold'
              END AS "state",

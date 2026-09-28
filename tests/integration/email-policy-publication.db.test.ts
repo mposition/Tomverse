@@ -133,14 +133,18 @@ const suppress = (address: string) =>
   });
 
 test("a notice that reached the mailbox is told, however the webhook moved it", async () => {
-  for (const status of ["sent", "delivered", "complained"]) {
+  for (const status of ["delivered", "complained"]) {
     const user = await account(daysBefore(90));
     await delivery(user.id, status, daysBefore(40), daysBefore(40));
   }
+  // Accepted by the provider and never confirmed: the lane writes `sent` before
+  // any bounce, and a lost webhook would leave it there for ever.
+  const accepted = await account(daysBefore(90));
+  await delivery(accepted.id, "sent", daysBefore(40), daysBefore(40));
   const result = await facts();
   assert.equal(result.owed, 3);
-  assert.equal(result.told, 3);
-  assert.equal(result.untold, 0);
+  assert.equal(result.told, 2);
+  assert.equal(result.untold, 1);
   assert.equal(result.firstSentAt?.getTime(), daysBefore(40).getTime());
   assert.equal(result.classification, "legal");
 });
@@ -261,7 +265,7 @@ test("a delivery of wording that was not approved as this notice does not count"
   // The key alone names a template, not a text. The account-deletion notice is
   // the only registered legal template; its own deliveries are not the notice.
   const user = await account(daysBefore(90));
-  await delivery(user.id, "sent", daysBefore(40), daysBefore(40));
+  await delivery(user.id, "delivered", daysBefore(40), daysBefore(40));
   const other = await noticeFactsFor(
     ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
     ["some-other-approved-hash"],
@@ -277,9 +281,9 @@ test("a delivery of wording that was not approved as this notice does not count"
 
 test("each account is told in time on its own, not by the earliest send", async () => {
   const early = await account(daysBefore(90));
-  await delivery(early.id, "sent", daysBefore(40), daysBefore(40));
+  await delivery(early.id, "delivered", daysBefore(40), daysBefore(40));
   const lateComer = await account(daysBefore(90));
-  await delivery(lateComer.id, "sent", daysBefore(5), daysBefore(5));
+  await delivery(lateComer.id, "delivered", daysBefore(5), daysBefore(5));
   const result = await facts();
   assert.equal(result.told, 1);
   assert.equal(result.late, 1);
@@ -290,12 +294,12 @@ test("the notice period is counted in calendar days", async () => {
   const onTheDay = await account(daysBefore(90));
   await delivery(
     onTheDay.id,
-    "sent",
+    "delivered",
     daysBefore(30),
     new Date(daysBefore(30).getTime() + 23 * 3_600_000)
   );
   const dayAfter = await account(daysBefore(90));
-  await delivery(dayAfter.id, "sent", daysBefore(29), daysBefore(29));
+  await delivery(dayAfter.id, "delivered", daysBefore(29), daysBefore(29));
   const result = await facts();
   assert.equal(result.told, 1);
   assert.equal(result.late, 1);
@@ -303,7 +307,7 @@ test("the notice period is counted in calendar days", async () => {
 
 test("an account that joined during the notice period has until the effective date", async () => {
   const joinedLate = await account(daysBefore(10));
-  await delivery(joinedLate.id, "sent", daysBefore(5), daysBefore(5));
+  await delivery(joinedLate.id, "delivered", daysBefore(5), daysBefore(5));
   await account(daysBefore(10));
   const result = await facts();
   assert.equal(result.owed, 2);
@@ -311,13 +315,49 @@ test("an account that joined during the notice period has until the effective da
   assert.equal(result.untold, 1);
 });
 
-test("a notice after the effective date is no notice", async () => {
+test("a notice after the effective date is late until its own thirty days pass", async () => {
+  // Untold for ever before: a signup the day before the effective date, or a
+  // retry that landed after it, held the gate shut for everybody.
   const user = await account(daysBefore(90));
-  await delivery(user.id, "sent", EFFECTIVE, new Date(EFFECTIVE.getTime() + 3_600_000));
+  const at = new Date(EFFECTIVE.getTime() + 3_600_000);
+  await delivery(user.id, "delivered", EFFECTIVE, at);
   const result = await facts();
   assert.equal(result.told, 0);
-  assert.equal(result.late, 0);
-  assert.equal(result.untold, 1);
+  assert.equal(result.late, 1);
+  assert.equal(result.untold, 0);
+
+  const day = 86_400_000;
+  const beforeItsPeriod = await noticeFactsFor(
+    ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    HASHES,
+    EFFECTIVE,
+    new Date(EFFECTIVE.getTime() + 29 * day)
+  );
+  assert.equal(beforeItsPeriod.late, 1);
+  const afterItsPeriod = await noticeFactsFor(
+    ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    HASHES,
+    EFFECTIVE,
+    new Date(EFFECTIVE.getTime() + 30 * day)
+  );
+  assert.equal(afterItsPeriod.told, 1);
+  assert.equal(afterItsPeriod.late, 0);
+});
+
+test("a hard bounce is found even when a later event wrote soft_bounce over it", async () => {
+  // Provider events overwrite lastErrorKind on the row, so a delayed event after
+  // the permanent bounce made it read as soft. The lane still refuses the
+  // address, and the account must not hold the gate as untold.
+  const address = `overwritten-${randomUUID().slice(0, 8)}@example.test`;
+  const user = await prisma.user.create({
+    data: { email: address, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(user.id, "bounced", daysBefore(40), daysBefore(40), "soft_bounce");
+  await suppress(address);
+  const result = await facts();
+  assert.equal(result.unreachable, 1);
+  assert.equal(result.untold, 0);
 });
 
 test("an account whose age is unknown is owed, and one created after is not", async () => {
@@ -337,7 +377,7 @@ test("an account with no address is unreachable, not untold", async () => {
 
 test("a delivery older than the notice window is not this notice", async () => {
   const old = await account(daysBefore(400));
-  await delivery(old.id, "sent", daysBefore(200), daysBefore(200));
+  await delivery(old.id, "delivered", daysBefore(200), daysBefore(200));
   const result = await facts();
   assert.equal(result.told, 0);
   assert.equal(result.untold, 1);
@@ -393,7 +433,7 @@ test("an account created on the first day of the notice period has until it appl
   // Effective 15 November: the period starts on 16 October. Somebody who signed
   // up that afternoon, after the bulk notice, is told if told before 15 November.
   const joined = await account(new Date(daysBefore(30).getTime() + 15 * 3_600_000));
-  await delivery(joined.id, "sent", daysBefore(20), daysBefore(20));
+  await delivery(joined.id, "delivered", daysBefore(20), daysBefore(20));
   const result = await facts();
   assert.equal(result.told, 1);
   assert.equal(result.late, 0);
