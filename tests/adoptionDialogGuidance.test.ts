@@ -40,4 +40,5 @@ test("a tiered or inherited price does not repeat the sentence the table already
   assert.deepEqual(priceHintsForView(lines, "tiered"), ["프로모션 문구 — 기간이 있습니다."]);
   assert.deepEqual(priceHintsForView(lines, "inherited"), ["프로모션 문구 — 기간이 있습니다."]);
   assert.deepEqual(priceHintsForView(lines, "flat"), lines);
+  assert.deepEqual(priceHintsForView(lines, "withheld"), lines);
 });

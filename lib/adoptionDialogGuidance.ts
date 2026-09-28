@@ -8,6 +8,8 @@
  * for.
  */
 
+import type { AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+
 export const ADOPTION_FIELD_HINTS = {
   registryId: ["Registry ID"],
   minimumPlan: ["최소 플랜"],
@@ -55,8 +57,9 @@ const PRICE_HINTS_REPLACED_BY_SHAPE = new Set(["입력·출력 단가", "장문 
 
 export function priceHintsForView(
   lines: readonly string[],
-  shape: "tiered" | "inherited" | "flat" | "unset" | null
+  shape: AdoptionPriceView["shape"] | null
 ) {
+  // A withheld price has no table, so the draft's own sentences stay.
   if (shape !== "tiered" && shape !== "inherited") return lines;
   return lines.filter((line) => !PRICE_HINTS_REPLACED_BY_SHAPE.has(adoptionSentencePrefix(line)));
 }
