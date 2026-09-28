@@ -172,7 +172,9 @@ test("the route cannot turn the latch on and the page stays unlisted", () => {
   // Apply needs the server switch from preview and an approve for this exact id.
   assert.match(panel, /applySwitch === true && approvedId !== null && approvedId === approvalId\.trim\(\)/);
   assert.match(panel, /typeof payload\.applyPermitted === "boolean"\) setApplySwitch\(payload\.applyPermitted\)/);
-  assert.match(panel, /action === "approve" && payload\.status === "approved" && payload\.approvalId/);
+  assert.match(panel, /response\.ok && action === "approve" && payload\.status === "approved" && payload\.approvalId/);
+  // Any other non-preview response, failed or not, closes Apply again.
+  assert.match(panel, /\} else if \(action !== "preview"\) \{\s*setApprovedId\(null\);/);
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);

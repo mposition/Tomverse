@@ -44,12 +44,15 @@ export function AmuxBoardPromotionPanel() {
       setResult(payload);
       if (payload.approvalId) setApprovalId(payload.approvalId);
       if (typeof payload.applyPermitted === "boolean") setApplySwitch(payload.applyPermitted);
-      if (action === "approve" && payload.status === "approved" && payload.approvalId) {
+      // Only a successful approve opens Apply. Any failed response, any apply
+      // (consumed or refused), and any other state change closes it again.
+      if (response.ok && action === "approve" && payload.status === "approved" && payload.approvalId) {
         setApprovedId(payload.approvalId);
-      } else if (action !== "preview" && payload.approvalId && payload.status !== "approved") {
+      } else if (action !== "preview") {
         setApprovedId(null);
       }
     } catch {
+      setApprovedId(null);
       setResult({ error: "board_promotion_failed" });
     } finally {
       setPending(false);

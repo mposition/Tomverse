@@ -210,14 +210,6 @@ impl ExistingSessionAdapter {
         self.sessions.keys().cloned().collect()
     }
 
-    /// A session that re-registered after losing its runtime lease takes the
-    /// new instance and generation. Nothing else about the session changes.
-    pub fn replace(&mut self, name: &str, presence: SessionPresence) {
-        if let Some(session) = self.sessions.get_mut(name) {
-            *session = presence;
-        }
-    }
-
     pub fn observe(&mut self, name: &str, running: bool, at_boundary: bool) {
         if let Some(session) = self.sessions.get_mut(name) {
             session.running = running;
@@ -295,14 +287,26 @@ impl WorkerAdapter for ExistingSessionAdapter {
 }
 
 /**
- * Whether a session whose runtime lease was lost may register again.
+ * What a heartbeat outcome for a pending execution means.
  *
- * Only a session that is still running locally and has no pending attempt.
- * A pending attempt belongs to the old generation; re-registering would fence
- * its heartbeats and settlement out, so that case halts instead.
+ * An explicit refusal from Tomverse fences the attempt out, so it leaves the
+ * pending set. A transport failure or timeout is an unknown outcome: the
+ * server may have renewed the lease, so the attempt stays pending and keeps
+ * its heartbeat, and the runner only stops taking new assignments.
  */
-pub fn plan_reregistration(lease_lost: bool, has_pending_attempt: bool, running_locally: bool) -> bool {
-    lease_lost && !has_pending_attempt && running_locally
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingHeartbeat {
+    Keep,
+    KeepAndHalt,
+    DropAndHalt,
+}
+
+pub fn plan_pending_heartbeat(accepted: Option<bool>) -> PendingHeartbeat {
+    match accepted {
+        Some(true) => PendingHeartbeat::Keep,
+        Some(false) => PendingHeartbeat::DropAndHalt,
+        None => PendingHeartbeat::KeepAndHalt,
+    }
 }
 
 pub fn payload_leaks_control_plane(text: &str) -> bool {
@@ -1004,27 +1008,11 @@ pub async fn run_from_env() -> i32 {
                     sessions.observe(&name, session.running, false);
                 }
                 Ok(response) if response.reason.as_deref() == Some("runtime_lease_lost") => {
-                    let mut replaced = false;
-                    if plan_reregistration(true, has_pending, session.running) {
-                        let instance_id = Uuid::new_v4().to_string();
-                        if let Ok(registered) = api.worker_register(&name, &instance_id).await {
-                            if let (true, Some(generation)) = (registered.registered, registered.generation) {
-                                sessions.replace(
-                                    &name,
-                                    SessionPresence {
-                                        running: true,
-                                        at_boundary: false,
-                                        instance_id,
-                                        generation,
-                                    },
-                                );
-                                replaced = true;
-                            }
-                        }
-                    }
-                    if !replaced {
-                        sessions.observe(&name, false, false);
-                    }
+                    // Registering again would bump the generation while an
+                    // attempt this process may not know about (acked but not
+                    // pending) is still open on the server. Stop instead.
+                    sessions.observe(&name, false, false);
+                    halted = true;
                 }
                 _ => {
                     sessions.observe(&name, session.running, false);
@@ -1094,12 +1082,18 @@ pub async fn run_from_env() -> i32 {
                 halted = true;
                 continue;
             };
-            match api
+            let accepted = api
                 .execution_heartbeat(delivery, &session.instance_id, session.generation)
                 .await
-            {
-                Ok(response) if response.accepted => still_pending.push(delivery.clone()),
-                _ => halted = true,
+                .ok()
+                .map(|response| response.accepted);
+            match plan_pending_heartbeat(accepted) {
+                PendingHeartbeat::Keep => still_pending.push(delivery.clone()),
+                PendingHeartbeat::KeepAndHalt => {
+                    still_pending.push(delivery.clone());
+                    halted = true;
+                }
+                PendingHeartbeat::DropAndHalt => halted = true,
             }
         }
         pending = still_pending;
@@ -1688,34 +1682,10 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_lease_re_registers_only_an_idle_running_session() {
-        assert!(plan_reregistration(true, false, true));
-        assert!(!plan_reregistration(true, true, true), "a pending attempt belongs to the old generation");
-        assert!(!plan_reregistration(true, false, false), "a stopped session is not registered");
-        assert!(!plan_reregistration(false, false, true), "only a lost lease re-registers");
-    }
-
-    #[test]
-    fn replace_takes_the_new_instance_and_generation_only_for_a_known_session() {
-        let mut sessions = ExistingSessionAdapter::new(BTreeMap::from([(
-            "claude-impl".to_owned(),
-            SessionPresence {
-                running: true,
-                at_boundary: true,
-                instance_id: "old".into(),
-                generation: 4,
-            },
-        )]));
-        let fresh = SessionPresence {
-            running: true,
-            at_boundary: false,
-            instance_id: "new".into(),
-            generation: 5,
-        };
-        sessions.replace("claude-impl", fresh.clone());
-        sessions.replace("unknown", fresh.clone());
-        assert_eq!(sessions.presence("claude-impl"), Some(&fresh));
-        assert_eq!(sessions.presence("unknown"), None);
+    fn an_unknown_heartbeat_keeps_the_attempt_and_only_a_refusal_drops_it() {
+        assert_eq!(plan_pending_heartbeat(Some(true)), PendingHeartbeat::Keep);
+        assert_eq!(plan_pending_heartbeat(None), PendingHeartbeat::KeepAndHalt);
+        assert_eq!(plan_pending_heartbeat(Some(false)), PendingHeartbeat::DropAndHalt);
     }
 
     #[test]
@@ -1726,6 +1696,9 @@ mod tests {
         let run = &source[source.find("pub async fn run_from_env").unwrap()..];
         let run = &run[..run.find("fn local_client").unwrap()];
         assert!(run.contains("return BRIDGE_HALT_EXIT_CODE;"));
-        assert!(run.contains("plan_reregistration(true, has_pending, session.running)"));
+        assert!(!run.contains("worker_register(&name"), "a lost lease never re-registers");
+        let lost = &run[run.find("Some(\"runtime_lease_lost\")").unwrap()..];
+        let lost = &lost[..lost.find("_ => {").unwrap()];
+        assert!(lost.contains("halted = true;"));
     }
 }

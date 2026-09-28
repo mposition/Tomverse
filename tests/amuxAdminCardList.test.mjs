@@ -25,6 +25,10 @@ test("the card list reads identifiers and state only", async () => {
   assert.match(select, /executionBriefDigest: true/);
   assert.match(loader, /take: AMUX_ADMIN_CARD_LIST_LIMIT/);
   assert.doesNotMatch(loader, /\.(update|updateMany|create|createMany|upsert|delete|deleteMany)\(/);
+  // One set query per page for the latest attempt and one for the counts.
+  assert.doesNotMatch(loader, /executionAttempts: \{/);
+  assert.match(loader, /SELECT DISTINCT ON \("taskId"\)/);
+  assert.match(loader, /groupBy\(\{\s*by: \["taskId"\]/);
 });
 
 test("the panel states how many rows it shows out of how many", async () => {

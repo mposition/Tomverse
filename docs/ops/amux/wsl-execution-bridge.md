@@ -32,9 +32,9 @@ Bridge 프로세스는 Tomverse 내부 API를 부르는 인증을 가질 수 있
 
 로컬 AMUX에 닿지 않거나 WSL이 멈추면 새 배정을 하지 않는다. generation이 바뀌었거나 execution lease가 지난 결과는 거절한다.
 
-Tomverse 내부 호출에는 20초 deadline이 있고 연결은 10초다. 앱의 AMUX route 예산 15초보다 길다. 쓰기 호출이 deadline을 넘으면 결과 불명이고, 재시도하지 않고 halt한다.
+Tomverse 내부 호출에는 20초 deadline이 있고 연결은 10초다. 앱의 AMUX route 예산 15초보다 길다. 쓰기 호출이 deadline을 넘으면 결과 불명이고, 재시도하지 않고 halt한다. 진행 중인 attempt의 execution heartbeat가 전송 오류나 deadline으로 끝나면 그 attempt는 pending에 남고 heartbeat를 계속한다. Tomverse가 명시적으로 거절한 heartbeat만 그 attempt를 pending에서 뺀다. 둘 다 새 배정을 멈춘다.
 
-heartbeat가 `runtime_lease_lost`로 거절되면, 그 세션이 로컬에서 실행 중이고 진행 중인 attempt가 없을 때만 새 instance로 다시 등록한다. 진행 중인 attempt가 있으면 그 attempt는 옛 generation에 속하므로 다시 등록하지 않는다.
+worker heartbeat가 `runtime_lease_lost`로 거절되면 다시 등록하지 않고 halt한다. 등록은 generation을 올리는데, 서버의 등록은 열린 attempt를 확인하지 않는다. ack는 됐지만 이 프로세스의 pending에 없는 attempt가 서버에 열려 있을 수 있으므로, 사람이 attempt 상태를 확인한 뒤 다시 시작한다.
 
 ## halt와 재시작
 

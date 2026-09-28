@@ -56,16 +56,30 @@ export async function listAmuxCardsForAdmin(): Promise<{
         requiresHumanReview: true,
         reviewPrNumber: true,
         updatedAt: true,
-        _count: { select: { executionAttempts: true } },
-        executionAttempts: {
-          // attemptNumber is null on historical rows; start time orders every row.
-          orderBy: [{ startedAt: "desc" }],
-          take: 1,
-          select: { outcome: true, toStatus: true },
-        },
       },
     }),
   ]);
+  const ids = cards.map((card) => card.id);
+  // Two set queries for the whole page, not one per card: a nested `take` on
+  // a to-many relation is loaded per parent row.
+  const [counts, latest] = ids.length === 0
+    ? [[], []]
+    : await Promise.all([
+        prisma.amuxExecutionAttempt.groupBy({
+          by: ["taskId"],
+          where: { taskId: { in: ids } },
+          _count: { _all: true },
+        }),
+        // attemptNumber is null on historical rows; start time orders every row.
+        prisma.$queryRaw<Array<{ taskId: string; outcome: string | null; toStatus: string | null }>>`
+          SELECT DISTINCT ON ("taskId") "taskId", "outcome", "toStatus"
+          FROM "AmuxExecutionAttempt"
+          WHERE "taskId" = ANY(${ids})
+          ORDER BY "taskId", "startedAt" DESC
+        `,
+      ]);
+  const countByTask = new Map(counts.map((row) => [row.taskId, row._count._all]));
+  const latestByTask = new Map(latest.map((row) => [row.taskId, row]));
   const rank = (status: string) => {
     const index = STATUS_ORDER.indexOf(status);
     return index === -1 ? STATUS_ORDER.length : index;
@@ -82,9 +96,9 @@ export async function listAmuxCardsForAdmin(): Promise<{
       briefPresent: card.executionBriefDigest !== null,
       requiresHumanReview: card.requiresHumanReview,
       reviewPrNumber: card.reviewPrNumber,
-      attemptCount: card._count.executionAttempts,
-      lastAttemptOutcome: card.executionAttempts[0]?.outcome ?? null,
-      lastAttemptToStatus: card.executionAttempts[0]?.toStatus ?? null,
+      attemptCount: countByTask.get(card.id) ?? 0,
+      lastAttemptOutcome: latestByTask.get(card.id)?.outcome ?? null,
+      lastAttemptToStatus: latestByTask.get(card.id)?.toStatus ?? null,
       updatedAt: card.updatedAt.toISOString(),
     }))
     .sort(
