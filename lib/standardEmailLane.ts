@@ -61,7 +61,12 @@ import {
   STANDARD_LANE_CLAIM_TTL_MS,
   abandonmentEscalation,
   nextStandardAttempt,
+  type RetryClassification,
 } from "@/lib/standardEmailRetryCore";
+import {
+  VerdictUnavailableError,
+  verdictRetry,
+} from "@/lib/releaseNotesVerdictRetryCore";
 
 /**
  * The standard lane: durable, at-least-once, delivered eventually.
@@ -1216,6 +1221,68 @@ export async function drainStandardEmailDeliveries(options?: {
         result.abandonedByClassification[classification] += 1;
       } else if (outcome === "suppressed") result.suppressed += 1;
     } catch (error) {
+      if (error instanceof VerdictUnavailableError) {
+        // Neither skipped nor failed. The rules refused nothing -- nobody asked
+        // them -- and nothing about the message is wrong; a database read while
+        // deciding did not answer. Turning that into a permanent `failed`, which
+        // is what the branch below would do, retires a message the law allows
+        // and leaves `lastErrorKind` naming a Prisma class, which nobody reading
+        // the row later can tell from a message that was genuinely unsendable
+        // (draft section 7.6, invariant 11).
+        //
+        // So the claim goes back and the schedule moves, on the classification's
+        // own curve. And it still runs out: a message nobody can decide after
+        // every attempt is one an operator has to see, and holding it `pending`
+        // for ever is how nobody does.
+        const classification = delivery.templateVersion.classification as RetryClassification;
+        const retry = verdictRetry({
+          attemptsMade: delivery.attempts,
+          classification,
+          now,
+        });
+        if (retry.outcome === "retry") {
+          await prisma.emailDelivery.update({
+            where: { id: delivery.id },
+            data: {
+              attempts: retry.attempts,
+              nextAttemptAt: retry.nextAttemptAt,
+              claimedAt: null,
+              lastErrorKind: "verdict_unavailable",
+            },
+          });
+          result.pending += 1;
+        } else {
+          await prisma.emailDelivery.update({
+            where: { id: delivery.id },
+            data: {
+              status: "abandoned",
+              attempts: retry.attempts,
+              nextAttemptAt: null,
+              claimedAt: null,
+              lastErrorKind: "verdict_unavailable",
+            },
+          });
+          result.abandoned += 1;
+          result.abandonedByClassification[classification] += 1;
+        }
+        await reportOperationalIncident({
+          code: "EMAIL_SEND_VERDICT_UNAVAILABLE",
+          title: "A queued email could not be decided",
+          error:
+            `Delivery ${delivery.id}: ${error.message}` +
+            (retry.outcome === "retry"
+              ? ` -- retrying in ${retry.delayMs}ms (attempt ${retry.attempts})`
+              : " -- abandoned, attempts exhausted"),
+          severity: retry.outcome === "retry" ? "warning" : "error",
+          cooldownMs: 15 * 60 * 1_000,
+          context: {
+            component: "standard-email-lane",
+            outcome: retry.outcome,
+            attempts: String(retry.attempts),
+          },
+        });
+        continue;
+      }
       // A render or decrypt failure, not a provider failure. Retrying it will
       // not help -- the snapshot is what it is -- so the row stops here rather
       // than occupying the queue on a curve that cannot succeed.
