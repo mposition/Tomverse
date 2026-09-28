@@ -262,6 +262,13 @@ run(
     // application alone protects is one a migration or an admin script can
     // rewrite -- and the row it rewrites is the proof that a send was allowed.
     "tests/integration/email-permission-ledger.db.test.ts",
+    // The ledger's first writers: the sealed cohort a risk_accepted approval
+    // covers, and the one-time in-product notice. Here rather than in a unit
+    // test because what is under test is whether the rows those writers build
+    // survive the triggers -- a sealed approval refusing to change, and an
+    // append-only table accepting a repeated render as one row rather than
+    // raising on the second.
+    "tests/integration/email-send-approval-cohort.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
@@ -289,6 +296,10 @@ run(
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // The recipient-authority rules: a version that is no longer a draft
+    // cannot have its rules changed, and one (ruleKey, ruleVersion) names one
+    // content -- both enforced by trigger, because a waiver is scoped to it.
+    "tests/integration/release-notes-country-rule.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
