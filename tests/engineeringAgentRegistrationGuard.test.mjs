@@ -277,11 +277,25 @@ test("each secret rule fires on its shape and reports only its id", () => {
     "xai-key": `xai-${"g".repeat(30)}`,
     "huggingface-token": `hf_${"h".repeat(34)}`,
     "credential-assignment": 'R2_SECRET_ACCESS_KEY="Q7xk9Pz2Lm4Rt8Vw3Ny6"',
+    "password-assignment": 'DB_password = "hunter2-but-longer!"',
   };
   for (const [id, sample] of Object.entries(samples)) {
     const found = detectSecrets(`before ${sample} after`);
     assert.ok(found.includes(id), `${id}: ${JSON.stringify(found)}`);
     for (const reported of found) assert.doesNotMatch(reported, /[=:]/);
+  }
+});
+
+test("a credential name is evidence enough whatever the value's alphabet", () => {
+  for (const value of [
+    "abcdefghijklmnopqrstuvwxyzABCDEFGH",
+    "1234567890123456789012",
+    "dGhpcyBpcyBhIGJhc2U2NCB0b2tlbg==",
+    "Zm9vYmFy_url-safe-base64_value",
+  ]) {
+    for (const name of ["CLOUDFLARE_API_TOKEN", "api_key", "clientSecret", "R2_SECRET_ACCESS_KEY"]) {
+      assert.ok(detectSecrets(`${name}=${value}`).length > 0, name);
+    }
   }
 });
 

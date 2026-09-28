@@ -42,25 +42,36 @@ export const ENGINEERING_AGENT_SECRET_RULES = [
     /**
      * An assignment whose name ends in a credential word -- with any provider
      * prefix, so `R2_SECRET_ACCESS_KEY` and `CLOUDFLARE_API_TOKEN` count as much
-     * as `api_key` -- and whose value looks opaque: sixteen or more token
-     * characters mixing letters and digits. A plain word like a test password
-     * does not; a placeholder, an expression or an environment read does not.
+     * as `api_key` -- and whose value is sixteen or more token characters. The
+     * name is the evidence here, so the value's alphabet is not asked about: a
+     * letters-only or digits-only credential is still a credential. A
+     * placeholder, an expression or an environment read is not.
      */
     id: "credential-assignment",
     pattern:
-      /\b[A-Za-z0-9_]*(?:api[_-]?key|secret(?:[_-]?access)?(?:[_-]?key)?|access[_-]?key|token|password|passwd|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])(?=[A-Za-z0-9._~+/=-]*[0-9])(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{16,}/i,
+      /\b[A-Za-z0-9_]*(?:api[_-]?key|secret(?:[_-]?access)?(?:[_-]?key)?|access[_-]?key|token|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])[A-Za-z0-9._~+/=-]{16,}/i,
+  },
+  {
+    /**
+     * A password assignment. Test code writes passwords constantly, so a value
+     * made only of letters -- `correcthorsebattery` -- is taken for test data;
+     * one carrying a digit or a symbol, or long enough to be generated, is not.
+     */
+    id: "password-assignment",
+    pattern:
+      /\b[A-Za-z0-9_]*(?:password|passwd)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])(?:(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{16,}|[A-Za-z]{32,})/i,
   },
   {
     /**
      * An upper-case environment-style name ending in `_KEY`, `_SECRET`,
-     * `_TOKEN` or `_PASSWORD` with an opaque value -- `FAL_KEY`,
-     * `OAUTH_TOKEN_ENCRYPTION_KEY`. Case-sensitive on purpose: a camelCase
-     * `objectKey` holding a storage path is ordinary data, and matching it would
-     * teach people to ignore this check.
+     * `_TOKEN` or `_PASSWORD` with a value of sixteen or more token characters
+     * -- `FAL_KEY`, `OAUTH_TOKEN_ENCRYPTION_KEY`. Case-sensitive on purpose: a
+     * camelCase `objectKey` holding a storage path is ordinary data, and
+     * matching it would teach people to ignore this check.
      */
     id: "env-credential-assignment",
     pattern:
-      /\b[A-Z][A-Z0-9_]*_(?:KEY|SECRET|TOKEN|PASSWORD)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])(?=[A-Za-z0-9._~+/=-]*[0-9])(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{16,}/,
+      /\b[A-Z][A-Z0-9_]*_(?:KEY|SECRET|TOKEN|PASSWORD)["']?\s*[:=]\s*["']?(?!(?:your|my|the|a)[-_ ]|<|\{\{|\$\{|process\.env|xxx|todo|changeme|example|dummy|fixture|placeholder|redacted|not[-_]a[-_]real|test[-_])[A-Za-z0-9._~+/=-]{16,}/,
   },
 ] as const;
 
