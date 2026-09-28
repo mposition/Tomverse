@@ -196,6 +196,51 @@ impl ExistingSessionAdapter {
     pub fn presence(&self, worker: &str) -> Option<&SessionPresence> {
         self.sessions.get(worker)
     }
+
+    pub fn names(&self) -> Vec<String> {
+        self.sessions.keys().cloned().collect()
+    }
+
+    pub fn observe(&mut self, name: &str, running: bool, at_boundary: bool) {
+        if let Some(session) = self.sessions.get_mut(name) {
+            session.running = running;
+            session.at_boundary = running && at_boundary;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkerHeartbeatPlan {
+    pub status: &'static str,
+    pub dispatch_ready: bool,
+}
+
+/**
+ * The server starts work only for an idle, dispatch-ready runtime. A session
+ * that is waiting or idle and has no live attempt is that state. A pending
+ * attempt, a mid-turn session, or a stopped session must not advertise it.
+ */
+pub fn plan_worker_heartbeat(
+    running: bool,
+    at_boundary: bool,
+    has_pending_attempt: bool,
+) -> WorkerHeartbeatPlan {
+    if !running {
+        return WorkerHeartbeatPlan {
+            status: "stopped",
+            dispatch_ready: false,
+        };
+    }
+    if has_pending_attempt || !at_boundary {
+        return WorkerHeartbeatPlan {
+            status: "busy",
+            dispatch_ready: false,
+        };
+    }
+    WorkerHeartbeatPlan {
+        status: "idle",
+        dispatch_ready: true,
+    }
 }
 
 impl WorkerAdapter for ExistingSessionAdapter {
@@ -889,14 +934,55 @@ pub async fn run_from_env() -> i32 {
         return 1;
     }
 
-    let sessions = ExistingSessionAdapter::new(registered);
-    let mut local = HttpLocal { client, base };
+    let mut sessions = ExistingSessionAdapter::new(registered);
+    let mut local = HttpLocal {
+        client: client.clone(),
+        base: base.clone(),
+    };
     let mut reserved = Vec::new();
-    let mut pending = Vec::new();
+    let mut pending: Vec<crate::tomverse_api::PulledDelivery> = Vec::new();
     let mut halted = false;
     let empty_prompts = BTreeMap::new();
 
     loop {
+        let roster_ok = refresh_registered_sessions(&client, &base, &mut sessions).await;
+        let pending_workers: HashSet<String> = pending.iter().map(|delivery| delivery.worker.clone()).collect();
+        for name in sessions.names() {
+            let Some(session) = sessions.presence(&name).cloned() else {
+                continue;
+            };
+            let has_pending = pending_workers.contains(&name);
+            let plan = if roster_ok {
+                plan_worker_heartbeat(session.running, session.at_boundary, has_pending)
+            } else {
+                plan_worker_heartbeat(true, false, true)
+            };
+            let published = api
+                .worker_heartbeat(
+                    &name,
+                    &session.instance_id,
+                    session.generation,
+                    plan.status,
+                    plan.dispatch_ready,
+                )
+                .await;
+            match published {
+                Ok(response) if response.accepted => {}
+                Ok(response) if response.reason.as_deref() == Some("active_execution") && plan.status == "idle" => {
+                    let _ = api
+                        .worker_heartbeat(&name, &session.instance_id, session.generation, "busy", false)
+                        .await;
+                    sessions.observe(&name, session.running, false);
+                }
+                Ok(response) if response.reason.as_deref() == Some("runtime_lease_lost") => {
+                    sessions.observe(&name, false, false);
+                }
+                _ => {
+                    sessions.observe(&name, session.running, false);
+                }
+            }
+        }
+
         if !halted {
             let mut prompts = DeliveryPrompts {
                 api: &api,
@@ -907,7 +993,7 @@ pub async fn run_from_env() -> i32 {
                 latch: true,
                 env_value: Some("1"),
                 halt: BridgeHalt::Running,
-                local_reachable: true,
+                local_reachable: roster_ok,
                 prompts: &empty_prompts,
                 reserved_attempt_ids: &reserved,
                 generation: 0,
@@ -993,6 +1079,25 @@ fn local_client(local_url: &str) -> Result<reqwest::Client> {
         builder = builder.danger_accept_invalid_certs(true);
     }
     builder.build().context("local AMUX client failed")
+}
+
+async fn refresh_registered_sessions(
+    client: &reqwest::Client,
+    base: &str,
+    sessions: &mut ExistingSessionAdapter,
+) -> bool {
+    let Ok(roster) = fetch_roster(client, base).await else {
+        return false;
+    };
+    let by_name: BTreeMap<String, SessionObservation> =
+        roster.into_iter().map(|row| (row.name.clone(), row)).collect();
+    for name in sessions.names() {
+        match by_name.get(&name) {
+            Some(row) => sessions.observe(&name, row.running, row.at_boundary),
+            None => sessions.observe(&name, false, false),
+        }
+    }
+    true
 }
 
 async fn fetch_roster(client: &reqwest::Client, base: &str) -> Result<Vec<SessionObservation>> {
@@ -1133,6 +1238,38 @@ mod tests {
             },
         );
         ExistingSessionAdapter::new(sessions)
+    }
+
+    #[test]
+    fn heartbeat_is_idle_only_at_a_boundary_without_a_pending_attempt() {
+        assert_eq!(
+            plan_worker_heartbeat(true, true, false),
+            WorkerHeartbeatPlan {
+                status: "idle",
+                dispatch_ready: true,
+            }
+        );
+        assert_eq!(
+            plan_worker_heartbeat(true, true, true),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_worker_heartbeat(true, false, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_worker_heartbeat(false, true, false),
+            WorkerHeartbeatPlan {
+                status: "stopped",
+                dispatch_ready: false,
+            }
+        );
     }
 
     #[test]

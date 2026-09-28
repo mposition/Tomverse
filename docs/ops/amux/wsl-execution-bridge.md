@@ -14,6 +14,8 @@ Rust runtime과 BoardDriver는 같은 WSL 프로세스에 둔다. 클라우드 s
 
 Bridge는 이미 실행 중인 로컬 AMUX 세션에만 작업을 넘긴다. 세션이 없으면 새로 만들지 않는다. Codex나 Claude 프로세스를 하나 더 띄우지 않는다.
 
+등록 직후 runtime은 `starting`이다. 서버는 `idle`이면서 dispatch-ready인 runtime에만 실행을 시작한다. 매 tick은 로컬 roster를 다시 읽고 worker heartbeat를 보낸다. 세션이 `waiting` 또는 `idle`이고 `agents_working`이 아니며, 그 worker의 진행 중인 attempt가 없을 때만 `idle`과 dispatch-ready를 알린다. 진행 중인 attempt, 작업 중 세션, roster에서 사라진 세션은 dispatch-ready가 아니다. heartbeat가 `active_execution`으로 거절되면 그 tick은 `busy`로 다시 알리고 새 실행을 시작하지 않는다. lease를 잃은 worker는 그 프로세스에서 다시 등록하지 않는다.
+
 전송은 `POST /api/sessions/<기존 세션>/send` 하나다. 본문은 `text`, `no_board: true`, `msg_id`만 가진다. `msg_id`는 Tomverse execution attempt id다. `/api/board`로 카드를 만들지 않는다.
 
 로컬 응답에 `no_board_refused`가 있으면 그 전송은 배정이 아니다. 로컬 보드가 같은 작업의 카드를 만들려 한 것이므로 재전송하지 않고, Tomverse attempt를 완료로 정산하지 않는다.
