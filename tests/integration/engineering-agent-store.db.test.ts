@@ -26,6 +26,7 @@ import {
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
   runEngineeringAgentTransaction,
+  setEngineeringAgentSwitch,
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
@@ -135,7 +136,7 @@ const startRun = async () => {
       leaseMs: 60_000,
     }),
   );
-  return { ...started, cardId: task.id };
+  return { ...started, cardId: task.id, amuxAttemptId: attempt.id };
 };
 
 const auditFor = (targetId: string) =>
@@ -174,11 +175,11 @@ test("a request is recorded before its work and answered from its record after",
 test("a run starts and ends with its audit entries, under the runner", async () => {
   const run = await startRun();
   assert.equal(run.modeAtStart, "t1");
-  const extended = await inTx((tx) => heartbeatEngineeringAgentRun(tx, { runId: run.runId, leaseMs: 120_000 }));
+  const extended = await inTx((tx) => heartbeatEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, leaseMs: 120_000 }));
   assert.ok(extended.getTime() > run.leaseExpiresAt.getTime());
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
   await refusedWith(
-    inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" })),
+    inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" })),
     "run_not_active",
   );
   const entries = await auditFor(run.runId);
@@ -306,7 +307,7 @@ test("a publish consumes its one capability on the write claim, and settles wher
     [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemClaimed, "engineering-agent-publisher"],
     [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering-agent-publisher"],
   ]);
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
   await retireBinding(bound.bindingId);
 });
 
@@ -342,7 +343,7 @@ test("an unknown outcome opens its decision item, and a person acknowledges it",
   const entry = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: auditLogId } });
   assert.equal(entry.actorUserId, owner.user!.id);
   assert.equal(systemActorOf(entry), undefined, "a person's action is not a system entry");
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
 });
 
 test("a T2 draft is stored only when clean, and decided with its audit entry in one transaction", async () => {
@@ -417,7 +418,7 @@ test("a T2 draft is stored only when clean, and decided with its audit entry in 
   const approval = await prisma.engineeringAgentApproval.findUniqueOrThrow({ where: { id: decided.approvalId } });
   assert.equal(approval.auditLogId, decided.auditLogId);
   assert.equal(approval.actorUserId, owner.user!.id);
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t2_draft", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t2_draft", halt: "none" }));
 });
 
 test("a binding records its observations once, its reviewer as a pair, and a re-bind supersedes it", async () => {
@@ -516,7 +517,7 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
   const observers = (await auditFor(current)).map((entry) => systemActorOf(entry));
   assert.ok(observers.includes("engineering-agent-observer"));
   assert.ok(observers.includes("engineering-agent-retention"));
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
 });
 
 test("work proven unwritten returns to the queue, and its next claim runs on a new capability", async () => {
@@ -561,7 +562,7 @@ test("work proven unwritten returns to the queue, and its next claim runs on a n
   const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   assert.equal(again.fencingToken, BigInt(2));
   const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
   await retireBinding(bound.bindingId);
 });
 
@@ -599,7 +600,7 @@ test("the switches refuse claims, capabilities and publishes, but never the reco
     await setMode("t1");
   }
   // Ending the run records what happened; no switch refuses it.
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
 });
 
 test("the publisher claims its next work, and the last look can only refuse", async () => {
@@ -621,7 +622,7 @@ test("the publisher claims its next work, and the last look can only refuse", as
       capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
     }),
   );
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
 
   const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   assert.ok(work && work.mode === "write", "a queued item with a live capability is claimed to write");
@@ -656,4 +657,130 @@ test("the publisher claims its next work, and the last look can only refuse", as
   }
   const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
   await retireBinding(bound.bindingId);
+});
+
+test("a halt stops the write claim before it consumes, and a latched circuit halts the last look", async () => {
+  // Three incidents within thirty days latch the circuit, and a run that later
+  // ends with `none` does not unlatch it. (They come first: in the first T1
+  // window a queued publish leaves no room for another run.)
+  for (const halt of ["unbound_app_pr", "none", "unbound_app_pr", "none", "unbound_app_pr", "none"] as const) {
+    const incident = await startRun();
+    await inTx((tx) =>
+      endEngineeringAgentRun(tx, { runId: incident.runId, amuxAttemptId: incident.amuxAttemptId, outcome: "no_change", halt }),
+    );
+  }
+
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:halt`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const issued = await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+    }),
+  );
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+
+  const claimNext = () => inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
+  const unspent = async () =>
+    (await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: issued.capabilityId } })).consumedAt === null;
+  assert.equal(await claimNext(), null, "a latched circuit claims nothing");
+  assert.ok(await unspent(), "a halted claim spends nothing");
+
+  // Only the acknowledgement clears the circuit.
+  const ackKey = "engineeringAgent.circuitAcknowledgedAt";
+  const acknowledge = (value: string) =>
+    prisma.appSetting.upsert({ where: { key: ackKey }, create: { key: ackKey, value }, update: { value } });
+  await acknowledge(new Date().toISOString());
+
+  // An open state mismatch halts too.
+  const { workItemId: mismatchId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, { kind: "state_mismatch", causeKey: `mismatch:${run.runId}`, runId: null, reason: "fixture" }),
+  );
+  assert.equal(await claimNext(), null, "an open mismatch claims nothing");
+  assert.ok(await unspent());
+  await prisma.engineeringAgentWorkItem.update({ where: { id: mismatchId }, data: { state: "resolved" } });
+
+  const work = await claimNext();
+  assert.ok(work && work.mode === "write" && work.workItemId === workItemId);
+
+  const incidentKey = "amux.incidentMode";
+  const previous = await prisma.appSetting.findUnique({ where: { key: incidentKey } });
+  const look = () =>
+    readEngineeringAgentLastLook(prisma, { workItemId, fencingToken: work.fencingToken, commitDigest: work.commitDigest });
+  try {
+    await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+    await prisma.appSetting.create({
+      data: {
+        key: incidentKey,
+        value: JSON.stringify({
+          version: 1,
+          state: "normal",
+          transition_id: null,
+          changed_at: new Date().toISOString(),
+          reason: "engineering agent store fixture",
+          ticket: "TEST",
+        }),
+      },
+    });
+    assert.deepEqual(await look(), { verdict: "no_objection" });
+    // With the acknowledgement before the incidents, the circuit is latched again.
+    await acknowledge("2000-01-01T00:00:00.000Z");
+    assert.deepEqual(await look(), { verdict: "refuse", reason: "halted" });
+  } finally {
+    await acknowledge(new Date().toISOString());
+    await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+    if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
+  }
+  const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+test("turning the mode on from off passes the armed gate; turning it off and freezing never do", async () => {
+  const keys = {
+    runner: "engineeringAgent.runnerLastFinishAt",
+    publisher: "engineeringAgent.publisherLastFinishAt",
+    monitors: "engineeringAgent.monitorsConfirmedAt",
+  };
+  const setSwitch = (name: "mode" | "freeze", value: string) =>
+    inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name, value }));
+  const record = (key: string, at: Date) =>
+    prisma.appSetting.upsert({ where: { key }, create: { key, value: at.toISOString() }, update: { value: at.toISOString() } });
+  try {
+    await setSwitch("mode", "off");
+    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
+    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
+
+    const now = new Date();
+    await record(keys.runner, now);
+    await record(keys.publisher, now);
+    // A monitor confirmation older than a week is no confirmation.
+    await record(keys.monitors, new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000));
+    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
+    await prisma.appSetting.update({ where: { key: keys.monitors }, data: { value: "not an instant" } });
+    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
+
+    await record(keys.monitors, now);
+    await setSwitch("mode", "shadow");
+    await setSwitch("mode", "shadow");
+    // Stopping is always allowed, whatever the records say.
+    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
+    await setSwitch("freeze", "true");
+    await setSwitch("freeze", "false");
+    await setSwitch("mode", "off");
+    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
+    await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
+    await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
+  }
 });

@@ -69,7 +69,7 @@ them is true. Reading any of it takes ordinary admin authentication; the
 slice adds, not these screens.
 
 **Engineering agent** is the engineering agent's record and the controls a
-person owns (`docs/policy/engineering-agent.md` §11, §12): T2 drafts decided,
+person owns (`docs/policy/engineering-agent.md §11` and `docs/policy/engineering-agent.md §12`): T2 drafts decided,
 decision items acknowledged, and the mode and freeze. It carries no badge in
 this slice. Reading takes ordinary admin authentication; every control takes
 `engineering-agent:write` and a recent sign-in, checked by its own route, and

@@ -530,6 +530,27 @@ export const ENGINEERING_AGENT_REGISTRATION_SETTING_KEY =
   "feature.engineeringAgentRegistration";
 export const ENGINEERING_AGENT_KILL_SWITCH_ENV = "ENGINEERING_AGENT_KILL_SWITCH";
 
+/**
+ * Instants the app keeps beside the switches, each written by one recorded
+ * act: the Admin acknowledgement that clears a latched circuit (§12), each
+ * service's report that a cycle ran to its end, and the operator's record that
+ * both dead-man monitors are active and alerting (the armed gate, §12). An
+ * absent or unparseable value is no record at all.
+ */
+export const ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.circuitAcknowledgedAt";
+export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
+export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
+export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
+
+const SETTING_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+/** A stored instant, in exactly the form `Date.prototype.toISOString` writes, or no record. */
+export const parseSettingInstant = (raw: string | null | undefined): Date | null => {
+  if (typeof raw !== "string" || !SETTING_INSTANT.test(raw)) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+};
+
 export const ENGINEERING_AGENT_MODES = ["off", "shadow", "t1"] as const;
 export type EngineeringAgentMode = (typeof ENGINEERING_AGENT_MODES)[number];
 
@@ -684,6 +705,26 @@ export const decideHalt = (reading: HaltReading): HaltValue => {
   if (reading.openStateMismatches > 0) return "state_mismatch";
   return "none";
 };
+
+/**
+ * The halt a run ends with. The runner reports what only it can see (the
+ * publisher App's identity, unbound App pull requests and refs); the app adds
+ * what it holds (a latched circuit, an open state mismatch). The result is the
+ * policy's priority over both, so a report of `none` can never lower a halt
+ * the app can see.
+ */
+export const combineRunHalt = (input: {
+  reported: HaltValue;
+  circuitLatched: boolean;
+  openStateMismatches: number;
+}): HaltValue =>
+  decideHalt({
+    appIdentityConfigured: input.reported !== "config_missing",
+    circuitLatched: input.circuitLatched || input.reported === "circuit_open",
+    unboundAppPrs: input.reported === "unbound_app_pr" ? 1 : 0,
+    unboundAppRefs: input.reported === "unbound_app_ref" ? 1 : 0,
+    openStateMismatches: input.openStateMismatches + (input.reported === "state_mismatch" ? 1 : 0),
+  });
 
 export const CIRCUIT_WINDOW_DAYS = 30;
 export const CIRCUIT_INCIDENT_LIMIT = 3;

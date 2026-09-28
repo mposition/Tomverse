@@ -362,6 +362,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
   },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "engineeringAgentApproval",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
 ];
 
 /**
@@ -408,6 +414,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 3,
     reason:
       "The data-domain registry names the content-free run model and describes retention and deletion. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "EngineeringAgentApproval",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the decision model as prismaModel and in its exclusion reason. It builds no SQL and opens no database connection.",
   },
   {
     path: "lib/promptRefinerShadowRunStore.ts",

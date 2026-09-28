@@ -8,10 +8,10 @@
  * rows: the claim's lease must still be live, and the commit object the
  * publisher built must hash to the digest the capability was issued with.
  *
- * The halt is read from what the database holds -- an open state mismatch, or
- * a halt recorded on the latest ended run. The unbound pull request and ref
- * checks are made by the observer, which records its reading on runs; until a
- * reading exists, only these are consulted.
+ * The halt is the store's reading of what the database holds -- an open state
+ * mismatch, a halt recorded on the latest ended run, or a circuit latched by
+ * repeated incidents since the last acknowledgement. The unbound pull request
+ * and ref checks are made by the observer, which records its reading on runs.
  */
 
 import "server-only";
@@ -24,7 +24,11 @@ import {
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   killSwitchEngaged,
 } from "@/lib/engineeringAgentCore";
-import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
+import {
+  engineeringAgentHalted,
+  readEngineeringAgentHaltState,
+  readEngineeringAgentSwitches,
+} from "@/lib/engineeringAgentStore";
 
 export type EngineeringAgentLastLookVerdict =
   | LastLookVerdict
@@ -38,7 +42,8 @@ export async function readEngineeringAgentLastLook(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<EngineeringAgentLastLookVerdict> {
   const switches = await readEngineeringAgentSwitches(db, env);
-  const [incident, item, consumed, openMismatch, latestEnded, clock] = await Promise.all([
+  const halt = await readEngineeringAgentHaltState(db);
+  const [incident, item, consumed, clock] = await Promise.all([
     db.appSetting.findUnique({ where: { key: AMUX_INCIDENT_SETTING_KEY }, select: { value: true } }),
     db.engineeringAgentWorkItem.findUnique({
       where: { id: input.workItemId },
@@ -47,12 +52,6 @@ export async function readEngineeringAgentLastLook(
     db.engineeringAgentCapability.findFirst({
       where: { workItemId: input.workItemId, claimFencingToken: input.fencingToken, consumedAt: { not: null } },
       select: { commitDigest: true },
-    }),
-    db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } }),
-    db.engineeringAgentRun.findFirst({
-      where: { status: { in: ["finished", "abandoned"] } },
-      orderBy: [{ endedAt: "desc" }, { id: "desc" }],
-      select: { halt: true },
     }),
     db.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "now"`,
   ]);
@@ -64,7 +63,7 @@ export async function readEngineeringAgentLastLook(
     killSwitch: killSwitchEngaged(env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
     // A missing or unreadable incident setting blocks, as it blocks AMUX admission.
     amuxIncidentFrozen: parseAmuxIncidentSetting(incident?.value).blocks_admission,
-    halted: openMismatch > 0 || (latestEnded !== null && latestEnded.halt !== "none"),
+    halted: engineeringAgentHalted(halt),
     currentFencingToken: writeClaim ? item.fencingToken.toString() : null,
     presentedFencingToken: input.fencingToken.toString(),
     consumed: consumed ? { workItemId: input.workItemId, claimFencingToken: input.fencingToken.toString() } : null,

@@ -217,6 +217,10 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // Engineering adapter: the run is written in the AMUX writer's own
+    // transaction after every AMUX lock, one fact or neither, and its
+    // settlement meets delivery ack and expired recovery without a deadlock.
+    "tests/integration/engineering-agent-amux-adapter.db.test.ts",
     // Engineering agent store: every change commits with its audit entry
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.

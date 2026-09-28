@@ -44,6 +44,7 @@ import { z } from "zod";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
+import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
 import {
   ENGINEERING_AGENT_VERIFIER_VERSION,
@@ -52,8 +53,13 @@ import {
   type IssueInput,
 } from "@/lib/engineeringAgentCapability";
 import {
+  ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY,
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
+  ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
+  ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY,
+  ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY,
+  HALT_VALUES,
   ENGINEERING_AGENT_MERGER_KINDS,
   ENGINEERING_AGENT_MODE_SETTING_KEY,
   ENGINEERING_AGENT_NOT_APPROVED_REASONS,
@@ -61,9 +67,13 @@ import {
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   QUEUE_TTL_DAYS,
   WRITE_ITEM_KINDS,
+  decideArmedGate,
   decideWriteItemTransition,
   engineeringBranchName,
+  isCircuitLatched,
   isRunId,
+  parseEngineeringAgentMode,
+  parseSettingInstant,
   resolveEngineeringAgentSwitches,
   unknownOutcomeDecisionCauseKey,
   writeItemStates,
@@ -103,6 +113,17 @@ export async function runEngineeringAgentTransaction<T>(
   options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
 ): Promise<T> {
   return client.$transaction((tx) => run(tx as unknown as EngineeringAgentTransaction), options);
+}
+
+/**
+ * The other place: an AMUX writer's own transaction, lent to the engineering
+ * adapter for the rows that must commit with the AMUX write (policy §11: a run
+ * is created in the transaction that starts its AMUX attempt). The AMUX brand
+ * already proves what this brand exists to prove -- that the client is an
+ * open transaction and not a whole PrismaClient -- so this only renames it.
+ */
+export function engineeringAgentTransactionInAmux(tx: AmuxAttachedTransaction): EngineeringAgentTransaction {
+  return tx as unknown as EngineeringAgentTransaction;
 }
 
 /** A write refused before it reached the database. The code is an enum, never text from outside. */
@@ -206,6 +227,57 @@ const requireSwitch = async (tx: EngineeringAgentTransaction, gate: EngineeringA
 };
 
 /* ------------------------------------------------------------------------- */
+/* Halt                                                                       */
+/* ------------------------------------------------------------------------- */
+
+export type EngineeringAgentHaltState = {
+  openStateMismatches: number;
+  /** The halt the latest terminated run recorded, or null before any run ended. */
+  latestEndedHalt: HaltValue | null;
+  circuitLatched: boolean;
+};
+
+// A halt the database holds that this build does not know is still a halt.
+const storedHalt = (raw: string): HaltValue =>
+  (HALT_VALUES as readonly string[]).includes(raw) ? (raw as HaltValue) : "config_missing";
+
+/**
+ * What the app itself knows about a halt (§12): an open state mismatch, the
+ * halt the latest ended run recorded, and whether repeated incidents latched
+ * the circuit since the last Admin acknowledgement. The unbound pull request
+ * and ref readings are the observer's, recorded on the runs it ends.
+ *
+ * The circuit is read over every terminated run since that acknowledgement,
+ * because incidents that latched it keep it latched however old they are.
+ */
+export async function readEngineeringAgentHaltState(
+  db: PrismaClient | Prisma.TransactionClient,
+): Promise<EngineeringAgentHaltState> {
+  const openStateMismatches = await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } });
+  const acknowledgement = await db.appSetting.findUnique({
+    where: { key: ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY },
+    select: { value: true },
+  });
+  const terminated = await db.engineeringAgentRun.findMany({
+    where: { status: { in: ["finished", "abandoned"] }, endedAt: { not: null } },
+    orderBy: [{ endedAt: "asc" }, { id: "asc" }],
+    select: { startedAt: true, endedAt: true, halt: true },
+  });
+  const runs = terminated.map((run) => ({ startedAt: run.startedAt, endedAt: run.endedAt!, halt: storedHalt(run.halt) }));
+  return {
+    openStateMismatches,
+    latestEndedHalt: runs.length === 0 ? null : runs[runs.length - 1].halt,
+    circuitLatched: isCircuitLatched({ runs, acknowledgedAt: parseSettingInstant(acknowledgement?.value) }),
+  };
+}
+
+/** Whether anything the app holds halts claims and pushes (§12). */
+export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
+  state.openStateMismatches > 0 ||
+  (state.latestEndedHalt !== null && state.latestEndedHalt !== "none") ||
+  state.circuitLatched;
+
+/* ------------------------------------------------------------------------- */
 /* Internal request idempotency (§10)                                         */
 /* ------------------------------------------------------------------------- */
 
@@ -306,30 +378,42 @@ export async function recordEngineeringAgentRunStart(
   return { runId: run.id, modeAtStart: run.modeAtStart, leaseExpiresAt: run.leaseExpiresAt };
 }
 
-/** Extends a live lease. A lease that has run out stays out (the trigger's rule). */
+/**
+ * Extends a live lease. A lease that has run out stays out (the trigger's
+ * rule). The AMUX attempt is named so a run's lease can move only with its own
+ * attempt's.
+ */
 export async function heartbeatEngineeringAgentRun(
   tx: EngineeringAgentTransaction,
-  input: { runId: string; leaseMs: number },
+  input: { runId: string; amuxAttemptId: string; leaseMs: number },
 ): Promise<Date> {
   if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) refuse("lease_invalid");
   const now = await databaseNow(tx);
   const leaseExpiresAt = new Date(now.getTime() + input.leaseMs);
   const moved = await tx.engineeringAgentRun.updateMany({
-    where: { id: input.runId, status: "active", leaseExpiresAt: { gt: now, lt: leaseExpiresAt } },
+    where: {
+      id: input.runId,
+      amuxAttemptId: input.amuxAttemptId,
+      status: "active",
+      leaseExpiresAt: { gt: now, lt: leaseExpiresAt },
+    },
     data: { leaseExpiresAt },
   });
   if (moved.count !== 1) refuse("run_lease_not_live");
   return leaseExpiresAt;
 }
 
-/** Ends a run once. `abandoned` is its own status; every other outcome finishes it. */
+/**
+ * Ends a run once. `abandoned` is its own status; every other outcome
+ * finishes it. The AMUX attempt is named so a run ends only with its own.
+ */
 export async function endEngineeringAgentRun(
   tx: EngineeringAgentTransaction,
-  input: { runId: string; outcome: RunOutcome; halt: HaltValue },
+  input: { runId: string; amuxAttemptId: string; outcome: RunOutcome; halt: HaltValue },
 ): Promise<void> {
   const status = input.outcome === "abandoned" ? "abandoned" : "finished";
   const moved = await tx.engineeringAgentRun.updateMany({
-    where: { id: input.runId, status: "active" },
+    where: { id: input.runId, amuxAttemptId: input.amuxAttemptId, status: "active" },
     data: { status, outcome: input.outcome, halt: input.halt },
   });
   if (moved.count !== 1) refuse("run_not_active");
@@ -634,7 +718,11 @@ export async function claimNextEngineeringAgentPublishWork(
   input: { leaseMs: number },
 ): Promise<EngineeringAgentPublishWork | null> {
   await requireSwitch(tx, "maintenanceAllowed");
-  const { publishAllowed } = await readEngineeringAgentSwitches(tx);
+  const switches = await readEngineeringAgentSwitches(tx);
+  // A halt stops claims (§12). A write claim consumes its capability, which
+  // nothing gives back, so the halt is read here, before the choice -- not
+  // left to the last look after it. Lookups are observation and continue.
+  const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
   const now = await databaseNow(tx);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
     SELECT w."id", w."state"
@@ -947,6 +1035,30 @@ export async function setEngineeringAgentSwitch(
   if (input.name === "freeze" && input.value !== "true" && input.value !== "false") refuse("freeze_value_invalid");
   const key = input.name === "mode" ? ENGINEERING_AGENT_MODE_SETTING_KEY : ENGINEERING_AGENT_FREEZE_SETTING_KEY;
   const previous = await tx.appSetting.findUnique({ where: { key }, select: { value: true } });
+  // Turning the mode on from `off` passes the armed gate (§12). Turning it
+  // off, and freezing, never do.
+  if (input.name === "mode" && input.value !== "off" && parseEngineeringAgentMode(previous?.value) === "off") {
+    const readings = await tx.appSetting.findMany({
+      where: {
+        key: {
+          in: [
+            ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY,
+            ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY,
+            ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    const at = (settingKey: string) => parseSettingInstant(readings.find((row) => row.key === settingKey)?.value);
+    const gate = decideArmedGate({
+      runnerLastFinishAt: at(ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY),
+      publisherLastFinishAt: at(ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY),
+      monitorsConfirmedAt: at(ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY),
+      now: await databaseNow(tx),
+    });
+    if (!gate.armed) refuse(`armed_gate_${gate.missing.join("_")}`);
+  }
   await tx.appSetting.upsert({ where: { key }, update: { value: input.value }, create: { key, value: input.value } });
   const known = (value: string | undefined) =>
     value === undefined ? null : ["off", "shadow", "t1", "true", "false"].includes(value) ? value : "unrecognised";

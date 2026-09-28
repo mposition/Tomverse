@@ -49,7 +49,7 @@ test("the engineering actors are listed system actors, and none is a person", ()
   }
 });
 
-test("the engineering transaction brand has exactly one cast, and nothing casts past a type", () => {
+test("the engineering transaction brand has exactly two casts, both in the store, and nothing casts past a type", () => {
   const files = [];
   const walk = (at) => {
     for (const entry of readdirSync(at, { withFileTypes: true })) {
@@ -75,8 +75,9 @@ test("the engineering transaction brand has exactly one cast, and nothing casts 
     };
     visit(sourceFile);
   }
-  assert.equal(casts.length, 1, casts.join(" | "));
-  assert.ok(casts[0].includes("engineeringAgentStore.ts"), casts[0]);
+  // One in runEngineeringAgentTransaction, one renaming an AMUX writer's lent transaction.
+  assert.equal(casts.length, 2, casts.join(" | "));
+  for (const cast of casts) assert.ok(cast.includes("engineeringAgentStore.ts"), cast);
   assert.doesNotMatch(source, /\bas (?:never|any)\b/);
 });
 
@@ -84,7 +85,9 @@ test("the engineering transaction brand has exactly one cast, and nothing casts 
 // writes records its actor in the same transaction.
 const UNAUDITED = new Map([
   ["runEngineeringAgentTransaction", "opens the transaction; writes nothing itself"],
+  ["engineeringAgentTransactionInAmux", "renames a lent transaction; writes nothing itself"],
   ["readEngineeringAgentSwitches", "reads only"],
+  ["readEngineeringAgentHaltState", "reads only"],
   ["acceptEngineeringAgentRequest", "idempotency bookkeeping for a request whose own change is audited"],
   ["moveEngineeringAgentRequest", "idempotency bookkeeping for a request whose own change is audited"],
   ["heartbeatEngineeringAgentRun", "a lease extension; the run's start and end are audited"],
@@ -124,7 +127,9 @@ const SWITCHED = [
 ];
 const RECORDS_WHAT_HAPPENED = [
   "runEngineeringAgentTransaction",
+  "engineeringAgentTransactionInAmux",
   "readEngineeringAgentSwitches",
+  "readEngineeringAgentHaltState",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",
   "heartbeatEngineeringAgentRun",

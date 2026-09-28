@@ -57,7 +57,30 @@ export const isEngineeringAgentRouteAuthorized = (
   return timingSafeEqual(digest(own), digest(provided));
 };
 
-export const ENGINEERING_AGENT_RESPONSE_MAX_BYTES = 256 * 1024;
+/**
+ * Larger than the widest answer any route gives: a claim carries a patch of up
+ * to ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES, and JSON writes each control
+ * character as six bytes, so that patch alone can serialise to six times its
+ * size. The idempotent runners also measure their result inside the work
+ * transaction, so an answer that cannot be sent is rolled back, not committed.
+ */
+export const ENGINEERING_AGENT_RESPONSE_MAX_BYTES = 512 * 1024;
+
+const serializedBytes = (body: unknown) =>
+  Buffer.byteLength(
+    JSON.stringify(body, (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value)),
+    "utf8",
+  );
+
+// What a route adds around the work's value: an envelope key and the braces.
+const RESPONSE_ENVELOPE_BYTES = 1024;
+
+/** Refuses, inside the work's transaction, a result the route could not send. */
+export const requireSendableResult = (value: unknown) => {
+  if (serializedBytes(value) + RESPONSE_ENVELOPE_BYTES > ENGINEERING_AGENT_RESPONSE_MAX_BYTES) {
+    throw new EngineeringAgentStoreRefusedError("response_too_large");
+  }
+};
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -68,7 +91,7 @@ export const engineeringAgentJson = (body: unknown, status = 200): Response => {
   const serialized = JSON.stringify(body, (_key, value: unknown) =>
     typeof value === "bigint" ? value.toString() : value,
   );
-  if (Buffer.byteLength(serialized, "utf8") > ENGINEERING_AGENT_RESPONSE_MAX_BYTES) {
+  if (serializedBytes(body) > ENGINEERING_AGENT_RESPONSE_MAX_BYTES) {
     return new Response(JSON.stringify({ error: "response_too_large" }), { status: 500, headers: NO_STORE_HEADERS });
   }
   return new Response(serialized, { status, headers: NO_STORE_HEADERS });
@@ -123,6 +146,39 @@ export async function runIdempotentEngineeringAgentRequest<T>(input: {
   body: unknown;
   work: (tx: EngineeringAgentTransaction) => Promise<T>;
 }): Promise<IdempotentOutcome<T>> {
+  const outcome = await runAttachedIdempotentEngineeringAgentRequest({
+    ...input,
+    work: (markCommitted) =>
+      runEngineeringAgentTransaction(
+        prisma,
+        async (tx) => {
+          const result = await input.work(tx);
+          requireSendableResult(result);
+          await markCommitted(tx);
+          return result;
+        },
+        { timeout: 30_000 },
+      ),
+  });
+  // The work above marks the request in its own transaction or throws.
+  if (outcome.kind === "not_committed") throw new Error("engineering agent request left uncommitted");
+  return outcome;
+}
+
+/**
+ * The same, for work whose transaction is not ours to open: the engineering
+ * adapter's, which runs inside an AMUX writer's own transaction. The work
+ * calls `markCommitted` in that transaction, so the AMUX write, the
+ * engineering rows and the request's `committed` are one commit. Work that
+ * returns without calling it did nothing of ours -- the AMUX writer refused
+ * before its attachment ran -- and the request is `aborted`.
+ */
+export async function runAttachedIdempotentEngineeringAgentRequest<T>(input: {
+  route: string;
+  requestKey: string;
+  body: unknown;
+  work: (markCommitted: (tx: EngineeringAgentTransaction) => Promise<void>) => Promise<T>;
+}): Promise<IdempotentOutcome<T> | { kind: "not_committed"; value: T }> {
   const requestDigest = createHash("sha256").update(JSON.stringify(input.body), "utf8").digest("hex");
   const accepted = await runEngineeringAgentTransaction(prisma, async (tx) => {
     const acceptance = await acceptEngineeringAgentRequest(tx, {
@@ -137,21 +193,23 @@ export async function runIdempotentEngineeringAgentRequest<T>(input: {
   });
   if (accepted.outcome === "replay") return { kind: "replay", state: accepted.state };
   if (accepted.outcome === "conflict") return { kind: "conflict" };
-  try {
-    const value = await runEngineeringAgentTransaction(
-      prisma,
-      async (tx) => {
-        const result = await input.work(tx);
-        await moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "committed" });
-        return result;
-      },
-      { timeout: 30_000 },
-    );
-    return { kind: "done", value };
-  } catch (error) {
-    await runEngineeringAgentTransaction(prisma, (tx) =>
+  const abort = () =>
+    runEngineeringAgentTransaction(prisma, (tx) =>
       moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "aborted" }),
     ).catch(() => undefined);
+  let committed = false;
+  try {
+    const value = await input.work(async (tx) => {
+      await moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "committed" });
+      committed = true;
+    });
+    if (!committed) {
+      await abort();
+      return { kind: "not_committed", value };
+    }
+    return { kind: "done", value };
+  } catch (error) {
+    await abort();
     throw error;
   }
 }

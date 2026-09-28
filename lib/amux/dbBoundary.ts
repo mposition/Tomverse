@@ -252,6 +252,57 @@ const boundedTransactionClient = (
   return wrap(tx) as Prisma.TransactionClient;
 };
 
+declare const AMUX_ATTACHED_TRANSACTION_BRAND: unique symbol;
+
+/**
+ * An AMUX writer's own open transaction, lent to an in-app adapter that an
+ * Agent policy approved (development-agent-orchestration.md, Authority,
+ * version 12). Only `withAmuxDbBoundary` produces one, so a value of this type
+ * is always the bounded transaction client and never a whole PrismaClient.
+ */
+export type AmuxAttachedTransaction = Prisma.TransactionClient & {
+  readonly [AMUX_ATTACHED_TRANSACTION_BRAND]: "amux-attached";
+};
+
+/**
+ * Work an adapter attaches to one AMUX writer call. The writer runs it only
+ * on the path where its own write succeeded, after every AMUX row it locks
+ * and before the commit fence, so the adapter's rows come after AMUX's in the
+ * lock order. A throw rolls the AMUX write back with it: the two are one fact
+ * or neither happened. The attached calls go through the same bounded client
+ * and count against the writer's ceiling, which `prismaCalls` widens.
+ */
+export type AmuxAttachment<R> = {
+  prismaCalls: number;
+  work: (
+    tx: AmuxAttachedTransaction,
+    result: R,
+    context: { dbNow: Date },
+  ) => Promise<void>;
+};
+
+/** Enough for an adapter's own row and its audit entry, and no more. */
+export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 12;
+
+/** The writer's boundary, widened by exactly what its attachment declared. */
+export const amuxBoundaryWithAttachment = (
+  boundary: AmuxDbBoundary,
+  attachment: { prismaCalls: number } | undefined,
+): AmuxDbBoundary => {
+  if (attachment === undefined) return boundary;
+  if (
+    !Number.isInteger(attachment.prismaCalls) ||
+    attachment.prismaCalls < 1 ||
+    attachment.prismaCalls > AMUX_ATTACHMENT_MAX_PRISMA_CALLS
+  ) {
+    throw new Error("AMUX attachment declares an invalid Prisma call budget");
+  }
+  return {
+    ...boundary,
+    prismaCallCeiling: boundary.prismaCallCeiling + attachment.prismaCalls,
+  };
+};
+
 /**
  * Every AMUX database operation uses one short interactive transaction.
  *
@@ -271,6 +322,8 @@ export async function withAmuxDbBoundary<T>(
       dbNow: Date;
       deadlineAt: Date;
       requireLeaseAt: (leaseExpiresAt: Date) => void;
+      /** The same bounded client as `tx`, typed for an `AmuxAttachment`. */
+      attachedTransaction: AmuxAttachedTransaction;
     },
   ) => Promise<T>,
 ): Promise<T> {
@@ -376,6 +429,7 @@ export async function withAmuxDbBoundary<T>(
       const result = await work(tx, {
         dbNow,
         deadlineAt,
+        attachedTransaction: tx as AmuxAttachedTransaction,
         requireLeaseAt(leaseExpiresAt) {
           if (
             leaseDeadlineAt === null ||
