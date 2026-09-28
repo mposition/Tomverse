@@ -342,10 +342,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * relations on AmuxWorkItem, AmuxExecutionAttempt and AdminAuditLog. None is
  * a marketing model or a webhook input, and no descriptor, webhook writer or
  * admission decision changes. The digest moves because the whole Prisma
- * schema is deliberately watched.
+ * schema is deliberately watched. develop moved the schema in the same days,
+ * so the value below is computed over the merged schema, not either side's.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "eba7c83f72f8a58c34f44e2ffbdadcaf341245071d4cff257d2bdf8cb291c659";
+  "ef9d48ed1779914d56f6e92be752485495356a293d2e2c751f43e602402988e0";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

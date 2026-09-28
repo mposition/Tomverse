@@ -1,6 +1,8 @@
+import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const es = {
+    emailConsent: consentCopyForLanguage("es"),
     skipLink: {
         toMainContent: "Saltar al contenido principal",
     },
@@ -2176,14 +2178,22 @@ export const es = {
     },
     privacyPolicy: {
         title: "Política de privacidad",
-        effective: "Vigente desde: 14 de septiembre de 2026",
+        effective: "Vigente desde: 28 de septiembre de 2026",
         intro: "Tomverse procesa información personal y datos de chat solo cuando es necesario para prestar el servicio.",
         collectedTitle: "Información que procesamos",
         collected: "Podemos procesar identificadores de cuenta, correo y datos de perfil proporcionados por proveedores de inicio de sesión, ajustes de usuario, chats y mensajes estándar, adjuntos, ajustes de compartición, datos de uso y registros de seguridad. Para evitar el abuso de promociones, procesamos hashes con clave derivados de una IP de cliente fiable y de la huella de un método de pago de Stripe. Tomverse no almacena datos brutos de tarjetas o cuentas bancarias.",
         purposeTitle: "Cómo se usa la información",
         purpose: "Usamos la información para autenticación, generación de respuestas de IA, almacenamiento, restauración, exportación y compartición de chats, procesamiento de adjuntos, seguridad del servicio, prevención de abusos y respuesta a incidentes.",
         providersTitle: "Proveedores externos de IA",
-        providers: "Los prompts, el contexto necesario, la selección de modelo y los adjuntos se envían al proveedor de IA seleccionado para generar respuestas. Los proveedores pueden procesar o conservar datos según sus propios términos y políticas, posiblemente en otro país.",
+        providers: "Al generar una respuesta, la pregunta, la conversación anterior necesaria para responderla y los archivos adjuntos se envían al proveedor del modelo que genera esa respuesta. La transferencia es una solicitud HTTPS cifrada, y su única finalidad es generar esa respuesta.",
+        providerTransferTitle: "Qué se envía al proveedor de chat",
+        providerTransfer1: "Qué se transfiere: la pregunta, la conversación anterior necesaria para responderla y los archivos adjuntos. Si la memoria de la cuenta o un asistente está activo, también se incluye el material de referencia descrito en esas secciones. Tomverse no adjunta a esta solicitud el identificador de la cuenta, el correo electrónico ni la IP del cliente.",
+        providerTransfer2: "Cuándo y cómo: al generar la respuesta, en una solicitud de API por HTTPS cifrado.",
+        providerTransfer3: "Quién lo recibe: el proveedor del modelo que genera la respuesta. Elegir un modelo es elegir a ese destinatario. Si comparas varios modelos, el proveedor de cada modelo elegido recibe el turno.",
+        providerTransfer4: "Finalidad: generar esa respuesta. Tomverse no envía el turno al proveedor para ninguna otra finalidad.",
+        providerTransfer5: "Cómo oponerse: no elijas ese modelo.",
+        providerTransfer6: "Efecto de oponerse: no recibes la respuesta de ese modelo. Elegir otro modelo envía el turno solo al proveedor de ese modelo. El resto de Tomverse sigue disponible.",
+        providerTransfer7: "Búsqueda web: en un turno en el que la propia Tomverse realiza la búsqueda, el texto de búsqueda se envía a Brave Search por HTTPS cifrado. Esa solicitud no incluye el identificador de la cuenta, el correo electrónico ni la IP del cliente. Desactivar la búsqueda web detiene esa transferencia. Cuando el proveedor del modelo realiza la búsqueda, ese texto forma parte de la solicitud al proveedor descrita arriba.",
         voiceInputTitle: "Entrada de voz",
         voiceInput: "Si usas el micrófono del cuadro de mensaje, la grabación se envía a un proveedor de reconocimiento de voz — hoy OpenAI — con el único fin de convertirla en texto, La entidad que la recibe es OpenAI OpCo, LLC, domiciliada en Estados Unidos. Como se usa la API global de OpenAI, la infraestructura que realiza el procesamiento no se limita a Estados Unidos: la grabación puede procesarse allí donde operan OpenAI y sus subencargados. Tomverse no almacena el audio: permanece en memoria durante esa única solicitud y nunca se escribe en una base de datos, un almacenamiento de archivos, un registro ni un sistema de seguimiento de errores; una grabación que canceles no se envía a ninguna parte. El texto resultante se coloca en el cuadro de mensaje para que lo leas, lo edites o lo borres antes de enviar nada; hasta que lo envíes es un borrador en tu dispositivo y Tomverse no guarda nada. Una vez enviado es un mensaje corriente y se le aplica el resto de esta política. La entrada de voz está disponible con o sin la sesión iniciada. Si no la has iniciado, la solicitud se atribuye al mismo identificador anónimo que usa el resto de tu actividad como invitado; en ningún caso se guarda la grabación.",
         voiceInputTransferTitle: "Transferencia internacional de las grabaciones de voz",

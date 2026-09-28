@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -23,9 +24,18 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import {
+  APPLICATION_FALLBACK_PROTECTED,
+  GUEST_LEAD_PROTECTED,
+  replacementOptionDisabled,
+  replacementRole,
+  substituteIfTrioMemberRemoved,
+} from "@/lib/defaultModelConsole";
 import {
   DEFAULT_MODEL_LIFECYCLE_FILTER,
   MODEL_LIFECYCLE_FILTERS,
@@ -218,6 +228,79 @@ const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
   return `${base}-${suffix}`;
 };
 
+function priceViewHidesInputs(view: AdoptionPriceView | null | undefined) {
+  return view?.shape === "tiered" || view?.shape === "inherited" || view?.shape === "withheld";
+}
+
+const EMPTY_PRICE_COLUMNS = {
+  inputUsdPerMillionTokens: null,
+  outputUsdPerMillionTokens: null,
+  cachedInputPriceMultiplier: null,
+} as const;
+
+function formatUsdPerMillion(value: number) {
+  return `US$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
+function PriceBandTable({
+  view,
+  labels,
+}: {
+  view: Extract<AdoptionPriceView, { shape: "tiered" }>;
+  labels: {
+    short: string;
+    long: string;
+    input: string;
+    cached: string;
+    cacheWrite: string;
+    output: string;
+  };
+}) {
+  const cell = (value: number | null) => (value === null ? "-" : formatUsdPerMillion(value));
+  return (
+    <table data-testid="adopt-price-bands" className="mt-2 w-full border-collapse text-left text-xs text-zinc-300">
+      <thead>
+        <tr className="text-[11px] uppercase tracking-wide text-zinc-500">
+          <th className="py-1 pr-3 font-bold" />
+          <th className="py-1 pr-3 font-bold">{labels.input}</th>
+          <th className="py-1 pr-3 font-bold">{labels.cached}</th>
+          <th className="py-1 pr-3 font-bold">{labels.cacheWrite}</th>
+          <th className="py-1 font-bold">{labels.output}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(
+          [
+            [labels.short, view.short],
+            [labels.long, view.long],
+          ] as const
+        ).map(([label, band]) => (
+          <tr key={label} className="border-t border-zinc-800 font-mono">
+            <th className="py-1.5 pr-3 text-left font-sans text-[11px] font-bold text-zinc-400">{label}</th>
+            <td className="py-1.5 pr-3">{cell(band.inputUsdPerMillionTokens)}</td>
+            <td className="py-1.5 pr-3">{cell(band.cachedInputUsdPerMillionTokens)}</td>
+            <td className="py-1.5 pr-3">{cell(band.cacheWriteUsdPerMillionTokens)}</td>
+            <td className="py-1.5">{cell(band.outputUsdPerMillionTokens)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DraftHints({ lines }: { lines: readonly string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <span className="text-[11px] font-normal normal-case tracking-normal text-zinc-400">
+      {lines.map((line) => (
+        <span key={line} className="mt-1 block leading-relaxed">
+          {line}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function AdminModelRegistryPanel() {
   const m = useAdminMessages(adminModelRegistryMessages);
   const { locale } = useAdminLocale();
@@ -226,6 +309,7 @@ export function AdminModelRegistryPanel() {
   const searchParams = useSearchParams();
   const requestedProvider = searchParams.get("provider");
   const [apiFailure, setApiFailure] = useState<string | null>(null);
+  const [apiFailureCode, setApiFailureCode] = useState<string | null>(null);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [saveRefusal, setSaveRefusal] = useState<"replace" | "plain" | null>(null);
   const [models, setModels] = useState<AdminModel[]>([]);
@@ -327,12 +411,15 @@ export function AdminModelRegistryPanel() {
   // a model whose price the override columns cannot hold. Shown to copy into a
   // pull request; nothing in this panel applies it.
   const [pricingProfileProposal, setPricingProfileProposal] = useState<string | null>(null);
+  const [priceView, setPriceView] = useState<AdoptionPriceView | null>(null);
+  const [priceOverrideOpen, setPriceOverrideOpen] = useState(false);
   // The last id a profile lookup settled for, success or failure. Until the id
   // in the form has settled, nothing about its profile is known: the save
   // waits, and the blank fields make no claim.
   const [lookupSettledForKey, setLookupSettledForKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
+  const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<EnvironmentStatus | null>(null);
 
@@ -343,11 +430,13 @@ export function AdminModelRegistryPanel() {
       const data = (await response.json().catch(() => null)) as {
         models?: AdminModel[];
         securityFindings?: RegistrySecurityFinding[];
+        guestLead?: { stored: string | null; effective: string | null };
         error?: string;
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
       setModels(data.models);
       setSecurityFindings(data.securityFindings || []);
+      setGuestLead(data.guestLead ?? null);
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : m.toast.loadFailed, "error");
     } finally {
@@ -358,6 +447,17 @@ export function AdminModelRegistryPanel() {
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  // A protected id can be chosen before the guest lead has loaded, while its
+  // option is still enabled. Once the lead arrives the option disables, and
+  // the value shown and submitted has to follow. Derived, rather than cleared
+  // from an effect: writing state in that effect fails the hook lint that CI
+  // runs, and a stale id must not ride into the replace request.
+  const selectedReplacesModelId = replacementOptionDisabled(
+    replacementRole(adoptReplacesModelId, guestLead?.effective ?? null)
+  )
+    ? ""
+    : adoptReplacesModelId;
 
   // `?adopt=<work item>` arrives from the discovery queue. The draft is the
   // scan's own answer to the fields it can answer -- identifier, display name,
@@ -381,6 +481,7 @@ export function AdminModelRegistryPanel() {
           notes?: string[];
           suggestions?: { reasoning?: string | null; price?: boolean };
           pricingProfileProposal?: string | null;
+          priceView?: AdoptionPriceView | null;
           effectiveTokenLimits?: typeof effectiveTokenLimits;
           worstCaseInputTokens?: number;
           profilePrice?: {
@@ -395,7 +496,17 @@ export function AdminModelRegistryPanel() {
           throw new Error(data?.error || m.toast.adoptionDraftFailed);
         }
         if (cancelled) return;
-        setForm({ ...emptyForm(), ...data.fields });
+        const hidePriceInputs = priceViewHidesInputs(data.priceView);
+        if (hidePriceInputs) {
+          touchedDraftFieldsRef.current.delete("inputUsdPerMillionTokens");
+          touchedDraftFieldsRef.current.delete("outputUsdPerMillionTokens");
+          touchedDraftFieldsRef.current.delete("cachedInputPriceMultiplier");
+        }
+        setForm({
+          ...emptyForm(),
+          ...data.fields,
+          ...(hidePriceInputs ? EMPTY_PRICE_COLUMNS : {}),
+        });
         setAdoptUnknowns(data.unknowns || []);
         setAdoptNotes(data.notes || []);
         setProfileLookupFailedForKey(null);
@@ -407,6 +518,12 @@ export function AdminModelRegistryPanel() {
         setAdoptPriceSuggested(Boolean(data.suggestions?.price));
         setAdoptPriceConfirmed(false);
         setPricingProfileProposal(data.pricingProfileProposal ?? null);
+        setPriceView(data.priceView ?? null);
+        setPriceOverrideOpen(false);
+        if (hidePriceInputs) {
+          setAdoptPriceSuggested(false);
+          setAdoptPriceConfirmed(false);
+        }
         setAdoptReasoningConfirmed(false);
         setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
         touchedDraftFieldsRef.current = new Set();
@@ -550,6 +667,7 @@ export function AdminModelRegistryPanel() {
       const settleFailed = () => {
         setProfileLookupFailedForKey(lookupKey);
         setLookupSettledForKey(lookupKey);
+        setPriceView(null);
       };
       void (async () => {
         try {
@@ -580,6 +698,7 @@ export function AdminModelRegistryPanel() {
             fields?: Partial<FormState>;
             effectiveTokenLimits?: typeof effectiveTokenLimits;
             pricingProfileProposal?: string | null;
+            priceView?: AdoptionPriceView | null;
             suggestions?: { reasoning?: string | null; price?: boolean };
           } | null;
           if (cancelled) return;
@@ -593,10 +712,21 @@ export function AdminModelRegistryPanel() {
           setProfilePrice(data.profilePrice ?? null);
           setProfileLookupFailedForKey(null);
           setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
+          const hidePriceInputs = priceViewHidesInputs(data.priceView);
+          if (hidePriceInputs) {
+            touchedDraftFieldsRef.current.delete("inputUsdPerMillionTokens");
+            touchedDraftFieldsRef.current.delete("outputUsdPerMillionTokens");
+            touchedDraftFieldsRef.current.delete("cachedInputPriceMultiplier");
+            setAdoptPriceSuggested(false);
+            setAdoptPriceConfirmed(false);
+            setPriceOverrideOpen(false);
+          }
           // Only an untouched prefill follows the key. A number the operator
-          // typed is theirs and stays.
-          if (data.fields) {
-            const fields = data.fields;
+          // typed is theirs and stays, unless this draft hides the price
+          // boxes: a number left in a closed override would replace the
+          // profile or both bands on save.
+          if (data.fields || hidePriceInputs) {
+            const fields = data.fields ?? {};
             const untouched = DRAFT_FOLLOWED_FIELDS.filter(
               (field) => !touchedDraftFieldsRef.current.has(field)
             );
@@ -607,6 +737,7 @@ export function AdminModelRegistryPanel() {
               ...Object.fromEntries(
                 untouched.map((field) => [field, fields[field] ?? DRAFT_FIELD_BLANK[field]])
               ),
+              ...(hidePriceInputs ? EMPTY_PRICE_COLUMNS : {}),
             }));
             if (!touchedDraftFieldsRef.current.has("reasoning")) {
               setAdoptReasoningSuggested(Boolean(data.suggestions?.reasoning));
@@ -618,6 +749,7 @@ export function AdminModelRegistryPanel() {
             // documentation is exactly the order in which an unchecked price
             // would otherwise reach the save.
             const priceFilledFromDocs =
+              !hidePriceInputs &&
               Boolean(data.suggestions?.price) &&
               PRICE_FIELDS.some(
                 (field) =>
@@ -633,6 +765,7 @@ export function AdminModelRegistryPanel() {
             }
           }
           setPricingProfileProposal(data.pricingProfileProposal ?? null);
+          setPriceView(data.priceView ?? null);
           setGuidanceKey(lookupKey);
           setLookupSettledForKey(lookupKey);
           if (data.unknowns) setAdoptUnknowns(data.unknowns);
@@ -669,6 +802,25 @@ export function AdminModelRegistryPanel() {
   // Not current without a key: an emptied id is not the id the guidance was
   // written for, and showing it would put the previous proposal back on screen.
   const guidanceIsCurrent = !adoptWorkItemId || (lookupKey !== null && guidanceKey === lookupKey);
+  const adoptionGuidance = useMemo(
+    () =>
+      partitionAdoptionGuidance(
+        guidanceIsCurrent ? [...adoptUnknowns, ...adoptNotes] : []
+      ),
+    [guidanceIsCurrent, adoptUnknowns, adoptNotes]
+  );
+  const shownPriceView = guidanceIsCurrent ? priceView : null;
+  const priceFieldHints = priceHintsForView(
+    adoptionGuidance.byField.price,
+    shownPriceView?.shape ?? null
+  );
+  const priceBoxesAreOverride =
+    shownPriceView?.shape === "tiered" ||
+    shownPriceView?.shape === "inherited" ||
+    shownPriceView?.shape === "withheld";
+  const tieredColumnsStayEmpty =
+    shownPriceView?.shape === "tiered" || shownPriceView?.shape === "withheld";
+  const priceFloorText = tieredColumnsStayEmpty ? m.adopt.tieredSaveRefused : m.floor.pricesUnknown;
   const blankTokens = adoptWorkItemId
     ? blankTokenFieldValues({
         // Unknown while the lookup is pending or has failed: whether a blank
@@ -731,7 +883,7 @@ export function AdminModelRegistryPanel() {
       })
     : null;
   const adoptSaveBlocked = adoptBlock !== null;
-  const replaceMissing = Boolean(adoptWorkItemId) && !adoptReplacesModelId.trim();
+  const replaceMissing = Boolean(adoptWorkItemId) && !selectedReplacesModelId.trim();
   const adoptBlockText =
     adoptBlock === "reason_too_short"
       ? m.adopt.reasonTooShort
@@ -750,7 +902,7 @@ export function AdminModelRegistryPanel() {
                     : adoptBlock === "output_cap_unknown"
                       ? m.floor.outputCapUnknown
                       : adoptBlock === "prices_unknown"
-                        ? m.floor.pricesUnknown
+                        ? priceFloorText
                         : adoptBlock === "credits_below_floor" && isCreditFloor(creditFloor)
                           ? m.adopt.creditsBelowFloor(creditFloor.credits, creditFloor.usageClass)
                           : null;
@@ -845,13 +997,14 @@ export function AdminModelRegistryPanel() {
       return;
     }
     setApiFailure(null);
+    setApiFailureCode(null);
     setSaving(true);
     try {
       const isNew = editingId === "new";
       const updatePayload: Partial<FormState> = { ...form };
       delete updatePayload.id;
       const replacesId =
-        replaces && adoptWorkItemId ? adoptReplacesModelId.trim() : "";
+        replaces && adoptWorkItemId ? selectedReplacesModelId.trim() : "";
       // Adopting: the create and the queue transition are one act on the
       // server, so the work item travels with the request rather than being
       // moved by a second call that can fail on its own. Retiring an existing
@@ -878,9 +1031,23 @@ export function AdminModelRegistryPanel() {
             model?: AdminModel;
             retired?: AdminModel;
             error?: string;
+            code?: string;
           }
         | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.saveFailed);
+      if (!response.ok || !data?.model) {
+        const protectedId = replacesId || form.id;
+        if (data?.code === APPLICATION_FALLBACK_PROTECTED || data?.code === GUEST_LEAD_PROTECTED) {
+          setApiFailureCode(data.code);
+          setApiFailure(
+            data.code === APPLICATION_FALLBACK_PROTECTED
+              ? m.adopt.fallbackProtected(protectedId)
+              : m.adopt.guestLeadProtected(protectedId)
+          );
+          return;
+        }
+        setApiFailureCode(null);
+        throw new Error(data?.error || m.toast.saveFailed);
+      }
       setModels((current) => {
         const replacedId = data.retired?.id;
         const next = current.filter(
@@ -897,6 +1064,7 @@ export function AdminModelRegistryPanel() {
       const replaced = Boolean(data.retired);
       setAdoptWorkItemId(null);
       setAdoptUnknowns([]);
+      setPriceView(null);
       setAdoptReason("");
       setAdoptReplacesModelId("");
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
@@ -1096,6 +1264,9 @@ export function AdminModelRegistryPanel() {
                     <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.provider}</span>
                     <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.minimumPlan}+</span>
                     <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
+                    {model.id === APP_DEFAULTS.defaultModelId ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleFallback}</span> : null}
+                    {guestLead?.effective === model.id ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleGuestLead}</span> : null}
+                    {(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
                     <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
                       <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
                     </span>
@@ -1139,63 +1310,33 @@ export function AdminModelRegistryPanel() {
                   </p>
                 ) : null}
               </div>
-              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); setAdoptReplacesModelId(""); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); setPriceView(null); setAdoptReplacesModelId(""); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="grid gap-6 p-5">
               {adoptWorkItemId ? (
                 <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
-                    {m.adopt.unknownsTitle}
-                  </p>
-                  <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
-                    {guidanceIsCurrent ? (
-                      adoptUnknowns.map((item) => <li key={item}>· {item}</li>)
-                    ) : !lookupKey ? (
-                      <li>· {m.adopt.draftNeedsId}</li>
-                    ) : profileLookupFailed ? (
-                      <li>· {m.adopt.draftFailed}</li>
-                    ) : (
-                      <li>· {m.adopt.draftReloading}</li>
-                    )}
-                  </ul>
-                  {guidanceIsCurrent && adoptNotes.length ? (
+                  {guidanceIsCurrent && adoptionGuidance.blockers.length ? (
                     <>
-                      <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                        {m.adopt.notesTitle}
+                      <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
+                        {m.adopt.unknownsTitle}
                       </p>
-                      <ul className="mt-2 grid gap-1 text-xs text-zinc-400">
-                        {adoptNotes.map((item) => (
+                      <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
+                        {adoptionGuidance.blockers.map((item) => (
                           <li key={item}>· {item}</li>
                         ))}
                       </ul>
                     </>
-                  ) : null}
-                  {guidanceIsCurrent && pricingProfileProposal ? (
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                          {m.adopt.profileProposalTitle}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard
-                              ?.writeText(pricingProfileProposal)
-                              .then(
-                                () => dispatchAppToast(m.adopt.proposalCopied, "success"),
-                                () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
-                              );
-                          }}
-                          className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
-                        >
-                          {m.adopt.copyProposal}
-                        </button>
-                      </div>
-                      <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
-                        {pricingProfileProposal}
-                      </pre>
-                    </div>
+                  ) : !guidanceIsCurrent ? (
+                    <ul className="grid gap-1 text-xs text-zinc-300">
+                      {!lookupKey ? (
+                        <li>· {m.adopt.draftNeedsId}</li>
+                      ) : profileLookupFailed ? (
+                        <li>· {m.adopt.draftFailed}</li>
+                      ) : (
+                        <li>· {m.adopt.draftReloading}</li>
+                      )}
+                    </ul>
                   ) : null}
                   {profileLookupFailed ? (
                     <p className="mt-3 text-xs text-amber-200">
@@ -1220,22 +1361,65 @@ export function AdminModelRegistryPanel() {
                     <label className={`${labelClass} mt-3`}>
                       {m.adopt.replaceLabel}
                       <select
-                        value={adoptReplacesModelId}
-                        onChange={(event) => setAdoptReplacesModelId(event.target.value)}
+                        value={selectedReplacesModelId}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          const role = replacementRole(next, guestLead?.effective ?? null);
+                          if (replacementOptionDisabled(role)) return;
+                          setAdoptReplacesModelId(next);
+                        }}
                         className={inputClass}
                         data-testid="adopt-replaces-model"
                       >
                         <option value="">{m.adopt.replaceNone}</option>
                         {models
                           .filter((model) => model.provider === form.provider && model.id !== form.id && !model.catalogDeleted)
-                          .map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.name} ({model.id})
-                              {model.status !== "enabled" ? ` · ${model.status}` : ""}
-                            </option>
-                          ))}
+                          .map((model) => {
+                            const role = replacementRole(model.id, guestLead?.effective ?? null);
+                            const mark =
+                              role === "application_fallback"
+                                ? m.adopt.replaceFallback
+                                : role === "guest_lead"
+                                  ? m.adopt.replaceGuestLead
+                                  : model.status !== "enabled"
+                                    ? ` · ${model.status}`
+                                    : "";
+                            return (
+                              <option key={model.id} value={model.id} disabled={replacementOptionDisabled(role)}>
+                                {model.name} ({model.id}){mark}
+                              </option>
+                            );
+                          })}
                       </select>
                     </label>
+                    {models.some((model) => model.provider === form.provider && model.id === APP_DEFAULTS.defaultModelId && !model.catalogDeleted) ? (
+                      <p className="mt-2 text-xs leading-relaxed text-zinc-300" data-testid="adopt-fallback-guidance">
+                        {m.adopt.fallbackGuidance(
+                          models.find((model) => model.id === APP_DEFAULTS.defaultModelId)?.name || APP_DEFAULTS.defaultModelId,
+                          APP_DEFAULTS.defaultModelId
+                        )}{" "}
+                        <Link href="/admin/platform#default-models" className="font-bold text-white underline">
+                          {m.adopt.openDefaultModels}
+                        </Link>
+                      </p>
+                    ) : null}
+                    {(() => {
+                      const selected = models.find((model) => model.id === selectedReplacesModelId);
+                      if (!selected) return null;
+                      const eligible = createGuestEligibilityCheck((id) => models.find((model) => model.id === id));
+                      const substituteId = substituteIfTrioMemberRemoved(
+                        selected.id,
+                        guestLead?.effective ?? null,
+                        eligible
+                      );
+                      if (!substituteId) return null;
+                      const substitute = models.find((model) => model.id === substituteId);
+                      return (
+                        <p className="mt-2 text-xs leading-relaxed text-amber-200" data-testid="adopt-trio-warning">
+                          {m.adopt.trioWarning(selected.name, substitute?.name || substituteId)}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : null}
@@ -1275,14 +1459,14 @@ export function AdminModelRegistryPanel() {
                     <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                       {creditFloor.reason === "output_cap_unknown"
                         ? m.floor.outputCapUnknown
-                        : m.floor.pricesUnknown}
+                        : priceFloorText}
                     </p>
                   )}
                 </div>
               ) : null}
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-2">
                 <legend className="px-2 text-sm font-bold text-white">{m.identity.legend}</legend>
-                <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
+                <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.registryId} /> : null}</label>
                 <label className={labelClass}>{m.identity.displayName}<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
                 <label className={labelClass}>{m.identity.provider}<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>{m.identity.apiModel}<input value={form.apiModel} onChange={(e) => { if (adoptWorkItemId && e.target.value.trim() !== form.apiModel.trim()) startNewPair(); setField("apiModel", e.target.value); }} className={inputClass} placeholder={m.identity.apiModelPlaceholder} /></label>
@@ -1298,10 +1482,11 @@ export function AdminModelRegistryPanel() {
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.catalogue.legend}</legend>
-                <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
-                <label className={labelClass}>{m.catalogue.usageClass}<select value={saleProposal?.usageClass ?? form.usageClass} onChange={(e) => { const usageClass = e.target.value as ModelUsageClass; if (saleProposal) { setForm((current) => ({ ...current, usageClass, creditWeight: saleProposal.creditWeight })); } else { setField("usageClass", usageClass); } setAdoptClassChosen(true); }} className={inputClass}>{ADOPTION_USAGE_CLASSES.map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{saleProposal ? m.adopt.classSuggested : m.adopt.classRequired}{saleProposal ? <button type="button" onClick={(event) => { event.preventDefault(); setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: saleProposal.creditWeight })); setAdoptClassChosen(true); }} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmReasoning}</button> : null}</span> : null}</label>
+                <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select>{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.minimumPlan} /> : null}</label>
+                <label className={labelClass}>{m.catalogue.usageClass}<select value={saleProposal?.usageClass ?? form.usageClass} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => { const usageClass = e.target.value as ModelUsageClass; if (saleProposal) { setForm((current) => ({ ...current, usageClass, creditWeight: saleProposal.creditWeight })); } else { setField("usageClass", usageClass); } setAdoptClassChosen(true); }} className={inputClass}>{ADOPTION_USAGE_CLASSES.map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{saleProposal ? m.adopt.classSuggested : m.adopt.classRequired}{saleProposal ? <button type="button" onClick={(event) => { event.preventDefault(); setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: saleProposal.creditWeight })); setAdoptClassChosen(true); }} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmReasoning}</button> : null}</span> : null}</label>
                 <label className={labelClass}>{m.catalogue.creditWeight}<input type="number" min={1} max={1000} value={saleProposal?.creditWeight ?? form.creditWeight} onChange={(e) => { const credits = Number(e.target.value); if (saleProposal) { setForm((current) => ({ ...current, usageClass: saleProposal.usageClass, creditWeight: credits })); } else { setField("creditWeight", credits); } if (adoptWorkItemId) setAdoptClassChosen(true); }} className={inputClass} /></label>
-                <label className={labelClass}>{m.catalogue.runtimeStatus}<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">{m.catalogue.status.enabled}</option><option value="limited">{m.catalogue.status.limited}</option><option value="disabled">{m.catalogue.status.disabled}</option><option value="coming-soon">{m.catalogue.status.comingSoon}</option></select></label>
+                <label className={labelClass}>{m.catalogue.runtimeStatus}<select value={form.status} disabled={editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">{m.catalogue.status.enabled}</option><option value="limited">{m.catalogue.status.limited}</option><option value="disabled">{m.catalogue.status.disabled}</option><option value="coming-soon">{m.catalogue.status.comingSoon}</option></select></label>
+                {editingId !== "new" && form.id === APP_DEFAULTS.defaultModelId ? <p className="md:col-span-4 text-xs leading-relaxed text-amber-200">{m.adopt.fallbackLocked}</p> : null}
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> {m.catalogue.publiclyListed}</label>
                 {adoptWorkItemId ? null : <label className={`${labelClass} md:col-span-2`}>{m.catalogue.replacementModel}<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">{m.catalogue.none}</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>}
                 <label className={labelClass}>{m.catalogue.sortOrder}<input type="number" value={form.sortOrder} onChange={(e) => setField("sortOrder", Number(e.target.value))} className={inputClass} /></label>
@@ -1311,27 +1496,99 @@ export function AdminModelRegistryPanel() {
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.capabilities.legend}</legend>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
-                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmReasoning}</button></span> : null}</label>
-                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
+                  {adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.supportsImage} /> : null}
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
+                  {adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.supportsNativePdf} /> : null}
+                </div>
+                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmReasoning}</button></span> : null}{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.reasoning} /> : null}</label>
+                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.contextWindowTokens} /> : null}</label>
                 <label className={labelClass}>{m.capabilities.maxImages}<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>{m.capabilities.maxBase64ImageBytes}<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">
                 <legend className="px-2 text-sm font-bold text-white">{m.tokens.legend}</legend>
-                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
-                <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} /></label>
-                <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
-                {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
-                  <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
-                    {m.adopt.priceFromDocs}
-                    <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
+                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.maxOutputTokens} /> : null}</label>
+                <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.reservationOutputTokens} /> : null}</label>
+                {shownPriceView?.shape === "tiered" ? (
+                  <div className="md:col-span-3">
+                    <p className="text-xs leading-relaxed text-zinc-300">
+                      {m.adopt.tieredPriceLead(shownPriceView.thresholdTokens.toLocaleString(adminIntlLocale(locale)))}
+                    </p>
+                    <PriceBandTable
+                      view={shownPriceView}
+                      labels={{
+                        short: m.adopt.bandShort,
+                        long: m.adopt.bandLong,
+                        input: m.adopt.bandInput,
+                        cached: m.adopt.bandCached,
+                        cacheWrite: m.adopt.bandCacheWrite,
+                        output: m.adopt.bandOutput,
+                      }}
+                    />
                   </div>
                 ) : null}
-                <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
-                <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                {shownPriceView?.shape === "inherited" ? (
+                  <p className="md:col-span-3 text-xs leading-relaxed text-zinc-300">{m.adopt.inheritedPriceLead}</p>
+                ) : null}
+                {shownPriceView?.shape === "tiered" && pricingProfileProposal ? (
+                  <div className="md:col-span-3 flex items-start justify-between gap-3">
+                    <p className="text-xs leading-relaxed text-zinc-400">{m.adopt.profileProposalTitle}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard
+                          ?.writeText(pricingProfileProposal)
+                          .then(
+                            () => dispatchAppToast(m.adopt.proposalCopied, "success"),
+                            () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
+                          );
+                      }}
+                      className="shrink-0 rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
+                    >
+                      {m.adopt.copyProposal}
+                    </button>
+                  </div>
+                ) : null}
+                {adoptWorkItemId && priceFieldHints.length ? (
+                  <div className="md:col-span-3">
+                    <DraftHints lines={priceFieldHints} />
+                  </div>
+                ) : null}
+                {priceBoxesAreOverride ? (
+                  <details
+                    data-testid="adopt-price-override"
+                    className="md:col-span-3"
+                    open={priceOverrideOpen}
+                    onToggle={(event) => setPriceOverrideOpen(event.currentTarget.open)}
+                  >
+                    <summary className="cursor-pointer text-xs font-bold text-zinc-300">{m.adopt.priceOverrideSummary}</summary>
+                    <p className="mt-2 text-xs leading-relaxed text-amber-200">
+                      {shownPriceView?.shape === "inherited" ? m.adopt.inheritedOverrideWarning : m.adopt.tieredOverrideWarning}
+                    </p>
+                    <div className="mt-3 grid gap-4 md:grid-cols-3">
+                      <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                      <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                      <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    </div>
+                  </details>
+                ) : (
+                  <>
+                    <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
+                      <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+                        {m.adopt.priceFromDocs}
+                        <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
+                      </div>
+                    ) : null}
+                    <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                    <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                  </>
+                )}
               </fieldset>
 
               {validation ? (
@@ -1346,7 +1603,12 @@ export function AdminModelRegistryPanel() {
             <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
               {apiFailure ? (
                 <div role="alert" data-testid="admin-api-error" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm leading-5 text-red-100">
-                  {apiFailure}
+                  <p>{apiFailure}</p>
+                  {apiFailureCode === APPLICATION_FALLBACK_PROTECTED || apiFailureCode === GUEST_LEAD_PROTECTED ? (
+                    <Link href="/admin/platform#default-models" className="mt-1 inline-block font-bold text-white underline">
+                      {m.adopt.openDefaultModels}
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
               {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (
@@ -1364,13 +1626,23 @@ export function AdminModelRegistryPanel() {
               <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 {editingId !== "new" ? (
-                  <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
+                  <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving || form.id === APP_DEFAULTS.defaultModelId} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> {m.actions.validate}</button>
-                {adoptWorkItemId ? <button type="button" onClick={() => void save(true)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-5 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {m.actions.replaceAndSave}</button> : null}
-                <button type="button" onClick={() => void save(false)} disabled={saving || Boolean(adoptWorkItemId && adoptReplacesModelId)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
+                {adoptWorkItemId ? (
+                  <div className="flex flex-col items-end gap-1">
+                    <p className="text-xs text-zinc-400" data-testid="adopt-successor-status">
+                      {m.adopt.successorStatus(
+                        form.status === "coming-soon" ? m.catalogue.status.comingSoon : form.status === "enabled" ? m.catalogue.status.enabled : form.status === "limited" ? m.catalogue.status.limited : m.catalogue.status.disabled,
+                        form.publiclyListed ? m.catalogue.publiclyListed : m.adopt.unlisted
+                      )}
+                    </p>
+                    <button type="button" onClick={() => void save(true)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-5 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {m.actions.replaceAndSave}</button>
+                  </div>
+                ) : null}
+                <button type="button" onClick={() => void save(false)} disabled={saving || Boolean(adoptWorkItemId && selectedReplacesModelId)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
               </div>
               </div>
             </div>

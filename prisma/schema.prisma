@@ -2911,6 +2911,11 @@ model ScheduledJobRun {
   completedAt        DateTime?
   createdAt          DateTime  @default(now())
   autoFixAttemptedAt DateTime?
+  /// Set only by the marketing publisher (S2d1). When present, a trigger stamps
+  /// startedAt, heartbeatAt and completedAt from the database clock, refuses to
+  /// move the deadline, and refuses `succeeded` for a run that closed after it.
+  deadlineAt         DateTime?
+  heartbeatAt        DateTime?
 
   @@index([jobKey, startedAt])
   @@index([jobKey, status, startedAt])

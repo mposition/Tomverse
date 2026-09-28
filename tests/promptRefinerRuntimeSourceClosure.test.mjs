@@ -234,18 +234,34 @@ const compilerOptions = parsedConfig.options;
 // remains 228 and the position-free inventory remains 9aa7ec49..., so this
 // repin records source-position movement only.
 //
+// 2026-09-28, Auto exploration: `lib/appSettings.ts` gains the reader for
+// `feature.autoExplorationEnabled`. The predicates are repeated in that file
+// so it does not import `lib/autoExplorationAccess.ts`, which would add a
+// path to the database-bound source list. The reader has no computed element
+// access.
+//
+// 2026-09-28, guest-lead save: `updateOperationalFeatureFlags` in the same
+// file sits above the computed accesses already there. The new function
+// writes three known keys through the same tuple `.map` the combined writer
+// already had, and that map is not an element access.
+//
+// Both notes stand on the merged tree. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin of source positions and not a review of new computed access.
+//
 // 2026-09-28, engineering agent state: `lib/adminAuditSystemActors.ts` gains
 // the engineering agent's system actors, and the marketing webhook
 // fingerprint note in `lib/marketingAutomationAccess.ts` records the
 // engineering tables in the watched schema. Neither adds a computed element
 // access. The count remains 228 and the position-free inventory remains
-// 9aa7ec49..., so only source positions moved.
+// 9aa7ec49..., so only source positions moved. Merged with develop's notes
+// above, the digest below is computed over the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f74139417efbca3b7fca1d31341f919e",
-  "5745ce2dc9cfec30a0f99c0727bb3c5f",
+  "745e417d2a51795692d5659abf18d024",
+  "77fdd9f6447e557f999d7865f0f0a9ea",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

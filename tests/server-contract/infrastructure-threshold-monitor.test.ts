@@ -28,9 +28,19 @@ type Incident = {
   context?: Record<string, unknown>;
 };
 
+type PublisherRun = {
+  id: string;
+  startedAt: Date;
+  heartbeatAt: Date | null;
+};
+
 type World = {
   dashboard: Record<string, unknown> | null;
   dashboardError: Error | null;
+  runningPublisherRuns: PublisherRun[];
+  /** What the query said the total was, when it differs from the rows given. */
+  silentTotal: number | null;
+  publisherQueryError: Error | null;
   incidents: Incident[];
   completedResults: unknown[];
   failedRuns: number;
@@ -39,6 +49,9 @@ type World = {
 const world: World = {
   dashboard: null,
   dashboardError: null,
+  runningPublisherRuns: [],
+  silentTotal: null,
+  publisherQueryError: null,
   incidents: [],
   completedResults: [],
   failedRuns: 0,
@@ -47,6 +60,9 @@ const world: World = {
 const resetWorld = () => {
   world.dashboard = null;
   world.dashboardError = null;
+  world.runningPublisherRuns = [];
+  world.silentTotal = null;
+  world.publisherQueryError = null;
   world.incidents = [];
   world.completedResults = [];
   world.failedRuns = 0;
@@ -78,7 +94,28 @@ const loadMonitor = () => {
         prisma: {
           scheduledJobRun: {
             findFirst: async () => null,
+            // The marketing publisher silence check reads the running rows.
+            // A mock without this method is the shape that let the monitor
+            // throw `findMany is not a function` on every single call while
+            // the unit suite stayed green -- the gate that catches it is this
+            // file, and only because this file loads the real monitor.
           },
+        },
+      },
+    });
+    mock.module(mod("lib/marketingPublisherRun.ts"), {
+      namedExports: {
+        // A canned answer, not a simulation of the statement. Whether the SQL
+        // selects the right rows in the right order is asked of a real
+        // PostgreSQL in tests/integration/marketing-automation-schema.db.test.ts;
+        // a fake that interpreted the statement would agree with whatever it
+        // said, including the two orderings that were wrong.
+        findSilentMarketingPublisherRuns: async () => {
+          if (world.publisherQueryError) throw world.publisherQueryError;
+          return {
+            total: world.silentTotal ?? world.runningPublisherRuns.length,
+            runs: world.runningPublisherRuns,
+          };
         },
       },
     });
@@ -144,6 +181,7 @@ test("PROJECTED_BALANCE_LOW alone reports no incident but stays observable", asy
         database: "healthy",
         prisma: "healthy",
       },
+      silentPublisherRuns: 0,
     },
   ]);
 });
@@ -247,5 +285,108 @@ test("a monitor failure still reports INFRASTRUCTURE_THRESHOLD_MONITOR_FAILED", 
   assert.equal(
     world.incidents[0]?.code,
     "INFRASTRUCTURE_THRESHOLD_MONITOR_FAILED"
+  );
+});
+
+test("a silent marketing publisher run pages, and is counted as an alert", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  const now = new Date("2026-09-24T00:30:00.000Z");
+  world.dashboard = dashboard();
+  // The query decides which rows are silent, so what it hands back is silent by
+  // construction. Whether it picks the right ones -- and puts the longest-silent
+  // first -- is asked of a real PostgreSQL in the integration suite; a fake that
+  // filtered here would only be agreeing with itself.
+  world.runningPublisherRuns = [
+    { id: "run_silent", startedAt: new Date(now.getTime() - 20 * 60_000), heartbeatAt: null },
+  ];
+
+  const result = await monitorInfrastructureThresholdsIfDue(now);
+
+  const incident = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_RUN_SILENT",
+  );
+  assert.equal(incident?.context?.component, "marketing-publisher");
+  assert.equal(incident?.context?.silentRuns, "1");
+  // The message names how long the worst one has been quiet, computed by the
+  // pure rule from the row the query chose.
+  assert.equal(
+    incident?.context?.oldestLastSignOfLife,
+    new Date(now.getTime() - 20 * 60_000).toISOString(),
+  );
+  // The count and the alert number are the same fact. Reporting an incident
+  // and returning `alerts: 0` told an operator reading either the row or the
+  // API that the monitor had done nothing.
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(
+    (world.completedResults.at(-1) as { silentPublisherRuns: number }).silentPublisherRuns,
+    1,
+  );
+});
+
+test("a silence check that cannot read records null and pages on its own behalf", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  // "Could not check" and "checked, nothing silent" are different facts, and
+  // an operator acts differently on each.
+  world.publisherQueryError = new Error("query failed");
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  // One alert, which is the one it just sent. The count has to agree with what
+  // was actually reported.
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(
+    (world.completedResults.at(-1) as { silentPublisherRuns: number | null })
+      .silentPublisherRuns,
+    null,
+  );
+  // Not a silent-run incident: nothing was found silent, because nothing could
+  // be read.
+  assert.equal(
+    world.incidents.some((entry) => entry.code === "MARKETING_PUBLISHER_RUN_SILENT"),
+    false,
+  );
+  // **But it pages.** This test used to assert that it pages *nothing*, which
+  // pinned the defect: a query failing every run disabled the stale-run watch
+  // permanently while the monitor finished `succeeded` with `alerts: 0`. The
+  // watch is the only thing that notices a dead worker's row, so a watch that
+  // has stopped working has to say so.
+  const failure = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_SILENCE_CHECK_FAILED",
+  );
+  assert.ok(failure, "a silence check that cannot run must reach the operational queue");
+  assert.equal((failure?.error as Error)?.message, "query failed");
+  // The infrastructure check itself still ran and still succeeded.
+  assert.equal(world.failedRuns, 0);
+});
+
+test("the incident reports the count the query returned, not the rows it named", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  const now = new Date("2026-09-24T00:30:00.000Z");
+  world.dashboard = dashboard();
+  // The query caps its page at fifty and its count is not capped by that, so
+  // the two are different facts and the message has to use the right one. They
+  // come from one statement, which is what stops them disagreeing about the
+  // snapshot -- the defect that made them two queries a defect.
+  world.silentTotal = 137;
+  world.runningPublisherRuns = Array.from({ length: 50 }, (_, index) => ({
+    id: "run_" + index,
+    startedAt: new Date(now.getTime() - 60 * 60_000),
+    heartbeatAt: null,
+  }));
+
+  const result = await monitorInfrastructureThresholdsIfDue(now);
+
+  const incident = world.incidents.find(
+    (entry) => entry.code === "MARKETING_PUBLISHER_RUN_SILENT",
+  );
+  assert.equal(incident?.context?.silentRuns, "137");
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(
+    (world.completedResults.at(-1) as { silentPublisherRuns: number }).silentPublisherRuns,
+    137,
   );
 });

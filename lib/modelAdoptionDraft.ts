@@ -50,8 +50,10 @@ import {
   buildPricingProfileProposal,
   docEvidenceIsFresh,
   docPricePrefill,
+  docProblemWithholdsPrice,
   type DocEvidenceSource,
   type DocPriceRefusal,
+  type ProviderModelDocFields,
   type ProviderModelDocParse,
   type ProviderModelDocProvider,
 } from "@/lib/providerModelDocsCore";
@@ -484,6 +486,97 @@ const DOC_PRICE_REFUSAL_TEXT: Record<Exclude<DocPriceRefusal, "profile_covers">,
     "문서의 가격이 프로모션 가격이라 채우지 않았습니다. 기간이 끝나면 바뀌는 가격을 고정 override로 넣지 않습니다.",
 };
 
+export type AdoptionPriceBand = {
+  inputUsdPerMillionTokens: number;
+  outputUsdPerMillionTokens: number;
+  cachedInputUsdPerMillionTokens: number | null;
+  cacheWriteUsdPerMillionTokens: number | null;
+};
+
+export type AdoptionPriceView =
+  | { shape: "inherited" }
+  | { shape: "flat" }
+  | { shape: "unset" }
+  /**
+   * The page describes two bands, but the numbers are not safe to display:
+   * a promotion, a parse problem, or a missing rate. The columns stay empty
+   * and out of the default inputs, and no band table is shown.
+   */
+  | { shape: "withheld" }
+  | {
+      shape: "tiered";
+      thresholdTokens: number;
+      inputMultiplier: number;
+      outputMultiplier: number;
+      short: AdoptionPriceBand;
+      long: AdoptionPriceBand;
+    };
+
+const publishedPrice = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+
+const publishedCachePrice = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+
+const scaledPrice = (value: number, factor: number) =>
+  Math.round(value * factor * 1_000_000) / 1_000_000;
+
+/**
+ * The price the dialog may show without inviting a one-number override.
+ *
+ * A profile already on the model is inherited by empty columns. A documented
+ * two-band price is shown as those two bands only when the parse trusts it;
+ * the columns still save empty. A promotion, a price problem, or a missing
+ * rate on a two-band page is `withheld`: no table, and the boxes are not the
+ * default input. A documented single rate is the one case the columns can hold.
+ */
+export const adoptionPriceView = (input: {
+  hasPricingProfile: boolean;
+  doc: ProviderModelDocFields | null;
+  problems?: readonly string[];
+}): AdoptionPriceView => {
+  if (input.hasPricingProfile) return { shape: "inherited" };
+  const doc = input.doc;
+  if (!doc) return { shape: "unset" };
+  const priceWithheld =
+    Boolean(doc.promotional) || (input.problems ?? []).some(docProblemWithholdsPrice);
+  if (doc.longContext.kind === "tiered" && priceWithheld) return { shape: "withheld" };
+  if (priceWithheld) return { shape: "unset" };
+  const inputUsd = publishedPrice(doc.inputUsdPerMillionTokens);
+  const outputUsd = publishedPrice(doc.outputUsdPerMillionTokens);
+  if (doc.longContext.kind === "tiered" && (inputUsd === null || outputUsd === null)) {
+    return { shape: "withheld" };
+  }
+  if (inputUsd === null || outputUsd === null) return { shape: "unset" };
+  if (doc.longContext.kind === "flat") return { shape: "flat" };
+  if (doc.longContext.kind !== "tiered") return { shape: "unset" };
+  const { thresholdTokens, inputMultiplier, outputMultiplier, cacheTakesInputMultiplier } =
+    doc.longContext;
+  const cacheFactor = cacheTakesInputMultiplier ? inputMultiplier : 1;
+  const cached = publishedCachePrice(doc.cachedInputUsdPerMillionTokens);
+  const cacheWrite = publishedCachePrice(doc.cacheWriteUsdPerMillionTokens);
+  const short: AdoptionPriceBand = {
+    inputUsdPerMillionTokens: inputUsd,
+    outputUsdPerMillionTokens: outputUsd,
+    cachedInputUsdPerMillionTokens: cached,
+    cacheWriteUsdPerMillionTokens: cacheWrite,
+  };
+  return {
+    shape: "tiered",
+    thresholdTokens,
+    inputMultiplier,
+    outputMultiplier,
+    short,
+    long: {
+      inputUsdPerMillionTokens: scaledPrice(inputUsd, inputMultiplier),
+      outputUsdPerMillionTokens: scaledPrice(outputUsd, outputMultiplier),
+      cachedInputUsdPerMillionTokens: cached === null ? null : scaledPrice(cached, cacheFactor),
+      cacheWriteUsdPerMillionTokens:
+        cacheWrite === null ? null : scaledPrice(cacheWrite, cacheFactor),
+    },
+  };
+};
+
 export type ModelAdoptionDraft = {
   /**
    * Prefilled registry fields.
@@ -562,6 +655,15 @@ export type ModelAdoptionDraft = {
    * registry's columns cannot hold. Never applied by anything.
    */
   pricingProfileProposal: string | null;
+  /**
+   * How the price boxes should present themselves.
+   *
+   * `inherited` and `tiered` are not empty inputs waiting for a number: a
+   * number saved in those columns replaces every band. `flat` is the one
+   * shape those two boxes can hold. `unset` is a price the documentation did
+   * not give, so the boxes stay the place a person types one rate.
+   */
+  priceView: AdoptionPriceView;
   /** Fields a person still has to answer, in the words the panel shows. */
   unknowns: string[];
   /** Values already settled, in the words the panel shows. */
@@ -881,6 +983,12 @@ export const buildAdoptionDraft = (input: {
     sources,
     unknowns,
     notes,
+    priceView: adoptionPriceView({
+      hasPricingProfile: Boolean(input.hasPricingProfile),
+      doc,
+      problems:
+        input.docEvidence?.parse?.status === "parsed" ? input.docEvidence.parse.problems : [],
+    }),
   };
 };
 
@@ -932,7 +1040,7 @@ export const adoptionReplacementRefusal = (input: {
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
   } | null;
-}): { status: 400 | 409; message: string } | null => {
+}): { status: 400 | 409; message: string; code?: string } | null => {
   if (!input.replacesModelId) return null;
   if (input.replacesModelId === input.adoptedModelId) {
     return { status: 400, message: "A model cannot replace itself." };
@@ -952,12 +1060,14 @@ export const adoptionReplacementRefusal = (input: {
   if (input.predecessor.isApplicationDefault) {
     return {
       status: 409,
+      code: "APPLICATION_FALLBACK_PROTECTED",
       message: "The application fallback model must remain enabled and Guest-accessible.",
     };
   }
   if (input.predecessor.isGuestDefault) {
     return {
       status: 409,
+      code: "GUEST_LEAD_PROTECTED",
       message:
         "Change the Guest default model in Platform Settings before disabling or restricting this model.",
     };

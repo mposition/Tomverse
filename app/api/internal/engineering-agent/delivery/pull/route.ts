@@ -18,8 +18,9 @@ import {
 } from "@/lib/engineeringAgentRouteAuth";
 
 // The runner pulls the execution brief AMUX queued with its attempt. The
-// brief is a card's text: the runner treats it as data (policy §7), and this
-// route passes it on exactly as AMUX stored it.
+// brief is a card's text: the runner treats it as data
+// (docs/policy/engineering-agent.md §7), and this route passes it on exactly
+// as AMUX stored it.
 
 const requestSchema = z
   .object({
