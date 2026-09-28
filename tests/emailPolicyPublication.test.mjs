@@ -21,6 +21,7 @@ import {
 } from "../lib/emailPolicyPublicationCore.ts";
 import {
   AMENDED_DOCUMENTS,
+  CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
   CHANGE_NOTICE_TEMPLATE_KEY,
   DIGEST_BEFORE_AMENDMENT,
   DIGEST_VERIFIED_BY,
@@ -180,6 +181,14 @@ test("every verifier the gate relies on hashes the document and compares it", ()
       source.includes(`["${path}"].contentSha256`),
       `${file} never compares a digest with the recorded one for ${path}`
     );
+    // And the date. The gate measures the notice period from the recorded date,
+    // so that date has to be the one the reader sees; /terms is the example of a
+    // page whose shown date did not follow its content.
+    assert.ok(
+      source.includes(`["${path}"].date`) ||
+        source.replace(/\s+/g, "").includes(`{date}=SITEMAP_CONTENT_EVIDENCE["${path}"]`),
+      `${file} never checks the recorded date against what ${path} shows`
+    );
   }
 });
 
@@ -192,6 +201,7 @@ test("the recorded pre-amendment state of /privacy is what the site renders toda
 
 test("today, nothing is published and release notes cannot go live", async () => {
   assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, null);
+  assert.deepEqual([...CHANGE_NOTICE_APPROVED_CONTENT_HASHES], []);
   assert.equal(documentFacts().length, 4);
   const problems = (await emailPolicyPublicationProblems(NOW)).map(
     (problem) => `${problem.subject}:${problem.refusal}`

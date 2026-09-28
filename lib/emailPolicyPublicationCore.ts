@@ -24,17 +24,21 @@
  *
  * Now each owed account is classified on its own, in one statement:
  *
- * - **told** -- a notice was handed to the provider (`sent`, `delivered`,
- *   `bounced`, `complained`: every state that exists only after the provider
- *   accepted the message) before the account's deadline. The deadline is the
+ * - **told** -- a notice reached the mailbox (`sent`, `delivered`,
+ *   `complained`) before the account's deadline. Not `bounced`: a bounce is a
+ *   notice the provider accepted and the mailbox did not, and the third version
+ *   counted it as told -- including a soft bounce, which is a full mailbox that a
+ *   legal notice can and should be retried into. The deadline is the
  *   end of the day thirty days before the effective date for an account that
  *   existed then; an account that joined inside the notice period has until the
  *   effective date, because thirty days were never available to it.
  * - **late** -- handed over, but only after its deadline. Blocking: a notice
  *   that arrives with less notice than owed is not the notice.
- * - **unreachable** -- never handed over, and the system cannot hand it over:
- *   the account has no address, or the lane refused the notice for a suppression
- *   on the address. Reported, not blocking -- section 3.1's fifth type asks that
+ * - **unreachable** -- not told, and the system cannot tell it: the account has
+ *   no address, or its latest notice was refused or hard-bounced *and* a live
+ *   suppression still stands on the address. A suppression lifted since is not a
+ *   dead mailbox any more, and that account is owed another notice. Reported
+ *   (`publicationReport()`), not blocking -- section 3.1's fifth type asks that
  *   a legal notice be sent and non-delivery tracked, and a gate waiting on mail
  *   the lane will never send never opens.
  * - **untold** -- everything else, including a notice that `failed` or was
@@ -138,14 +142,13 @@ export const CHANGE_NOTICE_PERIOD_DAYS = 30;
 export const CHANGE_NOTICE_WINDOW_DAYS = 120;
 
 /**
- * States that exist only after the provider accepted the message.
+ * States that mean the notice reached the mailbox.
  *
  * `suppressed`, `failed` and `abandoned` are not here: the lane writes each of
- * them without a provider ever seeing the message. The second version of this
- * gate counted them as attempts, which let rows the lane refused stand in for a
- * notice nobody sent.
+ * them without a provider ever seeing the message. `bounced` is not here
+ * either: the provider saw it and the mailbox did not.
  */
-export const HANDED_OVER_STATUSES = ["sent", "delivered", "bounced", "complained"] as const;
+export const TOLD_STATUSES = ["sent", "delivered", "complained"] as const;
 
 const DAY_MS = 86_400_000;
 

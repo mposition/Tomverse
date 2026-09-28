@@ -1544,9 +1544,14 @@ EEA·영국을 여는 선행 게이트입니다.
   시행일 전 `CHANGE_NOTICE_WINDOW_DAYS`(120일)입니다.
 - **"제때 고지받았는가"는 계정마다 판정합니다.** 시행일 전에 생긴 계정(생성 시각을
   모르는 계정 포함)마다 SQL 한 문장으로 넷 중 하나로 분류합니다 — **told**(고지가
-  기한 전에 제공자에게 넘어감: `sent`·`delivered`·`bounced`·`complained`),
-  **late**(넘어갔지만 기한 후, 차단), **unreachable**(주소가 없거나 lane이 suppression으로
-  거부, 보고만), **untold**(그 밖 전부 — `failed`·`abandoned`는 우리 실패이므로 차단).
+  기한 전에 메일함에 도달: `sent`·`delivered`·`complained`. `bounced`는 도달이
+  아닙니다), **late**(도달했지만 기한 후, 차단), **unreachable**(주소가 없거나, 마지막
+  고지가 suppression으로 거부·하드 바운스됐고 **지금도** suppression이 살아 있음 —
+  보고만), **untold**(그 밖 전부 — 소프트 바운스는 재시도 대상, `failed`·`abandoned`는
+  우리 실패이므로 차단).
+- **고지는 승인된 문안에 묶입니다.** template key만으로는 문안을 특정하지 못하므로
+  (현재 등록된 `legal` template은 계정 삭제 예고 하나뿐), 발송의 template version
+  `contentHash`가 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 있어야 셉니다.
   기한은 **달력일로 시행일 30일 전 그날까지**이고, 고지 기간 중 가입한 계정은
   시행일 전까지입니다. 모든 시각은 `AT TIME ZONE 'UTC'`로 비교합니다.
   이전 두 버전은 `sent`만 셌거나, 크기를 비교했거나, 가장 이른 한 통의 시각으로
@@ -1562,7 +1567,7 @@ EEA·영국을 여는 선행 게이트입니다.
 페이지가 아닌 것은 `AMENDED_DOCUMENT_EVIDENCE`), 그리고 그 현재 digest를 렌더된 원본에서
 다시 계산해 대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록 — 이름만 언급하는 테스트는
 검사가 거부합니다), (3) `legal` 분류의 변경 고지 template — 이 개정 전용으로 새로 만든
-것 — 과 시행일. 이 셋을 갖추고 고지를 대상 전원에게 기한 안에 넘기면 게이트가
+것 — 과 그 승인된 버전의 `contentHash`, 그리고 시행일. 이 셋을 갖추고 고지를 대상 전원에게 기한 안에 넘기면 게이트가
 스스로 열립니다.
 `tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
 있음을 고정하므로, 그때 함께 고칩니다.

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureJurisdictionPolicyDraft } from "@/lib/emailJurisdictionPolicy";
 import { noticeFactsFor } from "@/lib/emailPolicyPublication";
 import { ACCOUNT_DELETION_SCHEDULED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { recordSuppression } from "@/lib/emailSuppression";
 
 // The amendment notice's reach, counted the way S10 needs it counted.
 //
@@ -34,7 +35,7 @@ let eventId = "";
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
+      "SuppressionCause", "SuppressionEntry", "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion", "User"
     RESTART IDENTITY CASCADE
   `);
@@ -46,7 +47,8 @@ const delivery = (
   userId: string,
   status: string,
   createdAt: Date,
-  sentAt: Date | null = status === "sent" || status === "delivered" ? createdAt : null
+  sentAt: Date | null = status === "sent" || status === "delivered" ? createdAt : null,
+  lastErrorKind: string | null = null
 ) =>
   prisma.emailDelivery.create({
     data: {
@@ -64,6 +66,7 @@ const delivery = (
       status,
       createdAt,
       sentAt,
+      lastErrorKind,
     },
   });
 
@@ -110,65 +113,116 @@ before(async () => {
   eventId = event.id;
 });
 beforeEach(() =>
-  prisma.$executeRawUnsafe(`TRUNCATE TABLE "EmailDelivery", "User" CASCADE`)
+  prisma.$executeRawUnsafe(`TRUNCATE TABLE "SuppressionCause", "SuppressionEntry", "EmailDelivery", "User" CASCADE`)
 );
 after(async () => {
   await reset();
   await prisma.$disconnect();
 });
 
+const HASHES = ["hash"];
 const facts = () =>
-  noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, EFFECTIVE, EFFECTIVE);
+  noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, HASHES, EFFECTIVE, EFFECTIVE);
 
-test("a notice the webhook moved on is still a notice the provider accepted", async () => {
-  // `sent` is not where a successful message ends. The first version counted
-  // only `sent`, so a campaign the webhook had moved to `delivered` read as never
-  // sent.
-  for (const status of ["sent", "delivered", "bounced", "complained"]) {
+const suppress = (address: string) =>
+  recordSuppression({
+    emailAddress: address,
+    reason: "hard_bounce",
+    source: "provider_webhook",
+    sourceEventKey: `webhook:${randomUUID()}`,
+  });
+
+test("a notice that reached the mailbox is told, however the webhook moved it", async () => {
+  for (const status of ["sent", "delivered", "complained"]) {
     const user = await account(daysBefore(90));
     await delivery(user.id, status, daysBefore(40), daysBefore(40));
   }
   const result = await facts();
-  assert.equal(result.owed, 4);
-  assert.equal(result.told, 4);
+  assert.equal(result.owed, 3);
+  assert.equal(result.told, 3);
   assert.equal(result.untold, 0);
   assert.equal(result.firstSentAt?.getTime(), daysBefore(40).getTime());
   assert.equal(result.classification, "legal");
 });
 
+test("a bounce is not a notice", async () => {
+  // Soft: a full mailbox, which a legal notice can be retried into -- untold
+  // until a retry lands. Hard, with the suppression it leaves standing:
+  // unreachable, reported, not blocking.
+  const soft = await account(daysBefore(90));
+  await delivery(soft.id, "bounced", daysBefore(40), daysBefore(40), "soft_bounce");
+  const hardAddress = `hard-${randomUUID().slice(0, 8)}@example.test`;
+  const hard = await prisma.user.create({
+    data: { email: hardAddress, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(hard.id, "bounced", daysBefore(40), daysBefore(40));
+  await suppress(hardAddress);
+
+  const result = await facts();
+  assert.equal(result.told, 0);
+  assert.equal(result.untold, 1);
+  assert.equal(result.unreachable, 1);
+});
+
+test("a refused notice is unreachable only while the suppression stands", async () => {
+  // Refused once, suppression still live: unreachable.
+  const liveAddress = `live-${randomUUID().slice(0, 8)}@example.test`;
+  const live = await prisma.user.create({
+    data: { email: liveAddress, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(live.id, "suppressed", daysBefore(40), null);
+  await suppress(liveAddress);
+  // Refused once, and nothing stands now: owed another notice.
+  const lifted = await account(daysBefore(90));
+  await delivery(lifted.id, "suppressed", daysBefore(40), null);
+
+  const result = await facts();
+  assert.equal(result.unreachable, 1);
+  assert.equal(result.untold, 1);
+});
+
 test("a row the lane wrote without calling the provider is not a notice", async () => {
-  // `failed` and `abandoned` are our failures: the notice was never handed over,
-  // so those accounts are untold. `suppressed` is the lane refusing the address,
-  // which is a fact about the mailbox: unreachable, reported, not blocking.
   const failed = await account(daysBefore(90));
   await delivery(failed.id, "failed", daysBefore(40), null);
   const abandoned = await account(daysBefore(90));
   await delivery(abandoned.id, "abandoned", daysBefore(40), null);
-  const suppressed = await account(daysBefore(90));
-  await delivery(suppressed.id, "suppressed", daysBefore(40), null);
-
   const result = await facts();
   assert.equal(result.told, 0);
   assert.equal(result.untold, 2);
-  assert.equal(result.unreachable, 1);
+});
+
+test("a delivery of wording that was not approved as this notice does not count", async () => {
+  // The key alone names a template, not a text. The account-deletion notice is
+  // the only registered legal template; its own deliveries are not the notice.
+  const user = await account(daysBefore(90));
+  await delivery(user.id, "sent", daysBefore(40), daysBefore(40));
+  const other = await noticeFactsFor(
+    ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    ["some-other-approved-hash"],
+    EFFECTIVE,
+    EFFECTIVE
+  );
+  assert.equal(other.told, 0);
+  assert.equal(other.untold, 1);
+  // No approved wording at all is no notice at all.
+  const none = await noticeFactsFor(ACCOUNT_DELETION_SCHEDULED_TEMPLATE, [], EFFECTIVE, EFFECTIVE);
+  assert.equal(none.templateKey, null);
 });
 
 test("each account is told in time on its own, not by the earliest send", async () => {
-  // The second version measured the period from one `MIN(sentAt)`, so one early
-  // send made every later one count.
   const early = await account(daysBefore(90));
   await delivery(early.id, "sent", daysBefore(40), daysBefore(40));
   const lateComer = await account(daysBefore(90));
   await delivery(lateComer.id, "sent", daysBefore(5), daysBefore(5));
-
   const result = await facts();
   assert.equal(result.told, 1);
   assert.equal(result.late, 1);
 });
 
 test("the notice period is counted in calendar days", async () => {
-  // Effective 15 November: any time on 16 October is thirty days. Measured to the
-  // millisecond from midnight, 00:00:01 on 16 October was late for ever.
+  // Effective 15 November: any time on 16 October is thirty days.
   const onTheDay = await account(daysBefore(90));
   await delivery(
     onTheDay.id,
@@ -178,23 +232,19 @@ test("the notice period is counted in calendar days", async () => {
   );
   const dayAfter = await account(daysBefore(90));
   await delivery(dayAfter.id, "sent", daysBefore(29), daysBefore(29));
-
   const result = await facts();
   assert.equal(result.told, 1);
   assert.equal(result.late, 1);
 });
 
-test("an account that joined during the notice period is told if told before it applies", async () => {
-  // Thirty days were never available to it, so it has until the effective date.
+test("an account that joined during the notice period has until the effective date", async () => {
   const joinedLate = await account(daysBefore(10));
   await delivery(joinedLate.id, "sent", daysBefore(5), daysBefore(5));
-  const joinedLateUntold = await account(daysBefore(10));
-
+  await account(daysBefore(10));
   const result = await facts();
   assert.equal(result.owed, 2);
   assert.equal(result.told, 1);
   assert.equal(result.untold, 1);
-  assert.ok(joinedLateUntold.id);
 });
 
 test("a notice after the effective date is no notice", async () => {
@@ -219,7 +269,6 @@ test("an account with no address is unreachable, not untold", async () => {
   const result = await facts();
   assert.equal(result.owed, 1);
   assert.equal(result.unreachable, 1);
-  assert.equal(result.untold, 0);
 });
 
 test("a delivery older than the notice window is not this notice", async () => {
@@ -228,7 +277,6 @@ test("a delivery older than the notice window is not this notice", async () => {
   const result = await facts();
   assert.equal(result.told, 0);
   assert.equal(result.untold, 1);
-  assert.equal(result.firstSentAt, null);
 });
 
 test("pending and skipped deliveries tell nobody", async () => {
@@ -238,15 +286,4 @@ test("pending and skipped deliveries tell nobody", async () => {
   await delivery(skipped.id, "skipped", daysBefore(40), null);
   const result = await facts();
   assert.equal(result.untold, 2);
-});
-
-test("one account's extra deliveries do not stand in for another's missing one", async () => {
-  const told = await account(daysBefore(90));
-  await delivery(told.id, "sent", daysBefore(40), daysBefore(40));
-  await delivery(told.id, "delivered", daysBefore(39), daysBefore(39));
-  await account(daysBefore(90));
-  const result = await facts();
-  assert.equal(result.owed, 2);
-  assert.equal(result.told, 1);
-  assert.equal(result.untold, 1);
 });

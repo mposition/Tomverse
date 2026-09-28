@@ -6,7 +6,7 @@ import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 import { emailTemplateDefinition, EMAIL_TEMPLATE_KEYS } from "@/lib/emailTemplateDefinitions";
 import {
   CHANGE_NOTICE_WINDOW_DAYS,
-  HANDED_OVER_STATUSES,
+  TOLD_STATUSES,
   effectiveDateOf,
   noticeDeadline,
   publicationProblems,
@@ -36,10 +36,10 @@ import {
  *
  * Nothing is hashed at runtime: a production build does not promise the source
  * files are on disk. Both sides of the comparison are constants, and a current
- * digest counts only where a test recomputes it from what is rendered and
- * compares it with the recorded value (`DIGEST_VERIFIED_BY`;
- * `tests/emailPolicyPublication.test.mjs` checks each named test actually hashes
- * and compares, not merely mentions the path).
+ * digest and date count only where a test recomputes the digest from what is
+ * rendered *and* checks the date against what the page shows
+ * (`DIGEST_VERIFIED_BY`; `tests/emailPolicyPublication.test.mjs` checks each
+ * named test does both, not merely mentions the path).
  */
 
 /**
@@ -67,7 +67,8 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 
 /**
  * The test that recomputes each document's current digest from the rendered
- * source and compares it with the recorded one.
+ * source, compares it with the recorded one, and checks the recorded date is
+ * the one the document shows.
  */
 export const DIGEST_VERIFIED_BY: Readonly<Record<string, string>> = {
   "/privacy": "tests/sitemapLastModified.test.mjs",
@@ -86,12 +87,18 @@ export const AMENDED_DOCUMENTS = [
 ] as const;
 
 /**
- * The template that carries the amendment notice, once one exists.
+ * The template that carries the amendment notice, and the exact approved
+ * wording of it.
  *
- * It must be a `legal` template made for this amendment. Null until the approved
- * wording is written, which is `change_notice_unidentified`.
+ * Both, because a key alone identifies a template and not a text. The only
+ * registered `legal` template today is the account-deletion notice; a key
+ * pointed at it, or at a new key's retired draft, would have counted mail that
+ * said nothing about the amendment. Deliveries count only when their template
+ * version's `contentHash` is one listed here -- the versions whose wording was
+ * approved as this notice. Null or empty is `change_notice_unidentified`.
  */
 export const CHANGE_NOTICE_TEMPLATE_KEY: string | null = null;
+export const CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [];
 
 export const documentFacts = (): AmendedDocument[] =>
   AMENDED_DOCUMENTS.map((path) => {
@@ -132,23 +139,31 @@ const utc = (value: Date) => value.toISOString();
  * Every owed account classified as told, late, unreachable or untold, in one
  * statement.
  *
- * One SELECT so the counts come from one snapshot. Every instant is converted
- * with `AT TIME ZONE 'UTC'`, the way this repository's other raw SQL compares
- * these naive `TIMESTAMP(3)` columns: a bare JS `Date` parameter is interpreted
- * in the session's time zone, and the owed cut and the window would move by that
- * offset.
+ * One SELECT so the counts come from one snapshot. Every instant goes through
+ * `AT TIME ZONE 'UTC'`, the way this repository's other raw SQL compares these
+ * naive `TIMESTAMP(3)` columns.
  *
- * Takes the template key as an argument so it can be exercised against a
+ * "Unreachable" needs two facts, not one. The account's *latest* notice was
+ * refused by the lane or hard-bounced, **and** a suppression still stands on its
+ * address now. The third version took any `suppressed` row, ever, as permanent:
+ * a suppression lifted since left the account counted as a dead mailbox and owed
+ * nothing, and one refusal after the deadline hid every other row for that
+ * account. A soft bounce is neither told nor unreachable; it is a full mailbox,
+ * and the account is untold until a retry lands.
+ *
+ * Takes the key and hashes as arguments so it can be exercised against a
  * database before any notice exists
  * (tests/integration/email-policy-publication.db.test.ts).
  */
 export const noticeFactsFor = async (
   templateKey: string | null,
+  approvedContentHashes: readonly string[],
   effective: Date | null,
   now: Date
 ): Promise<ChangeNoticeFacts> => {
   if (
     templateKey === null ||
+    approvedContentHashes.length === 0 ||
     !EMAIL_TEMPLATE_KEYS.includes(templateKey as (typeof EMAIL_TEMPLATE_KEYS)[number])
   ) {
     return UNIDENTIFIED;
@@ -173,7 +188,8 @@ export const noticeFactsFor = async (
     WITH params AS (
       SELECT (${utc(anchor)}::timestamptz AT TIME ZONE 'UTC')      AS "effective",
              (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
-             (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart"
+             (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart",
+             (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now"
     ),
     owed AS (
       SELECT u."id", u."email", u."createdAt"
@@ -181,36 +197,51 @@ export const noticeFactsFor = async (
        WHERE u."createdAt" IS NULL OR u."createdAt" < p."effective"
     ),
     notice AS (
-      SELECT d."userId", d."status", d."sentAt"
+      SELECT d."userId", d."status", d."sentAt", d."createdAt", d."lastErrorKind"
         FROM "EmailDelivery" d
         JOIN "TemplateVersion" tv ON tv."id" = d."templateVersionId"
         JOIN "EmailTemplate" t ON t."id" = tv."templateId"
         CROSS JOIN params p
        WHERE t."key" = ${templateKey}
+         AND tv."contentHash" = ANY(${[...approvedContentHashes]}::text[])
          AND d."userId" IS NOT NULL
          AND d."createdAt" >= p."windowStart"
     ),
-    handed AS (
+    told AS (
       SELECT n."userId", n."sentAt"
         FROM notice n, params p
-       WHERE n."status" = ANY(${[...HANDED_OVER_STATUSES]}::text[])
+       WHERE n."status" = ANY(${[...TOLD_STATUSES]}::text[])
          AND n."sentAt" IS NOT NULL
          AND n."sentAt" < p."effective"
+    ),
+    latest AS (
+      SELECT DISTINCT ON (n."userId") n."userId", n."status", n."lastErrorKind"
+        FROM notice n
+       ORDER BY n."userId", n."createdAt" DESC
     ),
     classified AS (
       SELECT CASE
                WHEN EXISTS (
-                 SELECT 1 FROM handed h, params p
-                  WHERE h."userId" = o."id"
-                    AND (h."sentAt" < p."deadline"
+                 SELECT 1 FROM told t, params p
+                  WHERE t."userId" = o."id"
+                    AND (t."sentAt" < p."deadline"
                          OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."deadline"))
                ) THEN 'told'
-               WHEN EXISTS (SELECT 1 FROM handed h WHERE h."userId" = o."id") THEN 'late'
-               WHEN o."email" IS NULL
-                 OR EXISTS (
-                   SELECT 1 FROM notice n
-                    WHERE n."userId" = o."id" AND n."status" = 'suppressed'
-                 ) THEN 'unreachable'
+               WHEN EXISTS (SELECT 1 FROM told t WHERE t."userId" = o."id") THEN 'late'
+               WHEN o."email" IS NULL THEN 'unreachable'
+               WHEN EXISTS (
+                 SELECT 1 FROM latest l
+                  WHERE l."userId" = o."id"
+                    AND (l."status" = 'suppressed'
+                         OR (l."status" = 'bounced'
+                             AND l."lastErrorKind" IS DISTINCT FROM 'soft_bounce'))
+               )
+               AND EXISTS (
+                 SELECT 1 FROM "SuppressionCause" sc, params p
+                  WHERE sc."emailAddress" = lower(btrim(o."email"))
+                    AND sc."releasedAt" IS NULL
+                    AND (sc."expiresAt" IS NULL OR sc."expiresAt" > p."now")
+               ) THEN 'unreachable'
                ELSE 'untold'
              END AS "state"
         FROM owed o
@@ -221,7 +252,7 @@ export const noticeFactsFor = async (
       COUNT(*) FILTER (WHERE "state" = 'late')        AS "late",
       COUNT(*) FILTER (WHERE "state" = 'unreachable') AS "unreachable",
       COUNT(*) FILTER (WHERE "state" = 'untold')      AS "untold",
-      (SELECT MIN("sentAt") FROM handed)              AS "firstSentAt"
+      (SELECT MIN("sentAt") FROM told)                AS "firstSentAt"
       FROM classified
   `;
 
@@ -238,16 +269,34 @@ export const noticeFactsFor = async (
   };
 };
 
+export type PublicationReport = {
+  problems: PublicationProblem[];
+  notice: ChangeNoticeFacts;
+};
+
+/**
+ * The gate's answer and the counts behind it.
+ *
+ * The counts are returned, not only the refusals, because `unreachable` never
+ * becomes a refusal and would otherwise appear nowhere: those are accounts the
+ * amendment was never delivered to, and somebody should be able to see how many.
+ */
+export async function publicationReport(now: Date = new Date()): Promise<PublicationReport> {
+  const documents = documentFacts();
+  const notice = await noticeFactsFor(
+    CHANGE_NOTICE_TEMPLATE_KEY,
+    CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
+    effectiveDateOf(documents),
+    now
+  );
+  return { problems: publicationProblems({ documents, notice, now }), notice };
+}
+
 /** Why this amendment is not published, or an empty list when it is. */
 export async function emailPolicyPublicationProblems(
   now: Date = new Date()
 ): Promise<PublicationProblem[]> {
-  const documents = documentFacts();
-  return publicationProblems({
-    documents,
-    notice: await noticeFactsFor(CHANGE_NOTICE_TEMPLATE_KEY, effectiveDateOf(documents), now),
-    now,
-  });
+  return (await publicationReport(now)).problems;
 }
 
 /**
@@ -255,15 +304,17 @@ export async function emailPolicyPublicationProblems(
  *
  * Asked once per recipient by the verdict. A pass is remembered no longer than a
  * failure: an account that gains an address after the notice went out is owed a
- * notice it has not had, and the gate should close within a minute of that
- * rather than five.
+ * notice it has not had, and the gate should close within a minute of that.
  *
- * A query that throws is remembered too -- as the error, rethrown, not as
- * "unpublished". The callers are send gates inside the verdict, whose `read()`
- * turns a throw into the retryable `VerdictUnavailableError` (invariant 11).
- * Answering "unpublished" instead would make every release note claimed during a
- * database hiccup a permanent `feature_disabled` skip. Remembering the error
- * stops a timing-out statement being re-run for every claimed message.
+ * A query that throws is remembered as the error and rethrown, not as
+ * "unpublished". Inside the send verdict, `read()` turns a throw into the
+ * retryable `VerdictUnavailableError` (invariant 11); answering "unpublished"
+ * there would make every release note claimed during a database hiccup a
+ * permanent `feature_disabled` skip.
+ *
+ * A pass with unreachable accounts is logged, once per computation, so the
+ * accounts the amendment never reached are on record the moment release notes
+ * can go live -- counts only, no addresses.
  */
 const TTL_MS = 60_000;
 let cached: { published: boolean; at: number } | { error: unknown; at: number } | null = null;
@@ -277,7 +328,19 @@ export async function isEmailPolicyPublished(now: Date = new Date()): Promise<bo
     }
   }
   try {
-    const published = (await emailPolicyPublicationProblems(now)).length === 0;
+    const report = await publicationReport(now);
+    const published = report.problems.length === 0;
+    if (published && report.notice.unreachable > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "email_policy_published_with_unreachable",
+          at: now.toISOString(),
+          owed: report.notice.owed,
+          told: report.notice.told,
+          unreachable: report.notice.unreachable,
+        })
+      );
+    }
     cached = { published, at: now.getTime() };
     return published;
   } catch (error) {
@@ -293,4 +356,21 @@ export async function isEmailPolicyPublished(now: Date = new Date()): Promise<bo
 export async function isEmailReleaseNotesLive(): Promise<boolean> {
   if (!(await isEmailReleaseNotesEnabled())) return false;
   return isEmailPolicyPublished();
+}
+
+/**
+ * The same answer for a caller about to *write* rows rather than send them.
+ *
+ * At enqueue and at the start of a fan-out nothing has been written yet, so "we
+ * could not tell" can safely be "not now": the caller refuses, writes nothing,
+ * and running it again later is the retry. Throwing there instead ended a
+ * fan-out on a raw database error. The send verdict does not use this -- a
+ * claimed message must retry, not skip.
+ */
+export async function isEmailReleaseNotesLiveForEnqueue(): Promise<boolean> {
+  try {
+    return await isEmailReleaseNotesLive();
+  } catch {
+    return false;
+  }
 }
