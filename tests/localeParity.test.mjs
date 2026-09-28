@@ -174,11 +174,17 @@ const ENGLISH_STRING_CEILING = {
   // ("Conversation importee", "Afficher la conversation source") are
   // translated. Recorded with its reason in
   // `scripts/check-locale-translation-core.mjs` as well.
+  // +2 fr, +1 de, +3 es, +1 pt on 2026-09-28 from the privacy provider table.
+  // The country and region names that are the same word in that language:
+  // French "France" and "Europe", German "China", Spanish "Australia",
+  // "China" and "Asia", Portuguese "China". The sentences around them are
+  // translated. They are shorter than the translation check's minimum, so
+  // the ceiling here is what records them.
   zh: 10,
-  fr: 40,
-  de: 30,
-  es: 19,
-  pt: 17,
+  fr: 42,
+  de: 31,
+  es: 22,
+  pt: 18,
 };
 
 test("every supported language is in the dictionary map", () => {
