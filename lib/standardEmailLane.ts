@@ -87,6 +87,7 @@ import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue"
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
 import {
   DISPLAY_OBLIGATIONS,
+  SUBJECT_LABEL_OBLIGATIONS,
   subjectLabelWaived,
 } from "@/lib/releaseNotesDisplayRequirements";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
@@ -781,6 +782,18 @@ const redactSecrets = (
  */
 const CLAIM_MARGIN_MS = 60_000;
 
+/**
+ * The display duties that print in the footer: every display duty but the
+ * subject label. What `releaseNotesSkipReason()` may call an incomplete footer.
+ */
+const FOOTER_DISPLAY_OBLIGATIONS: Readonly<Record<string, readonly string[]>> =
+  Object.fromEntries(
+    Object.entries(DISPLAY_OBLIGATIONS).map(([country, duties]) => [
+      country,
+      duties.filter((duty) => duty !== SUBJECT_LABEL_OBLIGATIONS[country]),
+    ])
+  );
+
 class ReenqueueRaceError extends Error {
   constructor(readonly reason: "already_superseded" | "not_pending") {
     super(`the delivery was ${reason} when the replacement was written`);
@@ -857,7 +870,22 @@ const decideReleaseNotesSend = async (
     now,
   });
 
-  const skipReason = releaseNotesSkipReason(verdict, DISPLAY_OBLIGATIONS);
+  // A replacement only where the message is still owed. A moved contract is the
+  // only blocker, but the law may refuse this person all the same -- no consent
+  // and no approval that covers them -- and `reenqueueIsRight()` reads the
+  // blocker list alone. A replacement there is a row that is skipped as
+  // `no_consent` on its next drain, and a predecessor whose record says the
+  // contract moved when the actual answer was that we may not send.
+  const replaceable =
+    reenqueueIsRight(verdict.blockers) &&
+    (verdict.legalAllowed || verdict.overrideApplied !== null);
+  // Refused on the law, not the contract, so that is the word recorded.
+  // And the footer word only for duties that print in the footer: a missing
+  // subject label is not something an operator fixes in the footer.
+  const skipReason = releaseNotesSkipReason(
+    reenqueueIsRight(verdict.blockers) && !replaceable ? { ...verdict, blockers: [] } : verdict,
+    FOOTER_DISPLAY_OBLIGATIONS
+  );
 
   // A replacement is a delivery like any other, so it gets the first of section
   // 7.6's two snapshots too. Taken before the transaction because the
@@ -869,7 +897,7 @@ const decideReleaseNotesSend = async (
   // exists to keep a message alive. Wrapped here rather than inside the function,
   // whose enqueue-time callers want the raw error to roll their own write back.
   const replacementEnqueue =
-    reenqueueIsRight(verdict.blockers) && displayProfile !== null
+    replaceable && displayProfile !== null
       ? await releaseNotesEnqueueDecision({
           userId: delivery.userId,
           purpose,
@@ -964,7 +992,7 @@ const decideReleaseNotesSend = async (
     if (
       earlierAllowed &&
       recorded.differs &&
-      (verdict.allowed || reenqueueIsRight(verdict.blockers))
+      (verdict.allowed || replaceable)
     ) {
       await tx.emailDelivery.update({
         where: { id: delivery.id },
@@ -988,7 +1016,7 @@ const decideReleaseNotesSend = async (
     // this is an ending -- the replacement would be refused for that second
     // reason, and it would be a second row addressed to somebody who asked for
     // nothing.
-    if (reenqueueIsRight(verdict.blockers)) {
+    if (replaceable) {
       const required = verdict.displayContract.requiredDisplayContractHash;
       // `displayProfile` is non-null exactly when `required` is: both come from
       // one composed contract. Checked together so a replacement can never be
