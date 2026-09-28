@@ -188,6 +188,9 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   switchChanged: "engineering_agent.switch_changed",
   registrationRecorded: "engineering_agent.registration_recorded",
   registrationResolved: "engineering_agent.registration_resolved",
+  haltAcknowledged: "engineering_agent.halt_acknowledged",
+  monitorsConfirmed: "engineering_agent.monitors_confirmed",
+  serviceFinished: "engineering_agent.service_finished",
 } as const);
 
 const humanActorId = (session: Session): string =>
@@ -1245,6 +1248,102 @@ export async function setEngineeringAgentSwitch(
     tx,
   });
   return { auditLogId };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Acknowledgements and records a person or a service makes                   */
+/* ------------------------------------------------------------------------- */
+
+const writeInstant = async (tx: EngineeringAgentTransaction, key: string): Promise<Date> => {
+  const now = await databaseNow(tx);
+  await tx.appSetting.upsert({
+    where: { key },
+    update: { value: now.toISOString() },
+    create: { key, value: now.toISOString() },
+  });
+  return now;
+};
+
+/**
+ * A person clears the halts only a person clears (§12): a halt a run recorded
+ * and a latched circuit, from this instant on. It does not resolve an open
+ * state mismatch or a run whose attempt ended -- those stay until their own
+ * cause is dealt with -- and it says in its audit entry what it cleared.
+ */
+export async function acknowledgeEngineeringAgentHalt(
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request },
+): Promise<{ auditLogId: string; acknowledgedAt: Date }> {
+  humanActorId(input.session);
+  await lockEngineeringAgentHalt(tx);
+  const before = await readEngineeringAgentHaltState(tx);
+  const acknowledgedAt = await writeInstant(tx, ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY);
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.haltAcknowledged,
+    targetType: "AppSetting",
+    targetId: ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY,
+    summary: ENGINEERING_AGENT_AUDIT_ACTIONS.haltAcknowledged,
+    metadata: {
+      unacknowledgedHalt: before.unacknowledgedHalt,
+      circuitLatched: before.circuitLatched,
+      openStateMismatches: before.openStateMismatches,
+      orphanedRuns: before.orphanedRuns,
+    },
+    tx,
+  });
+  return { auditLogId, acknowledgedAt };
+}
+
+/**
+ * The operator's record that both dead-man monitors are active and their
+ * alerts reach someone, confirmed on the monitors' own screen (§12, the armed
+ * gate). The app cannot see the monitors; this is a person's statement, made
+ * under their name.
+ */
+export async function recordEngineeringAgentMonitorsConfirmed(
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request },
+): Promise<{ auditLogId: string; confirmedAt: Date }> {
+  humanActorId(input.session);
+  const confirmedAt = await writeInstant(tx, ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY);
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.monitorsConfirmed,
+    targetType: "AppSetting",
+    targetId: ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
+    summary: ENGINEERING_AGENT_AUDIT_ACTIONS.monitorsConfirmed,
+    metadata: {},
+    tx,
+  });
+  return { auditLogId, confirmedAt };
+}
+
+/**
+ * A service's report that a cycle ran to its end (§12, the armed gate). It is
+ * the service speaking about itself -- an indicator, not evidence -- and it is
+ * recorded whatever the switches say, as a cycle in mode `off` still runs.
+ */
+export async function recordEngineeringAgentServiceFinish(
+  tx: EngineeringAgentTransaction,
+  input: { service: "runner" | "publisher" },
+): Promise<{ finishedAt: Date }> {
+  const key =
+    input.service === "runner"
+      ? ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY
+      : ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY;
+  const finishedAt = await writeInstant(tx, key);
+  await systemAudit(
+    tx,
+    input.service === "runner" ? "engineering-agent-runner" : "engineering-agent-publisher",
+    ENGINEERING_AGENT_AUDIT_ACTIONS.serviceFinished,
+    "app_setting",
+    key,
+    { service: input.service },
+  );
+  return { finishedAt };
 }
 
 /* ------------------------------------------------------------------------- */

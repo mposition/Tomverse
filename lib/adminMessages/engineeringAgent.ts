@@ -52,6 +52,10 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     setShadow: "Run in shadow",
     freezeOn: "Freeze",
     freezeOff: "Unfreeze",
+    acknowledgeHalt: "Acknowledge the halt",
+    confirmMonitors: "Record that both monitors alert",
+    haltNote:
+      "Acknowledging clears a halt a run recorded and a latched circuit from now on. An open state mismatch stays until it is resolved. Record the monitors only after checking both on their own screen.",
     t1Note:
       "T1 publishing is not set from here. The policy requires person-only approval evidence before T1, and the switch waits for it.",
     prQueue: "Pull request queue: {occupied} of {limit}",
@@ -116,6 +120,10 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     setShadow: "Shadow로 실행",
     freezeOn: "동결",
     freezeOff: "동결 해제",
+    acknowledgeHalt: "정지 확인(해제)",
+    confirmMonitors: "두 모니터 알림 확인 기록",
+    haltNote:
+      "정지 확인은 run이 기록한 정지와 잠긴 차단기를 지금부터 해제합니다. 열린 상태 불일치는 해소될 때까지 남습니다. 모니터 기록은 두 모니터를 각자의 화면에서 확인한 뒤에만 남깁니다.",
     t1Note:
       "T1 게시는 여기서 켜지 않습니다. 정책이 T1 전에 사람 전용 승인 증거를 요구하며, 이 스위치는 그것을 기다립니다.",
     prQueue: "Pull request 대기열: {occupied}/{limit}",

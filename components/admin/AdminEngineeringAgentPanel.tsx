@@ -321,8 +321,15 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                 : button("freeze:true", m.freezeOn, () =>
                     void post("freeze:true", "/api/admin/engineering-agent/settings", { name: "freeze", value: "true" }),
                   )}
+              {button("halt:ack", m.acknowledgeHalt, () =>
+                void post("halt:ack", "/api/admin/engineering-agent/halt", {}),
+              )}
+              {button("monitors:confirm", m.confirmMonitors, () =>
+                void post("monitors:confirm", "/api/admin/engineering-agent/monitors", {}),
+              )}
             </div>
           ) : null}
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.haltNote}</p>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.t1Note}</p>
         </div>
       ) : null}

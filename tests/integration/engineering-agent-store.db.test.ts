@@ -11,6 +11,7 @@ import {
   EngineeringAgentStoreRefusedError,
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
+  acknowledgeEngineeringAgentHalt,
   claimEngineeringAgentWorkItem,
   claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
@@ -23,7 +24,9 @@ import {
   recordEngineeringAgentBinding,
   recordEngineeringAgentBindingObservation,
   readEngineeringAgentOwnerQueues,
+  recordEngineeringAgentMonitorsConfirmed,
   recordEngineeringAgentRunStart,
+  recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
   replaceEngineeringAgentBinding,
   runEngineeringAgentTransaction,
@@ -850,4 +853,45 @@ test("the owner-queue reading agrees with the run trigger", async () => {
   await assert.rejects(startRun(), /owner queue is full/);
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
   assert.equal((await readEngineeringAgentOwnerQueues(prisma, "t1")).claimAllowed, true);
+});
+
+test("the armed gate opens on the services' own finishes and a person's monitor record, and a person clears a halt", async () => {
+  const keys = [
+    "engineeringAgent.runnerLastFinishAt",
+    "engineeringAgent.publisherLastFinishAt",
+    "engineeringAgent.monitorsConfirmedAt",
+  ];
+  try {
+    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "off" }));
+    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
+    await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "runner" }));
+    await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "publisher" }));
+    await refusedWith(
+      inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" })),
+      "armed_gate_monitor_confirmation",
+    );
+    await inTx((tx) => recordEngineeringAgentMonitorsConfirmed(tx, { session: owner }));
+    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" }));
+    const finish = await prisma.adminAuditLog.findFirst({
+      where: { action: "engineering_agent.service_finished", targetId: "engineeringAgent.runnerLastFinishAt" },
+    });
+    assert.equal(systemActorOf(finish!), "engineering-agent-runner", "a service speaks under its own actor");
+
+    // A recorded halt holds until the acknowledgement, which a person makes.
+    await prisma.appSetting.update({ where: { key: MODE_KEY }, data: { value: "t1" } });
+    const run = await startRun();
+    await inTx((tx) =>
+      endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "config_missing" }),
+    );
+    await refusedWith(startRun(), "halted");
+    const acknowledged = await inTx((tx) => acknowledgeEngineeringAgentHalt(tx, { session: owner }));
+    const entry = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: acknowledged.auditLogId } });
+    assert.equal(entry.actorUserId, owner.user!.id);
+    assert.equal((entry.metadata as Record<string, unknown>).unacknowledgedHalt, "config_missing");
+    const next = await startRun();
+    await inTx((tx) => endEngineeringAgentRun(tx, { runId: next.runId, amuxAttemptId: next.amuxAttemptId, outcome: "no_change", halt: "none" }));
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
+    await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
+  }
 });
