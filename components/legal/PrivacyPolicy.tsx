@@ -29,6 +29,25 @@ const VOICE_TRANSFER_ITEMS = [
     "voiceInputTransfer8",
 ] as const;
 
+/**
+ * What Tomverse itself controls about a chat turn, in the same itemized
+ * shape as the voice notice.
+ *
+ * Country, the recipient's legal name, and retention are not in this list.
+ * Those answers belong to each provider's own contract, and a table that
+ * names only the providers already reviewed would omit the rest. The rows
+ * stay off this page until every live provider has a reviewed row.
+ */
+const PROVIDER_TRANSFER_ITEMS = [
+    "providerTransfer1",
+    "providerTransfer2",
+    "providerTransfer3",
+    "providerTransfer4",
+    "providerTransfer5",
+    "providerTransfer6",
+    "providerTransfer7",
+] as const;
+
 const sections = [
     ["collectedTitle", "collected", UserRound],
     ["purposeTitle", "purpose", Database],
@@ -93,6 +112,20 @@ export function PrivacyPolicy() {
                             </h2>
                             <div className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                                 <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "providers" && (
+                                    <>
+                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {t("privacyPolicy.providerTransferTitle")}
+                                        </h3>
+                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                                            {PROVIDER_TRANSFER_ITEMS.map((itemKey) => (
+                                                <li key={itemKey}>
+                                                    {t(`privacyPolicy.${itemKey}`)}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                )}
                                 {bodyKey === "voiceInput" && (
                                     <>
                                         <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
