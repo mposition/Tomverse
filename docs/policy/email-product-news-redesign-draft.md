@@ -1546,7 +1546,7 @@ EEA·영국을 여는 선행 게이트입니다.
   **digest는 테스트가 렌더된 원본과 대조하는 것만 증거로 인정합니다**
   (`DIGEST_VERIFIED_BY`). 표에 손으로 적은 digest는 페이지에 대한 주장이지 증거가
   아닙니다(`document_state_unverified`).
-- **변경 고지는 `legal` 분류여야 합니다**(§3.1의 5번 유형). 등록 가능한 분류 중
+- **변경 고지는 `legal` 분류여야 합니다**(docs/policy/email-notifications.md §3.1의 5번 유형). 등록 가능한 분류 중
   purpose도 수신거부도 없는 것은 `legal`뿐입니다 — `service`는 purpose가 필수라
   끌 수 있고, `transactional`을 가리키면 로그인 코드·영수증이 고지로 세어집니다.
   고지 기간은 `CHANGE_NOTICE_PERIOD_DAYS`(30일), 이 고지로 인정하는 발송의 범위는
@@ -1559,7 +1559,7 @@ EEA·영국을 여는 선행 게이트입니다.
   `suppressionCheck()`에 고지의 분류·purpose로 직접 묻습니다. 마케팅 전용
   `privacy_request`나 purpose 한정 수동 억제는 법정 고지를 막지 않으므로 해당하지
   않습니다. 차단하지 않고 보고하며, 게이트가 열릴 때 계정 id와 사유를 구조화 이벤트와
-  운영 incident로 남깁니다 — §3.2의 다른 채널이 대상을 알아야 하므로),
+  운영 incident로 남깁니다 — docs/policy/email-notifications.md §3.2의 다른 채널이 대상을 알아야 하므로),
   **untold**(그 밖 전부 — 소프트 바운스는 재시도 대상, `failed`·`abandoned`는 우리
   실패이므로 차단).
 - **고지는 승인된 문안에 묶입니다.** template key만으로는 문안을 특정하지 못하므로
