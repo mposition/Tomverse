@@ -124,6 +124,7 @@ test("new catalogue plans and credit weights follow their verified cost bands", 
     "gemini-3-6-flash": ["Free", "Advanced", 4],
     "gemini-3-5-flash": ["Free", "Advanced", 4],
     "gemini-2-5-flash": ["Guest", "Standard", 1],
+    "gemini-flash-lite-latest": ["Guest", "Standard", 1],
     "mistral-medium-3-1": ["Free", "Advanced", 4],
     "claude-fable-5": ["Pro", "Reasoning", 20],
     "kimi-k3": ["Pro", "Reasoning", 16],
@@ -146,7 +147,7 @@ test("new catalogue models expose verified context, output and attachment capabi
     assert.equal(modelSupportsNativePdfInput(model), true, id);
   }
 
-  for (const id of ["gemini-3-6-flash", "gemini-3-5-flash", "gemini-2-5-flash"]) {
+  for (const id of ["gemini-3-6-flash", "gemini-3-5-flash", "gemini-2-5-flash", "gemini-flash-lite-latest"]) {
     const model = getModel(id);
     assert.equal(model.contextWindowTokens, 1_048_576, id);
     assert.equal(getModelBillingProfile(model).maxOutputTokens, 65_536, id);

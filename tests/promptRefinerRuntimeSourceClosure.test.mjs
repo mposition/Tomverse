@@ -248,12 +248,18 @@ const compilerOptions = parsedConfig.options;
 // Both notes stand on the merged tree. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so the digest below is a
 // repin of source positions and not a review of new computed access.
+//
+// 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
+// gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
+// Standard profile. Both files are in this closure. Neither addition is a
+// computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a4393f97b394865cbce797ed7897729b",
-  "466909ed083384578b9a0d56a0a7e9c6",
+  "91a28fd31a974ed4b06a1aba2e93c326",
+  "4b94ee581fc9f3093b6f80088c1a6c47",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

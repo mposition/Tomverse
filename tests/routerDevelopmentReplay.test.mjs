@@ -15,10 +15,10 @@ const changedAnswer = (row, text) => { row.answerText = text; row.answerDigest =
 test("baseline cost signals and default-model control preserve the 24-case and 4-observation domains", () => {
   const report = replayDevelopment(fixture);
   const { baseline, candidate, paired, rows } = report.benchmarkDomain;
-  assert.equal(report.observationBundle.catalogueModels, 42);
-  assert.equal(report.observationBundle.catalogueRows, 1008);
-  assert.equal(report.observationBundle.importedRows, 60);
-  assert.equal(report.observationBundle.catalogueCoverage.length, 42);
+  assert.equal(report.observationBundle.catalogueModels, 43);
+  assert.equal(report.observationBundle.catalogueRows, 1032);
+  assert.equal(report.observationBundle.importedRows, 64);
+  assert.equal(report.observationBundle.catalogueCoverage.length, 43);
   assert.equal(report.observationBundle.catalogueCoverage.find((row) => row.modelId === "gemini-2-5-flash").apiModel, "gemini-3.5-flash-lite");
   assert.ok(report.observationBundle.catalogueCoverage.every((row) => row.correctnessRate === null));
   assert.equal(baseline.populationCases, 24);

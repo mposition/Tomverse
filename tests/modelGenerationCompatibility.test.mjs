@@ -69,7 +69,7 @@ test("MiniMax M3 enables adaptive thinking without Anthropic-only effort", () =>
 });
 
 test("new Gemini request paths omit unsupported sampling parameters", () => {
-  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash"]) {
+  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash", "gemini-flash-lite-latest"]) {
     assert.deepEqual(getModelGenerationSettings(getModel(id), { temperature: 0.1 }), {});
   }
   assert.deepEqual(
@@ -79,7 +79,7 @@ test("new Gemini request paths omit unsupported sampling parameters", () => {
 });
 
 test("new Gemini models reject a prefilled final model turn", () => {
-  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash"]) {
+  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash", "gemini-flash-lite-latest"]) {
     const model = getModel(id);
     assert.equal(
       hasUnsupportedGeminiPrefill(model, [

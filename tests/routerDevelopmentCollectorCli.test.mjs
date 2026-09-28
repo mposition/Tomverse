@@ -22,8 +22,8 @@ test("default preview is a network-free full census and never an approval", () =
   const result = run([]);
   assert.equal(result.status, 0, result.stderr);
   preview = JSON.parse(result.stdout);
-  assert.equal(preview.plan.rows.length, 1008);
-  assert.equal(preview.plan.summary.plannedCalls, 360);
+  assert.equal(preview.plan.rows.length, 1032);
+  assert.equal(preview.plan.summary.plannedCalls, 384);
   assert.equal(preview.approval, null);
   assert.equal(preview.collectionManifest, null);
 });
@@ -35,7 +35,7 @@ test("explicit proposal binds all source/settings/rates/limits without approving
   proposal = JSON.parse(readFileSync(proposalPath, "utf8"));
   assert.equal(proposal.status, "proposal");
   assert.equal(proposal.completionPossibleWithinLimits, false);
-  assert.equal(proposal.plan.rows.length, 1008);
+  assert.equal(proposal.plan.rows.length, 1032);
   assert.equal(proposal.calls.length, 1);
   assert.ok(proposal.totalReservedMicroUsd > 1);
   assert.ok(proposal.collectorSource.files["lib/activeAiModel.ts"]);
@@ -91,7 +91,7 @@ fs.openSync=(path,flags,...args)=>{if(resolve(String(path))===target){if(!checke
   const result = run([`--output=${target}`], {}, [preload]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).output, target);
-  assert.equal(JSON.parse(readFileSync(sink, "utf8")).plan.rows.length, 1008);
+  assert.equal(JSON.parse(readFileSync(sink, "utf8")).plan.rows.length, 1032);
   // The root path is intercepted before any existence query or open reaches the filesystem.
 });
 
@@ -110,5 +110,5 @@ fs.openSync=(path,flags,...args)=>{if(resolve(String(path))===inside)throw new E
   assert.equal(existsSync(inside), false);
   const allowed = run([`--output=${outside}`], {}, [preload]);
   assert.equal(allowed.status, 0, allowed.stderr);
-  assert.equal(JSON.parse(readFileSync(outside, "utf8")).plan.rows.length, 1008);
+  assert.equal(JSON.parse(readFileSync(outside, "utf8")).plan.rows.length, 1032);
 });
