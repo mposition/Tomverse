@@ -24,6 +24,10 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       notSaved:
         "Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.",
       saved: "Platform settings saved and are live.",
+      leadSaved: "Leading model saved and is live.",
+      leadNotSaved: "The leading model was not saved. Nothing else changed.",
+      copyDoesNotApply: "This copy does not change anything.",
+      copyFailed: "Could not copy. Select the text and copy it yourself.",
       sendFailed:
         "Platform settings could not be sent. Nothing changed -- check your connection and retry.",
     },
@@ -86,10 +90,58 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
     },
     guestDefault: {
       eyebrow: "Guest default model",
-      title: "Guest mode default conversation engine",
+      title: "Guest first conversation — leading model",
       description:
-        "Guests who are not signed in always get three models together: GPT · Claude · Gemini. The model chosen here only decides which of them goes first (the leading slot), and shapes a guest's first experience.",
-      leadingEngine: "Leading engine",
+        "Guests who are not signed in always get three models together. The model chosen here only decides which of those three goes first. It does not change which three they see, and it does not change the default for a signed-in account.",
+      leadingEngine: "Leading model (first of the guest trio)",
+      saveLead: "Save leading model",
+      trioFixed: (ids: string) => `Guest trio (fixed in code): ${ids}`,
+      visibleOrder: (ids: string) => `Order guests see now: ${ids}`,
+      noEligible: "No model can be chosen as the lead.",
+      outsideTrio: (name: string, id: string) =>
+        `${name} (${id}) is not in the guest trio, so it cannot lead. Changing the trio is a code change.`,
+      storedNotApplied: (stored: string, effective: string) =>
+        `Stored lead ${stored} is not applied, so ${effective} leads.`,
+      substituted: (missing: string, substitute: string) =>
+        `${missing} is outside the guest conditions, so guests see ${substitute} instead.`,
+    },
+    decisions: {
+      eyebrow: "Three different decisions",
+      title: "Default models",
+      subtitle:
+        "The same value can still be three decisions. Changing one does not change the others.",
+      fallbackTitle: "New-account default model (application fallback)",
+      fallbackBadge: "Fixed in code · changed by a deploy",
+      fallbackCurrent: (name: string, id: string, provider: string) =>
+        `${name} (${id}) · ${provider}`,
+      fallbackApplies:
+        "Applies to the representative model of a newly created account, the last substitute when a stored model cannot be used, and a request that names no model.",
+      fallbackDoesNot:
+        "Does not change an existing account's representative model or new-chat combination, existing conversations, or the guest trio and its lead.",
+      fallbackProtection:
+        "Turning it off, raising its minimum plan, or removing it from the catalogue is refused.",
+      fallbackHow:
+        "Moving it is a reviewed code change. The procedure is docs/policy/default-model-luna-migration.md §1.1 and §7.",
+      checkTitle: "Transition check (nothing is saved)",
+      checkEmpty:
+        "There is no other model to check. Adopt the successor in the model registry first.",
+      checkCandidate: "Candidate",
+      checkCopy: "Copy transition request",
+      checks: {
+        registry_live: "Enabled and publicly listed in the registry",
+        guest_plan: "Minimum plan is Guest",
+        standard_class: "Usage class is Standard",
+        credit_ceiling: "Credits are at or below the current fallback",
+        code_catalog: "Present in the code catalogue. A registry-only model cannot be the fallback.",
+        pricing_profile: "Has a pricing profile",
+      },
+      pass: "Pass",
+      fail: "Fail",
+      accountTitle: "Each account's new-chat combination",
+      accountBadge: "Set by each account · no administrator edit",
+      accountBody:
+        "Existing accounts move only after a model retirement is approved, and only through the reconciliation script (docs/policy/default-model-luna-migration.md §7). This screen does not run it.",
+      accountLink: "Default-model distribution in usage analytics",
     },
     packageImport: {
       eyebrow: "Its own control, not part of the save above",
@@ -132,6 +184,10 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       notSaved:
         "플랫폼 설정을 저장하지 않았습니다. 변경된 것은 없습니다. 다시 시도하거나, 편집을 버리려면 다시 불러오세요.",
       saved: "플랫폼 설정을 저장했으며 바로 적용됩니다.",
+      leadSaved: "선두 모델을 저장했으며 바로 적용됩니다.",
+      leadNotSaved: "선두 모델을 저장하지 않았습니다. 그 밖의 설정은 바뀌지 않았습니다.",
+      copyDoesNotApply: "이 복사만으로 바뀌는 것은 없습니다.",
+      copyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       sendFailed:
         "플랫폼 설정을 전송하지 못했습니다. 변경된 것은 없습니다. 연결을 확인하고 다시 시도하세요.",
     },
@@ -194,10 +250,55 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
     },
     guestDefault: {
       eyebrow: "게스트 기본 모델",
-      title: "게스트 모드 기본 대화 엔진",
+      title: "게스트 첫 대화 — 선두 모델",
       description:
-        "로그인하지 않은 게스트에게는 항상 GPT · Claude · Gemini 3개 모델이 함께 제공됩니다. 여기서 고르는 모델은 그중 어느 모델을 맨 앞(리딩 슬롯)에 둘지만 결정하며, 게스트 첫 사용 경험에 영향을 줍니다.",
-      leadingEngine: "리딩 엔진",
+        "로그인하지 않은 게스트에게는 항상 세 모델이 함께 제공됩니다. 여기서 고르는 모델은 그 셋 중 어느 것을 맨 앞에 둘지만 정합니다. 세 모델의 구성도, 로그인 계정의 기본 모델도 바꾸지 않습니다.",
+      leadingEngine: "선두 모델 (게스트 3종 중 맨 앞)",
+      saveLead: "선두 모델 저장",
+      trioFixed: (ids: string) => `게스트 3종 (코드 고정): ${ids}`,
+      visibleOrder: (ids: string) => `지금 게스트에게 보이는 순서: ${ids}`,
+      noEligible: "선두로 고를 수 있는 모델이 없습니다.",
+      outsideTrio: (name: string, id: string) =>
+        `${name} (${id})는 게스트 3종이 아니라 선두로 고를 수 없습니다. 3종 변경은 코드 변경입니다.`,
+      storedNotApplied: (stored: string, effective: string) =>
+        `저장된 선두 ${stored}가 적용되지 않아 ${effective}가 선두입니다.`,
+      substituted: (missing: string, substitute: string) =>
+        `${missing}가 게스트 조건을 벗어나 ${substitute}가 대신 보입니다.`,
+    },
+    decisions: {
+      eyebrow: "서로 다른 세 결정",
+      title: "기본 모델",
+      subtitle: "값이 같아도 따로 움직입니다. 하나를 바꿔도 나머지는 바뀌지 않습니다.",
+      fallbackTitle: "신규 계정 기본 모델 (앱 fallback)",
+      fallbackBadge: "코드에 고정 · 배포로 변경",
+      fallbackCurrent: (name: string, id: string, provider: string) =>
+        `${name} (${id}) · ${provider}`,
+      fallbackApplies:
+        "적용되는 곳: 새로 만들어지는 계정의 대표 모델, 저장된 모델을 쓸 수 없을 때의 마지막 대체, 모델을 지정하지 않은 요청.",
+      fallbackDoesNot:
+        "바꾸지 않는 것: 기존 계정의 대표 모델과 새 대화 조합, 기존 대화, 게스트 3종과 선두.",
+      fallbackProtection: "끄기, 최소 플랜 올리기, 카탈로그에서 제거는 거부됩니다.",
+      fallbackHow:
+        "전환은 검토를 거치는 코드 변경입니다. 절차는 docs/policy/default-model-luna-migration.md §1.1과 §7입니다.",
+      checkTitle: "전환 후보 점검 (저장하지 않음)",
+      checkEmpty: "점검할 다른 모델이 없습니다. 먼저 모델 레지스트리에서 후속 모델을 채택하세요.",
+      checkCandidate: "후보",
+      checkCopy: "전환 요청 복사",
+      checks: {
+        registry_live: "레지스트리에서 활성·공개",
+        guest_plan: "최소 플랜 Guest",
+        standard_class: "사용 등급 Standard",
+        credit_ceiling: "크레딧이 현재 fallback 이하",
+        code_catalog: "코드 카탈로그에 있음. 레지스트리에만 있는 모델은 fallback이 될 수 없습니다.",
+        pricing_profile: "가격 profile이 있음",
+      },
+      pass: "통과",
+      fail: "실패",
+      accountTitle: "계정별 새 대화 기본 조합",
+      accountBadge: "각 계정이 설정 · 관리자 변경 없음",
+      accountBody:
+        "기존 계정 이동은 모델 은퇴가 승인된 뒤 reconciliation 스크립트로만 합니다(docs/policy/default-model-luna-migration.md §7). 이 화면에서 실행하지 않습니다.",
+      accountLink: "사용량 분석의 기본 모델 분포",
     },
     packageImport: {
       eyebrow: "위의 저장과 별개인 전용 제어",
