@@ -22,7 +22,7 @@ import {
  * last moved. Recorded, not computed: a digest the test derives from whatever
  * it is handed proves only that sha256 is deterministic.
  */
-const SEEDED_BEHAVIOUR_DIGEST = "8e96166a83c803db";
+const SEEDED_BEHAVIOUR_DIGEST = "983eedc319aae927";
 
 test("the seed is usable as written", () => {
   assert.deepEqual(jurisdictionSeedProblems(), []);

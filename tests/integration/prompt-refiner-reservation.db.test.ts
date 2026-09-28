@@ -93,6 +93,8 @@ const stageCreateData = async (input: {
             maxReservations: 100,
             costCeilingMicroUsd: 2_491_600,
             approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+            runApprovalEnabled: true,
+            executionEnabled: true,
             approvedAt: approvedAt.toISOString(),
             approvalExpiresAt: approvalExpiresAt.toISOString(),
             reason: PROMPT_REFINER_STAGE_REASON,
@@ -152,6 +154,8 @@ const rebindStageAudit = async (data: Awaited<ReturnType<typeof stageCreateData>
             maxReservations: data.maxReservations,
             costCeilingMicroUsd: Number(data.costCeilingMicroUsd),
             approvalTtlMinutes: 60,
+            runApprovalEnabled: true,
+            executionEnabled: true,
             approvedAt: data.approvedAt.toISOString(),
             approvalExpiresAt: data.approvalExpiresAt.toISOString(),
             reason: PROMPT_REFINER_STAGE_REASON,
@@ -175,6 +179,241 @@ const createStage = async (input: { status?: "approved" | "closed" } = {}) => {
     }
     return stage;
 };
+
+const legacyStageFixture = async (version: 1 | 2) => {
+    const facts = await loadPromptRefinerStageAdmissionFacts();
+    const stageId = `prompt-refiner-shadow-v${version}`;
+    const contractDigest = version === 1
+        ? "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f"
+        : "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1";
+    const removedPaths = new Set([
+        "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+        ...(version === 1
+            ? ["prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"]
+            : []),
+    ]);
+    const currentManifest = facts.runtimeSourceManifest as unknown as {
+        commitSha: string;
+        files: Array<{ path: string; sizeBytes: number; sha256: string }>;
+    };
+    const files = currentManifest.files.filter((entry) => !removedPaths.has(entry.path));
+    const runtimeSourceManifest = {
+        schemaVersion: `prompt-refiner-runtime-source-manifest-v${version + 1}`,
+        commitSha: currentManifest.commitSha,
+        totalSizeBytes: files.reduce((sum, entry) => sum + entry.sizeBytes, 0),
+        files,
+    };
+    const runtimeSourceIdentityDigest = prefixedPromptRefinerDigest({ files });
+    const runtimeSourceManifestDigest = prefixedPromptRefinerDigest(runtimeSourceManifest);
+    const executionManifest = structuredClone(facts.executionManifest) as unknown as Record<string, unknown>;
+    executionManifest.schemaVersion = `prompt-refiner-shadow-execution-manifest-v${version}`;
+    executionManifest.stageId = stageId;
+    executionManifest.reservationContractDigest = contractDigest;
+    executionManifest.runtimeSource = {
+        fileCount: version === 1 ? 187 : 188,
+        maxFileBytes: 8 * 1024 * 1024,
+        maxTotalBytes: 16 * 1024 * 1024,
+    };
+    const executionManifestDigest = prefixedPromptRefinerDigest(executionManifest);
+    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    assert.ok(clock);
+    const approvedAt = clock.now;
+    const approvalExpiresAt = new Date(approvedAt.getTime() + PROMPT_REFINER_STAGE_APPROVAL_TTL_MS);
+    const authorizationAuditLogId = await writeAdminAuditLog({
+        session: fixtureSession,
+        request: fixtureRequest,
+        action: "prompt_refiner.shadow_stage.activated",
+        targetType: "PromptRefinerReservationStage",
+        targetId: stageId,
+        summary: "Preserved an exact legacy Prompt Refiner staging shadow stage fixture.",
+        metadata: {
+            admissionVersion: `prompt-refiner-stage-admission-v${version}`,
+            proposalDigest: facts.proposalDigest,
+            evidenceBundleDigest: facts.evidenceBundleDigest,
+            runtimeSourceManifestDigest,
+            executionManifestDigest,
+            environment: facts.runtimeEnvironment,
+            deploymentId: facts.runtimeDeploymentId,
+            commitSha: facts.runtimeCommitSha,
+            perRequestCostMicroUsd: 24_916,
+            maxReservations: 100,
+            costCeilingMicroUsd: 2_491_600,
+            approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+            approvedAt: approvedAt.toISOString(),
+            approvalExpiresAt: approvalExpiresAt.toISOString(),
+            reason: PROMPT_REFINER_STAGE_REASON,
+        },
+    });
+    return {
+        stageId,
+        contractDigest,
+        admissionVersion: `prompt-refiner-stage-admission-v${version}`,
+        facts,
+        runtimeSourceManifest,
+        runtimeSourceIdentityDigest,
+        runtimeSourceManifestDigest,
+        executionManifest,
+        executionManifestDigest,
+        approvedAt,
+        approvalExpiresAt,
+        authorizationAuditLogId,
+    };
+};
+
+const insertLegacyStageFixture = async (
+    fixture: Awaited<ReturnType<typeof legacyStageFixture>>
+) => prisma.$executeRawUnsafe(
+    `
+      INSERT INTO "PromptRefinerReservationStage" (
+        "id", "contractVersion", "contractDigest", "status",
+        "perRequestCostMicroUsd", "maxReservations", "costCeilingMicroUsd",
+        "reservationCount", "allocatedCostMicroUsd", "admissionVersion",
+        "proposalVersion", "proposalDigest", "evidenceBundleDigest",
+        "evidenceManifestSha256", "historicalSourceRef",
+        "historicalSourceIdentityDigest", "corpusDigest", "runtimeCommitSha",
+        "runtimeSourceIdentityDigest", "runtimeSourceManifest",
+        "runtimeSourceManifestDigest", "runtimeEnvironment", "runtimeDeploymentId",
+        "executionManifest", "executionManifestDigest", "approvedBy", "approvedAt",
+        "approvalExpiresAt", "authorizationAuditLogId", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'approved', 24916, 100, 2491600, 0, 0, $4,
+        $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17,
+        $18::jsonb, $19, 'mposition', $20, $21, $22, $20, $20
+      )
+    `,
+    fixture.stageId,
+    PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
+    fixture.contractDigest,
+    fixture.admissionVersion,
+    fixture.facts.proposalVersion,
+    fixture.facts.proposalDigest,
+    fixture.facts.evidenceBundleDigest,
+    fixture.facts.evidenceManifestSha256,
+    fixture.facts.historicalSourceRef,
+    fixture.facts.historicalSourceIdentityDigest,
+    fixture.facts.corpusDigest,
+    fixture.facts.runtimeCommitSha,
+    fixture.runtimeSourceIdentityDigest,
+    JSON.stringify(fixture.runtimeSourceManifest),
+    fixture.runtimeSourceManifestDigest,
+    fixture.facts.runtimeEnvironment,
+    fixture.facts.runtimeDeploymentId,
+    JSON.stringify(fixture.executionManifest),
+    fixture.executionManifestDigest,
+    fixture.approvedAt,
+    fixture.approvalExpiresAt,
+    fixture.authorizationAuditLogId
+);
+
+const legacyRunFixture = (
+    version: 3 | 4,
+    stage: Awaited<ReturnType<typeof legacyStageFixture>>
+) => ({
+    id: `legacy-shadow-run-v${version}`,
+    stageId: stage.stageId,
+    runContractVersion: `prompt-refiner-shadow-run-v${version}`,
+    runContractDigest: version === 3
+        ? "sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280"
+        : "sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7",
+    evidenceSpecDigest: version === 3
+        ? null
+        : "7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1",
+    previewBindingDigest: `sha256:${version.toString(16).repeat(64)}`,
+    authorizationAuditLogId: `legacy-shadow-run-v${version}-audit`,
+    stage,
+});
+
+const insertLegacyRunFixture = async (
+    fixture: ReturnType<typeof legacyRunFixture>
+) => prisma.$executeRawUnsafe(
+    `
+      INSERT INTO "PromptRefinerShadowRun" (
+        "id", "stageId", "runContractVersion", "runContractDigest", "corpusDigest",
+        "evidenceSpecDigest", "adapterVersion", "status", "perRequestCostMicroUsd",
+        "maxDispatches", "costCeilingMicroUsd", "dispatchCount", "terminalCount",
+        "knownActualCostMicroUsd", "runtimeCommitSha", "runtimeDeploymentId",
+        "runtimeSourceManifest", "runtimeSourceManifestDigest", "previewBindingDigest",
+        "approvedBy", "approvedAt", "approvalExpiresAt", "authorizationAuditLogId",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'prompt-refiner-openai-sdk-adapter-v1', 'approved',
+        24916, 16, 398656, 0, 0, 0, $7, $8, $9::jsonb, $10, $11, 'mposition',
+        $12, $13, $14, $12, $12
+      )
+    `,
+    fixture.id,
+    fixture.stageId,
+    fixture.runContractVersion,
+    fixture.runContractDigest,
+    fixture.stage.facts.corpusDigest,
+    fixture.evidenceSpecDigest,
+    fixture.stage.facts.runtimeCommitSha,
+    fixture.stage.facts.runtimeDeploymentId,
+    JSON.stringify(fixture.stage.runtimeSourceManifest),
+    fixture.stage.runtimeSourceManifestDigest,
+    fixture.previewBindingDigest,
+    fixture.stage.approvedAt,
+    fixture.stage.approvalExpiresAt,
+    fixture.authorizationAuditLogId
+);
+
+const insertLegacyReservationFixture = async (input: {
+    id: string;
+    stageId: string;
+    requestId: string;
+    contractDigest: string;
+    createdAt: Date;
+}) => prisma.$executeRawUnsafe(
+    `
+      INSERT INTO "PromptRefinerReservation" (
+        "id", "stageId", "requestId", "contractDigest", "status",
+        "reservedCostMicroUsd", "expiresAt", "createdAt", "updatedAt"
+      ) VALUES ($1, $2, $3, $4, 'reserved', 24916, $5, $6, $6)
+    `,
+    input.id,
+    input.stageId,
+    input.requestId,
+    input.contractDigest,
+    new Date(input.createdAt.getTime() + 5 * 60_000),
+    input.createdAt
+);
+
+const insertLegacyAttemptFixture = async (input: {
+    id: string;
+    runId: string;
+    reservationId: string;
+    requestId: string;
+    caseIndex: number;
+    stageId: string;
+    reservationContractDigest: string;
+    runContractDigest: string;
+    createdAt: Date;
+}) => prisma.$executeRawUnsafe(
+    `
+      INSERT INTO "PromptRefinerShadowAttempt" (
+        "id", "runId", "reservationId", "requestId", "caseId", "caseIndex",
+        "stageId", "reservationContractDigest", "runContractDigest", "provider",
+        "modelId", "adapterVersion", "status", "dispatchIntentAt",
+        "dispatchAuditLogId", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, 'openai', 'gpt-5-6-luna',
+        'prompt-refiner-openai-sdk-adapter-v1', 'dispatch_intent', $10, $11, $10, $10
+      )
+    `,
+    input.id,
+    input.runId,
+    input.reservationId,
+    input.requestId,
+    `legacy-case-${input.caseIndex}`,
+    input.caseIndex,
+    input.stageId,
+    input.reservationContractDigest,
+    input.runContractDigest,
+    input.createdAt,
+    `${input.id}-dispatch-audit`
+);
 
 const bindingOf = (reservation: {
     reservationId: string;
@@ -230,6 +469,166 @@ beforeEach(async () => {
     process.env.RAILWAY_GIT_COMMIT_SHA = FIXTURE_COMMIT_SHA;
     process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
     await reset();
+});
+
+test("successor migration preserves exact legacy v1/v2 manifests and rejects a re-digested tamper", async () => {
+    const v1 = await legacyStageFixture(1);
+    const v2 = await legacyStageFixture(2);
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+    );
+    try {
+        await insertLegacyStageFixture(v1);
+        await insertLegacyStageFixture(v2);
+        const preserved = await prisma.promptRefinerReservationStage.findMany({
+            where: { id: { in: [v1.stageId, v2.stageId] } },
+            orderBy: { id: "asc" },
+            select: { id: true, executionManifestDigest: true },
+        });
+        assert.deepEqual(preserved, [
+            { id: v1.stageId, executionManifestDigest: v1.executionManifestDigest },
+            { id: v2.stageId, executionManifestDigest: v2.executionManifestDigest },
+        ]);
+
+        const tampered = structuredClone(v1.executionManifest);
+        tampered.productAdapterReady = true;
+        await assert.rejects(
+            prisma.$executeRawUnsafe(
+                `
+                  UPDATE "PromptRefinerReservationStage"
+                  SET "executionManifest" = $1::jsonb,
+                      "executionManifestDigest" = $2
+                  WHERE "id" = $3
+                `,
+                JSON.stringify(tampered),
+                prefixedPromptRefinerDigest(tampered),
+                v1.stageId
+            ),
+            /PromptRefinerReservationStage_execution_manifest_check/
+        );
+        assert.deepEqual(
+            (
+                await prisma.promptRefinerReservationStage.findUniqueOrThrow({
+                    where: { id: v1.stageId },
+                    select: { executionManifest: true },
+                })
+            ).executionManifest,
+            v1.executionManifest
+        );
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+        );
+    }
+});
+
+test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", async () => {
+    const stageV1 = await legacyStageFixture(1);
+    const stageV2 = await legacyStageFixture(2);
+    const runV3 = legacyRunFixture(3, stageV1);
+    const runV4 = legacyRunFixture(4, stageV2);
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "PromptRefinerReservationStage"
+        DISABLE TRIGGER "prompt_refiner_stage_guard_trigger";
+      ALTER TABLE "PromptRefinerReservation"
+        DISABLE TRIGGER "prompt_refiner_reservation_insert_guard_trigger";
+      ALTER TABLE "PromptRefinerReservation"
+        DISABLE TRIGGER "prompt_refiner_reservation_account_insert_trigger";
+      ALTER TABLE "PromptRefinerShadowRun"
+        DISABLE TRIGGER "prompt_refiner_shadow_run_insert_guard_trigger";
+      ALTER TABLE "PromptRefinerShadowAttempt"
+        DISABLE TRIGGER "prompt_refiner_shadow_attempt_insert_guard_trigger";
+    `);
+    try {
+        await insertLegacyStageFixture(stageV1);
+        await insertLegacyStageFixture(stageV2);
+        await insertLegacyRunFixture(runV3);
+        await insertLegacyRunFixture(runV4);
+        assert.equal(await prisma.promptRefinerShadowRun.count(), 2);
+
+        await assert.rejects(
+            insertLegacyRunFixture({
+                ...runV3,
+                id: "legacy-shadow-run-tampered",
+                runContractDigest: `sha256:${"f".repeat(64)}`,
+                authorizationAuditLogId: "legacy-shadow-run-tampered-audit",
+            }),
+            /PromptRefinerShadowRun_contract_check/
+        );
+
+        await insertLegacyReservationFixture({
+            id: "legacy-reservation-v3",
+            stageId: stageV1.stageId,
+            requestId: "legacy-request-v3",
+            contractDigest: stageV1.contractDigest,
+            createdAt: stageV1.approvedAt,
+        });
+        await insertLegacyReservationFixture({
+            id: "legacy-reservation-v4",
+            stageId: stageV2.stageId,
+            requestId: "legacy-request-v4",
+            contractDigest: stageV2.contractDigest,
+            createdAt: stageV2.approvedAt,
+        });
+        await insertLegacyReservationFixture({
+            id: "legacy-reservation-tampered",
+            stageId: stageV1.stageId,
+            requestId: "legacy-request-tampered",
+            contractDigest: stageV1.contractDigest,
+            createdAt: stageV1.approvedAt,
+        });
+        await insertLegacyAttemptFixture({
+            id: "legacy-attempt-v3",
+            runId: runV3.id,
+            reservationId: "legacy-reservation-v3",
+            requestId: "legacy-request-v3",
+            caseIndex: 0,
+            stageId: stageV1.stageId,
+            reservationContractDigest: stageV1.contractDigest,
+            runContractDigest: runV3.runContractDigest,
+            createdAt: stageV1.approvedAt,
+        });
+        await insertLegacyAttemptFixture({
+            id: "legacy-attempt-v4",
+            runId: runV4.id,
+            reservationId: "legacy-reservation-v4",
+            requestId: "legacy-request-v4",
+            caseIndex: 1,
+            stageId: stageV2.stageId,
+            reservationContractDigest: stageV2.contractDigest,
+            runContractDigest: runV4.runContractDigest,
+            createdAt: stageV2.approvedAt,
+        });
+        assert.equal(await prisma.promptRefinerShadowAttempt.count(), 2);
+
+        await assert.rejects(
+            insertLegacyAttemptFixture({
+                id: "legacy-attempt-tampered",
+                runId: runV3.id,
+                reservationId: "legacy-reservation-tampered",
+                requestId: "legacy-request-tampered",
+                caseIndex: 2,
+                stageId: stageV1.stageId,
+                reservationContractDigest: stageV2.contractDigest,
+                runContractDigest: runV3.runContractDigest,
+                createdAt: stageV1.approvedAt,
+            }),
+            /PromptRefinerShadowAttempt_binding_check/
+        );
+    } finally {
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "PromptRefinerShadowAttempt"
+            ENABLE TRIGGER "prompt_refiner_shadow_attempt_insert_guard_trigger";
+          ALTER TABLE "PromptRefinerShadowRun"
+            ENABLE TRIGGER "prompt_refiner_shadow_run_insert_guard_trigger";
+          ALTER TABLE "PromptRefinerReservation"
+            ENABLE TRIGGER "prompt_refiner_reservation_account_insert_trigger";
+          ALTER TABLE "PromptRefinerReservation"
+            ENABLE TRIGGER "prompt_refiner_reservation_insert_guard_trigger";
+          ALTER TABLE "PromptRefinerReservationStage"
+            ENABLE TRIGGER "prompt_refiner_stage_guard_trigger";
+        `);
+    }
 });
 
 test("reserve uses the DB clock and atomically binds one exact permanent slot", async () => {

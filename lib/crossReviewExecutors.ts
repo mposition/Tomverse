@@ -39,6 +39,7 @@
 
 import {
     authorOutputProblems,
+    parseJsonWithoutDuplicateKeys,
     parseExecutorJson,
     renderReviewPrompt,
     reviewVerdictProblems,
@@ -118,9 +119,18 @@ export type SpawnResult = {
     status: number | null;
     stdout: string;
     stderr: string;
+    /** Exact bytes, when the production spawner captured them. */
+    stdoutBytes?: Buffer;
+    stderrBytes?: Buffer;
     /** True when the spawner itself enforced a timeout. */
     timedOut?: boolean;
     error?: Error;
+};
+
+/** Preserve stream bytes across arbitrary chunk boundaries, then decode once. */
+export const completeUtf8Capture = (chunks: readonly Uint8Array[]): { bytes: Buffer; text: string } => {
+    const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    return { bytes, text: bytes.toString("utf8") };
 };
 
 export type Spawner = (
@@ -257,6 +267,62 @@ export type CliExecutorOptions = {
     configOverrides?: readonly string[];
 };
 
+const CLAUDE_EXTERNAL_ROUTE_NAMES = new Set([
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+]);
+const CLAUDE_CLOUD_CREDENTIAL_PREFIXES = ["AWS_", "GOOGLE_", "AZURE_"];
+
+/**
+ * Build the exact child environment. Claude Code reviews must use the saved
+ * first-party subscription login, so API credentials are removed without
+ * trusting the casing used by the parent process or an override.
+ */
+export const sanitizedCliEnvironment = (
+    id: string,
+    base: Readonly<Record<string, string | undefined>>,
+    overrides: Readonly<Record<string, string | undefined>> = {}
+): Record<string, string> => {
+    const combined = { ...base, ...overrides };
+    const result: Record<string, string> = {};
+    for (const [name, value] of Object.entries(combined)) {
+        if (value === undefined) continue;
+        const upper = name.toUpperCase();
+        if (
+            id === "claude" &&
+            (CLAUDE_EXTERNAL_ROUTE_NAMES.has(upper) || CLAUDE_CLOUD_CREDENTIAL_PREFIXES.some((prefix) => upper.startsWith(prefix)))
+        ) continue;
+        result[name] = value;
+    }
+    return result;
+};
+
+export type ClaudeSubscriptionAuth = {
+    loggedIn: true;
+    authMethod: "claude.ai";
+    apiProvider: "firstParty";
+    subscriptionType: "max";
+};
+
+/** Fail closed unless Claude reports the exact Max first-party login. */
+export const claudeSubscriptionAuthProblems = (value: unknown): readonly string[] => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return ["Claude auth status must be an object"];
+    const record = value as Record<string, unknown>;
+    const expected: Record<keyof ClaudeSubscriptionAuth, unknown> = {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+    };
+    return Object.entries(expected)
+        .filter(([name, wanted]) => record[name] !== wanted)
+        .map(([name, wanted]) => `Claude auth ${name} must be ${JSON.stringify(wanted)}`);
+};
+
 const notExecuted = <T>(mode: string, command: string, args: readonly string[]): ExecutorResult<T> => ({
     ok: false,
     failure: "not_executed",
@@ -285,7 +351,7 @@ const runCli = async <T>(
             input: prompt,
             cwd: options.cwd,
             timeoutMs: options.timeoutMs,
-            env: options.env,
+            env: sanitizedCliEnvironment(options.id, process.env, options.env),
         });
     } catch (error) {
         return { ok: false, failure: "execution_failed", detail: error instanceof Error ? error.message : String(error) };
@@ -299,7 +365,93 @@ const runCli = async <T>(
             detail: `${options.invocation.command} exited ${result.status}: ${result.stderr.trim().slice(0, 400)}`,
         };
     }
-    return parseExecutorJson<T>(unwrapCodexJsonl(unwrapClaudeResult(result.stdout)), problemsOf);
+    // The executable may be an absolute, hash-bound path. Decoding depends
+    // on the logical producer protocol, never on that filesystem spelling.
+    return decodeCliResult<T>(options.id, result.stdout, problemsOf);
+};
+
+/**
+ * Decode exactly one successful model result from the tool's native output.
+ * This is shared by live execution and by the package provenance reader, so
+ * a wrapper cannot claim a verdict or report that the bound raw events do
+ * not actually contain.
+ */
+export const decodeCliResult = <T>(
+    command: string,
+    stdout: string,
+    problemsOf: (value: unknown) => readonly string[]
+): ExecutorResult<T> => {
+    if (command === "claude") {
+        let envelope: unknown;
+        try {
+            envelope = parseJsonWithoutDuplicateKeys(stdout);
+        } catch (error) {
+            return { ok: false, failure: "invalid_json", detail: `Claude output is not one unambiguous JSON envelope: ${error instanceof Error ? error.message : String(error)}` };
+        }
+        if (
+            typeof envelope !== "object" ||
+            envelope === null ||
+            Array.isArray(envelope) ||
+            (envelope as { type?: unknown }).type !== "result" ||
+            (envelope as { subtype?: unknown }).subtype !== "success" ||
+            (envelope as { is_error?: unknown }).is_error !== false ||
+            typeof (envelope as { result?: unknown }).result !== "string"
+        ) {
+            return { ok: false, failure: "missing_result", detail: "Claude output carries no single successful result envelope" };
+        }
+        return parseExecutorJson<T>((envelope as { result: string }).result, problemsOf);
+    }
+    if (command === "codex") {
+        const lines = stdout.split("\n").filter((line) => line.replace(/[ \t\r]/gu, "") !== "");
+        const results: string[] = [];
+        let completedTurns = 0;
+        let failedTurns = 0;
+        let legacyCompletedTurns = 0;
+        let terminalIndex: number | null = null;
+        for (let index = 0; index < lines.length; index += 1) {
+            const line = lines[index];
+            if (terminalIndex !== null) {
+                return {
+                    ok: false,
+                    failure: "schema_mismatch",
+                    detail: `Codex event stream carries an event after its terminal event at index ${terminalIndex}`,
+                };
+            }
+            let event: unknown;
+            try {
+                event = parseJsonWithoutDuplicateKeys(line);
+            } catch (error) {
+                return { ok: false, failure: "invalid_json", detail: `Codex output contains an ambiguous or non-JSON event line: ${error instanceof Error ? error.message : String(error)}` };
+            }
+            if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+            const current = event as { type?: unknown; item?: { type?: unknown; text?: unknown }; msg?: { type?: unknown; message?: unknown } };
+            if (current.type === "turn.completed") {
+                completedTurns += 1;
+                terminalIndex = index;
+            }
+            if (current.type === "turn.failed") failedTurns += 1;
+            const item = current.item;
+            if (current.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") results.push(item.text);
+            const msg = (event as { msg?: { type?: unknown; message?: unknown } }).msg;
+            if (msg?.type === "agent_message" && typeof msg.message === "string") results.push(msg.message);
+            if (msg?.type === "task_complete") {
+                legacyCompletedTurns += 1;
+                terminalIndex = index;
+            }
+        }
+        if (failedTurns > 0) return { ok: false, failure: "execution_failed", detail: "Codex event stream carries a failed turn" };
+        if (completedTurns + legacyCompletedTurns !== 1) {
+            return {
+                ok: false,
+                failure: "schema_mismatch",
+                detail: `Codex event stream carries ${completedTurns} completed turn(s) and ${legacyCompletedTurns} legacy completion(s); expected exactly one successful completion`,
+            };
+        }
+        if (results.length === 0) return { ok: false, failure: "missing_result", detail: "Codex event stream carries no agent result" };
+        if (results.length !== 1) return { ok: false, failure: "schema_mismatch", detail: `Codex event stream carries ${results.length} agent results; expected exactly one` };
+        return parseExecutorJson<T>(results[0], problemsOf);
+    }
+    return { ok: false, failure: "execution_failed", detail: `unsupported CLI result producer ${command}` };
 };
 
 /**
