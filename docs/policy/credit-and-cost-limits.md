@@ -55,6 +55,53 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
 적혀 있습니다(premium 8 크레딧 × 입력 배수 3 = 24 크레딧, 최대 입력
 128,000 토큰, 가장 비싼 premium 모델 기준).
 
+### Gemini 3.5 Flash-Lite를 standard 1크레딧으로 채택하는 예외
+
+2026-09-28에 Tommy가 승인했습니다. 채택 저장의 크레딧 하한은 최악 턴
+(입력 128,000토큰 × 입력 단가 + 출력 상한 전체 × 출력 단가)이 standard
+1크레딧의 3배 커버(US$0.12) 안에 들어올 것을 요구합니다. Gemini 3.5
+Flash-Lite의 공개 Standard 가격은 그 안에 들어오지 않습니다. 가격 출처는
+같은 날 읽은 <https://ai.google.dev/gemini-api/docs/pricing>입니다.
+
+- 공급자 `google`. API 모델은 둘입니다. `gemini-3.5-flash-lite`와,
+  버전을 포함하지 않는 최신 Flash-Lite 별칭 `gemini-flash-lite-latest`.
+  2026-09-28에 Tommy가 두 번째 ID를 이 예외에 넣었습니다. 별칭은 Google이
+  바꿀 수 있고, 이 예외는 따라가지 않습니다. 가격이나 출력 상한이 아래와
+  다르면 거절입니다.
+- 사용 등급 `standard`, 크레딧 가중치 1
+- 입력 US$0.30 / 100만 토큰, 출력 US$2.50 / 100만 토큰, 캐시 입력 배수 0.1
+  (캐시 적중 US$0.03 ÷ 입력 US$0.30)
+- 최대 출력 65,536토큰
+- 최악 턴은 202,240 micro-USD(US$0.20224)입니다. 거절 문장은 소수 셋째
+  자리인 US$0.202로 적습니다. standard 커버는 US$0.12이고, advanced
+  4크레딧이면 US$0.48로 덮입니다.
+
+이 차이는 `COST_PER_CREDIT_CEILING_MICRO_USD`(40,000)을 바꾸지 않고
+남깁니다. 예외는 `lib/modelAdoptionDraft.ts`의
+`GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION` 한 곳이며, 그 상수와
+본문의 공급자, 위 두 API 모델 중 하나, 등급, 가중치, 세 가격, 출력 상한이
+모두 같을 때만 채택 저장을 통과시킵니다. 가격이나 상한이나 모델이 다르면
+하한이 그대로 적용됩니다. `gemini-flash-latest`, Gemini 3.1 Flash-Lite,
+Gemini 2.5 Flash는 이 예외가 아닙니다. 캐시 저장 시간당 요금은 이 하한도
+이 예외도 가격에 넣지 않습니다.
+
+운영자 확인은 쿼리 매개변수 `creditFloorExceptionAck`가 예외 id
+`gemini-3.5-flash-lite-standard-2026-09-28`과 같을 때만 인정됩니다.
+체크박스의 `true`나, 다른 모델에 붙인 같은 문자열은 통과가 아닙니다.
+저장이 이 경로로 통과하면 `model.registry.create_started` 감사 기록에
+그 id가 남습니다.
+
+예외는 2026-12-27(UTC)까지입니다. 다음 UTC 날인 2026-12-28 00:00부터
+하한이 다시 적용됩니다. 날짜를 늘리는 것은 이 상수를 고치는 코드 변경입니다.
+
+이미 시드된 레지스트리 행 `gemini-2-5-flash`(표시 이름 Gemini 3.5
+Flash-Lite, API 모델 `gemini-3.5-flash-lite`, Guest, standard)는 이 하한보다
+먼저 들어왔고 이 예외로 다시 쓰지 않습니다. 그 행이 있으면
+`gemini-3.5-flash-lite`를 다시 채택하는 것은 거절되고, 그 행을 고치라고
+합니다. `gemini-flash-lite-latest`는 다른 API 모델이라 그 행에 막히지
+않습니다. 다만 그 별칭을 이미 서비스하는 행이 있으면 역시 두 번째 행은
+만들지 않습니다. 일반 수정은 이 하한을 실행하지 않습니다.
+
 결과(기본 플랜 설정 기준):
 
 | 플랜 | 일일 plan guardrail | 월간 plan guardrail |
