@@ -86,6 +86,37 @@ test("every app runtime file is in the slice, whether or not an import connects 
   ]);
 });
 
+test("data the running application reads is in the slice, whether imported, under a runtime directory or named by path", () => {
+  const files = tree({
+    "lib/amux/gate.ts": 'import rules from "../rules.json";\nexport const gate = () => rules.enabled;\n',
+    "lib/rules.json": '{"enabled": false}\n',
+    "docs/imported.json": '{"a": 1}\n',
+    "lib/useConfig.ts": 'import data from "../docs/imported.json";\nexport const d = data;\n',
+    "lib/registry.ts":
+      'import { readFileSync } from "node:fs";\nimport { join } from "node:path";\nexport const REGISTRY = "docs/marketing/registry.json";\n' +
+      'export const font = () => readFileSync(join(process.cwd(), "docs", "fonts", "face.ttf"));\n' +
+      "export const page = (name) => readFileSync(`docs/pages/${name}.md`);\n",
+    "docs/marketing/registry.json": "{}\n",
+    "docs/fonts/face.ttf": "x",
+    "docs/pages/home.md": "x",
+    "docs/unrelated.md": "x",
+  });
+  const paths = [
+    "lib/rules.json",
+    "locales/strings.json",
+    "docs/imported.json",
+    "docs/marketing/registry.json",
+    "docs/fonts/face.ttf",
+    "docs/pages/home.md",
+  ];
+  const result = slice(
+    [...paths, "docs/unrelated.md"].map((path) => change(path, { newText: "{}\n" })),
+    files,
+  );
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
+  assert.deepEqual([...result.slicePaths].sort(), [...paths].sort());
+});
+
 test("a new barrel and a new caller added together are both in the slice", () => {
   const result = slice([
     change("lib/newBarrel.ts", { status: "added", newText: 'export * from "./amux/gate";\n' }),

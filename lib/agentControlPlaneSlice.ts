@@ -364,7 +364,58 @@ type Graph = {
   edges: Map<string, Set<string>>;
   facts: Map<string, CodeFacts>;
   appSettingKeys: Set<string>;
+  /** Paths runtime code names as text, exactly or as a directory. */
+  named: NamedPaths;
   problems: SliceProblem[];
+};
+
+export type NamedPaths = { exact: Set<string>; prefixes: Set<string> };
+
+const PATH_LIKE = /^[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*$/;
+const normalisePathText = (text: string) =>
+  text.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
+const PATH_CALL = /(?:^|\.)(?:join|resolve)$/;
+const BASE_ARGUMENT = /^(?:process\.cwd\(\)|__dirname|import\.meta\.dirname)$/;
+
+/**
+ * Repository paths a runtime file names as text, so a file it reads by path
+ * joins the slice even though no import reaches it: every path-shaped string
+ * literal (exactly, and as a directory when it has a separator), the literal
+ * start of every `join`/`resolve` call, and the literal head of every
+ * template. A path assembled from nothing literal is not named, but whatever
+ * supplies it is runtime code, whose own literals are collected here.
+ */
+export const namedPaths = (source: ts.SourceFile): NamedPaths => {
+  const exact = new Set<string>();
+  const prefixes = new Set<string>();
+  const add = (raw: string, asPrefix: boolean) => {
+    const text = normalisePathText(raw);
+    if (text === "" || !PATH_LIKE.test(text)) return;
+    exact.add(text);
+    if (asPrefix || text.includes("/")) prefixes.add(text);
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) add(node.text, false);
+    if (ts.isTemplateExpression(node)) {
+      // The head up to its last separator is the directory the template reads under.
+      const head = node.head.text.replace(/\\/g, "/");
+      add(head.includes("/") ? head.slice(0, head.lastIndexOf("/")) : head, true);
+    }
+    if (ts.isCallExpression(node) && PATH_CALL.test(node.expression.getText(source))) {
+      const parts: string[] = [];
+      let index = 0;
+      while (index < node.arguments.length && BASE_ARGUMENT.test(node.arguments[index].getText(source))) index += 1;
+      for (; index < node.arguments.length; index += 1) {
+        const argument = node.arguments[index];
+        if (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)) break;
+        parts.push(argument.text);
+      }
+      if (parts.length > 0) add(parts.join("/"), true);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { exact, prefixes };
 };
 
 /** Parses and resolves every code file of one tree. */
@@ -373,6 +424,7 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
   const edges = new Map<string, Set<string>>();
   const facts = new Map<string, CodeFacts>();
   const appSettingKeys = new Set<string>();
+  const named: NamedPaths = { exact: new Set(), prefixes: new Set() };
   for (const file of files) {
     if (!isAppRuntimeCode(file.path)) continue;
     const source = parse(file);
@@ -383,6 +435,9 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     const fileFacts = codeFacts(source);
     facts.set(file.path, fileFacts);
     if (fileFacts.appSettingAccess) for (const key of keyLiterals(source)) appSettingKeys.add(key);
+    const fileNamed = namedPaths(source);
+    for (const path of fileNamed.exact) named.exact.add(path);
+    for (const path of fileNamed.prefixes) named.prefixes.add(path);
     if (isRuntimeControlPlane(file.path) && fileFacts.runtimeLoader) {
       problems.push({ path: file.path, specifier: null, problem: "runtime_loader_in_control_plane" });
     }
@@ -394,25 +449,44 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
     }
     edges.set(file.path, targets);
   }
-  return { edges, facts, appSettingKeys, problems };
+  return { edges, facts, appSettingKeys, named, problems };
 };
 
 const isProduct = (path: string) => classifyPath(path) === "product";
 
+/** Directories whose every file belongs to the running application, whatever its extension. */
+const RUNTIME_DIRECTORY = /^(?:app|components|lib|locales|packages|types|hooks|public)\//;
+
 /**
- * Every product file of the app runtime.
+ * Every product file the running application may read: every file under the
+ * runtime directories and every root runtime file, whatever its extension;
+ * every file runtime code imports; and every file runtime code names by path.
  *
  * The control plane runs inside the same application. A runtime file can
  * reach it without any import: the framework registers routes and pages by
  * convention and they are called by URL, the database and process-global
- * state are shared, and a callback can be handed over through any number of
- * files. No import-based analysis proves a runtime file cannot change what
- * the control plane does, so none is attempted -- every one is in the slice
+ * state are shared, a callback can be handed over through any number of
+ * files, and data -- JSON, locales, generated files, documents read by path --
+ * is read without being code. No analysis here proves a runtime file cannot
+ * change what the control plane does, so none is attempted
  * (docs/policy/engineering-agent.md §4: a file that cannot be analysed makes
  * the patch T2). The import graph is still built in full, because an import
  * that does not resolve, or a file that does not parse, fails the analysis.
  */
-const appRuntimeSlice = (graph: Graph) => new Set([...graph.edges.keys()].filter(isProduct));
+const appRuntimeSlice = (graph: Graph, paths: Iterable<string>) => {
+  const imported = new Set([...graph.edges.values()].flatMap((targets) => [...targets]));
+  const slice = new Set<string>();
+  for (const path of paths) {
+    if (!isProduct(path)) continue;
+    const runtime = RUNTIME_ROOT_FILES.has(path) || RUNTIME_DIRECTORY.test(path);
+    const named =
+      graph.named.exact.has(path) ||
+      [...graph.named.prefixes].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+    if (runtime || imported.has(path) || named) slice.add(path);
+  }
+  return slice;
+};
+
 
 /**
  * The slice for one change set. The base tree gives the slice a changed path
@@ -428,7 +502,7 @@ export const computeControlPlaneSlice = (input: {
 }): SliceResult => {
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = appRuntimeSlice(base);
+  const baseSlice = appRuntimeSlice(base, input.baseFiles.map((file) => file.path));
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
@@ -457,7 +531,7 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultSlice = appRuntimeSlice(result);
+  const resultSlice = appRuntimeSlice(result, resultFiles.map((file) => file.path));
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
