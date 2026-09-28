@@ -8034,6 +8034,8 @@ model EngineeringAgentRequest {
   route         String
   requestDigest String
   state         String   @default("accepted")
+  /// The run a start created or the item a claim took; set once, with `committed`.
+  resultRef     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

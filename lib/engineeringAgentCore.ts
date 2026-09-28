@@ -532,12 +532,12 @@ export const ENGINEERING_AGENT_KILL_SWITCH_ENV = "ENGINEERING_AGENT_KILL_SWITCH"
 
 /**
  * Instants the app keeps beside the switches, each written by one recorded
- * act: the Admin acknowledgement that clears a latched circuit (§12), each
+ * act: the Admin acknowledgement that clears a halt (§12), each
  * service's report that a cycle ran to its end, and the operator's record that
  * both dead-man monitors are active and alerting (the armed gate, §12). An
  * absent or unparseable value is no record at all.
  */
-export const ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.circuitAcknowledgedAt";
+export const ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.haltAcknowledgedAt";
 export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
 export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
 export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
@@ -707,23 +707,31 @@ export const decideHalt = (reading: HaltReading): HaltValue => {
 };
 
 /**
- * The halt a run ends with. The runner reports what only it can see (the
- * publisher App's identity, unbound App pull requests and refs); the app adds
- * what it holds (a latched circuit, an open state mismatch). The result is the
- * policy's priority over both, so a report of `none` can never lower a halt
- * the app can see.
+ * What a runner may report when its run ends: the readings only it can make
+ * -- the publisher App's identity, unbound App pull requests and refs. A
+ * latched circuit and an open state mismatch are the app's to read, never a
+ * runner's to assert: one report of `circuit_open` would otherwise latch the
+ * circuit without the repeated failures that are its definition (§12).
+ */
+export const RUNNER_REPORTABLE_HALTS = ["none", "config_missing", "unbound_app_pr", "unbound_app_ref"] as const;
+export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
+
+/**
+ * The halt a run ends with: the runner's report combined with what the app
+ * holds, in the policy's priority, so a report of `none` can never lower a
+ * halt the app can see.
  */
 export const combineRunHalt = (input: {
-  reported: HaltValue;
+  reported: RunnerReportableHalt;
   circuitLatched: boolean;
   openStateMismatches: number;
 }): HaltValue =>
   decideHalt({
     appIdentityConfigured: input.reported !== "config_missing",
-    circuitLatched: input.circuitLatched || input.reported === "circuit_open",
+    circuitLatched: input.circuitLatched,
     unboundAppPrs: input.reported === "unbound_app_pr" ? 1 : 0,
     unboundAppRefs: input.reported === "unbound_app_ref" ? 1 : 0,
-    openStateMismatches: input.openStateMismatches + (input.reported === "state_mismatch" ? 1 : 0),
+    openStateMismatches: input.openStateMismatches,
   });
 
 export const CIRCUIT_WINDOW_DAYS = 30;

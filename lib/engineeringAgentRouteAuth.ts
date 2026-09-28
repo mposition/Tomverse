@@ -145,6 +145,8 @@ export async function runIdempotentEngineeringAgentRequest<T>(input: {
   requestKey: string;
   body: unknown;
   work: (tx: EngineeringAgentTransaction) => Promise<T>;
+  /** The identifier a caller that lost the answer needs, recorded with the commit. */
+  resultRef?: (result: T) => string | null;
 }): Promise<IdempotentOutcome<T>> {
   const outcome = await runAttachedIdempotentEngineeringAgentRequest({
     ...input,
@@ -154,7 +156,7 @@ export async function runIdempotentEngineeringAgentRequest<T>(input: {
         async (tx) => {
           const result = await input.work(tx);
           requireSendableResult(result);
-          await markCommitted(tx);
+          await markCommitted(tx, input.resultRef?.(result) ?? undefined);
           return result;
         },
         { timeout: 30_000 },
@@ -177,7 +179,7 @@ export async function runAttachedIdempotentEngineeringAgentRequest<T>(input: {
   route: string;
   requestKey: string;
   body: unknown;
-  work: (markCommitted: (tx: EngineeringAgentTransaction) => Promise<void>) => Promise<T>;
+  work: (markCommitted: (tx: EngineeringAgentTransaction, resultRef?: string) => Promise<void>) => Promise<T>;
 }): Promise<IdempotentOutcome<T> | { kind: "not_committed"; value: T }> {
   const requestDigest = createHash("sha256").update(JSON.stringify(input.body), "utf8").digest("hex");
   const accepted = await runEngineeringAgentTransaction(prisma, async (tx) => {
@@ -199,8 +201,8 @@ export async function runAttachedIdempotentEngineeringAgentRequest<T>(input: {
     ).catch(() => undefined);
   let committed = false;
   try {
-    const value = await input.work(async (tx) => {
-      await moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "committed" });
+    const value = await input.work(async (tx, resultRef) => {
+      await moveEngineeringAgentRequest(tx, { key: input.requestKey, from: "in_progress", to: "committed", resultRef });
       committed = true;
     });
     if (!committed) {

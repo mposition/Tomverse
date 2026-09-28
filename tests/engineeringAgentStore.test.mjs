@@ -105,7 +105,11 @@ test("every exported write takes the engineering transaction and records its aud
     assert.ok(first, `${name} takes a client`);
     assert.equal(first.type.getText(tree), "EngineeringAgentTransaction", `${name} takes the engineering transaction`);
     // A function that delegates its one write to another export inherits that audit entry.
-    assert.match(body, /\b(?:systemAudit|writeAdminAuditLog|claimEngineeringAgentWorkItem)\(/, `${name} writes its audit entry`);
+    assert.match(
+      body,
+      /\b(?:systemAudit|writeAdminAuditLog|claimEngineeringAgentWorkItem|openEngineeringAgentWorkItem)\(/,
+      `${name} writes its audit entry`,
+    );
   }
   for (const name of UNAUDITED.keys()) assert.ok(names.includes(name), `${name} is still exported`);
   assert.ok(names.length > UNAUDITED.size + 10, "the writer's functions were found");
@@ -132,6 +136,7 @@ const RECORDS_WHAT_HAPPENED = [
   "readEngineeringAgentSwitches",
   "readEngineeringAgentHaltState",
   "readEngineeringAgentOwnerQueues",
+  "openEngineeringAgentRunMismatches",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",
   "heartbeatEngineeringAgentRun",

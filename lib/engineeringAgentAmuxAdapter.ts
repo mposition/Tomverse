@@ -43,19 +43,21 @@ import {
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
   combineRunHalt,
-  type HaltValue,
   type RunOutcome,
+  type RunnerReportableHalt,
 } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
-  engineeringAgentHoldsHalt,
+  engineeringAgentHalted,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
+  openEngineeringAgentRunMismatches,
   readEngineeringAgentHaltState,
   readEngineeringAgentOwnerQueues,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
+  runEngineeringAgentTransaction,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -113,7 +115,7 @@ export const amuxSettlementForRunOutcome = (
   }
 };
 
-type MarkCommitted = (tx: EngineeringAgentTransaction) => Promise<void>;
+type MarkCommitted = (tx: EngineeringAgentTransaction, resultRef?: string) => Promise<void>;
 
 /* ------------------------------------------------------------------------- */
 /* Attachments                                                                */
@@ -127,13 +129,14 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
 };
 
 // Calls each attachment makes through the AMUX writer's bounded client. The
-// start: switch read, halt state (three), clock, the run's INSERT, its audit
-// entry (four), the card's kind and the request's move to `committed` --
-// twelve, and one to spare. The heartbeat: clock and update. The end: halt
-// state (three), update, audit entry (four) and the request's move.
-const RUN_START_PRISMA_CALLS = 13;
+// start: switch read, halt lock, halt state (three), clock, the run's INSERT,
+// its audit entry (four), the card's kind and the request's move to
+// `committed` -- thirteen, and one to spare. The heartbeat: clock and
+// update. The end: halt state (three), halt lock, update, audit entry (four)
+// and the request's move.
+const RUN_START_PRISMA_CALLS = 14;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
-const RUN_END_PRISMA_CALLS = 9;
+const RUN_END_PRISMA_CALLS = 10;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
 export const engineeringRunStartAttachment = (input: {
@@ -153,7 +156,8 @@ export const engineeringRunStartAttachment = (input: {
       // The run's lease is the attempt's: the runner renews both in one call.
       leaseMs: fact.leaseExpiresAt.getTime() - context.dbNow.getTime(),
     });
-    await input.markCommitted?.(tx);
+    // A runner that loses this answer finds its run id in the request's record.
+    await input.markCommitted?.(tx, input.runId);
   },
 });
 
@@ -179,7 +183,7 @@ export const engineeringRunHeartbeatAttachment = (input: {
 export const engineeringRunEndAttachment = (input: {
   runId: string;
   outcome: RunOutcome;
-  halt: HaltValue;
+  halt: RunnerReportableHalt;
   markCommitted?: MarkCommitted;
 }): AmuxAttachment<AmuxExecutionSettledFact> => ({
   prismaCalls: RUN_END_PRISMA_CALLS,
@@ -248,13 +252,16 @@ export async function heartbeatEngineeringAgentWorker(input: {
   requireOpen();
   const refusal = workerCatalogRefusal();
   if (refusal) return { accepted: false as const, reason: refusal };
+  // An attempt AMUX recovered under a live run is a mismatch for a person
+  // (§11); the heartbeat is where the adapter looks for one.
+  await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx));
   const switches = await readEngineeringAgentSwitches(prisma);
   const [halt, queues] = await Promise.all([
     readEngineeringAgentHaltState(prisma),
     readEngineeringAgentOwnerQueues(prisma, switches.mode),
   ]);
   const dispatchReady =
-    input.dispatchReady && switches.claimAllowed && !engineeringAgentHoldsHalt(halt) && queues.claimAllowed;
+    input.dispatchReady && switches.claimAllowed && !engineeringAgentHalted(halt) && queues.claimAllowed;
   const heartbeat = await heartbeatAmuxWorkerRuntime({
     workerName: ENGINEERING_AGENT_AMUX_WORKER,
     instanceId: input.lease.instanceId,
@@ -362,7 +369,7 @@ export async function finishEngineeringAgentRun(input: {
   attemptId: string;
   taskRevision: number;
   outcome: RunOutcome;
-  halt: HaltValue;
+  halt: RunnerReportableHalt;
   markCommitted?: MarkCommitted;
 }) {
   requireOpen();

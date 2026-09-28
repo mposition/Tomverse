@@ -29,6 +29,7 @@ import {
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
+  openEngineeringAgentRunMismatches,
   runEngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -456,6 +457,25 @@ test("the adapter's settlement runs against delivery acknowledgement and expired
         "active",
         `round ${round}: a fenced-out settlement ends no run`,
       );
+      // The run is not ended to match AMUX: a mismatch goes to a person, once.
+      assert.ok(attempt.endedAt, `round ${round}: recovery ended the attempt`);
+      const opened = await runEngineeringAgentTransaction(prisma, (tx) =>
+        openEngineeringAgentRunMismatches(tx),
+      );
+      assert.ok(opened >= 1);
+      assert.equal(
+        await runEngineeringAgentTransaction(prisma, (tx) =>
+          openEngineeringAgentRunMismatches(tx),
+        ),
+        0,
+        "a run is reported once",
+      );
+      const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+        where: { causeKey: `run_attempt:${runId}` },
+      });
+      assert.equal(mismatch.kind, "state_mismatch");
+      assert.equal(mismatch.state, "open");
+      // Here the fixture plays the person who resolves it.
       await runEngineeringAgentTransaction(prisma, (tx) =>
         endEngineeringAgentRun(tx, {
           runId,
@@ -464,6 +484,10 @@ test("the adapter's settlement runs against delivery acknowledgement and expired
           halt: "none",
         }),
       );
+      await prisma.engineeringAgentWorkItem.update({
+        where: { id: mismatch.id },
+        data: { state: "resolved" },
+      });
     }
   }
 });

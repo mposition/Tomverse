@@ -10,7 +10,7 @@ import {
   finishEngineeringAgentRun,
   isEngineeringAgentAmuxAdapterOpen,
 } from "@/lib/engineeringAgentAmuxAdapter";
-import { HALT_VALUES, RUN_OUTCOMES, isRunId } from "@/lib/engineeringAgentCore";
+import { RUNNER_REPORTABLE_HALTS, RUN_OUTCOMES, isRunId } from "@/lib/engineeringAgentCore";
 import {
   engineeringAgentErrorResponse,
   engineeringAgentJson,
@@ -39,7 +39,8 @@ const requestSchema = z
     taskRevision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
     // `abandoned` is AMUX recovery's to record, never the runner's.
     outcome: z.enum(RUNNER_OUTCOMES),
-    halt: z.enum(HALT_VALUES),
+    // What only the runner can see; the app adds the circuit and mismatches.
+    halt: z.enum(RUNNER_REPORTABLE_HALTS),
   })
   .strict();
 

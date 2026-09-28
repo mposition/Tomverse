@@ -13,6 +13,7 @@ import {
 } from "../lib/engineeringAgentAmuxAdapter.ts";
 import {
   HALT_VALUES,
+  RUNNER_REPORTABLE_HALTS,
   RUN_OUTCOMES,
   combineRunHalt,
   decideHalt,
@@ -97,7 +98,11 @@ test("a run's halt is the runner's report combined with the app's, and a report 
   assert.equal(combineRunHalt({ reported: "none", circuitLatched: true, openStateMismatches: 0 }), "circuit_open");
   assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 2 }), "state_mismatch");
   assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 0 }), "none");
-  for (const reported of HALT_VALUES) {
+  // The circuit and a mismatch are the app's readings, never a runner's report.
+  assert.deepEqual([...RUNNER_REPORTABLE_HALTS].sort(), ["config_missing", "none", "unbound_app_pr", "unbound_app_ref"]);
+  const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
+  assert.match(finish, /halt: z\.enum\(RUNNER_REPORTABLE_HALTS\)/);
+  for (const reported of RUNNER_REPORTABLE_HALTS) {
     for (const circuitLatched of [false, true]) {
       for (const openStateMismatches of [0, 1]) {
         const halt = combineRunHalt({ reported, circuitLatched, openStateMismatches });

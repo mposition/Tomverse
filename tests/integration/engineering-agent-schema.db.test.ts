@@ -863,7 +863,19 @@ test("a request's end is kept, so a retry never starts over", async () => {
     "a request commits only from in_progress",
   );
   await prisma.engineeringAgentRequest.update({ where: { key }, data: { state: "in_progress" } });
-  await prisma.engineeringAgentRequest.update({ where: { key }, data: { state: "committed" } });
+  await refused(
+    prisma.engineeringAgentRequest.update({ where: { key }, data: { resultRef: "123456789012" } }),
+    "a result is recorded only with the commit",
+  );
+  await refused(
+    prisma.engineeringAgentRequest.update({ where: { key }, data: { state: "committed", resultRef: "not an id" } }),
+    "a result is a run id or a work item id",
+  );
+  await prisma.engineeringAgentRequest.update({ where: { key }, data: { state: "committed", resultRef: "123456789012" } });
+  await refused(
+    prisma.engineeringAgentRequest.update({ where: { key }, data: { resultRef: "123456789013" } }),
+    "a recorded result never changes",
+  );
   await refused(
     prisma.engineeringAgentRequest.update({ where: { key }, data: { state: "aborted" } }),
     "a committed request stays committed",

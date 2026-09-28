@@ -38,11 +38,14 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 1024, requestSchema);
     const row = await prisma.engineeringAgentRequest.findUnique({
       where: { key: body.requestKey },
-      select: { route: true, state: true },
+      select: { route: true, state: true, resultRef: true },
     });
     // Each service sees only its own routes' requests.
     const own = row !== null && ROUTE_PREFIXES[role].some((prefix) => row.route.startsWith(prefix));
-    return engineeringAgentJson(own ? { route: row.route, state: row.state } : { state: null }, 200);
+    return engineeringAgentJson(
+      own ? { route: row.route, state: row.state, resultRef: row.resultRef } : { state: null },
+      200,
+    );
   } catch (error) {
     return engineeringAgentErrorResponse("status", error);
   }

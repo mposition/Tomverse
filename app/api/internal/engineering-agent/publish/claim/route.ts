@@ -35,6 +35,9 @@ export async function POST(request: Request) {
       requestKey: body.requestKey,
       body,
       work: (tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS }),
+      // A publisher that loses the answer learns which item it holds; the
+      // claim's lease then passes and a lookup finds the work again (§10).
+      resultRef: (work) => work?.workItemId ?? null,
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
     if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state }, 200);

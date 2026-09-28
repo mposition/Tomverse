@@ -1437,7 +1437,9 @@ CREATE CONSTRAINT TRIGGER "engineering_agent_partial_registration_decision"
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentRequest: internal request idempotency (§10). `in_progress`
 -- may stay visible indefinitely, because a COMMIT can land late; nothing here
--- moves it on a timer.
+-- moves it on a timer. `resultRef` is the one identifier a caller that lost
+-- its answer needs to carry on -- the run a start created, the item a claim
+-- took -- written once, with `committed`, and never a result body.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE "EngineeringAgentRequest" (
@@ -1445,6 +1447,7 @@ CREATE TABLE "EngineeringAgentRequest" (
     "route" TEXT NOT NULL,
     "requestDigest" TEXT NOT NULL,
     "state" TEXT NOT NULL DEFAULT 'accepted',
+    "resultRef" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -1456,7 +1459,12 @@ ALTER TABLE "EngineeringAgentRequest"
     ADD CONSTRAINT "EngineeringAgentRequest_route_check" CHECK ("route" ~ '^[a-z]+/[a-z-]+$'),
     ADD CONSTRAINT "EngineeringAgentRequest_requestDigest_check" CHECK ("requestDigest" ~ '^[0-9a-f]{64}$'),
     ADD CONSTRAINT "EngineeringAgentRequest_state_check"
-        CHECK ("state" IN ('accepted', 'in_progress', 'committed', 'aborted'));
+        CHECK ("state" IN ('accepted', 'in_progress', 'committed', 'aborted')),
+    -- A run id or a work item id, and only on a committed request.
+    ADD CONSTRAINT "EngineeringAgentRequest_resultRef_check" CHECK (
+        "resultRef" IS NULL
+        OR ("state" = 'committed' AND "resultRef" ~ '^([0-9]{1,12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')
+    );
 
 CREATE INDEX "EngineeringAgentRequest_state_createdAt_idx" ON "EngineeringAgentRequest"("state", "createdAt");
 
@@ -1469,7 +1477,7 @@ DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
 BEGIN
     IF TG_OP = 'INSERT' THEN
-        IF NEW."state" <> 'accepted' THEN
+        IF NEW."state" <> 'accepted' OR NEW."resultRef" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentRequest starts accepted' USING ERRCODE = 'check_violation';
         END IF;
         NEW."createdAt" := now_utc;
@@ -1485,6 +1493,12 @@ BEGIN
         OR NEW."requestDigest" IS DISTINCT FROM OLD."requestDigest"
         OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
         RAISE EXCEPTION 'EngineeringAgentRequest % cannot change what was asked', OLD."key"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    -- The result's identifier is written with the commit and never after.
+    IF NEW."resultRef" IS DISTINCT FROM OLD."resultRef"
+        AND NOT (OLD."resultRef" IS NULL AND OLD."state" = 'in_progress' AND NEW."state" = 'committed') THEN
+        RAISE EXCEPTION 'EngineeringAgentRequest % result is written once, with its commit', OLD."key"
             USING ERRCODE = 'check_violation';
     END IF;
     IF (OLD."state", NEW."state") NOT IN (

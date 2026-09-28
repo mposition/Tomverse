@@ -53,7 +53,7 @@ import {
   type IssueInput,
 } from "@/lib/engineeringAgentCapability";
 import {
-  ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY,
+  ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY,
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
   ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY,
@@ -234,8 +234,12 @@ const requireSwitch = async (tx: EngineeringAgentTransaction, gate: EngineeringA
 
 export type EngineeringAgentHaltState = {
   openStateMismatches: number;
-  /** The halt the latest terminated run recorded, or null before any run ended. */
-  latestEndedHalt: HaltValue | null;
+  /**
+   * The latest halt a run recorded after the last Admin acknowledgement, or
+   * null when none has. A recorded halt holds until a person acknowledges it
+   * (§12); a later run that ends clean does not clear it.
+   */
+  unacknowledgedHalt: HaltValue | null;
   circuitLatched: boolean;
 };
 
@@ -244,20 +248,31 @@ const storedHalt = (raw: string): HaltValue =>
   (HALT_VALUES as readonly string[]).includes(raw) ? (raw as HaltValue) : "config_missing";
 
 /**
- * What the app itself knows about a halt (§12): an open state mismatch, the
- * halt the latest ended run recorded, and whether repeated incidents latched
- * the circuit since the last Admin acknowledgement. The unbound pull request
- * and ref readings are the observer's, recorded on the runs it ends.
- *
- * The circuit is read over every terminated run since that acknowledgement,
- * because incidents that latched it keep it latched however old they are.
+ * Everything that writes a halt (a run's end, an opened state mismatch) and
+ * everything that decides under one (a run's start, a write claim that spends
+ * a capability) takes this lock first, so a decision never reads the halts
+ * from before a halt that commits ahead of it. It comes after every AMUX row
+ * lock in an adapter transaction and before the owner-queue lock a run's
+ * INSERT takes.
+ */
+const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('engineering-agent:halt'))`;
+};
+
+/**
+ * What the app itself knows about a halt (§12): an open state mismatch, a
+ * halt a run recorded since the last Admin acknowledgement, and whether
+ * repeated incidents latched the circuit since then. The unbound pull
+ * request and ref readings are the runner's, recorded on the runs it ends.
+ * Only the acknowledgement clears a recorded halt or the circuit; the
+ * passage of time and a clean run do not.
  */
 export async function readEngineeringAgentHaltState(
   db: PrismaClient | Prisma.TransactionClient,
 ): Promise<EngineeringAgentHaltState> {
   const openStateMismatches = await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } });
   const acknowledgement = await db.appSetting.findUnique({
-    where: { key: ENGINEERING_AGENT_CIRCUIT_ACKNOWLEDGED_SETTING_KEY },
+    where: { key: ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY },
     select: { value: true },
   });
   const terminated = await db.engineeringAgentRun.findMany({
@@ -265,27 +280,53 @@ export async function readEngineeringAgentHaltState(
     orderBy: [{ endedAt: "asc" }, { id: "asc" }],
     select: { startedAt: true, endedAt: true, halt: true },
   });
+  const acknowledgedAt = parseSettingInstant(acknowledgement?.value);
   const runs = terminated.map((run) => ({ startedAt: run.startedAt, endedAt: run.endedAt!, halt: storedHalt(run.halt) }));
+  const recorded = runs.filter(
+    (run) => run.halt !== "none" && (acknowledgedAt === null || run.endedAt.getTime() > acknowledgedAt.getTime()),
+  );
   return {
     openStateMismatches,
-    latestEndedHalt: runs.length === 0 ? null : runs[runs.length - 1].halt,
-    circuitLatched: isCircuitLatched({ runs, acknowledgedAt: parseSettingInstant(acknowledgement?.value) }),
+    unacknowledgedHalt: recorded.length === 0 ? null : recorded[recorded.length - 1].halt,
+    circuitLatched: isCircuitLatched({ runs, acknowledgedAt }),
   };
 }
 
-/** Whether anything the app holds halts claims and pushes (§12). */
-export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
-  engineeringAgentHoldsHalt(state) || (state.latestEndedHalt !== null && state.latestEndedHalt !== "none");
+/** How many runs one mismatch sweep looks at. */
+export const ENGINEERING_AGENT_MISMATCH_SWEEP = 20;
 
 /**
- * The halts the app holds itself -- a latched circuit, an open state
- * mismatch -- which only a person's Admin action clears. These stop a run
- * from starting. A halt a run recorded is the runner's reading and clears
- * with the next run that ends without one, so it stops the publisher (above)
- * but not the next run: refusing that run would keep the halt forever.
+ * Opens a state mismatch for each active run whose AMUX attempt has already
+ * ended -- AMUX recovery reclaimed an expired attempt, which it may do on its
+ * own route without the engineering row (§11). The run is not ended to match:
+ * the mismatch goes to a person, and while it is open everything halts. A
+ * run already reported is not reported twice (its cause key is unique).
  */
-export const engineeringAgentHoldsHalt = (state: EngineeringAgentHaltState): boolean =>
-  state.openStateMismatches > 0 || state.circuitLatched;
+export async function openEngineeringAgentRunMismatches(tx: EngineeringAgentTransaction): Promise<number> {
+  const runs = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT r."id" FROM "EngineeringAgentRun" r
+    JOIN "AmuxExecutionAttempt" a ON a."id" = r."amuxAttemptId"
+    WHERE r."status" = 'active' AND a."endedAt" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "EngineeringAgentWorkItem" w WHERE w."causeKey" = 'run_attempt:' || r."id"
+      )
+    ORDER BY r."startedAt", r."id"
+    LIMIT ${ENGINEERING_AGENT_MISMATCH_SWEEP}
+  `;
+  for (const run of runs) {
+    await openEngineeringAgentWorkItem(tx, {
+      kind: "state_mismatch",
+      causeKey: `run_attempt:${run.id}`,
+      runId: run.id,
+      reason: "attempt_ended_run_active",
+    });
+  }
+  return runs.length;
+}
+
+/** Whether anything halts claims, runs and pushes (§12). */
+export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
+  state.openStateMismatches > 0 || state.unacknowledgedHalt !== null || state.circuitLatched;
 
 /* ------------------------------------------------------------------------- */
 /* Owner queues                                                               */
@@ -335,6 +376,7 @@ export async function readEngineeringAgentOwnerQueues(
 
 const REQUEST_KEY = /^[A-Za-z0-9_-]{16,128}$/;
 const REQUEST_ROUTE = /^[a-z]+\/[a-z-]+$/;
+const RESULT_REF = /^(?:[0-9]{1,12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -376,11 +418,20 @@ export async function acceptEngineeringAgentRequest(
 /** `accepted -> in_progress | aborted`, `in_progress -> committed | aborted`, once each. */
 export async function moveEngineeringAgentRequest(
   tx: EngineeringAgentTransaction,
-  input: { key: string; from: "accepted" | "in_progress"; to: "in_progress" | "committed" | "aborted" },
+  input: {
+    key: string;
+    from: "accepted" | "in_progress";
+    to: "in_progress" | "committed" | "aborted";
+    /** On `committed` only: the run or item id a caller that lost its answer needs. */
+    resultRef?: string | null;
+  },
 ): Promise<void> {
+  if (input.resultRef != null && (input.to !== "committed" || !RESULT_REF.test(input.resultRef))) {
+    refuse("request_result_ref_invalid");
+  }
   const moved = await tx.engineeringAgentRequest.updateMany({
     where: { key: input.key, state: input.from },
-    data: { state: input.to },
+    data: input.resultRef != null ? { state: input.to, resultRef: input.resultRef } : { state: input.to },
   });
   if (moved.count !== 1) refuse("request_not_in_expected_state");
 }
@@ -410,8 +461,9 @@ export async function recordEngineeringAgentRunStart(
   if (!SHA1.test(input.baseSha)) refuse("base_sha_invalid");
   if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) refuse("lease_invalid");
   await requireSwitch(tx, "claimAllowed");
-  // A halt the app holds stops claims (§12); a run is the claim's work.
-  if (engineeringAgentHoldsHalt(await readEngineeringAgentHaltState(tx))) refuse("halted");
+  // A halt stops claims (§12), and a run is the claim's work.
+  await lockEngineeringAgentHalt(tx);
+  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
   const now = await databaseNow(tx);
   const run = await tx.engineeringAgentRun.create({
     data: {
@@ -466,6 +518,7 @@ export async function endEngineeringAgentRun(
   input: { runId: string; amuxAttemptId: string; outcome: RunOutcome; halt: HaltValue },
 ): Promise<void> {
   const status = input.outcome === "abandoned" ? "abandoned" : "finished";
+  await lockEngineeringAgentHalt(tx);
   const moved = await tx.engineeringAgentRun.updateMany({
     where: { id: input.runId, amuxAttemptId: input.amuxAttemptId, status: "active" },
     data: { status, outcome: input.outcome, halt: input.halt },
@@ -543,6 +596,7 @@ export async function openEngineeringAgentWorkItem(
   if (!CAUSE_KEY.test(input.causeKey)) refuse("cause_key_invalid");
   if (input.kind === "publish") await requireSwitch(tx, "publishAllowed");
   if (input.kind === "expire_close" || input.kind === "prune") await requireSwitch(tx, "maintenanceAllowed");
+  if (input.kind === "state_mismatch") await lockEngineeringAgentHalt(tx);
   const data: Prisma.EngineeringAgentWorkItemUncheckedCreateInput = {
     id: randomUUID(),
     kind: input.kind,
@@ -697,6 +751,10 @@ export async function claimEngineeringAgentWorkItem(
   if (input.mode === "lookup") {
     context = { event: "claim", mode: "lookup", capabilityConsumed: false };
   } else if (kind === "publish") {
+    // A halt stops a write claim here, in the function that spends the
+    // capability, and under the lock every halt is written under (§12).
+    await lockEngineeringAgentHalt(tx);
+    if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
     capability = await lockLiveCapability(tx, item.id);
     if (!capability) refuse("capability_unavailable");
     if (capability!.expiresAt.getTime() <= now.getTime()) refuse("capability_expired");
@@ -731,6 +789,9 @@ export async function claimEngineeringAgentWorkItem(
   });
   return { fencingToken, leaseExpiresAt };
 }
+
+/** How many lapsed claims one next-work call moves to a lookup. */
+export const ENGINEERING_AGENT_LAPSED_CLAIM_SWEEP = 5;
 
 /** Proposed: how long a publisher's claim may run before only a lookup may follow. */
 export const ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS = 10 * 60 * 1000;
@@ -772,10 +833,21 @@ export async function claimNextEngineeringAgentPublishWork(
   input: { leaseMs: number },
 ): Promise<EngineeringAgentPublishWork | null> {
   await requireSwitch(tx, "maintenanceAllowed");
+  // A claim whose lease passed -- a publisher that died, or an answer that
+  // was lost -- goes to a lookup first (§10), so the work is found again.
+  const lapsed = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT w."id" FROM "EngineeringAgentWorkItem" w
+    WHERE w."kind" = 'publish' AND w."state" = 'claimed' AND w."leaseExpiresAt" <= clock_timestamp() AT TIME ZONE 'UTC'
+    ORDER BY w."leaseExpiresAt", w."id"
+    LIMIT ${ENGINEERING_AGENT_LAPSED_CLAIM_SWEEP}
+    FOR UPDATE SKIP LOCKED
+  `;
+  for (const row of lapsed) await markEngineeringAgentWorkItemLeaseExpired(tx, { workItemId: row.id });
   const switches = await readEngineeringAgentSwitches(tx);
-  // A halt stops claims (§12). A write claim consumes its capability, which
-  // nothing gives back, so the halt is read here, before the choice -- not
-  // left to the last look after it. Lookups are observation and continue.
+  // A halt stops claims (§12). A write claim spends its capability, which
+  // nothing gives back, so the choice is made under the halt lock; the claim
+  // below checks again in the function that spends it. Lookups continue.
+  await lockEngineeringAgentHalt(tx);
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
   const now = await databaseNow(tx);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`

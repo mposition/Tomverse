@@ -31,6 +31,7 @@ import {
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
+import { runIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's single writer
@@ -660,25 +661,12 @@ test("the publisher claims its next work, and the last look can only refuse", as
   await retireBinding(bound.bindingId);
 });
 
-test("a halt stops the write claim before it consumes, and a latched circuit halts the last look", async () => {
-  const ackKey = "engineeringAgent.circuitAcknowledgedAt";
+test("a halt holds until a person acknowledges it, and stops runs and write claims before they spend", async () => {
+  const ackKey = "engineeringAgent.haltAcknowledgedAt";
   const acknowledge = (value: string) =>
     prisma.appSetting.upsert({ where: { key: ackKey }, create: { key: ackKey, value }, update: { value } });
-  const beforeTheIncidents = "2000-01-01T00:00:00.000Z";
-
-  // Three incident starts within thirty days latch the circuit. A run that a
-  // runner-reported halt ended does not stop the next run: only the halts
-  // the app holds do, or a halt would never clear.
-  for (const halt of ["unbound_app_pr", "none", "unbound_app_pr", "none", "unbound_app_pr"] as const) {
-    const incident = await startRun();
-    await inTx((tx) =>
-      endEngineeringAgentRun(tx, { runId: incident.runId, amuxAttemptId: incident.amuxAttemptId, outcome: "no_change", halt }),
-    );
-  }
-  await refusedWith(startRun(), "halted");
-
-  // Acknowledged, the circuit lets a run start; the publish below is its work.
   await acknowledge(new Date().toISOString());
+
   const run = await startRun();
   const { workItemId } = await inTx((tx) =>
     openEngineeringAgentWorkItem(tx, {
@@ -697,25 +685,31 @@ test("a halt stops the write claim before it consumes, and a latched circuit hal
       capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
     }),
   );
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  // The run records a halt only the runner can see. It holds from here on.
+  await inTx((tx) =>
+    endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "unbound_app_pr" }),
+  );
 
   const claimNext = () => inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   const unspent = async () =>
     (await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: issued.capabilityId } })).consumedAt === null;
-
-  // With the acknowledgement before the incidents, the circuit is latched: no
-  // write claim, nothing spent, even though the latest run ended clean.
-  await acknowledge(beforeTheIncidents);
-  assert.equal(await claimNext(), null, "a latched circuit claims nothing");
+  assert.equal(await claimNext(), null, "a recorded halt claims nothing");
   assert.ok(await unspent(), "a halted claim spends nothing");
+  // The function that spends the capability refuses too, called directly.
+  await refusedWith(inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 })), "halted");
+  assert.ok(await unspent());
+  await refusedWith(startRun(), "halted");
+
+  // Only the acknowledgement clears it -- not a clean run, which cannot start.
   await acknowledge(new Date().toISOString());
 
-  // An open state mismatch halts too.
+  // An open state mismatch halts until it is resolved.
   const { workItemId: mismatchId } = await inTx((tx) =>
     openEngineeringAgentWorkItem(tx, { kind: "state_mismatch", causeKey: `mismatch:${run.runId}`, runId: null, reason: "fixture" }),
   );
   assert.equal(await claimNext(), null, "an open mismatch claims nothing");
   assert.ok(await unspent());
+  await refusedWith(startRun(), "halted");
   await prisma.engineeringAgentWorkItem.update({ where: { id: mismatchId }, data: { state: "resolved" } });
 
   const work = await claimNext();
@@ -741,7 +735,8 @@ test("a halt stops the write claim before it consumes, and a latched circuit hal
       },
     });
     assert.deepEqual(await look(), { verdict: "no_objection" });
-    await acknowledge(beforeTheIncidents);
+    // With the acknowledgement before the run's halt, the halt holds again.
+    await acknowledge("2000-01-01T00:00:00.000Z");
     assert.deepEqual(await look(), { verdict: "refuse", reason: "halted" });
   } finally {
     await acknowledge(new Date().toISOString());
@@ -749,6 +744,57 @@ test("a halt stops the write claim before it consumes, and a latched circuit hal
     if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
   }
   const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+test("a claim whose lease passed goes to a lookup, and a lost answer can be found by its request", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:lapse`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const issue = () =>
+    inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+      }),
+    );
+  await issue();
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+
+  // The publisher claims, and its answer is lost: the request's record names the item.
+  const requestKey = `lapse-${randomUUID()}`;
+  const lost = await runIdempotentEngineeringAgentRequest({
+    route: "publish/claim",
+    requestKey,
+    body: { requestKey },
+    work: (tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 1_000 }),
+    resultRef: (work) => work?.workItemId ?? null,
+  });
+  assert.equal(lost.kind, "done");
+  const record = await prisma.engineeringAgentRequest.findUniqueOrThrow({ where: { key: requestKey } });
+  assert.equal(record.state, "committed");
+  assert.equal(record.resultRef, workItemId);
+
+  // Once the lease passes, the next call looks the work up instead.
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  const lookup = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
+  assert.ok(lookup && lookup.mode === "lookup" && lookup.workItemId === workItemId);
+  const requeued = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }),
+  );
+  assert.equal(requeued.state, "queued");
+  await issue();
+  const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
   await retireBinding(bound.bindingId);
 });
 
