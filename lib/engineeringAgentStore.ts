@@ -189,6 +189,21 @@ export async function readEngineeringAgentSwitches(
   });
 }
 
+/**
+ * Which switch a write needs. The database refuses a run while the mode is off
+ * or frozen; the environment kill switch lives only here, so every claim,
+ * capability, publish and maintenance write reads the switches in its own
+ * transaction and refuses when they say no. Recording what already happened
+ * -- a claim's result, a pull request the publisher opened, a person's
+ * decision, a run's end -- is never refused by a switch.
+ */
+export type EngineeringAgentSwitchGate = "claimAllowed" | "publishAllowed" | "maintenanceAllowed";
+
+const requireSwitch = async (tx: EngineeringAgentTransaction, gate: EngineeringAgentSwitchGate) => {
+  const switches = await readEngineeringAgentSwitches(tx);
+  if (!switches[gate]) refuse(`switch_refused_${gate}`);
+};
+
 /* ------------------------------------------------------------------------- */
 /* Internal request idempotency (§10)                                         */
 /* ------------------------------------------------------------------------- */
@@ -269,6 +284,7 @@ export async function recordEngineeringAgentRunStart(
   if (!isRunId(input.runId)) refuse("run_id_invalid");
   if (!SHA1.test(input.baseSha)) refuse("base_sha_invalid");
   if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) refuse("lease_invalid");
+  await requireSwitch(tx, "claimAllowed");
   const now = await databaseNow(tx);
   const run = await tx.engineeringAgentRun.create({
     data: {
@@ -386,6 +402,8 @@ export async function openEngineeringAgentWorkItem(
   input: OpenWorkItemInput,
 ): Promise<{ workItemId: string }> {
   if (!CAUSE_KEY.test(input.causeKey)) refuse("cause_key_invalid");
+  if (input.kind === "publish") await requireSwitch(tx, "publishAllowed");
+  if (input.kind === "expire_close" || input.kind === "prune") await requireSwitch(tx, "maintenanceAllowed");
   const data: Prisma.EngineeringAgentWorkItemUncheckedCreateInput = {
     id: randomUUID(),
     kind: input.kind,
@@ -532,6 +550,7 @@ export async function claimEngineeringAgentWorkItem(
   if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) refuse("lease_invalid");
   const item = await lockWorkItem(tx, input.workItemId);
   const kind = asWriteKind(item.kind);
+  await requireSwitch(tx, input.mode === "write" && kind === "publish" ? "publishAllowed" : "maintenanceAllowed");
   const now = await databaseNow(tx);
 
   let capability: LockedCapability | null = null;
@@ -632,6 +651,7 @@ export async function markEngineeringAgentWorkItemLeaseExpired(
 ): Promise<void> {
   const item = await lockWorkItem(tx, input.workItemId);
   const kind = asWriteKind(item.kind);
+  await requireSwitch(tx, "maintenanceAllowed");
   const now = await databaseNow(tx);
   if (item.state !== "claimed" || !item.leaseExpiresAt || item.leaseExpiresAt.getTime() > now.getTime()) {
     refuse("lease_not_expired");
@@ -657,6 +677,7 @@ export async function expireEngineeringAgentWorkItem(
   input: { workItemId: string },
 ): Promise<void> {
   const item = await lockWorkItem(tx, input.workItemId);
+  await requireSwitch(tx, "maintenanceAllowed");
   const now = await databaseNow(tx);
   const ttlDays =
     item.kind === "publish" && item.state === "queued"
@@ -691,6 +712,7 @@ export async function issueEngineeringAgentCapability(
     refuse("capability_does_not_match_item");
   }
   if (item.runId !== input.capability.commit.runId) refuse("capability_run_mismatch");
+  await requireSwitch(tx, "publishAllowed");
   const now = await databaseNow(tx);
   const live = await lockLiveCapability(tx, item.id);
   if (live) {
@@ -955,6 +977,7 @@ export async function moveEngineeringAgentBinding(
   input: { bindingId: string; to: "closed" | "pruned" },
 ): Promise<void> {
   const binding = await lockBinding(tx, input.bindingId);
+  await requireSwitch(tx, "maintenanceAllowed");
   const from = input.to === "closed" ? "open" : "closed";
   if (binding.state !== from) refuse("binding_not_in_expected_state");
   await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data: { state: input.to } });
@@ -982,6 +1005,7 @@ export async function recordEngineeringAgentBindingObservation(
     | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> },
 ): Promise<{ recorded: boolean }> {
   const binding = await lockBinding(tx, input.bindingId);
+  await requireSwitch(tx, "maintenanceAllowed");
   const current = await tx.engineeringAgentBinding.findUniqueOrThrow({
     where: { id: binding.id },
     select: { approvalObservation: true, mergeObservation: true },
@@ -1028,6 +1052,7 @@ export async function removeEngineeringAgentReviewer(
   input: { bindingId: string },
 ): Promise<void> {
   const binding = await lockBinding(tx, input.bindingId);
+  await requireSwitch(tx, "maintenanceAllowed");
   await tx.engineeringAgentBinding.update({
     where: { id: binding.id },
     data: { reviewerGithubId: null, reviewerLogin: null },

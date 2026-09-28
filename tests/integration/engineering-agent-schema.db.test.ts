@@ -15,9 +15,13 @@ import { prisma } from "@/lib/prisma";
 // this file was not executed, not that it passed.
 //
 // The store is the only production writer; this file writes directly on
-// purpose, to show the database holds the line by itself. The owner queue
-// counts active runs and unsettled publish items, so every test ends the runs
-// it starts and settles the publish items it leaves behind.
+// purpose, to show the database holds the line by itself.
+//
+// The file runs under mode `t1`: a publish item comes only from a run that
+// started under t1, so the first T1 window is open throughout and the pull
+// request queue holds one. Every test therefore works one pull request at a
+// time and closes what it opens -- runs ended, publish items settled,
+// bindings pruned -- before the next begins.
 
 const requireDedicatedDatabase = () => {
   const testRaw = process.env.TEST_DATABASE_URL?.trim();
@@ -41,7 +45,7 @@ const setMode = (value: string) =>
   prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value }, update: { value } });
 
 before(async () => {
-  await setMode("shadow");
+  await setMode("t1");
   await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
 });
 
@@ -64,7 +68,7 @@ const refused = (promise: Promise<unknown>, label: string) =>
   assert.rejects(
     promise,
     (error: unknown) =>
-      /check_violation|23514|23505|violates|constraint|cannot|only|must|starts|immutable|kept|after|match|decide|consume|refused|once|full|cap|without|whole|lapse|off|frozen|commit/i.test(
+      /check_violation|23514|23505|violates|constraint|cannot|only|must|starts|immutable|kept|after|match|decide|consume|refused|once|full|cap|without|whole|lapse|off|frozen|commit|product|one current/i.test(
         String(error),
       ),
     label,
@@ -127,18 +131,35 @@ const newRun = async (leaseSeconds = 60, extra: { modeAtStart?: string } = {}) =
 const endRun = (id: string) =>
   prisma.engineeringAgentRun.update({ where: { id }, data: { status: "abandoned", outcome: "abandoned" } });
 
-const newItem = (kind: string) =>
+const productData = (kind: "t2_draft" | "publish", runId: string, patchBody = "patch") => ({
+  id: randomUUID(),
+  kind,
+  state: kind === "publish" ? "queued" : "open",
+  causeKey: `${kind}:${randomUUID()}`,
+  runId,
+  // The body is the text its digest names; the database checks it.
+  patchBody,
+  patchDigest: sha256("patch"),
+  baseSha: sha1("base"),
+  ...(kind === "publish" ? { expectedTreeId: sha1("tree") } : {}),
+});
+
+/** A run's one product, made while the run is active; the run then ends. */
+const newProduct = async (kind: "t2_draft" | "publish") => {
+  const run = await newRun();
+  const item = await prisma.engineeringAgentWorkItem.create({ data: productData(kind, run.id) });
+  await endRun(run.id);
+  return item;
+};
+
+/** A work item that is no run's product. */
+const newItem = (kind: "decision" | "state_mismatch" | "expire_close" | "prune") =>
   prisma.engineeringAgentWorkItem.create({
     data: {
       id: randomUUID(),
       kind,
-      state: ["publish", "expire_close", "prune"].includes(kind) ? "queued" : "open",
+      state: kind === "expire_close" || kind === "prune" ? "queued" : "open",
       causeKey: `${kind}:${randomUUID()}`,
-      // The body is the text its digest names; the database checks it.
-      ...(kind === "t2_draft" ? { patchDigest: sha256("patch"), baseSha: sha1("base"), patchBody: "patch" } : {}),
-      ...(kind === "publish"
-        ? { patchDigest: sha256("patch"), baseSha: sha1("base"), expectedTreeId: sha1("tree"), patchBody: "patch" }
-        : {}),
     },
   });
 
@@ -163,14 +184,12 @@ const retirePublish = async (id: string) => {
     await setState(id, "expired");
     return;
   }
-  let token = Number(item.fencingToken);
   if (item.state === "claimed" && item.leaseExpiresAt && item.leaseExpiresAt.getTime() > Date.now()) {
     await setState(id, "publish_failed");
     return;
   }
   if (item.state === "claimed") await setState(id, "needs_lookup");
-  token += 1;
-  await claim(id, token, "lookup");
+  await claim(id, Number(item.fencingToken) + 1, "lookup");
   await setState(id, "publish_failed");
 };
 
@@ -195,6 +214,20 @@ const consume = (id: string, fencingToken: number) =>
     where: { id },
     data: { consumedAt: new Date("2000-01-01T00:00:00.000Z"), claimFencingToken: BigInt(fencingToken) },
   });
+
+/**
+ * An active t1 run whose one publish item has been published, ready to be
+ * bound. The caller binds and then ends the run.
+ */
+const publishedRun = async () => {
+  const run = await newRun();
+  const item = await prisma.engineeringAgentWorkItem.create({ data: productData("publish", run.id) });
+  const capability = await issueCapability(item.id);
+  await claim(item.id, 1, "write");
+  await consume(capability.id, 1);
+  await setState(item.id, "published");
+  return run;
+};
 
 const snapshot = (overrides: Record<string, unknown> = {}) => ({
   baseSha: sha1("base"),
@@ -279,43 +312,74 @@ test("a run starts active on the database clock, on its attempt's card, ends onc
 });
 
 test("a run is a claim: none while the mode is off or the agent is frozen, and it records the mode it committed under", async () => {
-  await prisma.appSetting.deleteMany({ where: { key: MODE_KEY } });
-  await refused(newRun(), "an unset mode is off, and off claims nothing");
-  await setMode("t1-ish");
-  await refused(newRun(), "an unknown mode is off");
-  await setMode("shadow");
-  await prisma.appSetting.create({ data: { key: FREEZE_KEY, value: "true" } });
-  await refused(newRun(), "a frozen agent claims nothing");
-  await prisma.appSetting.delete({ where: { key: FREEZE_KEY } });
+  try {
+    await prisma.appSetting.deleteMany({ where: { key: MODE_KEY } });
+    await refused(newRun(), "an unset mode is off, and off claims nothing");
+    await setMode("t1-ish");
+    await refused(newRun(), "an unknown mode is off");
+    await setMode("shadow");
+    await prisma.appSetting.create({ data: { key: FREEZE_KEY, value: "true" } });
+    await refused(newRun(), "a frozen agent claims nothing");
+    await prisma.appSetting.delete({ where: { key: FREEZE_KEY } });
 
-  const run = await newRun(60, { modeAtStart: "t1" });
-  assert.equal(run.modeAtStart, "shadow", "the trigger reads the mode; a caller's claim is replaced");
+    const run = await newRun(60, { modeAtStart: "t1" });
+    assert.equal(run.modeAtStart, "shadow", "the trigger reads the mode; a caller's claim is replaced");
+    await refused(
+      prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { modeAtStart: "t1" } }),
+      "the mode a run started under never changes",
+    );
+    // In shadow a T1 result is a T2 draft: a shadow run makes no publish item.
+    await refused(
+      prisma.engineeringAgentWorkItem.create({ data: productData("publish", run.id) }),
+      "a publish item comes only from a run that started under t1",
+    );
+    await endRun(run.id);
+
+    // A mode set and taken back inside the run's own transaction was never in force.
+    const { task, attempt } = await amuxAttempt();
+    const runId = nextRunId();
+    await refused(
+      prisma.$transaction([
+        setMode("t1"),
+        prisma.engineeringAgentRun.create({
+          data: {
+            id: runId,
+            amuxAttemptId: attempt.id,
+            cardId: task.id,
+            cardKind: "code",
+            baseSha: sha1("base"),
+            leaseExpiresAt: inSeconds(60),
+          },
+        }),
+        setMode("shadow"),
+      ]),
+      "a run records the mode its transaction commits with",
+    );
+    assert.equal(await prisma.engineeringAgentRun.count({ where: { id: runId } }), 0, "nothing of it remains");
+  } finally {
+    await setMode("t1");
+  }
+});
+
+test("a draft or a publish item is the one product of an active run", async () => {
   await refused(
-    prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { modeAtStart: "t1" } }),
-    "the mode a run started under never changes",
+    prisma.engineeringAgentWorkItem.create({ data: { ...productData("t2_draft", "0"), runId: null } }),
+    "a product names its run",
+  );
+  const run = await newRun();
+  await prisma.engineeringAgentWorkItem.create({ data: productData("t2_draft", run.id) });
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: productData("publish", run.id) }),
+    "a run has one product",
   );
   await endRun(run.id);
-
-  // A mode set and taken back inside the run's own transaction was never in force.
-  const { task, attempt } = await amuxAttempt();
   await refused(
-    prisma.$transaction([
-      setMode("t1"),
-      prisma.engineeringAgentRun.create({
-        data: {
-          id: nextRunId(),
-          amuxAttemptId: attempt.id,
-          cardId: task.id,
-          cardKind: "code",
-          baseSha: sha1("base"),
-          leaseExpiresAt: inSeconds(60),
-        },
-      }),
-      setMode("shadow"),
-    ]),
-    "a run records the mode its transaction commits with",
+    prisma.engineeringAgentWorkItem.create({ data: productData("t2_draft", run.id) }),
+    "an ended run makes nothing more",
   );
-  assert.equal(await prisma.engineeringAgentRun.count({ where: { modeAtStart: "t1" } }), 0, "no t1 run exists yet");
+  const draft = await prisma.engineeringAgentWorkItem.findFirstOrThrow({ where: { runId: run.id } });
+  await setState(draft.id, "expired");
+  await refused(prisma.engineeringAgentWorkItem.delete({ where: { id: draft.id } }), "a closed work item is kept");
 });
 
 test("a write item claims with the next fencing token, and after its lease only a lookup follows", async () => {
@@ -346,12 +410,12 @@ test("a write item claims with the next fencing token, and after its lease only 
 });
 
 test("a publish is a consumed capability; unwritten work returns to the queue under a new one", async () => {
-  const bare = await newItem("publish");
+  const bare = await newProduct("publish");
   await claim(bare.id, 1, "write");
   await refused(setState(bare.id, "published"), "no capability, no publish");
   await retirePublish(bare.id);
 
-  const item = await newItem("publish");
+  const item = await newProduct("publish");
   const capability = await issueCapability(item.id);
   assert.equal(capability.unconsumedWorkItemId, item.id, "the new capability is the item's live one");
   await refused(issueCapability(item.id), "one live capability per publish item");
@@ -378,7 +442,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
 
   // A lookup after an unknown outcome settles a publish an earlier write
   // claim consumed for.
-  const looked = await newItem("publish");
+  const looked = await newProduct("publish");
   const lookedCapability = await issueCapability(looked.id);
   await claim(looked.id, 1, "write");
   await consume(lookedCapability.id, 1);
@@ -386,7 +450,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
   await claim(looked.id, 2, "lookup");
   await setState(looked.id, "published");
 
-  const unconsumed = await newItem("publish");
+  const unconsumed = await newProduct("publish");
   await issueCapability(unconsumed.id);
   await claim(unconsumed.id, 1, "write");
   await setState(unconsumed.id, "needs_lookup");
@@ -395,7 +459,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
   await setState(unconsumed.id, "queued");
   await retirePublish(unconsumed.id);
 
-  const lapsed = await newItem("publish");
+  const lapsed = await newProduct("publish");
   const lapsedCapability = await issueCapability(lapsed.id);
   await claim(lapsed.id, 1, "write", 1);
   await sleep(1_500);
@@ -404,7 +468,7 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
 
   // An unconsumed capability that expired may lapse, freeing its item for a
   // new one; a lapsed capability is never consumed.
-  const expiring = await newItem("publish");
+  const expiring = await newProduct("publish");
   const short = await issueCapability(expiring.id, { expiresInSeconds: 1 });
   const lapse = () =>
     prisma.engineeringAgentCapability.update({ where: { id: short.id }, data: { unconsumedWorkItemId: null } });
@@ -417,31 +481,26 @@ test("a publish is a consumed capability; unwritten work returns to the queue un
   await issueCapability(expiring.id);
   await retirePublish(expiring.id);
 
-  const mismatched = await newItem("publish");
+  const mismatched = await newProduct("publish");
   await refused(issueCapability(mismatched.id, { expectedTreeId: sha1("other tree") }), "a capability matches its item");
   await retirePublish(mismatched.id);
 
-  const publishItem = (patchBody: string | null) =>
-    prisma.engineeringAgentWorkItem.create({
-      data: {
-        id: randomUUID(),
-        kind: "publish",
-        state: "queued",
-        causeKey: `publish:${randomUUID()}`,
-        patchDigest: sha256("patch"),
-        baseSha: sha1("base"),
-        expectedTreeId: sha1("tree"),
-        patchBody,
-      },
-    });
-  await refused(publishItem(null), "a publish item carries the patch the publisher applies");
-  await refused(publishItem("diff --git a/x b/x"), "the patch is the text its digest names");
+  const run = await newRun();
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: { ...productData("publish", run.id), patchBody: null } }),
+    "a publish item carries the patch the publisher applies",
+  );
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: productData("publish", run.id, "diff --git a/x b/x") }),
+    "the patch is the text its digest names",
+  );
   await refused(
     prisma.engineeringAgentWorkItem.create({
       data: { id: randomUUID(), kind: "decision", state: "open", causeKey: `decision:${randomUUID()}`, patchBody: "patch" },
     }),
     "no other kind carries a patch",
   );
+  await endRun(run.id);
 });
 
 test("a T2 decision closes its draft in the same transaction, binds to what the owner saw, and stays", async () => {
@@ -472,7 +531,7 @@ test("a T2 decision closes its draft in the same transaction, binds to what the 
       },
     });
 
-  const draft = await newItem("t2_draft");
+  const draft = await newProduct("t2_draft");
   await refused(setState(draft.id, "approved"), "a draft does not close without its decision");
   await refused(decision(draft.id, await audit(draft.id), sha256("other patch")), "a decision binds to the draft's digest");
   await refused(decision(draft.id, await audit(draft.id)), "a decision alone, with the draft left open, does not commit");
@@ -489,7 +548,7 @@ test("a T2 decision closes its draft in the same transaction, binds to what the 
     "the patch body is kept until a retention period is fixed",
   );
 
-  const other = await newItem("t2_draft");
+  const other = await newProduct("t2_draft");
   const otherAudit = await audit(other.id);
   await refused(
     prisma.$transaction([decision(other.id, otherAudit), setState(other.id, "expired")]),
@@ -502,12 +561,23 @@ test("a T2 decision closes its draft in the same transaction, binds to what the 
   await setState(other.id, "expired");
 });
 
-test("a binding's snapshot never changes, its observations and reviewer are recorded once, and one row per pull request is current", async () => {
-  const run = await newRun();
+test("a binding records its run's published item, keeps its snapshot, and records observations and its reviewer once", async () => {
+  const bare = await newRun();
+  await refused(
+    prisma.engineeringAgentBinding.create({ data: bindingFor(bare.id, prNumberSeed()) }),
+    "a binding records a published item, and this run has none",
+  );
+  await endRun(bare.id);
+
+  const run = await publishedRun();
   const prNumber = prNumberSeed();
   const binding = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) });
   assert.equal(binding.currentPrNumber, prNumber, "the database marks the row current");
   await refused(prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) }), "one current binding per pull request");
+  await refused(
+    prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber + 1) }),
+    "one current binding per run",
+  );
   await refused(
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data: { snapshot: snapshot({ diffDigest: sha256("other") }) } }),
     "a snapshot is immutable",
@@ -531,6 +601,15 @@ test("a binding's snapshot never changes, its observations and reviewer are reco
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data: { reviewerLogin: "someone-else" } }),
     "a recorded reviewer is not rewritten",
   );
+  // Half a reviewer is no reviewer: retention removes the pair or nothing.
+  await refused(
+    prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data: { reviewerGithubId: null } }),
+    "the reviewer's number is not removed without its login",
+  );
+  await refused(
+    prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data: { reviewerLogin: null } }),
+    "the reviewer's login is not removed without its number",
+  );
   await prisma.engineeringAgentBinding.update({
     where: { id: binding.id },
     data: { reviewerLogin: null, reviewerGithubId: null },
@@ -543,28 +622,13 @@ test("a binding's snapshot never changes, its observations and reviewer are reco
     "a removed reviewer is not put back",
   );
 
-  // Half a reviewer is no reviewer: retention removes the pair or nothing.
-  const other = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber + 1) });
-  await prisma.engineeringAgentBinding.update({
-    where: { id: other.id },
-    data: { reviewerGithubId: BigInt(60078951), reviewerLogin: "owner" },
-  });
-  await refused(
-    prisma.engineeringAgentBinding.update({ where: { id: other.id }, data: { reviewerGithubId: null } }),
-    "the reviewer's number is not removed without its login",
-  );
-  await refused(
-    prisma.engineeringAgentBinding.update({ where: { id: other.id }, data: { reviewerLogin: null } }),
-    "the reviewer's login is not removed without its number",
-  );
-
   await retireBinding(binding.id);
-  await retireBinding(other.id);
+  await refused(prisma.engineeringAgentBinding.delete({ where: { id: binding.id } }), "a pruned binding is kept");
   await endRun(run.id);
 });
 
 test("a binding's JSON holds digests, enums and review ids, never free text or a person", async () => {
-  const run = await newRun();
+  const run = await publishedRun();
   const create = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumberSeed()), ...data } });
   await refused(create({ snapshot: snapshot({ note: "free text" }) }), "a snapshot has an exact key set");
@@ -576,6 +640,7 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
   const observe = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data });
   await refused(observe({ approvalObservation: { ...approvedObservation, reviewerLogin: "mposition" } }), "no person in an observation");
+  await refused(observe({ approvalObservation: { ...approvedObservation, reviewId: 1.5 } }), "an approving review id is a whole number");
   await refused(
     observe({ approvalObservation: { verdict: "not_approved", reason: "looked fine", observedAt: "2026-09-28T01:03:03.000Z" } }),
     "a reason is an enum",
@@ -618,7 +683,7 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
 });
 
 test("a binding is superseded only by a replacement that is current and still counted", async () => {
-  const run = await newRun();
+  const run = await publishedRun();
   const prNumber = prNumberSeed();
   const first = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumber) });
   const supersede = (id: string) =>
@@ -789,34 +854,29 @@ test("a request's end is kept, so a retry never starts over", async () => {
 });
 
 test("no run starts while the owner queue is full, counting what running work may still produce", async () => {
-  // Three open owner items fill the decision queue.
-  const open = [await newItem("decision"), await newItem("state_mismatch"), await newItem("t2_draft")];
+  // Three open owner items fill the decision queue: two here, and a draft,
+  // which is the product of its own run.
+  const open = [await newItem("decision"), await newItem("state_mismatch"), await newProduct("t2_draft")];
   await refused(newRun(), "a full decision queue refuses a new run");
   for (const item of open) await setState(item.id, item.kind === "state_mismatch" ? "resolved" : "expired");
 
-  // An active run may still produce a pull request, and an unsettled publish
-  // item may still produce a binding: together they fill the PR queue of two.
+  // Inside the first T1 window the pull request queue holds one: an active
+  // run may still produce a pull request, and so may an unsettled publish item.
   const running = await newRun();
-  const pending = await newItem("publish");
-  await refused(newRun(), "an active run and an unsettled publish fill the PR queue");
-  await retirePublish(pending.id);
+  await refused(newRun(), "an active run holds the one place");
   await endRun(running.id);
+  const pending = await newProduct("publish");
+  await refused(newRun(), "an unsettled publish item holds the one place");
+  await retirePublish(pending.id);
   await endRun((await newRun()).id);
 });
 
-// Last, because the run it starts under `t1` opens the first T1 window for
-// good: runs are never deleted.
-test("the first run under t1 opens the first T1 window, which narrows the pull request limit", async () => {
-  await setMode("t1");
-  try {
-    const run = await newRun();
-    assert.equal(run.modeAtStart, "t1");
-    const binding = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumberSeed()) });
-    await endRun(run.id);
-    await refused(newRun(), "one open pull request fills the first T1 window");
-    await retireBinding(binding.id);
-    await endRun((await newRun()).id);
-  } finally {
-    await setMode("shadow");
-  }
+test("inside the first T1 window one open pull request fills the queue", async () => {
+  const run = await publishedRun();
+  assert.equal(run.modeAtStart, "t1");
+  const binding = await prisma.engineeringAgentBinding.create({ data: bindingFor(run.id, prNumberSeed()) });
+  await endRun(run.id);
+  await refused(newRun(), "one open pull request fills the first T1 window");
+  await retireBinding(binding.id);
+  await endRun((await newRun()).id);
 });

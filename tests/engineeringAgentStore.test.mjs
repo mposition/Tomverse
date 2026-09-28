@@ -106,6 +106,48 @@ test("every exported write takes the engineering transaction and records its aud
   assert.ok(names.length > UNAUDITED.size + 10, "the writer's functions were found");
 });
 
+// Every export sits in exactly one of these: it reads the switches before it
+// writes, or it records something that already happened and is never refused
+// by a switch. A new export that is in neither fails here until it is placed.
+const SWITCHED = [
+  "recordEngineeringAgentRunStart",
+  "openEngineeringAgentWorkItem",
+  "claimEngineeringAgentWorkItem",
+  "markEngineeringAgentWorkItemLeaseExpired",
+  "expireEngineeringAgentWorkItem",
+  "issueEngineeringAgentCapability",
+  "moveEngineeringAgentBinding",
+  "recordEngineeringAgentBindingObservation",
+  "removeEngineeringAgentReviewer",
+];
+const RECORDS_WHAT_HAPPENED = [
+  "runEngineeringAgentTransaction",
+  "readEngineeringAgentSwitches",
+  "acceptEngineeringAgentRequest",
+  "moveEngineeringAgentRequest",
+  "heartbeatEngineeringAgentRun",
+  "endEngineeringAgentRun",
+  "settleEngineeringAgentWorkItem",
+  "decideEngineeringAgentT2Draft",
+  "acknowledgeEngineeringAgentDecision",
+  "recordEngineeringAgentBinding",
+  "replaceEngineeringAgentBinding",
+];
+
+test("every claim, capability, publish and maintenance write reads the switches first", () => {
+  const names = exportedFunctions().map((fn) => fn.name.getText(tree));
+  assert.deepEqual([...names].sort(), [...SWITCHED, ...RECORDS_WHAT_HAPPENED].sort());
+  for (const fn of exportedFunctions()) {
+    const name = fn.name.getText(tree);
+    const body = fn.body.getText(tree);
+    if (SWITCHED.includes(name)) {
+      assert.match(body, /await requireSwitch\(tx, /, `${name} reads the switches`);
+    } else {
+      assert.doesNotMatch(body, /requireSwitch\(/, `${name} records what happened and is not refused by a switch`);
+    }
+  }
+});
+
 test("the store names no target state for a result; the core decides it", () => {
   const settle = exportedFunctions().find((fn) => fn.name.getText(tree) === "settleEngineeringAgentWorkItem");
   assert.ok(settle);

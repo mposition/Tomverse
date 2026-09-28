@@ -144,8 +144,10 @@ BEGIN
         -- never taken from the caller; an unset or unknown value is `off`,
         -- as lib/engineeringAgentCore.ts reads it. A deferred check below
         -- holds that reading to the settings the transaction commits with.
-        -- The environment kill switch is not in the database: the app reads
-        -- it, with the halt and the circuit, before it claims.
+        -- The environment kill switch is not in the database: the store reads
+        -- it with these settings before every claim, capability and publish
+        -- (lib/engineeringAgentStore.ts). The halt and the circuit are judged
+        -- from observations the app makes before it claims.
         EXECUTE pg_catalog.format(
             'SELECT max(s."value") FILTER (WHERE s."key" = $1), max(s."value") FILTER (WHERE s."key" = $2)'
             ' FROM %I."AppSetting" s WHERE s."key" = ANY (ARRAY[$1, $2])',
@@ -357,10 +359,10 @@ ALTER TABLE "EngineeringAgentWorkItem"
     -- A draft and a publish item carry their patch: the owner reads a draft's,
     -- and the publisher applies a publish item's (§11: the app stores the
     -- patch and never applies it). The body is the text its digest names.
-    -- No other kind carries one.
+    -- No other kind carries one. Each is the product of a run.
     ADD CONSTRAINT "EngineeringAgentWorkItem_payload_check"
         CHECK (
-            ("kind" IN ('t2_draft', 'publish')
+            ("kind" IN ('t2_draft', 'publish') AND "runId" IS NOT NULL
                 AND "patchBody" IS NOT NULL AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL
                 AND encode(sha256(convert_to("patchBody", 'UTF8')), 'hex') = "patchDigest")
             OR ("kind" NOT IN ('t2_draft', 'publish') AND "patchDigest" IS NULL AND "patchBody" IS NULL)
@@ -390,7 +392,15 @@ DECLARE
     terminal BOOLEAN;
     consumed_token BIGINT;
     decided BOOLEAN;
+    producer RECORD;
+    products BIGINT;
 BEGIN
+    -- Work items are kept: they are what the owner queue and the audit trail
+    -- point at. A retention period for patch bodies is a later migration.
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'EngineeringAgentWorkItem is kept' USING ERRCODE = 'check_violation';
+    END IF;
+
     IF TG_OP = 'INSERT' THEN
         IF NOT (
             (NEW."kind" IN ('publish', 'expire_close', 'prune') AND NEW."state" = 'queued')
@@ -401,19 +411,40 @@ BEGIN
         IF NEW."fencingToken" <> 0 OR NEW."claimMode" IS NOT NULL OR NEW."closedAt" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentWorkItem starts unclaimed' USING ERRCODE = 'check_violation';
         END IF;
+        -- A draft or a publish item is the one product of a run that is
+        -- still active: the owner queue admitted that run with room for what
+        -- it makes (the run trigger counts active runs), so its product takes
+        -- the room the run held and cannot add to the queue beyond the cap. A
+        -- publish item comes only from a run that started under `t1`; in
+        -- shadow a T1 result is a T2 draft (§11).
+        IF NEW."kind" IN ('t2_draft', 'publish') THEN
+            PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('engineering-agent:owner-queue'));
+            EXECUTE pg_catalog.format(
+                'SELECT r."status", r."modeAtStart" FROM %I."EngineeringAgentRun" r WHERE r."id" = $1 FOR UPDATE',
+                TG_TABLE_SCHEMA
+            ) INTO producer USING NEW."runId";
+            IF producer."status" IS DISTINCT FROM 'active' THEN
+                RAISE EXCEPTION 'EngineeringAgentWorkItem % must be the product of an active run', NEW."kind"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            IF NEW."kind" = 'publish' AND producer."modeAtStart" IS DISTINCT FROM 't1' THEN
+                RAISE EXCEPTION 'EngineeringAgentWorkItem publish must come from a run that started under t1'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            EXECUTE pg_catalog.format(
+                'SELECT count(*) FROM %I."EngineeringAgentWorkItem" w WHERE w."runId" = $1 AND w."kind" = ANY ($2)',
+                TG_TABLE_SCHEMA
+            ) INTO products USING NEW."runId", ARRAY['t2_draft', 'publish'];
+            IF products > 0 THEN
+                RAISE EXCEPTION 'EngineeringAgentWorkItem a run has one product' USING ERRCODE = 'check_violation';
+            END IF;
+        END IF;
         NEW."createdAt" := now_utc;
         NEW."updatedAt" := now_utc;
         RETURN NEW;
     END IF;
 
     terminal := OLD."state" NOT IN ('queued', 'claimed', 'needs_lookup', 'outcome_unknown', 'open');
-
-    IF TG_OP = 'DELETE' THEN
-        IF NOT terminal THEN
-            RAISE EXCEPTION 'an open EngineeringAgentWorkItem cannot be deleted' USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN OLD;
-    END IF;
 
     IF NEW."id" IS DISTINCT FROM OLD."id"
         OR NEW."kind" IS DISTINCT FROM OLD."kind"
@@ -969,6 +1000,8 @@ ALTER TABLE "EngineeringAgentBinding"
                         AND "approvalObservation"
                             - ARRAY['verdict', 'reviewId', 'reviewCommitId', 'submittedAt', 'observedAt'] = '{}'::jsonb
                         AND jsonb_typeof("approvalObservation"->'reviewId') = 'number'
+                        AND NOT jsonb_path_exists(
+                            "approvalObservation", '$.reviewId ? (@ < 1 || @.floor() != @)')
                         AND jsonb_typeof("approvalObservation"->'reviewCommitId') = 'string'
                         AND "approvalObservation"->>'reviewCommitId' ~ '^[0-9a-f]{40}$'
                         AND jsonb_typeof("approvalObservation"->'submittedAt') = 'string'
@@ -1034,23 +1067,45 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
+    published BOOLEAN;
+    other_current BOOLEAN;
 BEGIN
+    -- A binding is the record of a pull request and its approval evidence;
+    -- it is kept.
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding is kept' USING ERRCODE = 'check_violation';
+    END IF;
     IF TG_OP = 'INSERT' THEN
         IF NEW."state" <> 'open' OR NEW."supersededAt" IS NOT NULL
             OR NEW."approvalObservation" IS NOT NULL OR NEW."mergeObservation" IS NOT NULL
             OR NEW."reviewerGithubId" IS NOT NULL OR NEW."reviewerLogin" IS NOT NULL OR NEW."reviewerRecordedAt" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentBinding starts open, current and unobserved' USING ERRCODE = 'check_violation';
         END IF;
+        -- A binding records what a run's one publish item published, and a
+        -- run has one current binding. The owner queue admitted the run with
+        -- room for that pull request, so the binding takes the room the
+        -- publish item held; it is never refused for the count, because the
+        -- pull request it records already exists.
+        PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('engineering-agent:owner-queue'));
+        EXECUTE pg_catalog.format(
+            'SELECT EXISTS (SELECT 1 FROM %1$I."EngineeringAgentWorkItem" w'
+            ' WHERE w."runId" = $1 AND w."kind" = $2 AND w."state" = $3),'
+            ' EXISTS (SELECT 1 FROM %1$I."EngineeringAgentBinding" b'
+            ' WHERE b."runId" = $1 AND b."currentPrNumber" IS NOT NULL)',
+            TG_TABLE_SCHEMA
+        ) INTO published, other_current USING NEW."runId", 'publish', 'published';
+        IF NOT published THEN
+            RAISE EXCEPTION 'EngineeringAgentBinding must record its run''s published item'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF other_current THEN
+            RAISE EXCEPTION 'EngineeringAgentBinding a run has one current binding; supersede it first'
+                USING ERRCODE = 'check_violation';
+        END IF;
         NEW."currentPrNumber" := NEW."prNumber";
         NEW."createdAt" := now_utc;
         NEW."updatedAt" := now_utc;
         RETURN NEW;
-    END IF;
-    IF TG_OP = 'DELETE' THEN
-        IF OLD."state" <> 'pruned' THEN
-            RAISE EXCEPTION 'only a pruned EngineeringAgentBinding can be deleted' USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN OLD;
     END IF;
 
     IF NEW."id" IS DISTINCT FROM OLD."id"

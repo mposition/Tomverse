@@ -58,9 +58,10 @@ const fixtureTaskIds: string[] = [];
 const MODE_KEY = "feature.engineeringAgentMode";
 const FREEZE_KEY = "feature.engineeringAgentFreeze";
 
-// A run is a claim, and there is none while the mode is off (the run trigger).
+// A run is a claim, and there is none while the mode is off (the run trigger);
+// a publish needs mode t1 and a run that started under it.
 before(async () => {
-  await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "shadow" }, update: { value: "shadow" } });
+  await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
   await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
 });
 
@@ -170,7 +171,7 @@ test("a request is recorded before its work and answered from its record after",
 
 test("a run starts and ends with its audit entries, under the runner", async () => {
   const run = await startRun();
-  assert.equal(run.modeAtStart, "shadow");
+  assert.equal(run.modeAtStart, "t1");
   const extended = await inTx((tx) => heartbeatEngineeringAgentRun(tx, { runId: run.runId, leaseMs: 120_000 }));
   assert.ok(extended.getTime() > run.leaseExpiresAt.getTime());
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
@@ -188,6 +189,29 @@ test("a run starts and ends with its audit entries, under the runner", async () 
     assert.equal(entry.actorUserId, null);
   }
 });
+
+/** Opens a run's publish item and carries it to `published`, as the publisher would. */
+const publishFor = async (run: { runId: string; cardId: string }) => {
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:bound`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+    }),
+  );
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "confirmed" }));
+};
 
 const commitFields = (runId: string, cardRef: string) => ({
   identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
@@ -367,6 +391,7 @@ test("a T2 draft is stored only when clean, and decided with its audit entry in 
 
 test("a binding records its observations once, its reviewer as a pair, and a re-bind supersedes it", async () => {
   const run = await startRun();
+  await publishFor(run);
   const prNumber = 100_000 + Math.floor(Math.random() * 900_000);
   const snapshot = { baseSha: sha1("base"), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] };
   const { bindingId } = await inTx((tx) =>
@@ -518,4 +543,41 @@ test("work proven unwritten returns to the queue, and its next claim runs on a n
   );
   assert.equal(settled.state, "published");
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+});
+
+test("the switches refuse claims, capabilities and publishes, but never the record of what happened", async () => {
+  const killSwitch = "ENGINEERING_AGENT_KILL_SWITCH";
+  const previous = process.env[killSwitch];
+  process.env[killSwitch] = "1";
+  try {
+    await refusedWith(startRun(), "switch_refused_claimAllowed");
+  } finally {
+    if (previous === undefined) delete process.env[killSwitch];
+    else process.env[killSwitch] = previous;
+  }
+
+  const run = await startRun();
+  const setMode = (value: string) =>
+    prisma.appSetting.update({ where: { key: MODE_KEY }, data: { value } });
+  await setMode("shadow");
+  try {
+    await refusedWith(
+      inTx((tx) =>
+        openEngineeringAgentWorkItem(tx, {
+          kind: "publish",
+          causeKey: `publish:${run.runId}:shadow`,
+          runId: run.runId,
+          patchBody: "patch",
+          patchDigest: sha256("patch"),
+          baseSha: sha1("base"),
+          expectedTreeId: sha1("tree"),
+        }),
+      ),
+      "switch_refused_publishAllowed",
+    );
+  } finally {
+    await setMode("t1");
+  }
+  // Ending the run records what happened; no switch refuses it.
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
 });
