@@ -71,15 +71,21 @@ CREATE INDEX "EngineeringAgentRun_endedAt_idx" ON "EngineeringAgentRun"("endedAt
 ALTER TABLE "EngineeringAgentRun"
     ADD CONSTRAINT "EngineeringAgentRun_amuxAttemptId_fkey"
         FOREIGN KEY ("amuxAttemptId") REFERENCES "AmuxExecutionAttempt"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE,
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT "EngineeringAgentRun_cardId_fkey"
         FOREIGN KEY ("cardId") REFERENCES "AmuxWorkItem"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_run_guard"()
 RETURNS TRIGGER AS $$
 DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
+    -- limit: OWNER_QUEUE_LIMITS.pr
+    pr_limit CONSTANT INTEGER := 2;
+    -- limit: OWNER_QUEUE_LIMITS.decision
+    decision_limit CONSTANT INTEGER := 3;
+    open_prs INTEGER;
+    pending_decisions INTEGER;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW."status" <> 'active' THEN
@@ -87,6 +93,27 @@ BEGIN
         END IF;
         IF NEW."leaseExpiresAt" <= now_utc THEN
             RAISE EXCEPTION 'EngineeringAgentRun lease is already over' USING ERRCODE = 'check_violation';
+        END IF;
+        -- The run is the attempt's, on the attempt's own card.
+        IF NOT EXISTS (
+            SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."id" = NEW."amuxAttemptId" AND a."taskId" = NEW."cardId"
+        ) THEN
+            RAISE EXCEPTION 'EngineeringAgentRun must bind an attempt to that attempt''s card'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        -- The owner queues (policy §12): a new run is a new claim, and none is
+        -- taken while either queue is full. The count is serialised so two
+        -- starts cannot both see the last free place. The shorter limit of
+        -- the first T1 window depends on the mode's history and is the store's.
+        PERFORM pg_advisory_xact_lock(hashtext('engineering-agent:owner-queue'));
+        SELECT count(*) INTO open_prs FROM "EngineeringAgentBinding"
+            WHERE "state" IN ('open', 'closed') AND "supersededAt" IS NULL;
+        SELECT (SELECT count(*) FROM "EngineeringAgentWorkItem"
+                    WHERE "kind" IN ('t2_draft', 'decision', 'state_mismatch') AND "state" = 'open')
+             + (SELECT count(*) FROM "EngineeringAgentRegistration" WHERE "result" = 'partial')
+            INTO pending_decisions;
+        IF open_prs >= pr_limit OR pending_decisions >= decision_limit THEN
+            RAISE EXCEPTION 'EngineeringAgentRun refused: the owner queue is full' USING ERRCODE = 'check_violation';
         END IF;
         NEW."startedAt" := now_utc;
         RETURN NEW;
@@ -214,10 +241,11 @@ ALTER TABLE "EngineeringAgentWorkItem"
     ADD CONSTRAINT "EngineeringAgentWorkItem_claimMode_check"
         CHECK ("claimMode" IS NULL OR "claimMode" IN ('write', 'lookup')),
     -- A draft and a publish item carry what they are about; a patch body is
-    -- only ever a draft's, and only the digest outlives it.
+    -- only ever a draft's.
     ADD CONSTRAINT "EngineeringAgentWorkItem_payload_check"
         CHECK (
-            ("kind" IN ('t2_draft', 'publish') AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL)
+            ("kind" = 't2_draft' AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL)
+            OR ("kind" = 'publish' AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL AND "patchBody" IS NULL)
             OR ("kind" NOT IN ('t2_draft', 'publish') AND "patchDigest" IS NULL AND "patchBody" IS NULL)
         ),
     ADD CONSTRAINT "EngineeringAgentWorkItem_publish_tree_check"
@@ -233,7 +261,7 @@ CREATE INDEX "EngineeringAgentWorkItem_state_leaseExpiresAt_idx"
 ALTER TABLE "EngineeringAgentWorkItem"
     ADD CONSTRAINT "EngineeringAgentWorkItem_runId_fkey"
         FOREIGN KEY ("runId") REFERENCES "EngineeringAgentRun"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_work_item_guard"()
 RETURNS TRIGGER AS $$
@@ -276,10 +304,11 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentWorkItem % cannot change what it is about', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
-    -- A patch body only ever leaves (retention); it never arrives or changes.
-    IF NEW."patchBody" IS DISTINCT FROM OLD."patchBody"
-        AND NOT (NEW."patchBody" IS NULL AND terminal AND NEW."state" = OLD."state") THEN
-        RAISE EXCEPTION 'EngineeringAgentWorkItem % patch body can only be removed once closed', OLD."id"
+    -- A patch body never arrives, changes or leaves here. Its removal after a
+    -- retention period is for a later migration, once the policy fixes that
+    -- period (§16); until then the draft is the only copy and stays whole.
+    IF NEW."patchBody" IS DISTINCT FROM OLD."patchBody" THEN
+        RAISE EXCEPTION 'EngineeringAgentWorkItem % patch body is kept until a retention period is fixed', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -378,19 +407,43 @@ BEGIN
                 RAISE EXCEPTION 'EngineeringAgentWorkItem % fencing token only moves on a claim', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
-            -- A write result that arrives after its lease is not a success.
-            IF OLD."state" = 'claimed'
-                AND NEW."state" IN ('published', 'closed', 'pruned')
-                AND OLD."leaseExpiresAt" <= now_utc THEN
-                RAISE EXCEPTION 'EngineeringAgentWorkItem % result arrived after its lease', OLD."id"
+            -- Once a claim's lease has passed, the only way out is a lookup:
+            -- no result, success or failure, and no return to the queue is
+            -- recorded without finding out what the earlier claim did (§10).
+            IF OLD."state" = 'claimed' AND OLD."leaseExpiresAt" <= now_utc AND NEW."state" <> 'needs_lookup' THEN
+                RAISE EXCEPTION 'EngineeringAgentWorkItem % lease has passed; only a lookup follows', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
-            -- A T2 decision is written first, in the same transaction, and must agree.
+            -- A publish is the consumption of this claim's capability: no
+            -- consumption, no publish; and once consumed, the claim cannot be
+            -- handed back to the queue as if nothing had been reserved.
+            IF OLD."kind" = 'publish' AND OLD."state" = 'claimed' AND NEW."state" IN ('published', 'queued') THEN
+                PERFORM 1 FROM "EngineeringAgentCapability" c
+                    WHERE c."workItemId" = OLD."id" AND c."consumedAt" IS NOT NULL
+                      AND c."claimFencingToken" = OLD."fencingToken"
+                    FOR UPDATE;
+                IF NEW."state" = 'published' AND NOT FOUND THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % publishes only on a consumed capability', OLD."id"
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW."state" = 'queued' AND FOUND THEN
+                    RAISE EXCEPTION 'EngineeringAgentWorkItem % consumed its capability and cannot be requeued', OLD."id"
+                        USING ERRCODE = 'check_violation';
+                END IF;
+            END IF;
+            -- A T2 decision is written first, in the same transaction, and must
+            -- agree; a draft with a decision never merely expires.
             IF OLD."kind" = 't2_draft' AND NEW."state" IN ('approved', 'rejected') AND NOT EXISTS (
                 SELECT 1 FROM "EngineeringAgentApproval" a
                 WHERE a."workItemId" = OLD."id" AND a."decision" = NEW."state"
             ) THEN
                 RAISE EXCEPTION 'EngineeringAgentWorkItem % has no matching decision', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            IF OLD."kind" = 't2_draft' AND NEW."state" = 'expired' AND EXISTS (
+                SELECT 1 FROM "EngineeringAgentApproval" a WHERE a."workItemId" = OLD."id"
+            ) THEN
+                RAISE EXCEPTION 'EngineeringAgentWorkItem % was decided and does not expire', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
             NEW."claimMode" := NULL;
@@ -449,10 +502,10 @@ ALTER TABLE "EngineeringAgentApproval"
 ALTER TABLE "EngineeringAgentApproval"
     ADD CONSTRAINT "EngineeringAgentApproval_workItemId_fkey"
         FOREIGN KEY ("workItemId") REFERENCES "EngineeringAgentWorkItem"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE,
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT "EngineeringAgentApproval_auditLogId_fkey"
         FOREIGN KEY ("auditLogId") REFERENCES "AdminAuditLog"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_approval_guard"()
 RETURNS TRIGGER AS $$
@@ -482,6 +535,26 @@ CREATE TRIGGER "engineering_agent_approval_guard_insert"
 CREATE TRIGGER "engineering_agent_approval_guard_change"
     BEFORE UPDATE OR DELETE ON "EngineeringAgentApproval"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_approval_guard"();
+
+-- By the end of the transaction that writes a decision, the draft is closed
+-- as decided; a decision never sits beside an open or expired draft.
+CREATE OR REPLACE FUNCTION "engineering_agent_approval_closes_draft"()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM "EngineeringAgentWorkItem" w WHERE w."id" = NEW."workItemId" AND w."state" = NEW."decision"
+    ) THEN
+        RAISE EXCEPTION 'EngineeringAgentApproval % must close its draft as decided in the same transaction', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_approval_closes_draft"
+    AFTER INSERT ON "EngineeringAgentApproval"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION "engineering_agent_approval_closes_draft"();
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentCapability: permission for one publish (§11). Issued once,
@@ -524,7 +597,7 @@ ALTER TABLE "EngineeringAgentCapability"
 ALTER TABLE "EngineeringAgentCapability"
     ADD CONSTRAINT "EngineeringAgentCapability_workItemId_fkey"
         FOREIGN KEY ("workItemId") REFERENCES "EngineeringAgentWorkItem"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_capability_guard"()
 RETURNS TRIGGER AS $$
@@ -537,7 +610,7 @@ BEGIN
     END IF;
     IF TG_OP = 'INSERT' THEN
         SELECT "kind", "state", "patchDigest", "baseSha", "expectedTreeId" INTO item
-        FROM "EngineeringAgentWorkItem" WHERE "id" = NEW."workItemId";
+        FROM "EngineeringAgentWorkItem" WHERE "id" = NEW."workItemId" FOR UPDATE;
         IF NOT FOUND OR item."kind" <> 'publish' OR item."state" <> 'queued'
             OR item."patchDigest" IS DISTINCT FROM NEW."patchDigest"
             OR item."baseSha" IS DISTINCT FROM NEW."baseSha"
@@ -580,7 +653,7 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentCapability % has expired', OLD."id" USING ERRCODE = 'check_violation';
     END IF;
     SELECT "state", "claimMode", "fencingToken" INTO item
-    FROM "EngineeringAgentWorkItem" WHERE "id" = OLD."workItemId";
+    FROM "EngineeringAgentWorkItem" WHERE "id" = OLD."workItemId" FOR UPDATE;
     IF item."state" <> 'claimed' OR item."claimMode" <> 'write' OR item."fencingToken" <> NEW."claimFencingToken" THEN
         RAISE EXCEPTION 'EngineeringAgentCapability % is consumed only by the current write claim', OLD."id"
             USING ERRCODE = 'check_violation';
@@ -616,6 +689,7 @@ CREATE TABLE "EngineeringAgentBinding" (
     "mergeObservation" JSONB,
     "reviewerGithubId" BIGINT,
     "reviewerLogin" TEXT,
+    "reviewerRecordedAt" TIMESTAMP(3),
     "supersededAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -641,7 +715,7 @@ CREATE INDEX "EngineeringAgentBinding_state_idx" ON "EngineeringAgentBinding"("s
 ALTER TABLE "EngineeringAgentBinding"
     ADD CONSTRAINT "EngineeringAgentBinding_runId_fkey"
         FOREIGN KEY ("runId") REFERENCES "EngineeringAgentRun"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_binding_guard"()
 RETURNS TRIGGER AS $$
@@ -649,8 +723,10 @@ DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
 BEGIN
     IF TG_OP = 'INSERT' THEN
-        IF NEW."state" <> 'open' OR NEW."supersededAt" IS NOT NULL THEN
-            RAISE EXCEPTION 'EngineeringAgentBinding starts open and current' USING ERRCODE = 'check_violation';
+        IF NEW."state" <> 'open' OR NEW."supersededAt" IS NOT NULL
+            OR NEW."approvalObservation" IS NOT NULL OR NEW."mergeObservation" IS NOT NULL
+            OR NEW."reviewerGithubId" IS NOT NULL OR NEW."reviewerLogin" IS NOT NULL OR NEW."reviewerRecordedAt" IS NOT NULL THEN
+            RAISE EXCEPTION 'EngineeringAgentBinding starts open, current and unobserved' USING ERRCODE = 'check_violation';
         END IF;
         NEW."createdAt" := now_utc;
         NEW."updatedAt" := now_utc;
@@ -686,13 +762,29 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentBinding % cannot go from % to %', OLD."id", OLD."state", NEW."state"
             USING ERRCODE = 'check_violation';
     END IF;
-    -- A reviewer's identity may only be removed (retention), never rewritten.
-    IF (NEW."reviewerGithubId" IS DISTINCT FROM OLD."reviewerGithubId" AND OLD."reviewerGithubId" IS NOT NULL
-            AND NEW."reviewerGithubId" IS NOT NULL)
-        OR (NEW."reviewerLogin" IS DISTINCT FROM OLD."reviewerLogin" AND OLD."reviewerLogin" IS NOT NULL
-            AND NEW."reviewerLogin" IS NOT NULL) THEN
-        RAISE EXCEPTION 'EngineeringAgentBinding % reviewer can be recorded once and removed', OLD."id"
+    -- An observation is recorded once, from nothing, and never rewritten.
+    IF (OLD."approvalObservation" IS NOT NULL AND NEW."approvalObservation" IS DISTINCT FROM OLD."approvalObservation")
+        OR (OLD."mergeObservation" IS NOT NULL AND NEW."mergeObservation" IS DISTINCT FROM OLD."mergeObservation") THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding % observations are recorded once', OLD."id"
             USING ERRCODE = 'check_violation';
+    END IF;
+    -- A reviewer is recorded once. Retention may remove the identity; nothing
+    -- may put one back or put another in its place.
+    IF NEW."reviewerRecordedAt" IS DISTINCT FROM OLD."reviewerRecordedAt" THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding reviewerRecordedAt is written by the database'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF (NEW."reviewerGithubId" IS NOT NULL AND NEW."reviewerGithubId" IS DISTINCT FROM OLD."reviewerGithubId")
+        OR (NEW."reviewerLogin" IS NOT NULL AND NEW."reviewerLogin" IS DISTINCT FROM OLD."reviewerLogin") THEN
+        IF OLD."reviewerRecordedAt" IS NOT NULL THEN
+            RAISE EXCEPTION 'EngineeringAgentBinding % reviewer was recorded once', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF NEW."reviewerGithubId" IS NULL OR NEW."reviewerLogin" IS NULL THEN
+            RAISE EXCEPTION 'EngineeringAgentBinding % reviewer is recorded whole', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
+        NEW."reviewerRecordedAt" := now_utc;
     END IF;
     NEW."updatedAt" := now_utc;
     RETURN NEW;
@@ -720,6 +812,7 @@ CREATE TABLE "EngineeringAgentRegistration" (
     "itemDigest" TEXT NOT NULL,
     "proposalDigest" TEXT NOT NULL,
     "guardResult" TEXT NOT NULL,
+    "roundId" TEXT NOT NULL,
     "result" TEXT NOT NULL DEFAULT 'pending',
     "amuxCardId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -744,20 +837,51 @@ ALTER TABLE "EngineeringAgentRegistration"
     ADD CONSTRAINT "EngineeringAgentRegistration_card_check"
         CHECK (("result" = 'registered') = ("amuxCardId" IS NOT NULL));
 
+ALTER TABLE "EngineeringAgentRegistration"
+    ADD CONSTRAINT "EngineeringAgentRegistration_roundId_check" CHECK ("roundId" ~ '^[A-Za-z0-9_-]{8,64}$');
+
+CREATE INDEX "EngineeringAgentRegistration_roundId_idx" ON "EngineeringAgentRegistration"("roundId");
 CREATE INDEX "EngineeringAgentRegistration_result_createdAt_idx"
     ON "EngineeringAgentRegistration"("result", "createdAt");
 
 ALTER TABLE "EngineeringAgentRegistration"
     ADD CONSTRAINT "EngineeringAgentRegistration_amuxCardId_fkey"
         FOREIGN KEY ("amuxCardId") REFERENCES "AmuxWorkItem"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+        ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE OR REPLACE FUNCTION "engineering_agent_registration_guard"()
 RETURNS TRIGGER AS $$
+DECLARE
+    -- limit: REGISTRATION_CAPS.perRound
+    round_limit CONSTANT INTEGER := 3;
+    -- limit: REGISTRATION_CAPS.perUtcDay
+    day_limit CONSTANT INTEGER := 10;
+    -- limit: REGISTRATION_CAPS.unpromoted
+    unpromoted_limit CONSTANT INTEGER := 20;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW."result" <> 'pending' OR NEW."decidedAt" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentRegistration starts pending' USING ERRCODE = 'check_violation';
+        END IF;
+        -- The caps (policy §2.2), counted here and not only by the guard.
+        -- A proposal that did not become a card -- refused, or confirmed
+        -- absent -- does not count; one whose card is unknown does.
+        PERFORM pg_advisory_xact_lock(hashtext('engineering-agent:registration'));
+        IF (SELECT count(*) FROM "EngineeringAgentRegistration"
+                WHERE "roundId" = NEW."roundId" AND "result" NOT IN ('registration_refused', 'absent')) >= round_limit THEN
+            RAISE EXCEPTION 'EngineeringAgentRegistration refused: the round cap is reached' USING ERRCODE = 'check_violation';
+        END IF;
+        IF (SELECT count(*) FROM "EngineeringAgentRegistration"
+                WHERE "createdAt" >= date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC')
+                  AND "result" NOT IN ('registration_refused', 'absent')) >= day_limit THEN
+            RAISE EXCEPTION 'EngineeringAgentRegistration refused: the UTC day cap is reached' USING ERRCODE = 'check_violation';
+        END IF;
+        IF (SELECT count(*) FROM "EngineeringAgentRegistration" r
+                LEFT JOIN "AmuxWorkItem" c ON c."id" = r."amuxCardId"
+                WHERE r."result" IN ('pending', 'partial')
+                   OR (r."result" = 'registered' AND c."status" = 'backlog' AND c."archivedAt" IS NULL)) >= unpromoted_limit THEN
+            RAISE EXCEPTION 'EngineeringAgentRegistration refused: too many registered cards wait for promotion'
+                USING ERRCODE = 'check_violation';
         END IF;
         NEW."createdAt" := clock_timestamp() AT TIME ZONE 'UTC';
         RETURN NEW;
@@ -839,11 +963,9 @@ BEGIN
         NEW."updatedAt" := now_utc;
         RETURN NEW;
     END IF;
+    -- A request's end is what makes a retry idempotent; it is never deleted.
     IF TG_OP = 'DELETE' THEN
-        IF OLD."state" NOT IN ('committed', 'aborted') THEN
-            RAISE EXCEPTION 'an unfinished EngineeringAgentRequest cannot be deleted' USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN OLD;
+        RAISE EXCEPTION 'EngineeringAgentRequest is kept' USING ERRCODE = 'check_violation';
     END IF;
     IF NEW."key" IS DISTINCT FROM OLD."key"
         OR NEW."route" IS DISTINCT FROM OLD."route"

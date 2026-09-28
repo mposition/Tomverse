@@ -7,6 +7,7 @@ import {
   BINDING_TRANSITIONS,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
   HALT_VALUES,
+  OWNER_QUEUE_LIMITS,
   REGISTRATION_RESULTS,
   REGISTRATION_TRANSITIONS,
   REQUEST_STATES,
@@ -18,6 +19,7 @@ import {
   workItemStates,
   workItemTransitions,
 } from "../lib/engineeringAgentCore.ts";
+import { REGISTRATION_CAPS } from "../lib/engineeringAgentRegistrationGuard.ts";
 
 /**
  * The migration's triggers and CHECK constraints are written out in SQL; the
@@ -102,6 +104,25 @@ test("a work item is created in its kind's initial state and nowhere else", () =
     assert.ok(clause, `an initial state for ${kind}`);
     assert.equal(clause[2], initial, kind);
   }
+});
+
+test("every cap the database counts is the number the code holds", () => {
+  const limits = new Map(
+    [...sql.matchAll(/-- limit: ([A-Z_]+)\.(\w+)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
+      `${m[1]}.${m[2]}`,
+      Number(m[3]),
+    ]),
+  );
+  assert.deepEqual(
+    Object.fromEntries(limits),
+    {
+      "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
+      "OWNER_QUEUE_LIMITS.decision": OWNER_QUEUE_LIMITS.decision,
+      "REGISTRATION_CAPS.perRound": REGISTRATION_CAPS.perRound,
+      "REGISTRATION_CAPS.perUtcDay": REGISTRATION_CAPS.perUtcDay,
+      "REGISTRATION_CAPS.unpromoted": REGISTRATION_CAPS.unpromoted,
+    },
+  );
 });
 
 test("time the triggers write or compare is the database clock in UTC, never the caller's", () => {

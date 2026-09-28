@@ -2265,6 +2265,7 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
   @@index([createdAt, entryHash])
+  engineeringAgentApprovals EngineeringAgentApproval[]
 }
 
 model AdminActionApproval {
@@ -6950,6 +6951,8 @@ model AmuxWorkItem {
   @@index([projectKey, status, owner])
   @@index([teamKey, status, owner])
   @@index([dueAt, status])
+  engineeringAgentRuns          EngineeringAgentRun[]          @relation("EngineeringAgentRunCard")
+  engineeringAgentRegistrations EngineeringAgentRegistration[] @relation("EngineeringAgentRegistrationCard")
 }
 
 model AmuxWorkDependency {
@@ -7006,6 +7009,7 @@ model AmuxExecutionAttempt {
   @@index([taskId, startedAt])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+  engineeringAgentRun EngineeringAgentRun?
 }
 
 model AmuxCostLedgerEntry {
@@ -7833,6 +7837,8 @@ model EngineeringAgentRun {
   leaseExpiresAt DateTime
   endedAt        DateTime?
 
+  attempt   AmuxExecutionAttempt       @relation(fields: [amuxAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  card      AmuxWorkItem               @relation("EngineeringAgentRunCard", fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   workItems EngineeringAgentWorkItem[]
   bindings  EngineeringAgentBinding[]
 
@@ -7858,7 +7864,7 @@ model EngineeringAgentWorkItem {
   updatedAt      DateTime  @updatedAt
   closedAt       DateTime?
 
-  run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict)
+  run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval   EngineeringAgentApproval?
   capability EngineeringAgentCapability?
 
@@ -7878,7 +7884,8 @@ model EngineeringAgentApproval {
   auditLogId  String   @unique
   decidedAt   DateTime @default(now())
 
-  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// Permission for one publish: issued once, consumed at most once, then immutable.
@@ -7897,7 +7904,7 @@ model EngineeringAgentCapability {
   consumedAt        DateTime?
   claimFencingToken BigInt?
 
-  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// A published pull request as the app bound it. The snapshot never changes; a
@@ -7916,11 +7923,12 @@ model EngineeringAgentBinding {
   mergeObservation    Json?
   reviewerGithubId    BigInt?
   reviewerLogin       String?
+  reviewerRecordedAt  DateTime?
   supersededAt        DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  run EngineeringAgentRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  run EngineeringAgentRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([runId])
   @@index([state])
@@ -7935,12 +7943,16 @@ model EngineeringAgentRegistration {
   itemDigest     String
   proposalDigest String
   guardResult    String
+  roundId        String
   result         String    @default("pending")
   amuxCardId     String?
   createdAt      DateTime  @default(now())
   decidedAt      DateTime?
 
+  amuxCard AmuxWorkItem? @relation("EngineeringAgentRegistrationCard", fields: [amuxCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
   @@unique([source, itemKey, itemDigest])
+  @@index([roundId])
   @@index([result, createdAt])
 }
 

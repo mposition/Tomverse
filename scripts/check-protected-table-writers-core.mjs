@@ -610,55 +610,55 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
-    writeVerbs: 64,
+    writeVerbs: 70,
     reason:
       "The engineering agent state migration adds a restrictive foreign key from the T2 decision table to AdminAuditLog. It never writes AdminAuditLog; its write verbs create and constrain the seven engineering tables and their triggers.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRun",
-    tableMentions: 20,
-    writeVerbs: 64,
+    tableMentions: 22,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentWorkItem",
-    tableMentions: 32,
-    writeVerbs: 64,
+    tableMentions: 37,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentWorkItem and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentApproval",
-    tableMentions: 9,
-    writeVerbs: 64,
+    tableMentions: 12,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentApproval and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentCapability",
-    tableMentions: 12,
-    writeVerbs: 64,
+    tableMentions: 13,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentCapability and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentBinding",
-    tableMentions: 15,
-    writeVerbs: 64,
+    tableMentions: 19,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentBinding and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRegistration",
-    tableMentions: 11,
-    writeVerbs: 64,
+    tableMentions: 20,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentRegistration and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
@@ -666,7 +666,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentRequest",
     tableMentions: 10,
-    writeVerbs: 64,
+    writeVerbs: 70,
     reason:
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
