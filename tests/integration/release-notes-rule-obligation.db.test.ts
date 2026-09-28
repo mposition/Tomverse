@@ -66,6 +66,9 @@ const duty = (
  * already wrong about the policy version before they touched the field they were
  * about. A case that could fail for two reasons proves neither.
  */
+/** One instant for the approval, its creation and its seal, so their order holds. */
+const APPROVED_AT = new Date("2026-09-20T00:00:00.000Z");
+
 const approval = async (
   overrides: Partial<Prisma.EmailSendApprovalUncheckedCreateInput> = {},
   policyVersionId?: string
@@ -82,7 +85,11 @@ const approval = async (
       approvalType: "obligation_waiver",
       approvedById: randomUUID(),
       approvedByEmail: `ops-${randomUUID().slice(0, 8)}@example.test`,
-      approvedAt: new Date("2026-09-20T00:00:00.000Z"),
+      approvedAt: APPROVED_AT,
+      // Explicit, because the ledger holds `sealedAt >= createdAt` and a fixed
+      // approval date with a default `now()` creation date breaks it on every
+      // day after the one the date names.
+      createdAt: APPROVED_AT,
       reason: "The owner decided not to print the advertising label.",
       reviewCondition: "Revisit on the first Korean complaint.",
       policyVersionId: policy.id,
@@ -182,12 +189,12 @@ test("each state carries its own evidence and only its own", async () => {
   await draft();
   const ruleId = await koreanRuleId();
   await prisma.releaseNotesRuleObligation.deleteMany({});
-  const sealed = await approval({ sealedAt: new Date("2026-09-20T00:00:00.000Z") });
+  const sealed = await approval({ sealedAt: APPROVED_AT });
   // Sealed for the duty the fixture is about, so an evidence case fails on its
   // evidence rather than on the waiver's scope -- two different refusals, and a
   // case that could be either proves neither.
   const sealedForFixture = await approval({
-    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    sealedAt: APPROVED_AT,
     obligationKey: "consent_result_notice_14_days",
   });
 
@@ -288,7 +295,7 @@ test("a waiver must be an approval of the right kind, and sealed", async () => {
     ruleVersion: null,
     country: null,
     obligationKey: null,
-    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    sealedAt: APPROVED_AT,
   });
   await refuses(
     () =>
@@ -347,7 +354,7 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
   for (const [overrides, what] of scopes) {
     const waiver = await approval(
       {
-        sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+        sealedAt: APPROVED_AT,
         ruleKey: rule.ruleKey,
         ruleVersion: rule.ruleVersion,
         country: "KR",
@@ -390,7 +397,7 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
       () =>
         approval(
           {
-            sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+            sealedAt: APPROVED_AT,
             ruleKey: rule.ruleKey,
             ruleVersion: rule.ruleVersion,
             country: "KR",
@@ -406,7 +413,7 @@ test("a waiver has to waive this duty, of this rule, of this policy version", as
   // The one that matches, so the test is about the comparison and not about the
   // trigger refusing everything.
   const exact = await approval({
-    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    sealedAt: APPROVED_AT,
     policyVersionId: rule.policyVersionId,
     ruleKey: rule.ruleKey,
     ruleVersion: rule.ruleVersion,
@@ -441,7 +448,7 @@ test("the waiver writer records what the database accepts and reports what it re
   });
   const sealedFor = (obligationKey: string | null, overrides = {}) =>
     approval({
-      sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+      sealedAt: APPROVED_AT,
       policyVersionId: rule.policyVersionId,
       ruleKey: rule.ruleKey,
       ruleVersion: rule.ruleVersion,
@@ -558,7 +565,7 @@ test("a rule carrying a waived duty cannot have the scope that waiver names chan
   });
 
   const waiver = await approval({
-    sealedAt: new Date("2026-09-20T00:00:00.000Z"),
+    sealedAt: APPROVED_AT,
     policyVersionId: rule.policyVersionId,
     ruleKey: rule.ruleKey,
     ruleVersion: rule.ruleVersion,

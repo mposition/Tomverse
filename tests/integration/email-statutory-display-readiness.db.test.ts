@@ -181,7 +181,9 @@ test("a message whose profile key is not its country code is still checked", asy
       subjectPrefix: "",
       footerBlocks: ["legal_name"],
       unsubscribeSlaBusinessDays: 10,
-      marketingBasis: "express_consent",
+      // `opt_in` or `opt_out`: the profile CHECK names those two, and
+      // `express_consent` is the release-notes rule vocabulary, not this one.
+      marketingBasis: "opt_in",
       notes: "A remapped Singaporean profile, for the test.",
     },
   });
