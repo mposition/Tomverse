@@ -187,69 +187,79 @@ export const enterPinnedDeploymentChat = async (input: {
                 return { started: false };
             }
             const inference = pinnedInferenceArguments(args);
-            const result = streamPinnedInference({
-                model: active,
-                messages: args.messages.map((message) => ({
-                    role: message.role,
-                    content: message.text,
-                })),
-                maxOutputTokens: inference.maxOutputTokens,
-                onFinish: async (event) => {
-                    await ensureDispatched();
-                    const usage = event.usage;
-                    const promptTokens = usage?.inputTokens;
-                    let rates: PinnedPriceRates | null = null;
-                    if (typeof promptTokens === "number") {
-                        try {
-                            rates = await ratesFor(args.logicalModelId, promptTokens);
-                        } catch {
-                            rates = null;
+            // A throw here is before the stream object exists, so onError never
+            // runs and the attempt would stay pending. Mark it not dispatched.
+            // Rethrow so the caller keeps the reservation as an unknown hold;
+            // returning started:false would release it.
+            let result;
+            try {
+                result = streamPinnedInference({
+                    model: active,
+                    messages: args.messages.map((message) => ({
+                        role: message.role,
+                        content: message.text,
+                    })),
+                    maxOutputTokens: inference.maxOutputTokens,
+                    onFinish: async (event) => {
+                        await ensureDispatched();
+                        const usage = event.usage;
+                        const promptTokens = usage?.inputTokens;
+                        let rates: PinnedPriceRates | null = null;
+                        if (typeof promptTokens === "number") {
+                            try {
+                                rates = await ratesFor(args.logicalModelId, promptTokens);
+                            } catch {
+                                rates = null;
+                            }
                         }
-                    }
-                    const actual = rates === null
-                        ? null
-                        : settlePinnedUsageCost(rates, {
-                            inputTokens: usage?.inputTokens,
-                            outputTokens: usage?.outputTokens,
-                            cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
-                        });
-                    try {
-                        await experiment.close(actual === null
-                            ? { holdId: args.holdId, experimentId: args.experimentId, outcome: "unknown" }
-                            : {
+                        const actual = rates === null
+                            ? null
+                            : settlePinnedUsageCost(rates, {
+                                inputTokens: usage?.inputTokens,
+                                outputTokens: usage?.outputTokens,
+                                cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+                            });
+                        try {
+                            await experiment.close(actual === null
+                                ? { holdId: args.holdId, experimentId: args.experimentId, outcome: "unknown" }
+                                : {
+                                    holdId: args.holdId,
+                                    experimentId: args.experimentId,
+                                    outcome: "usage",
+                                    actualMicroUsd: actual,
+                                });
+                        } finally {
+                            if (instrumentation) {
+                                await completeInstrumentedDispatch(instrumentation, {
+                                    outcome: "succeeded",
+                                    actualInputTokens: typeof usage?.inputTokens === "number" ? usage.inputTokens : null,
+                                    actualOutputTokens: typeof usage?.outputTokens === "number" ? usage.outputTokens : null,
+                                });
+                            }
+                        }
+                    },
+                    onError: async () => {
+                        await ensureDispatched();
+                        try {
+                            await experiment.close({
                                 holdId: args.holdId,
                                 experimentId: args.experimentId,
-                                outcome: "usage",
-                                actualMicroUsd: actual,
+                                outcome: "unknown",
                             });
-                    } finally {
-                        if (instrumentation) {
-                            await completeInstrumentedDispatch(instrumentation, {
-                                outcome: "succeeded",
-                                actualInputTokens: typeof usage?.inputTokens === "number" ? usage.inputTokens : null,
-                                actualOutputTokens: typeof usage?.outputTokens === "number" ? usage.outputTokens : null,
-                            });
+                        } finally {
+                            if (instrumentation) {
+                                await completeInstrumentedDispatch(instrumentation, {
+                                    outcome: "failed_pre_token",
+                                    failureLayer: "provider",
+                                });
+                            }
                         }
-                    }
-                },
-                onError: async () => {
-                    await ensureDispatched();
-                    try {
-                        await experiment.close({
-                            holdId: args.holdId,
-                            experimentId: args.experimentId,
-                            outcome: "unknown",
-                        });
-                    } finally {
-                        if (instrumentation) {
-                            await completeInstrumentedDispatch(instrumentation, {
-                                outcome: "failed_pre_token",
-                                failureLayer: "provider",
-                            });
-                        }
-                    }
-                },
-            });
+                    },
+                });
+            } catch (error) {
+                await abandonBeforeDispatch("pinned_stream_start_failed");
+                throw error;
+            }
             await ensureDispatched();
             return {
                 started: true,
