@@ -1654,7 +1654,12 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // Everything above -- the template read, the render, the footer, the quiet
   // hour wait -- happened outside it, and anything committed during it is what
   // this re-check is for.
-  const submitted = await sendWithAddressLock({
+  // Wrapped too. A throw from here is a database failure inside the lock --
+  // the suppression re-check, the transaction -- and once the provider has
+  // answered the lock returns that answer rather than throwing. Even the one
+  // case that may have submitted is safe to retry: the same key and, since the
+  // unsubscribe token became deterministic, the same payload.
+  const submitted = await gateRead("the send under the address lock", () => sendWithAddressLock({
     emailAddress: delivery.emailAddress,
     classification: definition.classification,
     purpose: definition.purpose,
@@ -1682,7 +1687,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     // sender the first attempt used rather than one recomputed from what the
     // retry happens to know (docs/policy/email-notifications.md §14.1a).
     senderRole: definition.senderRole,
-  });
+  }));
 
   if (submitted.ok === false && submitted.reason === "lock_unavailable") {
     // Nothing was submitted. The claim is released and the row comes back on

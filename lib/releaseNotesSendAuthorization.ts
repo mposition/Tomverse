@@ -11,7 +11,7 @@ import { identityBlocksWithoutValue } from "@/lib/emailBusinessIdentity";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
 import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
-import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
+import { REQUIRED_SUBJECT_PREFIX, subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
 import { earliestBiennialNoticeDueAt } from "@/lib/biennialConsentNoticeReadiness";
@@ -430,7 +430,13 @@ export async function releaseNotesSendAuthorization(
     profiles,
   });
 
-  // Each candidate country's footer duty judged by *this message's* footer: the
+  // Each candidate country's footer and subject-label duties judged by *this
+  // message*. The label is the same question in the same shape: the subject
+  // prefix check folds every pending row's pin into one answer too, so one stale
+  // Singapore row with an empty prefix skipped every Singapore message whose own
+  // prefix was right.
+  //
+  // The footer duty judged by *this message's* footer: the
   // profile this policy version maps the country to, which is what it renders
   // from, and the identity values that fill it -- the question
   // `footerDisclosureReadiness()` asks of every pair, asked of this one.
@@ -448,6 +454,9 @@ export async function releaseNotesSendAuthorization(
         profile !== undefined &&
         required.every((block) => profile.footerBlocks.includes(block)) &&
         identityBlocksWithoutValue(process.env, required).length === 0;
+      const requiredPrefix = REQUIRED_SUBJECT_PREFIX[country];
+      const ownSubjectLabel =
+        profile !== undefined && (profile.subjectPrefix ?? "").trimEnd() === requiredPrefix;
       return [
         country,
         {
@@ -455,6 +464,8 @@ export async function releaseNotesSendAuthorization(
           emailFooterDisclosures: FOOTER_DISCLOSURE_COUNTRIES.includes(country)
             ? ownFooterComplete
             : readiness.checks.emailFooterDisclosures,
+          emailSubjectLabels:
+            requiredPrefix !== undefined ? ownSubjectLabel : readiness.checks.emailSubjectLabels,
         },
       ];
     })
