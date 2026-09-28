@@ -1346,6 +1346,9 @@ const fixtureCodexEnvironment = (cwd) => {
     `fixture CLI bin requires a cwd under ${tmpdir()}: ${cwd}`
   );
   const bin = join(tmpdir(), fromTemporaryRoot.split(sep)[0], "fixture-cli-bin");
+  const binFromCwd = relative(cwd, bin);
+  assert.ok(binFromCwd === ".." || binFromCwd.startsWith(`..${sep}`),
+    `fixture CLI bin must be outside the fixture repository: ${cwd}`);
   mkdirSync(bin, { recursive: true });
   const posix = join(bin, "codex");
   writeFileSync(posix, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fixture-codex 1.0; exit 0; fi\nexit 2\n');
