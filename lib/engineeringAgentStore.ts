@@ -26,8 +26,8 @@
  *
  * What it does not do: permission and step-up checks are the route's; AMUX rows
  * are the AMUX store's, reached only through the engineering adapter, which
- * calls into this module inside the same transaction. The registration path is
- * absent until the AMUX intake has the agent registration source.
+ * calls into this module inside the same transaction. A registration record is
+ * written in the AMUX agent intake writer's transaction, beside its card.
  *
  * Reads are not restricted: any module may query these tables. It is writing
  * that goes through here.
@@ -73,6 +73,7 @@ import {
   engineeringBranchName,
   isCircuitLatched,
   isRunId,
+  partialRegistrationDecisionCauseKey,
   parseEngineeringAgentMode,
   parseSettingInstant,
   resolveEngineeringAgentSwitches,
@@ -185,6 +186,8 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   bindingObserved: "engineering_agent.binding_observed",
   reviewerRemoved: "engineering_agent.reviewer_removed",
   switchChanged: "engineering_agent.switch_changed",
+  registrationRecorded: "engineering_agent.registration_recorded",
+  registrationResolved: "engineering_agent.registration_resolved",
 } as const);
 
 const humanActorId = (session: Session): string =>
@@ -232,7 +235,11 @@ export async function readEngineeringAgentSwitches(
  * -- a claim's result, a pull request the publisher opened, a person's
  * decision, a run's end -- is never refused by a switch.
  */
-export type EngineeringAgentSwitchGate = "claimAllowed" | "publishAllowed" | "maintenanceAllowed";
+export type EngineeringAgentSwitchGate =
+  | "claimAllowed"
+  | "publishAllowed"
+  | "registrationAllowed"
+  | "maintenanceAllowed";
 
 const requireSwitch = async (tx: EngineeringAgentTransaction, gate: EngineeringAgentSwitchGate) => {
   const switches = await readEngineeringAgentSwitches(tx);
@@ -1360,6 +1367,123 @@ export async function recordEngineeringAgentBinding(
     headSha: input.headSha,
   });
   return { bindingId: created.id };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Registrations (§2.2)                                                       */
+/* ------------------------------------------------------------------------- */
+
+export type RegistrationRecordInput = {
+  id: string;
+  source: "S1" | "S2" | "S3";
+  pinnedCommit: string;
+  itemKey: string;
+  itemDigest: string;
+  proposalDigest: string;
+  guardResult: string;
+  roundId: string;
+  /** `registered` names its AMUX card; a refusal names none. */
+  result: "registered" | "registration_refused";
+  amuxCardId: string | null;
+};
+
+/**
+ * Records a registration proposal and what became of it, once (§2.2, §11):
+ * the source, the pinned revision, the digests and the guard's result, never
+ * the proposal's text. The row is inserted `pending` -- the database counts
+ * the caps there -- and moves to its result in the same transaction. A
+ * registered row is written in the AMUX agent intake's transaction, beside
+ * its card. Registration stops while anything halts (§12).
+ */
+export async function recordEngineeringAgentRegistration(
+  tx: EngineeringAgentTransaction,
+  input: RegistrationRecordInput,
+): Promise<{ registrationId: string }> {
+  await requireSwitch(tx, "registrationAllowed");
+  await lockEngineeringAgentHalt(tx);
+  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
+  if ((input.result === "registered") !== (input.amuxCardId !== null)) refuse("registration_card_mismatch");
+  await tx.engineeringAgentRegistration.create({
+    data: {
+      id: input.id,
+      source: input.source,
+      pinnedCommit: input.pinnedCommit,
+      itemKey: input.itemKey,
+      itemDigest: input.itemDigest,
+      proposalDigest: input.proposalDigest,
+      guardResult: input.guardResult,
+      roundId: input.roundId,
+    },
+  });
+  await tx.engineeringAgentRegistration.update({
+    where: { id: input.id },
+    data: { result: input.result, amuxCardId: input.amuxCardId },
+  });
+  await systemAudit(
+    tx,
+    "engineering-agent-registrar",
+    ENGINEERING_AGENT_AUDIT_ACTIONS.registrationRecorded,
+    "engineering_agent_registration",
+    input.id,
+    {
+      source: input.source,
+      itemDigest: input.itemDigest,
+      proposalDigest: input.proposalDigest,
+      guardResult: input.guardResult,
+      result: input.result,
+      amuxCardId: input.amuxCardId,
+    },
+  );
+  return { registrationId: input.id };
+}
+
+/**
+ * What the read-back found after an AMUX intake commit whose answer was lost
+ * (AMUX intake version 2): nothing written is `absent`; a card without this
+ * agent's record is `partial`, which opens a decision for a person. Nothing
+ * is retried. A proposal is recorded here only when its own row was not.
+ */
+export async function recordEngineeringAgentRegistrationReadBack(
+  tx: EngineeringAgentTransaction,
+  input: Omit<RegistrationRecordInput, "result" | "amuxCardId"> & { found: "absent" | "partial" },
+): Promise<{ registrationId: string; decisionItemId: string | null }> {
+  await tx.engineeringAgentRegistration.create({
+    data: {
+      id: input.id,
+      source: input.source,
+      pinnedCommit: input.pinnedCommit,
+      itemKey: input.itemKey,
+      itemDigest: input.itemDigest,
+      proposalDigest: input.proposalDigest,
+      guardResult: input.guardResult,
+      roundId: input.roundId,
+    },
+  });
+  let decisionItemId: string | null = null;
+  if (input.found === "partial") {
+    const decision = await tx.engineeringAgentWorkItem.create({
+      data: {
+        id: randomUUID(),
+        kind: "decision",
+        state: "open",
+        causeKey: partialRegistrationDecisionCauseKey(input.id),
+        runId: null,
+        reason: "registration_partial",
+      },
+      select: { id: true },
+    });
+    decisionItemId = decision.id;
+  }
+  await tx.engineeringAgentRegistration.update({ where: { id: input.id }, data: { result: input.found } });
+  await systemAudit(
+    tx,
+    "engineering-agent-registrar",
+    ENGINEERING_AGENT_AUDIT_ACTIONS.registrationResolved,
+    "engineering_agent_registration",
+    input.id,
+    { source: input.source, itemDigest: input.itemDigest, result: input.found, decisionItemId },
+  );
+  return { registrationId: input.id, decisionItemId };
 }
 
 /**

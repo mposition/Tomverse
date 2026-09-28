@@ -121,6 +121,7 @@ test("every exported write takes the engineering transaction and records its aud
 // by a switch. A new export that is in neither fails here until it is placed.
 const SWITCHED = [
   "recordEngineeringAgentRunStart",
+  "recordEngineeringAgentRegistration",
   "requireEngineeringAgentRunAdmission",
   "claimNextEngineeringAgentPublishWork",
   "openEngineeringAgentWorkItem",
@@ -140,6 +141,7 @@ const RECORDS_WHAT_HAPPENED = [
   "readEngineeringAgentOwnerQueues",
   "openEngineeringAgentRunMismatches",
   "recordEngineeringAgentPublishResult",
+  "recordEngineeringAgentRegistrationReadBack",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",
   "heartbeatEngineeringAgentRun",

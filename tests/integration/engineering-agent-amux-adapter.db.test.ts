@@ -16,6 +16,8 @@ import {
   settleAmuxExecution,
   startAmuxExecution,
 } from "@/lib/amux/execution";
+import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
+import { registerAmuxAgentIntakeCard } from "@/lib/amux/agentIntake";
 import { recordAmuxReviewPullRequest } from "@/lib/amux/reviewPullRequest";
 import {
   heartbeatAmuxWorkerRuntime,
@@ -37,6 +39,8 @@ import {
   moveEngineeringAgentBinding,
   openEngineeringAgentRunMismatches,
   openEngineeringAgentWorkItem,
+  recordEngineeringAgentRegistration,
+  recordEngineeringAgentRegistrationReadBack,
   runEngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import { runAttachedIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
@@ -143,7 +147,7 @@ let runCounter = 700_000_000 + (Math.floor(Date.now() / 1000) % 100_000_000);
 const nextRunId = () => String((runCounter += 1));
 
 /** A worker that is registered, idle and ready, and a todo card it owns. */
-const readyWorkerWithCard = async () => {
+const readyWorkerWithCard = async (options: { requiresHumanReview?: boolean } = {}) => {
   const worker = `eng-adapter-${randomUUID().slice(0, 12)}`;
   const instanceId = randomUUID();
   fixtureWorkers.push(worker);
@@ -160,6 +164,8 @@ const readyWorkerWithCard = async () => {
       owner: worker,
       claimedAt: new Date(),
       revision: 1,
+      requiresHumanReview: options.requiresHumanReview ?? false,
+      reviewSpecialty: options.requiresHumanReview ? "code-review" : null,
     },
   });
   fixtureTaskIds.push(taskId);
@@ -535,7 +541,8 @@ test("a published result is bound in the transaction that records the card's rev
   // A publish needs a run that started under t1.
   await setMode("t1");
   try {
-    const fixture = await readyWorkerWithCard();
+    // A review pull request belongs to a card a person reviews.
+    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
     const runId = nextRunId();
     const started = await startWithRun(fixture, runId);
     const { workItemId } = await inTx((tx) =>
@@ -764,4 +771,115 @@ test("a registration records the generation it created with its request", async 
   assert.deepEqual(replay, { kind: "replay", state: "committed", resultRef: String(generation) });
   const runtime = await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: worker } });
   assert.equal(runtime.generation, generation);
+});
+
+test("an agent registration writes its card and its record in one transaction, once per source identity", async () => {
+  const registrationKey = "feature.engineeringAgentRegistration";
+  await prisma.appSetting.upsert({
+    where: { key: registrationKey },
+    create: { key: registrationKey, value: "on" },
+    update: { value: "on" },
+  });
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const itemKey = `ENG-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const itemDigest = sha256(itemKey);
+  const roundId = `round-${randomUUID().slice(0, 12)}`;
+  const sourceKey = sha256(`engineering-product-backlog|${itemKey}`).toUpperCase();
+  const card = {
+    agentId: "engineering-agent" as const,
+    sourceSystem: "engineering-product-backlog",
+    sourceKey,
+    sourceVersion: sha1("pinned"),
+    sourceDigest: itemDigest,
+    title: "Engineering registration fixture",
+    priority: "p3" as const,
+    proposalDigest: sha256("proposal"),
+    scannerVersion: "amux-board-content-scan-v1",
+  };
+  const record = (id: string) => ({
+    id,
+    source: "S1" as const,
+    pinnedCommit: sha1("pinned"),
+    itemKey,
+    itemDigest,
+    proposalDigest: sha256("proposal"),
+    guardResult: "allowed",
+    roundId,
+  });
+  const attach = (id: string) => ({
+    prismaCalls: 16,
+    work: async (lent: Parameters<typeof engineeringAgentTransactionInAmux>[0], fact: { cardId: string }) => {
+      await recordEngineeringAgentRegistration(engineeringAgentTransactionInAmux(lent), {
+        ...record(id),
+        result: "registered",
+        amuxCardId: fact.cardId,
+      });
+    },
+  });
+  try {
+    const firstId = randomUUID();
+    const first = await withAmuxRouteBudget(
+      () => registerAmuxAgentIntakeCard({ card, actor: "engineering-agent-registrar" }, attach(firstId)),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(first.registered, true);
+    const cardId = first.registered ? first.cardId : "";
+    fixtureTaskIds.push(cardId);
+    const stored = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: cardId } });
+    assert.equal(stored.status, "backlog");
+    assert.equal(stored.kind, "unknown");
+    assert.equal(stored.owner, null);
+    assert.equal(stored.description, null, "the card holds no proposal text beyond its title");
+    const row = await prisma.engineeringAgentRegistration.findUniqueOrThrow({ where: { id: firstId } });
+    assert.equal(row.result, "registered");
+    assert.equal(row.amuxCardId, cardId);
+    const audit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.intake.agent_registered", targetId: cardId },
+    });
+    assert.equal(
+      (audit.metadata as Record<string, unknown>)[SYSTEM_AUDIT_ACTOR_METADATA_KEY],
+      "engineering-agent-registrar",
+      "the card is registered under the agent's system actor, not a person",
+    );
+    assert.equal(audit.actorUserId, null);
+
+    // The same item again: its record cannot be written twice, so nothing is.
+    const secondId = randomUUID();
+    await assert.rejects(
+      withAmuxRouteBudget(
+        () => registerAmuxAgentIntakeCard({ card, actor: "engineering-agent-registrar" }, attach(secondId)),
+        ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+      ),
+    );
+    assert.equal(await prisma.engineeringAgentRegistration.count({ where: { id: secondId } }), 0);
+
+    // The same identity with another digest is a conflict and writes nothing.
+    const conflict = await withAmuxRouteBudget(
+      () =>
+        registerAmuxAgentIntakeCard(
+          { card: { ...card, sourceDigest: sha256("another revision") }, actor: "engineering-agent-registrar" },
+          attach(randomUUID()),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.deepEqual(conflict, { registered: false, reason: "conflict" });
+
+    // A lost answer read back as partial is a person's decision.
+    const partialId = randomUUID();
+    const readBack = await runEngineeringAgentTransaction(prisma, (tx) =>
+      recordEngineeringAgentRegistrationReadBack(tx, {
+        ...record(partialId),
+        itemKey: `${itemKey}-B`,
+        found: "partial",
+      }),
+    );
+    assert.ok(readBack.decisionItemId);
+    const partial = await prisma.engineeringAgentRegistration.findUniqueOrThrow({ where: { id: partialId } });
+    assert.equal(partial.result, "partial");
+    // The fixture plays the person: the decision closes, the registration resolves.
+    await prisma.engineeringAgentWorkItem.update({ where: { id: readBack.decisionItemId! }, data: { state: "acknowledged" } });
+    await prisma.engineeringAgentRegistration.update({ where: { id: partialId }, data: { result: "absent" } });
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: registrationKey } });
+  }
 });
