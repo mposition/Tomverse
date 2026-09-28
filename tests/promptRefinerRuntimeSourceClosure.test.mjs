@@ -233,12 +233,19 @@ const compilerOptions = parsedConfig.options;
 // computed accesses in the admission and reservation modules. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so this
 // repin records source-position movement only.
+//
+// 2026-09-28, guest-lead save: `updateOperationalFeatureFlags` in
+// `lib/appSettings.ts` sits above the computed accesses already in that file.
+// The new function writes three known keys through the same tuple `.map` the
+// combined writer already had, and that map is not an element access. The
+// count remains 228 and the position-free inventory remains 9aa7ec49..., so
+// this is a repin and not a review.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f09e1e78146afa6b436b5846a6e6592b",
-  "2ebabbc6b965b91b95c4a4cb6576b2dc",
+  "853e207471c68e86dad6ab3e0f22d43a",
+  "a23499f758c625dc5323dc0ad7d5af94",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
