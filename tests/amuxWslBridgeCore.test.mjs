@@ -93,9 +93,13 @@ test("a prompt without an approved brief is not dispatched", () => {
   assert.equal(planLocalDispatch(ready({ prompt: absent })).reason, "brief_absent");
 });
 
-test("control-plane names do not ride in the worker text", () => {
-  const leaked = `${promptFor("Change the latch.")}\nDATABASE_URL=postgres://db`;
-  assert.equal(planLocalDispatch(ready({ prompt: leaked })).reason, "control_plane_leak");
+test("control-plane names and database URLs do not ride in the worker text", () => {
+  const named = `${promptFor("Change the latch.")}\nDATABASE_URL=secret`;
+  assert.equal(planLocalDispatch(ready({ prompt: named })).reason, "control_plane_leak");
+  const postgres = `${promptFor("Change the latch.")}\npostgres://db.internal/app`;
+  assert.equal(planLocalDispatch(ready({ prompt: postgres })).reason, "control_plane_leak");
+  const postgresql = `${promptFor("Change the latch.")}\nPostgreSQL://db.internal/app`;
+  assert.equal(planLocalDispatch(ready({ prompt: postgresql })).reason, "control_plane_leak");
 });
 
 test("local send success is not completion and a refused no_board is not dispatched", () => {

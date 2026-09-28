@@ -22,6 +22,8 @@ const CONTROL_PLANE_MARKERS = [
   "DATABASE_URL",
 ] as const;
 
+const DATABASE_URL_SCHEME = /postgres(?:ql)?:\/\//i;
+
 export type BridgeHalt = "running" | "halted";
 
 export type RunningSession = {
@@ -60,7 +62,8 @@ export type DispatchPlan =
     };
 
 export const payloadLeaksControlPlane = (text: string) =>
-  CONTROL_PLANE_MARKERS.some((marker) => text.includes(marker));
+  CONTROL_PLANE_MARKERS.some((marker) => text.includes(marker)) ||
+  DATABASE_URL_SCHEME.test(text);
 
 export const planLocalDispatch = (input: {
   latch: boolean;
