@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -100,6 +102,17 @@ test("the flag is off unless the stored value is exactly true and the kill switc
         }),
         false
     );
+});
+
+test("the settings reader repeats the flag literals and does not import them", () => {
+    const source = readFileSync(join(import.meta.dirname, "../lib/appSettings.ts"), "utf8");
+    assert.equal(source.includes('from "@/lib/autoExplorationAccess"'), false);
+    assert.match(
+        source,
+        /const AUTO_EXPLORATION_FLAG_KEY = "feature\.autoExplorationEnabled"/
+    );
+    assert.match(source, /process\.env\.AUTO_EXPLORATION_KILL_SWITCH/);
+    assert.match(source, /row\?\.value === "true"/);
 });
 
 const ready = { ready: true, outstanding: [], problems: [] };

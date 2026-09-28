@@ -218,12 +218,19 @@ const compilerOptions = parsedConfig.options;
 // pool and the closed auto-promotion gate. It is comment only. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so only
 // source positions moved.
+//
+// 2026-09-28, Auto exploration: `lib/appSettings.ts` gains the reader for
+// `feature.autoExplorationEnabled`. The predicates are repeated in that file
+// so it does not import `lib/autoExplorationAccess.ts`, which would add a
+// path to the database-bound source list. The reader has no computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "abd5fc73645355c73e54f9c4f39f1455",
-  "136f9cf8f80c965d1a19c08afe0e0db6",
+  "0d10328de43e78a4b04244ddf04481e9",
+  "6c96bb5541e89d05775a6a03aa551db1",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

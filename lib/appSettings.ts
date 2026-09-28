@@ -53,11 +53,6 @@ import {
   chatStarterKillSwitchEngaged,
 } from "@/lib/chatStarterAccess";
 import {
-  AUTO_EXPLORATION_FLAG_KEY,
-  autoExplorationAvailable,
-  autoExplorationKillSwitchEngaged,
-} from "@/lib/autoExplorationAccess";
-import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
@@ -405,19 +400,27 @@ export async function isPromptRefinerEnabled(): Promise<boolean> {
 /**
  * Auto's session-seeded tie exploration.
  *
+ * The predicates live in `lib/autoExplorationAccess.ts` and are repeated here
+ * on purpose. This module is inside the prompt-refiner runtime source
+ * closure, and importing that file would add it to a path list a database
+ * check is bound to. The repeated literals are locked by
+ * `tests/autoExploration.test.mjs`.
+ *
  * No setter. Turning it on changes which model answers a tied Auto turn, and
  * that stays an operator write of the AppSetting row after staging has shown
  * the same conversation staying on one model and a different credit price
  * staying out of the spread. Stopping is `AUTO_EXPLORATION_KILL_SWITCH`.
  */
+const AUTO_EXPLORATION_FLAG_KEY = "feature.autoExplorationEnabled";
+
 export async function isAutoExplorationEnabled(): Promise<boolean> {
-  if (autoExplorationKillSwitchEngaged(process.env)) return false;
+  if ((process.env.AUTO_EXPLORATION_KILL_SWITCH ?? "").trim()) return false;
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
     where: { key: AUTO_EXPLORATION_FLAG_KEY },
     select: { value: true },
   });
-  return autoExplorationAvailable({ storedFlagValue: row?.value, env: process.env });
+  return row?.value === "true";
 }
 
 export async function isChatStarterEnabled(): Promise<boolean> {
