@@ -593,6 +593,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
+    count: 3,
+    reason:
+      "Three reads, all FOR SHARE, all with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The waiver-scope trigger reads the approval it is about to be pointed at and the country rule whose scope that approval has to name; the country-rule trigger reads the waived duty states hanging off a rule whose scope is being moved. The schema is each trigger own, never input, quoted with %I, and every id is bound with USING. They read and never write.",
+  },
+  {
     path: "prisma/migrations/20260923400000_release_notes_country_rule/migration.sql",
     count: 2,
     reason:

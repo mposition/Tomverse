@@ -18,6 +18,7 @@ import { adminOverviewMessages } from "@/lib/adminMessages/overview";
 import { getAdminActivePaidWhere, getAdminUserStats } from "@/lib/adminUsers";
 import { authOptions } from "@/lib/auth";
 import { getBillingPlans } from "@/lib/billingConfig";
+import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
@@ -81,7 +82,9 @@ export default async function AdminOverviewPage() {
       },
       _sum: { count: true },
     }),
-    prisma.feedback.count({ where: { status: "open" } }),
+    prisma.feedback.count({
+      where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
+    }),
     prisma.refundRequest.count({ where: { status: "pending" } }),
     prisma.refundRequest.count({ where: { status: "approved" } }),
     prisma.billingPromotionRedemption.count(),

@@ -35,11 +35,11 @@ export const adminRiskPanelsMessages = defineAdminMessages({
     },
     supportAge: {
       eyebrow: "Service level",
-      title: "Open support age",
+      title: "Unresolved support age",
       description:
-        "Open feedback older than 24 hours, from the ten most recent reports.",
-      empty: "No open report has breached the 24-hour mark.",
-      hoursOpen: (hours: number) => `${hours}h open`,
+        "Unresolved feedback older than 24 hours, from the ten most recent reports.",
+      empty: "No unresolved report has breached the 24-hour mark.",
+      hoursOpen: (hours: number) => `${hours}h unresolved`,
       reported: (type: string, status: string, date: string) =>
         `${type} · ${status} · reported ${date} UTC`,
     },

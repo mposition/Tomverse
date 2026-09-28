@@ -55,6 +55,11 @@ const IDENTITY_ENV = {
   EMAIL_BUSINESS_LEGAL_NAME: "Tomverse Pty Ltd",
   EMAIL_BUSINESS_POSTAL_ADDRESS: "1 Example Street, Brisbane QLD 4000",
   EMAIL_BUSINESS_CONTACT_EMAIL: "support@tomverse.app",
+  // Korea names this block from the 2026-09-23 seed (시행령 별표 6), and the
+  // renderer drops a footer whose named block has no value -- so without it a
+  // Korean message carries no footer at all, which is the refusal this value
+  // exists to make rather than a defect in these cases.
+  EMAIL_BUSINESS_CONTACT_PHONE: "+61 7 0000 0000",
   EMAIL_BUSINESS_REGISTRATION_NUMBER: "000-00-00000",
   EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER: "2026-Seoul-00000",
   EMAIL_BUSINESS_ABN: "00 000 000 000",

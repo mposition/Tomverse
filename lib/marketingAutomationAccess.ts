@@ -338,7 +338,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "d2e81fac52ff9372c916f60f06bffe00404f0e514af226b2200a47ad7ef3ee6c";
+  "7a958d21deb5d165c1419299605729f50884325768de9d897f0782794fc7fb28";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

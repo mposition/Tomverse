@@ -82,7 +82,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       "Review user feedback, copy reproduction context, and move issues through support states without leaving the Admin console.",
     rowLimit: (limit: number) =>
       ` Showing the ${limit} most recent reports; the counters below describe those reports, not every report ever filed.`,
-    openCount: (count: number) => `${count} open`,
+    openCount: (count: number) => `${count} unresolved`,
     exportCsv: "Export CSV",
     searchPlaceholder: "Search email, trace ID, model, path, message...",
     empty: "No feedback matches the current filter.",
@@ -231,7 +231,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       "Admin 콘솔을 벗어나지 않고 사용자 피드백을 검토하고, 재현 컨텍스트를 복사하고, 이슈를 지원 상태별로 옮깁니다.",
     rowLimit: (limit: number) =>
       ` 최근 신고 ${limit}건만 표시합니다. 아래 카운터는 이 신고들에 대한 것이며, 지금까지 접수된 전체 신고가 아닙니다.`,
-    openCount: (count: number) => `접수 ${count}건`,
+    openCount: (count: number) => `미처리 ${count}건`,
     exportCsv: "CSV 내보내기",
     searchPlaceholder: "이메일, trace ID, 모델, 경로, 메시지 검색...",
     empty: "현재 필터에 맞는 피드백이 없습니다.",
