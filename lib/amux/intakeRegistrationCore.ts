@@ -51,8 +51,8 @@ export type AmuxIntakePreview = {
   outcome: "reject" | "approval_required" | "allow";
   code: string | null;
   unitCount: 0 | 1;
-  inactive: true;
-  applyPermitted: false;
+  inactive: boolean;
+  applyPermitted: boolean;
   writes: 0;
   reconfirmRequired: boolean;
   title: string | null;
@@ -121,11 +121,12 @@ export type AmuxIntakeDriftReport = {
 
 const emptyPreview = (
   code: string,
+  inactive = true,
 ): AmuxIntakePreview => ({
   outcome: "reject",
   code,
   unitCount: 0,
-  inactive: true,
+  inactive,
   applyPermitted: false,
   writes: 0,
   reconfirmRequired: false,
@@ -145,20 +146,18 @@ export const previewAmuxIntake = (
   secret: string | null,
   envValue: string | undefined,
 ): AmuxIntakePreview => {
-  if (amuxIntakeApplyPermitted(envValue)) {
-    throw new Error("intake apply latch must stay false");
-  }
   const parsed = parseAmuxIntakeDraft(raw);
-  if (!parsed.ok) return emptyPreview(parsed.code);
+  if (!parsed.ok) return emptyPreview(parsed.code, !amuxIntakeApplyPermitted(envValue));
   const guarded = guardAmuxIntake(raw);
   const draftDigest = amuxIntakeDraftDigest(parsed.draft);
   const sourceKey = secret === null ? null : amuxIntakeStoredSourceKey(secret, parsed.draft.sourceTaskId);
+  const latchOpen = amuxIntakeApplyPermitted(envValue);
   const shown: AmuxIntakePreview = {
     outcome: guarded.outcome,
     code: guarded.outcome === "reject" ? guarded.code : null,
     unitCount: 1,
-    inactive: true,
-    applyPermitted: false,
+    inactive: !latchOpen,
+    applyPermitted: latchOpen && guarded.outcome === "allow" && sourceKey !== null,
     writes: 0,
     reconfirmRequired: guarded.outcome !== "allow",
     title: parsed.draft.proposal.title,
@@ -171,7 +170,7 @@ export const previewAmuxIntake = (
     sourceKey,
     workItem: parsed.draft.workItem,
   };
-  if (guarded.outcome === "reject" && guarded.code !== "digest_mismatch") return emptyPreview(guarded.code);
+  if (guarded.outcome === "reject" && guarded.code !== "digest_mismatch") return emptyPreview(guarded.code, !latchOpen);
   return shown;
 };
 
@@ -233,6 +232,35 @@ export const planAmuxIntakeRegistration = (
       untouched: AMUX_INTAKE_UNTOUCHED_TABLES,
     },
   };
+};
+
+export type AmuxIntakeReadBackFact = {
+  cardDigest: string | null;
+  matchingConsumedDrafts: number;
+  matchingConsumedApprovals: number;
+  matchingAudits: number;
+  otherIntakeRows: number;
+};
+
+/** A lost response is compared once. Anything incomplete stays unknown. */
+export const classifyAmuxIntakeReadBack = (
+  fact: AmuxIntakeReadBackFact,
+  expectedDigest: string,
+): "committed" | "absent" | "partial" => {
+  const absent =
+    fact.cardDigest === null &&
+    fact.matchingConsumedDrafts === 0 &&
+    fact.matchingConsumedApprovals === 0 &&
+    fact.matchingAudits === 0 &&
+    fact.otherIntakeRows === 0;
+  if (absent) return "absent";
+  const committed =
+    fact.cardDigest === expectedDigest &&
+    fact.matchingConsumedDrafts === 1 &&
+    fact.matchingConsumedApprovals === 1 &&
+    fact.matchingAudits === 1 &&
+    fact.otherIntakeRows === 0;
+  return committed ? "committed" : "partial";
 };
 
 /** Keeps both digests. A conflict does not overwrite the stored card. */

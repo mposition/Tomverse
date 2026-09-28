@@ -18,19 +18,16 @@ import {
   boardImportContentTypeAccepted,
   pruneBoardImportPreviewHits,
 } from "@/lib/amux/boardImportCore";
-import { AMUX_INTAKE_APPLY_ENV, AMUX_INTAKE_RAW_BODY_MAX_BYTES } from "@/lib/amux/intakeCore";
+import { applyAmuxReconciliation } from "@/lib/amux/boardReconciliation";
 import {
-  AMUX_INTAKE_SOURCE_KEY_SECRET_ENV,
-  planAmuxIntakeRegistration,
-  previewAmuxIntake,
-} from "@/lib/amux/intakeRegistrationCore";
-import {
-  AmuxIntakeOutcomeUnknownError,
-  applyAmuxIntakeRegistration,
-} from "@/lib/amux/intakeRegistration";
+  AMUX_RECONCILIATION_APPLY_ENV,
+  AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES,
+  planAmuxReconciliation,
+  previewAmuxReconciliation,
+} from "@/lib/amux/boardReconciliationCore";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
-const ACTIONS = new Set(["preview", "register"]);
+const ACTIONS = new Set(["preview", "apply"]);
 const previewHits = new Map<string, number[]>();
 
 const withNoStore = (response: Response) => {
@@ -78,10 +75,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStoreHeaders });
     }
     if (action !== "preview") {
-      await consumeApiRateLimit(request, userId, `admin-amux-intake-${action}`, { minute: 10, day: 100 });
+      await consumeApiRateLimit(request, userId, `admin-amux-reconciliation-${action}`, { minute: 10, day: 100 });
     }
-    const raw = await readLimitedText(request, AMUX_INTAKE_RAW_BODY_MAX_BYTES);
-    const secret = process.env[AMUX_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null;
+    const raw = await readLimitedText(request, AMUX_RECONCILIATION_RAW_BODY_MAX_BYTES);
     if (action === "preview") {
       const now = Date.now();
       const pruned = pruneBoardImportPreviewHits([...previewHits], now);
@@ -93,31 +89,27 @@ export async function POST(request: Request) {
       if (!decision.allowed || decision.retained.length > BOARD_IMPORT_PREVIEW_LIMIT) {
         return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
       }
-      return NextResponse.json(previewAmuxIntake(raw, secret, process.env[AMUX_INTAKE_APPLY_ENV]), {
+      return NextResponse.json(previewAmuxReconciliation(raw, process.env[AMUX_RECONCILIATION_APPLY_ENV]), {
         headers: noStoreHeaders,
       });
     }
-    const planned = planAmuxIntakeRegistration(raw, secret);
+    const planned = planAmuxReconciliation(raw);
     if (!planned.ok) {
       return NextResponse.json({ error: planned.code, writes: 0 }, { status: 409, headers: noStoreHeaders });
     }
     return NextResponse.json(
-      await applyAmuxIntakeRegistration({ session: auth.session, request, plan: planned.plan }),
+      await applyAmuxReconciliation({ session: auth.session, request, plan: planned }),
       { headers: noStoreHeaders },
     );
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return withNoStore(approvalResponse);
     if (error instanceof BoardImportError) {
-      const body =
-        error instanceof AmuxIntakeOutcomeUnknownError
-          ? { error: error.code, retry: false as const, readBack: error.readBack }
-          : { error: error.code, writes: 0 as const };
-      return NextResponse.json(body, { status: error.httpStatus, headers: noStoreHeaders });
+      return NextResponse.json({ error: error.code, writes: 0 }, { status: error.httpStatus, headers: noStoreHeaders });
     }
     const security = apiSecurityResponse(error);
     if (security) return withNoStore(security);
-    console.error("AMUX intake preview failed");
-    return NextResponse.json({ error: "intake_failed" }, { status: 500, headers: noStoreHeaders });
+    console.error("AMUX reconciliation preview failed");
+    return NextResponse.json({ error: "reconciliation_failed" }, { status: 500, headers: noStoreHeaders });
   }
 }

@@ -55,15 +55,15 @@ const fact = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the shipped promotion latch is off unless both latches are on", () => {
-  assert.equal(BOARD_PROMOTION_APPLY_CODE_LATCH, false);
+test("the promotion latch is on and apply still needs the environment", () => {
+  assert.equal(BOARD_PROMOTION_APPLY_CODE_LATCH, true);
   assert.equal(
     boardPromotionApplyPermitted({ envValue: "enabled", codeLatch: false }),
     false,
   );
   assert.equal(
     boardPromotionApplyPermitted({ envValue: "enabled", codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH }),
-    false,
+    true,
   );
   assert.equal(boardPromotionApplyPermitted({ envValue: "true", codeLatch: true }), false);
   assert.equal(boardPromotionApplyPermitted({ envValue: undefined, codeLatch: true }), false);
@@ -147,11 +147,23 @@ test("only an unowned backlog card with a matching source and no execution is pr
 });
 
 test("the route cannot turn the latch on and the page stays unlisted", () => {
+  const core = read("lib/amux/boardPromotionCore.ts");
   const service = read("lib/amux/boardPromotionService.ts");
   const route = read("app/api/admin/amux/board-promotion/route.ts");
+  assert.equal(core.includes("BOARD_PROMOTION_APPLY_CODE_LATCH = true"), true);
+  assert.equal(core.includes("codeLatch: true"), false);
   const panel = read("components/admin/AmuxBoardPromotionPanel.tsx");
   assert.match(service, /codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH/);
   assert.equal(service.includes('codeLatch: true'), false);
+  const applyStart = service.indexOf("export async function applyBoardPromotion");
+  const applyEnd = service.indexOf("export async function markBoardPromotionOutcomeUnknown");
+  const apply = service.slice(applyStart, applyEnd);
+  const marker = 'throw new BoardImportError("apply_disabled", 409, input.approvalId)';
+  const refused = apply.indexOf(marker);
+  const transaction = apply.indexOf("return withPromotionTransaction");
+  assert.ok(applyStart >= 0 && applyEnd > applyStart);
+  assert.equal(refused, apply.lastIndexOf(marker));
+  assert.ok(refused > 0 && transaction > refused);
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("lib/amux/execution"), false);
   assert.equal(route.includes("codeLatch"), false);
