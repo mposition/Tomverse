@@ -105,8 +105,8 @@ const answer = (key, status, body) => ({ key, status, body });
 const allGood = () => [
   answer("no_token", 400, { error: "Invalid link." }),
   answer("forged_token", 400, { error: "Invalid link." }),
-  answer("valid_token", 200, { ok: true, scope: "purpose", purpose: "product_updates" }),
-  answer("replayed_token", 200, { ok: true, scope: "purpose", purpose: "product_updates" }),
+  answer("valid_token", 200, { ok: true, scope: "purpose", purpose: "service_status" }),
+  answer("replayed_token", 200, { ok: true, scope: "purpose", purpose: "service_status" }),
 ];
 
 test("the happy path has nothing to report", () => {
@@ -166,7 +166,7 @@ test("an extra field in the body is not a failure", () => {
   observed[2] = answer("valid_token", 200, {
     ok: true,
     scope: "purpose",
-    purpose: "product_updates",
+    purpose: "service_status",
     somethingNew: 1,
   });
   assert.deepEqual(stepProblems(observed), []);
@@ -175,9 +175,8 @@ test("an extra field in the body is not a failure", () => {
 const subject = { userId: "u_probe", emailAddress: "probe@tomverse.invalid" };
 
 const writtenSet = () => [
-  { table: "EmailPreference", id: "u_probe:product_updates", userId: "u_probe", emailAddress: null },
+  { table: "EmailPreference", id: "u_probe:service_status", userId: "u_probe", emailAddress: null },
   { table: "EmailPreferenceTransition", id: "t1", userId: "u_probe", emailAddress: null },
-  { table: "ConsentRecord", id: "c1", userId: "u_probe", emailAddress: "probe@tomverse.invalid" },
   { table: "SuppressionCause", id: "s1", userId: null, emailAddress: "probe@tomverse.invalid" },
 ];
 
@@ -194,7 +193,8 @@ test("a row belonging to another account is named", () => {
 
 test("a row belonging to another address is named", () => {
   const rows = writtenSet();
-  rows[3] = { ...rows[3], emailAddress: "someone@gmail.com" };
+  const cause = rows.findIndex((row) => row.table === "SuppressionCause");
+  rows[cause] = { ...rows[cause], emailAddress: "someone@gmail.com" };
   const problems = writeScopeProblems(rows, subject);
   assert.deepEqual(problems, ["SuppressionCause:s1 belongs to a different address"]);
 });
@@ -220,10 +220,20 @@ test("a replay that wrote again is caught", () => {
   // click is a consent history saying they refused twice.
   const rows = [
     ...writtenSet(),
-    { table: "ConsentRecord", id: "c2", userId: "u_probe", emailAddress: "probe@tomverse.invalid" },
+    { table: "EmailPreferenceTransition", id: "t2", userId: "u_probe", emailAddress: null },
   ];
   const problems = writeShapeProblems(rows);
-  assert.deepEqual(problems, ["ConsentRecord: 2 row(s), expected 1"]);
+  assert.deepEqual(problems, ["EmailPreferenceTransition: 2 row(s), expected 1"]);
+});
+
+test("a consent row for the probe purpose is a surprise, not a pass", () => {
+  // `service_status` records no consent. A consent row appearing for it would
+  // mean the write path has started treating it as a consent purpose.
+  const problems = writeShapeProblems([
+    ...writtenSet(),
+    { table: "ConsentRecord", id: "c1", userId: "u_probe", emailAddress: "probe@tomverse.invalid" },
+  ]);
+  assert.deepEqual(problems, ["ConsentRecord: 1 row(s), expected 0"]);
 });
 
 test("a row the path wrote and this check does not name is reported", () => {
@@ -238,10 +248,7 @@ test("a row the path wrote and this check does not name is reported", () => {
 
 test("a step that never happened is caught by its absent row too", () => {
   const problems = writeShapeProblems(writtenSet().slice(0, 2));
-  assert.deepEqual(problems.sort(), [
-    "ConsentRecord: 0 row(s), expected 1",
-    "SuppressionCause: 0 row(s), expected 1",
-  ]);
+  assert.deepEqual(problems.sort(), ["SuppressionCause: 0 row(s), expected 1"]);
 });
 
 test("a handler that answers ok without writing does not pass", () => {

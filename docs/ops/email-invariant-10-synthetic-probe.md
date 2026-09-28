@@ -7,9 +7,26 @@
 ## 이 점검이 다른 점검과 다른 한 가지
 
 **이것은 쓰는 점검입니다.** 다른 `check:` script는 전부 읽기만 하지만, 이것은
-probe 계정의 `product_updates` 수신 설정을 **실제로 끄고 되돌립니다**. 그 과정에서
-`EmailPreference` · `EmailPreferenceTransition` · `ConsentRecord` ·
-`EmailSuppressionCause` 네 행이 쓰입니다.
+probe 계정의 `service_status` 수신 설정을 **실제로 끄고 되돌립니다**. 그 과정에서
+`EmailPreference` · `EmailPreferenceTransition` · `SuppressionCause` 행이 쓰입니다.
+
+## 왜 `product_updates`가 아니라 `service_status`인가
+
+probe는 매 실행마다 purpose를 **끄고 다시 켜야** 합니다. `product_updates`는 동의
+필수 purpose이고, 동의 purpose를 다시 켜는 것은 확인(double opt-in)이 있어야만
+됩니다 — `setPreference()`가 확인 토큰을 검사하지 않은 모든 호출자에게
+`confirmation_required`로 거부합니다. 첫 버전은 `product_updates`를 써서 **매 실행
+복원에 실패했습니다.**
+
+우회로는 둘 다 더 나쁩니다. 예약 도메인으로 보낸 확인 메일은 배달될 수 없고 그
+반송이 probe 주소를 전역 suppression합니다. 확인 없이 동의 purpose를 켜는 경로는 —
+예약 도메인에 한정하더라도 — double opt-in 우회입니다.
+
+`service_status`는 끌 수 있고, 동의가 필요 없고, 기본값이 켜짐이며, **같은
+endpoint · 토큰 · rate limit · preference 쓰기 · transition · suppression 원인**을
+지납니다. 이 점검이 다루지 않는 것은 동의 purpose의 철회가 쓰는 `ConsentRecord`
+하나이고, 그 부분은 `setPreference()`의 DB 테스트
+(`tests/integration/email-preferences-consent.db.test.ts`) 소관입니다.
 
 그래서 기본값이 off이고, 예약 도메인이 아닌 주소를 거부하며, PR gate에 넣지
 않습니다. 게이트에 넣으면 실행될 수 없는 환경에서 스스로를 건너뛰고 **한 번도

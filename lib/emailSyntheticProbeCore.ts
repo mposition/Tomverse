@@ -18,8 +18,8 @@
  * ## The part that is dangerous
  *
  * Every other readiness check in this system reads. This one **writes**: it
- * turns a purpose off, which writes an `EmailPreference`, a
- * `ConsentRecord`, an `EmailPreferenceTransition` and a suppression cause. Run
+ * turns a purpose off, which writes an `EmailPreference`, an
+ * `EmailPreferenceTransition` and a suppression cause, and then turns it back on. Run
  * against the wrong subject it would unsubscribe a customer, and the customer's
  * only evidence would be mail that stopped arriving.
  *
@@ -93,6 +93,8 @@ export const PROBE_REFUSALS = [
   "probe_account_not_synthetic",
   /** Unsubscribe is not configured, so the path under test does not exist. */
   "unsubscribe_not_configured",
+  /** The probe purpose could not be switched on before the run. */
+  "probe_preference_unavailable",
   /** The application URL the probe would call is unset. */
   "no_probe_target",
 ] as const;
@@ -111,6 +113,8 @@ export const PROBE_REFUSAL_REMEDY: Record<ProbeRefusal, string> = {
   unsubscribe_not_configured:
     "Set EMAIL_UNSUBSCRIBE_KEYS. Without it the endpoint answers 503 and the path under test does not exist.",
   no_probe_target: "Set PUBLIC_APP_URL to the deployment this check should call.",
+  probe_preference_unavailable:
+    "The probe account's service_status preference could not be switched on. Look for a suppression on the probe address that a preference change may not lift -- a hard bounce or a complaint -- and use a fresh probe account rather than clearing it.",
 };
 
 const lower = (value: string) => value.trim().toLowerCase();
@@ -321,7 +325,8 @@ export const writeScopeProblems = (
 export const EXPECTED_WRITES: Readonly<Record<string, number>> = {
   EmailPreference: 1,
   EmailPreferenceTransition: 1,
-  ConsentRecord: 1,
+  // `service_status` records no consent, so a consent row here is a surprise.
+  ConsentRecord: 0,
   SuppressionCause: 1,
 };
 

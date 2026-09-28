@@ -27,10 +27,27 @@ import {
  *
  * ## The purpose it uses
  *
- * `product_updates`, because that is the purpose the release-notes product
- * actually sends under and the point of the invariant is that *this* product's
- * unsubscribe works. A probe on a purpose nothing sends would pass while the
- * one that matters was broken.
+ * `service_status`, not `product_updates`, and the reason is the product's own
+ * rule rather than convenience. The probe has to turn a purpose off *and back
+ * on*, every run. `product_updates` is consent-required, and switching a
+ * consent-required purpose on needs a confirmation (docs/policy/
+ * email-double-opt-in.md section 3 rule 1): `setPreference()` refuses it as
+ * `confirmation_required` for every caller that has not checked a confirmation
+ * token. The first version of this probe used `product_updates` and so failed
+ * its own restore on every run.
+ *
+ * The ways round that are both worse than the change. A confirmation mail to a
+ * reserved-name address cannot be delivered, and the bounce would suppress the
+ * probe address globally. A path that re-enables a consent purpose without a
+ * confirmation -- even one limited to reserved names -- is a way round double
+ * opt-in, which is the thing that rule exists to prevent.
+ *
+ * `service_status` is switchable, is not consent-required, defaults on, and
+ * goes through exactly the same endpoint, token, rate limits, preference write,
+ * transition and suppression cause. What it does not exercise is the consent
+ * record a consent purpose writes on withdrawal; that half of the write path is
+ * `setPreference()`'s, and its DB tests (tests/integration/
+ * email-preferences-consent.db.test.ts) are what cover it.
  *
  * ## Why it restores
  *
@@ -43,7 +60,7 @@ import {
  */
 
 /** The purpose the probe turns off and back on. */
-export const PROBE_PURPOSE = "product_updates";
+export const PROBE_PURPOSE = "service_status";
 
 const refuse = (refusal: ProbeRefusal): ProbeVerdict => ({
   ran: false,
@@ -123,6 +140,13 @@ export async function runSyntheticUnsubscribeProbe(
   const subject = { userId: account.id, emailAddress };
 
   // Everything above this line only read. Everything below writes.
+  //
+  // First, put the purpose on. A previous run that failed between its unsubscribe
+  // and its restore would otherwise leave this one exercising the already-set
+  // path and never the write -- and reporting that as the endpoint having
+  // written nothing. Done before the window opens, so its rows are not counted as
+  // the probe's.
+  if (!(await restore(account.id))) return refuse("probe_preference_unavailable");
   const token = createUnsubscribeToken(
     { userId: account.id, purpose: PROBE_PURPOSE },
     keyring
@@ -185,11 +209,13 @@ export async function runSyntheticUnsubscribeProbe(
 /**
  * The rows the probe's request produced.
  *
- * Four tables, because those are the four the unsubscribe write path touches
- * (`setPreference()` in `lib/emailPreferences.ts`): the preference itself, the
- * append-only transition, the consent record and the suppression cause. A fifth
- * appearing there without appearing here would be a row this check cannot say
- * is its own, which is why the list is written out rather than derived.
+ * The four tables the unsubscribe write path can touch (`setPreference()` in
+ * `lib/emailPreferences.ts`): the preference itself, the append-only
+ * transition, the consent record and the suppression cause. The consent record
+ * is read even though `service_status` writes none: a consent row appearing for
+ * this purpose is exactly the kind of surprise the shape check is for. A fifth
+ * table would be a row this check cannot say is its own, which is why the list
+ * is written out rather than derived.
  */
 const writtenRows = async (
   subject: { userId: string; emailAddress: string },
