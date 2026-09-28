@@ -221,8 +221,9 @@ test("an override is refused for the standing overrideBlockers() names", () => {
     assert.equal(result.allowed, false);
   }
 
-  // A country no profile covers is a legal refusal the override would otherwise
-  // lift: `profileForCountry()` answers ZZ, and `overrideBlockers()` says no.
+  // A country with no reviewed rule is a refusal about the destination, which no
+  // override lifts -- and `overrideBlockers()` would refuse it too, since
+  // `profileForCountry()` answers ZZ. The first of the two is the one named.
   const unreviewed = verdict({
     countries: ["JP"],
     rules: [],
@@ -230,7 +231,7 @@ test("an override is refused for the standing overrideBlockers() names", () => {
     override: override(),
   });
   assert.equal(unreviewed.overrideApplied, null);
-  assert.match(unreviewed.overrideRefusal ?? "", /country_undetermined/);
+  assert.match(unreviewed.overrideRefusal ?? "", /authority_not_liftable:.*no_country_rule/);
   assert.equal(unreviewed.allowed, false);
 
   // And with nothing against the person, the override applies.
@@ -390,4 +391,45 @@ test("the verdict carries what it was asked, so a record can be read without the
   assert.equal(result.policyVersionId, POLICY);
   assert.equal(result.phase, "enqueue");
   assert.equal(result.evaluatedAt.toISOString(), NOW.toISOString());
+});
+
+test("an override lifts a missing basis and nothing about the destination", () => {
+  // docs/policy/email-notifications.md section 5.1.1: an override answers "this
+  // person has not agreed", not "this country is closed". The first version
+  // treated every legal refusal alike, so a cohort member resolved to a mapped,
+  // closed country with no duties and an EU profile was sent to under the
+  // override.
+  const noConsent = { suppressed: false, objected: false, consent: { express: false, evidenceIds: [] } };
+
+  const closed = verdict({
+    countries: ["IT"],
+    rules: [rule("IT", { status: "closed" })],
+    recipient: noConsent,
+    override: override(),
+  });
+  assert.equal(closed.legalAllowed, false);
+  assert.equal(closed.overrideApplied, null);
+  assert.match(closed.overrideRefusal ?? "", /authority_not_liftable:.*country_closed/);
+  assert.ok(closed.blockers.includes("approval_member_mismatch"));
+  assert.equal(closed.allowed, false);
+
+  // The same country open, with the same missing consent, is what the override
+  // exists for.
+  const open = verdict({
+    countries: ["IT"],
+    rules: [rule("IT")],
+    recipient: noConsent,
+    override: override(),
+  });
+  assert.notEqual(open.overrideApplied, null);
+  assert.equal(open.allowed, true);
+
+  // And closing a country later stops the cohort too.
+  const closedLater = verdict({
+    countries: ["AU"],
+    rules: [rule("AU", { status: "closed" })],
+    recipient: noConsent,
+    override: override(),
+  });
+  assert.equal(closedLater.allowed, false);
 });

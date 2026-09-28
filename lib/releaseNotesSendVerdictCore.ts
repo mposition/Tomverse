@@ -95,6 +95,17 @@ export const SEND_BLOCKERS = [
 
 export type SendBlocker = (typeof SEND_BLOCKERS)[number];
 
+/**
+ * The authority refusals a `risk_accepted` override may lift: the ones that say
+ * this person has not given a basis. Everything else in
+ * `RELEASE_NOTES_AUTHORITY_REFUSALS` is about the destination, and stays.
+ */
+export const LIFTABLE_REFUSALS: ReadonlySet<string> = new Set([
+  "no_express_consent",
+  "inferred_consent_not_in_effect",
+  "no_au_sender_consent",
+]);
+
 /** What the caller knows about the person's own answers. */
 export type RecipientState = {
   /** A live suppression cause covering this purpose, at any scope. */
@@ -326,7 +337,21 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
   const overrideNeeded = !authority.legalAllowed;
   let overrideApplied: SendVerdict["overrideApplied"] = null;
   let overrideRefusal: string | null = null;
-  if (overrideNeeded && input.override !== null) {
+  // What an override may lift: a missing basis, and nothing else
+  // (docs/policy/email-notifications.md section 5.1.1). A country whose rule is
+  // closed, a country with no rule, and a country nobody can determine are
+  // refusals about *where* the message would go, not about *whether this person
+  // agreed*, and an approval about the second does not answer the first. The
+  // first version treated every legal refusal alike, so a cohort member resolved
+  // to Italy -- mapped, closed, no duties, an EU profile -- was sent to under the
+  // override, and closing a country later would not have stopped the cohort.
+  const unliftable = authority.authorities
+    .filter((entry) => entry.verdict === "deny" && !LIFTABLE_REFUSALS.has(entry.reason ?? ""))
+    .map((entry) => entry.reason ?? "unknown");
+  if (overrideNeeded && input.override !== null && unliftable.length > 0) {
+    overrideRefusal = `authority_not_liftable:${[...new Set(unliftable)].sort().join(",")}`;
+    blockers.push("approval_member_mismatch");
+  } else if (overrideNeeded && input.override !== null) {
     // The person first, then the approval. A blocked override is refused
     // whatever its scope and cohort say, and the refusal names every reason
     // rather than the first, because that is the list the admin screen shows.

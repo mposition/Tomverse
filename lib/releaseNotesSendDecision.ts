@@ -75,16 +75,30 @@ export async function recordSendDecision(
       where: {
         deliveryId_phase: { deliveryId: input.deliveryId, phase: input.phase },
       },
-      select: { id: true, allowed: true, blockers: true },
+      select: {
+        id: true,
+        allowed: true,
+        blockers: true,
+        legalAllowed: true,
+        overrideApprovalId: true,
+      },
     });
     if (existing) {
       // Compared on the two things a caller acts on. Not the whole row: the
       // evaluation time differs by construction, and reporting that as a
       // difference would make every retry look like a changed verdict.
       const blockers = Array.isArray(existing.blockers) ? existing.blockers : [];
+      //
+      // And on what the send rests on, not only whether it goes. A first attempt
+      // that committed `allowed` on express consent and died before the provider
+      // call, retried after the recipient's country closed, got `allowed` again
+      // under an override -- equal on the two fields this used to compare, so the
+      // message went and the ledger said it went on consent.
       const differs =
         existing.allowed !== input.verdict.allowed ||
-        blockers.join(",") !== [...input.verdict.blockers].sort().join(",");
+        blockers.join(",") !== [...input.verdict.blockers].sort().join(",") ||
+        existing.legalAllowed !== input.verdict.legalAllowed ||
+        existing.overrideApprovalId !== (input.verdict.overrideApplied?.approvalId ?? null);
       return {
         recorded: false,
         decisionId: existing.id,

@@ -842,7 +842,7 @@ const decideReleaseNotesSend = async (
   const skipReason = releaseNotesSkipReason(verdict);
 
   const finished = await runDecisionTransaction(delivery, async (tx) => {
-    await recordSendDecision(tx, {
+    const recorded = await recordSendDecision(tx, {
       deliveryId: delivery.id,
       userId: delivery.userId,
       phase: "send",
@@ -856,6 +856,21 @@ const decideReleaseNotesSend = async (
       providerSubmittedAt: null,
       evidence: evidenceOf(verdict),
     });
+
+    // A retry of a delivery whose send verdict is already sealed: an earlier
+    // attempt committed its decision and stopped before the provider call. The
+    // ledger holds one send decision per delivery, so this attempt may act only
+    // on a verdict that agrees with it -- on whether it goes *and* on what it
+    // rests on. Where they disagree it throws, the transaction rolls back, and
+    // the drain retries on the verdict-unavailable curve: if the difference was
+    // transient the next attempt agrees and proceeds, and if it is not the row
+    // is abandoned with an incident, which is a person looking at it rather than
+    // a message sent under a decision the ledger does not hold.
+    if (!recorded.recorded && recorded.differs) {
+      throw new Error(
+        `the sealed send decision ${recorded.decisionId} disagrees with the verdict taken now`
+      );
+    }
 
     if (verdict.allowed) return false;
 

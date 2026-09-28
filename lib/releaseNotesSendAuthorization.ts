@@ -5,6 +5,7 @@ import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSe
 import { footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
+import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
 import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
@@ -425,7 +426,17 @@ export async function releaseNotesSendAuthorization(
     input.userId === null
       ? null
       : await read("the risk_accepted approval", async () => {
-          const member = await prisma.emailSendApprovalMember.findFirst({
+          // Every sealed, unrevoked approval that names this account, not the
+          // first one the database happens to return. Member rows cannot be
+          // edited, so correcting an address is a second approval -- and while
+          // the first is unrevoked, both name the account. With `findFirst` and
+          // no order, whichever row came back decided the send: an out-of-scope
+          // or stale-address row first meant a refusal the other approval would
+          // have answered. So each is judged by the ledger's own scope and cohort
+          // rules, oldest first, and the first that covers this send is the one
+          // applied; where none covers it, the oldest is passed on so the
+          // refusal is named after something real.
+          const members = await prisma.emailSendApprovalMember.findMany({
             where: {
               userId: input.userId as string,
               approval: {
@@ -454,7 +465,35 @@ export async function releaseNotesSendAuthorization(
                 },
               },
             },
+            orderBy: [{ approval: { sealedAt: "asc" } }, { approval: { id: "asc" } }],
           });
+          const covers = (candidate: (typeof members)[number]) =>
+            approvalScopeRefusal(
+              {
+                approvalType: candidate.approval.approvalType as "risk_accepted",
+                sealedAt: candidate.approval.sealedAt,
+                revoked: candidate.approval.revocations.length > 0,
+                policyVersionId: candidate.approval.policyVersionId,
+                ruleKey: candidate.approval.ruleKey,
+                ruleVersion: candidate.approval.ruleVersion,
+                country: candidate.approval.country,
+                obligationKey: candidate.approval.obligationKey,
+                purposeKey: candidate.approval.purposeKey,
+              },
+              { approvalType: "risk_accepted", policyVersionId, purpose: input.purpose }
+            ) === null &&
+            cohortRefusal({
+              member: {
+                userId: candidate.userId,
+                addressDigest: candidate.addressDigest,
+                addressNormalizationVersion: candidate.addressNormalizationVersion,
+              },
+              userId: input.userId,
+              deliveryAddressDigest: input.deliveryAddressDigest,
+              currentAddressDigest: input.currentAddressDigest,
+              addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+            }) === null;
+          const member = members.find(covers) ?? members[0];
           if (!member) return null;
           return {
             approvalId: member.approval.id,
