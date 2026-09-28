@@ -125,6 +125,11 @@ export type RouterSelectionResult = {
      */
     rankedModelIds: readonly string[];
     /**
+     * Eligible models the criteria before model id could not separate from
+     * the top, in ranked order. Model id still orders `rankedModelIds`.
+     */
+    tiedModelIds: readonly string[];
+    /**
      * The streak to carry into the next turn. Reset to zero whenever the
      * challenger fails to clear the margin, so a switch needs consecutive
      * turns rather than an accumulation of unrelated ones.
@@ -454,11 +459,31 @@ export const rankCandidates = (
         return -1;
     };
 
+    const ranked = [...candidates].sort((left, right) => {
+        const index = firstDifference(left, right);
+        return index === -1 ? 0 : keyOf(left)[index] - keyOf(right)[index];
+    });
+    const top = ranked[0];
+    // The last criterion is model id, which is a total order and not a
+    // judgement. The tie exploration is allowed to spread across is the
+    // group that criterion had not yet split.
+    const prefixLength = ROUTER_TIE_BREAK_ORDER.length - 1;
+    const tiedWithTopModelIds = top
+        ? ranked
+              .filter((candidate) => {
+                  const left = keyOf(candidate);
+                  const right = keyOf(top);
+                  for (let index = 0; index < prefixLength; index += 1) {
+                      if (left[index] !== right[index]) return false;
+                  }
+                  return true;
+              })
+              .map((candidate) => candidate.modelId)
+        : [];
+
     return {
-        ranked: [...candidates].sort((left, right) => {
-            const index = firstDifference(left, right);
-            return index === -1 ? 0 : keyOf(left)[index] - keyOf(right)[index];
-        }),
+        ranked,
+        tiedWithTopModelIds,
         decidedBy: (left, right) => {
             const index = firstDifference(left, right);
             // Identical keys means the same model id twice. Nothing separated
@@ -490,6 +515,7 @@ export function selectRouterModel(input: {
             decidedBy: null,
             challengerModelId: null,
             rankedModelIds: [],
+            tiedModelIds: [],
         };
     }
 
@@ -505,6 +531,7 @@ export function selectRouterModel(input: {
     const ranked = ranking.ranked;
 
     const rankedModelIds = ranked.map((candidate) => candidate.modelId);
+    const tiedModelIds = ranking.tiedWithTopModelIds;
     const winner = ranked[0];
     const runnerUp = ranked[1];
     const bandOf = (candidate: ScoredCandidate) => candidate.cell.qualityBand;
@@ -533,6 +560,7 @@ export function selectRouterModel(input: {
             decidedBy,
             challengerModelId: winner.modelId,
             rankedModelIds,
+            tiedModelIds,
         };
     }
 
@@ -560,6 +588,7 @@ export function selectRouterModel(input: {
             decidedBy,
             challengerModelId: winner.modelId,
             rankedModelIds,
+            tiedModelIds,
             // The switch happened, so the streak has done its job and starts
             // again for the next comparison.
             turnsFavouringChallenger: 0,
@@ -575,6 +604,7 @@ export function selectRouterModel(input: {
         decidedBy,
         challengerModelId: winner.modelId,
         rankedModelIds,
+        tiedModelIds,
         turnsFavouringChallenger: streak,
     };
 }

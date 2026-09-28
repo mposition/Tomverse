@@ -53,6 +53,11 @@ import {
   chatStarterKillSwitchEngaged,
 } from "@/lib/chatStarterAccess";
 import {
+  AUTO_EXPLORATION_FLAG_KEY,
+  autoExplorationAvailable,
+  autoExplorationKillSwitchEngaged,
+} from "@/lib/autoExplorationAccess";
+import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
@@ -397,6 +402,24 @@ export async function isPromptRefinerEnabled(): Promise<boolean> {
  * the starter gallery is a welcome-screen surface, resolved once per page
  * render, and it dispatches nothing of its own for a route to have to refuse.
  */
+/**
+ * Auto's session-seeded tie exploration.
+ *
+ * No setter. Turning it on changes which model answers a tied Auto turn, and
+ * that stays an operator write of the AppSetting row after staging has shown
+ * the same conversation staying on one model and a different credit price
+ * staying out of the spread. Stopping is `AUTO_EXPLORATION_KILL_SWITCH`.
+ */
+export async function isAutoExplorationEnabled(): Promise<boolean> {
+  if (autoExplorationKillSwitchEngaged(process.env)) return false;
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: AUTO_EXPLORATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return autoExplorationAvailable({ storedFlagValue: row?.value, env: process.env });
+}
+
 export async function isChatStarterEnabled(): Promise<boolean> {
   if (chatStarterKillSwitchEngaged(process.env)) return false;
   if (e2eDatabaseDisabled()) return false;

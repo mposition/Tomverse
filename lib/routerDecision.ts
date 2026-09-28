@@ -44,6 +44,10 @@ import {
   type RouterCandidateInput,
 } from "@/lib/routerCandidates";
 import { expectedTotalCostUsdByModel } from "@/lib/routerCostSignal";
+import type {
+  RoutingAllocationMode,
+  RoutingAllocationSeedGrain,
+} from "@/lib/routingAllocation";
 import {
   ROUTER_SCORE_POLICY_VERSION,
   type RouterTieBreakCriterion,
@@ -134,6 +138,16 @@ export type RouterDecisionRecord = {
   challengerModelId: string | null;
   turnsFavouringChallenger: number;
   decisionLatencyMs: number;
+  /**
+   * How a tie was resolved, when the allocator ran.
+   *
+   * Absent on a record built before that step. `explore_bounded` is the
+   * session-seeded hash inside a credit-equal tie. Deterministic rolled
+   * nothing, so it carries no seed grain. The stored value is
+   * `explore_bounded`, which is the check constraint's name for that hash.
+   */
+  allocationMode?: RoutingAllocationMode | null;
+  allocationSeedGrain?: RoutingAllocationSeedGrain | null;
 };
 
 export type RouterDecision =
@@ -155,6 +169,10 @@ export type RouterDecision =
        * fallback rather than a reason to go looking elsewhere.
        */
       fallbackCandidateModelIds: readonly string[];
+      /** Best first, before stickiness. Exploration reads this order. */
+      rankedModelIds: readonly string[];
+      /** The tie before model-id order. */
+      tiedModelIds: readonly string[];
       record: RouterDecisionRecord;
     }
   | {
@@ -296,6 +314,8 @@ export function decideRouterModel(
     fallbackCandidateModelIds: selection.rankedModelIds.filter(
       (modelId) => modelId !== chosen.modelId
     ),
+    rankedModelIds: selection.rankedModelIds,
+    tiedModelIds: selection.tiedModelIds,
     record,
   };
 }
