@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 
 import { isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
-import type { ChangedEntry } from "./agentPushPolicy.ts";
+import { PUSH_LIMITS, type ChangedEntry } from "./agentPushPolicy.ts";
 
 export const TREE_MODES = {
   blob: "100644",
@@ -226,21 +226,35 @@ export const compileAttributesPattern = (raw: string): RegExp => {
 };
 
 /**
+ * The pattern grammar this matcher understands: plain path characters, `*`,
+ * `?`, `**` and a leading `/`. Anything else -- a negation, a character class,
+ * an attribute macro, an escape or a quoted pattern -- is grammar Git has and
+ * this does not, so the whole file is reported unsupported rather than
+ * guessed at.
+ */
+const SUPPORTED_ATTRIBUTE_PATTERN = /^\/?[A-Za-z0-9._\-/*?@+]+$/;
+
+export type AttributesMatcher =
+  | { supported: true; matches: (path: string) => boolean }
+  | { supported: false };
+
+/**
  * Paths the root `.gitattributes` gives any attribute to. Every attribute
  * counts, not only EOL and filters: an attribute is a way for the checkout to
  * differ from the blob, and the policy sends those paths to T2 rather than
  * reason about which attributes are harmless.
  */
-export const attributedPathMatcher = (gitattributes: string) => {
+export const attributedPathMatcher = (gitattributes: string): AttributesMatcher => {
   const patterns: RegExp[] = [];
   for (const line of gitattributes.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
     const [pattern, ...attributes] = trimmed.split(/\s+/);
+    if (!SUPPORTED_ATTRIBUTE_PATTERN.test(pattern)) return { supported: false };
     if (attributes.length === 0) continue;
     patterns.push(compileAttributesPattern(pattern));
   }
-  return (path: string) => patterns.some((pattern) => pattern.test(path));
+  return { supported: true, matches: (path) => patterns.some((pattern) => pattern.test(path)) };
 };
 
 /* ------------------------------------------------------------------------- */
@@ -251,6 +265,7 @@ export type UnsupportedReason =
   | "base_listing_truncated"
   | "nested_gitattributes"
   | "gitattributes_applies"
+  | "gitattributes_unsupported"
   | "gitlink_changed";
 
 export type VerificationInput = {
@@ -291,6 +306,8 @@ export type VerificationResult =
       changes: ChangedPath[];
       /** Anything here sends the whole patch to T2. */
       unsupported: Array<{ reason: UnsupportedReason; path: string | null }>;
+      /** The submitted blobs, each already checked against its id. */
+      verifiedBlobs: ReadonlyMap<string, Uint8Array>;
     };
 
 /**
@@ -381,15 +398,25 @@ export const verifyResultListing = (input: VerificationInput): VerificationResul
       }
     }
   }
-  const attributed = attributedPathMatcher(input.baseGitattributes ?? "");
+  const attributes = attributedPathMatcher(input.baseGitattributes ?? "");
+  if (!attributes.supported) unsupported.push({ reason: "gitattributes_unsupported", path: null });
   for (const change of changes) {
-    if (attributed(change.path)) unsupported.push({ reason: "gitattributes_applies", path: change.path });
+    if (attributes.supported && attributes.matches(change.path)) {
+      unsupported.push({ reason: "gitattributes_applies", path: change.path });
+    }
     if (change.oldType === "commit" || change.newType === "commit") {
       unsupported.push({ reason: "gitlink_changed", path: change.path });
     }
   }
 
-  return { ok: true, resultRootTreeId: result.rootTreeId, changes, unsupported };
+  const verifiedBlobs = new Map([...needed].map((oid) => [oid, input.changedBlobs.get(oid) as Uint8Array]));
+  return {
+    ok: true,
+    resultRootTreeId: result.rootTreeId,
+    changes,
+    unsupported,
+    verifiedBlobs,
+  };
 };
 
 const label =
@@ -442,21 +469,30 @@ const splitLines = (text: string) => {
 };
 
 /**
- * Lines added and removed between two texts, by Myers' shortest edit script.
- * The count is exact, so the size limit cannot be dodged by a diff that looks
- * smaller than it is; the added lines are what the content rules read.
+ * Lines added and removed between two texts, by Myers' shortest edit script,
+ * computed only up to `maxEdits`. The count is exact within that bound, so the
+ * size limit cannot be dodged by a diff that looks smaller than it is. Past the
+ * bound the answer is simply "exceeded" -- the change is T2 by size whatever
+ * the exact number, and memory stays proportional to the bound rather than to
+ * the files, so a 200 KB file of unrelated lines costs nothing unbounded.
  */
-export const diffLines = (before: string, after: string) => {
+export const diffLines = (
+  before: string,
+  after: string,
+  maxEdits: number = Number.POSITIVE_INFINITY,
+):
+  | { exceeded: false; addedLines: number; removedLines: number; addedText: string }
+  | { exceeded: true } => {
   const a = splitLines(before);
   const b = splitLines(after);
   const n = a.length;
   const m = b.length;
-  const max = n + m;
-  const offset = max + 1;
-  const v = new Int32Array(2 * max + 3);
+  const limit = Math.min(n + m, maxEdits);
+  const offset = limit + 1;
+  const v = new Int32Array(2 * limit + 3);
   const trace: Int32Array[] = [];
   let found = false;
-  for (let d = 0; d <= max && !found; d += 1) {
+  for (let d = 0; d <= limit && !found; d += 1) {
     trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
       let x =
@@ -475,6 +511,8 @@ export const diffLines = (before: string, after: string) => {
       }
     }
   }
+  if (!found) return { exceeded: true };
+
   // Walk the trace back to collect the added lines.
   const added: string[] = [];
   let removed = 0;
@@ -500,34 +538,70 @@ export const diffLines = (before: string, after: string) => {
     }
   }
   added.reverse();
-  return { addedLines: added.length, removedLines: removed, addedText: added.join("\n") };
+  return {
+    exceeded: false,
+    addedLines: added.length,
+    removedLines: removed,
+    addedText: added.join("\n"),
+  };
 };
 
+export type PolicyChangesResult =
+  | { ok: true; entries: ChangedEntry[] }
+  | { ok: false; problems: Array<{ problem: "blob_missing" | "blob_content_mismatch"; oid: string }> };
+
 /**
- * Builds the push policy's input from a verified change set. Base content is
- * read by the app by object id; `newBlobs` holds the verified submitted blobs
- * plus any base blob the result reuses (a mode change, a copy), read the same way.
- * A path that is not text is reported as such -- the policy sends it to T2 --
- * and counts its lines as zero rather than guessing.
+ * Builds the push policy's input from a verification that succeeded. Content
+ * comes from two places only: the blobs the verification already checked, and
+ * base blobs the app read from GitHub by id. Every piece used here is hashed
+ * again against the id the change names, so the text the tier is decided on is
+ * the text of the tree that will be published -- a map that pairs an id with
+ * other content is refused, not believed.
+ *
+ * A path that is not text is reported as such (the policy sends it to T2) with
+ * zero lines rather than a guess; a diff past the size limit is reported just
+ * over the limit, which is T2 whatever the exact number.
  */
 export const toPolicyChanges = (
-  changes: readonly ChangedPath[],
+  verification: Extract<VerificationResult, { ok: true }>,
   baseBlobs: ReadonlyMap<string, Uint8Array>,
-  newBlobs: ReadonlyMap<string, Uint8Array>,
-): ChangedEntry[] =>
-  changes.map((change) => {
-    const before = change.oldOid === null ? new Uint8Array() : baseBlobs.get(change.oldOid);
-    const after = change.newOid === null ? new Uint8Array() : newBlobs.get(change.newOid);
-    const beforeText = before === undefined ? null : decodeText(before);
-    const afterText = after === undefined ? null : decodeText(after);
+): PolicyChangesResult => {
+  const problems: Array<{ problem: "blob_missing" | "blob_content_mismatch"; oid: string }> = [];
+  const contentOf = (oid: string | null, type: TreeEntry["type"] | null) => {
+    if (oid === null) return new Uint8Array();
+    // A gitlink names a commit in another repository; there is no content.
+    if (type === "commit") return null;
+    const content = verification.verifiedBlobs.get(oid) ?? baseBlobs.get(oid);
+    if (content === undefined) {
+      problems.push({ problem: "blob_missing", oid });
+      return null;
+    }
+    if (gitObjectId("blob", content) !== oid) {
+      problems.push({ problem: "blob_content_mismatch", oid });
+      return null;
+    }
+    return content;
+  };
+
+  const entries = verification.changes.map((change): ChangedEntry => {
+    const before = contentOf(change.oldOid, change.oldType);
+    const after = contentOf(change.newOid, change.newType);
+    const beforeText = before === null ? null : decodeText(before);
+    const afterText = after === null ? null : decodeText(after);
     const isText =
       change.status === "deleted"
         ? beforeText !== null
         : afterText !== null && (change.status === "added" || beforeText !== null);
+    const diff =
+      beforeText !== null && afterText !== null
+        ? diffLines(beforeText, afterText, PUSH_LIMITS.maxChangedLines + 1)
+        : null;
     const lines =
-      beforeText !== null && afterText !== null && change.newType !== "commit"
-        ? diffLines(beforeText, afterText)
-        : { addedLines: 0, removedLines: 0, addedText: "" };
+      diff === null
+        ? { addedLines: 0, removedLines: 0, addedText: "" }
+        : diff.exceeded
+          ? { addedLines: PUSH_LIMITS.maxChangedLines + 1, removedLines: 0, addedText: "" }
+          : diff;
     return {
       path: change.path,
       status: change.status,
@@ -542,3 +616,6 @@ export const toPolicyChanges = (
       newText: change.status === "deleted" ? "" : (afterText ?? ""),
     };
   });
+
+  return problems.length > 0 ? { ok: false, problems } : { ok: true, entries };
+};

@@ -264,23 +264,57 @@ test("gitattributes patterns follow Git's anchoring rules", () => {
       "no-attributes-here",
     ].join("\n"),
   );
-  assert.equal(real("docs/ops/ai-review-evaluation-records/a/b.json"), true);
-  assert.equal(real("package.json"), true);
-  assert.equal(real("lib/package.json"), false);
-  assert.equal(real("deep/dir/x.bin"), true);
-  assert.equal(real("no-attributes-here"), false);
-  assert.equal(real("lib/chatInput.ts"), false);
+  assert.equal(real.supported, true);
+  assert.equal(real.matches("docs/ops/ai-review-evaluation-records/a/b.json"), true);
+  assert.equal(real.matches("package.json"), true);
+  assert.equal(real.matches("lib/package.json"), false);
+  assert.equal(real.matches("deep/dir/x.bin"), true);
+  assert.equal(real.matches("no-attributes-here"), false);
+  assert.equal(real.matches("lib/chatInput.ts"), false);
 });
 
-test("the repository's own .gitattributes leaves ordinary product files alone", async () => {
+test("gitattributes grammar the matcher does not understand makes the whole file unsupported", () => {
+  for (const line of [
+    "[ab].ts text",
+    "!*.ts text",
+    "[attr]binary -diff -merge -text",
+    "\\#literal text",
+    '"quoted name.ts" text',
+    "lib/{a,b}.ts text",
+  ]) {
+    assert.deepEqual(attributedPathMatcher(`*.md text\n${line}\n`), { supported: false }, line);
+  }
+});
+
+test("an unsupported .gitattributes sends the patch to T2", () => {
+  const { input } = scenario({
+    base: ({ put }) => put("lib/a.ts", "a\n"),
+    result: ({ put }) => put("lib/a.ts", "b\n"),
+    gitattributes: "[ab].ts text\n",
+  });
+  const verdict = verifyResultListing(input);
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.unsupported, [{ reason: "gitattributes_unsupported", path: null }]);
+});
+
+test("the repository's own .gitattributes is understood and leaves ordinary product files alone", async () => {
   const { readFileSync } = await import("node:fs");
   const matcher = attributedPathMatcher(
     readFileSync(new URL("../.gitattributes", import.meta.url), "utf8"),
   );
-  assert.equal(matcher("lib/chatInput.ts"), false);
-  assert.equal(matcher("components/chat/ChatInput.tsx"), false);
-  assert.equal(matcher("lib/promptRefinerSuggestion.ts"), true);
-  assert.equal(matcher("tests/fixtures/providerModelDocs/openai.md"), true);
+  assert.equal(matcher.supported, true);
+  assert.equal(matcher.matches("lib/chatInput.ts"), false);
+  assert.equal(matcher.matches("components/chat/ChatInput.tsx"), false);
+  assert.equal(matcher.matches("lib/promptRefinerSuggestion.ts"), true);
+  assert.equal(matcher.matches("tests/fixtures/providerModelDocs/openai.md"), true);
+});
+
+test("two paths differing only in a lone surrogate are refused, not hashed alike", () => {
+  const entry = (path) => ({ path, mode: "100644", type: "blob", oid: "1".repeat(40) });
+  for (const path of ["lib\uD800.ts", "lib\uDC00.ts", "x\uD801"]) {
+    assert.equal(checkListing([entry(path)]).ok, false, JSON.stringify(path));
+  }
+  assert.equal(checkListing([entry("lib😀.ts")]).ok, true, "a proper pair is text");
 });
 
 /* Line counting -------------------------------------------------------- */
@@ -308,8 +342,13 @@ test("line counts equal the minimal edit, on fixed and random inputs", () => {
     ["x\ny\n", "y\nx\n"],
   ];
   for (const [before, after] of fixed) {
-    const { addedLines, removedLines } = diffLines(before, after);
-    assert.deepEqual({ addedLines, removedLines }, lcsCounts(before, after), JSON.stringify([before, after]));
+    const diff = diffLines(before, after);
+    assert.equal(diff.exceeded, false);
+    assert.deepEqual(
+      { addedLines: diff.addedLines, removedLines: diff.removedLines },
+      lcsCounts(before, after),
+      JSON.stringify([before, after]),
+    );
   }
   let seed = 7;
   const random = () => {
@@ -322,9 +361,18 @@ test("line counts equal the minimal edit, on fixed and random inputs", () => {
       "\n";
     const before = make();
     const after = make();
-    const { addedLines, removedLines, addedText } = diffLines(before, after);
-    assert.deepEqual({ addedLines, removedLines }, lcsCounts(before, after), JSON.stringify([before, after]));
-    assert.equal(addedText === "" ? 0 : addedText.split("\n").length, addedLines);
+    const diff = diffLines(before, after);
+    const expected = lcsCounts(before, after);
+    assert.deepEqual(
+      { addedLines: diff.addedLines, removedLines: diff.removedLines },
+      expected,
+      JSON.stringify([before, after]),
+    );
+    assert.equal(diff.addedText === "" ? 0 : diff.addedText.split("\n").length, diff.addedLines);
+    // A bound at the exact edit count still answers; one below it does not.
+    const edits = expected.addedLines + expected.removedLines;
+    assert.equal(diffLines(before, after, edits).exceeded, false);
+    if (edits > 0) assert.equal(diffLines(before, after, edits - 1).exceeded, true);
   }
 });
 
@@ -335,21 +383,82 @@ test("added text is exactly the added lines, for the content rules to read", () 
   );
 });
 
+test("a 200 KB file of unrelated lines stops at the bound instead of growing without one", () => {
+  const lines = (prefix) =>
+    Array.from({ length: 18_000 }, (_, i) => `line-${prefix}-${i}`).join("\n") + "\n";
+  const before = lines("a");
+  const after = lines("b");
+  assert.ok(before.length > 200_000, `${before.length} bytes`);
+  const started = Date.now();
+  assert.deepEqual(diffLines(before, after, 301), { exceeded: true });
+  assert.ok(Date.now() - started < 5_000, "bounded diff must be quick");
+});
+
+/* From verification to policy input ------------------------------------ */
+
 test("verified changes become the push policy's input, with non-text marked", () => {
-  const changes = [
-    { path: "lib/a.ts", status: "modified", oldMode: "100644", newMode: "100644", oldType: "blob", newType: "blob", oldOid: "1".repeat(40), newOid: "2".repeat(40) },
-    { path: "lib/img.ts", status: "added", oldMode: null, newMode: "100644", oldType: null, newType: "blob", oldOid: null, newOid: "3".repeat(40) },
-  ];
-  const baseBlobs = new Map([["1".repeat(40), bytes("a\nb\n")]]);
-  const newBlobs = new Map([
-    ["2".repeat(40), bytes("a\nc\n")],
-    ["3".repeat(40), new Uint8Array([0x89, 0x50, 0x00, 0x47])],
-  ]);
-  const [modified, binary] = toPolicyChanges(changes, baseBlobs, newBlobs);
+  const { input } = scenario({
+    base: ({ put }) => put("lib/a.ts", "a\nb\n"),
+    result: ({ put }) => {
+      put("lib/a.ts", "a\nc\n");
+      put("lib/img.ts", "\u0089P\u0000G");
+    },
+  });
+  const verification = verifyResultListing(input);
+  assert.equal(verification.ok, true);
+  const baseBlobs = new Map([[gitObjectId("blob", bytes("a\nb\n")), bytes("a\nb\n")]]);
+  const built = toPolicyChanges(verification, baseBlobs);
+  assert.equal(built.ok, true);
+  const [modified, binary] = built.entries;
+  assert.equal(modified.path, "lib/a.ts");
   assert.equal(modified.isText, true);
   assert.equal(modified.addedLines, 1);
   assert.equal(modified.removedLines, 1);
   assert.equal(modified.addedText, "c");
+  assert.equal(modified.newText, "a\nc\n");
   assert.equal(binary.isText, false);
-  assert.equal(binary.sizeBytes, 4);
+});
+
+test("content paired with the wrong id is refused, so the tier is decided on the published text", () => {
+  const { input } = scenario({
+    base: ({ put }) => put("lib/a.ts", "a\n"),
+    result: ({ put }) => put("lib/a.ts", "const m = await import(name);\n"),
+  });
+  const verification = verifyResultListing(input);
+  assert.equal(verification.ok, true);
+  const baseOid = gitObjectId("blob", bytes("a\n"));
+
+  // A base map that swaps in other content under the right id.
+  const lyingBase = new Map([[baseOid, bytes("harmless\n")]]);
+  assert.deepEqual(toPolicyChanges(verification, lyingBase), {
+    ok: false,
+    problems: [{ problem: "blob_content_mismatch", oid: baseOid }],
+  });
+
+  // Base content that was never read.
+  assert.deepEqual(toPolicyChanges(verification, new Map()), {
+    ok: false,
+    problems: [{ problem: "blob_missing", oid: baseOid }],
+  });
+
+  // The honest map yields the loader in the published text.
+  const honest = toPolicyChanges(verification, new Map([[baseOid, bytes("a\n")]]));
+  assert.equal(honest.ok, true);
+  assert.match(honest.entries[0].newText, /import\(name\)/);
+});
+
+test("a diff past the size limit is reported just over the limit", () => {
+  const before = Array.from({ length: 400 }, (_, i) => `a${i}`).join("\n") + "\n";
+  const after = Array.from({ length: 400 }, (_, i) => `b${i}`).join("\n") + "\n";
+  const { input } = scenario({
+    base: ({ put }) => put("lib/a.ts", before),
+    result: ({ put }) => put("lib/a.ts", after),
+  });
+  const verification = verifyResultListing(input);
+  const built = toPolicyChanges(
+    verification,
+    new Map([[gitObjectId("blob", bytes(before)), bytes(before)]]),
+  );
+  assert.equal(built.ok, true);
+  assert.equal(built.entries[0].addedLines + built.entries[0].removedLines, 301);
 });

@@ -188,6 +188,11 @@ export const isCanonicalRepoPath = (path: string) => {
   if (path.length === 0 || path.length > 4096) return false;
   if (path.startsWith("/") || path.includes("\\")) return false;
   if (/[\u0000-\u001f\u007f]/.test(path)) return false;
+  // A lone surrogate is not text: two different ones encode to the same
+  // replacement bytes, so two distinct strings would name one Git path.
+  if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(path)) {
+    return false;
+  }
   return path
     .split("/")
     .every(
@@ -277,4 +282,5 @@ export const AGENTS_NAMED_CONTRACT_CONSTANTS: readonly string[] = [
   "LOCKED_EMAIL_PURPOSES",
   "IMAGE_INLINE_MODEL_DISCOVERY_LIMIT",
   "CHAT_STARTER_MAX_VISIBLE",
+  "CROSS_LOCK_ORDER",
 ];
