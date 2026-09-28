@@ -1202,7 +1202,7 @@ const runtimeImportClosure = () => {
 };
 
 test("runtime source closure provenance dates stay chronological", () => {
-  const source = readFileSync(join(repositoryRoot, "tests/promptRefinerRuntimeSourceClosure.test.mjs"), "utf8");
+  const source = readFileSync(new URL(import.meta.url), "utf8");
   const blockEnd = source.indexOf("const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT =");
   assert.notEqual(blockEnd, -1, "runtime source closure provenance boundary is missing");
   const dates = [...source.slice(0, blockEnd).matchAll(/^\/\/ (\d{4}-\d{2}-\d{2})/gm)].map(
