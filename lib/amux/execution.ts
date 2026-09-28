@@ -362,6 +362,11 @@ export async function startAmuxExecution(
         };
       }
 
+      // Every row this start locks is locked; nothing is written yet.
+      if (attachment?.beforeWrite) {
+        await attachment.beforeWrite(context.attachedTransaction, { taskId: input.taskId });
+      }
+
       const costAdmission = await evaluateLockedAmuxCostAdmission(
         tx,
         resourcePolicies,

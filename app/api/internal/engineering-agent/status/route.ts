@@ -17,7 +17,7 @@ import { prisma } from "@/lib/prisma";
 // this route never moves it.
 
 const ROUTE_PREFIXES = {
-  runner: ["run/", "register/"],
+  runner: ["run/", "worker/", "register/"],
   publisher: ["publish/"],
 } as const;
 

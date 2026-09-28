@@ -32,12 +32,14 @@ import {
   EngineeringAgentStoreRefusedError,
   claimEngineeringAgentWorkItem,
   endEngineeringAgentRun,
+  engineeringAgentTransactionInAmux,
   issueEngineeringAgentCapability,
   moveEngineeringAgentBinding,
   openEngineeringAgentRunMismatches,
   openEngineeringAgentWorkItem,
   runEngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
+import { runAttachedIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering adapter
@@ -628,4 +630,121 @@ test("a published result is bound in the transaction that records the card's rev
   } finally {
     await setMode("shadow");
   }
+});
+
+test("a run that may not start leaves no AMUX trace, even on a card AMUX would block", async () => {
+  const fixture = await readyWorkerWithCard();
+  // Five ended attempts spend the card's attempt budget: a start would block it.
+  for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
+    await prisma.amuxExecutionAttempt.create({
+      data: {
+        id: randomUUID(),
+        taskId: fixture.taskId,
+        worker: fixture.worker,
+        workerInstanceId: fixture.instanceId,
+        workerGeneration: fixture.generation,
+        taskRevision: 0,
+        attemptNumber,
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        endedAt: new Date(),
+        outcome: "failed",
+        toStatus: "todo",
+        endedBy: fixture.worker,
+      },
+    });
+  }
+  const { workItemId: mismatchId } = await runEngineeringAgentTransaction(prisma, (tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "state_mismatch",
+      causeKey: `mismatch:${fixture.taskId}`,
+      runId: null,
+      reason: "fixture",
+    }),
+  );
+  try {
+    await assert.rejects(
+      startWithRun(fixture, nextRunId()),
+      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
+    );
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.equal(card.status, "todo", "the halted start blocked nothing");
+    assert.equal(await prisma.amuxHumanEscalation.count({ where: { taskId: fixture.taskId } }), 0);
+  } finally {
+    await prisma.engineeringAgentWorkItem.update({ where: { id: mismatchId }, data: { state: "resolved" } });
+  }
+  // With nothing halting, AMUX's own refusal is AMUX's to record.
+  const started = await withAmuxRouteBudget(
+    () =>
+      startAmuxExecution(
+        {
+          taskId: fixture.taskId,
+          worker: fixture.worker,
+          instanceId: fixture.instanceId,
+          generation: fixture.generation,
+          expectedRevision: 1,
+        },
+        engineeringRunStartAttachment({ runId: nextRunId(), baseSha: sha1("base") }),
+      ),
+    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+  );
+  assert.deepEqual(started, { started: false, reason: "attempt_budget_exhausted" });
+  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).status, "blocked");
+});
+
+test("an active run whose attempt ended halts runs before anyone reports it", async () => {
+  const fixture = await readyWorkerWithCard();
+  const runId = nextRunId();
+  const started = await startWithRun(fixture, runId);
+  // AMUX recovery ends the attempt on its own route; no heartbeat has looked yet.
+  await reclaimExpiredAmuxExecutions({ now: new Date(Date.now() + 10 * 60_000), limit: 200 });
+  const ended = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  assert.ok(ended.endedAt, "recovery ended the attempt");
+  const other = await readyWorkerWithCard();
+  await assert.rejects(
+    startWithRun(other, nextRunId()),
+    (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
+  );
+  assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
+  const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
+  await runEngineeringAgentTransaction(prisma, (tx) =>
+    endEngineeringAgentRun(tx, { runId, amuxAttemptId: started.attemptId, outcome: "abandoned", halt: "none" }),
+  );
+  await prisma.engineeringAgentWorkItem.update({ where: { id: mismatch.id }, data: { state: "resolved" } });
+});
+
+test("a registration records the generation it created with its request", async () => {
+  const worker = `eng-adapter-${randomUUID().slice(0, 12)}`;
+  fixtureWorkers.push(worker);
+  const requestKey = `register-${randomUUID()}`;
+  const outcome = await runAttachedIdempotentEngineeringAgentRequest({
+    route: "worker/register",
+    requestKey,
+    body: { requestKey },
+    work: (markCommitted) =>
+      withAmuxRouteBudget(
+        () =>
+          registerAmuxWorkerRuntime(worker, randomUUID(), undefined, {
+            prismaCalls: 2,
+            work: async (lent, fact) => {
+              await markCommitted(engineeringAgentTransactionInAmux(lent), String(fact.generation));
+            },
+          }),
+        ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+      ),
+  });
+  assert.equal(outcome.kind, "done");
+  const generation = outcome.kind === "done" ? outcome.value.generation : -1;
+  const record = await prisma.engineeringAgentRequest.findUniqueOrThrow({ where: { key: requestKey } });
+  assert.equal(record.resultRef, String(generation));
+  // The retry is answered from the record; no second generation is made.
+  const replay = await runAttachedIdempotentEngineeringAgentRequest({
+    route: "worker/register",
+    requestKey,
+    body: { requestKey },
+    work: () => Promise.reject(new Error("a replay must not run the work")),
+  });
+  assert.deepEqual(replay, { kind: "replay", state: "committed", resultRef: String(generation) });
+  const runtime = await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: worker } });
+  assert.equal(runtime.generation, generation);
 });

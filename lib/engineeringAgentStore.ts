@@ -42,7 +42,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { Session } from "next-auth";
 import { z } from "zod";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
@@ -108,13 +108,24 @@ export type EngineeringAgentTransaction = Prisma.TransactionClient & {
   readonly [ENGINEERING_AGENT_TRANSACTION_BRAND]: "engineering-agent";
 };
 
-/** The one place an `EngineeringAgentTransaction` comes from. */
+/**
+ * The one place an `EngineeringAgentTransaction` comes from. Its first
+ * statement takes the audit chain's lock, the one lock order this app has
+ * (lib/adminAudit.ts, `takeAuditChainLock`): every engineering write ends in
+ * an audit entry, and the halt and owner-queue locks come after it, so an
+ * engineering transaction and an AMUX writer carrying an engineering
+ * attachment -- which has taken the audit lock before its attachment runs --
+ * take the locks they share in the same order.
+ */
 export async function runEngineeringAgentTransaction<T>(
   client: PrismaClient,
   run: (tx: EngineeringAgentTransaction) => Promise<T>,
   options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
 ): Promise<T> {
-  return client.$transaction((tx) => run(tx as unknown as EngineeringAgentTransaction), options);
+  return client.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    return run(tx as unknown as EngineeringAgentTransaction);
+  }, options);
 }
 
 /**
@@ -235,6 +246,11 @@ const requireSwitch = async (tx: EngineeringAgentTransaction, gate: EngineeringA
 export type EngineeringAgentHaltState = {
   openStateMismatches: number;
   /**
+   * Active runs whose AMUX attempt has already ended -- a mismatch that is
+   * real before anyone has opened its item (§11).
+   */
+  orphanedRuns: number;
+  /**
    * The latest halt a run recorded after the last Admin acknowledgement, or
    * null when none has. A recorded halt holds until a person acknowledges it
    * (§12); a later run that ends clean does not clear it.
@@ -251,11 +267,13 @@ const storedHalt = (raw: string): HaltValue =>
  * Everything that writes a halt (a run's end, an opened state mismatch) and
  * everything that decides under one (a run's start, a write claim that spends
  * a capability) takes this lock first, so a decision never reads the halts
- * from before a halt that commits ahead of it. It comes after every AMUX row
- * lock in an adapter transaction and before the owner-queue lock a run's
- * INSERT takes.
+ * from before a halt that commits ahead of it. The order is the audit chain's
+ * lock, then this one, then the owner-queue lock a run's, draft's, publish
+ * item's or binding's INSERT takes; in an adapter transaction all three come
+ * after every AMUX row lock.
  */
 const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
+  await takeAuditChainLock(tx);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('engineering-agent:halt'))`;
 };
 
@@ -271,6 +289,9 @@ export async function readEngineeringAgentHaltState(
   db: PrismaClient | Prisma.TransactionClient,
 ): Promise<EngineeringAgentHaltState> {
   const openStateMismatches = await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } });
+  const orphaned = await db.engineeringAgentRun.count({
+    where: { status: "active", amuxAttempt: { endedAt: { not: null } } },
+  });
   const acknowledgement = await db.appSetting.findUnique({
     where: { key: ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY },
     select: { value: true },
@@ -287,6 +308,7 @@ export async function readEngineeringAgentHaltState(
   );
   return {
     openStateMismatches,
+    orphanedRuns: orphaned,
     unacknowledgedHalt: recorded.length === 0 ? null : recorded[recorded.length - 1].halt,
     circuitLatched: isCircuitLatched({ runs, acknowledgedAt }),
   };
@@ -326,7 +348,24 @@ export async function openEngineeringAgentRunMismatches(tx: EngineeringAgentTran
 
 /** Whether anything halts claims, runs and pushes (§12). */
 export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
-  state.openStateMismatches > 0 || state.unacknowledgedHalt !== null || state.circuitLatched;
+  state.openStateMismatches > 0 ||
+  state.orphanedRuns > 0 ||
+  state.unacknowledgedHalt !== null ||
+  state.circuitLatched;
+
+/**
+ * Whether a run may start at all, asked before AMUX writes anything for it
+ * (§2.1: a skip is before the claim, because a refusal after it spends an
+ * attempt): the switches allow a claim, nothing halts, and both owner queues
+ * have room. The run's INSERT asks the database again.
+ */
+export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTransaction): Promise<void> {
+  await requireSwitch(tx, "claimAllowed");
+  await lockEngineeringAgentHalt(tx);
+  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
+  const { mode } = await readEngineeringAgentSwitches(tx);
+  if (!(await readEngineeringAgentOwnerQueues(tx, mode)).claimAllowed) refuse("owner_queue_full");
+}
 
 /* ------------------------------------------------------------------------- */
 /* Owner queues                                                               */
@@ -383,7 +422,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 export type RequestAcceptance =
   | { outcome: "accepted" }
   /** The same request was seen before: its recorded state is the answer, and nothing starts again. */
-  | { outcome: "replay"; state: string }
+  | { outcome: "replay"; state: string; resultRef: string | null }
   /** The key was used for a different request. */
   | { outcome: "conflict" };
 
@@ -402,11 +441,11 @@ export async function acceptEngineeringAgentRequest(
   if (!SHA256.test(input.requestDigest)) refuse("request_digest_invalid");
   const existing = await tx.engineeringAgentRequest.findUnique({
     where: { key: input.key },
-    select: { route: true, requestDigest: true, state: true },
+    select: { route: true, requestDigest: true, state: true, resultRef: true },
   });
   if (existing) {
     return existing.route === input.route && existing.requestDigest === input.requestDigest
-      ? { outcome: "replay", state: existing.state }
+      ? { outcome: "replay", state: existing.state, resultRef: existing.resultRef }
       : { outcome: "conflict" };
   }
   await tx.engineeringAgentRequest.create({

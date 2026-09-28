@@ -18,7 +18,7 @@
 
 import "server-only";
 
-import { randomInt } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 
 import type { AmuxAttachedTransaction, AmuxAttachment } from "@/lib/amux/dbBoundary";
 import { acknowledgeAmuxWorkDelivery, pullAmuxWorkDelivery } from "@/lib/amux/delivery";
@@ -60,6 +60,7 @@ import {
   readEngineeringAgentOwnerQueues,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
+  requireEngineeringAgentRunAdmission,
   runEngineeringAgentTransaction,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
@@ -132,15 +133,19 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
   return card.kind;
 };
 
-// Calls each attachment makes through the AMUX writer's bounded client. The
-// start: switch read, halt lock, halt state (three), clock, the run's INSERT,
-// its audit entry (four), the card's kind and the request's move to
-// `committed` -- thirteen, and one to spare. The heartbeat: clock and
-// update. The end: halt state (three), halt lock, update, audit entry (four)
-// and the request's move.
-const RUN_START_PRISMA_CALLS = 14;
+// Calls each attachment makes through the AMUX writer's bounded client. A
+// halt lock is two (the audit chain's, then the halt's); a halt state read is
+// four. The start's admission before any AMUX write: switches, halt lock,
+// halt state, switches, owner queues -- nine. The start itself: switches,
+// halt lock, halt state, clock, the run's INSERT, its audit entry (four), the
+// card's kind and the request's move -- fifteen. The heartbeat: clock and
+// update. The end: halt state, halt lock, update, audit entry and the
+// request's move -- twelve.
+const RUN_START_PRISMA_CALLS = 24;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
-const RUN_END_PRISMA_CALLS = 10;
+const RUN_END_PRISMA_CALLS = 12;
+// A registration: the request's move, and one to spare.
+const WORKER_REGISTER_PRISMA_CALLS = 2;
 // A publish result: the settlement (item lock, capability read, update,
 // audit entry -- seven), the run's card, the binding and its audit entry
 // (five) and the request's move -- fourteen, and two to spare.
@@ -153,6 +158,12 @@ export const engineeringRunStartAttachment = (input: {
   markCommitted?: MarkCommitted;
 }): AmuxAttachment<AmuxExecutionStartedFact> => ({
   prismaCalls: RUN_START_PRISMA_CALLS,
+  // Before AMUX writes anything -- a card it would block on cost or on its
+  // attempt budget included -- a run that could not start refuses the whole
+  // start, so a skip never leaves an AMUX trace (§2.1).
+  beforeWrite: async (lent) => {
+    await requireEngineeringAgentRunAdmission(engineeringAgentTransactionInAmux(lent));
+  },
   work: async (lent, fact, context) => {
     const tx = engineeringAgentTransactionInAmux(lent);
     await recordEngineeringAgentRunStart(tx, {
@@ -262,11 +273,18 @@ const workerCatalogRefusal = (): "worker_catalog_unavailable" | "worker_not_conf
  * Registers a new runtime generation for the adapter's worker, which fences
  * out every earlier generation. The instance id is the runner process's own.
  */
-export async function registerEngineeringAgentWorker(input: { instanceId: string }) {
+export async function registerEngineeringAgentWorker(input: { instanceId: string; markCommitted?: MarkCommitted }) {
   requireOpen();
   const refusal = workerCatalogRefusal();
   if (refusal) return { registered: false as const, reason: refusal };
-  const runtime = await registerAmuxWorkerRuntime(ENGINEERING_AGENT_AMUX_WORKER, input.instanceId);
+  // A registration creates a generation; a retry of one whose answer was lost
+  // must not create another. The request records the generation it created.
+  const runtime = await registerAmuxWorkerRuntime(ENGINEERING_AGENT_AMUX_WORKER, input.instanceId, undefined, {
+    prismaCalls: WORKER_REGISTER_PRISMA_CALLS,
+    work: async (lent, fact) => {
+      await input.markCommitted?.(engineeringAgentTransactionInAmux(lent), String(fact.generation));
+    },
+  });
   return { registered: true as const, generation: runtime.generation, leaseExpiresAt: runtime.leaseExpiresAt };
 }
 
@@ -306,14 +324,54 @@ export async function heartbeatEngineeringAgentWorker(input: {
   return { accepted: true as const, leaseExpiresAt: heartbeat.leaseExpiresAt, dispatchReady };
 }
 
-/** The next durable delivery for the adapter's worker: the card's execution brief. */
+/**
+ * The next durable delivery for the adapter's worker. The runner receives
+ * what §2.1 lets it receive -- the card's execution brief, its kind,
+ * priority, classification and explicit dependencies -- and nothing else:
+ * never the AMUX delivery envelope, which carries the card's title and
+ * description. The brief is passed only when it hashes to the digest the
+ * promotion stored; otherwise the delivery says why there is none, and the
+ * runner ends the run blocked.
+ */
 export async function pullEngineeringAgentDelivery(input: { lease: EngineeringAgentWorkerLease }) {
   requireOpen();
-  return pullAmuxWorkDelivery({
+  const pulled = await pullAmuxWorkDelivery({
     worker: ENGINEERING_AGENT_AMUX_WORKER,
     instanceId: input.lease.instanceId,
     generation: input.lease.generation,
   });
+  if (!pulled.available) return pulled;
+  const card = await prisma.amuxWorkItem.findUnique({
+    where: { id: pulled.delivery.taskId },
+    select: {
+      kind: true,
+      priority: true,
+      classification: true,
+      executionBrief: true,
+      executionBriefDigest: true,
+      dependencies: { select: { dependencyId: true }, orderBy: { dependencyId: "asc" } },
+    },
+  });
+  const brief = card?.executionBrief ?? null;
+  const digest = card?.executionBriefDigest ?? null;
+  const intact =
+    brief !== null && digest !== null && createHash("sha256").update(brief, "utf8").digest("hex") === digest;
+  return {
+    available: true as const,
+    delivery: {
+      attemptId: pulled.delivery.attemptId,
+      taskId: pulled.delivery.taskId,
+      taskRevision: pulled.delivery.taskRevision,
+      receiptId: pulled.delivery.receiptId,
+      leaseExpiresAt: pulled.delivery.leaseExpiresAt,
+      brief: intact ? { text: brief, digest } : null,
+      briefIssue: intact ? null : brief === null || digest === null ? ("missing" as const) : ("digest_mismatch" as const),
+      kind: card?.kind ?? null,
+      priority: card?.priority ?? null,
+      classification: card?.classification ?? null,
+      dependencies: card?.dependencies.map((dependency) => dependency.dependencyId) ?? [],
+    },
+  };
 }
 
 /** Acknowledges a delivery the runner received, under AMUX's receipt fence. */

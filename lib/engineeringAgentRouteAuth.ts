@@ -129,7 +129,7 @@ export const engineeringAgentErrorResponse = (operation: string, error: unknown)
 export type IdempotentOutcome<T> =
   | { kind: "done"; value: T }
   /** The key was seen before: its recorded state is the answer, and nothing runs again. */
-  | { kind: "replay"; state: string }
+  | { kind: "replay"; state: string; resultRef: string | null }
   | { kind: "conflict" };
 
 /**
@@ -193,7 +193,7 @@ export async function runAttachedIdempotentEngineeringAgentRequest<T>(input: {
     }
     return acceptance;
   });
-  if (accepted.outcome === "replay") return { kind: "replay", state: accepted.state };
+  if (accepted.outcome === "replay") return { kind: "replay", state: accepted.state, resultRef: accepted.resultRef };
   if (accepted.outcome === "conflict") return { kind: "conflict" };
   const abort = () =>
     runEngineeringAgentTransaction(prisma, (tx) =>

@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       resultRef: (work) => work?.workItemId ?? null,
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
-    if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state }, 200);
+    if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state, resultRef: outcome.resultRef }, 200);
     return engineeringAgentJson({ work: outcome.value }, 200);
   } catch (error) {
     return engineeringAgentErrorResponse("publish_claim", error);

@@ -80,7 +80,7 @@ export async function POST(request: Request) {
         ),
     });
     if (outcome.kind === "conflict") return engineeringAgentJson({ error: "request_key_reused" }, 409);
-    if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state }, 200);
+    if (outcome.kind === "replay") return engineeringAgentJson({ replayed: true, state: outcome.state, resultRef: outcome.resultRef }, 200);
     // Nothing of ours was written: the result was not recorded, and the
     // claim's lease will pass into a lookup.
     if (outcome.kind === "not_committed") return engineeringAgentJson({ recorded: false }, 409);

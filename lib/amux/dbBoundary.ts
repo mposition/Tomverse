@@ -277,9 +277,16 @@ export type AmuxAttachedTransaction = Prisma.TransactionClient & {
  * lock order. A throw rolls the AMUX write back with it: the two are one fact
  * or neither happened. The attached calls go through the same bounded client
  * and count against the writer's ceiling, which `prismaCalls` widens.
+ *
+ * `beforeWrite`, where a writer offers it, runs after the writer's row locks
+ * and before its first write, including a write on a refusal path (execution
+ * start blocks a card whose cost or attempt budget refuses it). A throw there
+ * refuses the call with nothing written, which is how an adapter says no
+ * before AMUX records anything.
  */
 export type AmuxAttachment<R> = {
   prismaCalls: number;
+  beforeWrite?: (tx: AmuxAttachedTransaction, context: { taskId: string }) => Promise<void>;
   work: (
     tx: AmuxAttachedTransaction,
     result: R,
@@ -287,8 +294,8 @@ export type AmuxAttachment<R> = {
   ) => Promise<void>;
 };
 
-/** Enough for an adapter's own row, its reads and its audit entry, and no more. */
-export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 16;
+/** Enough for an adapter's own checks, row and audit entry, and no more. */
+export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 24;
 
 /** The writer's boundary, widened by exactly what its attachment declared. */
 export const amuxBoundaryWithAttachment = (

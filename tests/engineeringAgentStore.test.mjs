@@ -89,6 +89,7 @@ const UNAUDITED = new Map([
   ["readEngineeringAgentSwitches", "reads only"],
   ["readEngineeringAgentHaltState", "reads only"],
   ["readEngineeringAgentOwnerQueues", "reads only"],
+  ["requireEngineeringAgentRunAdmission", "reads only; the run it admits is audited"],
   ["acceptEngineeringAgentRequest", "idempotency bookkeeping for a request whose own change is audited"],
   ["moveEngineeringAgentRequest", "idempotency bookkeeping for a request whose own change is audited"],
   ["heartbeatEngineeringAgentRun", "a lease extension; the run's start and end are audited"],
@@ -120,6 +121,7 @@ test("every exported write takes the engineering transaction and records its aud
 // by a switch. A new export that is in neither fails here until it is placed.
 const SWITCHED = [
   "recordEngineeringAgentRunStart",
+  "requireEngineeringAgentRunAdmission",
   "claimNextEngineeringAgentPublishWork",
   "openEngineeringAgentWorkItem",
   "claimEngineeringAgentWorkItem",
