@@ -770,6 +770,26 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Same published Standard rates as Gemini 3.5 Flash-Lite, pinned to
+        // the unversioned alias on 2026-09-28. The alias can move; this
+        // profile does not follow a later price. A non-null registry price
+        // column overrides these numbers.
+        modelId: "gemini-flash-lite-latest",
+        provider: "google",
+        apiModelId: "gemini-flash-lite-latest",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.3, 2.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_flash_lite_latest_standard_api_list_price",
+        pricingVersion: "google-gemini-flash-lite-latest-2026-09-28",
+        effectiveDate: "2026-09-28",
+    },
+    {
         modelId: "gemini-3-1-pro",
         provider: "google",
         apiModelId: "gemini-3.1-pro-preview",

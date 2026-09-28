@@ -162,6 +162,7 @@ export const ROUTER_SCORE_SNAPSHOT: readonly RouterScoreSnapshotEntry[] = [
     { modelId: "gemini-3-6-flash", providerId: "google" },
     { modelId: "gemini-3-1-pro", providerId: "google" },
     { modelId: "gemini-2-5-flash", providerId: "google" },
+    { modelId: "gemini-flash-lite-latest", providerId: "google" },
 
     { modelId: "grok-4-5", providerId: "xai" },
 
