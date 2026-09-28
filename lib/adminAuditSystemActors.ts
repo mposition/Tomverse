@@ -16,12 +16,29 @@
  */
 
 export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
+
+/**
+ * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
+ * names the service or app path whose action the entry records; none of them
+ * is a person, so none of them is approval evidence.
+ */
+export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
+  "engineering-agent-runner",
+  "engineering-agent-publisher",
+  "engineering-agent-retention",
+  "engineering-agent-observer",
+  "engineering-agent-registrar",
+] as const;
+export type EngineeringAgentSystemAuditActor =
+  (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
+
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
   "marketing-guard",
   "prompt-refiner-shadow-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
+  ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

@@ -1,0 +1,460 @@
+import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
+import { after, test } from "node:test";
+
+import type { Session } from "next-auth";
+
+import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
+import { unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+import {
+  ENGINEERING_AGENT_AUDIT_ACTIONS,
+  EngineeringAgentStoreRefusedError,
+  acceptEngineeringAgentRequest,
+  acknowledgeEngineeringAgentDecision,
+  claimEngineeringAgentWorkItem,
+  decideEngineeringAgentT2Draft,
+  endEngineeringAgentRun,
+  heartbeatEngineeringAgentRun,
+  issueEngineeringAgentCapability,
+  moveEngineeringAgentBinding,
+  moveEngineeringAgentRequest,
+  openEngineeringAgentWorkItem,
+  recordEngineeringAgentBinding,
+  recordEngineeringAgentBindingObservation,
+  recordEngineeringAgentRunStart,
+  removeEngineeringAgentReviewer,
+  replaceEngineeringAgentBinding,
+  runEngineeringAgentTransaction,
+  settleEngineeringAgentWorkItem,
+} from "@/lib/engineeringAgentStore";
+import { prisma } from "@/lib/prisma";
+
+// Real PostgreSQL evidence for the engineering agent's single writer
+// (docs/policy/engineering-agent.md §11): every change commits with its audit
+// entry under the right actor, results go where the core says, and the
+// database's own rules still hold behind the store. A missing
+// TEST_DATABASE_URL means this file was not executed, not that it passed.
+//
+// Runs before engineering-agent-schema.db.test.ts, whose last test opens the
+// first T1 window for good; everything this file opens it also closes.
+
+const requireDedicatedDatabase = () => {
+  const testRaw = process.env.TEST_DATABASE_URL?.trim();
+  if (!testRaw || process.env.DATABASE_URL?.trim() !== testRaw) {
+    throw new Error("REFUSE: engineering agent DB tests require DATABASE_URL=TEST_DATABASE_URL");
+  }
+  const url = new URL(testRaw);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  if (!/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName) || url.hostname.startsWith("pooled.")) {
+    throw new Error("REFUSE: engineering agent DB tests require a direct dedicated test database");
+  }
+};
+
+requireDedicatedDatabase();
+
+const fixtureTaskIds: string[] = [];
+
+after(async () => {
+  if (fixtureTaskIds.length > 0) {
+    await prisma.amuxWorkItem.updateMany({ where: { id: { in: fixtureTaskIds } }, data: { archivedAt: new Date() } });
+  }
+  await prisma.$disconnect();
+});
+
+const sha1 = (seed: string) => createHash("sha1").update(seed).digest("hex");
+const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+let runCounter = 500_000_000 + (Math.floor(Date.now() / 1000) % 100_000_000);
+const nextRunId = () => String((runCounter += 1));
+
+const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+  runEngineeringAgentTransaction(prisma, work);
+
+const refusedWith = async (promise: Promise<unknown>, code: string) =>
+  assert.rejects(promise, (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === code, code);
+
+const amuxAttempt = async () => {
+  const task = await prisma.amuxWorkItem.create({
+    data: {
+      id: `eng-agent-card-${randomUUID()}`,
+      title: "Engineering agent store fixture",
+      status: "review",
+      kind: "code",
+      priority: "p3",
+      revision: 2,
+      requiresHumanReview: true,
+      reviewSpecialty: "code-review",
+      reviewPrNumber: 1706,
+    },
+  });
+  fixtureTaskIds.push(task.id);
+  const now = new Date();
+  const attempt = await prisma.amuxExecutionAttempt.create({
+    data: {
+      id: `eng-agent-attempt-${randomUUID()}`,
+      taskId: task.id,
+      worker: "engineering-runner",
+      workerInstanceId: "store-fixture",
+      workerGeneration: 1,
+      taskRevision: 1,
+      attemptNumber: 1,
+      heartbeatAt: now,
+      startedAt: now,
+      endedAt: now,
+      outcome: "succeeded",
+      toStatus: "review",
+      endedBy: "engineering-runner",
+    },
+  });
+  return { task, attempt };
+};
+
+const startRun = async () => {
+  const { task, attempt } = await amuxAttempt();
+  const runId = nextRunId();
+  const started = await inTx((tx) =>
+    recordEngineeringAgentRunStart(tx, {
+      runId,
+      amuxAttemptId: attempt.id,
+      cardId: task.id,
+      cardKind: "code",
+      baseSha: sha1("base"),
+      leaseMs: 60_000,
+    }),
+  );
+  return { ...started, cardId: task.id };
+};
+
+const auditFor = (targetId: string) =>
+  prisma.adminAuditLog.findMany({ where: { targetId }, orderBy: { createdAt: "asc" } });
+
+const systemActorOf = (row: { metadata: unknown }) =>
+  (row.metadata as Record<string, unknown> | null)?.[SYSTEM_AUDIT_ACTOR_METADATA_KEY];
+
+const owner = {
+  user: { id: `eng-agent-owner-${randomUUID()}`, email: "owner@example.test" },
+  expires: new Date(Date.now() + 3_600_000).toISOString(),
+} as Session;
+
+test("a request is recorded before its work and answered from its record after", async () => {
+  const key = randomUUID().replace(/-/g, "");
+  const digest = sha256("request");
+  assert.deepEqual(await inTx((tx) => acceptEngineeringAgentRequest(tx, { key, route: "run/start", requestDigest: digest })), {
+    outcome: "accepted",
+  });
+  assert.deepEqual(await inTx((tx) => acceptEngineeringAgentRequest(tx, { key, route: "run/start", requestDigest: digest })), {
+    outcome: "replay",
+    state: "accepted",
+  });
+  assert.deepEqual(
+    await inTx((tx) => acceptEngineeringAgentRequest(tx, { key, route: "run/start", requestDigest: sha256("other") })),
+    { outcome: "conflict" },
+  );
+  await inTx((tx) => moveEngineeringAgentRequest(tx, { key, from: "accepted", to: "in_progress" }));
+  await refusedWith(
+    inTx((tx) => moveEngineeringAgentRequest(tx, { key, from: "accepted", to: "in_progress" })),
+    "request_not_in_expected_state",
+  );
+  await inTx((tx) => moveEngineeringAgentRequest(tx, { key, from: "in_progress", to: "committed" }));
+});
+
+test("a run starts and ends with its audit entries, under the runner", async () => {
+  const run = await startRun();
+  assert.equal(run.modeAtStart, "off");
+  const extended = await inTx((tx) => heartbeatEngineeringAgentRun(tx, { runId: run.runId, leaseMs: 120_000 }));
+  assert.ok(extended.getTime() > run.leaseExpiresAt.getTime());
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
+  await refusedWith(
+    inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" })),
+    "run_not_active",
+  );
+  const entries = await auditFor(run.runId);
+  assert.deepEqual(
+    entries.map((entry) => entry.action),
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.runStarted, ENGINEERING_AGENT_AUDIT_ACTIONS.runEnded],
+  );
+  for (const entry of entries) {
+    assert.equal(systemActorOf(entry), "engineering-agent-runner");
+    assert.equal(entry.actorUserId, null);
+  }
+});
+
+const commitFields = (runId: string, cardRef: string) => ({
+  identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+  baseCommitterDate: "1759000000 +1000",
+  runId,
+  cardRef,
+});
+
+test("a publish consumes its one capability on the write claim, and settles where the core says", async () => {
+  const run = await startRun();
+  const patchDigest = sha256("patch");
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}`,
+      runId: run.runId,
+      patchDigest,
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  await refusedWith(
+    inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 })),
+    "capability_unavailable",
+  );
+  const issued = await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: {
+        baseSha: sha1("base"),
+        patchDigest,
+        expectedTreeId: sha1("tree"),
+        commit: commitFields(run.runId, run.cardId),
+      },
+    }),
+  );
+  assert.match(issued.commitDigest, /^[0-9a-f]{64}$/);
+
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  assert.equal(claim.fencingToken, BigInt(1));
+  const capability = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { workItemId } });
+  assert.ok(capability.consumedAt, "the write claim consumed the capability");
+  assert.equal(capability.claimFencingToken, BigInt(1));
+
+  await refusedWith(
+    inTx((tx) =>
+      settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: BigInt(9), outcome: "confirmed" }),
+    ),
+    "result_leads_nowhere",
+  );
+  const settled = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "confirmed" }),
+  );
+  assert.deepEqual(settled, { state: "published", decisionItemId: null });
+
+  const actions = (await auditFor(workItemId)).map((entry) => [entry.action, systemActorOf(entry)]);
+  assert.deepEqual(actions, [
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemOpened, "engineering-agent-runner"],
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.capabilityIssued, "engineering-agent-runner"],
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemClaimed, "engineering-agent-publisher"],
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering-agent-publisher"],
+  ]);
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+});
+
+test("an unknown outcome opens its decision item, and a person acknowledges it", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, { kind: "expire_close", causeKey: `expire_close:${run.runId}`, runId: run.runId }),
+  );
+  await refusedWith(
+    inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 })),
+    "precondition_missing",
+  );
+  const claim = await inTx((tx) =>
+    claimEngineeringAgentWorkItem(tx, {
+      workItemId,
+      mode: "write",
+      leaseMs: 60_000,
+      precondition: { kind: "expire_close", bindingMatches: true, stillExpired: true },
+    }),
+  );
+  const settled = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "lookup_impossible" }),
+  );
+  assert.equal(settled.state, "outcome_unknown");
+  assert.ok(settled.decisionItemId);
+  const decision = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: settled.decisionItemId! } });
+  assert.equal(decision.causeKey, unknownOutcomeDecisionCauseKey(workItemId, claim.fencingToken));
+  assert.equal(decision.state, "open");
+
+  const { auditLogId } = await inTx((tx) =>
+    acknowledgeEngineeringAgentDecision(tx, { session: owner, workItemId: settled.decisionItemId! }),
+  );
+  const entry = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: auditLogId } });
+  assert.equal(entry.actorUserId, owner.user!.id);
+  assert.equal(systemActorOf(entry), undefined, "a person's action is not a system entry");
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+});
+
+test("a T2 draft is stored only when clean, and decided with its audit entry in one transaction", async () => {
+  const run = await startRun();
+  // Built at run time so no secret scanner reads a key in this file.
+  const leaky = `diff --git a/x b/x\n+${"-----BEGIN "}${"PRIVATE KEY-----"}\n`;
+  await refusedWith(
+    inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "t2_draft",
+        causeKey: `t2_draft:${run.runId}:leaky`,
+        runId: run.runId,
+        patchBody: leaky,
+        patchDigest: sha256(leaky),
+        baseSha: sha1("base"),
+        reason: "push_forbidden",
+      }),
+    ),
+    "secret_detected",
+  );
+  assert.equal(await prisma.engineeringAgentWorkItem.count({ where: { causeKey: `t2_draft:${run.runId}:leaky` } }), 0);
+
+  const patch = "diff --git a/README.md b/README.md\n+one line\n";
+  await refusedWith(
+    inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "t2_draft",
+        causeKey: `t2_draft:${run.runId}:mismatch`,
+        runId: run.runId,
+        patchBody: patch,
+        patchDigest: sha256("something else"),
+        baseSha: sha1("base"),
+        reason: "push_forbidden",
+      }),
+    ),
+    "patch_digest_mismatch",
+  );
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "t2_draft",
+      causeKey: `t2_draft:${run.runId}`,
+      runId: run.runId,
+      patchBody: patch,
+      patchDigest: sha256(patch),
+      baseSha: sha1("base"),
+      reason: "push_forbidden",
+    }),
+  );
+  await refusedWith(
+    inTx((tx) =>
+      decideEngineeringAgentT2Draft(tx, {
+        session: owner,
+        workItemId,
+        decision: "approved",
+        patchDigest: sha256("what the owner did not see"),
+        baseSha: sha1("base"),
+      }),
+    ),
+    "draft_changed",
+  );
+  const decided = await inTx((tx) =>
+    decideEngineeringAgentT2Draft(tx, {
+      session: owner,
+      workItemId,
+      decision: "approved",
+      patchDigest: sha256(patch),
+      baseSha: sha1("base"),
+    }),
+  );
+  const item = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+  assert.equal(item.state, "approved");
+  const approval = await prisma.engineeringAgentApproval.findUniqueOrThrow({ where: { id: decided.approvalId } });
+  assert.equal(approval.auditLogId, decided.auditLogId);
+  assert.equal(approval.actorUserId, owner.user!.id);
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t2_draft", halt: "none" }));
+});
+
+test("a binding records its observations once, its reviewer as a pair, and a re-bind supersedes it", async () => {
+  const run = await startRun();
+  const prNumber = 100_000 + Math.floor(Math.random() * 900_000);
+  const snapshot = { baseSha: sha1("base"), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] };
+  const { bindingId } = await inTx((tx) =>
+    recordEngineeringAgentBinding(tx, {
+      runId: run.runId,
+      prNumber,
+      headSha: sha1("head"),
+      verifiedHeadSha: sha1("head"),
+      snapshot,
+    }),
+  );
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBinding(tx, {
+        runId: run.runId,
+        prNumber,
+        headSha: sha1("head"),
+        verifiedHeadSha: sha1("head"),
+        snapshot: { ...snapshot, reviewer: "someone" } as typeof snapshot,
+      }),
+    ),
+    "snapshot_invalid",
+  );
+
+  const { bindingId: current } = await inTx((tx) =>
+    replaceEngineeringAgentBinding(tx, {
+      previousBindingId: bindingId,
+      replacement: {
+        runId: run.runId,
+        prNumber,
+        headSha: sha1("head 2"),
+        verifiedHeadSha: sha1("head 2"),
+        snapshot: { ...snapshot, diffDigest: sha256("diff 2"), invalidatedReviewIds: [41] },
+      },
+    }),
+  );
+  const superseded = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: bindingId } });
+  assert.ok(superseded.supersededAt && superseded.supersededAt.getFullYear() > 2000, "the database wrote the time");
+
+  const approved = {
+    verdict: "approved" as const,
+    reviewId: 42,
+    reviewCommitId: sha1("head 2"),
+    submittedAt: "2026-09-28T01:02:03.000Z",
+    observedAt: "2026-09-28T01:03:03.000Z",
+  };
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBindingObservation(tx, { bindingId: current, kind: "approval", observation: approved, reviewer: null }),
+    ),
+    "reviewer_goes_with_approval",
+  );
+  const reviewer = { githubId: 60078951, login: "mposition" };
+  assert.deepEqual(
+    await inTx((tx) =>
+      recordEngineeringAgentBindingObservation(tx, { bindingId: current, kind: "approval", observation: approved, reviewer }),
+    ),
+    { recorded: true },
+  );
+  assert.deepEqual(
+    await inTx((tx) =>
+      recordEngineeringAgentBindingObservation(tx, { bindingId: current, kind: "approval", observation: approved, reviewer }),
+    ),
+    { recorded: false },
+    "the same observation again is a no-op",
+  );
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBindingObservation(tx, {
+        bindingId: current,
+        kind: "approval",
+        observation: { verdict: "not_approved", reason: "snapshot_changed", observedAt: "2026-09-28T01:04:03.000Z" },
+        reviewer: null,
+      }),
+    ),
+    "observation_already_recorded",
+  );
+
+  await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: current, to: "closed" }));
+  await inTx((tx) =>
+    recordEngineeringAgentBindingObservation(tx, {
+      bindingId: current,
+      kind: "merge",
+      observation: {
+        merged: true,
+        mergeCommitSha: sha1("merge"),
+        mergedAt: "2026-09-28T02:00:00.000Z",
+        mergedByKind: "user",
+        observedAt: "2026-09-28T02:01:00.000Z",
+      },
+    }),
+  );
+  await inTx((tx) => removeEngineeringAgentReviewer(tx, { bindingId: current }));
+  const kept = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: current } });
+  assert.equal(kept.reviewerGithubId, null);
+  assert.equal(kept.reviewerLogin, null);
+  assert.ok(kept.reviewerRecordedAt, "when the reviewer was recorded stays");
+  await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: current, to: "pruned" }));
+
+  const observers = (await auditFor(current)).map((entry) => systemActorOf(entry));
+  assert.ok(observers.includes("engineering-agent-observer"));
+  assert.ok(observers.includes("engineering-agent-retention"));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+});

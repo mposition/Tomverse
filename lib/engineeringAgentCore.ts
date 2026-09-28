@@ -497,6 +497,14 @@ export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[]
 /* Mode and switches                                                          */
 /* ------------------------------------------------------------------------- */
 
+/**
+ * The approved policy version this code implements (docs/policy/engineering-agent.md,
+ * "정책 버전"). A capability records it at issue and is consumed only while it
+ * is still current; tests/engineeringAgentStore.test.mjs compares it with the
+ * policy header, so a new policy version cannot go unnoticed.
+ */
+export const ENGINEERING_AGENT_POLICY_VERSION = 1;
+
 export const ENGINEERING_AGENT_MODE_SETTING_KEY = "feature.engineeringAgentMode";
 export const ENGINEERING_AGENT_FREEZE_SETTING_KEY = "feature.engineeringAgentFreeze";
 export const ENGINEERING_AGENT_REGISTRATION_SETTING_KEY =

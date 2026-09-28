@@ -631,6 +631,30 @@ export const RAW_SQL_ALLOWLIST = [
       "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
   },
   {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentCapability",
+    tableMentions: 2,
+    writeVerbs: 7,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,

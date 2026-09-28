@@ -217,6 +217,10 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // Engineering agent store: every change commits with its audit entry
+    // under the right actor, and results go where the core says. Before the
+    // schema file, whose last test opens the first T1 window for good.
+    "tests/integration/engineering-agent-store.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
