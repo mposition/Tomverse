@@ -1,6 +1,8 @@
 # Railway Infrastructure as Code
 
-Scope: the five scheduled-job cron services only. The web service `Tomverse`
+Scope: the scheduled-job cron services, and -- once their image digest is
+recorded -- the engineering agent's two production services
+(`docs/ops/engineering-agent-services.md`). The web service `Tomverse`
 is managed in the Railway dashboard and is deliberately not owned by this file.
 
 - `scheduled-jobs.ts` -- the cron services as data (name, start command, cron,

@@ -3976,6 +3976,54 @@ const checks = [
     // and nothing but a check keeps them saying the same thing.
     test: (source) => source.includes('thinking_level: "high"'),
   },
+  {
+    // docs/policy/engineering-agent.md §8: each service holds exactly its own
+    // table row -- no database, AMUX, platform or other service's credential.
+    name: "Engineering agent services declare only the variables their policy row names",
+    file: ".railway/scheduled-jobs.ts",
+    test: (source) => {
+      const start = source.indexOf("export const RAILWAY_AGENT_SERVICES");
+      const stop = source.indexOf("];", start);
+      if (start < 0 || stop < 0) return false;
+      const block = source.slice(start, stop);
+      const declared = [...block.matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((match) => match[1]).sort();
+      const allowed = [
+        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
+        "ENGINEERING_AGENT_PUBLISHER_APP_ID",
+        "ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL",
+        "ENGINEERING_AGENT_PUBLISHER_INSTALLATION_ID",
+        "ENGINEERING_AGENT_PUBLISHER_PRIVATE_KEY",
+        "ENGINEERING_AGENT_PUBLISHER_SECRET",
+        "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
+        "ENGINEERING_AGENT_RUNNER_SECRET",
+      ];
+      return JSON.stringify(declared) === JSON.stringify(allowed) && !/staging:/.test(block);
+    },
+  },
+  {
+    // docs/policy/engineering-agent.md §8, §9-2: the publisher's App token is contents/pull_requests write and
+    // metadata read, and a token carrying anything else -- workflows above all
+    // -- is refused before use.
+    name: "Engineering agent publisher refuses an App token with any permission beyond its three",
+    file: "scripts/engineering-agent-publisher.mjs",
+    test: (source) =>
+      source.includes('contents: "write",\n  pull_requests: "write",\n  metadata: "read",\n});') &&
+      source.includes("if (!tokenPermissionsAllowed(body.permissions))") &&
+      !/workflows:\s*"(read|write)"/.test(source),
+  },
+  {
+    // docs/policy/engineering-agent.md §8: the agent image is built on main only, with no repository secret
+    // and no cache, and never on the deployment platform.
+    name: "Engineering agent image builds on main without a repository secret or cache",
+    file: ".github/workflows/engineering-agent-image.yml",
+    test: (source) =>
+      /on:\n {2}push:\n {4}branches: \[main\]\n/.test(source) &&
+      !/pull_request|workflow_dispatch|secrets\.|actions\/cache|cache-from|cache-to/.test(source) &&
+      source.includes("--no-cache"),
+  },
 ];
 
 const failures = [];
