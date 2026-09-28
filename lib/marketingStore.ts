@@ -4386,5 +4386,327 @@ export async function startMarketingPostDispatch(
   return { started: true, requestKey: post.logicalKey, attempt };
 }
 
+/**
+ * What became of a dispatched post: the three answers, and only these three.
+ *
+ * `published` means the platform confirmed an object. `failed` means it
+ * confirmed there is none and said why. `outcome_unknown` means we do not know
+ * -- and that is a result, not an error to swallow. The policy says never blind
+ * retry, and this is the value that makes the caller stop.
+ *
+ * All three share a shape, so it is written once: lock the post, require the
+ * exact request key the dispatch sent and `status = 'publishing'`, append one
+ * strict `attempt` entry, and move `historyVersion` by one under a CAS. What
+ * differs is the status, the columns each answer owns, and the audit action.
+ *
+ * **The request key, not the claim token, is what binds these.** By the time an
+ * answer comes back the lease may have expired -- the plan says a lease that
+ * expires after the call began follows the same rules and is never called
+ * reconciliation -- so requiring a live claim here would leave the row
+ * `publishing` forever with the answer in hand. The key is what the platform was
+ * told, so the key is what identifies the attempt being resolved.
+ */
+type MarketingOutcome =
+  | {
+      readonly kind: "published";
+      readonly externalPostId: string;
+      /** HTTPS, on the platform's own host. */
+      readonly externalUrl: string;
+    }
+  | { readonly kind: "failed"; readonly errorCode: string }
+  | { readonly kind: "outcome_unknown"; readonly errorCode: string };
+
+type MarketingOutcomeRefusal =
+  | "post_not_found"
+  | "post_not_publishing"
+  | "request_key_mismatch"
+  | "outcome_conflict";
+
+const OUTCOME_STATUS = Object.freeze({
+  published: "published",
+  failed: "failed",
+  outcome_unknown: "outcome_unknown",
+} as const);
+
+const OUTCOME_ACTION = Object.freeze({
+  published: MARKETING_S2D2_ACTIONS.published,
+  failed: MARKETING_S2D2_ACTIONS.failed,
+  outcome_unknown: MARKETING_S2D2_ACTIONS.outcomeUnknown,
+} as const);
+
+async function recordMarketingPostOutcome(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly outcome: MarketingOutcome;
+  },
+): Promise<
+  | { readonly recorded: true; readonly paused: boolean }
+  | { readonly recorded: false; readonly reason: MarketingOutcomeRefusal }
+> {
+  const id = String(rawInput.id);
+  const requestKey = String(rawInput.requestKey);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const outcome = rawInput.outcome;
+  if (requestKey.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "outcome_request_key_empty",
+      "An outcome names the request it answers, and an empty key names nothing",
+    );
+  }
+  if (outcome.kind === "published") {
+    // HTTPS on the platform's own host. A URL is what a person clicks to check
+    // the post exists, and one this system cannot vouch for is worse than none.
+    let parsed: URL;
+    try {
+      parsed = new URL(outcome.externalUrl);
+    } catch {
+      throw new MarketingStoreRefusedError(
+        "published_url_unreadable",
+        "A published post carries a URL, and that is not one",
+      );
+    }
+    if (parsed.protocol !== "https:") {
+      throw new MarketingStoreRefusedError(
+        "published_url_not_https",
+        "A published post's URL is HTTPS",
+      );
+    }
+    if (String(outcome.externalPostId).length === 0) {
+      throw new MarketingStoreRefusedError(
+        "published_external_id_empty",
+        "A published post has an id on the platform",
+      );
+    }
+  } else if (String(outcome.errorCode).length === 0) {
+    throw new MarketingStoreRefusedError(
+      "outcome_error_code_empty",
+      "A failure says why, from a closed code",
+    );
+  }
+
+  await requireSerializableTransaction(database, "outcome");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  const rows = await database.$queryRaw<
+    Array<{
+      id: string;
+      channelId: string;
+      status: string;
+      providerRequestKey: string | null;
+      publishAttempt: number;
+      history: Prisma.JsonValue;
+      historyVersion: number;
+    }>
+  >(Prisma.sql`
+    SELECT
+      "id", "channelId", "status", "providerRequestKey",
+      "publishAttempt", "history", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "publishing") {
+    return { recorded: false, reason: "post_not_publishing" };
+  }
+  if (post.providerRequestKey !== requestKey) {
+    return { recorded: false, reason: "request_key_mismatch" };
+  }
+
+  const attempt = Number(post.publishAttempt);
+  // Parsed before being written back, like every other history append here: a
+  // row whose history this module cannot read is a row it must not rewrite.
+  const history = marketingHistorySchema.parse(post.history);
+  const entry = {
+    at: now.toISOString(),
+    type: "attempt" as const,
+    attempt,
+    outcome: outcome.kind,
+    errorCode: outcome.kind === "published" ? null : outcome.errorCode,
+  };
+
+  // Prisma's own input type, not `Record<string, unknown>`. An untyped bag would
+  // let a misspelled column through the compiler, and the fake in the unit tests
+  // accepts whatever it is handed -- so the mistake would surface only against a
+  // real database, which is the failure shape this feature keeps producing.
+  const data: Prisma.MarketingPostUpdateManyMutationInput = {
+    status: OUTCOME_STATUS[outcome.kind],
+    history: asJson([...history, entry]),
+    historyVersion: expectedHistoryVersion + 1,
+  };
+  if (outcome.kind === "published") {
+    data.externalPostId = outcome.externalPostId;
+    data.externalUrl = outcome.externalUrl;
+    // The database's clock, once, like every other instant this module writes.
+    // A published time a caller chose is a published time a caller could choose
+    // to be before its own deadline.
+    data.publishedAt = now;
+    // The attempt has concluded, so the claim describes nothing. Left set, it
+    // would hide a published post behind a dead lease.
+    data.claimToken = null;
+    data.leaseUntil = null;
+  } else if (outcome.kind === "failed") {
+    data.errorCode = outcome.errorCode;
+    data.claimToken = null;
+    data.leaseUntil = null;
+  } else {
+    data.outcomeUnknownAt = now;
+    // **The claim is deliberately left alone.** An unknown outcome is the one
+    // state where something may exist on the platform that this system cannot
+    // see, and clearing the claim would let the next run treat the row as free.
+    // It is a person who resolves this, through
+    // `marketing_post.resolve_outcome_unknown`.
+    data.errorCode = outcome.errorCode;
+  }
+
+  const recorded = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "publishing",
+      providerRequestKey: requestKey,
+      historyVersion: expectedHistoryVersion,
+    },
+    data,
+  });
+  if (recorded.count !== 1) {
+    return { recorded: false, reason: "outcome_conflict" };
+  }
+
+  // **An unknown outcome stops an autonomous account, in this transaction.**
+  //
+  // Not afterwards and not on a schedule: the whole hazard is that something may
+  // already be live that nothing here can see, and an account that keeps posting
+  // while that is true compounds it. The channel is locked, and the trigger is
+  // what permits `autonomous_mode -> paused` and writes `pausedFromMode` and
+  // `pausedAt` itself, so this sets only the status and the reason.
+  //
+  // An account in `approval_mode` is not paused: a person is already looking at
+  // every post there, which is the thing pausing would achieve.
+  let paused = false;
+  if (outcome.kind === "outcome_unknown") {
+    const channel = await lockMarketingChannel(database, post.channelId);
+    if (channel.status === "autonomous_mode") {
+      const stopped = await database.marketingChannel.updateMany({
+        where: { id: post.channelId, status: "autonomous_mode" },
+        data: { status: "paused", pauseReasonCode: "outcome_unknown" },
+      });
+      paused = stopped.count === 1;
+      if (paused) {
+        await writeSystemAuditLog({
+          tx: database,
+          systemActor: "marketing-publisher",
+          action: MARKETING_S2D2_ACTIONS.accountOutcomeUnknownPaused,
+          targetType: "MarketingChannel",
+          targetId: post.channelId,
+          summary:
+            "Stopped an autonomous account because a post's outcome is unknown.",
+          metadata: {
+            postId: id,
+            attempt,
+            reasonCode: "outcome_unknown",
+            pausedFromMode: channel.status,
+          },
+        });
+      }
+    }
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: OUTCOME_ACTION[outcome.kind],
+    targetType: "MarketingPost",
+    targetId: id,
+    summary:
+      outcome.kind === "published"
+        ? "The platform confirmed the post."
+        : outcome.kind === "failed"
+          ? "The platform confirmed the post was not made, and said why."
+          : "A request left and nothing proves what became of it.",
+    metadata: {
+      channelId: post.channelId,
+      attempt,
+      requestKey,
+      ...(outcome.kind === "published"
+        ? { externalPostId: outcome.externalPostId, externalUrl: outcome.externalUrl }
+        : { errorCode: outcome.errorCode }),
+      ...(outcome.kind === "outcome_unknown" ? { accountPaused: paused } : {}),
+    },
+  });
+
+  return { recorded: true, paused };
+}
+
+/** The platform confirmed an object. */
+export async function recordMarketingPostPublished(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: {
+      kind: "published",
+      externalPostId: input.externalPostId,
+      externalUrl: input.externalUrl,
+    },
+  });
+}
+
+/** The platform confirmed there is no object, and said why. */
+export async function recordMarketingPostFailed(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: { kind: "failed", errorCode: input.errorCode },
+  });
+}
+
+/**
+ * A request left and nothing proves what became of it.
+ *
+ * The caller reaches this only after the idempotency lookup has also failed to
+ * settle it -- `outcome_unknown` is not what a timeout means on its own, it is
+ * what a timeout plus an unanswerable "did this happen" means. Recording it
+ * stops an autonomous account in the same transaction.
+ */
+export async function recordMarketingPostOutcomeUnknown(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: { kind: "outcome_unknown", errorCode: input.errorCode },
+  });
+}
+
 /** Unused by this module, exported so a caller can narrow a paused mode. */
 export type { MarketingPausableMode };
