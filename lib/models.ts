@@ -236,6 +236,11 @@ export const AVAILABLE_MODELS = [
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", apiModel: "gemini-3.5-flash-lite", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
+    // Unversioned Google alias. A separate catalogue id from gemini-2-5-flash:
+    // that stable id keeps calling gemini-3.5-flash-lite, and this one follows
+    // whatever Google currently serves as gemini-flash-lite-latest. Guest
+    // comparisons open this id as of 2026-09-28. Do not rename either id.
+    { id: "gemini-flash-lite-latest", name: "Gemini Flash-Lite", apiModel: "gemini-flash-lite-latest", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
 
     // STANDING DECISION -- openai/gpt-oss-* is not added to this catalogue.
     //

@@ -339,6 +339,9 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   "gemini-3-1-pro": APP_MANAGED_BRAVE,
   // Stable Tomverse ID; upstream apiModel is gemini-3.5-flash-lite.
   "gemini-2-5-flash": APP_MANAGED_BRAVE,
+  // Unversioned alias. Same application-managed search path as the other
+  // active Google chat models; Google's own grounding stays undispatchable.
+  "gemini-flash-lite-latest": APP_MANAGED_BRAVE,
   // Disabled in the catalog; left out entirely (falls through to unsupported
   // via the lookup fallback) since it can't be selected today anyway.
 

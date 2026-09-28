@@ -82,6 +82,7 @@ test("an application-managed search reserves five Brave requests at the Brave ra
     "gemini-3-6-flash",
     "gemini-3-1-pro",
     "gemini-2-5-flash",
+    "gemini-flash-lite-latest",
   ]) {
     const model = modelFor(id);
     if (!model) continue;

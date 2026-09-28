@@ -28,7 +28,7 @@ import { installChatModelStub } from "./support/chat-state-fixtures";
  * same script rather than only the lead, so this spec does not quietly depend
  * on how many panels a guest conversation opens with.
  */
-const GUEST_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
+const GUEST_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
 const NUL = String.fromCharCode(0);
 const KEEPALIVE_MARKER = `${NUL}TOMVERSE_STREAM_KEEPALIVE`;
 const TRAILER_MARKER = `${NUL}TOMVERSE_SEARCH_METADATA`;

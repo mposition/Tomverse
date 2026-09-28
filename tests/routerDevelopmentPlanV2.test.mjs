@@ -42,11 +42,17 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // which is what says neither change moved a row of this plan -- the old and
   // new rankings agree on everything the v1 corpus produces. A re-baseline
   // asserted only against itself would say nothing at all.
+  //
+  // Re-baselined again when `gemini-flash-lite-latest` joined the catalogue
+  // (2026-09-28). The plan is one row per case per model, so both digests
+  // moved. The previous plan digest was 9f948dd5…6946e5. The substitution
+  // below is recomputed on this catalogue and still has to match the pair
+  // those two older version strings produce.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
   assert.equal(legacy.versions.router.selection, "router-selection-v3");
   assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
-  assert.equal(legacy.planDigest, "9f948dd55cf75518c76a23324c8fe05c6b96fca2b647facec6dab35bef6946e5");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "e58faed7ac2c3d0a3939a50c39e51e54b6e204fbbffb6fca435f8788f29de4c1");
+  assert.equal(legacy.planDigest, "4e6f769a31a7fcdcf7db0f2b4f4d627a86f1b6bb913ebec9be2774f9d5892784");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "839c980f0ecde4a064ca2d42472f3ab2c010529e627fc75af8ab4478acf1912f");
 
   // The digest covers the body without itself, and it is written last, so
   // dropping it leaves the remaining keys in the order they were built in.
@@ -61,10 +67,10 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
     },
   };
   const beforePlanDigest = benchmarkDigest(canonicalBenchmarkJson(asBefore));
-  assert.equal(beforePlanDigest, "c27c6a833b7fc6a41956098d8a967a9c5224545c2de7d74f90d72cf1339afc4b");
+  assert.equal(beforePlanDigest, "43c5605bb7fad864c3c7695ccd2df2c75ff3679fbc582f5ef3170e266f1d58b5");
   assert.equal(
     benchmarkDigest(JSON.stringify({ ...asBefore, planDigest: beforePlanDigest })),
-    "64e628f3ac59ee52283991f2a58a4a71b8b028b793451cc6012229971a0a4b3a"
+    "aa88c7a9e8a300303d59672193a97fff79e8192998692ed3b42daebfee24b40e"
   );
   assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
