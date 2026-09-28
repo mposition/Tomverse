@@ -405,63 +405,49 @@ const buildGraph = (files: readonly SourceFile[]): Graph => {
 const isProduct = (path: string) => classifyPath(path) === "product";
 const isControlPlane = (path: string) => classifyPath(path) === "control-plane";
 
-/** Product files the runtime control plane reaches. */
-const dependenciesOf = (graph: Graph) => {
-  const dependencies = new Set<string>();
-  const queue = [...graph.edges.keys()].filter(isRuntimeControlPlane);
-  const seen = new Set(queue);
-  while (queue.length > 0) {
-    const current = queue.pop() as string;
-    for (const target of graph.edges.get(current) ?? []) {
-      if (seen.has(target)) continue;
-      seen.add(target);
-      if (isProduct(target)) dependencies.add(target);
-      queue.push(target);
-    }
-  }
-  return dependencies;
-};
-
 /**
- * Product files from which a control-plane module is reachable through product
- * files, plus product files that load modules by a computed name -- they may be
- * reaching the control plane in a way no edge shows.
+ * Product files connected to the control plane by imports in either direction,
+ * through any number of hops, plus product files that load by a computed name.
+ *
+ * A module the control plane runs can be handed a callback, registered into or
+ * mutated by any file that reaches it, directly or through others, and that
+ * file is shaped in turn by whatever it imports. Import edges do not say which
+ * of these happens, and this analysis does not try to: everything connected is
+ * in the slice. Only code that shares no import path with the control plane,
+ * in either direction, stays out.
  */
-const callersOf = (graph: Graph) => {
-  const reverse = new Map<string, Set<string>>();
+const connectedToControlPlane = (graph: Graph) => {
+  const neighbours = new Map<string, Set<string>>();
+  const link = (from: string, to: string) => {
+    const set = neighbours.get(from) ?? new Set<string>();
+    set.add(to);
+    neighbours.set(from, set);
+  };
   for (const [from, targets] of graph.edges) {
     for (const target of targets) {
-      const importers = reverse.get(target) ?? new Set<string>();
-      importers.add(from);
-      reverse.set(target, importers);
+      link(from, target);
+      link(target, from);
     }
   }
-  const callers = new Set<string>();
-  const queue: string[] = [];
-  for (const path of graph.edges.keys()) {
-    if (isControlPlane(path)) queue.push(path);
-    else if (isProduct(path) && graph.facts.get(path)?.runtimeLoader) {
-      callers.add(path);
-      queue.push(path);
-    }
-  }
+  const queue = [...graph.edges.keys()].filter(
+    (path) => isControlPlane(path) || (isProduct(path) && graph.facts.get(path)?.runtimeLoader === true),
+  );
   const seen = new Set(queue);
   while (queue.length > 0) {
     const current = queue.pop() as string;
-    for (const importer of reverse.get(current) ?? []) {
-      if (seen.has(importer) || !isProduct(importer)) continue;
-      seen.add(importer);
-      callers.add(importer);
-      queue.push(importer);
+    for (const next of neighbours.get(current) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(next);
     }
   }
-  return callers;
+  return new Set([...seen].filter(isProduct));
 };
 
 /**
  * The slice for one change set. The base tree gives the slice a changed path
- * may already be in; the result tree gives the callers it may have joined --
- * including through a barrel the same change adds. A changed file that loads
+ * may already be in; the result tree gives the one it may have joined --
+ * including through a barrel or a registrant the same change adds. A changed file that loads
  * by a computed name, calls through a computed member, reads a computed
  * environment key or touches AppSetting directly is in the slice, as is one
  * whose added lines name a configuration key.
@@ -472,7 +458,7 @@ export const computeControlPlaneSlice = (input: {
 }): SliceResult => {
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = new Set([...dependenciesOf(base), ...callersOf(base)]);
+  const baseSlice = connectedToControlPlane(base);
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
@@ -501,8 +487,7 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultCallers = callersOf(result);
-  const resultDependencies = dependenciesOf(result);
+  const resultSlice = connectedToControlPlane(result);
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
@@ -510,17 +495,7 @@ export const computeControlPlaneSlice = (input: {
       if (baseSlice.has(path)) slicePaths.add(path);
     }
     if (change.status !== "deleted") {
-      if (resultCallers.has(change.path)) slicePaths.add(change.path);
-      // A changed file that imports code the control plane runs can hand it a
-      // callback, register into it or mutate what it holds -- none of which an
-      // import edge shows. Following that is beyond this analysis, so the file
-      // joins the slice instead.
-      for (const target of result.edges.get(change.path) ?? []) {
-        if (resultDependencies.has(target)) {
-          slicePaths.add(change.path);
-          break;
-        }
-      }
+      if (resultSlice.has(change.path)) slicePaths.add(change.path);
       const changeFacts = result.facts.get(change.path);
       if (
         changeFacts !== undefined &&

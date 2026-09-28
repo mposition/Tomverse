@@ -28,9 +28,9 @@ const TSCONFIG = JSON.stringify({
 const LOCK = JSON.stringify({ packages: { "": {}, "node_modules/react": {}, "node_modules/@ai-sdk/provider": {} } });
 
 /**
- * A small tree. `lib/amux/gate.ts` is runtime control plane; it imports a
- * product helper, which imports another. `lib/facade.ts` re-exports the gate;
- * `lib/page.ts` uses the facade. `lib/leaf.ts` touches nothing.
+ * A small tree. The gate under the AMUX directory is runtime control plane; it
+ * imports a product helper, which imports another. A facade re-exports the
+ * gate, a page uses the facade, and a leaf touches nothing.
  */
 const tree = (overrides = {}) => {
   const files = {
@@ -109,6 +109,26 @@ test("a file that registers into code the control plane runs joins the slice", (
   assert.deepEqual([...result.slicePaths], ["lib/feature.ts"]);
 });
 
+test("registration reaches through any number of hops, in either direction", () => {
+  const files = tree({
+    "lib/registry.ts": "export const handlers = [];\nexport const register = (h) => handlers.push(h);\n",
+    "lib/amux/gate.ts": 'import { handlers } from "@/lib/registry";\nexport const gate = () => handlers.forEach((h) => h());\n',
+    "lib/registrant.ts": 'import { register } from "./registry";\nimport { work } from "./worker";\nregister(work);\n',
+    "lib/worker.ts": "export const work = () => 1;\n",
+    "lib/intermediate.ts": 'import { register } from "./registry";\nexport const add = (h) => register(h);\n',
+  });
+  // The helper a registrant hands over: it imports nothing the control plane runs.
+  assert.deepEqual([...slice([change("lib/worker.ts")], files).slicePaths], ["lib/worker.ts"]);
+  // A feature that registers through an intermediate file.
+  const feature = change("lib/feature.ts", {
+    status: "added",
+    newText: 'import { add } from "./intermediate";\nadd(() => 2);\n',
+  });
+  assert.deepEqual([...slice([feature], files).slicePaths], ["lib/feature.ts"]);
+  // Code that shares no import path with the control plane stays out.
+  assert.deepEqual([...slice([change("lib/leaf.ts")], files).slicePaths], []);
+});
+
 test("code that cannot be followed moves the changed file into the slice", () => {
   const cases = {
     "a computed loader": 'export const load = (n) => import(`@/lib/amux/${n}`);\n',
@@ -146,7 +166,7 @@ test("a runtime control-plane module that assembles what it loads fails the anal
     "failed",
   );
   assert.equal(
-    slice([change("lib/leaf.ts")], tree({ "lib/amux/doc.ts": "/** import (policy §22), require(x) in prose */\nexport const d = 1;\n" })).status,
+    slice([change("lib/leaf.ts")], tree({ "lib/amux/doc.ts": "/** import (see the notes), require(x) in prose */\nexport const d = 1;\n" })).status,
     "analysed",
   );
   assert.equal(hasRuntimeLoader({ path: "a.ts", text: 'const m = await import("./x");' }), false);
