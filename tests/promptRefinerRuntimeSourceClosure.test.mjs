@@ -233,12 +233,20 @@ const compilerOptions = parsedConfig.options;
 // computed accesses in the admission and reservation modules. The count
 // remains 228 and the position-free inventory remains 9aa7ec49..., so this
 // repin records source-position movement only.
+//
+// 2026-09-28, Auto exploration: `lib/appSettings.ts` gains the reader for
+// `feature.autoExplorationEnabled`. The predicates are repeated in that file
+// so it does not import `lib/autoExplorationAccess.ts`, which would add a
+// path to the database-bound source list. The reader has no computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved. The position-sensitive digest
+// below is the merge of that reader with the successor audit-facts repin.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f09e1e78146afa6b436b5846a6e6592b",
-  "2ebabbc6b965b91b95c4a4cb6576b2dc",
+  "48f1e9cb7e194a3e9cb412e4a66fcd9a",
+  "cd8e219c263d8e29a47df49a727da8e9",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

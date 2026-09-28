@@ -190,24 +190,28 @@ test("no branch of the shape rule can evaluate to NULL", () => {
         }
     }
 });
-test("nothing reads the two columns", () => {
+test("only the Auto exploration path names the allocation columns", () => {
     // RoutingRun is live, so the table check cannot cover this: the columns
-    // are dark on a table that is not. check-dark-tables scans for the two
-    // identifiers, and each entry carries its own exemption list -- per column
-    // rather than one shared list, because the columns added later are
-    // ordinary foreign key names the dark tables already spell.
+    // are dark on a table that is not. The exempt list is the writer path.
+    // A file that is not on it and spells either column fails the check.
     const checker = readFileSync(
         new URL("../scripts/check-dark-tables.mjs", import.meta.url),
         "utf8"
     );
+    const allowed = [
+        "lib/routingAllocation.ts",
+        "lib/autoExploration.ts",
+        "lib/autoModelSelection.ts",
+        "lib/routerDecision.ts",
+        "lib/routingDispatchInstrumentation.ts",
+    ];
     for (const column of ["allocationMode", "allocationSeedGrain"]) {
-        assert.match(
-            checker,
-            new RegExp(
-                `column: "${column}",\\s*\\n\\s*on: "RoutingRun",\\s*\\n\\s*exempt: \\["lib/routingAllocation\\.ts"\\]`
-            ),
-            column
-        );
+        const block = new RegExp(
+            `column: "${column}",\\s*on: "RoutingRun",\\s*exempt: \\[([\\s\\S]*?)\\]`
+        ).exec(checker);
+        assert.ok(block, column);
+        const files = [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+        assert.deepEqual(files, allowed, column);
     }
 });
 

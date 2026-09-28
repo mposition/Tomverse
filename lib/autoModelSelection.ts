@@ -26,6 +26,9 @@
  */
 
 import type { AiModel, ModelTier } from "@/lib/models";
+import { applyAutoExploration } from "@/lib/autoExploration";
+import { estimateRequestCredits } from "@/lib/webSearchCredits";
+import { NO_WEB_SEARCH_BACKENDS } from "@/lib/webSearchBackends";
 import {
   decideAutoCohort,
   type AutoCohortConfig,
@@ -89,6 +92,15 @@ export type AutoSelection =
       modelId: string;
       /** Carry into the conversation row after the turn completes. */
       sticky: RouterStickyState;
+      /**
+       * The model the conversation should remember when exploration dispatched
+       * someone else.
+       *
+       * Absent means the dispatched model is the one to remember. Present only
+       * when a session hash answered and the deterministic selection is what
+       * flag-off must return to, without rewriting a past row.
+       */
+      stickyMemoryModelId?: string;
       /**
        * What §7's automatic fallback may try instead, best first.
        *
@@ -210,6 +222,20 @@ export type AutoSelectionInput = {
    * not a staging drill gets.
    */
   drillOverride?: boolean;
+  /**
+   * Session-seeded tie exploration. Absent and false are off.
+   *
+   * The server folds the stored flag and the kill switch before passing this.
+   * This function does not read the environment.
+   */
+  explorationEnabled?: boolean;
+  /**
+   * The conversation's own id, used as the session seed.
+   *
+   * Null, empty, and a turn with no conversation all leave the seed unset,
+   * and the sorted top answers. A request id is never a seed.
+   */
+  conversationId?: string | null;
   now?: () => number;
 };
 
@@ -306,12 +332,48 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
     };
   }
 
+  const estimate = estimateRequestCredits({
+    models: input.models,
+    estimatedInputTokens: input.reservedInputTokens,
+    webSearchMode: input.webSearchRequested ? "always" : "off",
+    backendReadiness: input.searchBackendReadiness ?? NO_WEB_SEARCH_BACKENDS,
+  });
+  const billedCreditsByModelId = Object.fromEntries(
+    estimate.models.map((model) => [model.modelId, model.totalCredits])
+  );
+  const allocation = applyAutoExploration({
+    rankedModelIds: decision.rankedModelIds,
+    tiedModelIds: decision.tiedModelIds,
+    billedCreditsByModelId,
+    enabled: input.explorationEnabled === true,
+    conversationId: input.conversationId ?? null,
+  });
+  // Stickiness that is holding a model the credit-equal tie does not contain
+  // is a quality hold, not a model-id tie. The hash does not pull the
+  // conversation off it. Inside the tie, the session hash is the answer, so
+  // a conversation stays on one model for as long as the tie stays.
+  const stickyOutsideTie =
+    decision.record.selectionReason === "sticky" &&
+    allocation !== null &&
+    !allocation.spreadModelIds.includes(decision.modelId);
+  const useHash =
+    allocation?.allocationMode === "explore_bounded" && !stickyOutsideTie;
+  const modelId = useHash && allocation ? allocation.chosenModelId : decision.modelId;
+
   return {
     routed: true,
-    modelId: decision.modelId,
+    modelId,
     sticky: decision.sticky,
-    fallbackCandidateModelIds: decision.fallbackCandidateModelIds,
-    record: decision.record,
+    stickyMemoryModelId: useHash ? decision.modelId : undefined,
+    fallbackCandidateModelIds: useHash
+      ? decision.rankedModelIds.filter((candidateId) => candidateId !== modelId)
+      : decision.fallbackCandidateModelIds,
+    record: {
+      ...decision.record,
+      selectedModelId: modelId,
+      allocationMode: useHash ? "explore_bounded" : "deterministic",
+      allocationSeedGrain: useHash ? "session" : null,
+    },
     versions: ROUTER_VERSIONS,
     cohort,
   };
