@@ -41,8 +41,8 @@ const card = (id, overrides = {}) => ({
 
 const id = (suffix) => `c${suffix.padEnd(24, "0").slice(0, 24)}`;
 
-test("version 7 ships the recommendation latch closed", () => {
-  assert.equal(RECOMMENDATION_CODE_LATCH, false);
+test("version 10 ships the recommendation latch open", () => {
+  assert.equal(RECOMMENDATION_CODE_LATCH, true);
   assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(recommendationApplyPermitted({ envValue: "true", codeLatch: true }), false);
@@ -287,5 +287,5 @@ test("the route passes the shipped latch and does not mention execution", () => 
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.create"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.update"), false);
-  assert.match(core, /RECOMMENDATION_CODE_LATCH = false/);
+  assert.match(core, /RECOMMENDATION_CODE_LATCH = true/);
 });
