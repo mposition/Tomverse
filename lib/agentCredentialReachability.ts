@@ -30,6 +30,9 @@ export type HumanExclusion = {
 const AGENT_BRANCH_PREFIX = "agent/engineering/";
 const PR_BASE = "develop";
 
+/** A reusable workflow in this repository, as a job's `uses` names it. */
+const LOCAL_CALLEE = /^\.\/(\.github\/workflows\/[^/@]+\.ya?ml)$/;
+
 /**
  * Events the agent's own writes can set off: pushing and creating its branch,
  * deleting it, the pull request it opens against develop (every activity type,
@@ -358,6 +361,23 @@ export const analyseCredentialReachability = (input: {
   const excluded = (path: string, jobId: string) =>
     validExclusions.some((exclusion) => exclusion.workflowPath === path && exclusion.jobId === jobId);
 
+  /**
+   * Every workflow a local call reaches, the called file included; null when
+   * any call on the way is remote or unreadable.
+   */
+  const calleesOf = (path: string, seen: Set<string>): Set<string> | null => {
+    if (seen.has(path)) return seen;
+    const workflow = parsed.get(path);
+    if (workflow === undefined) return null;
+    seen.add(path);
+    for (const job of Object.values(workflow.jobs as Obj)) {
+      if (!isObj(job) || typeof job.uses !== "string") continue;
+      const local = LOCAL_CALLEE.exec(job.uses);
+      if (local === null || calleesOf(local[1], seen) === null) return null;
+    }
+    return seen;
+  };
+
   const judgeJob = (workflow: Obj, path: string, jobId: string, job: Json, depth: number): JobVerdict => {
     if (!isObj(job)) {
       return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: "job_not_an_object" };
@@ -371,25 +391,30 @@ export const analyseCredentialReachability = (input: {
 
     const callerPermissions = job.permissions !== undefined ? job.permissions : workflow.permissions;
     if (typeof job.uses === "string") {
-      const local = /^\.\/(\.github\/workflows\/[^/@]+\.ya?ml)$/.exec(job.uses);
-      if (local === null) return own(true, false);
+      // Calling a reusable workflow is a credential in itself (policy §5); the
+      // callee is still read for what the rule set needs from it -- whether it
+      // restores a cache, and whether it can be read at all.
+      const local = LOCAL_CALLEE.exec(job.uses);
+      // A remote callee's content is in no pinned blob, so no exclusion covers it.
+      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: null };
       const callee = parsed.get(local[1]);
       if (callee === undefined || depth > 8) return own(true, false, "callee_unreadable");
-      // What the caller hands over: inherited or named secrets, unresolved
-      // inputs, and a token whose permissions the callee can only narrow.
-      let credential =
-        job.secrets === "inherit" ||
-        referencesSecret(job.secrets) ||
-        hasUnresolvedExpression(job.with) ||
-        permissionsWrite(callerPermissions) !== "read";
       let cache = false;
       for (const [calleeJobId, calleeJob] of Object.entries(callee.jobs as Obj)) {
         const verdict = judgeJob(callee, local[1], calleeJobId, calleeJob, depth + 1);
         if (verdict.problem) return own(true, cache, verdict.problem);
-        credential = credential || verdict.credentialIgnoringExclusions;
         cache = cache || verdict.restoresCache;
       }
-      return own(credential, cache);
+      // An exclusion on the caller pins the caller's blob only. It holds when
+      // every workflow the call reaches is local and pinned at its current blob
+      // by an exclusion of its own; otherwise a changed callee would ride on
+      // the caller's review.
+      const reach = calleesOf(local[1], new Set());
+      const calleesPinned =
+        reach !== null && [...reach].every((path) => validExclusions.some((exclusion) => exclusion.workflowPath === path));
+      return calleesPinned
+        ? own(true, cache)
+        : { credential: true, credentialIgnoringExclusions: true, restoresCache: cache, problem: null };
     }
 
     const cache = restoresCache(job);
@@ -497,9 +522,12 @@ export const analyseCredentialReachability = (input: {
   let grew = true;
   while (grew) {
     grew = false;
+    // `workflow_run.workflows` matches a workflow's name or its file name, so
+    // a reached workflow answers to both.
     for (const path of reached) {
       const name = parsed.get(path)?.name;
-      reachedNames.add(typeof name === "string" ? name : path);
+      if (typeof name === "string") reachedNames.add(name);
+      reachedNames.add(path.slice(path.lastIndexOf("/") + 1));
     }
     for (const [path, workflow] of parsed) {
       if (reached.has(path)) continue;

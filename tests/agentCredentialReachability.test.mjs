@@ -157,6 +157,11 @@ jobs:
     steps: [{ run: echo }]
 `;
   assert.equal(analyse([wf("ci", upstream), wf("middle", middle), wf("tail", tail)]).forbidsAll, true);
+  // `workflows` matches a workflow's name or its file name; a file name must chain too,
+  // whether or not the upstream workflow has a name.
+  const byFile = middle.replace("workflows: [ci]", "workflows: [ci.yml]");
+  assert.equal(analyse([wf("ci", upstream.replace("name: ci", "name: CI")), wf("middle", byFile), wf("tail", tail)]).forbidsAll, true);
+  assert.equal(analyse([wf("ci", upstream.replace(/^name: .*$/m, "")), wf("middle", byFile), wf("tail", tail)]).forbidsAll, true);
   assert.equal(
     analyse([wf("ci", upstream.replace("branches: [develop]", "branches: [main]")), wf("middle", middle), wf("tail", tail)]).forbidsAll,
     false,
@@ -185,7 +190,33 @@ jobs:
     runs-on: ubuntu-latest
     steps: [{ run: echo }]
 `;
-  assert.equal(analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee)]).forbidsAll, false);
+  assert.equal(
+    analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee)]).forbidsAll,
+    true,
+    "calling a reusable workflow is a credential in itself, even a read-only local one",
+  );
+
+  // An exclusion on the caller holds only while every local callee is pinned at its own blob.
+  const pin = (path, blobSha = "a".repeat(40)) => ({
+    workflowPath: `.github/workflows/${path}.yml`,
+    jobId: path === "caller" ? "call" : "inner",
+    blobSha,
+    reason: "reviewed",
+    reviewedBy: "owner",
+  });
+  const pair = [wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee)];
+  assert.equal(analyse(pair, { exclusions: [pin("caller")] }).forbidsAll, true, "the callee is not pinned");
+  assert.equal(analyse(pair, { exclusions: [pin("caller"), pin("callee")] }).forbidsAll, false, "caller and callee both pinned");
+  assert.equal(
+    analyse(pair, { exclusions: [pin("caller"), pin("callee", "b".repeat(40))] }).forbidsAll,
+    true,
+    "a callee changed since its review voids the caller's exclusion",
+  );
+  assert.equal(
+    analyse([wf("caller", caller("other/repo/.github/workflows/x.yml@v1"))], { exclusions: [pin("caller")] }).forbidsAll,
+    true,
+    "no exclusion covers a remote callee",
+  );
   assert.equal(
     analyse([wf("caller", caller("./.github/workflows/callee.yml")), wf("callee", callee.replace("contents: read", "contents: write"))]).forbidsAll,
     true,
