@@ -183,6 +183,70 @@ test("a refused notice is unreachable only while the suppression stands", async 
   assert.equal(result.untold, 1);
 });
 
+test("a suppression that does not stop a legal notice does not make an account unreachable", async () => {
+  // Scope, not only reason. A deletion intake holds marketing only, and an
+  // operator's hold may name one purpose; the lane still sends a legal notice to
+  // both, so neither account may be excused from it.
+  const privacyAddress = `privacy-${randomUUID().slice(0, 8)}@example.test`;
+  const privacy = await prisma.user.create({
+    data: { email: privacyAddress, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(privacy.id, "bounced", daysBefore(40), daysBefore(40));
+  await recordSuppression({
+    emailAddress: privacyAddress,
+    scope: "classification",
+    purposeKey: "marketing",
+    reason: "privacy_request",
+    source: "admin",
+    sourceEventKey: `privacy:${randomUUID()}:intake`,
+  });
+
+  const heldAddress = `held-${randomUUID().slice(0, 8)}@example.test`;
+  const held = await prisma.user.create({
+    data: { email: heldAddress, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(held.id, "suppressed", daysBefore(40), null);
+  await recordSuppression({
+    emailAddress: heldAddress,
+    reason: "manual",
+    source: "admin",
+    purposeKey: "product_updates",
+    sourceEventKey: `admin:${randomUUID()}`,
+  });
+
+  const result = await facts();
+  assert.equal(result.unreachable, 0);
+  assert.equal(result.untold, 2);
+  assert.deepEqual(result.unreachableAccounts, []);
+});
+
+test("an unreachable account is named, with why, and never by address", async () => {
+  const address = `named-${randomUUID().slice(0, 8)}@example.test`;
+  const bounced = await prisma.user.create({
+    data: { email: address, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(bounced.id, "bounced", daysBefore(40), daysBefore(40));
+  await suppress(address);
+  const silent = await prisma.user.create({
+    data: { email: null, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+
+  const result = await facts();
+  assert.equal(result.unreachable, 2);
+  assert.deepEqual(
+    [...result.unreachableAccounts].sort((a, b) => a.userId.localeCompare(b.userId)),
+    [
+      { userId: bounced.id, reason: "hard_bounce" },
+      { userId: silent.id, reason: "no_address" },
+    ].sort((a, b) => a.userId.localeCompare(b.userId))
+  );
+  assert.ok(!JSON.stringify(result.unreachableAccounts).includes("@"));
+});
+
 test("a row the lane wrote without calling the provider is not a notice", async () => {
   const failed = await account(daysBefore(90));
   await delivery(failed.id, "failed", daysBefore(40), null);

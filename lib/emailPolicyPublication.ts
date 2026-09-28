@@ -4,14 +4,22 @@ import { prisma } from "@/lib/prisma";
 import { isEmailReleaseNotesEnabled } from "@/lib/appSettings";
 import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 import { emailTemplateDefinition, EMAIL_TEMPLATE_KEYS } from "@/lib/emailTemplateDefinitions";
+import { suppressionCheck } from "@/lib/emailSuppression";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  CURRENT_CONSENT_COPY_VERSION,
+  consentCopyPromiseState,
+} from "@/lib/emailConsentCopy";
 import {
   CHANGE_NOTICE_WINDOW_DAYS,
   TOLD_STATUSES,
+  UNREACHABLE_REPORT_LIMIT,
   effectiveDateOf,
   noticeDeadline,
   publicationProblems,
   type AmendedDocument,
   type ChangeNoticeFacts,
+  type ConsentCopyFacts,
   type PublicationProblem,
 } from "@/lib/emailPolicyPublicationCore";
 
@@ -82,16 +90,30 @@ export const DIGEST_VERIFIED_BY: Readonly<
 };
 
 /**
- * Section 10's table: the two pages, and the two pieces of product copy that
- * carry the same promise. None but `/privacy` has a recorded state yet, so each
- * of the other three is `document_state_unrecorded` -- which is true.
+ * Section 10's table: the two pages and the login-screen sentence. None but
+ * `/privacy` has a recorded state yet, so the other two are
+ * `document_state_unrecorded` -- which is true.
+ *
+ * The consent devices are not here. They are versioned together in
+ * lib/emailConsentCopy.ts, so they are checked as one version
+ * (`consentCopyFacts()`) -- all four, including the in-product notice existing
+ * accounts see, which a single "signup consent copy" entry left out.
  */
-export const AMENDED_DOCUMENTS = [
-  "/privacy",
-  "/terms",
-  "signup consent copy",
-  "login consent sentence",
-] as const;
+export const AMENDED_DOCUMENTS = ["/privacy", "/terms", "login consent sentence"] as const;
+
+/**
+ * The consent copy versions approved as carrying the amendment. Empty until one
+ * is: the only version today (2026-09-23) promises no unrequested send.
+ */
+export const APPROVED_AMENDED_CONSENT_COPY_VERSIONS: readonly string[] = [];
+
+export const consentCopyFacts = (): ConsentCopyFacts => ({
+  version: CURRENT_CONSENT_COPY_VERSION,
+  approvedAsAmended: APPROVED_AMENDED_CONSENT_COPY_VERSIONS.includes(
+    CURRENT_CONSENT_COPY_VERSION
+  ),
+  promiseState: consentCopyPromiseState(CURRENT_CONSENT_COPY_VERSION),
+});
 
 /**
  * The template that carries the amendment notice, and the exact approved
@@ -134,22 +156,12 @@ const UNIDENTIFIED: ChangeNoticeFacts = {
   told: 0,
   late: 0,
   unreachable: 0,
+  unreachableAccounts: [],
   untold: 0,
   firstSentAt: null,
 };
 
 const DAY_MS = 86_400_000;
-
-/**
- * The suppression causes that stop a legal message.
- *
- * `suppressionCheck()` lets a `legal` message through an unsubscribe and a
- * complaint -- a person who turned marketing off is exactly who a policy notice
- * is owed to. Only these three stop it, so only these make an account
- * unreachable. The previous version took any live cause, which excused the
- * people the notice matters most to.
- */
-const LEGAL_BLOCKING_CAUSES = ["hard_bounce", "manual", "privacy_request"] as const;
 
 /** A JS instant as the naive-UTC `TIMESTAMP(3)` the columns hold. */
 const utc = (value: Date) => value.toISOString();
@@ -162,13 +174,20 @@ const utc = (value: Date) => value.toISOString();
  * `AT TIME ZONE 'UTC'`, the way this repository's other raw SQL compares these
  * naive `TIMESTAMP(3)` columns.
  *
- * "Unreachable" needs two facts, not one. The account's *latest* notice was
- * refused by the lane or hard-bounced, **and** a suppression still stands on its
- * address now. The third version took any `suppressed` row, ever, as permanent:
- * a suppression lifted since left the account counted as a dead mailbox and owed
- * nothing, and one refusal after the deadline hid every other row for that
- * account. A soft bounce is neither told nor unreachable; it is a full mailbox,
- * and the account is untold until a retry lands.
+ * "Unreachable" needs two facts, not one. A notice to the account was refused by
+ * the lane or hard-bounced, **and** the lane would refuse this notice to that
+ * address now. The second is asked of `suppressionCheck()` itself, with the
+ * notice's own classification and purpose, rather than restated in SQL: a
+ * restatement matched the cause's reason and not its scope, so a marketing-only
+ * `privacy_request` or a purpose-scoped manual hold -- neither of which stops a
+ * legal message -- excused an account the lane would in fact have mailed.
+ *
+ * Any refused row, not the latest: a later attempt that fails before the
+ * suppression check (a template mismatch, say) is not evidence the address
+ * became reachable, and the live check already answers whether it did. A row
+ * refused under a cause since released is untold, because the check now says
+ * the notice would go. A soft bounce is neither told nor unreachable; it is a
+ * full mailbox, and the account is untold until a retry lands.
  *
  * Takes the key and hashes as arguments so it can be exercised against a
  * database before any notice exists
@@ -204,9 +223,10 @@ export const noticeFactsFor = async (
       owed: bigint;
       told: bigint;
       late: bigint;
-      unreachable: bigint;
       untold: bigint;
       firstSentAt: Date | null;
+      /** Accounts that may be unreachable, for `suppressionCheck()` to decide. */
+      candidates: { id: string; email: string | null; state: "no_address" | "refused" }[] | null;
     }[]
   >`
     WITH params AS (
@@ -248,34 +268,49 @@ export const noticeFactsFor = async (
                          OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."periodStart"))
                ) THEN 'told'
                WHEN EXISTS (SELECT 1 FROM told t WHERE t."userId" = o."id") THEN 'late'
-               WHEN o."email" IS NULL THEN 'unreachable'
+               WHEN o."email" IS NULL THEN 'no_address'
                WHEN EXISTS (
                  SELECT 1 FROM notice n
                   WHERE n."userId" = o."id"
                     AND (n."status" = 'suppressed'
                          OR (n."status" = 'bounced'
                              AND n."lastErrorKind" IS DISTINCT FROM 'soft_bounce'))
-               )
-               AND EXISTS (
-                 SELECT 1 FROM "SuppressionCause" sc, params p
-                  WHERE sc."emailAddress" = lower(btrim(o."email"))
-                    AND sc."releasedAt" IS NULL
-                    AND (sc."expiresAt" IS NULL OR sc."expiresAt" > p."now")
-                    AND sc."reason" = ANY(${[...LEGAL_BLOCKING_CAUSES]}::text[])
-               ) THEN 'unreachable'
+               ) THEN 'refused'
                ELSE 'untold'
-             END AS "state"
+             END AS "state",
+             o."id", o."email"
         FROM owed o
     )
     SELECT
       COUNT(*)                                        AS "owed",
       COUNT(*) FILTER (WHERE "state" = 'told')        AS "told",
       COUNT(*) FILTER (WHERE "state" = 'late')        AS "late",
-      COUNT(*) FILTER (WHERE "state" = 'unreachable') AS "unreachable",
       COUNT(*) FILTER (WHERE "state" = 'untold')      AS "untold",
-      (SELECT MIN("sentAt") FROM told)                AS "firstSentAt"
+      (SELECT MIN("sentAt") FROM told)                AS "firstSentAt",
+      json_agg(json_build_object('id', "id", 'email', "email", 'state', "state")
+               ORDER BY "id")
+        FILTER (WHERE "state" IN ('no_address', 'refused')) AS "candidates"
       FROM classified
   `;
+
+  // The lane's own answer for each refused account, asked now. Few rows: an
+  // account is here only when a notice to it was refused or hard-bounced.
+  let untold = Number(row?.untold ?? 0);
+  const unreachableAccounts: { userId: string; reason: string }[] = [];
+  for (const candidate of row?.candidates ?? []) {
+    if (candidate.state === "no_address" || candidate.email === null) {
+      unreachableAccounts.push({ userId: candidate.id, reason: "no_address" });
+      continue;
+    }
+    const verdict = await suppressionCheck({
+      emailAddress: candidate.email,
+      classification: definition.classification,
+      ...(definition.purpose ? { purpose: definition.purpose } : {}),
+      now,
+    });
+    if (verdict.allowed) untold += 1;
+    else unreachableAccounts.push({ userId: candidate.id, reason: verdict.skipReason });
+  }
 
   return {
     templateKey,
@@ -284,8 +319,9 @@ export const noticeFactsFor = async (
     owed: Number(row?.owed ?? 0),
     told: Number(row?.told ?? 0),
     late: Number(row?.late ?? 0),
-    unreachable: Number(row?.unreachable ?? 0),
-    untold: Number(row?.untold ?? 0),
+    unreachable: unreachableAccounts.length,
+    unreachableAccounts: unreachableAccounts.slice(0, UNREACHABLE_REPORT_LIMIT),
+    untold,
     firstSentAt: row?.firstSentAt ?? null,
   };
 };
@@ -310,7 +346,10 @@ export async function publicationReport(now: Date = new Date()): Promise<Publica
     effectiveDateOf(documents),
     now
   );
-  return { problems: publicationProblems({ documents, notice, now }), notice };
+  return {
+    problems: publicationProblems({ documents, consentCopy: consentCopyFacts(), notice, now }),
+    notice,
+  };
 }
 
 /** Why this amendment is not published, or an empty list when it is. */
@@ -333,9 +372,12 @@ export async function emailPolicyPublicationProblems(
  * there would make every release note claimed during a database hiccup a
  * permanent `feature_disabled` skip.
  *
- * A pass with unreachable accounts is logged, once per computation, so the
+ * A pass with unreachable accounts is reported, once per computation, so the
  * accounts the amendment never reached are on record the moment release notes
- * can go live -- counts only, no addresses.
+ * can go live: a structured event naming each account id and why (never an
+ * address), and an operational incident so somebody is told rather than having
+ * to search for it. Section 3.2 sends a hard-bounced account to another channel,
+ * and that needs to know which account.
  */
 const TTL_MS = 60_000;
 let cached: { published: boolean; at: number } | { error: unknown; at: number } | null = null;
@@ -383,8 +425,21 @@ export async function isEmailPolicyPublished(now: Date = new Date()): Promise<bo
           owed: report.notice.owed,
           told: report.notice.told,
           unreachable: report.notice.unreachable,
+          accounts: report.notice.unreachableAccounts,
+          accountsTruncated:
+            report.notice.unreachableAccounts.length < report.notice.unreachable,
         })
       );
+      await reportOperationalIncident({
+        code: "EMAIL_POLICY_NOTICE_UNREACHABLE",
+        title: "Release notes are live and some accounts were never told of the amendment",
+        severity: "warning",
+        error:
+          `${report.notice.unreachable} of ${report.notice.owed} account(s) owed the amendment notice cannot be reached by email. ` +
+          "The email_policy_published_with_unreachable event names them; section 3.2 needs another channel for them.",
+        cooldownMs: 24 * 60 * 60 * 1_000,
+        context: { component: "email-policy-publication" },
+      });
     }
     cached = { published, at: now.getTime() };
     return published;

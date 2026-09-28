@@ -100,13 +100,49 @@ export type ChangeNoticeFacts = {
   late: number;
   /** Not handed over, and the system cannot hand it over. Reported. */
   unreachable: number;
+  /**
+   * Who they are, for the report -- account ids and why, never addresses.
+   *
+   * Unreachable does not block because it is tracked (section 3.1, type 5), and
+   * a count is not tracking: section 3.2 sends a hard-bounced account to a
+   * different channel, which needs to know which account. At most
+   * `UNREACHABLE_REPORT_LIMIT`, in id order; `unreachable` is the total.
+   */
+  unreachableAccounts: readonly { userId: string; reason: string }[];
   /** Not handed over for any other reason. Blocking. */
   untold: number;
   /** The earliest hand-over, for the report. */
   firstSentAt: Date | null;
 };
 
+/** How many unreachable accounts a report names. The count is always whole. */
+export const UNREACHABLE_REPORT_LIMIT = 500;
+
+/**
+ * The consent copy the product renders: all four devices at once.
+ *
+ * One fact rather than four documents, because the devices are versioned
+ * together (`CONSENT_COPY_VERSIONS` in lib/emailConsentCopy.ts): a version is
+ * every key in every language, so approving one version approves the signup
+ * opt-in, the signup notice, the signup refusal and the in-product notice
+ * existing accounts see. The previous gate had one "signup consent copy" entry
+ * for three of those and none for the fourth -- whose body today promises that
+ * product news is not sent unless asked for.
+ */
+export type ConsentCopyFacts = {
+  /** The version a new render uses. */
+  version: string;
+  /** Whether that version is one approved as carrying the amendment. */
+  approvedAsAmended: boolean;
+  /** What that version says about sending unasked. */
+  promiseState: "promises_no_unrequested_send" | "makes_no_promise" | "unknown_version";
+};
+
 export const PUBLICATION_REFUSALS = [
+  /** The consent copy the product renders is not a version approved as amended. */
+  "consent_copy_not_amended",
+  /** The consent copy still tells people we will not send unless asked. */
+  "consent_copy_still_promises",
   /** A document section 10 names has no recorded before-and-after state. */
   "document_state_unrecorded",
   /** Its current digest is recorded but no test checks it against the source. */
@@ -206,11 +242,34 @@ export const noticeDeadline = (effective: Date): Date =>
 /** Every reason this amendment does not count as published. All of them. */
 export const publicationProblems = (input: {
   documents: readonly AmendedDocument[];
+  consentCopy: ConsentCopyFacts;
   notice: ChangeNoticeFacts;
   now: Date;
 }): PublicationProblem[] => {
   const problems: PublicationProblem[] = [];
   const dates = new Set<string>();
+
+  if (!input.consentCopy.approvedAsAmended) {
+    problems.push({
+      refusal: "consent_copy_not_amended",
+      subject: `consent copy ${input.consentCopy.version}`,
+      detail:
+        "The consent copy the product renders -- the signup opt-in, notice and refusal, and the in-product notice for existing accounts -- is not a version approved as carrying the amendment.",
+    });
+  }
+  // Separate from approval, and checked even for an approved version: a version
+  // that still promises no unrequested send, or one this build cannot read,
+  // contradicts release notes going out whoever approved it.
+  if (input.consentCopy.promiseState !== "makes_no_promise") {
+    problems.push({
+      refusal: "consent_copy_still_promises",
+      subject: `consent copy ${input.consentCopy.version}`,
+      detail:
+        input.consentCopy.promiseState === "unknown_version"
+          ? "This build does not know what the rendered consent copy promises, so it cannot show the copy no longer promises that product news is sent only on request."
+          : "The rendered consent copy still tells people product news is not sent unless they ask for it.",
+    });
+  }
 
   for (const document of input.documents) {
     if (document.approvedDigests.length === 0 || document.publishedDigest === null) {

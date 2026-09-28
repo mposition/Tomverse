@@ -1535,8 +1535,14 @@ EEA·영국을 여는 선행 게이트입니다.
   번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
   `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
   `document_state_unrecorded`로 보고합니다.
-- **문서는 네 개입니다** — `/privacy`, `/terms`, 가입 화면의 동의 문안, 로그인 화면의
-  동의 문장. 앞의 둘만 두면 뒤의 둘이 옛 문안인 채로 게이트가 열립니다. 그리고
+- **문서는 `/privacy`, `/terms`, 로그인 화면의 동의 문장이고, 동의 문안은 버전 하나로
+  봅니다.** 네 장치(가입 opt-in·가입 고지·가입 거부·기존 계정의 제품 내 안내)는
+  `lib/emailConsentCopy.ts`에서 한 버전으로 함께 바뀌므로, 게이트는 렌더되는 버전이
+  개정 승인 목록(`APPROVED_AMENDED_CONSENT_COPY_VERSIONS`)에 있고
+  **"요청하지 않으면 보내지 않는다"는 약속을 더 이상 하지 않는지**를 봅니다
+  (`consent_copy_not_amended`, `consent_copy_still_promises`). 이전에는 가입 장치
+  셋을 항목 하나로 묶고 제품 내 안내를 빠뜨려, 기존 계정이 옛 약속을 보는 채로
+  게이트가 열릴 수 있었습니다. 그리고
   **digest는 테스트가 렌더된 원본과 대조하는 것만 증거로 인정합니다**
   (`DIGEST_VERIFIED_BY`). 표에 손으로 적은 digest는 페이지에 대한 주장이지 증거가
   아닙니다(`document_state_unverified`).
@@ -1548,10 +1554,14 @@ EEA·영국을 여는 선행 게이트입니다.
 - **"제때 고지받았는가"는 계정마다 판정합니다.** 시행일 전에 생긴 계정(생성 시각을
   모르는 계정 포함)마다 SQL 한 문장으로 넷 중 하나로 분류합니다 — **told**(고지가
   기한 전에 메일함에 도달: `sent`·`delivered`·`complained`. `bounced`는 도달이
-  아닙니다), **late**(도달했지만 기한 후, 차단), **unreachable**(주소가 없거나, 마지막
-  고지가 suppression으로 거부·하드 바운스됐고 **지금도** suppression이 살아 있음 —
-  보고만), **untold**(그 밖 전부 — 소프트 바운스는 재시도 대상, `failed`·`abandoned`는
-  우리 실패이므로 차단).
+  아닙니다), **late**(도달했지만 기한 후, 차단), **unreachable**(주소가 없거나, 고지가
+  거부·하드 바운스된 적이 있고 **지금 레인이 이 고지를 그 주소로 보내지 않음** —
+  `suppressionCheck()`에 고지의 분류·purpose로 직접 묻습니다. 마케팅 전용
+  `privacy_request`나 purpose 한정 수동 억제는 법정 고지를 막지 않으므로 해당하지
+  않습니다. 차단하지 않고 보고하며, 게이트가 열릴 때 계정 id와 사유를 구조화 이벤트와
+  운영 incident로 남깁니다 — §3.2의 다른 채널이 대상을 알아야 하므로),
+  **untold**(그 밖 전부 — 소프트 바운스는 재시도 대상, `failed`·`abandoned`는 우리
+  실패이므로 차단).
 - **고지는 승인된 문안에 묶입니다.** template key만으로는 문안을 특정하지 못하므로
   (현재 등록된 `legal` template은 계정 삭제 예고 하나뿐), 발송의 template version
   `contentHash`가 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 있어야 셉니다.
@@ -1564,7 +1574,7 @@ EEA·영국을 여는 선행 게이트입니다.
   던집니다** — 판정의 `read()`가 재시도로 바꾸므로, 순간적인 DB 오류가 release
   notes를 영구 skip하지 않습니다(불변식 11).
 
-**남은 것은 전부 소유자 결정입니다.** (1) 네 문서의 개정 문안(7개 언어) 승인,
+**남은 것은 전부 소유자 결정입니다.** (1) 세 문서와 동의 문안 새 버전의 개정 문안(7개 언어) 승인,
 (2) 개정을 담은 각 문서 버전의 승인된 digest(`APPROVED_AMENDED_DIGESTS`)와
 현재 digest·시행일(페이지는 `SITEMAP_CONTENT_EVIDENCE`, 가입·로그인 문안처럼
 페이지가 아닌 것은 `AMENDED_DOCUMENT_EVIDENCE`), 그리고 그 현재 digest를 렌더된 원본에서
