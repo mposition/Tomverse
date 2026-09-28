@@ -149,8 +149,14 @@ export const marketingFlagApplies = (classification: string): boolean =>
  * `marketing` and the marketing flag already answers for that. This one answers
  * for the product, and a purpose is what a delivery carries that says which
  * product it belongs to.
+ *
+ * The string is the one `EmailTemplate.purpose` and `CONSENT_REQUIRED_PURPOSES`
+ * already use. The first draft of this list wrote the redesign document own
+ * name for the product instead, which matches no template -- so the gate would
+ * have been dead code and both enqueue paths ungated. A flag that switches
+ * nothing teaches an operator that flags switch nothing.
  */
-export const RELEASE_NOTES_PURPOSES = ["product_news"] as const;
+export const RELEASE_NOTES_PURPOSES = ["product_updates"] as const;
 
 export const releaseNotesFlagApplies = (purpose: string | null | undefined): boolean =>
   typeof purpose === "string" &&
