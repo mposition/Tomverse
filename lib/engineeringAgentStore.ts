@@ -290,7 +290,7 @@ export async function readEngineeringAgentHaltState(
 ): Promise<EngineeringAgentHaltState> {
   const openStateMismatches = await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } });
   const orphaned = await db.engineeringAgentRun.count({
-    where: { status: "active", amuxAttempt: { endedAt: { not: null } } },
+    where: { status: "active", attempt: { endedAt: { not: null } } },
   });
   const acknowledgement = await db.appSetting.findUnique({
     where: { key: ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY },
@@ -1379,6 +1379,8 @@ export async function recordEngineeringAgentPublishResult(
     reason?: string;
     pullRequest: Omit<BindingInput, "runId"> | null;
     cardId?: string;
+    /** When given, the AMUX attempt whose review the pull request is for: the item's run's own. */
+    attemptId?: string;
   },
 ): Promise<{ state: string; decisionItemId: string | null; bindingId: string | null }> {
   const settled = await settleEngineeringAgentWorkItem(tx, {
@@ -1394,10 +1396,11 @@ export async function recordEngineeringAgentPublishResult(
   if (input.pullRequest === null) refuse("published_without_pull_request");
   const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: input.workItemId },
-    select: { runId: true, run: { select: { cardId: true } } },
+    select: { runId: true, run: { select: { cardId: true, amuxAttemptId: true } } },
   });
   const runId = item.runId ?? refuse("publish_item_without_run");
   if (input.cardId !== undefined && item.run?.cardId !== input.cardId) refuse("card_mismatch");
+  if (input.attemptId !== undefined && item.run?.amuxAttemptId !== input.attemptId) refuse("attempt_mismatch");
   const { bindingId } = await recordEngineeringAgentBinding(tx, { ...input.pullRequest!, runId });
   return { ...settled, bindingId };
 }

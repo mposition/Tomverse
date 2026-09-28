@@ -161,6 +161,7 @@ test("a request is recorded before its work and answered from its record after",
   assert.deepEqual(await inTx((tx) => acceptEngineeringAgentRequest(tx, { key, route: "run/start", requestDigest: digest })), {
     outcome: "replay",
     state: "accepted",
+    resultRef: null,
   });
   assert.deepEqual(
     await inTx((tx) => acceptEngineeringAgentRequest(tx, { key, route: "run/start", requestDigest: sha256("other") })),

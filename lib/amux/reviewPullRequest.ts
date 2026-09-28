@@ -1,6 +1,6 @@
 import "server-only";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import {
@@ -13,6 +13,8 @@ import {
 /** What an attachment to the review pull request record sees. */
 export type AmuxReviewPullRequestFact = {
   taskId: string;
+  /** The attempt whose review this number is for: the card's latest. */
+  attemptId: string;
   prNumber: number;
   taskRevision: number;
 };
@@ -32,6 +34,7 @@ type TaskRow = {
 };
 
 type AttemptRow = {
+  id: string;
   worker: string;
   outcome: string | null;
   toStatus: string | null;
@@ -43,12 +46,14 @@ type AttemptRow = {
  * (development-agent-orchestration.md, Authority, version 12: "review 대상 PR
  * 번호의 기록"). Only for a card in `review` whose latest attempt the same
  * worker settled there; the number is written once, and writing the same
- * number again changes nothing. It opens no approval and moves no status: the
- * human review of the card stays AMUX's, and a later board sync may still
- * carry the number as it always has.
+ * number again changes nothing. The caller names the attempt the number
+ * belongs to, and it must be the card's latest: an earlier attempt's pull
+ * request never lands on a later attempt's review. It opens no approval and
+ * moves no status: the human review of the card stays AMUX's, and a later
+ * board sync may still carry the number as it always has.
  */
 export async function recordAmuxReviewPullRequest(
-  input: { taskId: string; worker: string; prNumber: number },
+  input: { taskId: string; attemptId: string; worker: string; prNumber: number },
   attachment?: AmuxAttachment<AmuxReviewPullRequestFact>,
 ): Promise<
   | { recorded: true; taskRevision: number; changed: boolean }
@@ -74,7 +79,7 @@ export async function recordAmuxReviewPullRequest(
         return { recorded: false as const, reason: "task_not_in_review" as const };
       }
       const attempts = await tx.$queryRaw<AttemptRow[]>`
-        SELECT "worker", "outcome", "toStatus", "endedAt"
+        SELECT "id", "worker", "outcome", "toStatus", "endedAt"
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
@@ -83,6 +88,7 @@ export async function recordAmuxReviewPullRequest(
       const last = attempts[0];
       if (
         !last ||
+        last.id !== input.attemptId ||
         last.worker !== input.worker ||
         last.endedAt === null ||
         last.outcome !== "succeeded" ||
@@ -120,9 +126,12 @@ export async function recordAmuxReviewPullRequest(
       }
 
       if (attachment) {
+        // The audit chain's lock comes before any row an attachment locks,
+        // whether or not this call wrote an entry of its own.
+        await takeAuditChainLock(context.attachedTransaction);
         await attachment.work(
           context.attachedTransaction,
-          { taskId: task.id, prNumber: input.prNumber, taskRevision },
+          { taskId: task.id, attemptId: input.attemptId, prNumber: input.prNumber, taskRevision },
           { dbNow: context.dbNow },
         );
       }

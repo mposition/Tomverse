@@ -146,10 +146,11 @@ const RUN_HEARTBEAT_PRISMA_CALLS = 2;
 const RUN_END_PRISMA_CALLS = 12;
 // A registration: the request's move, and one to spare.
 const WORKER_REGISTER_PRISMA_CALLS = 2;
-// A publish result: the settlement (item lock, capability read, update,
-// audit entry -- seven), the run's card, the binding and its audit entry
-// (five) and the request's move -- fourteen, and two to spare.
-const PUBLISH_RESULT_PRISMA_CALLS = 16;
+// A publish result: the writer's audit-chain lock, the settlement (item
+// lock, capability read, update, audit entry -- seven), the run's card, the
+// binding and its audit entry (five) and the request's move -- fifteen, and
+// two to spare.
+const PUBLISH_RESULT_PRISMA_CALLS = 17;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
 export const engineeringRunStartAttachment = (input: {
@@ -243,6 +244,7 @@ export const engineeringPublishResultAttachment = (input: {
       outcome: input.outcome,
       pullRequest: input.pullRequest,
       cardId: fact.taskId,
+      attemptId: fact.attemptId,
     });
     await input.markCommitted?.(tx, input.workItemId);
   },
@@ -515,13 +517,16 @@ export async function recordEngineeringAgentPublisherResult(input: {
   requireOpen();
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
-    select: { run: { select: { cardId: true } } },
+    select: { run: { select: { cardId: true, amuxAttemptId: true } } },
   });
   const cardId = item?.run?.cardId ?? null;
-  if (cardId === null) throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
+  const attemptId = item?.run?.amuxAttemptId ?? null;
+  if (cardId === null || attemptId === null) throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
   const pullRequest = input.pullRequest;
+  // The number goes on the review of this item's own attempt, and AMUX takes
+  // it only while that attempt is still the card's latest.
   const recorded = await recordAmuxReviewPullRequest(
-    { taskId: cardId, worker: ENGINEERING_AGENT_AMUX_WORKER, prNumber: pullRequest.prNumber },
+    { taskId: cardId, attemptId, worker: ENGINEERING_AGENT_AMUX_WORKER, prNumber: pullRequest.prNumber },
     engineeringPublishResultAttachment({
       workItemId: input.workItemId,
       fencingToken: input.fencingToken,

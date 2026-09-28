@@ -597,7 +597,7 @@ test("a published result is bound in the transaction that records the card's rev
       withAmuxRouteBudget(
         () =>
           recordAmuxReviewPullRequest(
-            { taskId: fixture.taskId, worker, prNumber: number },
+            { taskId: fixture.taskId, attemptId: started.attemptId, worker, prNumber: number },
             engineeringPublishResultAttachment({
               workItemId,
               fencingToken: claim.fencingToken,
@@ -611,6 +611,23 @@ test("a published result is bound in the transaction that records the card's rev
     // Another worker's review takes no number, and nothing of ours is written.
     assert.deepEqual(await record("someone-else"), { recorded: false, reason: "not_the_workers_review" });
     assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).state, "claimed");
+    // An attempt that is not the card's latest takes no number either.
+    assert.deepEqual(
+      await withAmuxRouteBudget(
+        () =>
+          recordAmuxReviewPullRequest(
+            { taskId: fixture.taskId, attemptId: randomUUID(), worker: fixture.worker, prNumber },
+            engineeringPublishResultAttachment({
+              workItemId,
+              fencingToken: claim.fencingToken,
+              outcome: "confirmed",
+              pullRequest,
+            }),
+          ),
+        ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+      ),
+      { recorded: false, reason: "not_the_workers_review" },
+    );
 
     const done = await record(fixture.worker);
     assert.equal(done.recorded, true);
