@@ -428,6 +428,13 @@ type ClaimedDelivery = {
   attempts: number;
   /** This worker's claim, as written by `claimDueDelivery()`. */
   claimedAt: Date | null;
+  /**
+   * This process's wall clock when the claim was taken. `claimedAt` is the
+   * drain's `now`, which a caller may set anywhere; how long the claim has been
+   * held is a question about real time, and it starts here, not at whatever
+   * step later asks.
+   */
+  claimedWallAt: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
   policyVersionId: string;
@@ -483,6 +490,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   `;
   const claimedId = rows[0]?.id;
   if (!claimedId) return null;
+  const claimedWallAt = Date.now();
 
   return prisma.emailDelivery.findUnique({
     where: { id: claimedId },
@@ -516,7 +524,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
         },
       },
     },
-  }) as Promise<ClaimedDelivery | null>;
+  }).then((row) => (row ? { ...row, claimedWallAt } : null)) as Promise<ClaimedDelivery | null>;
 };
 
 /**
@@ -785,9 +793,6 @@ const decideReleaseNotesSend = async (
   definition: { purpose: string | null; classification: EmailClassification },
   now: Date
 ): Promise<ReleaseNotesSendOutcome> => {
-  // Wall time, not `now`: what matters is how long this worker has held the
-  // claim, and the claim was taken immediately before this call.
-  const startedAt = Date.now();
   const purpose = definition.purpose;
   // Unreachable through `releaseNotesFlagApplies()`, which answers false for a
   // null purpose. Narrowed rather than asserted, so a future caller that asked
@@ -901,7 +906,9 @@ const decideReleaseNotesSend = async (
       claimRow.status === "pending" &&
       delivery.claimedAt !== null &&
       claimRow.claimedAt?.getTime() === delivery.claimedAt.getTime() &&
-      Date.now() - startedAt < STANDARD_LANE_CLAIM_TTL_MS - CLAIM_MARGIN_MS;
+      // Since the claim, not since this function began: the suppression,
+      // marketing and jurisdiction reads before it spend the same claim.
+      Date.now() - delivery.claimedWallAt < STANDARD_LANE_CLAIM_TTL_MS - CLAIM_MARGIN_MS;
     if (!ours) throw new ReenqueueRaceError("not_pending");
 
     const recorded = await recordSendDecision(tx, {
@@ -1165,6 +1172,12 @@ const runDecisionTransaction = async (
 };
 
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
+  // For a release note, every read the send decision rests on is a verdict read:
+  // one that fails is retried rather than ending the row (section 7.6, invariant
+  // 11). The ones below come before `decideReleaseNotesSend()` but decide the
+  // same send, so they are treated the same way. Other mail is unchanged.
+  const gateRead = <T>(label: string, read: () => Promise<T>): Promise<T> =>
+    releaseNotesFlagApplies(delivery.templateVersion.purpose) ? verdictRead(label, read) : read();
   // Filled for marketing only; re-checked immediately before the provider call.
   let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
   // Set by the release-notes verdict, which is the only thing that reads the
@@ -1216,12 +1229,12 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // template read rather than a composed message. It is not the decision the
   // send is made on: that one is taken again under the address lock,
   // immediately before the provider call (lib/emailSendLock.ts).
-  const verdict = await suppressionCheck({
+  const verdict = await gateRead("the suppression check", () => suppressionCheck({
     emailAddress: delivery.emailAddress,
     classification: definition.classification,
     purpose: definition.purpose,
     now,
-  });
+  }));
   if (!verdict.allowed) {
     await prisma.emailDelivery.update({
       where: { id: delivery.id },
@@ -1304,7 +1317,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // a promotion that waits for a decision arrives stale, and the row records
   // why it never went.
   if (definition.classification === "marketing") {
-    if (!(await isEmailMarketingEnabled())) {
+    if (!(await gateRead("the marketing switch", () => isEmailMarketingEnabled()))) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
@@ -1325,7 +1338,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // account-wide (§5.3.1), so a switch that could stop transactional mail would
   // be a second route to login codes not arriving.
   if (definition.classification === "marketing") {
-    const health = await evaluateMarketingSendHealth(now);
+    const health = await gateRead("the marketing send health", () =>
+      evaluateMarketingSendHealth(now)
+    );
     if (health.halted) {
       // Skipped rather than held. A promotion that waits for a person to clear
       // a halt is a promotion that arrives stale, and the reputation event that
@@ -1361,7 +1376,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // and this gate leaves a skip reason and nothing else.
   if (definition.classification === "marketing") {
     const resolved = delivery.userId
-      ? await jurisdictionForUser({ userId: delivery.userId })
+      ? await gateRead("the recipient's jurisdiction", () =>
+          jurisdictionForUser({ userId: delivery.userId as string })
+        )
       : null;
     const verdict = resolved
       ? marketingJurisdictionVerdict(resolved)
@@ -1395,13 +1412,13 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     const profileKeys = [
       ...new Set([delivery.jurisdictionProfileKey, resolved?.profileKey].filter(Boolean)),
     ] as string[];
-    quietHourWindows = await prisma.jurisdictionProfile.findMany({
+    quietHourWindows = await gateRead("the quiet-hour windows", () => prisma.jurisdictionProfile.findMany({
       where: {
         policyVersionId: delivery.policyVersionId,
         profileKey: { in: profileKeys },
       },
       select: { profileKey: true, quietHours: true },
-    });
+    }));
     const held = await holdForQuietHours(delivery, quietHourWindows, now);
     if (held) return { outcome: "pending" as const, classification: definition.classification };
   }
