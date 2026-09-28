@@ -1,6 +1,6 @@
 # 채팅 공급자 수신지 공개문서 초안 (2026-09-28)
 
-이 문서는 초안이다. 어느 행도 `proven`이 아니고, `approvedBy`와 `approvedAt`은 비어 있다. 판정과 서명은 소유자와 법무가 한다. 이 파일을 근거로 `lib/providerDataDestinations.ts`의 상태를 바꾸지 않았고, 개인정보 처리방침에도 공급자 표를 올리지 않았다.
+이 문서는 초안이다. 2026-09-28에 소유자가 등록된 열여섯 공급자를 모두 Ready로 확정했다. MiniMax Account에는 학습 스위치가 없었고, 소유자는 개인정보 처리방침의 문장을 학습 아니오와 판매·광고 금지로 함께 확정했다. 계약이 장소를 묶지 않는 칸은 `NOT_SPECIFIED`로 둔다. 개인정보 처리방침 페이지는 열여섯 행이 모두 공개 가능할 때만 공급자 표를 그린다.
 
 읽은 날: 2026-09-28. 근거는 그 공급자가 공개한 문서만이다. 다른 서비스의 정책, 블로그, 요약 사이트는 근거로 쓰지 않았다. OpenRouter의 문서는 OpenRouter 행에만 쓴다. 읽지 못한 칸은 미확인이다. 미확인은 아니오가 아니다. 계정 콘솔에만 있는 값(리전, ZDR 승인, 유료 결제 연결)은 비워 두었다.
 
@@ -64,15 +64,17 @@ Perplexity에만 내부 추적 헤더를 붙였다가, 실제 전송 전에 `lib
 
 ### google
 
-- 수신 법인·국가: 미확인. 추가 약관은 유료 서비스의 "Google"을 다른 페이지의 정의로 보낸다. 그 정의를 이번 읽기에서 열지 않았다.
-- 저장·처리 지리: 유료 서비스 조항은 프롬프트와 응답이 Google 또는 그 대리인이 시설을 둔 어느 나라에서든 일시 저장되거나 캐시될 수 있다고 한다. 나라 목록은 없다. 모드(유료/무료)는 콘솔.
-- 학습: 모드에 따라 갈린다. 무료 서비스(AI Studio, Gemini API 무상 할당량)는 제출한 내용과 생성 응답을 제품과 머신러닝 기술을 제공·개선·개발하는 데 쓴다. 유료 서비스(활성 Cloud Billing이 연결된 프로젝트로 API를 부르는 경우)는 프롬프트와 응답을 제품 개선에 쓰지 않는다고 한다. 우리 키의 프로젝트가 어느 쪽인지는 콘솔에서만 알 수 있다. 확인 전에는 학습 여부를 예도 아니오도 적지 않는다.
-- 보관 content: 유료는 금지 사용 정책 위반 탐지를 위해 제한된 기간 로그한다고만 하고, 이 페이지에는 일수가 없다. Grounding with Google Search는 별도 보관이 있다. 로그 정책 페이지는 결제 프로젝트가 소유한 로그의 기본 최대 55일을 말한다. 그것이 abuse 로그와 같은 것인지는 이 초안이 합치지 않는다.
-- safetyLogs, inMemoryCache, persistentFeatureState, systemMetadata: 유료 조항은 계정, 결제, 사용량, IP 주소 등이 컨트롤러 간 약관과 Google 개인정보 처리방침의 대상이라고 한다. 다섯 칸으로 나누어 일수를 확정하지 못했다.
-- 제3자 상업 이용 제한: 미확인. DPA 원문은 이번 읽기에 없다.
-- 근거: https://ai.google.dev/gemini-api/terms (Effective March 23, 2026), https://ai.google.dev/gemini-api/docs/logs-policy (로그 55일은 이 페이지). 코드 호스트는 Gemini Developer API이다.
+Ready. 2026-09-28 소유자 확정.
 
-교체 전에 볼 것: 키가 무상 할당량이면, 읽은 약관은 그 내용을 제품과 머신러닝 개발에 쓴다고 한다. 그 확인이 나오기 전에는 공급자 표를 고지에 넣지 않는다. 트래픽을 끊거나 옮기는 결정은 이 초안이 하지 않는다.
+- 수신 법인·국가: Google Asia Pacific Pte. Ltd.와 Google Australia Pty Ltd. 국가 SG, AU. 근거는 Google 계약 당사자 페이지.
+- 저장·처리 지리: 유료 약관은 시설이 있는 나라에서 일시 저장·캐시될 수 있다고만 하고 나라를 묶지 않는다. `NOT_PINNED`.
+- 학습: 아니오. AI Studio 결제 화면에서 Tomverse 프로젝트가 Gemini API 유료 1이고 결제 계정이 연결되어 있었다. 유료 약관은 그 프롬프트를 제품 개선에 쓰지 않는다고 한다.
+- 보관 content·inMemoryCache: `TRANSIENT`. persistentFeatureState·systemMetadata: `NOT_SPECIFIED`.
+- safetyLogs: `BOUNDED` 55일. 근거는 시트에 적힌 usage-policies 페이지.
+- 제3자 상업 이용 제한: 금지. Cloud Data Processing Addendum은 고객 지시를 따라 서비스를 제공할 때만 처리하고, CCPA 절에서 판매와 광고 목적 공유를 금지한다. 소유자가 이 문장으로 Ready를 확정했다.
+- 근거: https://ai.google.dev/gemini-api/terms , https://cloud.google.com/terms/google-entity , https://cloud.google.com/terms/data-processing-addendum , https://ai.google.dev/gemini-api/docs/usage-policies
+
+트래픽을 끊거나 옮기는 결정은 이 초안이 하지 않는다. 개인정보 처리방침 표는 MiniMax가 Ready가 된 뒤에 넣는다.
 
 ### groq
 
@@ -103,48 +105,54 @@ Perplexity에만 내부 추적 헤더를 붙였다가, 실제 전송 전에 `lib
 
 ### deepseek
 
-- 수신 법인: 개인정보 처리방침의 컨트롤러는 Hangzhou DeepSeek Artificial Intelligence Co., Ltd.이고 등록 주소는 중국이다. 같은 방침은 오픈 플랫폼으로 만든 하위 앱의 최종 사용자 개인정보 처리를 이 방침의 범위 밖으로 둔다. API로 받는 우리 이용자의 수신자가 그 법인인지는 그래서 확정이 아니다.
-- 수신 국가: 약관의 준거법은 중국 본토법이고, 관할은 그 회사 등록 사무소 소재지 법원이다. 저장 지리와는 별개다.
-- 저장·처리 지리: 미확인.
-- 학습: 확정하지 않는다. 이용약관 4.3은 암호화와 비식별을 전제로 입력과 출력을 서비스 또는 기반 기술을 제공·유지·운영·개발·개선하는 데 최소한으로 쓸 수 있고, "Improve the model for everyone"을 끄면 거부할 수 있다고 한다. 그 스위치가 API 계정에 있는지는 콘솔에서 봐야 한다. 개인정보 처리방침의 학습 문장을 API 고객 콘텐츠에 그대로 적용하지 않는다.
-- 보관 다섯 칸: 미확인.
-- 제3자 상업 이용 제한: 미확인.
-- 근거: https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html , https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html (Last Update: Feb 10, 2026). 하위처리자 목록은 이번 읽기에 없다.
+Ready. 2026-09-28 소유자 확정.
 
-이 초안은 DeepSeek를 "학습에 사용"으로 확인하지 않는다. 트래픽을 끊거나 다른 호스트로 옮기지 않는다.
+- 수신 법인: Hangzhou DeepSeek Artificial Intelligence Co., Ltd. Open Platform 약관이 그 회사를 운영자로 적는다.
+- 수신 국가: CN. 약관의 준거법은 중국 본토법이고, 관할은 그 회사 등록 사무소다. 저장 지리와는 별개다.
+- 호출 주소: 카탈로그는 `https://api.deepseek.com`이다. 공식 문서의 Anthropic 호환 주소 `https://api.deepseek.com/anthropic`은 이 앱이 부르지 않는다. `api.deepseek.cn`, `api.sg.deepseek.com` 같은 별도 호스트는 공식 문서에서 확인되지 않아 적지 않는다.
+- 저장·처리 지리: `NOT_SPECIFIED`. 국가 목록은 비어 있다. 일반 개인정보 처리방침의 중국 저장 문장은 API 고객 콘텐츠의 저장 위치로 쓰지 않는다.
+- 학습: 아니오. 채팅 Settings의 Data에서 "Improve the model for everyone"은 회색이었다. 오른쪽으로 밀면 파란색이 되고, 그때가 켜진 상태다.
+- 보관 다섯 칸: `NOT_SPECIFIED`.
+- 제3자 상업 이용 제한: 금지. 개인정보 처리방침은 타깃 광고를 하지 않고, 개인정보를 판매하지 않으며, 프로파일링에 쓰지 않는다고 적는다. 소유자가 이 문장으로 금지라고 확정했다. Open Platform 약관 5.5는 그 방침이 개발자 본인의 개인정보에 적용되고 하위 앱 최종 사용자의 처리 규칙은 방침 밖이라고 한다. 그 범위 차이를 안 상태에서 소유자가 금지를 적으라고 했다.
+- 근거: https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html , https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html , https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html
+
+트래픽을 끊거나 다른 호스트로 옮기지 않는다. 개인정보 처리방침 표는 MiniMax가 Ready가 된 뒤에 넣는다.
 
 ### mistral
 
-- 수신 법인·국가: 미확인. DPA 원문은 이번 읽기에 없다.
-- 저장·처리 지리: 미확인.
-- 학습: ZDR 문서가 학습 opt-out을 ZDR과 다른 컨트롤로 둔다. 기본이 opt-out인지 opt-in인지는 그 페이지가 말하지 않는다. 도움말 센터 요약은 API용 토글이 따로 있다고 하나, 그 페이지 전문을 이번 읽기의 근거로 확정하지 않는다. 콘솔의 Privacy 설정이 답이다.
-- 보관 content: ZDR이 켜지면 지원되는 무상태 호출의 입력·출력을 응답 생성에 필요한 시간보다 오래 저장하거나 로그하지 않는다고 한다. ZDR은 유료 플랜에서 신청하고 승인을 받는다. 우리 조직의 승인 여부는 콘솔. 기본 보관 일수는 이 페이지에 없다.
-- safetyLogs, inMemoryCache, persistentFeatureState, systemMetadata: 미확인. Files, batch, agents는 ZDR 밖이다.
-- 제3자 상업 이용 제한: 미확인.
-- 근거: https://docs.mistral.ai/admin/monitor-comply/zero-data-retention
+Ready. 2026-09-28 소유자 확정.
+
+- 수신 법인·국가: Mistral AI, FR.
+- 저장 지리: `COMMITTED_LOCATIONS`, 매크로 리전 EU. 처리 지리: `NOT_PINNED`. 임시로 EU 밖으로 옮길 수 있어 처리를 EU에 묶지 않는다.
+- 학습: 아니오. Admin Privacy에서 "Allow the use of your API calls to train Mistral's AI models"가 꺼져 있었다. Labs 모델도 꺼져 있어, opt-out과 무관하게 학습에 쓴다는 Labs 문장은 지금 켜져 있지 않다.
+- 보관 다섯 칸: `NOT_SPECIFIED`. ZDR 승인 여부는 이 화면의 질문이 아니어서 `UNKNOWN`으로 둔다.
+- 제3자 상업 이용 제한: 금지. 근거는 데이터 처리 부속계약.
+- 근거: https://legal.mistral.ai/terms/commercial-terms-of-service/ , https://legal.mistral.ai/terms/data-processing-addendum/ , https://help.mistral.ai/en/articles/347629-where-do-you-store-my-data-or-my-organization-s-data , https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training
 
 ### moonshot
 
-- 수신 법인·국가: 미확인. 도움말 페이지는 법인을 적지 않는다.
-- 저장·처리 지리: 미확인.
-- 학습: 도움말 페이지는 API로 제출한 입력과 출력을 Kimi 모델 학습이나 개선에 쓰지 않는다고 한다. 처리가 끝나면 학습을 위해 영구 저장하지 않는다고 한다. 이용약관 전문을 같은 날에 대조하지 못했다. 그래서 이 칸은 초안이지 확정이 아니다.
-- 보관 content: 그 문장은 학습 목적의 영구 저장을 부인한다. 안전 검토, 파일, 그 밖의 보관 일수는 그 페이지에 없다. 파일은 콘솔에서 지울 수 있다고 한다.
-- safetyLogs: 콘텐츠 안전 검토는 원문을 저장하거나 공개하지 않는다고 한다. 로그 메타데이터의 보관은 미확인.
-- inMemoryCache, persistentFeatureState, systemMetadata: 미확인.
-- 제3자 상업 이용 제한: 미확인. DPA와 하위처리자 목록은 이번 읽기에 없다.
-- 근거: https://www.kimi.com/en/help/kimi-api/api-data-security
+- 수신 법인: MOONSHOT AI PTE. LTD.
+- 수신 국가: SG. 저장 지리와 같은 문서에서 읽었고, 둘은 다른 칸이다.
+- 호출 주소: 카탈로그는 `https://api.moonshot.ai/v1`이다. 공식 Chat Completions 예제도 그 주소다. 중국 본토 주소 `https://api.moonshot.cn/v1`은 쓰지 않는다. 문서의 Anthropic 호환 주소 `https://api.moonshot.ai/anthropic`은 이 앱이 부르지 않는다.
+- 저장 지리: `COMMITTED_LOCATIONS`, SG. 처리방침은 수집한 정보를 싱가포르의 secure servers에 저장한다고 적는다.
+- 처리 지리: `DISCLOSED_POSSIBLE_LOCATIONS`, SG. 같은 문서는 필요하면 국외 이전이 있을 수 있다고 적지만 다른 국가를 이름 대지 않는다. 이름 없는 이전을 국가 코드로 만들지 않는다.
+- 학습: 참. 같은 처리방침은 User Content로 기반 기술(기계학습 모델과 알고리즘)을 학습·개선할 수 있다고 적는다. 싱가포르 저장과 별개의 칸이다. 도움말 페이지는 API 입력·출력을 학습에 쓰지 않는다고 하므로 두 문서가 어긋난다. 레지스트리의 학습 답은 처리방침을 따른다.
+- 보관 다섯 칸: `NOT_SPECIFIED`. "필요한 동안"은 일수가 아니다.
+- 제3자 상업 이용 제한: 금지되지 않음. 처리방침이 판매·광고 금지를 말하지 않는다.
+- 근거: https://platform.kimi.ai/docs/agreement/userprivacy (Last Update: April 30, 2025). 행 상태는 `proven`이고 고지 표에 오른다. 학습이 참인 것도 그 표의 칸이다.
 
-도움말 페이지는 "학습에 사용"이 아니다. 약관과 어긋나는지는 아직 모른다. 확인되기 전에는 트래픽을 끊거나 DeepInfra로 옮기지 않는다.
+학습이 참이라는 것과 싱가포르 저장은 표에서 서로 다른 칸이다. 트래픽을 끊거나 다른 호스트로 옮기지 않는다.
 
 ### minimax
 
-- 수신 법인: API 개인정보 처리방침은 Nanonoble Pte. Ltd.를 컨트롤러로 적고, 주소는 152 Beach Road, #14-02 Gateway East, Singapore (189721)이다.
-- 수신 국가: 싱가포르(등록 주소). 저장 지리와는 별개다.
-- 저장·처리 지리: EEA 등 보충 조항은 데이터를 Cloud의 미국 데이터센터에 국외 저장하고 EU-US Privacy Framework 인증을 언급한다. 싱가포르 조항은 일반적으로 싱가포르 밖으로 옮기지 않는다고도 한다. 두 문장이 같은 처리 모드를 말하는지 이 초안이 합치지 않는다. 모드 미확인.
-- 학습: "개인 데이터를 개인에 대한 특성을 추론하는 데 쓰지 않고, 소비자를 프로파일하거나 타깃하는 학습에 쓰지 않는다"고 한다. 모델 학습 전반의 금지는 그 문장보다 좁다. 모델 학습 여부는 미확인.
-- 보관 다섯 칸: 목적에 필요하거나 법이 허용하는 동안. 일수 없음.
-- 제3자 상업 이용 제한: 미확인. 서비스 제공자는 계약으로 제공 목적 밖 보유·이용·공개가 금지된다고 한다. 그것이 독립적 상업 이용 금지의 전부인지 미확인.
-- 근거: https://platform.minimax.io/protocol/privacy-policy . API 개요의 "stateless" 문장은 기술 설명이라 이 행의 보관 근거로 쓰지 않는다. 하위처리자 목록은 이번 읽기에 없다.
+Ready이다. Account에 학습 스위치는 없었다. 소유자가 처리방침 문장을 학습 아니오와 판매·광고 금지로 함께 확정했다.
+
+- 수신 법인·국가: Nanonoble Pte. Ltd., SG. 근거는 유료 서비스 약관.
+- 저장·처리 지리: `NOT_SPECIFIED`. 미국 데이터센터 문장과 싱가포르 밖 이전 제한 문장을 한 나라로 합치지 않는다.
+- 학습: 아니오. 처리방침은 입력 개인정보로 개인의 특성을 추론하지 않고, 소비자를 프로파일하거나 타깃하는 학습에 쓰지 않는다고 적는다. 소유자가 이 문장으로 학습도 아니오라고 확정했다.
+- 보관 다섯 칸: `NOT_SPECIFIED`.
+- 제3자 상업 이용 제한: 금지. 같은 문장이다.
+- 근거: https://platform.minimax.io/protocol/privacy-policy , https://platform.minimax.io/protocol/paid-agreement . 행 상태는 `proven`이고, 나머지 행과 함께 고지 표에 오른다.
 
 ### qwen
 
@@ -200,14 +208,16 @@ Perplexity에만 내부 추적 헤더를 붙였다가, 실제 전송 전에 `lib
 
 ### together
 
-- 수신 법인: Together Computer, Inc.
-- 수신 국가: 미확인. 캘리포니아 고지 문장이 있으나 본점 주소로 읽지 않는다.
-- 저장·처리 지리: 미확인. 문서의 프라이버시 페이지는 기업 고객의 리전과 VPC를 별도 계약으로 둔다. 우리 계정이 그 계약인지는 콘솔.
-- 학습: 명시적 opt-in 없이는 수집한 데이터로 모델을 학습하지 않는다고 개인정보 처리방침이 말한다. 조직 설정의 "Allow organization's data for training"은 opt-in이고 기본이 아니라고 개발자 문서가 말한다. 우리 조직 토글은 콘솔.
-- 보관 content: 개발자 문서는 입력·출력을 기본으로 저장하지 않는다고 한다. 개인정보 처리방침의 ZDR은 설정에서 프롬프트 저장과 학습을 "No"로 두는 것이고, 그 전 데이터에는 소급하지 않는다고 약관이 말한다. 기본이 이미 ZDR인지, 토글을 켜야 ZDR인지는 두 문서의 문장이 같다. 우리 조직 설정은 콘솔.
-- safetyLogs, inMemoryCache, persistentFeatureState, systemMetadata: 미확인. Usage Data는 콘텐츠를 제외한 운영 데이터로 서비스를 개선할 수 있다고 약관이 말한다.
-- 제3자 상업 이용 제한: 미확인. Passthrough 모델을 허용하면 프롬프트가 제3 공급자에게 가고 그 공급자 정책이 적용된다고 한다. 그 토글은 콘솔.
-- 근거: https://www.together.ai/privacy , https://www.together.ai/terms-of-service , https://docs.together.ai/docs/privacy-and-security . 하위처리자 목록은 이번 읽기에 없다.
+Ready. 2026-09-28 소유자 화면.
+
+- 수신 법인·국가: Together Computer, Inc., US.
+- 저장·처리 지리: `NOT_SPECIFIED`.
+- 학습: 아니오. 조직 Privacy의 "Allow my organization's data to be used for training models"가 No였다.
+- 프롬프트 저장과 제3자 passthrough도 No였다. 저장을 끄면 passthrough도 꺼진다고 그 화면이 적는다.
+- 보관 content·persistentFeatureState: `CUSTOMER_CONTROLLED`. 나머지는 `NOT_SPECIFIED`.
+- ZDR: 개인정보 처리방침은 프롬프트 저장과 학습을 No로 두면 Zero Data Retention이고, 그 내용은 서비스 제공에 필요한 범위를 넘는 2차 목적에 쓰지 않는다고 한다.
+- 제3자 상업 이용 제한: 금지. 같은 문장이다. 화면에도 제3자와 공유하지 않는다고 적혀 있고, passthrough는 No이다.
+- 근거: https://www.together.ai/privacy , https://www.together.ai/terms-of-service
 
 ### openrouter
 
@@ -258,4 +268,4 @@ Perplexity에만 내부 추적 헤더를 붙였다가, 실제 전송 전에 `lib
 
 열여섯 행이 모두 검토된 것은 아니다. 일부를 고지에 적으면 빠진 공급자가 고지에서 빠진다. 페이지에 올린 것은 Tomverse가 통제하는 사실뿐이다. 법인, 국가, 보관 기간은 사람이 각 행을 `proven`으로 승인하기 전에는 페이지에 없다.
 
-받아들일 수 없는 답이 확정된 공급자는 없다. Google의 무상 모드와 DeepSeek 약관 4.3은 콘솔 확인이 끝나기 전에 표를 올리지 말라는 표시이지, 트래픽을 끊거나 호스트를 옮기라는 결정이 아니다.
+Moonshot의 학습 답은 참이고, 싱가포르 저장과 별개다. 그 답만으로 트래픽을 끊거나 호스트를 옮기지 않는다. Google의 무상 모드와 DeepSeek 약관 4.3도 콘솔 확인이 끝나기 전의 표시이며, 트래픽을 끊거나 호스트를 옮기라는 결정이 아니다.

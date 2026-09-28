@@ -24,7 +24,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, creditFloorExceptionShapeKey, creditFloorExceptionVerdict, GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
 import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
@@ -348,6 +348,10 @@ export function AdminModelRegistryPanel() {
   // non-nullable columns -- so an untouched form would save `standard` and 1,
   // a sale decision nobody made, under a banner calling it undecided.
   const [adoptClassChosen, setAdoptClassChosen] = useState(false);
+  // The exception id the operator acknowledged, bound to the shape key it was
+  // checked against. A later price or model edit produces a different key, so
+  // the check does not travel with it.
+  const [acknowledgedFloorExceptionKey, setAcknowledgedFloorExceptionKey] = useState<string | null>(null);
   // The existing registry row this adoption retires. Empty means the save
   // only creates the new model. Set, the same save disables that row and
   // records this adoption as its replacement.
@@ -868,6 +872,30 @@ export function AdminModelRegistryPanel() {
     () => (adoptWorkItemId && !adoptClassChosen ? adoptionSaleProposal(creditFloor) : null),
     [adoptWorkItemId, adoptClassChosen, creditFloor]
   );
+  const floorExceptionInput = {
+    provider: form.provider,
+    apiModel: form.apiModel,
+    usageClass: saleProposal?.usageClass ?? form.usageClass,
+    creditWeight: saleProposal?.creditWeight ?? form.creditWeight,
+    inputUsdPerMillionTokens:
+      form.inputUsdPerMillionTokens ?? inheritedPrice?.inputUsdPerMillionTokens ?? null,
+    outputUsdPerMillionTokens:
+      form.outputUsdPerMillionTokens ?? inheritedPrice?.outputUsdPerMillionTokens ?? null,
+    cachedInputPriceMultiplier: form.cachedInputPriceMultiplier,
+    maxOutputTokens: form.maxOutputTokens ?? inheritedPrice?.maxOutputTokens ?? null,
+  };
+  const floorExceptionShapeKey = adoptWorkItemId
+    ? creditFloorExceptionShapeKey(floorExceptionInput)
+    : null;
+  const floorException = floorExceptionShapeKey
+    ? creditFloorExceptionVerdict({
+        ...floorExceptionInput,
+        acknowledgement:
+          acknowledgedFloorExceptionKey === floorExceptionShapeKey
+            ? GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
+            : null,
+      })
+    : "not_applicable";
   const adoptBlock = adoptWorkItemId
     ? adoptionSaveBlock({
         reason: adoptReason,
@@ -880,6 +908,7 @@ export function AdminModelRegistryPanel() {
         priceConfirmed: adoptPriceConfirmed,
         creditWeight: saleProposal?.creditWeight ?? form.creditWeight,
         floor: creditFloor,
+        floorException,
       })
     : null;
   const adoptSaveBlocked = adoptBlock !== null;
@@ -905,7 +934,9 @@ export function AdminModelRegistryPanel() {
                         ? priceFloorText
                         : adoptBlock === "credits_below_floor" && isCreditFloor(creditFloor)
                           ? m.adopt.creditsBelowFloor(creditFloor.credits, creditFloor.usageClass)
-                          : null;
+                          : adoptBlock === "credit_floor_exception_expired" && isCreditFloor(creditFloor)
+                            ? m.adopt.flashLiteStandardExceptionExpired(creditFloor.credits, creditFloor.usageClass)
+                            : null;
 
   const updateLocation = (
     nextQuery: string,
@@ -1016,6 +1047,9 @@ export function AdminModelRegistryPanel() {
               workItemId: adoptWorkItemId,
               reason: adoptReason.trim(),
               ...(replacesId ? { replacesModelId: replacesId } : {}),
+              ...(floorException === "accepted"
+                ? { creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+                : {}),
             })}`
           : "/api/admin/models";
       const response = await fetch(
@@ -1610,6 +1644,23 @@ export function AdminModelRegistryPanel() {
                     </Link>
                   ) : null}
                 </div>
+              ) : null}
+              {adoptWorkItemId &&
+              (floorException === "needs_acknowledgement" || floorException === "accepted") ? (
+                <label className="flex min-h-11 items-start gap-3 text-sm leading-5 text-amber-100">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    data-testid="credit-floor-exception-ack"
+                    checked={floorException === "accepted"}
+                    onChange={(event) => {
+                      setAcknowledgedFloorExceptionKey(
+                        event.target.checked ? floorExceptionShapeKey : null
+                      );
+                    }}
+                  />
+                  <span>{m.adopt.flashLiteStandardException}</span>
+                </label>
               ) : null}
               {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (
                 <div

@@ -8,13 +8,16 @@ import { fr } from "../locales/fr.ts";
 import { ko } from "../locales/ko.ts";
 import { pt } from "../locales/pt.ts";
 import { zh } from "../locales/zh.ts";
+import {
+    PROVIDER_DATA_DESTINATIONS,
+    disclosableDataDestinations,
+} from "../lib/providerDataDestinations.ts";
 
 /**
- * The chat-provider notice states only what Tomverse controls: what is sent,
- * when and how, the purpose, that choosing a model chooses the recipient,
- * how to refuse, and that the request does not carry the account identifier,
- * email, or client IP. Country, legal name, and retention stay off the page
- * until every live provider has a reviewed row.
+ * The chat-provider notice states what Tomverse controls, then the
+ * per-provider table. The table is printed only when every enrolled row is
+ * disclosable. Country names in the table come from the registry, not from
+ * the transfer sentences.
  */
 
 const LOCALES = { ko, en, zh, fr, de, es, pt };
@@ -71,9 +74,62 @@ test("the notice says the provider request omits account id, email, and client I
     assert.match(de.privacyPolicy.providerTransfer1, /Kontokennung/);
 });
 
-test("the privacy page does not render unproven provider rows", () => {
+test("the privacy page renders the provider table only when every row is disclosable", () => {
     const source = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
     assert.match(source, /PROVIDER_TRANSFER_ITEMS/);
-    assert.equal(source.includes("providerDataDestinations"), false);
-    assert.equal(source.includes("recipientEntity"), false);
+    assert.match(source, /disclosableDataDestinations/);
+    assert.match(source, /destinations\.length === PROVIDER_DATA_DESTINATIONS\.length/);
+    assert.equal(disclosableDataDestinations().length, PROVIDER_DATA_DESTINATIONS.length);
+    assert.ok(PROVIDER_DATA_DESTINATIONS.length > 0);
+    const labels = [
+        "providerTableTitle",
+        "providerTableIntro",
+        "colProvider",
+        "colRecipient",
+        "colStorage",
+        "colProcessing",
+        "colTraining",
+        "colRetention",
+        "colCommercialUse",
+        "trainsYes",
+        "trainsNo",
+        "commercialProhibited",
+        "commercialAllowed",
+        "geoNotSpecified",
+        "geoNotPinned",
+        "geoCommitted",
+        "geoDisclosedPossible",
+        "geoNoPersistentContent",
+        "retentionNotSpecified",
+        "retentionCustomerControlled",
+        "retentionBounded",
+        "retentionTransient",
+        "retentionNoPersistent",
+        "providerSource",
+    ];
+    const places = new Set();
+    for (const row of disclosableDataDestinations()) {
+        for (const code of [
+            ...row.recipientCountryCodes,
+            ...row.customerContentStorage.countryCodes,
+            ...row.customerContentStorage.macroRegions,
+            ...row.processing.countryCodes,
+            ...row.processing.macroRegions,
+        ]) {
+            places.add(code);
+        }
+    }
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        for (const key of labels) {
+            const value = bundle.privacyPolicy?.[key];
+            assert.equal(typeof value, "string", `${name}.privacyPolicy.${key}`);
+            assert.ok(value.trim().length > 0, `${name}.privacyPolicy.${key} empty`);
+        }
+        for (const code of places) {
+            const key = `place${code}`;
+            const value = bundle.privacyPolicy?.[key];
+            assert.equal(typeof value, "string", `${name}.privacyPolicy.${key}`);
+            assert.ok(value.trim().length > 0, `${name}.privacyPolicy.${key} empty`);
+        }
+    }
 });

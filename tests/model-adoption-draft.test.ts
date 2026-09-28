@@ -5,6 +5,8 @@ import {
   adoptionDocReadIsDue,
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
+  creditFloorExceptionVerdict,
+  GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION,
   adoptionSaleProposal,
   adoptionSaveBlock,
   blankTokenFieldValues,
@@ -208,6 +210,18 @@ test("an adoption save says why it is not ready", () => {
   assert.equal(adoptionSaveBlock(ready), null);
   assert.equal(adoptionSaveBlock({ ...ready, reason: "no" }), "reason_too_short");
   assert.equal(adoptionSaveBlock({ ...ready, creditWeight: 16 }), "credits_below_floor");
+  assert.equal(
+    adoptionSaveBlock({ ...ready, creditWeight: 16, floorException: "accepted" }),
+    null
+  );
+  assert.equal(
+    adoptionSaveBlock({ ...ready, creditWeight: 16, floorException: "needs_acknowledgement" }),
+    "credits_below_floor"
+  );
+  assert.equal(
+    adoptionSaveBlock({ ...ready, creditWeight: 16, floorException: "expired" }),
+    "credit_floor_exception_expired"
+  );
 });
 
 test("a new adoption draft opens coming soon and unlisted", () => {
@@ -586,6 +600,208 @@ test("a class below the floor is refused at the save, not just warned about", ()
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /at least 8 credits/);
+});
+
+const flashLiteWorkItem = {
+  id: "wi_flash_lite",
+  status: "discovered",
+  action: "add",
+  provider: "google",
+  apiModel: "gemini-3.5-flash-lite",
+  modelId: null as string | null,
+};
+
+const flashLiteBody = {
+  id: "gemini-3-5-flash-lite",
+  apiModel: "gemini-3.5-flash-lite",
+  provider: "google",
+  status: "coming-soon",
+  publiclyListed: true,
+  usageClass: "standard",
+  creditWeight: 1,
+  inputUsdPerMillionTokens: 0.3,
+  outputUsdPerMillionTokens: 2.5,
+  cachedInputPriceMultiplier: 0.1,
+  maxOutputTokens: 65_536,
+};
+
+const duringFlashLiteException = new Date("2026-09-28T00:00:00.000Z");
+const lastFlashLiteExceptionInstant = new Date("2026-12-27T23:59:59.000Z");
+const afterFlashLiteException = new Date("2026-12-28T00:00:00.000Z");
+
+test("gemini 3.5 flash-lite at one standard credit is refused until this exception is acknowledged", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: flashLiteBody,
+    now: duringFlashLiteException,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /at least 4 credits/);
+  assert.equal(
+    creditFloorExceptionVerdict({
+      ...flashLiteBody,
+      acknowledgement: null,
+      now: duringFlashLiteException,
+    }),
+    "needs_acknowledgement"
+  );
+});
+
+test("the flash-lite standard-credit exception accepts only the named shape and acknowledgement", () => {
+  const accepted = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: flashLiteBody,
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(accepted, null);
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: flashLiteWorkItem,
+      body: flashLiteBody,
+      creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+      now: lastFlashLiteExceptionInstant,
+    }),
+    null
+  );
+  const bareTrue = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: flashLiteBody,
+    creditFloorExceptionAck: "true",
+    now: duringFlashLiteException,
+  });
+  assert.equal(bareTrue?.status, 409);
+  assert.match(bareTrue!.message, /at least 4 credits/);
+  const otherModel = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: 0.3,
+      outputUsdPerMillionTokens: 2.5,
+      cachedInputPriceMultiplier: 0.1,
+      maxOutputTokens: 65_536,
+    },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(otherModel?.status, 409);
+  const gemini25 = adoptionPreflightRefusal({
+    workItem: { ...flashLiteWorkItem, apiModel: "gemini-2.5-flash" },
+    body: { ...flashLiteBody, apiModel: "gemini-2.5-flash" },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(gemini25?.status, 409);
+  assert.match(gemini25!.message, /at least 4 credits/);
+  const otherOutput = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: { ...flashLiteBody, outputUsdPerMillionTokens: 2.6 },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(otherOutput?.status, 409);
+  const otherCache = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: { ...flashLiteBody, cachedInputPriceMultiplier: 0.2 },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(otherCache?.status, 409);
+  const shorterCap = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: { ...flashLiteBody, maxOutputTokens: 32_768 },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(shorterCap?.status, 409);
+  assert.match(shorterCap!.message, /at least 4 credits/);
+});
+
+test("the flash-lite exception inherits list rates from a profile and still requires the cache multiplier", () => {
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: flashLiteWorkItem,
+      body: {
+        ...flashLiteBody,
+        inputUsdPerMillionTokens: null,
+        outputUsdPerMillionTokens: null,
+        maxOutputTokens: null,
+      },
+      profilePrice: {
+        inputUsdPerMillionTokens: 0.3,
+        outputUsdPerMillionTokens: 2.5,
+        maxOutputTokens: 65_536,
+      },
+      creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+      now: duringFlashLiteException,
+    }),
+    null
+  );
+  const missingCache = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: { ...flashLiteBody, cachedInputPriceMultiplier: null },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(missingCache?.status, 409);
+  assert.match(missingCache!.message, /at least 4 credits/);
+});
+
+test("gemini-flash-lite-latest is the same standard-credit exception", () => {
+  const latestBody = {
+    ...flashLiteBody,
+    id: "gemini-flash-lite-latest",
+    apiModel: "gemini-flash-lite-latest",
+  };
+  const workItem = { ...flashLiteWorkItem, apiModel: "gemini-flash-lite-latest" };
+  const refused = adoptionPreflightRefusal({
+    workItem,
+    body: latestBody,
+    now: duringFlashLiteException,
+  });
+  assert.equal(refused?.status, 409);
+  assert.match(refused!.message, /at least 4 credits/);
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem,
+      body: latestBody,
+      creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+      now: duringFlashLiteException,
+    }),
+    null
+  );
+  const otherLatest = adoptionPreflightRefusal({
+    workItem: { ...flashLiteWorkItem, apiModel: "gemini-flash-latest" },
+    body: { ...latestBody, apiModel: "gemini-flash-latest" },
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: duringFlashLiteException,
+  });
+  assert.equal(otherLatest?.status, 409);
+  assert.match(otherLatest!.message, /at least 4 credits/);
+});
+
+test("the flash-lite standard-credit exception ends after its review day", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: flashLiteWorkItem,
+    body: flashLiteBody,
+    creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    now: afterFlashLiteException,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /ended after 2026-12-27/);
+});
+
+test("a flash-lite sale already at the floor does not need the exception", () => {
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: flashLiteWorkItem,
+      body: { ...flashLiteBody, usageClass: "advanced", creditWeight: 4 },
+      now: duringFlashLiteException,
+    }),
+    null
+  );
 });
 
 test("a class at or above the floor is accepted", () => {

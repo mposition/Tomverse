@@ -66,6 +66,36 @@ const providerUnion = () => {
     return [...declaration[1].matchAll(/"([a-z0-9_-]+)"/g)].map((match) => match[1]);
 };
 
+const emptyRow = (provider = "openai") => ({
+    provider,
+    recipientEntity: null,
+    recipientCountryCodes: [],
+    customerContentStorage: {
+        mode: "UNKNOWN",
+        countryCodes: [],
+        macroRegions: [],
+        evidenceRef: null,
+    },
+    processing: {
+        mode: "UNKNOWN",
+        countryCodes: [],
+        macroRegions: [],
+        evidenceRef: null,
+    },
+    destinationRegions: [],
+    trainsOnCustomerContent: { value: null, evidenceRef: null },
+    retention: Object.fromEntries(
+        RETENTION_COMPONENTS.map((component) => [
+            component,
+            { behavior: "UNKNOWN", maxDays: null, evidenceRef: null },
+        ])
+    ),
+    zeroDataRetention: { mode: "UNKNOWN", evidenceRef: null },
+    independentCommercialUseProhibited: { value: null, evidenceRef: null },
+    evidenceRef: null,
+    status: "unproven",
+});
+
 test("every provider the catalogue can reach is enrolled", () => {
     // Enrolment is the point: a provider added to the union and forgotten here
     // is one nobody asked the destination question about, and the report would
@@ -90,7 +120,7 @@ test("a destination cannot be claimed without something that says so", () => {
 
     // And the rule bites when it is broken: an unproven row relabelled as
     // proven is missing every part a notice would print.
-    const bare = { ...PROVIDER_DATA_DESTINATIONS[0], status: "proven" };
+    const bare = { ...emptyRow(), status: "proven" };
     assert.deepEqual(provenDestinationProblems(bare), [
         "proven without an evidenceRef",
         "proven without a recipientEntity",
@@ -225,7 +255,7 @@ test("no place is not a place: NOT_PINNED and NOT_SPECIFIED list nothing", () =>
 
 test("the recipient rests on the row's evidence, even while unproven", () => {
     const named = {
-        ...PROVIDER_DATA_DESTINATIONS[0],
+        ...emptyRow(),
         recipientEntity: "Example Recipient, LLC",
         recipientCountryCodes: ["US"],
     };
@@ -435,9 +465,129 @@ test("a provider nobody enrolled has none either", () => {
     assert.equal(providerDestinationIsEstablished("not-a-provider"), false);
 });
 
+test("moonshot records Singapore storage and training as separate unread-notice facts", () => {
+    const row = providerDataDestination("moonshot");
+    assert.ok(row);
+    assert.equal(row.recipientEntity, "MOONSHOT AI PTE. LTD.");
+    assert.deepEqual([...row.recipientCountryCodes], ["SG"]);
+    assert.equal(row.customerContentStorage.mode, "COMMITTED_LOCATIONS");
+    assert.deepEqual([...row.customerContentStorage.countryCodes], ["SG"]);
+    assert.equal(row.processing.mode, "DISCLOSED_POSSIBLE_LOCATIONS");
+    assert.deepEqual([...row.processing.countryCodes], ["SG"]);
+    assert.equal(row.trainsOnCustomerContent.value, true);
+    assert.equal(row.retention.content.behavior, "NOT_SPECIFIED");
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+    assert.equal(providerDestinationIsEstablished("moonshot"), true);
+    const registry = readFileSync(
+        new URL("../lib/modelRegistryShared.ts", import.meta.url),
+        "utf8"
+    );
+    assert.match(registry, /moonshot:\s*\{[\s\S]*?baseUrl: "https:\/\/api\.moonshot\.ai\/v1"/);
+    assert.equal(registry.includes("api.moonshot.cn"), false);
+});
+
+test("google is ready: paid billing means no training, and the addendum bars sale", () => {
+    const row = providerDataDestination("google");
+    assert.ok(row);
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.customerContentStorage.mode, "NOT_PINNED");
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+});
+
+test("deepseek names the Hangzhou company and does not store API content in a named country", () => {
+    const row = providerDataDestination("deepseek");
+    assert.ok(row);
+    assert.equal(
+        row.recipientEntity,
+        "Hangzhou DeepSeek Artificial Intelligence Co., Ltd."
+    );
+    assert.deepEqual([...row.recipientCountryCodes], ["CN"]);
+    assert.equal(row.customerContentStorage.mode, "NOT_SPECIFIED");
+    assert.deepEqual([...row.customerContentStorage.countryCodes], []);
+    assert.deepEqual([...row.destinationRegions], []);
+    assert.equal(row.processing.mode, "NOT_SPECIFIED");
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.retention.content.behavior, "NOT_SPECIFIED");
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+    assert.equal(providerDestinationIsEstablished("deepseek"), true);
+    const registry = readFileSync(
+        new URL("../lib/modelRegistryShared.ts", import.meta.url),
+        "utf8"
+    );
+    assert.match(registry, /deepseek:\s*\{[\s\S]*?baseUrl: "https:\/\/api\.deepseek\.com"/);
+    assert.equal(registry.includes("api.deepseek.cn"), false);
+    assert.equal(registry.includes("api.sg.deepseek.com"), false);
+});
+
+test("mistral API training is off and the row is ready", () => {
+    const row = providerDataDestination("mistral");
+    assert.ok(row);
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.customerContentStorage.mode, "COMMITTED_LOCATIONS");
+    assert.deepEqual([...row.customerContentStorage.macroRegions], ["EU"]);
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+});
+
+test("together privacy answers are no, so training is off and the row is ready", () => {
+    const row = providerDataDestination("together");
+    assert.ok(row);
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.zeroDataRetention.mode, "ZDR");
+    assert.equal(row.retention.content.behavior, "CUSTOMER_CONTROLLED");
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+});
+
+test("minimax is ready: the privacy-policy sentence is the training no and the sale ban", () => {
+    const row = providerDataDestination("minimax");
+    assert.ok(row);
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.customerContentStorage.mode, "NOT_SPECIFIED");
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+});
+
+test("every enrolled provider is ready", () => {
+    const ready = [
+        "openai",
+        "anthropic",
+        "google",
+        "groq",
+        "xai",
+        "deepseek",
+        "mistral",
+        "moonshot",
+        "minimax",
+        "qwen",
+        "zhipu",
+        "perplexity",
+        "deepinfra",
+        "together",
+        "openrouter",
+        "sail",
+    ];
+    const open = [];
+    assert.deepEqual(
+        disclosableDataDestinations().map((entry) => entry.provider),
+        ready
+    );
+    for (const provider of open) {
+        const row = providerDataDestination(provider);
+        assert.equal(row.status, "unproven", provider);
+        assert.equal(destinationIsDisclosable(row), false, provider);
+    }
+});
+
 test("nothing is disclosable until something is proven", () => {
-    // Today this is empty, and that is the accurate state rather than a gap.
-    // A notice is a promise; this is the list of promises that can be kept.
     for (const entry of disclosableDataDestinations()) {
         assert.equal(entry.status, "proven");
         assert.deepEqual(provenDestinationProblems(entry), []);
