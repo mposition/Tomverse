@@ -85,14 +85,42 @@ const setMode = (value: string) =>
     update: { value },
   });
 
+// A missing AMUX incident reading freezes admission, so the file writes a
+// normal one and puts back whatever was there.
+const INCIDENT_KEY = "amux.incidentMode";
+let previousIncident: { value: string } | null = null;
+
 // Shadow is enough for a run, and it holds no pull request window open for
 // the engineering files that run after this one.
 before(async () => {
   await setMode("shadow");
   await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
+  previousIncident = await prisma.appSetting.findUnique({
+    where: { key: INCIDENT_KEY },
+    select: { value: true },
+  });
+  const normal = JSON.stringify({
+    version: 1,
+    state: "normal",
+    transition_id: null,
+    changed_at: new Date().toISOString(),
+    reason: "engineering adapter fixture",
+    ticket: "TEST",
+  });
+  await prisma.appSetting.upsert({
+    where: { key: INCIDENT_KEY },
+    create: { key: INCIDENT_KEY, value: normal },
+    update: { value: normal },
+  });
 });
 
 after(async () => {
+  await prisma.appSetting.deleteMany({ where: { key: INCIDENT_KEY } });
+  if (previousIncident) {
+    await prisma.appSetting.create({
+      data: { key: INCIDENT_KEY, value: previousIncident.value },
+    });
+  }
   await prisma.appSetting.deleteMany({ where: { key: MODE_KEY } });
   if (fixtureTaskIds.length > 0) {
     await prisma.amuxWorkItem.updateMany({

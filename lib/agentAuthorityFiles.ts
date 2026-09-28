@@ -117,6 +117,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminAuditSystemActors.ts",
   "lib/adminAuth*",
   "lib/adminMessages/amux*",
+  "lib/adminMessages/engineeringAgent*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",

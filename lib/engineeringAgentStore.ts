@@ -256,7 +256,7 @@ const storedHalt = (raw: string): HaltValue =>
  * INSERT takes.
  */
 const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('engineering-agent:halt'))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('engineering-agent:halt'))`;
 };
 
 /**
